@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="WinPool_App.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:WinPool_App">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <!-- Other merged dictionaries here -->
+            </ResourceDictionary.MergedDictionaries>
+            <Color x:Key="WinPoolAccentColor">#0078D4</Color>
+            <Color x:Key="WinPoolAccentHoverColor">#330078D4</Color>
+            <Color x:Key="WinPoolAccentPressedColor">#4D0078D4</Color>
+            <Color x:Key="WinPoolAccentBorderColor">#60CDFF</Color>
+            <Color x:Key="WinPoolAccentForegroundColor">#FFFFFF</Color>
+            <SolidColorBrush x:Key="WinPoolAccentBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="WinPoolAccentHoverBrush" Color="{StaticResource WinPoolAccentHoverColor}" />
+            <SolidColorBrush x:Key="WinPoolAccentPressedBrush" Color="{StaticResource WinPoolAccentPressedColor}" />
+            <SolidColorBrush x:Key="WinPoolAccentBorderBrush" Color="{StaticResource WinPoolAccentBorderColor}" />
+            <SolidColorBrush x:Key="WinPoolAccentForegroundBrush" Color="{StaticResource WinPoolAccentForegroundColor}" />
+
+            <!-- Explicit aliases keep built-in controls synchronized with a preset WinPool accent. -->
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="FocusStrokeColorOuterBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="ListViewItemSelectionIndicatorBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="{StaticResource WinPoolAccentColor}" />
+
+            <Style x:Key="WinPoolAccentButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource WinPoolAccentBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
+            </Style>
+            <local:BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <local:NotificationSeverityConverter x:Key="NotificationSeverityConverter" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

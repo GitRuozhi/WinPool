@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WinPool.App/WinPool.App.csproj" />
+    <Project Path="src/WinPool.Core/WinPool.Core.csproj" />
+    <Project Path="src/WinPool.Infrastructure.Windows/WinPool.Infrastructure.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WinPool.Core.Tests/WinPool.Core.Tests.csproj" />
+    <Project Path="tests/WinPool.Infrastructure.Tests/WinPool.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>

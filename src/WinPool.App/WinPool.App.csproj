@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>WinPool_App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableWinAppRunSupport>false</EnableWinAppRunSupport>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishProfile Condition="Exists('Properties\PublishProfiles\win-x64.pubxml')">win-x64.pubxml</PublishProfile>
+    <UseWinUI>true</UseWinUI>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The app is not NativeAOT. C# partial properties require a newer language version than the approved .NET 9 target. -->
+    <NoWarn>$(NoWarn);MVVMTK0045</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\AppIcon.ico"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\WinPool.Infrastructure.Windows\Scripts\Get-StorageInventory.ps1"
+          Link="Scripts\Get-StorageInventory.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260416003" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinPool.Core\WinPool.Core.csproj" />
+    <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+
+  <!-- V0.1 favors reliable JSON serialization over trimmed output size. -->
+  <PropertyGroup>
+    <PublishReadyToRun>False</PublishReadyToRun>
+    <PublishTrimmed>False</PublishTrimmed>
+  </PropertyGroup>
+
+  <!--
+    The unpackaged WinUI CLI publish target does not automatically copy the
+    generated XBF/PRI application resources. Copy them from the verified build
+    output so the published executable can initialize XAML.
+  -->
+  <Target Name="CopyGeneratedWinUiResourcesToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <GeneratedWinUiXbf Include="$(TargetDir)**\*.xbf" />
+      <GeneratedWinUiPri Include="$(TargetDir)$(AssemblyName).pri"
+                         Condition="Exists('$(TargetDir)$(AssemblyName).pri')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GeneratedWinUiXbf)"
+          DestinationFiles="@(GeneratedWinUiXbf->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(GeneratedWinUiPri)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

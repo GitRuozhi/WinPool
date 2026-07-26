@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="WinPool_App.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:WinPool_App.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:WinPool_App"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    mc:Ignorable="d">
+
+    <Grid Padding="12,4,12,12">
+        <Grid.RowDefinitions>
+            <RowDefinition MinHeight="230" Height="2*" />
+            <RowDefinition Height="8" />
+            <RowDefinition MinHeight="250" Height="3*" />
+        </Grid.RowDefinitions>
+
+        <Border
+            Grid.Row="0"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Padding="10,4,12,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <ListView
+                        x:Name="CategoryList"
+                        HorizontalAlignment="Left"
+                        ItemsSource="{x:Bind ViewModel.Categories}"
+                        SelectedItem="{x:Bind ViewModel.SelectedCategoryItem, Mode=TwoWay}"
+                        SelectionMode="Single"
+                        ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                        ScrollViewer.HorizontalScrollMode="Disabled">
+                        <ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ListView.ItemsPanel>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel
+                                    MinWidth="88"
+                                    HorizontalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="7">
+                                    <FontIcon FontSize="14" Glyph="{Binding Glyph}" />
+                                    <TextBlock VerticalAlignment="Center" Text="{Binding Title}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                        <ProgressRing
+                            Width="18"
+                            Height="18"
+                            IsActive="{x:Bind ViewModel.IsScanning, Mode=OneWay}" />
+                        <TextBlock
+                            MaxWidth="420"
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition MinWidth="180" Width="22*" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition MinWidth="360" Width="53*" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition MinWidth="200" Width="25*" />
+                    </Grid.ColumnDefinitions>
+
+                    <ListView
+                        x:Name="ObjectList"
+                        Grid.Column="0"
+                        Padding="8"
+                        ItemsSource="{x:Bind ViewModel.Objects}"
+                        SelectedItem="{x:Bind ViewModel.SelectedWorkspaceItem, Mode=TwoWay}"
+                        SelectionMode="Single">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid MinHeight="42">
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontWeight="SemiBold"
+                                        Text="{Binding Title}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <toolkit:GridSplitter
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        ResizeBehavior="PreviousAndNext"
+                        ResizeDirection="Columns"
+                        Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                        AutomationProperties.Name="Resize object and property areas" />
+
+                    <ScrollViewer
+                        Grid.Column="2"
+                        Padding="18,12,18,18"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1,0,0,0"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel HorizontalAlignment="Stretch" Spacing="10">
+                            <TextBlock
+                                FontSize="24"
+                                FontWeight="SemiBold"
+                                Text="{x:Bind ViewModel.DetailTitle, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.DetailSubtitle, Mode=OneWay}" />
+
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.Details}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Padding="0,8" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="180" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{Binding Label}" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                Text="{Binding Value}"
+                                                TextWrapping="WrapWholeWords" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <toolkit:GridSplitter
+                        Grid.Column="3"
+                        HorizontalAlignment="Stretch"
+                        ResizeBehavior="PreviousAndNext"
+                        ResizeDirection="Columns"
+                        Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                        AutomationProperties.Name="Resize property and command areas" />
+
+                    <ScrollViewer
+                        Grid.Column="4"
+                        Padding="12"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1,0,0,0"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel
+                            x:Name="CommandButtonsPanel"
+                            Spacing="8"
+                            Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <Button x:Name="RescanButton" HorizontalAlignment="Stretch" Click="RescanButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Refresh" />
+                                    <TextBlock x:Name="RescanButtonText" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="CopySummaryButton" HorizontalAlignment="Stretch" Click="CopySummaryButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Copy" />
+                                    <TextBlock x:Name="CopySummaryButtonText" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="CopyIdButton" HorizontalAlignment="Stretch" Click="CopyIdButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Copy" />
+                                    <TextBlock x:Name="CopyIdButtonText" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="ExportButton" HorizontalAlignment="Stretch" Click="ExportButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Save" />
+                                    <TextBlock x:Name="ExportButtonText" />
+                                </StackPanel>
+                            </Button>
+                            <Button
+                                x:Name="OpenPartitionButton"
+                                HorizontalAlignment="Stretch"
+                                Click="OpenPartitionButton_Click"
+                                Style="{StaticResource WinPoolAccentButtonStyle}"
+                                Visibility="{x:Bind ViewModel.CanOpenSelectedPartition, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="OpenFile" />
+                                    <TextBlock x:Name="OpenPartitionButtonText" />
+                                </StackPanel>
+                            </Button>
+                            <Button
+                                x:Name="RelatedButton"
+                                HorizontalAlignment="Stretch"
+                                Click="RelatedButton_Click"
+                                Style="{StaticResource WinPoolAccentButtonStyle}"
+                                Visibility="{x:Bind ViewModel.HasRelatedTarget, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Link" />
+                                    <TextBlock x:Name="RelatedButtonText" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <toolkit:GridSplitter
+            Grid.Row="1"
+            HorizontalAlignment="Stretch"
+            ResizeBehavior="PreviousAndNext"
+            ResizeDirection="Rows"
+            Background="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.Name="Resize workspaces" />
+
+        <Border
+            Grid.Row="2"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <ScrollViewer
+                x:Name="TopologyScrollViewer"
+                Padding="8"
+                HorizontalScrollBarVisibility="Disabled"
+                HorizontalScrollMode="Disabled"
+                SizeChanged="TopologyScrollViewer_SizeChanged"
+                VerticalScrollBarVisibility="Auto"
+                VerticalScrollMode="Auto">
+                <ItemsControl
+                    x:Name="TopologySystemsControl"
+                    HorizontalAlignment="Stretch"
+                    ItemsSource="{x:Bind ViewModel.TopologySystems}">
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Vertical" Spacing="6" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <controls:TopologyNodeControl
+                                HorizontalAlignment="Stretch"
+                                ViewModel="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Page>

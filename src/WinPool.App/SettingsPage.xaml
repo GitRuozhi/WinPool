@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WinPool_App.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer HorizontalContentAlignment="Stretch">
+        <StackPanel
+            Padding="24,20,24,40"
+            HorizontalAlignment="Stretch"
+            Spacing="16">
+            <StackPanel Margin="0,0,0,8" Spacing="8">
+                <TextBlock
+                    x:Name="SettingsTitle"
+                    FontSize="32"
+                    FontWeight="SemiBold"
+                    Text="设置" />
+                <TextBlock
+                    x:Name="SettingsDescription"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="更改立即生效并保存。返回后会保留工作区状态。"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="ThemeTitle" FontSize="18" FontWeight="SemiBold" Text="主题" />
+                        <TextBlock
+                            x:Name="ThemeSubtitle"
+                            Margin="0,5,24,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="跟随系统支持高对比度和系统主题变化。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <RadioButtons x:Name="ThemeOptions" Grid.Column="1" SelectionChanged="ThemeOptions_SelectionChanged">
+                        <x:String>跟随系统</x:String>
+                        <x:String>亮色</x:String>
+                        <x:String>暗色</x:String>
+                    </RadioButtons>
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="AccentTitle" FontSize="18" FontWeight="SemiBold" Text="主题色" />
+                        <TextBlock
+                            x:Name="AccentSubtitle"
+                            Margin="0,5,24,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="跟随 Windows 强调色或选择预设颜色。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <RadioButtons x:Name="AccentOptions" Grid.Column="1" SelectionChanged="AccentOptions_SelectionChanged">
+                        <x:String>跟随 Windows</x:String>
+                        <x:String>蓝</x:String>
+                        <x:String>青</x:String>
+                        <x:String>绿</x:String>
+                        <x:String>紫</x:String>
+                        <x:String>橙</x:String>
+                        <x:String>红</x:String>
+                    </RadioButtons>
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="LanguageTitle" FontSize="18" FontWeight="SemiBold" Text="语言" />
+                        <TextBlock
+                            x:Name="LanguageSubtitle"
+                            Margin="0,5,24,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="磁盘型号、卷标和池名称保持原文。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <RadioButtons x:Name="LanguageOptions" Grid.Column="1" SelectionChanged="LanguageOptions_SelectionChanged">
+                        <x:String>中文</x:String>
+                        <x:String>English</x:String>
+                    </RadioButtons>
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="ExecutionTitle" FontSize="18" FontWeight="SemiBold" Text="执行模式" />
+                        <TextBlock
+                            x:Name="ExecutionSubtitle"
+                            Margin="0,5,24,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="真实执行只对管理员进程可用，且不会跨启动保存。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                        <TextBlock x:Name="SettingsSimulationLabel" VerticalAlignment="Center" Text="模拟" />
+                        <ToggleSwitch
+                            x:Name="SettingsExecutionModeSwitch"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="SettingsExecutionModeSwitch_Toggled" />
+                        <TextBlock x:Name="SettingsRealLabel" VerticalAlignment="Center" Text="真实" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="AboutTitle" FontSize="18" FontWeight="SemiBold" Text="关于" />
+                        <TextBlock
+                            x:Name="AboutSubtitle"
+                            Margin="0,5,24,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Windows Storage Spaces 只读管理预览版。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="10">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="AboutProductNameLabel" Text="产品名称" />
+                            <TextBlock
+                                x:Name="AboutProductNameValue"
+                                Grid.Column="1"
+                                FontWeight="SemiBold"
+                                Text="WinPool" />
+                        </Grid>
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="AboutVersionLabel" Text="当前版本" />
+                            <TextBlock
+                                x:Name="AboutVersionValue"
+                                Grid.Column="1"
+                                FontWeight="SemiBold"
+                                Text="" />
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="UpdateTitle" FontSize="18" FontWeight="SemiBold" Text="更新" />
+                        <TextBlock
+                            x:Name="UpdateSubtitle"
+                            Margin="0,5,24,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="更新信息将在系统默认浏览器中打开。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="10">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="UpdateVersionLabel" Text="当前版本" />
+                            <TextBlock
+                                x:Name="UpdateVersionValue"
+                                Grid.Column="1"
+                                FontWeight="SemiBold"
+                                Text="" />
+                        </Grid>
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="UpdateSourceLabel" Text="更新来源" />
+                            <TextBlock Grid.Column="1" Text="GitHub" />
+                        </Grid>
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="UpdateModeLabel" Text="更新方式" />
+                            <TextBlock x:Name="UpdateModeValue" Grid.Column="1" Text="外部网页" />
+                        </Grid>
+                        <Button
+                            x:Name="ViewUpdatesButton"
+                            Margin="0,6,0,0"
+                            HorizontalAlignment="Left"
+                            Click="ViewUpdatesButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8A7;" />
+                                <TextBlock x:Name="ViewUpdatesButtonText" Text="查看更新" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

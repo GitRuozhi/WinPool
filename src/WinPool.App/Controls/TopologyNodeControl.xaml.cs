@@ -1,0 +1,158 @@
+using System.ComponentModel;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using WinPool.App.ViewModels;
+
+namespace WinPool_App.Controls;
+
+public sealed partial class TopologyNodeControl : UserControl
+{
+    private static TopologyNodeControl? s_hoveredControl;
+    private bool _wasSelected;
+    private bool _isPointerOver;
+
+    public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
+        nameof(ViewModel),
+        typeof(TopologyNodeViewModel),
+        typeof(TopologyNodeControl),
+        new PropertyMetadata(null, OnViewModelChanged));
+
+    public TopologyNodeControl()
+    {
+        InitializeComponent();
+        Loaded += (_, _) => UpdateSelectionVisual();
+        ActualThemeChanged += (_, _) => UpdateSelectionVisual();
+    }
+
+    public TopologyNodeViewModel ViewModel
+    {
+        get => (TopologyNodeViewModel)GetValue(ViewModelProperty);
+        set => SetValue(ViewModelProperty, value);
+    }
+
+    private static void OnViewModelChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
+    {
+        var control = (TopologyNodeControl)dependencyObject;
+        if (args.OldValue is TopologyNodeViewModel oldValue)
+        {
+            oldValue.PropertyChanged -= control.ViewModel_PropertyChanged;
+        }
+        if (args.NewValue is TopologyNodeViewModel newValue)
+        {
+            newValue.PropertyChanged += control.ViewModel_PropertyChanged;
+        }
+        control.Bindings.Update();
+        control.UpdateSelectionVisual();
+    }
+
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(TopologyNodeViewModel.IsSelected)
+            or nameof(TopologyNodeViewModel.IsExpanded))
+        {
+            UpdateSelectionVisual();
+        }
+    }
+
+    private void UpdateSelectionVisual()
+    {
+        if (NodeBorder is null || ViewModel is null)
+        {
+            return;
+        }
+
+        ApplyInteractionAppearance();
+
+        if (ViewModel.IsSelected && !_wasSelected)
+        {
+            StartBringIntoView(new BringIntoViewOptions
+            {
+                AnimationDesired = true,
+                HorizontalAlignmentRatio = 0.5,
+                VerticalAlignmentRatio = 0.5
+            });
+        }
+
+        _wasSelected = ViewModel.IsSelected;
+    }
+
+    private void ApplyInteractionAppearance()
+    {
+        if (ViewModel.IsSelected)
+        {
+            NodeBorder.Background = Brush("WinPoolAccentBrush");
+            NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
+            InteractionBorder.BorderBrush = Brush("WinPoolAccentBorderBrush");
+            InteractionBorder.Visibility = Visibility.Visible;
+            SelectionIndicator.Visibility = Visibility.Visible;
+            SetTextBrush(Brush("WinPoolAccentForegroundBrush"));
+            return;
+        }
+
+        if (_isPointerOver)
+        {
+            NodeBorder.Background = Brush("WinPoolAccentHoverBrush");
+            NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
+            InteractionBorder.BorderBrush = Brush("WinPoolAccentBorderBrush");
+            InteractionBorder.Visibility = Visibility.Visible;
+            SelectionIndicator.Visibility = Visibility.Collapsed;
+            SetTextBrush(Brush("TextFillColorPrimaryBrush"));
+            return;
+        }
+
+        NodeBorder.Background = Brush("LayerFillColorDefaultBrush");
+        NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
+        InteractionBorder.Visibility = Visibility.Collapsed;
+        SelectionIndicator.Visibility = Visibility.Collapsed;
+        DisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
+        TypeLabelText.Foreground = Brush("TextFillColorSecondaryBrush");
+        SummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
+    }
+
+    private static Brush Brush(string key) =>
+        (Brush)Application.Current.Resources[key];
+
+    private void SetTextBrush(Brush brush)
+    {
+        DisplayNameText.Foreground = brush;
+        TypeLabelText.Foreground = brush;
+        SummaryText.Foreground = brush;
+    }
+
+    private void TopologyNodeControl_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (s_hoveredControl is not null && !ReferenceEquals(s_hoveredControl, this))
+        {
+            s_hoveredControl._isPointerOver = false;
+            s_hoveredControl.UpdateSelectionVisual();
+        }
+        s_hoveredControl = this;
+        _isPointerOver = true;
+        UpdateSelectionVisual();
+        e.Handled = true;
+    }
+
+    private void TopologyNodeControl_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (ReferenceEquals(s_hoveredControl, this))
+        {
+            s_hoveredControl = null;
+            _isPointerOver = false;
+            UpdateSelectionVisual();
+        }
+        e.Handled = true;
+    }
+
+    private void NodeBorder_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (ViewModel?.IsSelectable == true)
+        {
+            ViewModel.SelectCommand.Execute(null);
+        }
+        e.Handled = true;
+    }
+
+    private void ExpandButton_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
+        e.Handled = true;
+}

@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="WinPool_App.Controls.TopologyNodeControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:WinPool_App.Controls"
+    PointerEntered="TopologyNodeControl_PointerEntered"
+    PointerExited="TopologyNodeControl_PointerExited">
+
+    <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="InteractionStates">
+            <VisualState x:Name="Normal">
+                <VisualState.Setters>
+                    <Setter Target="NodeBorder.Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+                    <Setter Target="NodeBorder.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    <Setter Target="InteractionBorder.Visibility" Value="Collapsed" />
+                    <Setter Target="SelectionIndicator.Visibility" Value="Collapsed" />
+                    <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                </VisualState.Setters>
+            </VisualState>
+            <VisualState x:Name="PointerOver">
+                <VisualState.Setters>
+                    <Setter Target="NodeBorder.Background" Value="{StaticResource WinPoolAccentHoverBrush}" />
+                    <Setter Target="InteractionBorder.BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
+                    <Setter Target="InteractionBorder.Visibility" Value="Visible" />
+                    <Setter Target="SelectionIndicator.Visibility" Value="Collapsed" />
+                    <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                </VisualState.Setters>
+            </VisualState>
+            <VisualState x:Name="Selected">
+                <VisualState.Setters>
+                    <Setter Target="NodeBorder.Background" Value="{StaticResource WinPoolAccentBrush}" />
+                    <Setter Target="InteractionBorder.BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
+                    <Setter Target="InteractionBorder.Visibility" Value="Visible" />
+                    <Setter Target="SelectionIndicator.Visibility" Value="Visible" />
+                    <Setter Target="DisplayNameText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
+                    <Setter Target="TypeLabelText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
+                    <Setter Target="SummaryText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
+                </VisualState.Setters>
+            </VisualState>
+        </VisualStateGroup>
+    </VisualStateManager.VisualStateGroups>
+
+    <Grid Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}">
+        <Border
+            x:Name="NodeBorder"
+            Margin="0"
+            Padding="6"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="2"
+            Tapped="NodeBorder_Tapped">
+            <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid
+                Grid.Row="{x:Bind ViewModel.HeaderRow, Mode=OneWay}"
+                Visibility="{x:Bind ViewModel.HeaderVisibility, Mode=OneWay}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="4" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border
+                    x:Name="SelectionIndicator"
+                    Margin="-6,-6,5,-6"
+                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                    Visibility="Collapsed" />
+                <Button
+                    Grid.Column="1"
+                    Width="30"
+                    Height="30"
+                    Padding="0"
+                    VerticalAlignment="Top"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Command="{x:Bind ViewModel.ToggleExpandedCommand, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.HasChildren, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.ExpandButtonVisibility, Mode=OneWay}"
+                    AutomationProperties.Name="{x:Bind ViewModel.ExpandAutomationName, Mode=OneWay}"
+                    Tapped="ExpandButton_Tapped">
+                    <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.ExpandGlyph, Mode=OneWay}" />
+                </Button>
+                <Grid
+                    Grid.Column="2"
+                    MinHeight="42"
+                    Padding="8,4">
+                    <StackPanel IsHitTestVisible="False">
+                        <TextBlock
+                            x:Name="DisplayNameText"
+                            MinHeight="18"
+                            FontWeight="SemiBold"
+                            Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="TypeLabelText"
+                            Margin="0,2,0,0"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.TypeLabel, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="SummaryText"
+                            Margin="0,2,0,0"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.Summary, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+                <ItemsControl
+                    x:Name="FlowChildren"
+                    Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
+                    Margin="6,5,6,5"
+                    ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.FlowChildrenVisibility, Mode=OneWay}">
+                <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ItemsControl.ItemContainerStyle>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <controls:AdaptiveFlowPanel
+                            HorizontalAlignment="Stretch"
+                            MinimumItemWidth="112" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <controls:TopologyNodeControl ViewModel="{Binding}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+                <ItemsControl
+                    Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
+                    Margin="6,5,6,5"
+                    ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.WeightedChildrenVisibility, Mode=OneWay}">
+                <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ItemsControl.ItemContainerStyle>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <controls:WeightedPoolPanel HorizontalAlignment="Stretch" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <controls:TopologyNodeControl ViewModel="{Binding}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+                <ItemsControl
+                    Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
+                    Margin="6,5,6,5"
+                    ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.StackChildrenVisibility, Mode=OneWay}">
+                <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ItemsControl.ItemContainerStyle>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Vertical" Spacing="6" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <controls:TopologyNodeControl ViewModel="{Binding}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            </Grid>
+        </Border>
+
+        <Border
+            x:Name="InteractionBorder"
+            BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
+            BorderThickness="2"
+            CornerRadius="2"
+            IsHitTestVisible="False"
+            Visibility="Collapsed" />
+    </Grid>
+</UserControl>

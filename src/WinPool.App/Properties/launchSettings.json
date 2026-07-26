@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "WinPool.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "WinPool.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
