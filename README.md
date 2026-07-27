@@ -1,86 +1,91 @@
 # WinPool
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README_CN.md)
 
-WinPool is a native Windows desktop application for inspecting Windows Storage Spaces and the storage topology around them. `V0.1` is a public, read-only test preview built with C#, WinUI 3, .NET 9, and the Windows App SDK.
+WinPool is a third-party graphical interface for Windows storage systems. It is intended to replace the aging Disk Management and Storage Spaces graphical experiences built into Windows with one modern, coherent workspace.
 
-## What it does
+WinPool is designed to:
 
-- Scans Windows storage inventory through a fixed read-only PowerShell script.
-- Correlates storage subsystems, pools, tiers, physical disks, virtual disks, partitions, and mapped network disks.
-- Presents object details in an upper operation workspace and the complete nested topology in a lower logic workspace.
-- Includes a fixed simulation system so the interface remains useful on computers without a complex Storage Spaces configuration.
-- Supports Chinese and English, light/dark/system themes, Windows or preset accent colors, and single-instance activation.
-- Masks disk serial numbers before data reaches the interface, clipboard, or default exports.
+- present clear hierarchical relationships between storage systems, pools, tiers, disks, virtual disks, partitions, and other storage objects;
+- create storage objects with complete and reviewable parameters;
+- provide modern storage testing and monitoring workflows;
+- reserve stable integration points for developers;
+- expose predictable, structured operations that are convenient for AI agents to understand and invoke.
 
-The Manage and Settings tabs are implemented. Create, Test, Monitor, and Development are placeholders for later milestones.
+## Current development stage
 
-## Safety boundary
+WinPool is currently in the **requirements-confirmed and frontend-visual-design stage**.
 
-`V0.1` does not contain storage-pool creation, disk initialization, formatting, removal, resize, repair, or any other mutating storage operation.
+The repository contains a runnable WinUI 3 frontend draft used to validate information architecture, visual hierarchy, navigation, topology presentation, localization, theming, and interaction behavior. Backend work is intentionally limited to the minimum needed to support frontend development.
 
-Every normal launch starts in Simulation. The Real switch currently demonstrates privilege handling and interface state only; it does not enable storage modification. The inventory provider invokes only the repository's fixed read-only script and does not accept user-supplied PowerShell parameters.
+At this stage:
 
-## Requirements
+- simulated storage data is a normal and approved development source;
+- the backend does not need to implement every capability represented by the frontend;
+- visible Create, Test, Monitor, and Development experiences may be prototypes or placeholders;
+- current Windows discovery is read-only and may remain incomplete while frontend behavior is refined;
+- frontend requirements do not freeze a public API, database, plug-in contract, or C#/Python wire protocol.
 
-- Windows 10 version 1809 or later, or Windows 11
-- x64 processor and operating system
-- Administrator rights are optional and are not required for normal read-only use
+The interface expresses the intended product direction. It must not be interpreted as a promise that every displayed workflow is already connected to a production backend.
 
-The portable test build is self-contained and does not require a separate .NET or Windows App SDK installation.
+## Product direction
 
-## Portable test build
+### Storage management
 
-Download `WinPool_V0.1_Test_x64.7z` from [GitHub Releases](https://github.com/GitRuozhi/WinPool/releases), extract the `WinPool` folder, and run `WinPool.App.exe`.
+WinPool aims to make Windows storage objects understandable as one connected system rather than a collection of unrelated management dialogs. The primary interface should show both:
 
-Settings are stored in:
+- a focused workspace for the selected object, its properties, warnings, and applicable actions;
+- a complete topology that preserves pool, tier, disk, virtual-disk, and partition relationships.
 
-```text
-%LOCALAPPDATA%\WinPool\settings.json
-```
+Future creation and management workflows should expose the complete relevant parameters, provide a reviewable plan, and make the resulting operation understandable before execution.
 
-WinPool does not include an installer or an in-app updater. The Settings page opens the GitHub Releases page in the system browser.
+### Testing and monitoring
 
-## Build from source
+WinPool is intended to bring storage testing, health monitoring, performance observation, result comparison, and evidence export into the same product. These areas are part of the frontend and product design, but their complete backend integration is not required in the current stage.
 
-The repository uses an unpackaged, self-contained x64 deployment model.
+### Developer and AI integration
 
-```powershell
-dotnet test WinPool.slnx -c Release
-dotnet build src\WinPool.App\WinPool.App.csproj -c Release -p:Platform=x64
-dotnet publish src\WinPool.App\WinPool.App.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true
-```
+Developer-facing and AI-facing integration should eventually use typed objects, stable identities, explicit parameters, structured results, and clearly separated read and write operations. No public integration contract is frozen yet.
 
-The pinned SDK is declared in `global.json`. Visual Studio with the Windows App SDK C# workload is recommended for XAML development.
+## Current safety boundary
 
-## Repository layout
+The current application is a frontend and read-only inspection draft.
 
-```text
-Docs/                              Current product and engineering documents
-src/WinPool.App/                   WinUI shell, pages, controls, and view models
-src/WinPool.Core/                  Domain models, topology, selection, and layout rules
-src/WinPool.Infrastructure.Windows/ Read-only Windows inventory and local services
-tests/                             Core and Windows infrastructure tests
-```
+- It must not create, initialize, format, resize, repair, remove, or otherwise modify storage objects.
+- The Real mode control currently represents execution-mode and privilege UX only.
+- Simulation is the default and may be used for all frontend development and demonstrations.
+- Mutating storage support requires a separately approved implementation stage and a disposable test environment.
 
-## Known limitations
+## Technology
 
-- This is a test preview, not a production storage-management tool.
-- Only x64 portable publishing is supported in this release.
-- Network-drive discovery reflects mappings visible to the current Windows user session.
-- Hardware and Storage Spaces association quality depends on information exposed by Windows.
-- Real storage operations, Dite integration, reporting, and monitoring are not implemented.
+The current draft uses:
+
+- C# and WinUI 3;
+- .NET 9;
+- Windows App SDK;
+- an unpackaged, self-contained x64 desktop deployment model.
+
+Developer setup, architecture, build commands, and implementation boundaries are documented in [DEVELOP.md](DEVELOP.md).
 
 ## Research background
 
-WinPool grows out of an evidence-backed Storage Spaces research project. The current tested recommendation is 64K interleave with a 64K NTFS allocation unit.
+WinPool grows from the WinPool Storage Spaces research project. Within the completed Windows 10 22H2 tests, the current tested recommendation is:
 
-Read the [WinPool Tiered Storage research and V10 guide](https://github.com/GitRuozhi/WinPool-Tiered-Storage).
+```text
+64K interleave + 64K NTFS allocation unit size
+```
 
-## Feedback
+Equivalent Windows 11 testing has not yet been completed.
 
-Use [GitHub Issues](https://github.com/GitRuozhi/WinPool/issues) for reproducible bugs and interface feedback. Do not post unmasked disk serial numbers or private diagnostic material.
+## Project documents
+
+- [README.md](README.md): user-facing English introduction.
+- [README_CN.md](README_CN.md): user-facing Simplified Chinese introduction.
+- [AGENTS.md](AGENTS.md): operational constraints for AI agents.
+- [DEVELOP.md](DEVELOP.md): developer-facing architecture and workflow.
+
+Historical product and implementation documents are archived outside this repository directory under the parent project's `Old` tree. They are retained for reference but no longer constrain current development.
 
 ## Rights
 
-No license is granted for this repository. All rights are reserved.
+No license is granted by this repository. All rights are reserved.
