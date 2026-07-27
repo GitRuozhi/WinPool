@@ -10,9 +10,19 @@ public sealed record WorkspaceItem(
     string Key,
     string Title,
     StorageUnitRef? Unit = null,
-    bool IsAction = false);
+    bool IsAction = false,
+    string? StorageSystemId = null);
 
 public sealed record DetailRow(string Label, string Value);
+
+public sealed record ComparisonColumn(
+    string Key,
+    string Name,
+    IReadOnlyList<DetailRow> Rows);
+
+public sealed record EditNavigationParameter(
+    WorkspaceViewModel ViewModel,
+    string? TargetStableId);
 
 public enum ShellPageKind
 {

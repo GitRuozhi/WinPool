@@ -38,6 +38,90 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                     snapshot,
                     $"{_occurrenceKey}/{index}:{child.Unit.Kind}"))
             .ToList();
+        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, node.Unit);
+    }
+
+    public string BadgeText { get; }
+
+    public bool BadgeIsWarning { get; }
+
+    public Visibility BadgeVisibility =>
+        string.IsNullOrEmpty(BadgeText) ? Visibility.Collapsed : Visibility.Visible;
+
+    private static (string Text, bool IsWarning) ComputeBadge(
+        WorkspaceViewModel owner,
+        StorageSnapshot snapshot,
+        StorageUnitRef unit)
+    {
+        switch (unit.Kind)
+        {
+            case StorageUnitKind.PhysicalDisk:
+                var physical = snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == unit.StableId);
+                if (physical is not null)
+                {
+                    if (StorageFindingInspector.IsUnhealthy(physical.HealthStatus, physical.OperationalStatus))
+                    {
+                        return (owner.Localization["Unhealthy"], true);
+                    }
+                    var backingOsDisk = snapshot.OsDisks.FirstOrDefault(
+                        x => x.PhysicalDiskStableId == physical.StableId);
+                    if (backingOsDisk is { IsSystem: true } or { IsBoot: true })
+                    {
+                        return (owner.Localization["SystemDisk"], false);
+                    }
+                }
+                break;
+            case StorageUnitKind.VirtualDisk:
+                var virtualDisk = snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == unit.StableId);
+                if (virtualDisk is not null
+                    && StorageFindingInspector.IsUnhealthy(virtualDisk.HealthStatus, virtualDisk.OperationalStatus))
+                {
+                    return (owner.Localization["Unhealthy"], true);
+                }
+                break;
+            case StorageUnitKind.StoragePool:
+                var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId);
+                if (pool is not null
+                    && StorageFindingInspector.IsUnhealthy(pool.HealthStatus, pool.OperationalStatus))
+                {
+                    return (owner.Localization["Unhealthy"], true);
+                }
+                break;
+            case StorageUnitKind.StorageTier:
+                var tier = snapshot.StorageTiers.FirstOrDefault(x => x.StableId == unit.StableId);
+                if (tier is not null)
+                {
+                    var members = snapshot.PhysicalDisks.Where(
+                        x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase));
+                    if (members.Any(x => StorageFindingInspector.IsUnhealthy(x.HealthStatus, x.OperationalStatus)))
+                    {
+                        return (owner.Localization["Unhealthy"], true);
+                    }
+                }
+                break;
+            case StorageUnitKind.Partition:
+                var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
+                if (partition is not null)
+                {
+                    if (StorageFindingInspector.IsUnhealthy(partition.HealthStatus, partition.OperationalStatus))
+                    {
+                        return (owner.Localization["Unhealthy"], true);
+                    }
+                    if (partition.IsBoot || partition.IsSystem)
+                    {
+                        return (owner.Localization["SystemDisk"], false);
+                    }
+                }
+                break;
+            case StorageUnitKind.OsDisk:
+                var osDisk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == unit.StableId);
+                if (osDisk is { IsSystem: true } or { IsBoot: true })
+                {
+                    return (owner.Localization["SystemDisk"], false);
+                }
+                break;
+        }
+        return (string.Empty, false);
     }
 
     public StorageUnitRef Unit { get; }
@@ -58,7 +142,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public int LayoutWeight { get; }
 
-    public bool IsSelected => _owner.SelectedTopologyStableId == Unit.StableId;
+    public bool IsSelected =>
+        ReferenceEquals(_owner.ActiveSnapshot, _snapshot)
+        && _owner.SelectedTopologyStableId == Unit.StableId;
 
     public int HeaderRow => 0;
 
@@ -175,9 +261,6 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private static string LocalizeName(StorageUnitRef unit, WorkspaceViewModel owner) =>
         unit.StableId switch
         {
-            _ when unit.Kind == StorageUnitKind.System
-                && unit.StableId == owner.SimulatedSnapshot.Computer.StableId =>
-                owner.Localization["SimulatedComputer"],
             _ when unit.Kind == StorageUnitKind.NetworkDiskGroup => owner.Localization["Network"],
             _ when unit.Kind == StorageUnitKind.OtherDiskGroup => owner.Localization["Other"],
             _ => unit.DisplayName

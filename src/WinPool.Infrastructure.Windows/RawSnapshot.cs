@@ -16,6 +16,9 @@ internal sealed class RawSnapshot
     public List<RawOsDisk> OsDisks { get; set; } = [];
     public List<RawPartition> Partitions { get; set; } = [];
     public List<RawNetworkDisk> NetworkDisks { get; set; } = [];
+    public List<RawLogicalVolume> LogicalVolumes { get; set; } = [];
+    public List<RawDiskDrive> DiskDrives { get; set; } = [];
+    public RawHardware Hardware { get; set; } = new();
     public List<RawWarning> Warnings { get; set; } = [];
 }
 
@@ -57,6 +60,9 @@ internal sealed class RawPhysicalDisk : RawIdentity
     public bool CanPool { get; set; }
     public string CannotPoolReason { get; set; } = string.Empty;
     public int? DeviceId { get; set; }
+    public string FirmwareVersion { get; set; } = string.Empty;
+    public string ProvisioningType { get; set; } = string.Empty;
+    public string PhysicalLocation { get; set; } = string.Empty;
     public bool IsBoot { get; set; }
     public bool IsSystem { get; set; }
     public bool IsPageFile { get; set; }
@@ -72,6 +78,9 @@ internal sealed class RawPool : RawIdentity
     public string OperationalStatus { get; set; } = string.Empty;
     public long Size { get; set; }
     public long AllocatedSize { get; set; }
+    public long? LogicalSectorSize { get; set; }
+    public long? PhysicalSectorSize { get; set; }
+    public string ProvisioningTypeDefault { get; set; } = string.Empty;
     public string SubsystemAssociationKey { get; set; } = string.Empty;
     public List<string> MemberPhysicalDiskKeys { get; set; } = [];
 }
@@ -83,6 +92,8 @@ internal sealed class RawTier : RawIdentity
     public string ResiliencySettingName { get; set; } = string.Empty;
     public long Size { get; set; }
     public long FootprintOnPool { get; set; }
+    public int? NumberOfColumns { get; set; }
+    public long? Interleave { get; set; }
     public string PoolAssociationKey { get; set; } = string.Empty;
     public string VirtualDiskAssociationKey { get; set; } = string.Empty;
     public List<string> MemberPhysicalDiskKeys { get; set; } = [];
@@ -114,6 +125,8 @@ internal sealed class RawOsDisk
     public bool IsBoot { get; set; }
     public bool IsSystem { get; set; }
     public bool IsOffline { get; set; }
+    public int? NumberOfPartitions { get; set; }
+    public string Path { get; set; } = string.Empty;
     public string PhysicalDiskAssociationKey { get; set; } = string.Empty;
     public string VirtualDiskAssociationKey { get; set; } = string.Empty;
 }
@@ -138,6 +151,29 @@ internal sealed class RawPartition
     public string HealthStatus { get; set; } = string.Empty;
     public string OperationalStatus { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
+    public bool IsHidden { get; set; }
+    public string DriveType { get; set; } = string.Empty;
+    public string VolumeUniqueId { get; set; } = string.Empty;
+    public string VolumeObjectId { get; set; } = string.Empty;
+}
+
+internal sealed class RawLogicalVolume
+{
+    public string DeviceID { get; set; } = string.Empty;
+    public int? DriveType { get; set; }
+    public string VolumeSerialNumber { get; set; } = string.Empty;
+    public bool? Compressed { get; set; }
+    public string ProviderName { get; set; } = string.Empty;
+}
+
+internal sealed class RawDiskDrive
+{
+    public int? Index { get; set; }
+    public string InterfaceType { get; set; } = string.Empty;
+    public int? SCSIBus { get; set; }
+    public int? SCSILogicalUnit { get; set; }
+    public int? SCSIPort { get; set; }
+    public int? SCSITargetId { get; set; }
 }
 
 internal sealed class RawNetworkDisk
@@ -202,7 +238,7 @@ internal static class RawSnapshotProjector
             var id = physicalMap[x.AssociationKey];
             return new PhysicalDiskInfo(
                 id.Value, id.IsStable, First(x.FriendlyName, x.Model, $"Physical disk {x.DeviceId}"), x.Model,
-                StableId.MaskSerial(x.SerialNumber), x.BusType, x.MediaType, x.Size, x.LogicalSectorSize,
+                string.IsNullOrWhiteSpace(x.SerialNumber) ? "—" : x.SerialNumber.Trim(), x.BusType, x.MediaType, x.Size, x.LogicalSectorSize,
                 x.PhysicalSectorSize, x.HealthStatus, x.OperationalStatus, x.CanPool, x.CannotPoolReason,
                 x.DeviceId, x.IsBoot, x.IsSystem, x.IsPageFile, x.IsCrashDump,
                 Resolve(poolMap, x.PoolAssociationKey));

@@ -29,41 +29,19 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Grid Padding="10,4,12,5">
+                <Grid Padding="10,4,12,5" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <ListView
-                        x:Name="CategoryList"
-                        HorizontalAlignment="Left"
-                        ItemsSource="{x:Bind ViewModel.Categories}"
-                        SelectedItem="{x:Bind ViewModel.SelectedCategoryItem, Mode=TwoWay}"
-                        SelectionMode="Single"
-                        ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                        ScrollViewer.HorizontalScrollMode="Disabled">
-                        <ListView.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ListView.ItemsPanel>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel
-                                    MinWidth="88"
-                                    HorizontalAlignment="Center"
-                                    Orientation="Horizontal"
-                                    Spacing="7">
-                                    <FontIcon FontSize="14" Glyph="{Binding Glyph}" />
-                                    <TextBlock VerticalAlignment="Center" Text="{Binding Title}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                    <TextBlock
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Text="{x:Bind ViewModel.SelectedCategoryTitle, Mode=OneWay}" />
 
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                         <ProgressRing
                             Width="18"
                             Height="18"
@@ -77,92 +55,66 @@
                     </StackPanel>
                 </Grid>
 
-                <Grid Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+                <Grid Grid.Row="1">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition MinWidth="180" Width="22*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="6" />
-                        <ColumnDefinition MinWidth="360" Width="53*" />
-                        <ColumnDefinition Width="6" />
-                        <ColumnDefinition MinWidth="200" Width="25*" />
+                        <ColumnDefinition MinWidth="200" Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <ListView
-                        x:Name="ObjectList"
+                        x:Name="VerticalCategoryList"
                         Grid.Column="0"
-                        Padding="8"
-                        ItemsSource="{x:Bind ViewModel.Objects}"
-                        SelectedItem="{x:Bind ViewModel.SelectedWorkspaceItem, Mode=TwoWay}"
-                        SelectionMode="Single">
+                        Padding="6"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="0,0,1,0"
+                        ItemsSource="{x:Bind ViewModel.Categories}"
+                        SelectedItem="{x:Bind ViewModel.SelectedCategoryItem, Mode=TwoWay}"
+                        SelectionMode="Single"
+                        ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                        ScrollViewer.VerticalScrollBarVisibility="Hidden">
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid MinHeight="42">
+                                <StackPanel
+                                    Width="76"
+                                    Padding="4,8"
+                                    HorizontalAlignment="Center"
+                                    Spacing="4">
+                                    <FontIcon
+                                        HorizontalAlignment="Center"
+                                        FontSize="18"
+                                        Glyph="{Binding Glyph}" />
                                     <TextBlock
-                                        VerticalAlignment="Center"
-                                        FontWeight="SemiBold"
-                                        Text="{Binding Title}"
-                                        TextTrimming="CharacterEllipsis" />
-                                </Grid>
+                                        HorizontalAlignment="Center"
+                                        FontSize="12"
+                                        Text="{Binding Title}" />
+                                </StackPanel>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
 
-                    <toolkit:GridSplitter
-                        Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        ResizeBehavior="PreviousAndNext"
-                        ResizeDirection="Columns"
-                        Background="{ThemeResource CardStrokeColorDefaultBrush}"
-                        AutomationProperties.Name="Resize object and property areas" />
-
                     <ScrollViewer
-                        Grid.Column="2"
-                        Padding="18,12,18,18"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1,0,0,0"
-                        HorizontalScrollBarVisibility="Disabled"
-                        VerticalScrollBarVisibility="Auto">
-                        <StackPanel HorizontalAlignment="Stretch" Spacing="10">
-                            <TextBlock
-                                FontSize="24"
-                                FontWeight="SemiBold"
-                                Text="{x:Bind ViewModel.DetailTitle, Mode=OneWay}"
-                                TextWrapping="Wrap" />
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="{x:Bind ViewModel.DetailSubtitle, Mode=OneWay}" />
-
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.Details}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Padding="0,8" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="180" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{Binding Label}" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                Text="{Binding Value}"
-                                                TextWrapping="WrapWholeWords" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
+                        x:Name="TableScrollViewer"
+                        Grid.Column="1"
+                        Padding="8"
+                        HorizontalScrollBarVisibility="Auto"
+                        HorizontalScrollMode="Enabled"
+                        VerticalScrollBarVisibility="Auto"
+                        VerticalScrollMode="Enabled">
+                        <Grid x:Name="ComparisonTableGrid" />
                     </ScrollViewer>
 
                     <toolkit:GridSplitter
-                        Grid.Column="3"
+                        Grid.Column="2"
                         HorizontalAlignment="Stretch"
                         ResizeBehavior="PreviousAndNext"
                         ResizeDirection="Columns"
                         Background="{ThemeResource CardStrokeColorDefaultBrush}"
-                        AutomationProperties.Name="Resize property and command areas" />
+                        AutomationProperties.Name="Resize table and command areas" />
 
                     <ScrollViewer
-                        Grid.Column="4"
+                        Grid.Column="3"
                         Padding="12"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1,0,0,0"
@@ -170,55 +122,8 @@
                         VerticalScrollBarVisibility="Auto">
                         <StackPanel
                             x:Name="CommandButtonsPanel"
-                            Spacing="8"
-                            Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <Button x:Name="RescanButton" HorizontalAlignment="Stretch" Click="RescanButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="Refresh" />
-                                    <TextBlock x:Name="RescanButtonText" />
-                                </StackPanel>
-                            </Button>
-                            <Button x:Name="CopySummaryButton" HorizontalAlignment="Stretch" Click="CopySummaryButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="Copy" />
-                                    <TextBlock x:Name="CopySummaryButtonText" />
-                                </StackPanel>
-                            </Button>
-                            <Button x:Name="CopyIdButton" HorizontalAlignment="Stretch" Click="CopyIdButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="Copy" />
-                                    <TextBlock x:Name="CopyIdButtonText" />
-                                </StackPanel>
-                            </Button>
-                            <Button x:Name="ExportButton" HorizontalAlignment="Stretch" Click="ExportButton_Click" Style="{StaticResource WinPoolAccentButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="Save" />
-                                    <TextBlock x:Name="ExportButtonText" />
-                                </StackPanel>
-                            </Button>
-                            <Button
-                                x:Name="OpenPartitionButton"
-                                HorizontalAlignment="Stretch"
-                                Click="OpenPartitionButton_Click"
-                                Style="{StaticResource WinPoolAccentButtonStyle}"
-                                Visibility="{x:Bind ViewModel.CanOpenSelectedPartition, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="OpenFile" />
-                                    <TextBlock x:Name="OpenPartitionButtonText" />
-                                </StackPanel>
-                            </Button>
-                            <Button
-                                x:Name="RelatedButton"
-                                HorizontalAlignment="Stretch"
-                                Click="RelatedButton_Click"
-                                Style="{StaticResource WinPoolAccentButtonStyle}"
-                                Visibility="{x:Bind ViewModel.HasRelatedTarget, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="Link" />
-                                    <TextBlock x:Name="RelatedButtonText" />
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
+                            MinWidth="180"
+                            Spacing="8" />
                     </ScrollViewer>
                 </Grid>
             </Grid>
@@ -253,7 +158,7 @@
                     <ItemsControl.ItemContainerStyle>
                         <Style TargetType="ContentPresenter">
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        </Style>
+                            </Style>
                     </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>

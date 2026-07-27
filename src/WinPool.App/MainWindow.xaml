@@ -102,36 +102,34 @@
                 x:Name="ModeControls"
                 Grid.Column="3"
                 VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="6">
-                <TextBlock
-                    x:Name="SimulationModeLabel"
+                Orientation="Horizontal">
+                <CheckBox
+                    x:Name="LocalRealOperationsCheckBox"
                     VerticalAlignment="Center"
-                    FontSize="13"
-                    FontWeight="SemiBold"
-                    Text="模拟" />
-                <ToggleSwitch
-                    x:Name="ExecutionModeSwitch"
-                    MinWidth="0"
-                    VerticalAlignment="Center"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="ExecutionModeSwitch_Toggled"
-                    AutomationProperties.Name="Execution mode" />
-                <TextBlock
-                    x:Name="RealModeLabel"
-                    VerticalAlignment="Center"
-                    FontSize="13"
-                    Text="真实" />
+                    Click="LocalRealOperationsCheckBox_Click"
+                    Content="本机真实操作"
+                    AutomationProperties.Name="Local real operations" />
             </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1">
             <Frame x:Name="RootFrame" />
 
+            <InfoBar
+                x:Name="LocalRealOperationsWarning"
+                Margin="12,6,12,0"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Top"
+                Canvas.ZIndex="110"
+                IsClosable="True"
+                IsOpen="False"
+                Severity="Warning"
+                CloseButtonClick="LocalRealOperationsWarning_CloseButtonClick"
+                Title="测试版本" />
+
             <ItemsControl
                 x:Name="GlobalNotificationStack"
-                Margin="12,6,12,0"
+                Margin="12,72,12,0"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Top"
                 Canvas.ZIndex="100"

@@ -3,36 +3,70 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPool.App.Services;
 using WinPool.Core;
+using WinPool.Infrastructure.Windows;
 
 namespace WinPool.App.ViewModels;
 
 public sealed partial class WorkspaceViewModel : ObservableObject
 {
-    private readonly IStorageInventoryProvider _inventoryProvider;
+    private readonly IHardwareInventoryProvider _hardwareInventoryProvider;
     private readonly IUserPreferencesService _preferencesService;
     private readonly IGlobalNotificationService _notificationService;
+    private readonly IStorageSystemRepository _systemRepository;
+    private readonly ISimulationOperationService _simulationOperations;
+    private readonly IMachineRecordService _machineRecordService;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly Dictionary<string, bool> _expandedStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<WorkspaceCategory, string> _categorySelections = [];
+    private bool _updatingComparisonSelection;
     private StorageUnitRef? _contextUnit;
+    private readonly HashSet<string> _shownFindings = new(StringComparer.Ordinal);
     public const string AddStorageSystemKey = "action:add-storage-system";
 
     public WorkspaceViewModel(
-        IStorageInventoryProvider inventoryProvider,
+        IHardwareInventoryProvider hardwareInventoryProvider,
         IPrivilegeService privilegeService,
         IUserPreferencesService preferencesService,
-        IExportService exportService,
-        IGlobalNotificationService notificationService)
+        IStorageSystemImportExportService importExportService,
+        IStorageSystemRepository systemRepository,
+        ISimulationOperationService simulationOperations,
+        IGlobalNotificationService notificationService,
+        IMachineRecordService machineRecordService,
+        ICommandLogService commandLogService)
     {
-        _inventoryProvider = inventoryProvider;
+        _hardwareInventoryProvider = hardwareInventoryProvider;
         _preferencesService = preferencesService;
         _notificationService = notificationService;
-        ExportService = exportService;
+        _systemRepository = systemRepository;
+        _simulationOperations = simulationOperations;
+        _machineRecordService = machineRecordService;
+        CommandLog = commandLogService;
+        ImportExportService = importExportService;
         PrivilegeState = privilegeService.Current;
         Execution = new ExecutionModeController(PrivilegeState);
-        Snapshot = StorageSnapshot.Empty(Environment.MachineName);
-        SimulatedSnapshot = SimulationStorageSnapshotFactory.Create();
-        IsUsingSimulatedInventory = true;
+        var localSnapshot = StorageSnapshot.Empty(Environment.MachineName);
+        var local = new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            $"local:{localSnapshot.Computer.StableId}",
+            StorageSystemKind.Local,
+            localSnapshot.Computer.Name,
+            localSnapshot,
+            HardwareInventoryReport.Empty(DateTimeOffset.MinValue),
+            [],
+            DateTimeOffset.MinValue);
+        var simulatedSnapshot = SimulationStorageSnapshotFactory.Create();
+        var simulation = new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:builtin:desktop-pl96ukd-20260727-114130",
+            StorageSystemKind.Simulation,
+            "DESKTOP-PL96UKD",
+            simulatedSnapshot,
+            KsReferenceReportFactory.Create(),
+            [],
+            simulatedSnapshot.ScannedAt);
+        SystemCatalog.ReplaceLocal(local);
+        SystemCatalog.AddSimulation(simulation);
+        SelectedSystem = simulation;
         Localization = new LocalizationService();
         _selectedCategory = WorkspaceCategory.System;
         RefreshLocalizedContent();
@@ -40,9 +74,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public LocalizationService Localization { get; }
 
-    public IExportService ExportService { get; }
+    public IStorageSystemImportExportService ImportExportService { get; }
 
     public IGlobalNotificationService NotificationService => _notificationService;
+
+    public ICommandLogService CommandLog { get; }
 
     public PrivilegeState PrivilegeState { get; }
 
@@ -52,20 +88,34 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool IsRealMode => Execution.Mode == ExecutionMode.Real;
 
-    public StorageSnapshot Snapshot { get; private set; }
+    public StorageSystemCatalog SystemCatalog { get; } = new();
 
-    public StorageSnapshot SimulatedSnapshot { get; }
+    public StorageSystemDocument SelectedSystem { get; private set; }
 
-    public StorageSnapshot ActiveSnapshot =>
-        IsUsingSimulatedInventory ? SimulatedSnapshot : Snapshot;
+    public StorageSystemDocument ActiveDocument => SelectedSystem;
 
-    public bool IsUsingSimulatedInventory { get; private set; }
+    public StorageSnapshot ActiveSnapshot => SelectedSystem.Snapshot;
+
+    public StorageSnapshot Snapshot =>
+        SystemCatalog.Systems.First(x => x.IsLocal).Snapshot;
+
+    public StorageSnapshot SimulatedSnapshot =>
+        SystemCatalog.Systems.First(x => !x.IsLocal).Snapshot;
+
+    public bool IsUsingSimulatedInventory => SelectedSystem.Kind == StorageSystemKind.Simulation;
+
+    public bool IsLocalSystem => SelectedSystem.Kind == StorageSystemKind.Local;
 
     public ObservableCollection<CategoryItem> Categories { get; } = [];
 
     public ObservableCollection<WorkspaceItem> Objects { get; } = [];
 
     public ObservableCollection<DetailRow> Details { get; } = [];
+
+    public ObservableCollection<ComparisonColumn> ComparisonColumns { get; } = [];
+
+    [ObservableProperty]
+    private ComparisonColumn? _selectedComparisonColumn;
 
     [ObservableProperty]
     private WorkspaceCategory _selectedCategory;
@@ -110,6 +160,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool HasRelatedTarget => GetPrimaryRelatedTarget() is not null;
 
+    public string SelectedCategoryTitle =>
+        Categories.FirstOrDefault(x => x.Category == SelectedCategory)?.Title ?? string.Empty;
+
     public event EventHandler? WorkspaceSelectionChanged;
 
     partial void OnSelectedCategoryItemChanged(CategoryItem? value)
@@ -124,6 +177,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     {
         RebuildObjects(_categorySelections.GetValueOrDefault(value));
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == value);
+        OnPropertyChanged(nameof(SelectedCategoryTitle));
     }
 
     partial void OnSelectedWorkspaceItemChanged(WorkspaceItem? value)
@@ -135,6 +189,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             SelectedTopologyStableId = null;
             _categorySelections[SelectedCategory] = value.Key;
             BuildDetails();
+            RebuildComparisonColumns();
             RefreshTopologySelection();
             NotifySelectionState();
             WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
@@ -143,7 +198,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
         if (SelectedCategory == WorkspaceCategory.System && value?.Unit?.Kind == StorageUnitKind.System)
         {
-            SwitchInventory(value.Unit.StableId == SimulatedSnapshot.Computer.StableId);
+            SwitchSystem(value.StorageSystemId);
         }
         SelectedStableId = value?.Unit?.StableId;
         SelectedTopologyStableId = SelectedStableId;
@@ -152,10 +207,24 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             _categorySelections[SelectedCategory] = value.Key;
         }
         BuildDetails();
+        RebuildComparisonColumns();
         RefreshTopologySelection();
         ExpandSelectedTopologyPath();
         NotifySelectionState();
         WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    partial void OnSelectedComparisonColumnChanged(ComparisonColumn? value)
+    {
+        if (_updatingComparisonSelection || value is null)
+        {
+            return;
+        }
+        var item = Objects.FirstOrDefault(x => x.Key == value.Key);
+        if (item is not null && !ReferenceEquals(item, SelectedWorkspaceItem))
+        {
+            SelectedWorkspaceItem = item;
+        }
     }
 
     partial void OnSelectedTopologyStableIdChanged(string? value) => RefreshTopologySelection();
@@ -167,6 +236,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var preferences = await _preferencesService.LoadAsync();
         Localization.Language = preferences.Language;
         CurrentPreferences = preferences;
+        var persisted = await _systemRepository.LoadSimulationsAsync();
+        if (persisted.Count > 0)
+        {
+            var selectedId = SelectedSystem.Id;
+            SystemCatalog.ReplaceSimulations(persisted);
+            SelectedSystem = SystemCatalog.Find(selectedId)
+                ?? SystemCatalog.Systems.First(x => !x.IsLocal);
+        }
+        else
+        {
+            await _systemRepository.SaveSimulationAsync(SelectedSystem);
+        }
         RefreshLocalizedContent();
     }
 
@@ -196,6 +277,101 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
+    public async Task SetShowHardwareIdsAsync(bool show)
+    {
+        CurrentPreferences = CurrentPreferences with { ShowHardwareIds = show };
+        BuildDetails();
+        RebuildComparisonColumns();
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
+    public async Task SetCreateMsrOnInitializeAsync(bool create)
+    {
+        CurrentPreferences = CurrentPreferences with { CreateMsrOnInitialize = create };
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
+    public string FormatSerial(string? serial) =>
+        CurrentPreferences.ShowHardwareIds
+            ? (string.IsNullOrWhiteSpace(serial) ? "—" : serial)
+            : StableId.MaskSerial(serial);
+
+    public async Task<string?> ExportActiveSystemAsync(
+        CancellationToken cancellationToken = default) =>
+        await ImportExportService.ExportAsync(ActiveDocument, cancellationToken);
+
+    public async Task<bool> ImportSystemAsync(CancellationToken cancellationToken = default)
+    {
+        var imported = await ImportExportService.ImportAsync(cancellationToken);
+        if (imported is null)
+        {
+            return false;
+        }
+        SystemCatalog.AddSimulation(imported);
+        await _systemRepository.SaveSimulationAsync(imported, cancellationToken);
+        SelectedSystem = imported;
+        OnPropertyChanged(nameof(SelectedSystem));
+        OnPropertyChanged(nameof(ActiveDocument));
+        OnPropertyChanged(nameof(ActiveSnapshot));
+        OnPropertyChanged(nameof(IsLocalSystem));
+        OnPropertyChanged(nameof(IsUsingSimulatedInventory));
+        RebuildTopology();
+        RebuildObjects(imported.Id);
+        return true;
+    }
+
+    public async Task<SimulationOperationResult> ApplySimulationOperationAsync(
+        SimulationOperationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = _simulationOperations.Apply(ActiveDocument, request);
+        if (!result.Succeeded)
+        {
+            return result;
+        }
+        foreach (var command in result.Commands)
+        {
+            CommandLog.Log("simulation", command, "OK", simulated: true);
+        }
+        SelectedSystem = result.Document;
+        SystemCatalog.Update(result.Document);
+        await _systemRepository.SaveSimulationAsync(result.Document, cancellationToken);
+        OnPropertyChanged(nameof(SelectedSystem));
+        OnPropertyChanged(nameof(ActiveDocument));
+        OnPropertyChanged(nameof(ActiveSnapshot));
+        RebuildTopology();
+        RebuildObjects(request.TargetStableId);
+        BuildDetails();
+        RebuildComparisonColumns();
+        return result;
+    }
+
+    public async Task ResetActiveSimulationAsync()
+    {
+        if (!SelectedSystem.Id.StartsWith("simulation:builtin", StringComparison.Ordinal))
+        {
+            return;
+        }
+        var snapshot = SimulationStorageSnapshotFactory.Create();
+        var document = SelectedSystem with
+        {
+            Snapshot = snapshot,
+            HardwareReport = KsReferenceReportFactory.Create(),
+            Jobs = [],
+            UpdatedAt = DateTimeOffset.Now
+        };
+        SelectedSystem = document;
+        SystemCatalog.Update(document);
+        await _systemRepository.SaveSimulationAsync(document);
+        OnPropertyChanged(nameof(SelectedSystem));
+        OnPropertyChanged(nameof(ActiveDocument));
+        OnPropertyChanged(nameof(ActiveSnapshot));
+        RebuildTopology();
+        RebuildObjects(null);
+        BuildDetails();
+        RebuildComparisonColumns();
+    }
+
     public bool TrySetExecutionMode(ExecutionMode mode)
     {
         var changed = Execution.TrySetMode(mode);
@@ -219,15 +395,31 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var previousTopologyStableId = SelectedTopologyStableId;
         try
         {
-            var snapshot = await _inventoryProvider.ScanAsync(CancellationToken.None);
-            Snapshot = snapshot;
+            var localDocument = await _hardwareInventoryProvider.CollectLocalAsync(CancellationToken.None);
+            var snapshot = localDocument.Snapshot;
+            CommandLog.Log(
+                "inventory",
+                "WinPool read-only inventory (embedded PowerShell)",
+                $"{snapshot.PhysicalDisks.Count} disks, {snapshot.StoragePools.Count} pools, {snapshot.Partitions.Count} partitions",
+                simulated: false);
+            try
+            {
+                await _machineRecordService.RecordLocalScanAsync(localDocument, CancellationToken.None);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+            SystemCatalog.ReplaceLocal(localDocument);
             OnPropertyChanged(nameof(ActiveSnapshot));
-            if (IsUsingSimulatedInventory)
+            OnPropertyChanged(nameof(ActiveDocument));
+            OnPropertyChanged(nameof(Snapshot));
+            if (!IsLocalSystem)
             {
                 RebuildTopology();
             }
             else
             {
+                SelectedSystem = localDocument;
                 var restored = WorkspaceState.Restore(snapshot, previous);
                 SelectedCategory = restored.Category;
                 RebuildTopology();
@@ -245,6 +437,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     "inventory",
                     $"inventory:{snapshot.ScannedAt.UtcTicks}:{warning.Code}:{warning.StableId}");
             }
+            PublishStorageFindings(snapshot);
             BuildDetails();
         }
         catch (Exception ex)
@@ -275,9 +468,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
-        var switchedInventory = SwitchInventory(
-            sourceSnapshot.Computer.StableId == SimulatedSnapshot.Computer.StableId);
-        var selection = WorkspaceMapper.FromUnit(unit, sourceSnapshot);
+        var sourceDocument = SystemCatalog.Systems.FirstOrDefault(
+            x => ReferenceEquals(x.Snapshot, sourceSnapshot))
+            ?? SystemCatalog.Systems.FirstOrDefault(
+                x => x.Snapshot.SnapshotVersion == sourceSnapshot.SnapshotVersion);
+        var switchedInventory = SwitchSystem(sourceDocument?.Id);
+        var selection = unit.Kind == StorageUnitKind.System && sourceDocument is not null
+            ? new WorkspaceSelection(WorkspaceCategory.System, sourceDocument.Id)
+            : WorkspaceMapper.FromUnit(unit, sourceSnapshot);
         if (selection.StableId is not null)
         {
             _categorySelections[selection.Category] = selection.StableId;
@@ -377,36 +575,95 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Categories.Add(new CategoryItem(WorkspaceCategory.Disk, Localization["Disk"], "\uEDA2"));
         Categories.Add(new CategoryItem(WorkspaceCategory.Partition, Localization["Partition"], "\uE7C3"));
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == category);
+        OnPropertyChanged(nameof(SelectedCategoryTitle));
         RebuildObjects(SelectedStableId);
         RebuildTopology();
         if (preserveTopologySelection)
         {
             SelectedTopologyStableId = topologyStableId is not null
-                && (SimulatedSnapshot.FindUnit(topologyStableId) is not null
-                    || Snapshot.FindUnit(topologyStableId) is not null)
+                && SystemCatalog.Systems.Any(system =>
+                    system.Id == topologyStableId
+                    || system.Snapshot.FindUnit(topologyStableId) is not null)
                     ? topologyStableId
                     : null;
         }
         BuildDetails();
     }
 
+    private void PublishStorageFindings(StorageSnapshot snapshot)
+    {
+        var zh = Localization.Language == LanguagePreference.ZhCn;
+        foreach (var finding in StorageFindingInspector.Evaluate(snapshot))
+        {
+            if (!_shownFindings.Add($"{finding.Kind}:{finding.TargetStableId}"))
+            {
+                continue;
+            }
+            var (title, message) = finding.Kind switch
+            {
+                StorageFindingKind.MultiplePerformanceTiers => (
+                    zh ? "存储池布局建议" : "Pool layout suggestion",
+                    zh
+                        ? $"存储池 {finding.TargetName} 含有多个容量不为 0 的性能层。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
+                        : $"Pool {finding.TargetName} has more than one non-empty performance tier. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                StorageFindingKind.MultipleCapacityTiers => (
+                    zh ? "存储池布局建议" : "Pool layout suggestion",
+                    zh
+                        ? $"存储池 {finding.TargetName} 含有多个容量不为 0 的容量层。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
+                        : $"Pool {finding.TargetName} has more than one non-empty capacity tier. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                StorageFindingKind.MultipleVirtualDisks => (
+                    zh ? "存储池布局建议" : "Pool layout suggestion",
+                    zh
+                        ? $"存储池 {finding.TargetName} 含有多个虚拟磁盘。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
+                        : $"Pool {finding.TargetName} has more than one virtual disk. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                StorageFindingKind.LegacyDynamicVolume => (
+                    zh ? "老旧卷类型" : "Legacy volume type",
+                    zh
+                        ? $"检测到动态磁盘卷（{finding.TargetName}）。这些老旧功能已被弃用，您仍可以进行管理，但不支持创建，建议您迁移到存储空间。如果您有任何问题，可以反馈。"
+                        : $"A legacy dynamic-disk volume ({finding.TargetName}) was detected. These deprecated layouts can still be managed but not created; migrating to Storage Spaces is recommended. Feedback is welcome."),
+                StorageFindingKind.MbrDisk => (
+                    zh ? "MBR 磁盘" : "MBR disk",
+                    zh
+                        ? $"检测到 MBR 磁盘（{finding.TargetName}）。MBR 已不再受支持，您仍可以进行管理，但不支持创建，建议您迁移到 GPT。如果您仍要求创建，请使用开发板块。如果您有任何问题，可以反馈。"
+                        : $"An MBR disk ({finding.TargetName}) was detected. MBR is no longer supported; it can still be managed but not created. Migrate to GPT, or use the Development area if creation is strictly required. Feedback is welcome."),
+                _ => (Localization["Warning"], finding.TargetName)
+            };
+            _notificationService.PublishWarning(
+                title,
+                message,
+                "storage-finding",
+                $"storage-finding:{finding.Kind}:{finding.TargetStableId}");
+        }
+    }
+
     private void RebuildTopology()
     {
         TopologySystems.Clear();
-        TopologySystems.Add(CreateTopologyRoot(SimulatedSnapshot));
-        TopologySystems.Add(CreateTopologyRoot(Snapshot));
+        foreach (var system in SystemCatalog.Systems)
+        {
+            TopologySystems.Add(CreateTopologyRoot(system));
+        }
         ApplySystemRootExpansion();
         RefreshTopologySelection();
     }
 
-    private TopologyNodeViewModel CreateTopologyRoot(StorageSnapshot snapshot)
+    private TopologyNodeViewModel CreateTopologyRoot(StorageSystemDocument document)
     {
-        var root = TopologyProjector.Project(snapshot);
+        var projected = TopologyProjector.Project(document.Snapshot);
+        var root = new TopologyNode(
+            new StorageUnitRef(document.Id, StorageUnitKind.System, document.DisplayName),
+            projected.Summary,
+            projected.Children,
+            projected.IsReference,
+            projected.IsExpanded,
+            projected.IsSelectable,
+            projected.ChildrenLayout,
+            projected.LayoutWeight);
         return new TopologyNodeViewModel(
             root,
             this,
-            snapshot,
-            $"{snapshot.Computer.StableId}:root");
+            document.Snapshot,
+            $"{document.Id}:root");
     }
 
     private void RebuildObjects(string? preferredStableId)
@@ -427,18 +684,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         switch (category)
         {
             case WorkspaceCategory.System:
-                yield return new WorkspaceItem(
-                    SimulatedSnapshot.Computer.StableId,
-                    Localization["SimulatedComputer"],
-                    new StorageUnitRef(
-                        SimulatedSnapshot.Computer.StableId,
-                        StorageUnitKind.System,
-                        Localization["SimulatedComputer"]));
-                yield return new WorkspaceItem(
-                    Snapshot.Computer.StableId,
-                    Snapshot.Computer.Name,
-                    new StorageUnitRef(Snapshot.Computer.StableId, StorageUnitKind.System, Snapshot.Computer.Name),
-                    false);
+                foreach (var system in SystemCatalog.Systems)
+                {
+                    var prefix = system.IsLocal
+                        ? (Localization.Language == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
+                        : (Localization.Language == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
+                    yield return new WorkspaceItem(
+                        system.Id,
+                        $"{prefix} {system.DisplayName}",
+                        new StorageUnitRef(system.Id, StorageUnitKind.System, system.DisplayName),
+                        false,
+                        system.Id);
+                }
                 yield return new WorkspaceItem(
                     AddStorageSystemKey,
                     Localization["AddStorageSystem"],
@@ -596,7 +853,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             case StorageUnitKind.PhysicalDisk:
                 var disk = ActiveSnapshot.PhysicalDisks.First(x => x.StableId == unit.StableId);
                 Details.Add(new DetailRow(Localization["Model"], disk.Model));
-                Details.Add(new DetailRow(Localization["Serial"], disk.MaskedSerialNumber));
+                Details.Add(new DetailRow(Localization["Serial"], FormatSerial(disk.MaskedSerialNumber)));
                 Details.Add(new DetailRow(Localization["Bus"], disk.BusType));
                 Details.Add(new DetailRow(Localization["Media"], disk.MediaType));
                 Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(disk.Size)));
@@ -670,6 +927,109 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         NotifySelectionState();
     }
 
+    private void RebuildComparisonColumns()
+    {
+        ComparisonColumns.Clear();
+        foreach (var item in Objects.Where(x => !x.IsAction && x.Unit is not null))
+        {
+            var document = item.StorageSystemId is null
+                ? ActiveDocument
+                : SystemCatalog.Find(item.StorageSystemId) ?? ActiveDocument;
+            ComparisonColumns.Add(new ComparisonColumn(
+                item.Key,
+                item.Title,
+                BuildComparisonRows(item.Unit!, document.Snapshot)));
+        }
+
+        _updatingComparisonSelection = true;
+        SelectedComparisonColumn = ComparisonColumns.FirstOrDefault(
+            x => x.Key == SelectedWorkspaceItem?.Key);
+        _updatingComparisonSelection = false;
+    }
+
+    private IReadOnlyList<DetailRow> BuildComparisonRows(
+        StorageUnitRef unit,
+        StorageSnapshot snapshot)
+    {
+        var rows = new List<DetailRow>();
+        switch (unit.Kind)
+        {
+            case StorageUnitKind.System:
+                rows.Add(new DetailRow(
+                    "Windows",
+                    $"{snapshot.Computer.WindowsProductName} {snapshot.Computer.WindowsVersion} ({snapshot.Computer.OsBuild})".Trim()));
+                rows.Add(new DetailRow(Localization["PhysicalDisk"], snapshot.PhysicalDisks.Count.ToString()));
+                rows.Add(new DetailRow(Localization["StoragePool"], snapshot.StoragePools.Count.ToString()));
+                rows.Add(new DetailRow(Localization["StorageTier"], snapshot.StorageTiers.Count.ToString()));
+                rows.Add(new DetailRow(Localization["VirtualDisk"], snapshot.VirtualDisks.Count.ToString()));
+                rows.Add(new DetailRow(Localization["Partition"], snapshot.Partitions.Count.ToString()));
+                break;
+            case StorageUnitKind.StoragePool:
+                var pool = snapshot.StoragePools.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["Type"], pool.IsPrimordial ? Localization["OriginalPool"] : Localization["StoragePool"]));
+                rows.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(pool.HealthStatus, pool.OperationalStatus)));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(pool.Size)));
+                rows.Add(new DetailRow(Localization["Allocated"], TopologyProjector.FormatBytes(pool.AllocatedSize)));
+                rows.Add(new DetailRow(Localization["Members"], pool.MemberPhysicalDiskIds.Count.ToString()));
+                break;
+            case StorageUnitKind.StorageTier:
+                var tier = snapshot.StorageTiers.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["Media"], tier.MediaType));
+                rows.Add(new DetailRow(Localization["Role"], tier.ResiliencySettingName));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(tier.Size)));
+                rows.Add(new DetailRow(Localization["Members"], tier.MemberPhysicalDiskIds.Count.ToString()));
+                break;
+            case StorageUnitKind.PhysicalDisk:
+                var physical = snapshot.PhysicalDisks.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["Model"], physical.Model));
+                rows.Add(new DetailRow(Localization["Serial"], FormatSerial(physical.MaskedSerialNumber)));
+                rows.Add(new DetailRow(Localization["Bus"], physical.BusType));
+                rows.Add(new DetailRow(Localization["Media"], physical.MediaType));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(physical.Size)));
+                rows.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(physical.HealthStatus, physical.OperationalStatus)));
+                break;
+            case StorageUnitKind.VirtualDisk:
+                var virtualDisk = snapshot.VirtualDisks.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(virtualDisk.HealthStatus, virtualDisk.OperationalStatus)));
+                rows.Add(new DetailRow(Localization["Role"], virtualDisk.ResiliencySettingName));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(virtualDisk.Size)));
+                rows.Add(new DetailRow("Columns", virtualDisk.NumberOfColumns?.ToString() ?? "—"));
+                rows.Add(new DetailRow("Interleave", virtualDisk.Interleave is null ? "—" : TopologyProjector.FormatBytes(virtualDisk.Interleave.Value)));
+                break;
+            case StorageUnitKind.OsDisk:
+                var osDisk = snapshot.OsDisks.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["Type"], osDisk.PartitionStyle));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(osDisk.Size)));
+                rows.Add(new DetailRow("Status", osDisk.IsOffline ? "Offline" : "Online"));
+                break;
+            case StorageUnitKind.Partition:
+                var partition = snapshot.Partitions.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["Type"], PartitionTypeName(partition.Type)));
+                rows.Add(new DetailRow(Localization["FileSystem"], string.IsNullOrWhiteSpace(partition.FileSystem) ? "—" : partition.FileSystem));
+                rows.Add(new DetailRow(Localization["AllocationUnit"], partition.AllocationUnitSize is null ? "—" : TopologyProjector.FormatBytes(partition.AllocationUnitSize.Value)));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(partition.Size)));
+                rows.Add(new DetailRow(Localization["Available"], TopologyProjector.FormatBytes(partition.SizeRemaining)));
+                rows.Add(new DetailRow(Localization["Path"], string.IsNullOrWhiteSpace(partition.Path) ? "—" : partition.Path));
+                break;
+            case StorageUnitKind.NetworkDisk:
+                var network = snapshot.NetworkDisks.First(x => x.StableId == unit.StableId);
+                rows.Add(new DetailRow(Localization["FileSystem"], network.FileSystem));
+                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(network.Size)));
+                rows.Add(new DetailRow(Localization["Available"], TopologyProjector.FormatBytes(network.SizeRemaining)));
+                rows.Add(new DetailRow(Localization["Path"], network.ProviderPath));
+                break;
+            default:
+                rows.Add(new DetailRow(Localization["Type"], KindName(unit.Kind)));
+                break;
+        }
+        rows.Add(new DetailRow(
+            Localization["LastScan"],
+            snapshot.ScannedAt == DateTimeOffset.MinValue
+                ? "—"
+                : snapshot.ScannedAt.LocalDateTime.ToString("G")));
+        return rows;
+    }
+
     private StorageUnitRef? GetPrimaryRelatedTarget()
     {
         var unit = ResolveDetailUnit();
@@ -729,15 +1089,23 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _ => kind.ToString()
     };
 
-    private bool SwitchInventory(bool useSimulation)
+    private bool SwitchSystem(string? systemId)
     {
-        if (IsUsingSimulatedInventory == useSimulation)
+        if (string.IsNullOrWhiteSpace(systemId))
+        {
+            return false;
+        }
+        var system = SystemCatalog.Find(systemId);
+        if (system is null || system.Id == SelectedSystem.Id)
         {
             return false;
         }
 
-        IsUsingSimulatedInventory = useSimulation;
+        SelectedSystem = system;
         _contextUnit = null;
+        OnPropertyChanged(nameof(SelectedSystem));
+        OnPropertyChanged(nameof(ActiveDocument));
+        OnPropertyChanged(nameof(IsLocalSystem));
         OnPropertyChanged(nameof(IsUsingSimulatedInventory));
         OnPropertyChanged(nameof(ActiveSnapshot));
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
@@ -747,7 +1115,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private void ApplySystemRootExpansion()
     {
-        var activeSystemId = ActiveSnapshot.Computer.StableId;
+        var activeSystemId = ActiveDocument.Id;
         foreach (var root in TopologySystems)
         {
             root.IsExpanded = root.Unit.StableId == activeSystemId;
@@ -789,7 +1157,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
-        foreach (var root in TopologySystems)
+        foreach (var root in TopologySystems.Where(
+                     x => x.Unit.StableId == ActiveDocument.Id))
         {
             if (root.ExpandPathTo(SelectedStableId))
             {

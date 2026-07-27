@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="WinPool_App.MonitorPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+    <StackPanel Padding="24,20,24,40" Spacing="12">
+        <TextBlock
+            x:Name="MonitorTitle"
+            FontSize="32"
+            FontWeight="SemiBold"
+            Text="监控" />
+        <TextBlock
+            x:Name="MonitorIntro"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+        <Border
+            Padding="12"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="1*" />
+                    <ColumnDefinition Width="1*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    x:Name="HeaderDisk"
+                    FontWeight="SemiBold"
+                    Text="磁盘" />
+                <TextBlock
+                    x:Name="HeaderActivity"
+                    Grid.Column="1"
+                    FontWeight="SemiBold"
+                    Text="活动时间" />
+                <TextBlock
+                    x:Name="HeaderRead"
+                    Grid.Column="2"
+                    FontWeight="SemiBold"
+                    Text="读取" />
+                <TextBlock
+                    x:Name="HeaderWrite"
+                    Grid.Column="3"
+                    FontWeight="SemiBold"
+                    Text="写入" />
+            </Grid>
+        </Border>
+        <ItemsControl x:Name="DiskRows">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border
+                        Margin="0,0,0,6"
+                        Padding="12"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="1*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Text="{Binding InstanceName}"
+                                TextTrimming="CharacterEllipsis" />
+                            <Grid VerticalAlignment="Center" Grid.Column="1">
+                                <ProgressBar
+                                    Maximum="100"
+                                    Value="{Binding ActivityPercent}" />
+                                <TextBlock
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    Text="{Binding ActivityText}" />
+                            </Grid>
+                            <TextBlock
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                Text="{Binding ReadText}" />
+                            <TextBlock
+                                Grid.Column="3"
+                                VerticalAlignment="Center"
+                                Text="{Binding WriteText}" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </StackPanel>
+</Page>

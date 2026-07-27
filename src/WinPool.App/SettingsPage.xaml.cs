@@ -25,9 +25,12 @@ public sealed partial class SettingsPage : Page
     {
         base.OnNavigatedTo(e);
         ViewModel = (WorkspaceViewModel)e.Parameter;
+        PopulateComboBoxes();
         ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
         AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
         LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
+        MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
+        ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         UpdateText();
         SyncExecutionMode();
@@ -38,6 +41,17 @@ public sealed partial class SettingsPage : Page
     {
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         base.OnNavigatedFrom(e);
+    }
+
+    private void PopulateComboBoxes()
+    {
+        var l = ViewModel.Localization;
+        ThemeOptions.ItemsSource = new[] { l["SystemTheme"], l["Light"], l["Dark"] };
+        AccentOptions.ItemsSource = new[]
+        {
+            l["SystemAccent"], l["Blue"], l["Cyan"], l["Green"], l["Purple"], l["Orange"], l["Red"]
+        };
+        LanguageOptions.ItemsSource = new[] { l["Chinese"], l["English"] };
     }
 
     private async void ThemeOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -73,23 +87,65 @@ public sealed partial class SettingsPage : Page
 
         var language = (LanguagePreference)LanguageOptions.SelectedIndex;
         await ViewModel.SetLanguageAsync(language);
+        PopulateComboBoxes();
+        ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
+        AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
+        LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
         UpdateText();
         ((MainWindow)App.Window).RefreshChrome();
     }
 
-    private async void SettingsExecutionModeSwitch_Toggled(object sender, RoutedEventArgs e)
+    private async void SettingsExecutionModeSwitch_Click(object sender, RoutedEventArgs e)
     {
         if (!_ready || _updatingMode)
         {
             return;
         }
 
-        var requestedMode = SettingsExecutionModeSwitch.IsOn
+        var requestedMode = SettingsExecutionModeSwitch.IsChecked == true
             ? ExecutionMode.Real
             : ExecutionMode.Simulation;
         await ((MainWindow)App.Window).RequestExecutionModeAsync(requestedMode);
         SyncExecutionMode();
         ((MainWindow)App.Window).RefreshChrome();
+    }
+
+    private async void MsrCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_ready)
+        {
+            return;
+        }
+        await ViewModel.SetCreateMsrOnInitializeAsync(MsrCheckBox.IsChecked == true);
+    }
+
+    private async void ShowHardwareIdsCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_ready)
+        {
+            return;
+        }
+
+        if (ShowHardwareIdsCheckBox.IsChecked == true)
+        {
+            var l = ViewModel.Localization;
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = l["PrivacyWarningTitle"],
+                Content = l["PrivacyWarningMessage"],
+                PrimaryButtonText = l["Confirm"],
+                CloseButtonText = l["Cancel"],
+                DefaultButton = ContentDialogButton.Close
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                ShowHardwareIdsCheckBox.IsChecked = false;
+                return;
+            }
+        }
+
+        await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsCheckBox.IsChecked == true);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -104,15 +160,13 @@ public sealed partial class SettingsPage : Page
     {
         _updatingMode = true;
         SettingsExecutionModeSwitch.IsEnabled = true;
-        SettingsExecutionModeSwitch.IsOn = ViewModel.IsRealMode;
-        SettingsSimulationLabel.Opacity = ViewModel.IsRealMode ? 0.56 : 1;
-        SettingsRealLabel.Opacity = ViewModel.IsRealMode ? 1 : 0.56;
+        SettingsExecutionModeSwitch.IsChecked = ViewModel.IsRealMode;
         ToolTipService.SetToolTip(
             SettingsExecutionModeSwitch,
             ViewModel.CanUseRealMode ? ViewModel.Localization["ExecutionMode"] : ViewModel.Localization["AdminRequired"]);
         SettingsExecutionModeSwitch.SetValue(
             AutomationProperties.NameProperty,
-            $"{ViewModel.Localization["Simulation"]} / {ViewModel.Localization["Real"]}");
+            ViewModel.Localization["LocalRealOperations"]);
         _updatingMode = false;
     }
 
@@ -120,56 +174,43 @@ public sealed partial class SettingsPage : Page
     {
         var l = ViewModel.Localization;
         SettingsTitle.Text = l["Settings"];
-        SettingsDescription.Text = l["SettingsDescription"];
         ThemeTitle.Text = l["Appearance"];
-        ThemeSubtitle.Text = l.Language == LanguagePreference.ZhCn
-            ? "跟随系统支持高对比度和系统主题变化。"
-            : "System mode follows Windows theme changes and high contrast.";
-        ThemeOptions.Items[0] = l["SystemTheme"];
-        ThemeOptions.Items[1] = l["Light"];
-        ThemeOptions.Items[2] = l["Dark"];
         AccentTitle.Text = l["AccentColor"];
-        AccentSubtitle.Text = l["AccentDescription"];
-        AccentOptions.Items[0] = l["SystemAccent"];
-        AccentOptions.Items[1] = l["Blue"];
-        AccentOptions.Items[2] = l["Cyan"];
-        AccentOptions.Items[3] = l["Green"];
-        AccentOptions.Items[4] = l["Purple"];
-        AccentOptions.Items[5] = l["Orange"];
-        AccentOptions.Items[6] = l["Red"];
         LanguageTitle.Text = l["Language"];
-        LanguageSubtitle.Text = l.Language == LanguagePreference.ZhCn
-            ? "磁盘型号、卷标和池名称保持原文。"
-            : "Disk models, volume labels, and pool names remain unchanged.";
-        LanguageOptions.Items[0] = l["Chinese"];
-        LanguageOptions.Items[1] = l["English"];
         ExecutionTitle.Text = l["ExecutionMode"];
-        ExecutionSubtitle.Text = l["ExecutionDescription"];
-        SettingsSimulationLabel.Text = l["SimulationShort"];
-        SettingsRealLabel.Text = l["RealShort"];
+        SettingsExecutionModeSwitch.Content = l["LocalRealOperations"];
+        MsrTitle.Text = l["InitializeDisk"];
+        MsrCheckBox.Content = l["CreateMsrOnInitialize"];
+        PrivacyTitle.Text = l["Privacy"];
+        ShowHardwareIdsCheckBox.Content = l["ShowHardwareIds"];
         AboutTitle.Text = l["About"];
-        AboutSubtitle.Text = l["AboutDescription"];
-        AboutProductNameLabel.Text = l["ProductName"];
+        AboutProductNameLabel.Text = l["Product"];
         AboutProductNameValue.Text = ProductInformation.Name;
-        AboutVersionLabel.Text = l["CurrentVersion"];
+        AboutVersionLabel.Text = l["Version"];
         AboutVersionValue.Text = ProductInformation.Version;
-        UpdateTitle.Text = l["Update"];
-        UpdateSubtitle.Text = l["UpdateDescription"];
-        UpdateVersionLabel.Text = l["CurrentVersion"];
-        UpdateVersionValue.Text = ProductInformation.Version;
-        UpdateSourceLabel.Text = l["UpdateSource"];
-        UpdateModeLabel.Text = l["UpdateMethod"];
-        UpdateModeValue.Text = l["ExternalUpdate"];
-        ViewUpdatesButtonText.Text = l["ViewUpdates"];
-        ViewUpdatesButton.SetValue(AutomationProperties.NameProperty, l["ViewUpdates"]);
+        AboutProviderLabel.Text = l["Provider"];
+        AboutWebsiteLabel.Text = l["Website"];
+        AboutUpdateLabel.Text = l["Update"];
+        AboutFeedbackLabel.Text = l["Feedback"];
+        AboutCommunityLabel.Text = l["Community"];
+        AboutCommunityValue.Text = l["CommunityPending"];
         SyncExecutionMode();
     }
 
-    private async void ViewUpdatesButton_Click(object sender, RoutedEventArgs e)
+    private async void WebsiteLink_Click(object sender, RoutedEventArgs e) =>
+        await OpenAsync(ProductInformation.WebsiteUri);
+
+    private async void UpdateLink_Click(object sender, RoutedEventArgs e) =>
+        await OpenAsync(ProductInformation.UpdateUri);
+
+    private async void FeedbackLink_Click(object sender, RoutedEventArgs e) =>
+        await OpenAsync(ProductInformation.FeedbackUri);
+
+    private async Task OpenAsync(Uri uri)
     {
         try
         {
-            if (await Windows.System.Launcher.LaunchUriAsync(ProductInformation.UpdateUri))
+            if (await Windows.System.Launcher.LaunchUriAsync(uri))
             {
                 return;
             }

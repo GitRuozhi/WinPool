@@ -37,10 +37,21 @@ Backend implementation is intentionally minimal. It only needs to support the cu
 - Simulated data is an approved first-class development source.
 - A frontend element does not require a complete production backend in the current stage.
 - Prefer a small fake or read-only provider over premature integration.
-- Do not freeze a public API, database schema, plug-in contract, IPC protocol, or C#/Python wire format.
-- Do not integrate Dite, KS, reporting, monitoring services, or external automation unless explicitly requested.
+- Do not freeze a public API, plug-in contract, IPC protocol, or C#/Python wire format.
+  The current JSON persistence (settings, `machine.json`, simulated system documents)
+  is internal and may change without migration.
+- KS/StatSys read-only collection has been explicitly requested. Preserve its
+  structured report boundary, but do not add a Python runtime, Flask service, or
+  external automation.
 - Keep current Windows inventory code fixed and read-only.
-- Do not add a storage executor or any mutating PowerShell command.
+- Do not add a storage executor or any mutating command against the local machine.
+  The only permitted write path is the simulated operation service acting on
+  simulated documents.
+- Sensitive hardware values may remain unmasked in memory to support the
+  privacy toggle, but everything persisted, exported, or imported must pass
+  through `StorageSystemDocumentSanitizer.RedactSensitiveData`.
+- Do not store or publish a `.ps1` inventory file. Fixed read-only PowerShell text
+  must be embedded in the assembly and provided through standard input.
 
 The existing Core and Infrastructure projects may remain broader than the minimum frontend need, but new work should not expand them merely to make every visible prototype functional.
 
@@ -60,14 +71,14 @@ These are product goals, not claims that the current backend already implements 
 
 ## Current frontend baseline
 
-- Use a single WinUI 3 desktop window.
-- Keep title-bar destinations for Manage, Create, Test, Monitor, Development, and Settings.
-- Manage and Settings may contain working content; the other destinations may remain visual prototypes or placeholders.
+- Use a single WinUI 3 desktop window on .NET 10.
+- Keep title-bar destinations for Manage, Edit, Test, Monitor, Development, and Settings.
 - The Manage workspace uses an upper operation area and a lower complete topology area separated by a horizontal splitter.
-- The upper area uses the categories System, Pool, Tier, Disk, and Partition.
-- Category selection changes the vertical object selector and detail content.
-- The lower topology shows the complete storage structure through nested enclosure blocks.
-- Containment is the relationship language; do not add relationship lines.
+- The upper area shows System, Pool, Tier, Disk, and Partition as vertical tabs, one shared comparison table (columns are the category objects), and command buttons with icons.
+- Selecting a table column highlights it, centers it horizontally, and stays in sync with topology selection.
+- The lower topology shows the complete storage structure through nested enclosure blocks; containment is the relationship language, with no relationship lines. System disks and unhealthy objects carry badges.
+- All mutating and destructive workflows live on the Edit page and act on simulated systems only; Manage keeps entries that navigate to Edit.
+- The Monitor page samples local physical disks through read-only PDH counters; the Development page shows a read-only log of executed commands; the Test page is a placeholder.
 - Workspace selection and topology highlighting remain independent where the current interaction requires it.
 - Network and other logical storage groups must not be counted as Windows Storage Pools.
 - Use stock, theme-aware WinUI controls and resources while the visual system is still being refined.
@@ -86,10 +97,13 @@ Prefer built-in WinUI controls and shared resources. Add custom controls only wh
 
 ## Safety rules
 
-1. Do not add or run mutating storage commands.
-2. Do not initialize, clear, format, resize, repair, optimize, remove, or create storage objects.
+1. Do not add or run commands that mutate the local machine.
+2. Do not initialize, clear, format, resize, repair, optimize, remove, or create local storage objects.
+   Simulated operations on simulated documents are the approved write path; every
+   local mutation entry point must stay disabled, including in Real mode.
 3. Do not use a real attached disk as a temporary test target.
-4. Do not expose unmasked serial numbers in UI, clipboard, logs, or default exports.
+4. Do not expose unmasked serial numbers in clipboard, logs, persisted files, or
+   exports. The settings privacy toggle may reveal them in UI text only.
 5. Do not directly delete files.
 6. Move superseded WinPool content to the parent project root `Old`, preserving its relative path when practical.
 7. Move low-value generated material to the parent project root `Rubbish`.

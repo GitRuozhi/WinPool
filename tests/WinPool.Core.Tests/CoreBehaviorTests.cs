@@ -28,6 +28,54 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void SystemDocumentSanitizerMasksSnapshotAndHardwareEvidence()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        snapshot = snapshot with
+        {
+            PhysicalDisks =
+            [
+                snapshot.PhysicalDisks[0] with { MaskedSerialNumber = "SERIAL-123456" }
+            ]
+        };
+        var raw = System.Text.Json.JsonSerializer.SerializeToElement(new[] { "SERIAL-123456" });
+        var item = new WinPool.Core.HardwareInventoryItemResult(
+            "0803",
+            "Disk",
+            "SerialNumber",
+            "序列号",
+            raw,
+            [
+                new WinPool.Core.CollectorSourceResult(
+                    "test",
+                    WinPool.Core.CollectorSourceStatus.Success,
+                    raw,
+                    string.Empty,
+                    0)
+            ],
+            []);
+        var document = new WinPool.Core.StorageSystemDocument(
+            1,
+            "simulation:test",
+            WinPool.Core.StorageSystemKind.Simulation,
+            "Test",
+            snapshot,
+            new WinPool.Core.HardwareInventoryReport(1, DateTimeOffset.Now, [item], []),
+            [],
+            DateTimeOffset.Now);
+
+        var sanitized = WinPool.Core.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+
+        Assert.Contains('•', sanitized.Snapshot.PhysicalDisks[0].MaskedSerialNumber);
+        Assert.All(
+            sanitized.HardwareReport.Items[0].FinalValue!.Value.EnumerateArray(),
+            value => Assert.Contains('•', value.GetString()!));
+        Assert.All(
+            sanitized.HardwareReport.Items[0].Sources[0].RawValue!.Value.EnumerateArray(),
+            value => Assert.Contains('•', value.GetString()!));
+    }
+
+    [Fact]
     public void TieredPoolDoesNotDuplicatePhysicalDiskAtPoolLevel()
     {
         var snapshot = TestSnapshotFactory.Create();
@@ -310,5 +358,59 @@ public sealed class CoreBehaviorTests
         Assert.Equal(
             "group:other:system:test",
             WinPool.Core.TopologyProjector.OtherGroupStableId(snapshot));
+    }
+
+    [Fact]
+    public void StorageSystemCatalogKeepsLocalFirstAndImportedSimulationsInOrder()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var report = WinPool.Core.HardwareInventoryReport.Empty(DateTimeOffset.Now);
+        var local = new WinPool.Core.StorageSystemDocument(
+            1, "local", WinPool.Core.StorageSystemKind.Local, "Local",
+            snapshot, report, [], DateTimeOffset.Now);
+        var first = new WinPool.Core.StorageSystemDocument(
+            1, "sim:1", WinPool.Core.StorageSystemKind.Simulation, "First",
+            snapshot, report, [], DateTimeOffset.Now);
+        var second = first with { Id = "sim:2", DisplayName = "Second" };
+        var catalog = new WinPool.Core.StorageSystemCatalog();
+
+        catalog.AddSimulation(first);
+        catalog.ReplaceLocal(local);
+        catalog.AddSimulation(second);
+
+        Assert.Equal(["local", "sim:1", "sim:2"], catalog.Systems.Select(x => x.Id));
+    }
+
+    [Fact]
+    public void SimulationOperationsRejectLocalAndPersistSnapshotChanges()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var report = WinPool.Core.HardwareInventoryReport.Empty(DateTimeOffset.Now);
+        var local = new WinPool.Core.StorageSystemDocument(
+            1, "local", WinPool.Core.StorageSystemKind.Local, "Local",
+            snapshot, report, [], DateTimeOffset.Now);
+        var simulation = local with
+        {
+            Id = "simulation",
+            Kind = WinPool.Core.StorageSystemKind.Simulation
+        };
+        var service = new WinPool.Core.SimulationOperationService();
+
+        var rejected = service.Apply(
+            local,
+            new WinPool.Core.SimulationOperationRequest(
+                WinPool.Core.SimulationOperationKind.Rename,
+                "pool:1",
+                Name: "Changed"));
+        var changed = service.Apply(
+            simulation,
+            new WinPool.Core.SimulationOperationRequest(
+                WinPool.Core.SimulationOperationKind.Rename,
+                "pool:1",
+                Name: "Changed"));
+
+        Assert.False(rejected.Succeeded);
+        Assert.True(changed.Succeeded);
+        Assert.Equal("Changed", changed.Document.Snapshot.StoragePools[0].FriendlyName);
     }
 }

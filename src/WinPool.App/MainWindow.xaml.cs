@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
     private bool _updatingMode;
     private bool _updatingNavigation;
     private bool _requestingElevation;
+    private bool _realWarningDismissed;
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
     private readonly IElevationRestartService _elevationRestartService;
@@ -47,12 +48,17 @@ public sealed partial class MainWindow : Window
     {
         NotificationService = new GlobalNotificationService();
         _elevationRestartService = new WindowsElevationRestartService();
+        var importExportService = new DesktopExportService();
         ViewModel = new WorkspaceViewModel(
-            new WindowsStorageInventoryProvider(),
+            new WindowsHardwareInventoryProvider(),
             new WindowsPrivilegeService(),
             new LocalUserPreferencesService(),
-            new DesktopExportService(),
-            NotificationService);
+            importExportService,
+            new LocalStorageSystemRepository(),
+            new SimulationOperationService(),
+            NotificationService,
+            new LocalMachineRecordService(),
+            new GlobalCommandLogService());
         if (startupOptions.EnterRealModeAfterElevation)
         {
             ViewModel.TrySetExecutionMode(ExecutionMode.Real);
@@ -99,6 +105,13 @@ public sealed partial class MainWindow : Window
         SelectShellPage(ShellPageKind.Settings);
     }
 
+    public void ShowCreate() => ShowEdit(null);
+
+    public void ShowEdit(string? targetStableId)
+    {
+        SelectShellPage(ShellPageKind.Create, targetStableId);
+    }
+
     public void ApplyTheme(ThemePreference preference)
     {
         RootGrid.RequestedTheme = preference switch
@@ -119,17 +132,16 @@ public sealed partial class MainWindow : Window
         WindowTitleText.Text = $"WinPool{suffix}";
         Title = WindowTitleText.Text;
         AppWindow.Title = WindowTitleText.Text;
-        SimulationModeLabel.Text = ViewModel.Localization["SimulationShort"];
-        RealModeLabel.Text = ViewModel.Localization["RealShort"];
-        ExecutionModeSwitch.OffContent = string.Empty;
-        ExecutionModeSwitch.OnContent = string.Empty;
-        ExecutionModeSwitch.SetValue(
+        LocalRealOperationsCheckBox.Content = ViewModel.Localization["LocalRealOperations"];
+        LocalRealOperationsCheckBox.SetValue(
             AutomationProperties.NameProperty,
-            $"{ViewModel.Localization["Simulation"]} / {ViewModel.Localization["Real"]}");
+            ViewModel.Localization["LocalRealOperations"]);
         ToolTipService.SetToolTip(
-            ExecutionModeSwitch,
+            LocalRealOperationsCheckBox,
             ViewModel.CanUseRealMode ? ViewModel.Localization["ExecutionMode"] : ViewModel.Localization["AdminRequired"]);
-        ExecutionModeSwitch.IsEnabled = true;
+        LocalRealOperationsCheckBox.IsEnabled = true;
+        LocalRealOperationsWarning.Title = ViewModel.Localization["PreviewWarningTitle"];
+        LocalRealOperationsWarning.Message = ViewModel.Localization["PreviewWarningMessage"];
         RefreshShellNavigationText();
         UpdateShellNavigationTextVisibility();
         SyncModeSwitch();
@@ -141,7 +153,7 @@ public sealed partial class MainWindow : Window
         ModeControls.Margin = new Thickness(8, 0, right, 0);
     }
 
-    private async void ExecutionModeSwitch_Toggled(object sender, RoutedEventArgs e)
+    private async void LocalRealOperationsCheckBox_Click(object sender, RoutedEventArgs e)
     {
         if (_updatingMode)
         {
@@ -149,7 +161,9 @@ public sealed partial class MainWindow : Window
         }
 
         await RequestExecutionModeAsync(
-            ExecutionModeSwitch.IsOn ? ExecutionMode.Real : ExecutionMode.Simulation);
+            LocalRealOperationsCheckBox.IsChecked == true
+                ? ExecutionMode.Real
+                : ExecutionMode.Simulation);
     }
 
     public async Task RequestExecutionModeAsync(ExecutionMode requestedMode)
@@ -157,12 +171,9 @@ public sealed partial class MainWindow : Window
         if (requestedMode == ExecutionMode.Simulation)
         {
             ViewModel.TrySetExecutionMode(ExecutionMode.Simulation);
-            return;
-        }
-
-        if (ViewModel.CanUseRealMode)
-        {
-            ViewModel.TrySetExecutionMode(ExecutionMode.Real);
+            _realWarningDismissed = false;
+            LocalRealOperationsWarning.IsOpen = false;
+            SyncModeSwitch();
             return;
         }
 
@@ -179,15 +190,25 @@ public sealed partial class MainWindow : Window
             var dialog = new ContentDialog
             {
                 XamlRoot = RootGrid.XamlRoot,
-                Title = localization["ElevationTitle"],
-                Content = localization["ElevationMessage"],
-                PrimaryButtonText = localization["RestartAsAdministrator"],
+                Title = localization["PreviewWarningTitle"],
+                Content = localization["PreviewConfirmation"],
+                PrimaryButtonText = ViewModel.CanUseRealMode
+                    ? localization["Confirm"]
+                    : localization["RestartAsAdministrator"],
                 CloseButtonText = localization["Cancel"],
                 DefaultButton = ContentDialogButton.Primary
             };
             var result = await dialog.ShowAsync();
             if (result != ContentDialogResult.Primary)
             {
+                return;
+            }
+
+            if (ViewModel.CanUseRealMode)
+            {
+                ViewModel.TrySetExecutionMode(ExecutionMode.Real);
+                _realWarningDismissed = false;
+                LocalRealOperationsWarning.IsOpen = true;
                 return;
             }
 
@@ -218,15 +239,13 @@ public sealed partial class MainWindow : Window
     private void SyncModeSwitch()
     {
         _updatingMode = true;
-        ExecutionModeSwitch.IsOn = ViewModel.IsRealMode;
-        SimulationModeLabel.Opacity = ViewModel.IsRealMode ? 0.56 : 1;
-        SimulationModeLabel.FontWeight = ViewModel.IsRealMode
-            ? Microsoft.UI.Text.FontWeights.Normal
-            : Microsoft.UI.Text.FontWeights.SemiBold;
-        RealModeLabel.Opacity = ViewModel.IsRealMode ? 1 : 0.56;
-        RealModeLabel.FontWeight = ViewModel.IsRealMode
-            ? Microsoft.UI.Text.FontWeights.SemiBold
-            : Microsoft.UI.Text.FontWeights.Normal;
+        LocalRealOperationsCheckBox.IsChecked = ViewModel.IsRealMode;
+        if (ViewModel.IsRealMode
+            && !_realWarningDismissed
+            && !LocalRealOperationsWarning.IsOpen)
+        {
+            LocalRealOperationsWarning.IsOpen = true;
+        }
         _updatingMode = false;
     }
 
@@ -297,7 +316,7 @@ public sealed partial class MainWindow : Window
         var keys = new Dictionary<ShellPageKind, string>
         {
             [ShellPageKind.Manage] = "Manage",
-            [ShellPageKind.Create] = "Create",
+            [ShellPageKind.Create] = "Edit",
             [ShellPageKind.Test] = "Test",
             [ShellPageKind.Monitor] = "Monitor",
             [ShellPageKind.Development] = "Development",
@@ -310,7 +329,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void SelectShellPage(ShellPageKind page)
+    private void SelectShellPage(ShellPageKind page, string? editTargetStableId = null)
     {
         var item = ShellNavigationItems.First(candidate => candidate.Page == page);
         _updatingNavigation = true;
@@ -338,7 +357,23 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        RootFrame.Navigate(typeof(EmptyPage), item);
+        switch (page)
+        {
+            case ShellPageKind.Create:
+                RootFrame.Navigate(
+                    typeof(EditPage),
+                    new EditNavigationParameter(ViewModel, editTargetStableId));
+                break;
+            case ShellPageKind.Test:
+                RootFrame.Navigate(typeof(TestPage), ViewModel);
+                break;
+            case ShellPageKind.Monitor:
+                RootFrame.Navigate(typeof(MonitorPage), ViewModel);
+                break;
+            case ShellPageKind.Development:
+                RootFrame.Navigate(typeof(DevelopmentPage), ViewModel);
+                break;
+        }
         UpdateShellNavigationTextVisibility();
     }
 
@@ -476,6 +511,11 @@ public sealed partial class MainWindow : Window
         {
             NotificationService.Dismiss(notification.Id);
         }
+    }
+
+    private void LocalRealOperationsWarning_CloseButtonClick(InfoBar sender, object args)
+    {
+        _realWarningDismissed = true;
     }
 
     private static double RelativeLuminance(Color color)

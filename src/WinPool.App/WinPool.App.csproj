@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>WinPool_App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -16,7 +16,7 @@
     <WinUISDKReferences>false</WinUISDKReferences>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- The app is not NativeAOT. C# partial properties require a newer language version than the approved .NET 9 target. -->
+    <!-- The app is not NativeAOT. C# partial properties require a newer language version than the approved .NET 10 target. -->
     <NoWarn>$(NoWarn);MVVMTK0045</NoWarn>
   </PropertyGroup>
 
@@ -24,12 +24,6 @@
     <Content Include="Assets\AppIcon.ico"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\WinPool.Infrastructure.Windows\Scripts\Get-StorageInventory.ps1"
-          Link="Scripts\Get-StorageInventory.ps1"
-          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

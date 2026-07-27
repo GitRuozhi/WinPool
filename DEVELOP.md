@@ -28,7 +28,7 @@ The current solution uses:
 
 - C#;
 - WinUI 3;
-- .NET 9;
+- .NET 10;
 - Windows App SDK;
 - CommunityToolkit where an existing dependency already fills a specific gap;
 - unpackaged, self-contained, Windows x64 deployment.
@@ -46,7 +46,7 @@ src/
 tests/
   WinPool.Core.Tests/
   WinPool.Infrastructure.Tests/
-Release/                          Current test archive and checksum
+Ref/                              Read-only reference material (KS/StatSys collector and capture)
 ```
 
 The repository root intentionally contains only four Markdown documents:
@@ -88,6 +88,20 @@ Frontend code may use simulation-specific objects and presentation models when t
 - flow and weighted layout calculations;
 - execution-mode state;
 - service interfaces used by the current application.
+- storage-system documents, complete hardware reports, simulation jobs, and pure
+  simulation-operation validation;
+- simulated storage mutations (rename, drive letter, format, delete, convert,
+  offline, initialize with optional MSR, create/extend/shrink partition, create
+  and populate pools, create virtual disks, drive optimization) with their
+  reviewable PowerShell command text;
+- storage-layout findings (busy pools, legacy dynamic volumes, MBR disks) and a
+  read-only in-memory command log.
+
+Sensitive hardware values (mainboard, memory, volume, and disk serial numbers
+and MAC addresses) stay unmasked in memory so the privacy toggle can reveal
+them, and are always masked again by
+`StorageSystemDocumentSanitizer.RedactSensitiveData` before any value is
+persisted, exported, or imported.
 
 These types are internal architecture, not a frozen public SDK or serialization contract.
 
@@ -99,30 +113,78 @@ These types are internal architecture, not a frozen public SDK or serialization 
 - the confirmed elevation-restart handoff;
 - local preference persistence;
 - a fixed read-only PowerShell inventory provider.
+- the persistent simulated-system repository;
+- the per-launch local machine record (`machine.json`, always redacted);
+- an assembly-embedded, stdin-driven Windows PowerShell 5.1 command runner;
+- a staged hardware-report collection and storage-projection pipeline;
+- a read-only PDH physical-disk performance sampler for the Monitor page.
 
-The inventory script may query Windows storage state, but it must remain read-only and must not accept free-form user commands.
+The inventory command may query Windows storage state, but it must remain read-only
+and must not accept free-form user commands. No `.ps1` file is shipped. The fixed
+command is embedded in the assembly and sent to the system Windows PowerShell 5.1
+process over standard input.
+
+The KS/StatSys migration preserves its 13 categories and 154 item identities in a
+structured hardware report. A live local report collects all items through the same
+fixed read-only command, except the few values Windows does not expose read-only
+(storage-tier allocation unit, shared and total GPU memory, DirectX feature level,
+monitor-to-GPU mapping, and monitor color format and dynamic range); those entries
+are explicitly recorded as `Unavailable`. The bundled
+`DESKTOP-PL96UKD_20260727_114130` reference report retains values for all 154 items.
+
+### Storage-system documents
+
+The application catalog contains the local system first, followed by persistent
+simulations. Imports always create a new simulation identity. A versioned system
+document contains the storage snapshot, hardware report, and simulated jobs. Imported
+content is data only and is never evaluated as a command.
 
 ## Frontend baseline
 
 The current shell uses title-bar destinations for:
 
 - Manage;
-- Create;
+- Edit;
 - Test;
 - Monitor;
 - Development;
 - Settings.
 
-Only the frontend behavior required for current design validation needs to be functional. Create, Test, Monitor, and Development may remain prototypes or placeholders.
+Only the frontend behavior required for current design validation needs to be functional.
 
 The Manage page is based on:
 
 - an upper object-focused operation workspace;
 - a lower complete storage-topology workspace;
 - a horizontal splitter between them;
-- System, Pool, Tier, Disk, and Partition categories;
-- a category-dependent vertical object selector;
+- System, Pool, Tier, Disk, and Partition categories shown as vertical tabs;
+- one shared comparison table whose columns are the category objects, with the
+  selected column highlighted and centered;
 - nested enclosure blocks for relationships, without connector lines.
+
+The Edit page applies every mutating or destructive workflow to simulated systems
+only: partition extend/shrink/delete/format/create, disk initialization with an
+optional 16 MB MSR (a persisted setting, on by default), pool creation through
+drag-and-drop disk assignment, and virtual-disk creation with reviewable
+interleave, resiliency, and cluster-size parameters. All simulated operations are
+recorded in a read-only command log shown on the Development page, and the
+built-in simulation can be reset. Local storage remains read-only: every local
+mutation entry point is disabled, even in Real mode.
+
+The Monitor page samples local physical-disk activity, read, and write rates
+through read-only PDH English counters. The Test page is a capability
+placeholder for the planned Dite/RealSoak-style workflows.
+
+The settings page offers theme, accent, and language drop-downs, the
+execution-mode switch, the MSR-on-initialize option, and a "show hardware IDs"
+privacy toggle (off by default; enabling it warns about serial-number exposure
+and unmasks sensitive hardware values in the UI only). Product, version,
+provider, website, update, feedback, and community links live in a single About
+card.
+
+Local machine information is refreshed into
+`%LocalAppData%\WinPool\machine.json` after every successful scan; simulated
+systems persist as redacted JSON documents in `%LocalAppData%\WinPool\Systems`.
 
 The frontend should continue to support:
 
@@ -150,6 +212,9 @@ Use simulation when:
 Backend work should be limited to the smallest change needed for the current frontend task. Do not implement complete command execution, monitoring infrastructure, Dite integration, databases, services, or plug-in systems merely because the frontend shows their intended location.
 
 Real mode currently demonstrates execution-mode and privilege UX. It does not authorize or enable storage mutation.
+
+Simulation operations may update and persist simulated documents. They must never
+resolve simulated identities to local storage commands.
 
 ## Build and test
 
@@ -206,9 +271,14 @@ Hardware-specific inventory assertions should be separated from portable unit te
 6. Define developer and AI integration concepts only after the frontend object and operation model is stable.
 7. Begin mutating backend design only after a separate user-approved plan and disposable hardware environment exist.
 
+Candidate later workflows include pool membership and hot spares, virtual-disk
+repair/connectivity, reliability counters and identification LEDs, partition access
+paths and integrity checks, and storage health/diagnostic reports. These remain
+design candidates rather than current local execution capabilities.
+
 ## Contribution boundaries
 
-- Do not add storage mutation in the current stage.
+- Do not add local storage mutation in the current stage; simulated mutations on simulated documents are the only permitted write path, and every local mutation entry point must stay disabled, including in Real mode.
 - Do not treat visible prototype functions as authorization to implement their backend.
 - Do not create new documentation directories or planning files when one of the four root documents is the correct home.
 - Do not use archived documents as current requirements.

@@ -67,7 +67,9 @@ public enum StorageUnitKind
 public sealed record UserPreferences(
     ThemePreference Theme = ThemePreference.System,
     AccentColorPreference AccentColor = AccentColorPreference.System,
-    LanguagePreference Language = LanguagePreference.ZhCn);
+    LanguagePreference Language = LanguagePreference.ZhCn,
+    bool ShowHardwareIds = false,
+    bool CreateMsrOnInitialize = true);
 
 public sealed record StorageUnitRef(
     string StableId,

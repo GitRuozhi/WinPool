@@ -1,0 +1,1916 @@
+# ========== 公用后处理锚点 ==========
+gib_convert: &gib_convert
+  - type: calculate
+    operation: divide
+    by: 1073741824
+  - type: add_unit
+    unit: "GiB"
+
+mib_convert: &mib_convert
+  - type: calculate
+    operation: divide
+    by: 1048576
+  - type: add_unit
+    unit: "MiB"
+
+kib_convert: &kib_convert
+  - type: calculate
+    operation: divide
+    by: 1024
+  - type: add_unit
+    unit: "KiB"
+
+extract_number: &extract_number
+  - type: extract_number
+
+partition_style_map: &partition_style_map
+  - type: map
+    mapping:
+      "0": "Unknown"
+      "1": "MBR"
+      "2": "GPT"
+      "3": "RAW"
+
+media_type_map: &media_type_map
+  - type: map
+    mapping:
+      "0": "Unknown"
+      "3": "HDD"
+      "4": "SSD"
+      "5": "USB"
+
+bus_type_map: &bus_type_map
+  - type: map
+    mapping:
+      "0": "Unknown"
+      "1": "SCSI"
+      "2": "ATAPI"
+      "3": "ATA"
+      "4": "IEEE 1394"
+      "5": "SSA"
+      "6": "Fibre Channel"
+      "7": "USB"
+      "8": "RAID"
+      "9": "iSCSI"
+      "10": "SAS"
+      "11": "SATA"
+      "12": "SD"
+      "13": "MMC"
+      "14": "Virtual"
+      "15": "File Backed Virtual"
+      "16": "Storage Spaces"
+      "17": "NVMe"
+      "18": "SCM"
+
+drive_type_map: &drive_type_map
+  - type: map
+    mapping:
+      "0": "Unknown"
+      "1": "No Root Directory"
+      "2": "Removable Disk"
+      "3": "Local Disk"
+      "4": "Network Drive"
+      "5": "Compact Disc"
+      "6": "RAM Disk"
+
+boolean_map: &boolean_map
+  - type: map
+    mapping:
+      "True": "√"
+      "False": "×"
+      "None": "Φ"
+
+gpt_type_map: &gpt_type_map
+  - type: map
+    mapping:
+      "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}": "Basic Data"
+      "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}": "System"
+      "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}": "Recovery"
+      "{e3c9e316-0b5c-4db8-817d-f92df00215ae}": "Reserved"
+      "{5808c8aa-7e8f-42e0-85d2-e1e90434cfb3}": "LDM Metadata"
+      "{af9b60a0-1431-4f62-bc68-3311714a69ad}": "LDM Data"
+      "{37affc90-ef7d-4e96-91c3-08d2b93b4a8b}": "Storage Spaces"
+
+health_status_map: &health_status_map
+  - type: map
+    mapping:
+      "0": "Healthy"
+      "1": "Warning"
+      "2": "Unhealthy"
+      "3": "Unknown"
+
+operational_status_map: &operational_status_map
+  - type: map
+    mapping:
+      "0": "Unknown"
+      "1": "Other"
+      "2": "OK"
+      "3": "Degraded"
+      "4": "Stressed"
+      "5": "Predictive Failure"
+      "6": "Error"
+      "7": "Non-Recoverable Error"
+      "8": "Starting"
+      "9": "Stopping"
+      "10": "Stopped"
+      "11": "In Service"
+      "12": "No Contact"
+      "13": "Lost Communication"
+
+columns_map: &columns_map
+  - type: map
+    mapping:
+      "65535": "Auto"
+
+ecc_map: &ecc_map
+  - type: map
+    mapping:
+      "0": "Reserved"
+      "1": "Other"
+      "2": "Unknown"
+      "3": "None"
+      "4": "Parity"
+      "5": "Single-bit ECC"
+      "6": "Multi-bit ECC"
+      "7": "CRC"
+
+system_name_map: &system_name_map
+  - type: map
+    mapping:
+      "Microsoft Windows 10 家庭版": "Windows 10 Home"
+      "Microsoft Windows 10 家庭单语言版": "Windows 10 Home Single Language"
+      "Microsoft Windows 10 专业版": "Windows 10 Pro"
+      "Microsoft Windows 10 企业版": "Windows 10 Enterprise"
+      "Microsoft Windows 10 教育版": "Windows 10 Education"
+      "Microsoft Windows 10 专业工作站版": "Windows 10 Pro for Workstations"
+      "Microsoft Windows 10 专业教育版": "Windows 10 Pro Education"
+      "Microsoft Windows 10 企业版 LTSB": "Windows 10 Enterprise LTSB"
+      "Microsoft Windows 10 企业版 LTSC": "Windows 10 Enterprise LTSC"
+      "Microsoft Windows 10 IoT 企业版": "Windows 10 IoT Enterprise"
+      "Microsoft Windows 10 团队版": "Windows 10 Team"
+      "Microsoft Windows 10 S 模式": "Windows 10 S"
+      "Microsoft Windows 11 家庭版": "Windows 11 Home"
+      "Microsoft Windows 11 家庭单语言版": "Windows 11 Home Single Language"
+      "Microsoft Windows 11 专业版": "Windows 11 Pro"
+      "Microsoft Windows 11 企业版": "Windows 11 Enterprise"
+      "Microsoft Windows 11 教育版": "Windows 11 Education"
+      "Microsoft Windows 11 专业工作站版": "Windows 11 Pro for Workstations"
+      "Microsoft Windows 11 专业教育版": "Windows 11 Pro Education"
+      "Microsoft Windows 11 企业版 LTSC": "Windows 11 Enterprise LTSC"
+      "Microsoft Windows 11 IoT 企业版": "Windows 11 IoT Enterprise"
+      "Microsoft Windows 11 SE": "Windows 11 SE"
+      "Microsoft Windows Server 2019 Datacenter": "Windows Server 2019 Datacenter"
+      "Microsoft Windows Server 2022 Datacenter": "Windows Server 2022 Datacenter"
+      "Microsoft Windows Server 2025 Datacenter": "Windows Server 2025 Datacenter"
+
+provisioning_type_map: &provisioning_type_map
+  - type: map
+    mapping:
+      "0": "Unknown"
+      "1": "Thin"
+      "2": "Fixed"
+      "3": "Differential"
+
+# ========== 项列表 ==========
+items:
+
+  # ---------- Computer ----------
+  - id: "0101"
+    category: Computer
+    standard_name: Device Name
+    chinese_name: 主机名
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_ComputerSystem
+      Property: Name
+    REG:
+      key: "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ComputerName"
+      value: "ComputerName"
+    psutil:
+      impl: hostname
+    SystemInfo:
+      field: "主机名"
+
+  - id: "0102"
+    category: Computer
+    standard_name: System Manufacturer
+    chinese_name: 制造商
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_ComputerSystem
+      Property: Manufacturer
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS"
+      value: "SystemManufacturer"
+    SystemInfo:
+      field: "系统制造商"
+
+  - id: "0103"
+    category: Computer
+    standard_name: System Model
+    chinese_name: 型号
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_ComputerSystem
+      Property: Model
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS"
+      value: "SystemProductName"
+    SystemInfo:
+      field: "系统型号"
+
+  - id: "0104"
+    category: Computer
+    standard_name: System Type
+    chinese_name: 架构
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_ComputerSystem
+      Property: SystemType
+    SystemInfo:
+      field: "系统类型"
+
+  # ---------- System ----------
+  - id: "0201"
+    category: System
+    standard_name: OS Name
+    chinese_name: 名称
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_OperatingSystem
+      Property: Caption
+      post_process: *system_name_map
+    REG:
+      key: "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+      value: "ProductName"
+    SystemInfo:
+      field: "OS 名称"
+      post_process: *system_name_map
+
+  - id: "0202"
+    category: System
+    standard_name: Version
+    chinese_name: 版本
+    multiplicity: 0
+    REG:
+      key: "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+      value: "DisplayVersion"
+
+  - id: "0203"
+    category: System
+    standard_name: Build
+    chinese_name: 内部版本
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_OperatingSystem
+      Property: BuildNumber
+    REG:
+      key: "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+      value: "CurrentBuild"
+
+  - id: "0204"
+    category: System
+    standard_name: Activation Status
+    chinese_name: 激活状态
+    multiplicity: 0
+    Powershell:
+    - command: |
+        Get-CimInstance -ClassName SoftwareLicensingProduct `
+          -Filter "ApplicationID = '55c92734-d682-4d71-983e-d6ec3f16059f' and PartialProductKey is not null" |
+        Select-Object -ExpandProperty LicenseStatus
+      post_process:
+      - type: map
+        mapping:
+          "0": "未激活"
+          "1": "已激活"
+
+  - id: "0205"
+    category: System
+    standard_name: Display Language
+    chinese_name: 语言
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_OperatingSystem
+      Property: MUILanguages
+      post_process:
+      - type: extract
+        index: 0
+    REG:
+      key: "HKCU:\\Control Panel\\Desktop"
+      value: "PreferredUILanguages"
+      post_process:
+      - type: extract
+        index: 0
+
+  - id: "0206"
+    category: System
+    standard_name: Region
+    chinese_name: 国家或地区
+    multiplicity: 0
+    REG:
+      key: "HKCU:\\Control Panel\\International\\Geo"
+      value: "Name"
+    Powershell:
+    - command: "(Get-WinHomeLocation).HomeLocation"
+
+  - id: "0207"
+    category: System
+    standard_name: Time Zone
+    chinese_name: 时区
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_TimeZone
+      Property: Caption
+
+  - id: "0208"
+    category: System
+    standard_name: User Name
+    chinese_name: 当前用户
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_ComputerSystem
+      Property: UserName
+
+  - id: "0209"
+    category: System
+    standard_name: Administrator_Disabled
+    chinese_name: 本地超级管理员
+    multiplicity: 0
+    Powershell:
+      - command: |
+          Get-CimInstance -ClassName Win32_UserAccount -Filter "Name='Administrator'" |
+          Select-Object -ExpandProperty Disabled
+        post_process:
+          - type: map
+            mapping:
+              "True": "禁用"
+              "False": "激活"
+
+  - id: "0210"
+    category: System
+    standard_name: ElementName
+    chinese_name: 电源计划
+    multiplicity: 0
+    Powershell:
+    - command: "powercfg /getactivescheme | ForEach-Object { $_.split('(')[1].split(')')[0] }"
+
+  - id: "0211"
+    category: System
+    standard_name: InstallDate
+    chinese_name: 系统安装日期
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_OperatingSystem
+      Property: InstallDate
+      post_process:
+      - type: extract_number
+      - type: map
+        mapping: {}
+
+  - id: "0212"
+    category: System
+    standard_name: LastBootUpTime
+    chinese_name: 上次启动时间
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_OperatingSystem
+      Property: LastBootUpTime
+      post_process:
+      - type: extract_number
+      - type: map
+        mapping: {}
+
+  - id: "0213"
+    category: System
+    standard_name: SystemDirectory
+    chinese_name: 系统目录
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_OperatingSystem
+      Property: SystemDirectory
+
+  - id: "0214"
+    category: System
+    standard_name: Total Processes
+    chinese_name: 进程
+    multiplicity: 0
+    hide: true
+    Powershell:
+    - command: "(Get-Process).Count"
+
+  - id: "0215"
+    category: System
+    standard_name: Total Threads
+    chinese_name: 线程
+    multiplicity: 0
+    hide: true
+    Powershell:
+    - command: "(Get-Process | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum"
+
+  - id: "0216"
+    category: System
+    standard_name: Total Handles
+    chinese_name: 句柄
+    multiplicity: 0
+    hide: true
+    Powershell:
+    - command: "(Get-Process | ForEach-Object { $_.HandleCount } | Measure-Object -Sum).Sum"
+
+  # ---------- Mainboard ----------
+  - id: "0301"
+    category: Mainboard
+    standard_name: BaseBoard Product
+    chinese_name: 型号
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_BaseBoard
+      Property: Product
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS"
+      value: "BaseBoardProduct"
+
+      
+  - id: "0302"
+    category: Mainboard
+    standard_name: BaseBoard Manufacturer
+    chinese_name: 主板厂商
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_BaseBoard
+      Property: Manufacturer
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS"
+      value: "BaseBoardManufacturer"
+
+
+  - id: "0303"
+    category: Mainboard
+    standard_name: BIOS Mode
+    chinese_name: BIOS模式
+    multiplicity: 0
+    Powershell:
+    - command: "Confirm-SecureBootUEFI"
+      post_process:
+      - type: map
+        mapping:
+          "True": "UEFI"
+          "False": "UEFI"
+    - command: "Get-Disk | Where-Object {$_.IsBoot} | Select-Object -First 1 -ExpandProperty PartitionStyle"
+      post_process:
+      - type: map
+        mapping:
+          "GPT": "UEFI"
+          "MBR": "Legacy"
+          "RAW": "Unknown"
+    - command: "(Get-WmiObject Win32_ComputerSystem).BootupState"
+      post_process:
+      - type: map
+        mapping:
+          "Normal boot": "UEFI"
+          "Fail-safe boot": "Legacy"
+
+  - id: "0304"
+    category: Mainboard
+    standard_name: BaseBoard Serial Number
+    chinese_name: 主板序列号
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_BaseBoard
+      Property: SerialNumber
+
+  - id: "0305"
+    category: Mainboard
+    standard_name: BaseBoard Version
+    chinese_name: 主板版本
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_BaseBoard
+      Property: Version
+
+  - id: "0306"
+    category: Mainboard
+    standard_name: BIOS Version
+    chinese_name: BIOS版本
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_BIOS
+      Property: SMBIOSBIOSVersion
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS"
+      value: "BIOSVersion"
+
+  - id: "0307"
+    category: Mainboard
+    standard_name: BIOS Manufacturer
+    chinese_name: BIOS厂商
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_BIOS
+      Property: Manufacturer
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\BIOS"
+      value: "SystemManufacturer"
+
+
+
+  # ---------- CPU ----------
+  - id: "0401"
+    category: CPU
+    standard_name: Processor
+    chinese_name: 型号
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_Processor
+      Property: Name
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"
+      value: "ProcessorNameString"
+
+  - id: "0402"
+    category: CPU
+    standard_name: Base Speed
+    chinese_name: 基准速度
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_Processor
+      Property: MaxClockSpeed
+      post_process:
+      - type: calculate
+        operation: divide
+        by: 1000
+      - type: add_unit
+        unit: "GHz"
+    REG:
+      key: "HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"
+      value: "~MHz"
+      post_process:
+      - type: calculate
+        operation: divide
+        by: 1000
+      - type: add_unit
+        unit: "GHz"
+
+  - id: "0403"
+    category: CPU
+    standard_name: Cores
+    chinese_name: 物理核心
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_Processor
+      Property: NumberOfCores
+    psutil:
+      impl: cpu_count.physical
+
+  - id: "0404"
+    category: CPU
+    standard_name: Logical Processors
+    chinese_name: 逻辑核心
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_ComputerSystem
+      Property: NumberOfLogicalProcessors
+    psutil:
+      impl: cpu_count.logical
+
+  - id: "0405"
+    category: CPU
+    standard_name: L1 Cache
+    chinese_name: 一级缓存
+    multiplicity: 1
+    cpucache:
+      level: L1
+      post_process:
+      - type: sum
+      - type: add_unit
+        unit: "KiB"
+
+  - id: "0406"
+    category: CPU
+    standard_name: L2 Cache
+    chinese_name: 二级缓存
+    multiplicity: 1
+    cpucache:
+      level: L2
+      post_process:
+      - type: sum
+      - type: add_unit
+        unit: "KiB"
+
+  - id: "0407"
+    category: CPU
+    standard_name: L3 Cache
+    chinese_name: 三级缓存
+    multiplicity: 1
+    cpucache:
+      level: L3
+      post_process:
+      - type: sum
+      - type: add_unit
+        unit: "KiB"
+
+  # ---------- Memory ----------
+  - id: "0501"
+    category: Memory
+    standard_name: MemoryDevices
+    chinese_name: 插槽总数
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_PhysicalMemoryArray
+      Property: MemoryDevices
+
+  - id: "0502"
+    category: Memory
+    standard_name: MemoryDevices
+    chinese_name: 已使用插槽
+    multiplicity: 0
+    Powershell:
+    - command: "(Get-CimInstance -ClassName Win32_PhysicalMemory).Count"
+
+  - id: "0503"
+    category: Memory
+    standard_name: ErrorCorrection
+    chinese_name: ECC
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_PhysicalMemoryArray
+      Property: MemoryErrorCorrection
+      post_process: *ecc_map
+    Powershell:
+    - command: |
+        (Get-CimInstance Win32_PhysicalMemoryArray).MemoryErrorCorrection
+      post_process: *ecc_map
+
+  - id: "0504"
+    category: Memory
+    standard_name: Capacity
+    chinese_name: 容量
+    multiplicity: 1
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: Capacity
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0505"
+    category: Memory
+    standard_name: Speed
+    chinese_name: 速度
+    multiplicity: 1
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: ConfiguredClockSpeed
+      post_process:
+      - type: add_unit
+        unit: "MHz"
+
+  - id: "0506"
+    category: Memory
+    standard_name: MemoryType
+    chinese_name: 代际
+    multiplicity: 1
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: SMBIOSMemoryType
+      post_process:
+      - type: map
+        mapping:
+          "0": "Unknown"
+          "1": "Other"
+          "2": "DRAM"
+          "3": "Synchronous DRAM"
+          "4": "Cache DRAM"
+          "5": "EDO"
+          "6": "EDRAM"
+          "7": "VRAM"
+          "8": "SRAM"
+          "9": "RAM"
+          "10": "ROM"
+          "11": "Flash"
+          "12": "EEPROM"
+          "13": "FEPROM"
+          "14": "EPROM"
+          "15": "CDRAM"
+          "16": "3DRAM"
+          "17": "SDRAM"
+          "18": "SGRAM"
+          "19": "RDRAM"
+          "20": "DDR"
+          "21": "DDR2"
+          "22": "DDR2 FB-DIMM"
+          "23": "Reserved"
+          "24": "DDR3"
+          "25": "FBD2"
+          "26": "DDR4"
+          "27": "LPDDR"
+          "28": "LPDDR2"
+          "29": "LPDDR3"
+          "30": "LPDDR4"
+          "31": "Logical non-volatile device"
+          "32": "HBM"
+          "33": "HBM2"
+          "34": "DDR5"
+          "35": "LPDDR5"
+          "36": "HBM3"
+
+  - id: "0507"
+    category: Memory
+    standard_name: PartNumber
+    chinese_name: 型号
+    multiplicity: 1
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: PartNumber
+
+  - id: "0508"
+    category: Memory
+    standard_name: Memory Device Locator
+    chinese_name: 插槽位置
+    multiplicity: 1
+    hide: true
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: DeviceLocator
+
+  - id: "0509"
+    category: Memory
+    standard_name: Memory Manufacturer
+    chinese_name: 制造商
+    multiplicity: 1
+    hide: true
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: Manufacturer
+
+  - id: "0510"
+    category: Memory
+    standard_name: Memory Serial Number
+    chinese_name: 序列号
+    multiplicity: 1
+    hide: true
+    CIM:
+      ClassName: Win32_PhysicalMemory
+      Property: SerialNumber
+
+  # ---------- VirtualMemory ----------
+  - id: "0601"
+    category: VirtualMemory
+    standard_name: InitialSize
+    chinese_name: 初始大小
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_PageFileSetting
+      Property: InitialSize
+      post_process:
+      - type: human_readable_size
+        unit: "MiB"
+
+  - id: "0602"
+    category: VirtualMemory
+    standard_name: MaximumSize
+    chinese_name: 最大值
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_PageFileSetting
+      Property: MaximumSize
+      post_process:
+      - type: human_readable_size
+        unit: "MiB"
+
+  - id: "0603"
+    category: VirtualMemory
+    standard_name: Paging File Location(s)
+    chinese_name: 页面文件位置
+    multiplicity: 0
+    CIM:
+      ClassName: Win32_PageFileSetting
+      Property: Name
+      post_process:
+      - type: uppercase_drive
+    SystemInfo:
+      field: "页面文件位置"
+
+  # ---------- Volume ----------
+  - id: "0701"
+    category: Volume
+    standard_name: DriveLetter
+    chinese_name: 盘符
+    multiplicity: 1
+    adv_vol:
+      properties: [DriveLetter, DeviceID]
+      post_process:
+        - type: extract
+          index: 0
+        - type: uppercase_drive
+
+  - id: "0702"
+    category: Volume
+    standard_name: VolumeName
+    chinese_name: 卷标
+    multiplicity: 1
+    adv_vol:
+      properties: [FileSystemLabel, VolumeName]
+
+  - id: "0703"
+    category: Volume
+    standard_name: Size
+    chinese_name: 容量
+    multiplicity: 1
+    adv_vol:
+      properties: [Size]
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0704"
+    category: Volume
+    standard_name: FreeSpace
+    chinese_name: 可用
+    multiplicity: 1
+    adv_vol:
+      properties: [SizeRemaining, FreeSpace]
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+      
+  - id: "0705"
+    category: Volume
+    standard_name: AllocationUnitSize
+    chinese_name: 分配单元
+    multiplicity: 1
+    adv_vol:
+        properties: [AllocationUnitSize]
+        post_process: 
+          - type: human_readable_size
+            unit: "Byte"
+
+  - id: "0706"
+    category: Volume
+    standard_name: FileSystem
+    chinese_name: 文件系统
+    multiplicity: 1
+    adv_vol:
+      properties: [FileSystem]
+
+  - id: "0707"
+    category: Volume
+    standard_name: PartitionStyle
+    chinese_name: 分区表
+    multiplicity: 1
+    adv_vol:
+      properties: [PartitionStyle]
+      post_process: *partition_style_map
+
+  - id: "0708"
+    category: Volume
+    standard_name: PartitionType
+    chinese_name: 分区类型
+    multiplicity: 1
+    adv_vol:
+      properties: [GptType]
+      post_process: *gpt_type_map
+
+  - id: "0709"
+    category: Volume
+    standard_name: DriveType
+    chinese_name: 驱动器类型
+    multiplicity: 1
+    adv_vol:
+      properties: [DriveType]
+      post_process: *drive_type_map
+      
+
+  - id: "0718"
+    category: Volume
+    standard_name: VolumeSerialNumber
+    chinese_name: 序列号
+    multiplicity: 1
+    hide: true
+    adv_vol:
+      properties: [SerialNumber, VolumeSerialNumber]
+
+  - id: "0710"
+    category: Volume
+    standard_name: Compressed
+    chinese_name: 启用压缩
+    multiplicity: 1
+    adv_vol:
+      properties: [Compressed]
+      post_process: *boolean_map
+      
+  - id: "0711"
+    category: Volume
+    standard_name: IsBoot
+    chinese_name: 启动分区
+    multiplicity: 1
+    adv_vol:
+      properties: [IsBoot]
+      post_process: *boolean_map
+
+  - id: "0712"
+    category: Volume
+    standard_name: IsSystem
+    chinese_name: 系统分区
+    multiplicity: 1
+    adv_vol:
+      properties: [IsSystem]
+      post_process: *boolean_map
+
+  - id: "0713"
+    category: Volume
+    standard_name: IsHidden
+    chinese_name: 隐藏分区
+    multiplicity: 1
+    adv_vol:
+      properties: [IsHidden]
+      post_process: *boolean_map
+      
+  - id: "0717"
+    category: Volume
+    standard_name: OperationalStatus
+    chinese_name: 分区状态
+    multiplicity: 1
+    adv_vol:
+      properties: [OperationalStatus]
+      post_process:
+        - type: extract
+          index: 0
+        - *operational_status_map
+
+  - id: "0714"
+    category: Volume
+    standard_name: DiskNumber
+    chinese_name: 所在磁盘
+    multiplicity: 1
+    adv_vol:
+      properties: [DiskNumber]
+
+
+  - id: "0716"
+    category: Volume
+    standard_name: PartitionOffset
+    chinese_name: 起始偏移
+    multiplicity: 1
+    adv_vol:
+      properties: [Offset]
+      post_process:
+        - type: human_readable_size
+          unit: "Byte"
+          
+  - id: "0715"
+    category: Volume
+    standard_name: ProviderName
+    chinese_name: 远程路径
+    multiplicity: 1
+    adv_vol:
+      properties: [ProviderName]
+
+  - id: "0719"
+    category: Volume
+    standard_name: Volume UniqueId
+    chinese_name: 卷唯一ID
+    multiplicity: 1
+    hide: true
+    adv_vol:
+      properties: [UniqueId]
+
+  - id: "0720"
+    category: Volume
+    standard_name: Volume ObjectId
+    chinese_name: 卷对象ID
+    multiplicity: 1
+    hide: true
+    adv_vol:
+      properties: [ObjectId]
+
+  # ---------- Disk ----------
+  - id: "0801"
+    category: Disk
+    standard_name: Number
+    chinese_name: 编号
+    multiplicity: 1
+    adv_disk:
+      properties: [DeviceId, Number]
+      post_process: *extract_number
+
+      
+  - id: "0829"
+    category: Disk
+    standard_name: Disk FriendlyName
+    chinese_name: 名称
+    multiplicity: 1
+    adv_disk:
+      property: FriendlyName
+
+  - id: "0802"
+    category: Disk
+    standard_name: Model
+    chinese_name: 型号
+    multiplicity: 1
+    adv_disk:
+      property: Model
+      
+
+  - id: "0825"
+    category: Disk
+    standard_name: FirmwareRevision
+    chinese_name: 固件版本
+    multiplicity: 1
+    adv_disk:
+      property: FirmwareRevision
+
+  - id: "0803"
+    category: Disk
+    standard_name: SerialNumber
+    chinese_name: 序列号
+    multiplicity: 1
+    hide: true
+    adv_disk:
+      property: SerialNumber
+
+  - id: "0804"
+    category: Disk
+    standard_name: BusType
+    chinese_name: 总线类型
+    multiplicity: 1
+    adv_disk:
+      property: BusType
+      default: "Storage Spaces"
+      post_process: *bus_type_map
+            
+  - id: "0824"
+    category: Disk
+    standard_name: InterfaceType
+    chinese_name: 接口类型[旧]
+    multiplicity: 1
+    adv_disk:
+        property: InterfaceType
+
+
+  - id: "0805"
+    category: Disk
+    standard_name: Size
+    chinese_name: 容量
+    multiplicity: 1
+    adv_disk:
+      property: Size
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0806"
+    category: Disk
+    standard_name: LogicalSectorSize
+    chinese_name: 逻辑扇区
+    multiplicity: 1
+    adv_disk:
+      property: LogicalSectorSize
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0807"
+    category: Disk
+    standard_name: PhysicalSectorSize
+    chinese_name: 物理扇区
+    multiplicity: 1
+    adv_disk:
+      property: PhysicalSectorSize
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0808"
+    category: Disk
+    standard_name: MediaType
+    chinese_name: 介质类型
+    multiplicity: 1
+    adv_disk:
+      property: MediaType
+      default: "Virtual"
+      post_process: *media_type_map
+
+  - id: "0809"
+    category: Disk
+    standard_name: PartitionStyle
+    chinese_name: 分区表
+    multiplicity: 1
+    adv_disk:
+      property: PartitionStyle
+      default: ""
+      post_process: *partition_style_map
+
+  - id: "0810"
+    category: Disk
+    standard_name: IsBoot
+    chinese_name: 启动盘
+    multiplicity: 1
+    adv_disk:
+      property: IsBoot
+      default: ""
+      post_process: *boolean_map
+
+  - id: "0811"
+    category: Disk
+    standard_name: ProvisioningType
+    chinese_name: 预配类型
+    multiplicity: 1
+    adv_disk:
+      property: ProvisioningType
+      post_process: *provisioning_type_map
+
+  - id: "0812"
+    category: Disk
+    standard_name: NumberOfPartitions
+    chinese_name: 分区数量
+    multiplicity: 1
+    adv_disk:
+      property: NumberOfPartitions
+      default: ""
+
+  - id: "0813"
+    category: Disk
+    standard_name: HealthStatus
+    chinese_name: 健康状态
+    multiplicity: 1
+    adv_disk:
+      property: HealthStatus
+      post_process: *health_status_map
+
+  - id: "0814"
+    category: Disk
+    standard_name: OperationalStatus
+    chinese_name: 运行状态
+    multiplicity: 1
+    adv_disk:
+      property: OperationalStatus
+      post_process:
+        - type: extract
+          index: 0
+        - *operational_status_map
+
+  - id: "0815"
+    category: Disk
+    standard_name: LocationPrefix
+    chinese_name: 位置前缀
+    multiplicity: 1
+    adv_disk:
+      property: LocationPrefix
+
+  - id: "0816"
+    category: Disk
+    standard_name: BusNumber
+    chinese_name: 总线号
+    multiplicity: 1
+    adv_disk:
+      property: BusNumber
+
+  - id: "0817"
+    category: Disk
+    standard_name: DeviceNumber
+    chinese_name: 设备号
+    multiplicity: 1
+    adv_disk:
+      property: DeviceNumber
+
+  - id: "0818"
+    category: Disk
+    standard_name: FunctionNumber
+    chinese_name: 功能号
+    multiplicity: 1
+    adv_disk:
+      property: FunctionNumber
+
+  - id: "0819"
+    category: Disk
+    standard_name: AdapterNumber
+    chinese_name: 适配器号
+    multiplicity: 1
+    adv_disk:
+      property: AdapterNumber
+
+  - id: "0820"
+    category: Disk
+    standard_name: PortNumber
+    chinese_name: 端口号
+    multiplicity: 1
+    adv_disk:
+      property: PortNumber
+
+  - id: "0821"
+    category: Disk
+    standard_name: TargetId
+    chinese_name: 目标ID
+    multiplicity: 1
+    adv_disk:
+      property: TargetId
+      
+  - id: "0822"
+    category: Disk
+    standard_name: Lun
+    chinese_name: 逻辑单元号
+    multiplicity: 1
+    adv_disk:
+      property: Lun
+
+  - id: "0823"
+    category: Disk
+    standard_name: Pool
+    chinese_name: 所属池
+    multiplicity: 1
+    adv_disk:
+      property: StoragePoolName
+      default: ""
+
+
+  - id: "0826"
+    category: Disk
+    standard_name: Disk UniqueId
+    chinese_name: 磁盘唯一ID
+    multiplicity: 1
+    hide: true
+    adv_disk:
+      property: UniqueId
+
+  - id: "0827"
+    category: Disk
+    standard_name: Disk ObjectId
+    chinese_name: 磁盘对象ID
+    multiplicity: 1
+    hide: true
+    adv_disk:
+      property: ObjectId
+
+  - id: "0828"
+    category: Disk
+    standard_name: Disk Path
+    chinese_name: 磁盘路径
+    multiplicity: 1
+    hide: true
+    adv_disk:
+      property: Path
+
+
+  - id: "0830"
+    category: Disk
+    standard_name: PhysicalLocation
+    chinese_name: 物理位置
+    hide: true
+    multiplicity: 1
+    adv_disk:
+      property: PhysicalLocation
+
+  # ---------- Storage (10xx) ----------
+  # 基本显示项
+  - id: "0901"
+    category: Storage
+    standard_name: FriendlyName
+    chinese_name: 名称
+    multiplicity: 1
+    adv_pool:
+      type: both
+      properties: [FriendlyName]
+
+  - id: "0902"
+    category: Storage
+    standard_name: MediaType
+    chinese_name: 介质类型
+    multiplicity: 1
+    adv_pool:
+      type: both
+      properties: [MediaType]
+      post_process: *media_type_map
+
+  - id: "0903"
+    category: Storage
+    standard_name: Size
+    chinese_name: 容量
+    multiplicity: 1
+    adv_pool:
+      type: both
+      properties: [Size]
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0904"
+    category: Storage
+    standard_name: AllocatedSize
+    chinese_name: 已分配
+    multiplicity: 1
+    adv_pool:
+      type: both
+      properties: [AllocatedSize]
+      post_process: 
+      - type: human_readable_size
+        unit: "Byte"
+
+  - id: "0905"
+    category: Storage
+    standard_name: ResiliencySettingName
+    chinese_name: 弹性设置
+    multiplicity: 1
+    adv_pool:
+      type: both
+      properties: [ResiliencySettingName]
+
+  # 存储池特有项
+  - id: "0906"
+    category: Storage
+    standard_name: StoragePool LogicalSectorSize
+    chinese_name: 存储池逻辑扇区
+    multiplicity: 1
+    adv_pool:
+      type: pool
+      properties: [LogicalSectorSize]
+      post_process:
+        - type: human_readable_size
+          unit: "Byte"
+
+  - id: "0907"
+    category: Storage
+    standard_name: StoragePool PhysicalSectorSize
+    chinese_name: 存储池物理扇区
+    multiplicity: 1
+    adv_pool:
+      type: pool
+      properties: [PhysicalSectorSize]
+      post_process:
+        - type: human_readable_size
+          unit: "Byte"
+
+  - id: "0908"
+    category: Storage
+    standard_name: StoragePool ProvisioningTypeDefault
+    chinese_name: 存储池默认预配类型
+    multiplicity: 1
+    adv_pool:
+      type: pool
+      properties: [ProvisioningTypeDefault]
+      post_process: *provisioning_type_map
+
+  - id: "0909"
+    category: Storage
+    standard_name: StoragePool OperationalStatus
+    chinese_name: 存储池状态
+    multiplicity: 1
+    adv_pool:
+      type: pool
+      properties: [OperationalStatus]
+      post_process:
+        - type: extract
+          index: 0
+        - *operational_status_map
+
+  - id: "0910"
+    category: Storage
+    standard_name: StoragePool HealthStatus
+    chinese_name: 存储池健康状态
+    multiplicity: 1
+    adv_pool:
+      type: pool
+      properties: [HealthStatus]
+      post_process: *health_status_map
+
+  # 存储层特有项
+  - id: "0911"
+    category: Storage
+    standard_name: StorageTier MediaType
+    chinese_name: 存储层介质类型
+    multiplicity: 1
+    adv_pool:
+      type: tier
+      properties: [MediaType]
+      post_process: *media_type_map
+
+  - id: "0912"
+    category: Storage
+    standard_name: StorageTier ResiliencySettingName
+    chinese_name: 存储层弹性设置
+    multiplicity: 1
+    adv_pool:
+      type: tier
+      properties: [ResiliencySettingName]
+
+  - id: "0913"
+    category: Storage
+    standard_name: StorageTier NumberOfColumns
+    chinese_name: 存储层列数
+    multiplicity: 1
+    adv_pool:
+      type: tier
+      properties: [NumberOfColumns]
+      post_process: *columns_map
+
+  - id: "0914"
+    category: Storage
+    standard_name: StorageTier Interleave
+    chinese_name: 存储层条带大小
+    multiplicity: 1
+    adv_pool:
+      type: tier
+      properties: [Interleave]
+      post_process:
+        - type: human_readable_size
+          unit: "Byte"
+
+  - id: "0915"
+    category: Storage
+    standard_name: StorageTier AllocationUnitSize
+    chinese_name: 存储层分配单元
+    multiplicity: 1
+    adv_pool:
+      type: tier
+      properties: [AllocationUnitSize]
+      post_process:
+        - type: map
+          mapping:
+            "18446744073709551615": "Auto"
+            "null": ""
+        - type: extract_number
+        - type: human_readable_size
+          unit: "Byte"
+
+  # 隐藏项 - 唯一标识和对象ID
+  - id: "0916"
+    category: Storage
+    standard_name: StoragePool UniqueId
+    chinese_name: 存储池唯一ID
+    multiplicity: 1
+    hide: true
+    adv_pool:
+      type: pool
+      properties: [UniqueId]
+
+  - id: "0917"
+    category: Storage
+    standard_name: StoragePool ObjectId
+    chinese_name: 存储池对象ID
+    multiplicity: 1
+    hide: true
+    adv_pool:
+      type: pool
+      properties: [ObjectId]
+
+  - id: "0918"
+    category: Storage
+    standard_name: StorageTier UniqueId
+    chinese_name: 存储层唯一ID
+    multiplicity: 1
+    hide: true
+    adv_pool:
+      type: tier
+      properties: [UniqueId]
+
+  - id: "0919"
+    category: Storage
+    standard_name: StorageTier ObjectId
+    chinese_name: 存储层对象ID
+    multiplicity: 1
+    hide: true
+    adv_pool:
+      type: tier
+      properties: [ObjectId]
+
+  - id: "0920"
+    category: Storage
+    standard_name: StoragePool FriendlyName
+    chinese_name: 存储池名称
+    multiplicity: 1
+    hide: true
+    adv_pool:
+      type: pool
+      properties: [FriendlyName]
+
+  - id: "0921"
+    category: Storage
+    standard_name: StorageTier FriendlyName
+    chinese_name: 存储层名称
+    multiplicity: 1
+    hide: true
+    adv_pool:
+      type: tier
+      properties: [FriendlyName]
+
+  # ---------- GPU ----------
+  - id: "1001"
+    category: GPU
+    standard_name: GPU Name
+    chinese_name: 显卡型号
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: name
+
+  - id: "1002"
+    category: GPU
+    standard_name: Driver Version
+    chinese_name: 驱动版本
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: driver_version
+
+  - id: "1003"
+    category: GPU
+    standard_name: Dedicated GPU Memory
+    chinese_name: 专用GPU内存
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: dedicated_memory_gib
+      post_process:
+      - type: human_readable_size
+        unit: "GiB"
+
+  - id: "1004"
+    category: GPU
+    standard_name: Shared GPU Memory
+    chinese_name: 共享GPU内存
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: shared_memory_gib
+      post_process:
+      - type: human_readable_size
+        unit: "GiB"
+
+  - id: "1005"
+    category: GPU
+    standard_name: Total GPU Memory
+    chinese_name: 总计GPU内存
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: total_memory_gib
+      post_process:
+      - type: human_readable_size
+        unit: "GiB"
+
+  - id: "1006"
+    category: GPU
+    standard_name: DirectX Support
+    chinese_name: DirectX 支持
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: dx_version
+
+  - id: "1007"
+    category: GPU
+    standard_name: GPU Bus
+    chinese_name: 总线
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: bus_hex
+
+  - id: "1008"
+    category: GPU
+    standard_name: GPU Device
+    chinese_name: 设备
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: device_hex
+
+  - id: "1009"
+    category: GPU
+    standard_name: GPU Function
+    chinese_name: 功能
+    multiplicity: 1
+    adv_graph:
+      type: gpu
+      field: function_hex
+
+  # ---------- Monitor ----------
+  - id: "1101"
+    category: Monitor
+    standard_name: Monitor Model
+    chinese_name: 型号
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: model
+
+  - id: "1102"
+    category: Monitor
+    standard_name: Monitor Manufacturer
+    chinese_name: 制造商
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: manufacturer
+
+  - id: "1103"
+    category: Monitor
+    standard_name: Connected GPU
+    chinese_name: 连接显卡
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: gpu_name
+
+  - id: "1104"
+    category: Monitor
+    standard_name: Horizontal Position
+    chinese_name: 水平坐标
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: pos_x
+
+  - id: "1105"
+    category: Monitor
+    standard_name: Vertical Position
+    chinese_name: 垂直坐标
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: pos_y
+
+  - id: "1106"
+    category: Monitor
+    standard_name: Primary Monitor
+    chinese_name: 主显示器
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: is_primary
+      post_process: *boolean_map
+
+  - id: "1107"
+    category: Monitor
+    standard_name: Horizontal Resolution
+    chinese_name: 水平分辨率
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: width
+
+  - id: "1108"
+    category: Monitor
+    standard_name: Vertical Resolution
+    chinese_name: 垂直分辨率
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: height
+
+  - id: "1109"
+    category: Monitor
+    standard_name: Refresh Rate
+    chinese_name: 刷新率
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: refresh
+      post_process:
+      - type: add_unit
+        unit: "Hz"
+
+  - id: "1110"
+    category: Monitor
+    standard_name: Bit Depth
+    chinese_name: 位深
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: depth_str
+
+  - id: "1111"
+    category: Monitor
+    standard_name: Color Format
+    chinese_name: 颜色格式
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: color_format
+
+  - id: "1112"
+    category: Monitor
+    standard_name: Dynamic Range
+    chinese_name: 动态范围
+    multiplicity: 1
+    adv_graph:
+      type: display
+      field: dynamic_range
+
+  # ---------- Network ----------
+  - id: "1201"
+    category: Network
+    standard_name: Adapter Name
+    chinese_name: 名称
+    multiplicity: 1
+    Powershell:
+    - command: |
+        Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+        Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+        Sort-Object InterfaceIndex | Select-Object -ExpandProperty Name
+
+  - id: "1202"
+    category: Network
+    standard_name: Hardware
+    chinese_name: 硬件
+    multiplicity: 1
+    Powershell:
+    - command: |
+        Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+        Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+        Sort-Object InterfaceIndex | Select-Object -ExpandProperty DriverDescription
+
+  - id: "1203"
+    category: Network
+    standard_name: Link Speed
+    chinese_name: 链路速度
+    multiplicity: 1
+    Powershell:
+    - command: |
+        Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+        Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+        Sort-Object InterfaceIndex |
+        ForEach-Object {
+            if ($null -ne $_.Speed) {
+                $_.Speed.ToString()
+            } else {
+                ""
+            }
+        }
+      post_process:    
+      - type: calculate
+        operation: divide
+        by: 1000000
+      - type: add_unit
+        unit: "Mbps"
+
+  - id: "1204"
+    category: Network
+    standard_name: IPv4 Address
+    chinese_name: IPv4地址
+    multiplicity: 1
+    Powershell:
+    - command: |
+        $adapters = Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+                    Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+                    Sort-Object InterfaceIndex
+        $result = @()
+        foreach ($a in $adapters) {
+            $ip = Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetIPAddress -Filter "InterfaceIndex=$($a.InterfaceIndex) AND AddressFamily=2" |
+                  Select-Object -First 1
+            $result += if ($ip) { $ip.IPAddress } else { $null }
+        }
+        $result
+
+  - id: "1205"
+    category: Network
+    standard_name: IPv6 Address
+    chinese_name: IPv6地址
+    multiplicity: 1
+    Powershell:
+    - command: |
+        $adapters = Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+                    Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+                    Sort-Object InterfaceIndex
+        $result = @()
+        foreach ($a in $adapters) {
+            $ip = Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetIPAddress -Filter "InterfaceIndex=$($a.InterfaceIndex) AND AddressFamily=23" |
+                  Select-Object -First 1
+            $result += if ($ip) { $ip.IPAddress } else { $null }
+        }
+        $result
+
+  - id: "1206"
+    category: Network
+    standard_name: MAC Address
+    chinese_name: MAC地址
+    multiplicity: 1
+    Powershell:
+    - command: |
+        Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+        Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+        Sort-Object InterfaceIndex | Select-Object -ExpandProperty PermanentAddress
+
+  - id: "1207"
+    category: Network
+    standard_name: Default Route
+    chinese_name: 主网络
+    multiplicity: 1
+    Powershell:
+      - command: | 
+          $adapters = Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter |
+                      Where-Object { $_.ConnectorPresent -or $_.InterfaceType -ne 0 } |
+                      Sort-Object InterfaceIndex
+          $defaultRoute = Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetRoute -Filter "DestinationPrefix='0.0.0.0/0'" | Select-Object -First 1
+          $defaultIfIndex = if ($defaultRoute) { $defaultRoute.InterfaceIndex } else { $null }
+          $result = @()
+          foreach ($a in $adapters) {
+              $result += $a.InterfaceIndex -eq $defaultIfIndex
+          }
+          $result
+        post_process: *boolean_map 
+
+  - id: "1208"
+    category: Network
+    standard_name: DHCP Enabled
+    chinese_name: DHCP启用
+    multiplicity: 1
+    hide: true
+    Powershell:
+    - command: |
+        Get-NetIPInterface -AddressFamily IPv4 | Select-Object InterfaceAlias, Dhcp
+
+  - id: "1209"
+    category: Network
+    standard_name: Default Gateway
+    chinese_name: 默认网关
+    multiplicity: 1
+    hide: true
+    Powershell:
+    - command: |
+        Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Select-Object InterfaceAlias, NextHop
+
+  - id: "1210"
+    category: Network
+    standard_name: DNS Servers
+    chinese_name: DNS服务器
+    multiplicity: 1
+    hide: true
+    Powershell:
+    - command: |
+        Get-DnsClientServerAddress | Where-Object { $_.ServerAddresses } | Select-Object InterfaceAlias, ServerAddresses
+
+  - id: "1211"
+    category: Network
+    standard_name: Connection Status
+    chinese_name: 连接状态
+    multiplicity: 1
+    hide: true
+    Powershell:
+    - command: |
+        Get-NetAdapter | Select-Object Name, Status
+
+  # ---------- Battery ----------
+  - id: "1301"
+    category: Battery
+    standard_name: Battery Present
+    chinese_name: 电池存在
+    multiplicity: 0
+    hide: true
+    Powershell:
+    - command: |
+        if (Get-CimInstance -ClassName Win32_Battery) { $true } else { $false }
+
+  - id: "1302"
+    category: Battery
+    standard_name: Design Capacity
+    chinese_name: 设计容量
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_Battery
+      Property: DesignCapacity
+      post_process:
+      - type: add_unit
+        unit: "mWh"
+
+  - id: "1303"
+    category: Battery
+    standard_name: Remaining Capacity
+    chinese_name: 剩余容量
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_Battery
+      Property: EstimatedChargeRemaining
+      post_process:
+      - type: add_unit
+        unit: "%"
+
+  - id: "1304"
+    category: Battery
+    standard_name: Battery Status
+    chinese_name: 电池状态
+    multiplicity: 0
+    hide: true
+    CIM:
+      ClassName: Win32_Battery
+      Property: BatteryStatus
+      post_process:
+      - type: map
+        mapping:
+          "1": "放电"
+          "2": "交流电"
+          "3": "充电"
+          "4": "充满"
+          "5": "低电量"
+          "6": "严重低电量"
+          "7": "未知"
+          "8": "充电中"
+          "9": "无电池"
+          "10": "部分充电"
+          "11": "部分放电"

@@ -94,12 +94,24 @@
                     MinHeight="42"
                     Padding="8,4">
                     <StackPanel IsHitTestVisible="False">
-                        <TextBlock
-                            x:Name="DisplayNameText"
-                            MinHeight="18"
-                            FontWeight="SemiBold"
-                            Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}"
-                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock
+                                x:Name="DisplayNameText"
+                                MinHeight="18"
+                                FontWeight="SemiBold"
+                                Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <Border
+                                Padding="5,1"
+                                VerticalAlignment="Top"
+                                Background="{ThemeResource SystemFillColorCautionBrush}"
+                                CornerRadius="3"
+                                Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
+                                <TextBlock
+                                    FontSize="10"
+                                    Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
+                            </Border>
+                        </StackPanel>
                         <TextBlock
                             x:Name="TypeLabelText"
                             Margin="0,2,0,0"

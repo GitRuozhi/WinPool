@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.ComponentModel;
 using System.Security.Principal;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Core;
@@ -111,108 +110,6 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
         }
 
         File.Move(temporaryPath, SettingsPath, true);
-    }
-}
-
-public sealed class WindowsStorageInventoryProvider : IStorageInventoryProvider
-{
-    public const int TimeoutSeconds = 30;
-    private readonly string _scriptPath;
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        NumberHandling = JsonNumberHandling.AllowReadingFromString
-    };
-
-    public WindowsStorageInventoryProvider(string? scriptPath = null)
-    {
-        _scriptPath = scriptPath ?? Path.Combine(AppContext.BaseDirectory, "Scripts", "Get-StorageInventory.ps1");
-    }
-
-    public async Task<StorageSnapshot> ScanAsync(CancellationToken cancellationToken)
-    {
-        if (!File.Exists(_scriptPath))
-        {
-            throw new FileNotFoundException("The fixed WinPool inventory script was not found.", _scriptPath);
-        }
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{_scriptPath}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                CreateNoWindow = true
-            }
-        };
-
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Unable to start the read-only inventory process.");
-        }
-
-        var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-        try
-        {
-            await process.WaitForExitAsync(timeout.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            TryKill(process);
-            throw new TimeoutException($"Storage inventory scan exceeded {TimeoutSeconds} seconds.");
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            throw;
-        }
-
-        var output = await outputTask;
-        var error = await errorTask;
-        if (process.ExitCode != 0)
-        {
-            throw new InventoryScanException(
-                $"The read-only inventory process failed with exit code {process.ExitCode}.",
-                error);
-        }
-
-        if (string.IsNullOrWhiteSpace(output))
-        {
-            throw new InventoryScanException("The read-only inventory process returned no JSON.", error);
-        }
-
-        try
-        {
-            var raw = JsonSerializer.Deserialize<RawSnapshot>(output, JsonOptions)
-                ?? throw new JsonException("The JSON snapshot was empty.");
-            return RawSnapshotProjector.Project(raw, output);
-        }
-        catch (JsonException ex)
-        {
-            throw new InventoryScanException($"The inventory JSON could not be parsed: {ex.Message}", error, ex);
-        }
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
     }
 }
 

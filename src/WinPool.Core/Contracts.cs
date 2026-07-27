@@ -7,6 +7,55 @@ public interface IStorageInventoryProvider
     Task<StorageSnapshot> ScanAsync(CancellationToken cancellationToken);
 }
 
+public interface IHardwareInventoryProvider
+{
+    Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken);
+}
+
+public interface IReadOnlyCommandRunner
+{
+    Task<ReadOnlyCommandResult> RunAsync(string fixedCommand, CancellationToken cancellationToken);
+}
+
+public sealed record ReadOnlyCommandResult(
+    int ExitCode,
+    string StandardOutput,
+    string StandardError,
+    TimeSpan Duration);
+
+public interface IStorageSystemRepository
+{
+    Task<IReadOnlyList<StorageSystemDocument>> LoadSimulationsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task SaveSimulationAsync(
+        StorageSystemDocument document,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IStorageSystemImportExportService
+{
+    Task<string?> ExportAsync(
+        StorageSystemDocument document,
+        CancellationToken cancellationToken = default);
+
+    Task<StorageSystemDocument?> ImportAsync(CancellationToken cancellationToken = default);
+}
+
+public interface IMachineRecordService
+{
+    Task RecordLocalScanAsync(
+        StorageSystemDocument localDocument,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ISimulationOperationService
+{
+    SimulationOperationResult Apply(
+        StorageSystemDocument document,
+        SimulationOperationRequest request);
+}
+
 public interface IPrivilegeService
 {
     PrivilegeState Current { get; }
