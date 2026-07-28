@@ -75,10 +75,9 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public string SettingsPath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "WinPool",
-        "settings.json");
+    private static readonly SemaphoreSlim SaveLock = new(1, 1);
+
+    public string SettingsPath => Path.Combine(StorageDataLocations.CurrentRoot, "settings.json");
 
     public async Task<UserPreferences> LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -101,15 +100,78 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
 
     public async Task SaveAsync(UserPreferences preferences, CancellationToken cancellationToken = default)
     {
-        var directory = Path.GetDirectoryName(SettingsPath)!;
-        Directory.CreateDirectory(directory);
-        var temporaryPath = SettingsPath + ".tmp";
-        await using (var stream = File.Create(temporaryPath))
+        await SaveLock.WaitAsync(cancellationToken);
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, preferences, JsonOptions, cancellationToken);
-        }
+            var directory = Path.GetDirectoryName(SettingsPath)!;
+            Directory.CreateDirectory(directory);
+            var temporaryPath = SettingsPath + ".tmp";
+            await using (var stream = File.Create(temporaryPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, preferences, JsonOptions, cancellationToken);
+            }
 
-        File.Move(temporaryPath, SettingsPath, true);
+            File.Move(temporaryPath, SettingsPath, true);
+        }
+        finally
+        {
+            SaveLock.Release();
+        }
+    }
+}
+
+public sealed class LocalWorkspaceStateService : IWorkspaceStateService
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static readonly SemaphoreSlim SaveLock = new(1, 1);
+
+    public string StatePath => Path.Combine(StorageDataLocations.CurrentRoot, "workspace.json");
+
+    public async Task<WorkspaceUiState?> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!File.Exists(StatePath))
+            {
+                return null;
+            }
+
+            await using var stream = File.OpenRead(StatePath);
+            return await JsonSerializer.DeserializeAsync<WorkspaceUiState>(
+                stream,
+                JsonOptions,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public async Task SaveAsync(WorkspaceUiState state, CancellationToken cancellationToken = default)
+    {
+        await SaveLock.WaitAsync(cancellationToken);
+        try
+        {
+            var directory = Path.GetDirectoryName(StatePath)!;
+            Directory.CreateDirectory(directory);
+            var temporaryPath = StatePath + ".tmp";
+            await using (var stream = File.Create(temporaryPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+            }
+
+            File.Move(temporaryPath, StatePath, true);
+        }
+        finally
+        {
+            SaveLock.Release();
+        }
     }
 }
 

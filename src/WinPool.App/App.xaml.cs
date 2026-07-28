@@ -48,15 +48,36 @@ public partial class App : Application
     {
         InitializeComponent();
         UnhandledException += App_UnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
+    }
+
+    private static void CurrentDomain_UnhandledException(object sender, System.UnhandledExceptionEventArgs e) =>
+        WriteCrashLog("AppDomain", e.ExceptionObject as Exception);
+
+    private static void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e) =>
+        WriteCrashLog("UnobservedTask", e.Exception);
+
+    private static void WriteCrashLog(string source, Exception? exception)
+    {
+        try
+        {
+            var directory = StorageDataLocations.CurrentRoot;
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(
+                Path.Combine(directory, "last-crash.txt"),
+                $"{DateTime.Now:O} [{source}] {exception}\n\n");
+        }
+        catch
+        {
+        }
     }
 
     private static void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         try
         {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "WinPool");
+            var directory = StorageDataLocations.CurrentRoot;
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, "last-crash.txt"), e.Exception.ToString());
         }

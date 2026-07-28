@@ -13,18 +13,9 @@
             HorizontalAlignment="Stretch"
             Spacing="16">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock
-                    x:Name="EditTitle"
-                    FontSize="32"
-                    FontWeight="SemiBold"
-                    Text="编辑" />
                 <Button
                     x:Name="ResetSimulationButton"
-                    Grid.Column="1"
+                    HorizontalAlignment="Right"
                     VerticalAlignment="Center"
                     Click="ResetSimulation_Click"
                     Content="重置模拟数据" />

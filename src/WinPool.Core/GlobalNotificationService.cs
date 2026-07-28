@@ -13,11 +13,19 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
 
     public ReadOnlyObservableCollection<GlobalNotification> Notifications { get; }
 
+    public void PublishInfo(
+        string title,
+        string message,
+        string source,
+        string? occurrenceKey = null,
+        bool autoDismiss = true) =>
+        Publish(GlobalNotificationSeverity.Info, title, message, source, occurrenceKey, autoDismiss);
+
     public void PublishWarning(string title, string message, string source, string? occurrenceKey = null) =>
-        Publish(GlobalNotificationSeverity.Warning, title, message, source, occurrenceKey);
+        Publish(GlobalNotificationSeverity.Warning, title, message, source, occurrenceKey, true);
 
     public void PublishError(string title, string message, string source, string? occurrenceKey = null) =>
-        Publish(GlobalNotificationSeverity.Error, title, message, source, occurrenceKey);
+        Publish(GlobalNotificationSeverity.Error, title, message, source, occurrenceKey, true);
 
     public void Dismiss(string id)
     {
@@ -28,19 +36,31 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         }
     }
 
+    public void DismissByKey(string deduplicationKey)
+    {
+        var matches = _notifications
+            .Where(x => x.DeduplicationKey.Equals(deduplicationKey, StringComparison.Ordinal))
+            .ToList();
+        foreach (var match in matches)
+        {
+            _notifications.Remove(match);
+        }
+    }
+
     private void Publish(
         GlobalNotificationSeverity severity,
         string title,
         string message,
         string source,
-        string? occurrenceKey)
+        string? occurrenceKey,
+        bool autoDismiss)
     {
-        if (string.IsNullOrWhiteSpace(message))
+        if (string.IsNullOrWhiteSpace(message) && string.IsNullOrWhiteSpace(title))
         {
             return;
         }
 
-        var deduplicationKey = occurrenceKey ?? $"{severity}:{source}:{message}";
+        var deduplicationKey = occurrenceKey ?? $"{severity}:{source}:{title}:{message}";
         if (_notifications.Any(x => x.DeduplicationKey.Equals(
                 deduplicationKey,
                 StringComparison.Ordinal)))
@@ -55,6 +75,7 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
             message,
             source,
             DateTimeOffset.Now,
-            deduplicationKey));
+            deduplicationKey,
+            autoDismiss));
     }
 }

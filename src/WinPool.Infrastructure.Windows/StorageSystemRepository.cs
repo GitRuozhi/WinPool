@@ -13,15 +13,11 @@ public sealed class LocalStorageSystemRepository : IStorageSystemRepository
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public LocalStorageSystemRepository(string? directoryPath = null)
-    {
-        DirectoryPath = directoryPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinPool",
-            "Systems");
-    }
+    private readonly string? _directoryPath;
 
-    public string DirectoryPath { get; }
+    public LocalStorageSystemRepository(string? directoryPath = null) => _directoryPath = directoryPath;
+
+    public string DirectoryPath => _directoryPath ?? Path.Combine(StorageDataLocations.CurrentRoot, "Systems");
 
     public async Task<IReadOnlyList<StorageSystemDocument>> LoadSimulationsAsync(
         CancellationToken cancellationToken = default)
@@ -81,5 +77,17 @@ public sealed class LocalStorageSystemRepository : IStorageSystemRepository
             await JsonSerializer.SerializeAsync(stream, document, JsonOptions, cancellationToken);
         }
         File.Move(temporaryPath, path, true);
+    }
+
+    public Task DeleteSimulationAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var safeId = string.Concat(id.Select(ch =>
+            char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
+        var path = Path.Combine(DirectoryPath, $"{safeId}.json");
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+        return Task.CompletedTask;
     }
 }

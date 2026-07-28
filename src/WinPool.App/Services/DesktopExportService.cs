@@ -77,6 +77,24 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         return file.Path;
     }
 
+    public async Task<string?> ExportCsvAsync(
+        string suggestedName,
+        string csvContent,
+        CancellationToken cancellationToken = default)
+    {
+        var picker = new FileSavePicker { SuggestedFileName = suggestedName };
+        picker.FileTypeChoices.Add("CSV", [".csv"]);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinPool_App.App.WindowHandle);
+        var file = await picker.PickSaveFileAsync();
+        if (file is null)
+        {
+            return null;
+        }
+
+        await File.WriteAllTextAsync(file.Path, "\uFEFF" + csvContent, cancellationToken);
+        return file.Path;
+    }
+
     public async Task<StorageSystemDocument?> ImportAsync(
         CancellationToken cancellationToken = default)
     {

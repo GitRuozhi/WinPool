@@ -170,6 +170,7 @@ internal sealed class RawDiskDrive
 {
     public int? Index { get; set; }
     public string InterfaceType { get; set; } = string.Empty;
+    public string PNPDeviceID { get; set; } = string.Empty;
     public int? SCSIBus { get; set; }
     public int? SCSILogicalUnit { get; set; }
     public int? SCSIPort { get; set; }
@@ -230,18 +231,24 @@ internal static class RawSnapshotProjector
             x.HealthStatus,
             x.OperationalStatus,
             string.IsNullOrWhiteSpace(driveLetter) ? x.Path : $"{driveLetter}:\\",
-            osDiskMap.GetValueOrDefault(x.DiskNumber));
+            osDiskMap.GetValueOrDefault(x.DiskNumber),
+            x.IsHidden);
         }).ToList();
 
         var physicalDisks = raw.PhysicalDisks.Select(x =>
         {
             var id = physicalMap[x.AssociationKey];
+            var drive = raw.DiskDrives.FirstOrDefault(candidate => candidate.Index == x.DeviceId);
             return new PhysicalDiskInfo(
                 id.Value, id.IsStable, First(x.FriendlyName, x.Model, $"Physical disk {x.DeviceId}"), x.Model,
                 string.IsNullOrWhiteSpace(x.SerialNumber) ? "—" : x.SerialNumber.Trim(), x.BusType, x.MediaType, x.Size, x.LogicalSectorSize,
                 x.PhysicalSectorSize, x.HealthStatus, x.OperationalStatus, x.CanPool, x.CannotPoolReason,
                 x.DeviceId, x.IsBoot, x.IsSystem, x.IsPageFile, x.IsCrashDump,
-                Resolve(poolMap, x.PoolAssociationKey));
+                Resolve(poolMap, x.PoolAssociationKey),
+                x.FirmwareVersion.Trim(),
+                (drive?.InterfaceType ?? string.Empty).Trim(),
+                x.ProvisioningType.Trim(),
+                (drive?.PNPDeviceID ?? string.Empty).Trim());
         }).ToList();
 
         var pools = raw.StoragePools.Select(x =>
@@ -251,7 +258,10 @@ internal static class RawSnapshotProjector
                 id.Value, id.IsStable, x.IsPrimordial ? "Primordial" : x.FriendlyName, x.IsPrimordial,
                 x.HealthStatus, x.OperationalStatus, x.Size,
                 x.AllocatedSize, Resolve(subsystemMap, x.SubsystemAssociationKey),
-                ResolveMany(physicalMap, x.MemberPhysicalDiskKeys));
+                ResolveMany(physicalMap, x.MemberPhysicalDiskKeys),
+                x.LogicalSectorSize,
+                x.PhysicalSectorSize,
+                x.ProvisioningTypeDefault.Trim());
         }).ToList();
 
         if (!pools.Any(x => x.IsPrimordial))
@@ -291,7 +301,9 @@ internal static class RawSnapshotProjector
                 id.Value, id.IsStable, x.FriendlyName, x.MediaType, x.ResiliencySettingName, x.Size,
                 x.FootprintOnPool, Resolve(poolMap, x.PoolAssociationKey),
                 Resolve(virtualMap, x.VirtualDiskAssociationKey),
-                ResolveMany(physicalMap, x.MemberPhysicalDiskKeys));
+                ResolveMany(physicalMap, x.MemberPhysicalDiskKeys),
+                x.NumberOfColumns,
+                x.Interleave);
         }).ToList();
 
         var virtualDisks = raw.VirtualDisks.Select(x =>
@@ -354,7 +366,9 @@ internal static class RawSnapshotProjector
                 raw.Computer.WindowsProductName,
                 raw.Computer.WindowsVersion,
                 raw.Computer.OsBuild,
-                raw.Computer.LastBootTime),
+                raw.Computer.LastBootTime,
+                raw.Hardware?.OperatingSystem.DisplayVersion ?? string.Empty,
+                raw.Hardware?.OperatingSystem.UBR ?? string.Empty),
             subsystems,
             physicalDisks,
             pools,

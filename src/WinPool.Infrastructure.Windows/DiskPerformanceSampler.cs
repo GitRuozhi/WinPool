@@ -41,10 +41,6 @@ public sealed class DiskPerformanceSampler : IDisposable
             return [];
         }
 
-        if (_primed)
-        {
-            Thread.Sleep(200);
-        }
         if (PdhCollectQueryData(_query) != 0)
         {
             return [];

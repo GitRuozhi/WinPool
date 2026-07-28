@@ -53,9 +53,9 @@ public static class WorkspaceMapper
             StorageUnitKind.StorageTier =>
                 new WorkspaceSelection(WorkspaceCategory.Tier, unit.StableId),
             StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk
-                or StorageUnitKind.NetworkDisk or StorageUnitKind.OsDisk =>
+                or StorageUnitKind.OsDisk =>
                 new WorkspaceSelection(WorkspaceCategory.Disk, unit.StableId),
-            StorageUnitKind.Partition =>
+            StorageUnitKind.NetworkDisk or StorageUnitKind.Partition =>
                 new WorkspaceSelection(WorkspaceCategory.Partition, unit.StableId),
             _ => new WorkspaceSelection(WorkspaceCategory.System, snapshot.Computer.StableId)
         };
@@ -78,7 +78,9 @@ public static class TopologyProjector
                 snapshot.VirtualDisks.Count > 0
                     ? $"{snapshot.VirtualDisks.Count} virtual disks"
                     : null,
-                $"{snapshot.NetworkDisks.Count} network disks",
+                snapshot.NetworkDisks.Count > 0
+                    ? $"{snapshot.NetworkDisks.Count} network disks"
+                    : null,
                 FormatBytes(uniquePhysical.Sum(x => x.Size))),
             childrenLayout: TopologyChildrenLayout.WeightedFlow);
 

@@ -5,7 +5,7 @@ namespace WinPool.App.Services;
 
 public sealed class LocalizationService : ObservableObject
 {
-    private LanguagePreference _language = LanguagePreference.ZhCn;
+    private LanguagePreference _language = LanguagePreference.SystemDefault;
 
     private static readonly IReadOnlyDictionary<string, (string Zh, string En)> Texts =
         new Dictionary<string, (string Zh, string En)>(StringComparer.Ordinal)
@@ -47,22 +47,54 @@ public sealed class LocalizationService : ObservableObject
             ["OperationArea"] = ("操作区", "Operations"),
             ["TopologyArea"] = ("完整存储拓扑", "Complete storage topology"),
             ["Scanning"] = ("正在扫描存储对象…", "Scanning storage objects…"),
+            ["ScanComplete"] = ("扫描完成", "Scan complete"),
             ["NeverModified"] = ("当前第一稿只读取系统信息，不会修改任何磁盘。", "This first draft is read-only and never modifies a disk."),
             ["Rescan"] = ("重新扫描", "Rescan"),
             ["CopySummary"] = ("复制摘要", "Copy summary"),
             ["CopyId"] = ("复制标识", "Copy ID"),
             ["Export"] = ("导出信息", "Export"),
+            ["Import"] = ("导入", "Import"),
             ["Open"] = ("在文件资源管理器中打开", "Open in File Explorer"),
             ["ViewRelated"] = ("查看关联对象", "View related"),
             ["NoSelection"] = ("当前分类没有可显示的对象。", "No object is available in this category."),
             ["AddStorageSystem"] = ("+ 添加其他存储系统", "+ Add another storage system"),
             ["LastScan"] = ("最后扫描", "Last scan"),
+            ["HostName"] = ("主机名", "Host name"),
+            ["VersionNumber"] = ("版本号", "Version"),
+            ["OsBuild"] = ("OS 内部版本", "OS build"),
+            ["Cpu"] = ("中央处理器", "CPU"),
+            ["Memory"] = ("内存", "Memory"),
+            ["LocalStorage"] = ("本地存储", "Local storage"),
+            ["ExternalStorage"] = ("外部存储", "External storage"),
+            ["AccessibleVolumes"] = ("可访问卷", "Accessible volumes"),
+            ["RunningStatus"] = ("运行状态", "Operational status"),
+            ["ProvisioningType"] = ("预配类型", "Provisioning"),
+            ["Resiliency"] = ("弹性", "Resiliency"),
+            ["PhysicalSector"] = ("物理扇区", "Physical sector"),
+            ["LogicalSector"] = ("逻辑扇区", "Logical sector"),
+            ["DiskNumber"] = ("编号", "Number"),
+            ["PartitionTable"] = ("分区表", "Partition style"),
+            ["Firmware"] = ("固件", "Firmware"),
+            ["InterfaceType"] = ("接口类型", "Interface"),
+            ["OwningDisk"] = ("所属磁盘", "Disk"),
+            ["SystemPartition"] = ("系统分区", "System partition"),
+            ["HiddenPartition"] = ("隐藏分区", "Hidden partition"),
+            ["PartitionStatus"] = ("分区状态", "Partition state"),
+            ["StartOffset"] = ("起始偏移", "Offset"),
+            ["DriveLetter"] = ("盘符", "Drive letter"),
+            ["VolumeLabel"] = ("卷标", "Volume label"),
+            ["Columns"] = ("列数", "Columns"),
+            ["Interleave"] = ("条带大小", "Interleave"),
+            ["FaultTolerance"] = ("容灾故障数", "Tolerated failures"),
+            ["Offline"] = ("脱机", "Offline"),
+            ["Online"] = ("联机", "Online"),
             ["Health"] = ("健康状态", "Health"),
             ["Type"] = ("类型", "Type"),
+            ["Name"] = ("名称", "Name"),
             ["Capacity"] = ("容量", "Capacity"),
             ["Allocated"] = ("已分配", "Allocated"),
             ["Available"] = ("可用", "Available"),
-            ["AllocationUnit"] = ("簇大小", "Cluster size"),
+            ["AllocationUnit"] = ("分配单元", "Allocation unit"),
             ["Model"] = ("型号", "Model"),
             ["Serial"] = ("序列号", "Serial"),
             ["Bus"] = ("总线", "Bus"),
@@ -89,6 +121,7 @@ public sealed class LocalizationService : ObservableObject
             ["Light"] = ("亮色", "Light"),
             ["Dark"] = ("暗色", "Dark"),
             ["Language"] = ("语言", "Language"),
+            ["SystemLanguage"] = ("跟随系统", "System default"),
             ["Chinese"] = ("中文", "Chinese"),
             ["English"] = ("English", "English"),
             ["SettingsDescription"] = ("更改立即生效并保存。返回后会保留工作区状态。", "Changes apply immediately and are saved. Workspace state is preserved."),
@@ -121,7 +154,7 @@ public sealed class LocalizationService : ObservableObject
             ["StripedVolume"] = ("带区卷", "Striped volume"),
             ["WindowsRecovery"] = ("Windows 恢复分区", "Windows recovery partition"),
             ["EfiSystem"] = ("EFI 系统分区", "EFI system partition"),
-            ["MicrosoftReserved"] = ("Microsoft 保留分区 (MSR)", "Microsoft reserved partition (MSR)"),
+            ["MicrosoftReserved"] = ("微软保留分区", "Microsoft Reserved Partition"),
             ["SystemReserved"] = ("系统保留分区", "System reserved partition"),
             ["UnknownPartition"] = ("未知分区类型", "Unknown partition type"),
             ["Unknown"] = ("未知", "Unknown"),
@@ -140,6 +173,8 @@ public sealed class LocalizationService : ObservableObject
             ["UpdateMethod"] = ("更新方式", "Update method"),
             ["ExternalUpdate"] = ("外部网页", "External web page"),
             ["ViewUpdates"] = ("查看更新", "View updates"),
+            ["VisitWebsite"] = ("访问官网", "Visit website"),
+            ["SendFeedback"] = ("提交反馈", "Send feedback"),
             ["OpenUpdateFailed"] = ("无法打开更新网页。", "The update page could not be opened."),
             ["Edit"] = ("编辑", "Edit"),
             ["Product"] = ("产品", "Product"),
@@ -156,7 +191,7 @@ public sealed class LocalizationService : ObservableObject
                 "开启后，界面将明文显示主板、内存、磁盘、卷序列号和 MAC 地址。这些信息可能被截图或共享时泄露。确定继续？",
                 "When enabled, mainboard, memory, disk, and volume serial numbers and MAC addresses are shown in plain text and may leak through screenshots or sharing. Continue?"),
             ["InitializeDisk"] = ("初始化磁盘", "Disk initialization"),
-            ["CreateMsrOnInitialize"] = ("初始化磁盘时创建微软保留分区（MSR）", "Create a Microsoft Reserved Partition (MSR) when initializing disks"),
+            ["CreateMsrOnInitialize"] = ("初始化磁盘时创建微软保留分区", "Create a Microsoft Reserved Partition when initializing disks"),
             ["ExtendVolume"] = ("扩展卷", "Extend volume"),
             ["ShrinkVolume"] = ("压缩卷", "Shrink volume"),
             ["DeleteVolume"] = ("删除卷", "Delete volume"),
@@ -177,7 +212,39 @@ public sealed class LocalizationService : ObservableObject
             ["MonitorIntro"] = ("实时显示本机磁盘的活动时间与读写速度。", "Shows live disk activity and read/write throughput of this computer."),
             ["DevelopmentIntro"] = ("此处实时显示程序执行的命令和系统返回（只读日志）。", "Shows the commands executed by WinPool and their output in real time (read-only log)."),
             ["SystemDisk"] = ("系统盘", "System disk"),
-            ["Unhealthy"] = ("不健康", "Unhealthy")
+            ["Welcome"] = ("欢迎页面", "Welcome page"),
+            ["WelcomeTitle"] = ("欢迎使用 WinPool", "Welcome to WinPool"),
+            ["WelcomeMessage"] = (
+                "WinPool 是一款现代化的 Windows 存储管理工具，可以清晰展示存储池、存储层、磁盘和分区的完整拓扑关系。当前版本为只读预览：所有本机修改操作均已禁用，你可以安全地浏览界面，或在模拟系统中体验完整的编辑流程。",
+                "WinPool is a modern Windows storage management tool that presents the complete topology of storage pools, tiers, disks, and partitions. This build is a read-only preview: all local mutation commands are disabled, so you can safely explore the interface or try the full editing workflow in a simulated system."),
+            ["ShowWelcomeAtStart"] = ("启动时显示欢迎页面", "Show the welcome page at startup"),
+            ["WelcomeConfirm"] = ("我知道啦", "Got it"),
+            ["Unhealthy"] = ("不健康", "Unhealthy"),
+            ["DataLocation"] = ("数据存储位置", "Data location"),
+            ["StandardLocation"] = ("标准位置", "Standard location"),
+            ["PortableLocation"] = ("软件目录（便携）", "App folder (portable)"),
+            ["DataLocationSwitched"] = ("数据存储位置已切换，已有数据已迁移。", "Data location changed; existing data was migrated."),
+            ["DataLocationFailed"] = ("无法切换数据存储位置：目标目录不可写。", "The data location could not be changed: the target folder is not writable."),
+            ["BackgroundMonitoring"] = ("后台持续监控", "Keep monitoring in background"),
+            ["SamplingRate"] = ("采样频率", "Sampling rate"),
+            ["RefreshRate"] = ("刷新率", "Refresh rate"),
+            ["StartMonitoring"] = ("开始监控", "Start monitoring"),
+            ["StopMonitoring"] = ("停止监控", "Stop monitoring"),
+            ["ExportData"] = ("导出数据", "Export data"),
+            ["Activity"] = ("活动", "Activity"),
+            ["ReadSpeed"] = ("读取速度", "Read speed"),
+            ["WriteSpeed"] = ("写入速度", "Write speed"),
+            ["VolumeColumn"] = ("卷", "Volumes"),
+            ["ColorColumn"] = ("图例", "Legend"),
+            ["NoMonitoringData"] = ("还没有可导出的监控数据。", "There is no monitoring data to export yet."),
+            ["ConvertedToSimulation"] = ("已把本机信息保存为模拟系统并激活。", "The local machine was saved as a simulation and activated."),
+            ["TargetMissing"] = ("目标在本机上已不存在。", "The target no longer exists on this computer."),
+            ["DeleteSimulation"] = ("删除模拟系统", "Delete simulation"),
+            ["ConfirmDeleteSimulation"] = ("确定删除当前模拟系统？保存的模拟数据将被移除，此操作不可撤销。", "Delete the current simulation? The saved simulation data will be removed and cannot be recovered."),
+            ["AutoColor"] = ("自动颜色", "Automatic color"),
+            ["ActivityLabelShort"] = ("活", "A"),
+            ["ReadLabelShort"] = ("读", "R"),
+            ["WriteLabelShort"] = ("写", "W")
         };
 
     public LanguagePreference Language
@@ -187,13 +254,30 @@ public sealed class LocalizationService : ObservableObject
         {
             if (SetProperty(ref _language, value))
             {
+                OnPropertyChanged(nameof(EffectiveLanguage));
                 OnPropertyChanged(string.Empty);
             }
         }
     }
 
+    public LanguagePreference EffectiveLanguage
+    {
+        get
+        {
+            if (Language != LanguagePreference.SystemDefault)
+            {
+                return Language;
+            }
+
+            return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
+                .Equals("zh", StringComparison.OrdinalIgnoreCase)
+                ? LanguagePreference.ZhCn
+                : LanguagePreference.EnUs;
+        }
+    }
+
     public string this[string key] =>
         Texts.TryGetValue(key, out var pair)
-            ? (Language == LanguagePreference.ZhCn ? pair.Zh : pair.En)
+            ? (EffectiveLanguage == LanguagePreference.ZhCn ? pair.Zh : pair.En)
             : key;
 }

@@ -13,10 +13,7 @@ public sealed class LocalMachineRecordService : IMachineRecordService
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public string RecordPath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "WinPool",
-        "machine.json");
+    public string RecordPath => Path.Combine(StorageDataLocations.CurrentRoot, "machine.json");
 
     public async Task RecordLocalScanAsync(
         StorageSystemDocument localDocument,
@@ -37,5 +34,30 @@ public sealed class LocalMachineRecordService : IMachineRecordService
             await JsonSerializer.SerializeAsync(stream, redacted, JsonOptions, cancellationToken);
         }
         File.Move(temporaryPath, RecordPath, true);
+    }
+
+    public async Task<StorageSystemDocument?> LoadLocalScanAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!File.Exists(RecordPath))
+            {
+                return null;
+            }
+
+            await using var stream = File.OpenRead(RecordPath);
+            var document = await JsonSerializer.DeserializeAsync<StorageSystemDocument>(
+                stream,
+                JsonOptions,
+                cancellationToken);
+            return document is { IsLocal: true, SchemaVersion: StorageSystemDocument.CurrentSchemaVersion }
+                ? document
+                : null;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 }

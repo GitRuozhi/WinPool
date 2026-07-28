@@ -117,7 +117,15 @@ These types are internal architecture, not a frozen public SDK or serialization 
 - the per-launch local machine record (`machine.json`, always redacted);
 - an assembly-embedded, stdin-driven Windows PowerShell 5.1 command runner;
 - a staged hardware-report collection and storage-projection pipeline;
-- a read-only PDH physical-disk performance sampler for the Monitor page.
+- a read-only PDH physical-disk performance sampler for the Monitor page;
+- the data-location service (`StorageDataLocations`) that resolves the active
+  data root. The standard root is `%LocalAppData%\WinPool`; portable mode uses a
+  `Data` folder next to the executable. The tiny `storage-location.json` pointer
+  always lives in the standard root; switching modes migrates existing data to
+  the new root and keeps the old files. If the executable folder is not
+  writable, portable mode is refused. All persistence (preferences,
+  `machine.json`, `workspace.json`, `Systems`, monitoring CSV) resolves through
+  this service at call time.
 
 The inventory command may query Windows storage state, but it must remain read-only
 and must not accept free-form user commands. No `.ps1` file is shipped. The fixed
@@ -154,13 +162,49 @@ Only the frontend behavior required for current design validation needs to be fu
 
 The Manage page is based on:
 
-- an upper object-focused operation workspace;
-- a lower complete storage-topology workspace;
+- an upper complete storage-topology workspace;
+- a lower object-focused operation workspace;
 - a horizontal splitter between them;
-- System, Pool, Tier, Disk, and Partition categories shown as vertical tabs;
-- one shared comparison table whose columns are the category objects, with the
-  selected column highlighted and centered;
-- nested enclosure blocks for relationships, without connector lines.
+- System, Pool, Tier, Disk, and Partition categories shown as vertical tabs with
+  horizontal icon-and-label items;
+- one shared comparison table whose columns are the category objects and whose
+  first column (property names) stays frozen while the value columns scroll
+  horizontally; the object name is the first table row, value columns size to
+  content and wrap long values instead of truncating them, every cell offers
+  hover feedback, the selected column enables in-place text selection, and the
+  selected column is highlighted and centered;
+- category switches that prefer the object related to the current selection
+  (partition to its disk, disk to its pool, tier to its pool, and the reverse
+  child direction) before falling back to the remembered or first object;
+- an Export list command on every category, named after the current category
+  (Export [category] info list), that writes the table as CSV;
+- a Delete simulation command on the System category that removes the selected
+  simulation after confirmation and deletes its persisted file; the built-in
+  simulation and the local system cannot be deleted;
+- nested enclosure blocks for relationships, without connector lines, where each
+  node carries a type icon inline at the type row and Windows-backed disks and
+  partitions carry a four-square Windows mark right after the type icon.
+Scan progress, scan completion, import/export results, and errors surface as
+bottom-right notifications that dismiss automatically after a few seconds; the
+in-progress scan notification stays until the scan finishes. Disk and
+partition Properties commands open the Windows native experience (the Device
+Manager device property sheet for disks, the volume properties dialog for
+partitions), and the partition group also offers an Optimize drives command
+that opens `dfrgui.exe`. These native commands are enabled for any
+local-consistent system: the local system or a simulation whose recorded
+source host name matches this machine. The System category's Convert local to
+simulation command persists a redacted copy of the local system with the
+source host name and activates it immediately; from such a copy the native
+target is re-resolved against the live local snapshot at click time, and a
+missing target raises a warning without permanently disabling the command.
+
+The last shell page, active system, and per-category selections persist to
+`<data root>\workspace.json` and are restored on the next launch;
+topology expansion state and the execution mode are never persisted.
+Right-clicking a topology node that is the current workspace selection opens a
+context menu with the same commands as the operation-area buttons, placed at
+the node's right edge (left edge when space runs out); right-clicking an
+unselected node shows nothing.
 
 The Edit page applies every mutating or destructive workflow to simulated systems
 only: partition extend/shrink/delete/format/create, disk initialization with an
@@ -171,20 +215,60 @@ recorded in a read-only command log shown on the Development page, and the
 built-in simulation can be reset. Local storage remains read-only: every local
 mutation entry point is disabled, even in Real mode.
 
-The Monitor page samples local physical-disk activity, read, and write rates
-through read-only PDH English counters. The Test page is a capability
-placeholder for the planned Dite/RealSoak-style workflows.
+The Monitor page is split into three areas separated by a draggable splitter,
+each framed in its own card including the button row. The top graph area draws
+one color per disk in a 60-second right-to-left window: activity as a dotted
+line (0-100 percent fixed scale), read throughput as a dashed line, and write
+throughput as a solid line with a translucent fill underneath; the throughput
+scale adapts to the data with a 100 KiB/s floor and uses KiB/MiB units, the
+activity axis label sits at the left and the speed scale at the right, and the
+right edge reserves a gutter where each disk carries three left-pointing flag
+labels (activity, read, write) with solid backgrounds that center on their
+curve endpoints and cover each other in write-over-read-over-activity order. The middle table lists name,
+owning pool, accessible volumes, media, capacity, activity, read, and write
+per disk; a legend swatch in its own column shows the disk's graph color,
+auto-assigned by default and pickable from a hue-sorted preset palette or a
+hex RGB input (Enter or focus loss confirms), and the button row can reassign
+all disk colors automatically; each row's checkbox controls whether that disk
+is drawn in the graph (all disks are always sampled; disks with volumes start
+checked, disks without volumes start unchecked). The bottom button row offers
+a keep-monitoring-in-background checkbox (off by default; otherwise
+monitoring runs only while the page is open and the window is not minimized),
+a labeled sampling-rate selector (0.2/0.5/1/2/5/10/20 Hz, default 1) that
+also drives the UI refresh cadence, an automatic-colors command, and
+right-aligned start, stop, and CSV export commands; every button carries an
+icon. The graph and table areas share an invisible draggable splitter, and on
+the first page entry of each app run the split is computed so the table
+exactly fits its rows when there are few disks and caps at 40 percent of the
+workspace with a scrollbar beyond that; the ratio then stays as the user left
+it for the rest of the run, is stored only in memory, and is recomputed on
+the next launch. Monitoring starts when the
+page opens, and each session is recorded incrementally to
+`<data root>\Monitoring\yyyyMMdd_HHmmss.csv` with periodic flushes instead of
+one write at exit. Samples come from read-only PDH English counters for both
+physical and virtual disks, with disk activity capped at 100 percent. The
+Test page is a capability placeholder for the planned Dite/RealSoak-style
+workflows.
 
-The settings page offers theme, accent, and language drop-downs, the
-execution-mode switch, the MSR-on-initialize option, and a "show hardware IDs"
-privacy toggle (off by default; enabling it warns about serial-number exposure
-and unmasks sensitive hardware values in the UI only). Product, version,
-provider, website, update, feedback, and community links live in a single About
-card.
+The settings page offers theme, accent, and language drop-downs (the language
+defaults to following Windows and falls back to English for unsupported
+cultures, switching immediately without a restart), the execution-mode
+switch, the MSR-on-initialize option, a "show hardware IDs" privacy toggle
+(off by default; enabling it warns about serial-number exposure and unmasks
+sensitive hardware values in the UI only), a welcome-page toggle, and a data
+location selector (standard `%LocalAppData%\WinPool` or a portable `Data`
+folder next to the executable; switching migrates existing data). Product,
+version, provider, website, update, feedback, and community links live in a
+single About card. A welcome dialog with artwork and introduction text
+appears at startup until the user clears the "show at startup" checkbox in
+the dialog or in Settings. Pages no longer show a large in-page title; the
+title-bar tabs carry the page identity.
 
 Local machine information is refreshed into
-`%LocalAppData%\WinPool\machine.json` after every successful scan; simulated
-systems persist as redacted JSON documents in `%LocalAppData%\WinPool\Systems`.
+`<data root>\machine.json` after every successful scan and is loaded
+back at startup so the previous local inventory is visible immediately while a
+background scan refreshes it; simulated systems persist as redacted JSON
+documents in `<data root>\Systems`.
 
 The frontend should continue to support:
 
@@ -197,6 +281,14 @@ The frontend should continue to support:
 - adaptive behavior as the window narrows.
 
 Use standard WinUI controls and theme resources first. Keep custom controls narrowly focused on topology or verified layout needs.
+
+Theme-correct color handling: code that reads theme resources programmatically
+(`Application.Current.Resources[...]`) does not follow the app-level
+`RequestedTheme` override and returns the OS-theme variant, which makes text
+and divider brushes vanish in the opposite app theme. For programmatically
+built UI, read computed values from hidden XAML probe elements whose
+properties use `{ThemeResource ...}` (see `BrushProbes` in `MainPage.xaml`),
+and rebuild such UI on `ActualThemeChanged`.
 
 ## Simulation and backend boundaries
 

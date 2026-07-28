@@ -40,9 +40,13 @@ At this stage:
   optional MSR, partition extend/shrink/delete/create, drag-and-drop pool creation,
   and virtual-disk provisioning with reviewable 64K interleave and 64K cluster
   defaults — while every local mutation entry point stays disabled;
-- the Monitor page observes local physical-disk activity and throughput through
-  read-only performance counters, and the Development page shows a read-only log of
-  every command WinPool executes;
+- the Monitor page observes local physical and virtual disks through read-only
+  performance counters and presents a task-manager-style activity graph, a
+  per-disk table, adjustable sampling, optional background monitoring, and CSV
+  export, while the Development page shows a read-only log of every command
+  WinPool executes;
+- app data lives in `%LocalAppData%\WinPool` by default or in a portable `Data`
+  folder next to the executable, with automatic migration when switching;
 - local machine information is refreshed into `%LocalAppData%\WinPool\machine.json`
   on every launch, always with sensitive serial numbers masked;
 - frontend requirements do not freeze a public API, database, plug-in contract, or C#/Python wire protocol.

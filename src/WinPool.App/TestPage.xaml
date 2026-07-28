@@ -7,11 +7,6 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
     <StackPanel Padding="24,20,24,40" Spacing="12">
-        <TextBlock
-            x:Name="TestTitle"
-            FontSize="32"
-            FontWeight="SemiBold"
-            Text="测试" />
         <Border
             Padding="20"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

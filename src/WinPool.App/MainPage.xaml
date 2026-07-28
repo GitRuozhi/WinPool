@@ -12,133 +12,19 @@
 
     <Grid Padding="12,4,12,12">
         <Grid.RowDefinitions>
-            <RowDefinition MinHeight="230" Height="2*" />
-            <RowDefinition Height="8" />
             <RowDefinition MinHeight="250" Height="3*" />
+            <RowDefinition Height="8" />
+            <RowDefinition MinHeight="230" Height="2*" />
         </Grid.RowDefinitions>
+
+        <Grid x:Name="BrushProbes" Width="0" Height="0" Visibility="Collapsed">
+            <TextBlock x:Name="ProbeSecondaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Border x:Name="ProbeDivider" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            <Border x:Name="ProbeHover" Background="{ThemeResource ControlFillColorSecondaryBrush}" />
+        </Grid>
 
         <Border
             Grid.Row="0"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <Grid Padding="10,4,12,5" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock
-                        Grid.Column="0"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold"
-                        Text="{x:Bind ViewModel.SelectedCategoryTitle, Mode=OneWay}" />
-
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                        <ProgressRing
-                            Width="18"
-                            Height="18"
-                            IsActive="{x:Bind ViewModel.IsScanning, Mode=OneWay}" />
-                        <TextBlock
-                            MaxWidth="420"
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                            TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                </Grid>
-
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="6" />
-                        <ColumnDefinition MinWidth="200" Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <ListView
-                        x:Name="VerticalCategoryList"
-                        Grid.Column="0"
-                        Padding="6"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="0,0,1,0"
-                        ItemsSource="{x:Bind ViewModel.Categories}"
-                        SelectedItem="{x:Bind ViewModel.SelectedCategoryItem, Mode=TwoWay}"
-                        SelectionMode="Single"
-                        ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                        ScrollViewer.VerticalScrollBarVisibility="Hidden">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel
-                                    Width="76"
-                                    Padding="4,8"
-                                    HorizontalAlignment="Center"
-                                    Spacing="4">
-                                    <FontIcon
-                                        HorizontalAlignment="Center"
-                                        FontSize="18"
-                                        Glyph="{Binding Glyph}" />
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        FontSize="12"
-                                        Text="{Binding Title}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-
-                    <ScrollViewer
-                        x:Name="TableScrollViewer"
-                        Grid.Column="1"
-                        Padding="8"
-                        HorizontalScrollBarVisibility="Auto"
-                        HorizontalScrollMode="Enabled"
-                        VerticalScrollBarVisibility="Auto"
-                        VerticalScrollMode="Enabled">
-                        <Grid x:Name="ComparisonTableGrid" />
-                    </ScrollViewer>
-
-                    <toolkit:GridSplitter
-                        Grid.Column="2"
-                        HorizontalAlignment="Stretch"
-                        ResizeBehavior="PreviousAndNext"
-                        ResizeDirection="Columns"
-                        Background="{ThemeResource CardStrokeColorDefaultBrush}"
-                        AutomationProperties.Name="Resize table and command areas" />
-
-                    <ScrollViewer
-                        Grid.Column="3"
-                        Padding="12"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1,0,0,0"
-                        HorizontalScrollBarVisibility="Disabled"
-                        VerticalScrollBarVisibility="Auto">
-                        <StackPanel
-                            x:Name="CommandButtonsPanel"
-                            MinWidth="180"
-                            Spacing="8" />
-                    </ScrollViewer>
-                </Grid>
-            </Grid>
-        </Border>
-
-        <toolkit:GridSplitter
-            Grid.Row="1"
-            HorizontalAlignment="Stretch"
-            ResizeBehavior="PreviousAndNext"
-            ResizeDirection="Rows"
-            Background="{ThemeResource CardStrokeColorDefaultBrush}"
-            AutomationProperties.Name="Resize workspaces" />
-
-        <Border
-            Grid.Row="2"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
@@ -174,6 +60,109 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+        </Border>
+
+        <toolkit:GridSplitter
+            Grid.Row="1"
+            HorizontalAlignment="Stretch"
+            ResizeBehavior="PreviousAndNext"
+            ResizeDirection="Rows"
+            Background="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.Name="Resize workspaces" />
+
+        <Border
+            Grid.Row="2"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="6" />
+                    <ColumnDefinition MinWidth="200" Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ListView
+                    x:Name="VerticalCategoryList"
+                    Grid.Column="0"
+                    Padding="6"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,1,0"
+                    ItemsSource="{x:Bind ViewModel.Categories}"
+                    SelectedItem="{x:Bind ViewModel.SelectedCategoryItem, Mode=TwoWay}"
+                    SelectionMode="Single"
+                    ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                    ScrollViewer.VerticalScrollBarVisibility="Hidden">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel
+                                Padding="10,8"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                                <FontIcon
+                                    VerticalAlignment="Center"
+                                    FontSize="14"
+                                    Glyph="{Binding Glyph}" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontSize="13"
+                                    Text="{Binding Title}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <ScrollViewer
+                    x:Name="TableOuterScrollViewer"
+                    Grid.Column="1"
+                    Padding="8"
+                    HorizontalScrollBarVisibility="Disabled"
+                    HorizontalScrollMode="Disabled"
+                    VerticalScrollBarVisibility="Auto"
+                    VerticalScrollMode="Enabled">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="96" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="LabelColumnGrid" Grid.Column="0" />
+                        <ScrollViewer
+                            x:Name="TableScrollViewer"
+                            Grid.Column="1"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Enabled"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <Grid
+                                x:Name="ComparisonTableGrid"
+                                PointerWheelChanged="ComparisonTableGrid_PointerWheelChanged" />
+                        </ScrollViewer>
+                    </Grid>
+                </ScrollViewer>
+
+                <toolkit:GridSplitter
+                    Grid.Column="2"
+                    HorizontalAlignment="Stretch"
+                    ResizeBehavior="PreviousAndNext"
+                    ResizeDirection="Columns"
+                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    AutomationProperties.Name="Resize table and command areas" />
+
+                <ScrollViewer
+                    Grid.Column="3"
+                    Padding="12"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1,0,0,0"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+                    <StackPanel
+                        x:Name="CommandButtonsPanel"
+                        MinWidth="180"
+                        Spacing="8" />
+                </ScrollViewer>
+            </Grid>
         </Border>
     </Grid>
 </Page>

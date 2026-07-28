@@ -31,6 +31,10 @@ public interface IStorageSystemRepository
     Task SaveSimulationAsync(
         StorageSystemDocument document,
         CancellationToken cancellationToken = default);
+
+    Task DeleteSimulationAsync(
+        string id,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IStorageSystemImportExportService
@@ -47,6 +51,22 @@ public interface IMachineRecordService
     Task RecordLocalScanAsync(
         StorageSystemDocument localDocument,
         CancellationToken cancellationToken = default);
+
+    Task<StorageSystemDocument?> LoadLocalScanAsync(
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record WorkspaceUiState(
+    string ShellPage = "",
+    string ActiveSystemId = "",
+    WorkspaceCategory Category = WorkspaceCategory.System,
+    IReadOnlyDictionary<WorkspaceCategory, string>? CategorySelections = null);
+
+public interface IWorkspaceStateService
+{
+    Task<WorkspaceUiState?> LoadAsync(CancellationToken cancellationToken = default);
+
+    Task SaveAsync(WorkspaceUiState state, CancellationToken cancellationToken = default);
 }
 
 public interface ISimulationOperationService
@@ -78,6 +98,7 @@ public interface IExportService
 
 public enum GlobalNotificationSeverity
 {
+    Info,
     Warning,
     Error
 }
@@ -89,17 +110,27 @@ public sealed record GlobalNotification(
     string Message,
     string Source,
     DateTimeOffset CreatedAt,
-    string DeduplicationKey);
+    string DeduplicationKey,
+    bool AutoDismiss = true);
 
 public interface IGlobalNotificationService
 {
     ReadOnlyObservableCollection<GlobalNotification> Notifications { get; }
+
+    void PublishInfo(
+        string title,
+        string message,
+        string source,
+        string? occurrenceKey = null,
+        bool autoDismiss = true);
 
     void PublishWarning(string title, string message, string source, string? occurrenceKey = null);
 
     void PublishError(string title, string message, string source, string? occurrenceKey = null);
 
     void Dismiss(string id);
+
+    void DismissByKey(string deduplicationKey);
 }
 
 public enum ElevationRestartStatus

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Core;
+using WinPool.Infrastructure.Windows;
 
 namespace WinPool_App;
 
@@ -13,6 +14,7 @@ public sealed partial class SettingsPage : Page
 {
     private bool _ready;
     private bool _updatingMode;
+    private bool _updatingDataLocation;
 
     public SettingsPage()
     {
@@ -31,6 +33,10 @@ public sealed partial class SettingsPage : Page
         LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
         MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
         ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
+        WelcomeCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowWelcomeAtStart;
+        _updatingDataLocation = true;
+        DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
+        _updatingDataLocation = false;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         UpdateText();
         SyncExecutionMode();
@@ -51,9 +57,43 @@ public sealed partial class SettingsPage : Page
         {
             l["SystemAccent"], l["Blue"], l["Cyan"], l["Green"], l["Purple"], l["Orange"], l["Red"]
         };
-        LanguageOptions.ItemsSource = new[] { l["Chinese"], l["English"] };
+        LanguageOptions.ItemsSource = new[] { l["SystemLanguage"], l["Chinese"], l["English"] };
+        DataLocationOptions.ItemsSource = new[] { l["StandardLocation"], l["PortableLocation"] };
     }
 
+    private async void DataLocationOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready || _updatingDataLocation || DataLocationOptions.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var l = ViewModel.Localization;
+        var mode = (StorageLocationMode)DataLocationOptions.SelectedIndex;
+        var result = await StorageDataLocations.SetModeAsync(mode);
+        if (!result.Success)
+        {
+            _updatingDataLocation = true;
+            DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
+            _updatingDataLocation = false;
+            ViewModel.NotificationService.PublishError(
+                l["Error"],
+                l["DataLocationFailed"],
+                "settings",
+                $"datalocation:{DateTimeOffset.UtcNow.Ticks}");
+            return;
+        }
+
+        if (mode == StorageDataLocations.Mode)
+        {
+            DataLocationPath.Text = StorageDataLocations.CurrentRoot;
+            ViewModel.NotificationService.PublishInfo(
+                l["DataLocation"],
+                l["DataLocationSwitched"],
+                "settings",
+                $"datalocation:{DateTimeOffset.UtcNow.Ticks}");
+        }
+    }
     private async void ThemeOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_ready || ThemeOptions.SelectedIndex < 0)
@@ -132,6 +172,7 @@ public sealed partial class SettingsPage : Page
             var dialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
+                RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
                 Title = l["PrivacyWarningTitle"],
                 Content = l["PrivacyWarningMessage"],
                 PrimaryButtonText = l["Confirm"],
@@ -146,6 +187,15 @@ public sealed partial class SettingsPage : Page
         }
 
         await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsCheckBox.IsChecked == true);
+    }
+
+    private async void WelcomeCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_ready)
+        {
+            return;
+        }
+        await ViewModel.SetShowWelcomeAtStartAsync(WelcomeCheckBox.IsChecked == true);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -173,7 +223,6 @@ public sealed partial class SettingsPage : Page
     private void UpdateText()
     {
         var l = ViewModel.Localization;
-        SettingsTitle.Text = l["Settings"];
         ThemeTitle.Text = l["Appearance"];
         AccentTitle.Text = l["AccentColor"];
         LanguageTitle.Text = l["Language"];
@@ -183,6 +232,14 @@ public sealed partial class SettingsPage : Page
         MsrCheckBox.Content = l["CreateMsrOnInitialize"];
         PrivacyTitle.Text = l["Privacy"];
         ShowHardwareIdsCheckBox.Content = l["ShowHardwareIds"];
+        WelcomeTitle.Text = l["Welcome"];
+        WelcomeCheckBox.Content = l["ShowWelcomeAtStart"];
+        DataLocationTitle.Text = l["DataLocation"];
+        DataLocationPath.Text = StorageDataLocations.CurrentRoot;
+        _updatingDataLocation = true;
+        DataLocationOptions.ItemsSource = new[] { l["StandardLocation"], l["PortableLocation"] };
+        DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
+        _updatingDataLocation = false;
         AboutTitle.Text = l["About"];
         AboutProductNameLabel.Text = l["Product"];
         AboutProductNameValue.Text = ProductInformation.Name;
@@ -194,6 +251,9 @@ public sealed partial class SettingsPage : Page
         AboutFeedbackLabel.Text = l["Feedback"];
         AboutCommunityLabel.Text = l["Community"];
         AboutCommunityValue.Text = l["CommunityPending"];
+        WebsiteButtonText.Text = l["VisitWebsite"];
+        UpdateButtonText.Text = l["ViewUpdates"];
+        FeedbackButtonText.Text = l["SendFeedback"];
         SyncExecutionMode();
     }
 

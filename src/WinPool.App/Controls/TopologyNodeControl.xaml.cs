@@ -108,6 +108,13 @@ public sealed partial class TopologyNodeControl : UserControl
         DisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
         TypeLabelText.Foreground = Brush("TextFillColorSecondaryBrush");
         SummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
+        var iconBrush = Brush("TextFillColorSecondaryBrush");
+        TypeIcon.Foreground = iconBrush;
+        ExpandIcon.Foreground = iconBrush;
+        WindowsMarkerSquare1.Fill = iconBrush;
+        WindowsMarkerSquare2.Fill = iconBrush;
+        WindowsMarkerSquare3.Fill = iconBrush;
+        WindowsMarkerSquare4.Fill = iconBrush;
     }
 
     private static Brush Brush(string key) =>
@@ -118,6 +125,12 @@ public sealed partial class TopologyNodeControl : UserControl
         DisplayNameText.Foreground = brush;
         TypeLabelText.Foreground = brush;
         SummaryText.Foreground = brush;
+        TypeIcon.Foreground = brush;
+        ExpandIcon.Foreground = brush;
+        WindowsMarkerSquare1.Fill = brush;
+        WindowsMarkerSquare2.Fill = brush;
+        WindowsMarkerSquare3.Fill = brush;
+        WindowsMarkerSquare4.Fill = brush;
     }
 
     private void TopologyNodeControl_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -149,6 +162,15 @@ public sealed partial class TopologyNodeControl : UserControl
         if (ViewModel?.IsSelectable == true)
         {
             ViewModel.SelectCommand.Execute(null);
+        }
+        e.Handled = true;
+    }
+
+    private void NodeBorder_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+    {
+        if (ViewModel?.IsSelectable == true)
+        {
+            ViewModel.RequestContextMenu(this);
         }
         e.Handled = true;
     }

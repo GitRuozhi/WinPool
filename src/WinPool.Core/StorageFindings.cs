@@ -74,5 +74,6 @@ public static class StorageFindingInspector
         !(string.IsNullOrWhiteSpace(healthStatus)
           || healthStatus.Equals("Healthy", StringComparison.OrdinalIgnoreCase))
         || !(string.IsNullOrWhiteSpace(operationalStatus)
-             || operationalStatus.Equals("OK", StringComparison.OrdinalIgnoreCase));
+             || operationalStatus.Equals("OK", StringComparison.OrdinalIgnoreCase)
+             || operationalStatus.Equals("Other", StringComparison.OrdinalIgnoreCase));
 }

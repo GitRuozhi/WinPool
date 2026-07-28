@@ -54,7 +54,8 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="2"
-            Tapped="NodeBorder_Tapped">
+            Tapped="NodeBorder_Tapped"
+            RightTapped="NodeBorder_RightTapped">
             <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -87,14 +88,18 @@
                     Visibility="{x:Bind ViewModel.ExpandButtonVisibility, Mode=OneWay}"
                     AutomationProperties.Name="{x:Bind ViewModel.ExpandAutomationName, Mode=OneWay}"
                     Tapped="ExpandButton_Tapped">
-                    <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.ExpandGlyph, Mode=OneWay}" />
+                    <FontIcon x:Name="ExpandIcon" FontSize="12" Glyph="{x:Bind ViewModel.ExpandGlyph, Mode=OneWay}" />
                 </Button>
                 <Grid
                     Grid.Column="2"
                     MinHeight="42"
                     Padding="8,4">
                     <StackPanel IsHitTestVisible="False">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock
                                 x:Name="DisplayNameText"
                                 MinHeight="18"
@@ -102,6 +107,7 @@
                                 Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}"
                                 TextWrapping="Wrap" />
                             <Border
+                                Grid.Column="1"
                                 Padding="5,1"
                                 VerticalAlignment="Top"
                                 Background="{ThemeResource SystemFillColorCautionBrush}"
@@ -111,21 +117,66 @@
                                     FontSize="10"
                                     Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
                             </Border>
-                        </StackPanel>
-                        <TextBlock
-                            x:Name="TypeLabelText"
-                            Margin="0,2,0,0"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind ViewModel.TypeLabel, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                        <TextBlock
-                            x:Name="SummaryText"
-                            Margin="0,2,0,0"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind ViewModel.Summary, Mode=OneWay}"
-                            TextWrapping="Wrap" />
+                        </Grid>
+                        <Grid Margin="0,2,0,0" ColumnSpacing="5">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <FontIcon
+                                x:Name="TypeIcon"
+                                Grid.Column="0"
+                                Margin="0,1,0,0"
+                                VerticalAlignment="Top"
+                                FontSize="13"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="{x:Bind ViewModel.TypeGlyph, Mode=OneWay}" />
+                            <Grid
+                                x:Name="WindowsMarker"
+                                Grid.Column="1"
+                                Width="12"
+                                Height="12"
+                                Margin="0,3,0,0"
+                                VerticalAlignment="Top"
+                                ColumnSpacing="1.5"
+                                RowSpacing="1.5"
+                                Visibility="{x:Bind ViewModel.WindowsMarkerVisibility, Mode=OneWay}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Rectangle x:Name="WindowsMarkerSquare1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Rectangle x:Name="WindowsMarkerSquare2" Grid.Column="1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Rectangle x:Name="WindowsMarkerSquare3" Grid.Row="1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Rectangle x:Name="WindowsMarkerSquare4" Grid.Row="1" Grid.Column="1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                            <TextBlock
+                                x:Name="TypeLabelText"
+                                Grid.Column="2"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.TypeLabel, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                x:Name="SummaryText"
+                                Grid.Row="1"
+                                Grid.Column="0"
+                                Grid.ColumnSpan="3"
+                                Margin="0,2,0,0"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.Summary, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </Grid>
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -133,7 +184,7 @@
                 <ItemsControl
                     x:Name="FlowChildren"
                     Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
-                    Margin="6,5,6,5"
+                    Margin="6,5,6,0"
                     ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
                     Visibility="{x:Bind ViewModel.FlowChildrenVisibility, Mode=OneWay}">
                 <ItemsControl.ItemContainerStyle>
@@ -158,7 +209,7 @@
 
                 <ItemsControl
                     Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
-                    Margin="6,5,6,5"
+                    Margin="6,5,6,0"
                     ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
                     Visibility="{x:Bind ViewModel.WeightedChildrenVisibility, Mode=OneWay}">
                 <ItemsControl.ItemContainerStyle>
@@ -181,7 +232,7 @@
 
                 <ItemsControl
                     Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
-                    Margin="6,5,6,5"
+                    Margin="6,5,6,0"
                     ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
                     Visibility="{x:Bind ViewModel.StackChildrenVisibility, Mode=OneWay}">
                 <ItemsControl.ItemContainerStyle>

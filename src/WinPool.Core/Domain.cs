@@ -35,8 +35,15 @@ public enum AccentColorPreference
 
 public enum LanguagePreference
 {
+    SystemDefault,
     ZhCn,
     EnUs
+}
+
+public enum StorageLocationMode
+{
+    Standard,
+    Portable
 }
 
 public enum WorkspaceCategory
@@ -67,9 +74,10 @@ public enum StorageUnitKind
 public sealed record UserPreferences(
     ThemePreference Theme = ThemePreference.System,
     AccentColorPreference AccentColor = AccentColorPreference.System,
-    LanguagePreference Language = LanguagePreference.ZhCn,
+    LanguagePreference Language = LanguagePreference.SystemDefault,
     bool ShowHardwareIds = false,
-    bool CreateMsrOnInitialize = true);
+    bool CreateMsrOnInitialize = true,
+    bool ShowWelcomeAtStart = true);
 
 public sealed record StorageUnitRef(
     string StableId,
@@ -100,7 +108,9 @@ public sealed record ComputerInfo(
     string WindowsProductName,
     string WindowsVersion,
     string OsBuild,
-    DateTimeOffset LastBootTime);
+    DateTimeOffset LastBootTime,
+    string DisplayVersion = "",
+    string Ubr = "");
 
 public sealed record StorageSubsystemInfo(
     string StableId,
@@ -128,7 +138,11 @@ public sealed record PhysicalDiskInfo(
     bool IsSystem,
     bool IsPageFile,
     bool IsCrashDump,
-    string? PoolStableId);
+    string? PoolStableId,
+    string FirmwareVersion = "",
+    string InterfaceType = "",
+    string ProvisioningType = "",
+    string PnpDeviceId = "");
 
 public sealed record StoragePoolInfo(
     string StableId,
@@ -140,7 +154,10 @@ public sealed record StoragePoolInfo(
     long Size,
     long AllocatedSize,
     string? SubsystemStableId,
-    IReadOnlyList<string> MemberPhysicalDiskIds);
+    IReadOnlyList<string> MemberPhysicalDiskIds,
+    long? LogicalSectorSize = null,
+    long? PhysicalSectorSize = null,
+    string ProvisioningTypeDefault = "");
 
 public sealed record StorageTierInfo(
     string StableId,
@@ -152,7 +169,9 @@ public sealed record StorageTierInfo(
     long FootprintOnPool,
     string? PoolStableId,
     string? VirtualDiskStableId,
-    IReadOnlyList<string> MemberPhysicalDiskIds);
+    IReadOnlyList<string> MemberPhysicalDiskIds,
+    int? NumberOfColumns = null,
+    long? Interleave = null);
 
 public sealed record VirtualDiskInfo(
     string StableId,
@@ -200,7 +219,8 @@ public sealed record PartitionInfo(
     string HealthStatus,
     string OperationalStatus,
     string Path,
-    string? OsDiskStableId);
+    string? OsDiskStableId,
+    bool IsHidden = false);
 
 public sealed record NetworkDiskInfo(
     string StableId,

@@ -1,4 +1,4 @@
-using Microsoft.UI.Text;
+﻿using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -753,5 +753,5 @@ public sealed partial class EditPage : Page
     }
 
     private string Text(string zh, string en) =>
-        ViewModel.Localization.Language == LanguagePreference.ZhCn ? zh : en;
+        ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;
 }

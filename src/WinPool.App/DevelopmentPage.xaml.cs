@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -23,8 +23,7 @@ public sealed partial class DevelopmentPage : Page
     {
         base.OnNavigatedTo(e);
         ViewModel = (WorkspaceViewModel)e.Parameter;
-        var zh = ViewModel.Localization.Language == LanguagePreference.ZhCn;
-        DevelopmentTitle.Text = ViewModel.Localization["Development"];
+        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         DevelopmentIntro.Text = ViewModel.Localization["DevelopmentIntro"];
         ClearButton.Content = zh ? "清空" : "Clear";
         Rebuild();

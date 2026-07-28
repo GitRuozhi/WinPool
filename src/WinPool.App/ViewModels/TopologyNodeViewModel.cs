@@ -39,11 +39,35 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                     $"{_occurrenceKey}/{index}:{child.Unit.Kind}"))
             .ToList();
         (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, node.Unit);
+        IsWindowsBacked = ComputeIsWindowsBacked(snapshot, node.Unit);
     }
 
     public string BadgeText { get; }
 
     public bool BadgeIsWarning { get; }
+
+    public bool IsWindowsBacked { get; }
+
+    public Visibility WindowsMarkerVisibility =>
+        IsWindowsBacked ? Visibility.Visible : Visibility.Collapsed;
+
+    private static bool ComputeIsWindowsBacked(StorageSnapshot snapshot, StorageUnitRef unit)
+    {
+        switch (unit.Kind)
+        {
+            case StorageUnitKind.PhysicalDisk:
+                return snapshot.OsDisks.Any(
+                    x => x.PhysicalDiskStableId == unit.StableId && (x.IsSystem || x.IsBoot));
+            case StorageUnitKind.Partition:
+                var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
+                return partition is { IsBoot: true } or { IsSystem: true };
+            case StorageUnitKind.OsDisk:
+                var osDisk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == unit.StableId);
+                return osDisk is { IsSystem: true } or { IsBoot: true };
+            default:
+                return false;
+        }
+    }
 
     public Visibility BadgeVisibility =>
         string.IsNullOrEmpty(BadgeText) ? Visibility.Collapsed : Visibility.Visible;
@@ -57,18 +81,10 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         {
             case StorageUnitKind.PhysicalDisk:
                 var physical = snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == unit.StableId);
-                if (physical is not null)
+                if (physical is not null
+                    && StorageFindingInspector.IsUnhealthy(physical.HealthStatus, physical.OperationalStatus))
                 {
-                    if (StorageFindingInspector.IsUnhealthy(physical.HealthStatus, physical.OperationalStatus))
-                    {
-                        return (owner.Localization["Unhealthy"], true);
-                    }
-                    var backingOsDisk = snapshot.OsDisks.FirstOrDefault(
-                        x => x.PhysicalDiskStableId == physical.StableId);
-                    if (backingOsDisk is { IsSystem: true } or { IsBoot: true })
-                    {
-                        return (owner.Localization["SystemDisk"], false);
-                    }
+                    return (owner.Localization["Unhealthy"], true);
                 }
                 break;
             case StorageUnitKind.VirtualDisk:
@@ -101,23 +117,10 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 break;
             case StorageUnitKind.Partition:
                 var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
-                if (partition is not null)
+                if (partition is not null
+                    && StorageFindingInspector.IsUnhealthy(partition.HealthStatus, partition.OperationalStatus))
                 {
-                    if (StorageFindingInspector.IsUnhealthy(partition.HealthStatus, partition.OperationalStatus))
-                    {
-                        return (owner.Localization["Unhealthy"], true);
-                    }
-                    if (partition.IsBoot || partition.IsSystem)
-                    {
-                        return (owner.Localization["SystemDisk"], false);
-                    }
-                }
-                break;
-            case StorageUnitKind.OsDisk:
-                var osDisk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == unit.StableId);
-                if (osDisk is { IsSystem: true } or { IsBoot: true })
-                {
-                    return (owner.Localization["SystemDisk"], false);
+                    return (owner.Localization["Unhealthy"], true);
                 }
                 break;
         }
@@ -157,6 +160,17 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public Visibility ExpandButtonVisibility =>
         HasChildren ? Visibility.Visible : Visibility.Collapsed;
+
+    public string TypeGlyph => Unit.Kind switch
+    {
+        StorageUnitKind.System => "\uE7F8",
+        StorageUnitKind.StoragePool => "\uEDA2",
+        StorageUnitKind.StorageTier => "\uE8FD",
+        StorageUnitKind.NetworkDisk or StorageUnitKind.NetworkDiskGroup => "\uE774",
+        StorageUnitKind.OtherDiskGroup => "\uE8B7",
+        StorageUnitKind.Partition => "\uE7C3",
+        _ => "\uEDA2"
+    };
 
     public Visibility HeaderVisibility =>
         Unit.Kind == StorageUnitKind.DirectDiskGroup ? Visibility.Collapsed : Visibility.Visible;
@@ -218,6 +232,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             IsExpanded = !IsExpanded;
         }
     }
+
+    public void RequestContextMenu(Microsoft.UI.Xaml.FrameworkElement target) =>
+        _owner.NodeContextMenuRequested?.Invoke(Unit, target);
 
     public void RefreshSelection()
     {
@@ -282,7 +299,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 snapshot.VirtualDisks.Count > 0
                     ? $"{snapshot.VirtualDisks.Count} {owner.Localization["VirtualDisk"]}"
                     : null,
-                $"{snapshot.NetworkDisks.Count} {owner.Localization["NetworkDisk"]}",
+                snapshot.NetworkDisks.Count > 0
+                    ? $"{snapshot.NetworkDisks.Count} {owner.Localization["NetworkDisk"]}"
+                    : null,
                 TopologyProjector.FormatBytes(physical.Sum(x => x.Size)));
         }
 

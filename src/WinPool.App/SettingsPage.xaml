@@ -12,14 +12,6 @@
             Padding="24,20,24,40"
             HorizontalAlignment="Stretch"
             Spacing="16">
-            <StackPanel Margin="0,0,0,8" Spacing="8">
-                <TextBlock
-                    x:Name="SettingsTitle"
-                    FontSize="32"
-                    FontWeight="SemiBold"
-                    Text="设置" />
-            </StackPanel>
-
             <Border
                 Padding="20"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -90,6 +82,8 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -135,6 +129,39 @@
                         VerticalAlignment="Center"
                         Click="ShowHardwareIdsCheckBox_Click"
                         Content="显示硬件ID" />
+                    <TextBlock
+                        x:Name="WelcomeTitle"
+                        Grid.Row="3"
+                        VerticalAlignment="Center"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="欢迎页面" />
+                    <CheckBox
+                        x:Name="WelcomeCheckBox"
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Click="WelcomeCheckBox_Click"
+                        Content="启动时显示欢迎页面" />
+                    <TextBlock
+                        x:Name="DataLocationTitle"
+                        Grid.Row="4"
+                        VerticalAlignment="Center"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="数据存储位置" />
+                    <StackPanel Grid.Row="4" Grid.Column="1" Spacing="4">
+                        <ComboBox
+                            x:Name="DataLocationOptions"
+                            MinWidth="220"
+                            HorizontalAlignment="Left"
+                            SelectionChanged="DataLocationOptions_SelectionChanged" />
+                        <TextBlock
+                            x:Name="DataLocationPath"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -196,12 +223,12 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutWebsiteLabel" Text="官网" />
-                            <HyperlinkButton
-                                x:Name="WebsiteLink"
-                                Grid.Column="1"
-                                Padding="0"
-                                Click="WebsiteLink_Click"
-                                Content="github.com/GitRuozhi/WinPool" />
+                            <Button x:Name="WebsiteButton" Grid.Column="1" Padding="8,4" Click="WebsiteLink_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="13" Glyph="&#xE774;" />
+                                    <TextBlock x:Name="WebsiteButtonText" VerticalAlignment="Center" Text="访问官网" />
+                                </StackPanel>
+                            </Button>
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
@@ -209,12 +236,12 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutUpdateLabel" Text="更新" />
-                            <HyperlinkButton
-                                x:Name="UpdateLink"
-                                Grid.Column="1"
-                                Padding="0"
-                                Click="UpdateLink_Click"
-                                Content="GitHub Releases" />
+                            <Button x:Name="UpdateButton" Grid.Column="1" Padding="8,4" Click="UpdateLink_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="13" Glyph="&#xE777;" />
+                                    <TextBlock x:Name="UpdateButtonText" VerticalAlignment="Center" Text="查看更新" />
+                                </StackPanel>
+                            </Button>
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
@@ -222,12 +249,12 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutFeedbackLabel" Text="反馈" />
-                            <HyperlinkButton
-                                x:Name="FeedbackLink"
-                                Grid.Column="1"
-                                Padding="0"
-                                Click="FeedbackLink_Click"
-                                Content="GitHub Issues" />
+                            <Button x:Name="FeedbackButton" Grid.Column="1" Padding="8,4" Click="FeedbackLink_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="13" Glyph="&#xE8F2;" />
+                                    <TextBlock x:Name="FeedbackButtonText" VerticalAlignment="Center" Text="提交反馈" />
+                                </StackPanel>
+                            </Button>
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>

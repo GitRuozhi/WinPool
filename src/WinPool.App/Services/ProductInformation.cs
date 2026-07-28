@@ -4,7 +4,7 @@ public static class ProductInformation
 {
     public const string Name = "WinPool";
 
-    public const string Version = "V0.12";
+    public const string Version = "V0.13";
 
     public static readonly Uri WebsiteUri = new("https://github.com/GitRuozhi/WinPool");
 

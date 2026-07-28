@@ -129,14 +129,14 @@
 
             <ItemsControl
                 x:Name="GlobalNotificationStack"
-                Margin="12,72,12,0"
-                HorizontalAlignment="Stretch"
-                VerticalAlignment="Top"
+                Margin="12,0,12,12"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
                 Canvas.ZIndex="100"
                 ItemsSource="{x:Bind NotificationService.Notifications, Mode=OneWay}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <StackPanel Spacing="6" />
+                        <StackPanel Width="380" Spacing="6" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>

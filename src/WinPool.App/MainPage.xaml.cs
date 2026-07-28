@@ -1,9 +1,11 @@
-using Microsoft.UI.Text;
+﻿using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using System.Runtime.InteropServices;
 using WinPool.App.ViewModels;
 using WinPool.Core;
 
@@ -11,11 +13,54 @@ namespace WinPool_App;
 
 public sealed partial class MainPage : Page
 {
-    private const double LabelColumnWidth = 150;
-    private const double ObjectColumnWidth = 220;
+    private const uint SeeMaskInvokeIdList = 0x0000000C;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShellExecuteInfo
+    {
+        public int Size;
+        public uint Mask;
+        public nint Hwnd;
+        public string? Verb;
+        public string? File;
+        public string? Parameters;
+        public string? Directory;
+        public int Show;
+        public nint InstApp;
+        public nint IDList;
+        public string? Class;
+        public nint HKeyClass;
+        public uint HotKey;
+        public nint Icon;
+        public nint Process;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShellExecuteEx(ref ShellExecuteInfo executeInfo);
+
+    private static bool TryShowNativeProperties(string path)
+    {
+        var info = new ShellExecuteInfo
+        {
+            Size = Marshal.SizeOf<ShellExecuteInfo>(),
+            Mask = SeeMaskInvokeIdList,
+            Hwnd = nint.Zero,
+            Verb = "properties",
+            File = path,
+            Show = 1
+        };
+        return ShellExecuteEx(ref info);
+    }
+
+    private const double LabelColumnWidth = 96;
     private const double ColumnGap = 8;
+    private const double RowHeight = 32;
+    private const double MaxValueWidth = 250;
     private readonly Dictionary<string, int> _columnIndexByKey = new(StringComparer.Ordinal);
-    private readonly List<FrameworkElement> _columnCells = [];
+    private readonly List<Border> _columnCells = [];
+    private string? _hoveredColumnKey;
+    private string _renderedSignature = string.Empty;
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
 
@@ -30,6 +75,8 @@ public sealed partial class MainPage : Page
         base.OnNavigatedTo(e);
         ViewModel = (WorkspaceViewModel)e.Parameter;
         ViewModel.WorkspaceSelectionChanged += ViewModel_WorkspaceSelectionChanged;
+        ViewModel.NodeContextMenuRequested = ShowNodeContextMenu;
+        ActualThemeChanged += MainPage_ActualThemeChanged;
         Bindings.Update();
         RebuildComparisonTable();
         BuildCommandButtons();
@@ -38,15 +85,26 @@ public sealed partial class MainPage : Page
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         ViewModel.WorkspaceSelectionChanged -= ViewModel_WorkspaceSelectionChanged;
+        ViewModel.NodeContextMenuRequested = null;
+        ActualThemeChanged -= MainPage_ActualThemeChanged;
         ViewModel.TopologyHorizontalOffset = TopologyScrollViewer.HorizontalOffset;
         ViewModel.TopologyVerticalOffset = TopologyScrollViewer.VerticalOffset;
         base.OnNavigatedFrom(e);
     }
 
+    private void MainPage_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        _renderedSignature = string.Empty;
+        RebuildComparisonTable();
+        BuildCommandButtons();
+        ApplyColumnHighlight(centerSelected: false);
+    }
+
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.Snapshot.ScannedAt == DateTimeOffset.MinValue && !ViewModel.IsScanning)
+        if (!ViewModel.AutoScanAttempted && !ViewModel.IsScanning)
         {
+            ViewModel.AutoScanAttempted = true;
             await ViewModel.ScanAsync();
         }
         DispatcherQueue.TryEnqueue(() =>
@@ -62,11 +120,15 @@ public sealed partial class MainPage : Page
     private void RebuildComparisonTable()
     {
         var grid = ComparisonTableGrid;
+        var labelGrid = LabelColumnGrid;
         grid.Children.Clear();
         grid.RowDefinitions.Clear();
         grid.ColumnDefinitions.Clear();
+        labelGrid.Children.Clear();
+        labelGrid.RowDefinitions.Clear();
         _columnIndexByKey.Clear();
         _columnCells.Clear();
+        _hoveredColumnKey = null;
 
         var columns = ViewModel.ComparisonColumns;
         if (columns.Count == 0)
@@ -74,13 +136,13 @@ public sealed partial class MainPage : Page
             grid.Children.Add(new TextBlock
             {
                 Padding = new Thickness(12),
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Foreground = ProbeSecondaryText.Foreground,
                 Text = ViewModel.Localization["NoSelection"]
             });
             return;
         }
 
-        var labels = new List<string>();
+        var labels = new List<string> { ViewModel.Localization["Name"] };
         foreach (var column in columns)
         {
             foreach (var row in column.Rows)
@@ -92,95 +154,158 @@ public sealed partial class MainPage : Page
             }
         }
 
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(LabelColumnWidth) });
         for (var i = 0; i < columns.Count; i++)
         {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ObjectColumnWidth) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             _columnIndexByKey[columns[i].Key] = i;
         }
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         foreach (var unused in labels)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            labelGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         }
 
-        var corner = new Border { Padding = new Thickness(10, 8, 10, 8) };
-        Grid.SetRow(corner, 0);
-        Grid.SetColumn(corner, 0);
-        grid.Children.Add(corner);
-
-        for (var i = 0; i < columns.Count; i++)
-        {
-            var column = columns[i];
-            var header = new Button
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(10, 8, 10, 8),
-                Margin = new Thickness(i == 0 ? 0 : ColumnGap, 0, 0, 4),
-                Content = new TextBlock
-                {
-                    FontWeight = FontWeights.SemiBold,
-                    Text = column.Name,
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                },
-                Tag = column.Key
-            };
-            header.SetValue(AutomationProperties.NameProperty, column.Name);
-            header.Click += ColumnHeader_Click;
-            Grid.SetRow(header, 0);
-            Grid.SetColumn(header, i + 1);
-            grid.Children.Add(header);
-            _columnCells.Add(header);
-        }
+        var secondaryBrush = ProbeSecondaryText.Foreground;
+        var dividerBrush = ProbeDivider.BorderBrush;
 
         for (var rowIndex = 0; rowIndex < labels.Count; rowIndex++)
         {
-            var labelBlock = new TextBlock
+            var labelCell = new Border
             {
-                Padding = new Thickness(10, 7, 10, 7),
-                VerticalAlignment = VerticalAlignment.Top,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Text = labels[rowIndex]
+                MinHeight = RowHeight,
+                BorderBrush = dividerBrush,
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Child = new TextBlock
+                {
+                    Padding = new Thickness(10, 0, 10, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = secondaryBrush,
+                    IsTextSelectionEnabled = true,
+                    Text = labels[rowIndex],
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                }
             };
-            Grid.SetRow(labelBlock, rowIndex + 1);
-            Grid.SetColumn(labelBlock, 0);
-            grid.Children.Add(labelBlock);
+            Grid.SetRow(labelCell, rowIndex);
+            labelGrid.Children.Add(labelCell);
 
             for (var i = 0; i < columns.Count; i++)
             {
-                var value = columns[i].Rows
-                    .FirstOrDefault(x => x.Label.Equals(labels[rowIndex], StringComparison.Ordinal))
-                    ?.Value ?? string.Empty;
+                var isNameRow = rowIndex == 0;
+                var value = isNameRow
+                    ? columns[i].Name
+                    : columns[i].Rows
+                        .FirstOrDefault(x => x.Label.Equals(labels[rowIndex], StringComparison.Ordinal))
+                        ?.Value ?? string.Empty;
+                var text = new TextBlock
+                {
+                    Padding = new Thickness(10, 5, 10, 5),
+                    MaxWidth = MaxValueWidth,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontWeight = isNameRow ? FontWeights.SemiBold : FontWeights.Normal,
+                    Text = value,
+                    TextWrapping = TextWrapping.WrapWholeWords
+                };
                 var cell = new Border
                 {
+                    MinHeight = RowHeight,
                     Margin = new Thickness(i == 0 ? 0 : ColumnGap, 0, 0, 0),
-                    BorderBrush = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+                    BorderBrush = dividerBrush,
                     BorderThickness = new Thickness(0, 0, 0, 1),
-                    Child = new TextBlock
-                    {
-                        Padding = new Thickness(10, 7, 10, 7),
-                        Text = value,
-                        TextWrapping = TextWrapping.WrapWholeWords
-                    },
+                    Child = text,
                     Tag = columns[i].Key
                 };
                 cell.Tapped += ColumnCell_Tapped;
-                Grid.SetRow(cell, rowIndex + 1);
-                Grid.SetColumn(cell, i + 1);
+                cell.PointerEntered += ColumnCell_PointerEntered;
+                cell.PointerExited += ColumnCell_PointerExited;
+                Grid.SetRow(cell, rowIndex);
+                Grid.SetColumn(cell, i);
                 grid.Children.Add(cell);
                 _columnCells.Add(cell);
             }
         }
 
         ApplyColumnHighlight(centerSelected: false);
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            SyncLabelRowHeights);
+        _renderedSignature = ComputeTableSignature();
     }
 
-    private void ColumnHeader_Click(object sender, RoutedEventArgs e) =>
-        SelectColumn(((FrameworkElement)sender).Tag as string);
+    private string ComputeTableSignature()
+    {
+        var builder = new System.Text.StringBuilder();
+        builder.Append(ViewModel.SelectedCategory).Append('|');
+        foreach (var column in ViewModel.ComparisonColumns)
+        {
+            builder.Append(column.Key).Append('\u0001').Append(column.Name);
+            foreach (var row in column.Rows)
+            {
+                builder.Append(row.Label).Append('\u0001').Append(row.Value).Append('\u0002');
+            }
+        }
+        return builder.ToString();
+    }
+
+    private void SyncLabelRowHeights()
+    {
+        var grid = ComparisonTableGrid;
+        var labelGrid = LabelColumnGrid;
+        for (var row = 0; row < grid.RowDefinitions.Count && row < labelGrid.RowDefinitions.Count; row++)
+        {
+            var height = grid.Children
+                .OfType<FrameworkElement>()
+                .Where(x => Grid.GetRow(x) == row)
+                .Select(x => x.ActualHeight)
+                .DefaultIfEmpty(RowHeight)
+                .Max();
+            var target = Math.Max(RowHeight, height);
+            var current = labelGrid.RowDefinitions[row].Height;
+            if (current.IsAuto || Math.Abs(current.Value - target) > 0.5)
+            {
+                labelGrid.RowDefinitions[row].Height = new GridLength(target);
+            }
+        }
+    }
+
+    private void ComparisonTableGrid_PointerWheelChanged(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var delta = e.GetCurrentPoint(ComparisonTableGrid).Properties.MouseWheelDelta;
+        if (delta == 0)
+        {
+            return;
+        }
+        e.Handled = true;
+        var offset = TableOuterScrollViewer.VerticalOffset - ((delta / 120.0) * 48);
+        TableOuterScrollViewer.ChangeView(null, offset, null, disableAnimation: true);
+    }
 
     private void ColumnCell_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
         SelectColumn(((FrameworkElement)sender).Tag as string);
+
+    private void ColumnCell_PointerEntered(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var key = ((Border)sender).Tag as string;
+        if (key != _hoveredColumnKey)
+        {
+            _hoveredColumnKey = key;
+            ApplyColumnHighlight(centerSelected: false);
+        }
+    }
+
+    private void ColumnCell_PointerExited(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_hoveredColumnKey is not null)
+        {
+            _hoveredColumnKey = null;
+            ApplyColumnHighlight(centerSelected: false);
+        }
+    }
 
     private void SelectColumn(string? key)
     {
@@ -201,20 +326,30 @@ public sealed partial class MainPage : Page
 
     private void ApplyColumnHighlight(bool centerSelected)
     {
-        var accent = (Brush)Application.Current.Resources["WinPoolAccentHoverBrush"];
+        var accent = (Brush)Application.Current.Resources["WinPoolAccentBrush"];
+        var accentForeground = (Brush)Application.Current.Resources["WinPoolAccentForegroundBrush"];
+        var hover = (Brush)Application.Current.Resources["WinPoolAccentHoverBrush"];
         var transparent = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         var selectedKey = ViewModel.SelectedWorkspaceItem?.Key;
         foreach (var cell in _columnCells)
         {
-            var brush = cell.Tag is string key && key == selectedKey ? accent : transparent;
-            switch (cell)
+            var isSelected = cell.Tag is string key && key == selectedKey;
+            cell.Background = isSelected
+                ? accent
+                : cell.Tag is string hoveredKey && hoveredKey == _hoveredColumnKey
+                    ? hover
+                    : transparent;
+            if (cell.Child is TextBlock text)
             {
-                case Border border:
-                    border.Background = brush;
-                    break;
-                case Button button:
-                    button.Background = brush;
-                    break;
+                if (isSelected)
+                {
+                    text.Foreground = accentForeground;
+                }
+                else
+                {
+                    text.ClearValue(TextBlock.ForegroundProperty);
+                }
+                text.IsTextSelectionEnabled = isSelected;
             }
         }
 
@@ -222,53 +357,59 @@ public sealed partial class MainPage : Page
             && selectedKey is not null
             && _columnIndexByKey.TryGetValue(selectedKey, out var index))
         {
-            var columnStart = LabelColumnWidth + (index * (ObjectColumnWidth + ColumnGap));
-            var target = columnStart - ((TableScrollViewer.ViewportWidth - ObjectColumnWidth) / 2);
+            var columnStart = _columnCells
+                .Where(x => Grid.GetRow(x) == 0 && Grid.GetColumn(x) < index)
+                .Sum(x => x.ActualWidth + (Grid.GetColumn(x) == 0 ? 0 : ColumnGap));
+            var columnWidth = _columnCells
+                .FirstOrDefault(x => Grid.GetRow(x) == 0 && Grid.GetColumn(x) == index)
+                ?.ActualWidth ?? 220;
+            var target = columnStart - ((TableScrollViewer.ViewportWidth - columnWidth) / 2);
             TableScrollViewer.ChangeView(Math.Max(0, target), null, null, disableAnimation: false);
         }
     }
 
-    private void BuildCommandButtons()
+    private sealed record CommandSpec(string Text, string Glyph, bool Enabled, Func<Task> Action);
+
+    private List<CommandSpec> BuildCommandSpecs()
     {
-        if (ViewModel is null)
-        {
-            return;
-        }
-        CommandButtonsPanel.Children.Clear();
+        var specs = new List<CommandSpec>();
         var selected = ViewModel.SelectedWorkspaceItem;
         if (selected?.IsAction == true)
         {
-            AddCommand(Text("导入", "Import"), "\uE8B5", true, ImportAsync);
-            return;
+            specs.Add(new CommandSpec(Text("导入", "Import"), "\uE8B5", true, ImportAsync));
+            return specs;
         }
         if (selected?.Unit is null)
         {
-            return;
+            return specs;
         }
 
         var simulated = ViewModel.IsUsingSimulatedInventory;
         switch (ViewModel.SelectedCategory)
         {
             case WorkspaceCategory.System:
-                AddCommand(Text("刷新", "Refresh"), "\uE72C", ViewModel.IsLocalSystem, RescanAsync);
-                AddCommand(Text("导出", "Export"), "\uEDE1", true, ExportAsync);
+                specs.Add(new CommandSpec(Text("刷新本机信息", "Refresh local info"), "\uE72C", ViewModel.IsLocalSystem, RescanAsync));
+                specs.Add(new CommandSpec(Text("转换本机到模拟", "Convert local to simulation"), "\uE8AB", ViewModel.IsLocalSystem, ConvertLocalAsync));
+                specs.Add(new CommandSpec(Text("导入模拟系统", "Import simulated system"), "\uE8B5", true, ImportAsync));
+                specs.Add(new CommandSpec(Text("导出模拟系统", "Export simulated system"), "\uEDE1", true, ExportAsync));
+                specs.Add(new CommandSpec(Text("删除模拟系统", "Delete simulation"), "\uE74D", ViewModel.CanDeleteSelectedSimulation, DeleteSimulationAsync));
                 break;
             case WorkspaceCategory.Pool:
                 var pool = ViewModel.ActiveSnapshot.StoragePools.FirstOrDefault(
                     x => x.StableId == selected.Unit.StableId);
                 var editablePool = simulated && pool is { IsPrimordial: false };
-                AddCommand(Text("重命名", "Rename"), "\uE8AC", editablePool, NavigateEditAsync);
-                AddCommand(Text("创建", "Create"), "\uE710", simulated && pool is not null, NavigateEditAsync);
-                AddCommand(Text("调整", "Adjust"), "\uE90F", editablePool, NavigateEditAsync);
-                AddCommand(
-                    Text("优化使用率", "Optimize usage"), "\uE945",
+                specs.Add(new CommandSpec(Text("重命名存储池", "Rename pool"), "\uE8AC", editablePool, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("创建存储池", "Create pool"), "\uE710", simulated && pool is not null, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("编辑存储池", "Edit pool"), "\uE90F", editablePool, NavigateEditAsync));
+                specs.Add(new CommandSpec(
+                    Text("优化磁盘使用率", "Optimize disk usage"), "\uE945",
                     editablePool,
-                    NavigateEditAsync);
+                    NavigateEditAsync));
                 break;
             case WorkspaceCategory.Tier:
-                AddCommand(Text("重命名", "Rename"), "\uE8AC", simulated, NavigateEditAsync);
-                AddCommand(Text("创建", "Create"), "\uE710", simulated, NavigateEditAsync);
-                AddCommand(Text("调整", "Adjust"), "\uE90F", simulated, NavigateEditAsync);
+                specs.Add(new CommandSpec(Text("重命名存储层", "Rename tier"), "\uE8AC", simulated, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("创建存储层", "Create tier"), "\uE710", simulated, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("编辑存储层", "Edit tier"), "\uE90F", simulated, NavigateEditAsync));
                 break;
             case WorkspaceCategory.Disk:
                 var selectedDisk = ResolveOsDisk();
@@ -284,66 +425,131 @@ public sealed partial class MainPage : Page
                     } && selectedPhysicalDisk is not { IsPageFile: true } and not { IsCrashDump: true };
                 var diskHasPartitions = selectedDisk is not null
                     && ViewModel.ActiveSnapshot.Partitions.Any(x => x.OsDiskStableId == selectedDisk.StableId);
-                AddCommand(
-                    Text("重命名", "Rename"), "\uE8AC",
+                specs.Add(new CommandSpec(
+                    Text("重命名磁盘", "Rename disk"), "\uE8AC",
                     simulated && selected.Unit.Kind is not StorageUnitKind.NetworkDisk,
-                    NavigateEditAsync);
-                AddCommand(Text("新建", "New"), "\uE710", simulated && selectedDisk is not null, NavigateEditAsync);
-                AddCommand(Text("初始化", "Initialize"), "\uE9CE", simulated && selectedDisk is not null, NavigateEditAsync);
-                AddCommand(
-                    Text("转换", "Convert"), "\uE8AB",
+                    NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("初始化磁盘", "Initialize disk"), "\uE9CE", simulated && selectedDisk is not null, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("新建分区", "New partition"), "\uE710", simulated && selectedDisk is not null, NavigateEditAsync));
+                specs.Add(new CommandSpec(
+                    Text("转换到其他类型", "Convert to another style"), "\uE8AB",
                     simulated && selectedDisk is not null && !diskHasPartitions,
-                    NavigateEditAsync);
-                AddCommand(
-                    Text("脱机 / 联机", "Offline / Online"), "",
+                    NavigateEditAsync));
+                specs.Add(new CommandSpec(
+                    selectedDisk is { IsOffline: true }
+                        ? Text("联机", "Online")
+                        : Text("脱机", "Offline"),
+                    "\uEDA2",
                     simulated && selectedDisk is not null && diskCanBeTakenOffline,
-                    NavigateEditAsync);
-                AddCommand(Text("属性", "Properties"), "\uE90A", true, PropertiesAsync);
+                    NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("系统属性对话框", "System properties dialog"), "\uE90A", ViewModel.IsSelectedSystemLocalConsistent, PropertiesAsync));
                 break;
             case WorkspaceCategory.Partition:
                 var partition = ViewModel.ActiveSnapshot.Partitions.FirstOrDefault(
                     x => x.StableId == selected.Unit.StableId);
                 var isPrimaryPartition = partition?.Type == "Primary";
                 var editablePartition = simulated && isPrimaryPartition;
-                AddCommand(
-                    Text("打开", "Open"), "\uE838",
+                specs.Add(new CommandSpec(
+                    Text("打开资源管理器", "Open in File Explorer"), "\uE838",
                     isPrimaryPartition && ViewModel.CanOpenSelectedPartition,
-                    OpenPartitionAsync);
-                AddCommand(Text("更改盘符", "Change drive letter"), "\uE8B7", editablePartition, NavigateEditAsync);
-                AddCommand(Text("重命名", "Rename"), "\uE8AC", editablePartition, NavigateEditAsync);
-                AddCommand(Text("格式化", "Format"), "\uE9CE", editablePartition, NavigateEditAsync);
-                AddOptimizeCommand(partition, simulated);
-                AddCommand(Text("调整", "Adjust"), "\uE90F", editablePartition, NavigateEditAsync);
-                AddCommand(Text("删除", "Delete"), "\uE74D", editablePartition, NavigateEditAsync);
-                AddCommand(Text("属性", "Properties"), "\uE90A", true, PropertiesAsync);
+                    OpenPartitionAsync));
+                specs.Add(new CommandSpec(Text("修改盘符和路径", "Change drive letter and paths"), "\uE8B7", editablePartition, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("重命名分区", "Rename partition"), "\uE8AC", editablePartition, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("格式化分区", "Format partition"), "\uE9CE", editablePartition, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("编辑分区", "Edit partition"), "\uE90F", editablePartition, NavigateEditAsync));
+                specs.Add(new CommandSpec(Text("删除分区", "Delete partition"), "\uE74D", editablePartition, NavigateEditAsync));
+                specs.Add(new CommandSpec(
+                    Text("优化驱动器", "Optimize drive"), "\uE945",
+                    isPrimaryPartition && ViewModel.IsSelectedSystemLocalConsistent,
+                    OptimizeDrivesAsync));
+                specs.Add(new CommandSpec(Text("系统属性对话框", "System properties dialog"), "\uE90A", ViewModel.IsSelectedSystemLocalConsistent, PropertiesAsync));
                 break;
+        }
+
+        specs.Add(new CommandSpec(
+            Text($"导出 [{ViewModel.SelectedCategoryTitle}] 信息列表", $"Export [{ViewModel.SelectedCategoryTitle}] info list"),
+            "\uE8B6",
+            true,
+            ExportListAsync));
+        return specs;
+    }
+
+    private async Task DeleteSimulationAsync()
+    {
+        var l = ViewModel.Localization;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
+            Title = l["Warning"],
+            Content = l["ConfirmDeleteSimulation"],
+            PrimaryButtonText = l["DeleteSimulation"],
+            CloseButtonText = l["Cancel"],
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        await ViewModel.DeleteSimulationAsync();
+    }
+
+    private void BuildCommandButtons()
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+        CommandButtonsPanel.Children.Clear();
+        foreach (var spec in BuildCommandSpecs())
+        {
+            AddCommand(spec);
         }
     }
 
-    private void AddOptimizeCommand(PartitionInfo? partition, bool simulated)
+    private void ShowNodeContextMenu(StorageUnitRef unit, object target)
     {
-        if (partition is null)
+        if (target is not FrameworkElement element)
         {
             return;
         }
 
-        var osDisk = ViewModel.ActiveSnapshot.OsDisks.FirstOrDefault(
-            x => x.StableId == partition.OsDiskStableId);
-        string label;
-        if (osDisk?.VirtualDiskStableId is not null)
+        var selected = ViewModel.SelectedWorkspaceItem;
+        if (selected?.Unit is null
+            || !selected.Unit.StableId.Equals(unit.StableId, StringComparison.OrdinalIgnoreCase))
         {
-            label = Text("优化", "Optimize");
+            return;
         }
-        else
+
+        var specs = BuildCommandSpecs();
+        if (specs.Count == 0)
         {
-            var physical = ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(
-                x => x.StableId == osDisk?.PhysicalDiskStableId);
-            label = physical?.MediaType == "HDD"
-                ? Text("碎片整理", "Defragment")
-                : Text("剪裁", "Trim");
+            return;
         }
-        AddCommand(label, "\uE945", simulated && partition.Type == "Primary", OptimizeDriveAsync);
+
+        var flyout = new MenuFlyout();
+        foreach (var spec in specs)
+        {
+            var item = new MenuFlyoutItem
+            {
+                Text = spec.Text,
+                Icon = new FontIcon { FontSize = 14, Glyph = spec.Glyph },
+                IsEnabled = spec.Enabled
+            };
+            item.Click += async (_, _) => await RunCommandAsync(spec.Action);
+            flyout.Items.Add(item);
+        }
+
+        var bounds = element.TransformToVisual(null).TransformBounds(
+            new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
+        var windowWidth = App.Window.AppWindow.Size.Width;
+        var placement = bounds.Right + 260 > windowWidth
+            ? FlyoutPlacementMode.LeftEdgeAlignedTop
+            : FlyoutPlacementMode.RightEdgeAlignedTop;
+        flyout.ShowAt(element, new FlyoutShowOptions { Placement = placement });
     }
+
+    private void AddCommand(CommandSpec spec) => AddCommand(spec.Text, spec.Glyph, spec.Enabled, spec.Action);
 
     private void AddCommand(string text, string glyph, bool enabled, Func<Task> action)
     {
@@ -392,11 +598,69 @@ public sealed partial class MainPage : Page
 
     private async Task RescanAsync() => await ViewModel.ScanAsync();
 
+    private async Task ExportListAsync()
+    {
+        var columns = ViewModel.ComparisonColumns;
+        if (columns.Count == 0)
+        {
+            return;
+        }
+
+        var labels = new List<string> { ViewModel.Localization["Name"] };
+        foreach (var column in columns)
+        {
+            foreach (var row in column.Rows)
+            {
+                if (!labels.Contains(row.Label, StringComparer.Ordinal))
+                {
+                    labels.Add(row.Label);
+                }
+            }
+        }
+
+        var builder = new System.Text.StringBuilder();
+        AppendCsvRow(builder, [ViewModel.Localization["Name"], .. columns.Select(x => x.Name)]);
+        foreach (var label in labels.Skip(1))
+        {
+            AppendCsvRow(builder,
+            [
+                label,
+                .. columns.Select(x =>
+                    x.Rows.FirstOrDefault(r => r.Label.Equals(label, StringComparison.Ordinal))?.Value
+                    ?? string.Empty)
+            ]);
+        }
+
+        var path = await new WinPool.App.Services.DesktopExportService().ExportCsvAsync(
+            $"WinPool-{ViewModel.SelectedCategory}-{DateTime.Now:yyyyMMdd-HHmmss}",
+            builder.ToString());
+        if (path is not null)
+        {
+            ViewModel.NotificationService.PublishInfo(
+                ViewModel.Localization["Export"],
+                ViewModel.Localization["Exported"],
+                "workspace-operation",
+                $"export-list:{DateTimeOffset.UtcNow.Ticks}");
+        }
+    }
+
+    private static void AppendCsvRow(System.Text.StringBuilder builder, string[] values) =>
+        builder.AppendLine(string.Join(",", values.Select(EscapeCsv)));
+
+    private static string EscapeCsv(string value) =>
+        value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r')
+            ? $"\"{value.Replace("\"", "\"\"")}\""
+            : value;
+
     private async Task ExportAsync()
     {
         if (await ViewModel.ExportActiveSystemAsync() is not null)
         {
-            ViewModel.StatusMessage = ViewModel.Localization["Exported"];
+            ViewModel.NotificationService.PublishInfo(
+                ViewModel.Localization["Export"],
+                ViewModel.Localization["Exported"],
+                "workspace-operation",
+                $"export:{DateTimeOffset.UtcNow.Ticks}");
         }
     }
 
@@ -404,7 +668,11 @@ public sealed partial class MainPage : Page
     {
         if (await ViewModel.ImportSystemAsync())
         {
-            ViewModel.StatusMessage = Text("系统已导入为模拟副本。", "System imported as a simulation.");
+            ViewModel.NotificationService.PublishInfo(
+                ViewModel.Localization["Import"],
+                Text("系统已导入为模拟副本。", "System imported as a simulation."),
+                "workspace-operation",
+                $"import:{DateTimeOffset.UtcNow.Ticks}");
         }
     }
 
@@ -414,16 +682,62 @@ public sealed partial class MainPage : Page
         return Task.CompletedTask;
     }
 
-    private async Task OptimizeDriveAsync()
+    private async Task ConvertLocalAsync()
     {
-        var unit = ViewModel.ResolveDetailUnit();
-        if (unit is null)
+        await ViewModel.ConvertLocalToSimulationAsync();
+        ViewModel.NotificationService.PublishInfo(
+            Text("转换本机到模拟", "Convert local to simulation"),
+            ViewModel.Localization["ConvertedToSimulation"],
+            "workspace-operation",
+            $"convert-local:{DateTimeOffset.UtcNow.Ticks}");
+    }
+
+    private void NotifyTargetMissing() =>
+        ViewModel.NotificationService.PublishWarning(
+            ViewModel.Localization["Warning"],
+            ViewModel.Localization["TargetMissing"],
+            "workspace-operation",
+            $"target-missing:{DateTimeOffset.UtcNow.Ticks}");
+
+    private PartitionInfo? ResolveLivePartition(StorageUnitRef unit)
+    {
+        var selected = ViewModel.ActiveSnapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
+        if (selected is null)
         {
-            return;
+            return null;
         }
-        await ApplyAsync(new SimulationOperationRequest(
-            SimulationOperationKind.OptimizeDrive,
-            unit.StableId));
+        if (ViewModel.IsLocalSystem)
+        {
+            return selected;
+        }
+        return ViewModel.Snapshot.Partitions.FirstOrDefault(
+            x => x.DiskNumber == selected.DiskNumber && x.PartitionNumber == selected.PartitionNumber);
+    }
+
+    private async Task OptimizeDrivesAsync()
+    {
+        await Task.CompletedTask;
+        var unit = ViewModel.ResolveDetailUnit();
+        var arguments = string.Empty;
+        if (unit?.Kind == StorageUnitKind.Partition)
+        {
+            var partition = ResolveLivePartition(unit);
+            if (partition is null)
+            {
+                NotifyTargetMissing();
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(partition.DriveLetter))
+            {
+                arguments = $"{partition.DriveLetter}:";
+            }
+        }
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "dfrgui.exe",
+            Arguments = arguments,
+            UseShellExecute = true
+        });
     }
 
     private OsDiskInfo? ResolveOsDisk()
@@ -444,9 +758,17 @@ public sealed partial class MainPage : Page
     private async Task OpenPartitionAsync()
     {
         var unit = ViewModel.ResolveDetailUnit();
-        var partition = ViewModel.ActiveSnapshot.Partitions.FirstOrDefault(
-            x => x.StableId == unit?.StableId);
-        if (!ViewModel.IsLocalSystem || partition is null || !Directory.Exists(partition.Path))
+        if (unit is null || !ViewModel.IsSelectedSystemLocalConsistent)
+        {
+            return;
+        }
+        var partition = ResolveLivePartition(unit);
+        if (partition is null)
+        {
+            NotifyTargetMissing();
+            return;
+        }
+        if (!Directory.Exists(partition.Path))
         {
             return;
         }
@@ -461,72 +783,87 @@ public sealed partial class MainPage : Page
 
     private async Task PropertiesAsync()
     {
-        var zh = ViewModel.Localization.Language == LanguagePreference.ZhCn;
-        var osDisk = ResolveOsDisk();
-        var text = osDisk is not null
-            ? WinPool.App.Services.DiskDetailFormatter.Format(ViewModel.ActiveSnapshot, osDisk, zh)
-            : ViewModel.CreateSelectedSummary();
-        await ShowMessageAsync(Text("属性", "Properties"), text);
-    }
-
-    private async Task ApplyAsync(SimulationOperationRequest request)
-    {
-        var result = await ViewModel.ApplySimulationOperationAsync(request);
-        if (!result.Succeeded)
+        var unit = ViewModel.ResolveDetailUnit();
+        if (unit is null || !ViewModel.IsSelectedSystemLocalConsistent)
         {
-            await ShowMessageAsync(Text("操作不可用", "Operation unavailable"), result.Error);
+            return;
+        }
+
+        if (unit.Kind == StorageUnitKind.Partition)
+        {
+            var partition = ResolveLivePartition(unit);
+            if (partition is null)
+            {
+                NotifyTargetMissing();
+                return;
+            }
+            if (Directory.Exists(partition.Path))
+            {
+                if (!TryShowNativeProperties(partition.Path))
+                {
+                    ViewModel.NotificationService.PublishError(
+                        ViewModel.Localization["Error"],
+                        ViewModel.Localization["OperationFailed"],
+                        "workspace-operation",
+                        $"properties:{DateTimeOffset.UtcNow.Ticks}");
+                }
+            }
+            return;
+        }
+
+        if (unit.Kind is StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk
+            or StorageUnitKind.OsDisk)
+        {
+            await OpenDiskPropertiesAsync(unit);
         }
     }
 
-    private async Task<string?> PromptAsync(string title, string value)
+    private async Task OpenDiskPropertiesAsync(StorageUnitRef unit)
     {
-        var input = new TextBox { Text = value, MinWidth = 360 };
-        var dialog = new ContentDialog
+        await Task.CompletedTask;
+        var activeSnapshot = ViewModel.ActiveSnapshot;
+        var physical = unit.Kind == StorageUnitKind.PhysicalDisk
+            ? activeSnapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == unit.StableId)
+            : ResolveOsDisk()?.PhysicalDiskStableId is string physicalId
+                ? activeSnapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == physicalId)
+                : null;
+        if (!ViewModel.IsLocalSystem)
         {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = input,
-            PrimaryButtonText = Text("确定", "OK"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary
-            ? input.Text.Trim()
-            : null;
-    }
-
-    private async Task<bool> ConfirmAsync(string title, string message)
-    {
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = message,
-            PrimaryButtonText = Text("确定", "OK"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
-    }
-
-    private async Task ShowMessageAsync(string title, string message)
-    {
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = new ScrollViewer
+            var activeOsDisk = ResolveOsDisk();
+            if (activeOsDisk is null)
             {
-                MaxHeight = 500,
-                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }
-            },
-            CloseButtonText = Text("关闭", "Close")
-        };
-        await dialog.ShowAsync();
+                NotifyTargetMissing();
+                return;
+            }
+            var liveOsDisk = ViewModel.Snapshot.OsDisks.FirstOrDefault(x => x.Number == activeOsDisk.Number);
+            if (liveOsDisk is null)
+            {
+                NotifyTargetMissing();
+                return;
+            }
+            physical = liveOsDisk.PhysicalDiskStableId is string livePhysicalId
+                ? ViewModel.Snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == livePhysicalId)
+                : null;
+        }
+        if (!string.IsNullOrWhiteSpace(physical?.PnpDeviceId))
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "rundll32.exe",
+                Arguments = $"devmgr.dll,DeviceProperties_RunDLL /DeviceID \"{physical.PnpDeviceId}\"",
+                UseShellExecute = true
+            });
+            return;
+        }
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "diskmgmt.msc",
+            UseShellExecute = true
+        });
     }
 
     private string Text(string zh, string en) =>
-        ViewModel.Localization.Language == LanguagePreference.ZhCn ? zh : en;
+        ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -537,8 +874,13 @@ public sealed partial class MainPage : Page
 
     private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e)
     {
-        RebuildComparisonTable();
-        ApplyColumnHighlight(centerSelected: true);
+        if (ComputeTableSignature() != _renderedSignature)
+        {
+            RebuildComparisonTable();
+        }
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => ApplyColumnHighlight(centerSelected: true));
         BuildCommandButtons();
     }
 }

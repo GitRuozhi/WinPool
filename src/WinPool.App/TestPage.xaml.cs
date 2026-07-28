@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml.Controls;
+﻿using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
 using WinPool.Core;
@@ -16,8 +16,7 @@ public sealed partial class TestPage : Page
     {
         base.OnNavigatedTo(e);
         var viewModel = (WorkspaceViewModel)e.Parameter;
-        var zh = viewModel.Localization.Language == LanguagePreference.ZhCn;
-        TestTitle.Text = viewModel.Localization["Test"];
+        var zh = viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         TestIntro.Text = viewModel.Localization["TestPageIntro"];
         TestStatus.Title = zh ? "开发中" : "Under development";
     }

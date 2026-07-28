@@ -308,6 +308,45 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void SystemSummaryOmitsZeroVirtualAndNetworkDiskCounts()
+    {
+        var source = TestSnapshotFactory.Create();
+        var root = WinPool.Core.TopologyProjector.Project(
+            source with { VirtualDisks = [], NetworkDisks = [] });
+
+        Assert.DoesNotContain("virtual disks", root.Summary);
+        Assert.DoesNotContain("network disks", root.Summary);
+    }
+
+    [Fact]
+    public void InfoNotificationsSupportStickyAndDismissByKey()
+    {
+        var service = new WinPool.Core.GlobalNotificationService();
+        service.PublishInfo("Scanning", string.Empty, "inventory", "scan", autoDismiss: false);
+        service.PublishInfo("Done", "Finished", "inventory", "done");
+
+        Assert.Equal(2, service.Notifications.Count);
+        Assert.False(service.Notifications[0].AutoDismiss);
+        Assert.True(service.Notifications[1].AutoDismiss);
+        Assert.Equal(
+            WinPool.Core.GlobalNotificationSeverity.Info,
+            service.Notifications[0].Severity);
+
+        service.DismissByKey("scan");
+        Assert.Single(service.Notifications);
+        Assert.Equal("done", service.Notifications[0].DeduplicationKey);
+    }
+
+    [Fact]
+    public void ReservedPartitionOtherStatusIsNotUnhealthy()
+    {
+        Assert.False(WinPool.Core.StorageFindingInspector.IsUnhealthy("Healthy", "Other"));
+        Assert.False(WinPool.Core.StorageFindingInspector.IsUnhealthy("Healthy", "OK"));
+        Assert.True(WinPool.Core.StorageFindingInspector.IsUnhealthy("Healthy", "Failed"));
+        Assert.True(WinPool.Core.StorageFindingInspector.IsUnhealthy("Warning", "OK"));
+    }
+
+    [Fact]
     public void NetworkAndOtherGroupsAreSelectablePoolCategoryObjectsButNotPools()
     {
         var source = TestSnapshotFactory.Create();

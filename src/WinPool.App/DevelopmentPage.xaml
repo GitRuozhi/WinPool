@@ -13,18 +13,9 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock
-                x:Name="DevelopmentTitle"
-                FontSize="32"
-                FontWeight="SemiBold"
-                Text="开发" />
             <Button
                 x:Name="ClearButton"
-                Grid.Column="1"
+                HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 Click="ClearButton_Click"
                 Content="清空" />

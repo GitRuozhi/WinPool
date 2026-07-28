@@ -10,24 +10,42 @@ public static class SimulationStorageSnapshotFactory
 {
     private const string ComputerId = "simulation:system:winpool-v01";
 
+    public const string SimulatedComputerName = "DESKTOP-PL96UKD";
+
+    public const string SimulatedSnapshotVersion = "simulation-winpool-v02";
+
     public static StorageSnapshot Create()
     {
         var disks = new[]
         {
-            Disk("sim:disk:00", 0, "ST8000NM017B-2TJ103", "ST8000NM017B-2TJ103", "HDD", 8001563222016, "sim:pool:primordial"),
-            Disk("sim:disk:01", 1, "WDC WD42EJRX-89BFNY0", "WDC WD42EJRX-89BFNY0", "HDD", 4000787030016, "sim:pool:primordial"),
-            Disk("sim:disk:02", 2, "Samsung SSD 860 EVO 500GB", "Samsung SSD 860 EVO 500GB", "SSD", 500107862016, "sim:pool:02"),
-            Disk("sim:disk:03", 3, "FORESEE 256GB SSD", "FORESEE 256GB SSD", "SSD", 256060514304, "sim:pool:01"),
-            Disk("sim:disk:04", 4, "ZHITAI TiPro7000 THREE-BODY 2TB", "ZHITAI TiPro7000 THREE-BODY 2TB", "SSD", 2048408248320, "sim:pool:primordial", isSystem: true),
-            Disk("sim:disk:05", 5, "Predator SSD GM7 M.2 4TB", "Predator SSD GM7 M.2 4TB", "SSD", 4096805658624, "sim:pool:primordial"),
-            Disk("sim:disk:06", 6, "SEAGATE ST3000NM0023 SCSI Disk Device", "ST3000NM0023", "HDD", 3000592982016, "sim:pool:01"),
-            Disk("sim:disk:07", 7, "SEAGATE ST3000NM0023 SCSI Disk Device", "ST3000NM0023", "HDD", 3000592982016, "sim:pool:01"),
-            Disk("sim:disk:08", 8, "SEAGATE ST3000NM0023 SCSI Disk Device", "ST3000NM0023", "HDD", 3000592982016, "sim:pool:01"),
-            Disk("sim:disk:09", 9, "SEAGATE ST4000NM0023 SCSI Disk Device", "ST4000NM0023", "HDD", 4000787030016, "sim:pool:02"),
-            Disk("sim:disk:10", 10, "SEAGATE ST4000NM0023 SCSI Disk Device", "ST4000NM0023", "HDD", 4000787030016, "sim:pool:02"),
-            Disk("sim:disk:11", 11, "SEAGATE ST4000NM0025 SCSI Disk Device", "ST4000NM0025", "HDD", 4000787030016, "sim:pool:02"),
-            Disk("sim:disk:12", 12, "SEAGATE ST4000NM0025 SCSI Disk Device", "ST4000NM0025", "HDD", 4000787030016, "sim:pool:02"),
-            Disk("sim:disk:13", 13, "HITACHI HUS723030ALS640 SCSI Disk Device", "HUS723030ALS640", "HDD", 3000592982016, "sim:pool:01")
+            Disk("sim:disk:00", 0, "ST8000NM017B-2TJ103", "ST8000NM017B-2TJ103", "HDD", 8001563222016, "sim:pool:primordial",
+                bus: "SATA", interfaceType: "IDE", firmware: "SNA1", provisioning: "Fixed"),
+            Disk("sim:disk:01", 1, "WDC WD42EJRX-89BFNY0", "WDC WD42EJRX-89BFNY0", "HDD", 4000787030016, "sim:pool:primordial",
+                bus: "SATA", interfaceType: "IDE", firmware: "80.00A80", provisioning: "Fixed"),
+            Disk("sim:disk:02", 2, "Samsung SSD 860 EVO 500GB", "Samsung SSD 860 EVO 500GB", "SSD", 500107862016, "sim:pool:02",
+                bus: "SATA", physicalSector: 512),
+            Disk("sim:disk:03", 3, "FORESEE 256GB SSD", "FORESEE 256GB SSD", "SSD", 256060514304, "sim:pool:01",
+                bus: "SATA", physicalSector: 512),
+            Disk("sim:disk:04", 4, "ZHITAI TiPro7000 THREE-BODY 2TB", "ZHITAI TiPro7000 THREE-BODY 2TB", "SSD", 2048408248320, "sim:pool:primordial",
+                isSystem: true, bus: "NVMe", interfaceType: "SCSI", firmware: "ZTA32F46", provisioning: "Fixed"),
+            Disk("sim:disk:05", 5, "Predator SSD GM7 M.2 4TB", "Predator SSD GM7 M.2 4TB", "SSD", 4096805658624, "sim:pool:primordial",
+                bus: "NVMe", interfaceType: "SCSI", firmware: "SN12717", provisioning: "Fixed"),
+            Disk("sim:disk:06", 6, "SEAGATE ST3000NM0023 SCSI Disk Device", "ST3000NM0023", "HDD", 3000592982016, "sim:pool:01",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:07", 7, "SEAGATE ST3000NM0023 SCSI Disk Device", "ST3000NM0023", "HDD", 3000592982016, "sim:pool:01",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:08", 8, "SEAGATE ST3000NM0023 SCSI Disk Device", "ST3000NM0023", "HDD", 3000592982016, "sim:pool:01",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:09", 9, "SEAGATE ST4000NM0023 SCSI Disk Device", "ST4000NM0023", "HDD", 4000787030016, "sim:pool:02",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:10", 10, "SEAGATE ST4000NM0023 SCSI Disk Device", "ST4000NM0023", "HDD", 4000787030016, "sim:pool:02",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:11", 11, "SEAGATE ST4000NM0025 SCSI Disk Device", "ST4000NM0025", "HDD", 4000787030016, "sim:pool:02",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:12", 12, "SEAGATE ST4000NM0025 SCSI Disk Device", "ST4000NM0025", "HDD", 4000787030016, "sim:pool:02",
+                bus: "SAS", physicalSector: 512),
+            Disk("sim:disk:13", 13, "HITACHI HUS723030ALS640 SCSI Disk Device", "HUS723030ALS640", "HDD", 3000592982016, "sim:pool:01",
+                bus: "SAS", physicalSector: 512)
         };
 
         var pools = new[]
@@ -49,12 +67,12 @@ public static class SimulationStorageSnapshotFactory
 
         var tiers = new[]
         {
-            Tier("sim:tier:pool01-ssd", "Pool01-SSD", "SSD", "Simple", 249644974080, "sim:pool:01", "sim:vdisk:pool01", ["sim:disk:03"]),
+            Tier("sim:tier:pool01-ssd", "Pool01-SSD", "SSD", "Simple", 249644974080, "sim:pool:01", "sim:vdisk:pool01", ["sim:disk:03"], 1),
             Tier("sim:tier:pool01-hdd", "Pool01-HDD", "HDD", "Parity", 8992050905088, "sim:pool:01", "sim:vdisk:pool01",
-                ["sim:disk:06", "sim:disk:07", "sim:disk:08", "sim:disk:13"]),
-            Tier("sim:tier:pool02-ssd", "Pool02-SSDTier02", "SSD", "Simple", 493921239040, "sim:pool:02", "sim:vdisk:pool02", ["sim:disk:02"]),
+                ["sim:disk:06", "sim:disk:07", "sim:disk:08", "sim:disk:13"], 4),
+            Tier("sim:tier:pool02-ssd", "Pool02-SSDTier02", "SSD", "Simple", 493921239040, "sim:pool:02", "sim:vdisk:pool02", ["sim:disk:02"], 1),
             Tier("sim:tier:pool02-hdd", "Pool02-HDDTier02", "HDD", "Parity", 10555419000832, "sim:pool:02", "sim:vdisk:pool02",
-                ["sim:disk:09", "sim:disk:10", "sim:disk:11", "sim:disk:12"])
+                ["sim:disk:09", "sim:disk:10", "sim:disk:11", "sim:disk:12"], 4)
         };
 
         var virtualDisks = new[]
@@ -81,16 +99,16 @@ public static class SimulationStorageSnapshotFactory
 
         var partitions = new[]
         {
-            Partition(0, 1, 16759808, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 17408, remaining: 0),
+            Partition(0, 1, 16759808, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 17408, remaining: 0, isHidden: true, operationalStatus: "Other"),
             Partition(0, 2, 8001545043968, "G", "希捷企业", offset: 16777216, remaining: 1414682701824),
-            Partition(1, 1, 16759808, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 17408, remaining: 0),
+            Partition(1, 1, 16759808, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 17408, remaining: 0, isHidden: true, operationalStatus: "Other"),
             Partition(1, 2, 4000768327680, "F", "西数监控", offset: 16777216, remaining: 946147430400),
-            Partition(4, 1, 104857600, null, "", isSystem: true, type: "EfiSystem", fileSystem: "", offset: 1048576, remaining: 0),
-            Partition(4, 2, 16777216, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 105906176, remaining: 0),
-            Partition(4, 3, 549756751872, "C", "", isBoot: true, offset: 122683392, remaining: 231010652160),
-            Partition(4, 4, 1497990430720, "D", "本地磁盘", offset: 549879545856, remaining: 381719527424),
-            Partition(4, 5, 537919488, null, "Recovery", type: "WindowsRecovery", offset: 2047869976576, remaining: 523251712),
-            Partition(5, 1, 16759808, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 17408, remaining: 0),
+            Partition(4, 1, 104857600, null, "", isSystem: true, type: "EfiSystem", fileSystem: "", offset: 1048576, remaining: 0, isHidden: true, operationalStatus: "Other"),
+            Partition(4, 2, 16777216, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 105906176, remaining: 0, isHidden: true, operationalStatus: "Other"),
+            Partition(4, 3, 549756751872, "C", "", isBoot: true, offset: 122683392, remaining: Gib(221.179)),
+            Partition(4, 4, 1497990430720, "D", "本地磁盘", offset: 549879545856, remaining: Gib(356.88)),
+            Partition(4, 5, 537919488, null, "Recovery", type: "WindowsRecovery", fileSystem: "", offset: 2047869976576, remaining: 0, isHidden: true, operationalStatus: "Other"),
+            Partition(5, 1, 16759808, null, "", type: "MicrosoftReserved", fileSystem: "", offset: 17408, remaining: 0, isHidden: true, operationalStatus: "Other"),
             Partition(5, 2, 4096787480576, "E", "宏碁GM7", offset: 16777216, remaining: 455208955904),
             Partition(14, 1, 11049338142720, "I", "Pool02", allocationUnitSize: 65536, offset: 1048576, remaining: 3088199254016),
             Partition(15, 1, 9241693782016, "H", "Pool01", allocationUnitSize: 65536, offset: 1048576, remaining: 534690791424)
@@ -105,15 +123,17 @@ public static class SimulationStorageSnapshotFactory
 
         return new StorageSnapshot(
             2,
-            "simulation-winpool-v01",
+            SimulatedSnapshotVersion,
             DateTimeOffset.Now,
             new ComputerInfo(
                 ComputerId,
-                "WinPool 模拟系统",
-                "Microsoft Windows 10 Pro",
-                "10.0.19045",
+                SimulatedComputerName,
+                "Windows 10 Pro",
+                "22H2",
                 "19045",
-                DateTimeOffset.Now.AddDays(-3)),
+                DateTimeOffset.Now.AddDays(-3),
+                "22H2",
+                "7184"),
             [new StorageSubsystemInfo("sim:subsystem:spaces", "Windows Storage Spaces", "Healthy", "OK")],
             disks,
             pools,
@@ -134,12 +154,18 @@ public static class SimulationStorageSnapshotFactory
         string media,
         long size,
         string? poolId = null,
-        bool isSystem = false) =>
+        bool isSystem = false,
+        string bus = "SATA",
+        long physicalSector = 4096,
+        string interfaceType = "",
+        string firmware = "",
+        string provisioning = "") =>
         new(
-            id, true, friendlyName, model, $"SIM••••{number:00}", "SATA", media, size,
-            512, 4096, "Healthy", "OK", poolId?.EndsWith(":primordial", StringComparison.Ordinal) == true && !isSystem,
+            id, true, friendlyName, model, $"SIM••••{number:00}", bus, media, size,
+            512, physicalSector, "Healthy", "OK", poolId?.EndsWith(":primordial", StringComparison.Ordinal) == true && !isSystem,
             isSystem ? "系统盘受保护" : poolId?.EndsWith(":primordial", StringComparison.Ordinal) == true ? string.Empty : "已属于存储池",
-            number, isSystem, isSystem, isSystem, isSystem, poolId);
+            number, isSystem, isSystem, isSystem, isSystem, poolId,
+            firmware, interfaceType, provisioning);
 
     private static StorageTierInfo Tier(
         string id,
@@ -149,8 +175,10 @@ public static class SimulationStorageSnapshotFactory
         long size,
         string poolId,
         string virtualDiskId,
-        IReadOnlyList<string> members) =>
-        new(id, true, name, media, resiliency, size, size, poolId, virtualDiskId, members);
+        IReadOnlyList<string> members,
+        int? numberOfColumns = null) =>
+        new(id, true, name, media, resiliency, size, size, poolId, virtualDiskId, members,
+            numberOfColumns, numberOfColumns is null ? null : 64 * 1024);
 
     private static OsDiskInfo OsDisk(
         int number,
@@ -175,15 +203,18 @@ public static class SimulationStorageSnapshotFactory
         string fileSystem = "NTFS",
         long allocationUnitSize = 4096,
         long offset = 0,
-        long remaining = 0) =>
+        long remaining = 0,
+        bool isHidden = false,
+        string operationalStatus = "OK") =>
         new(
             $"sim:partition:{disk}:{number}", true, disk, number,
             type, offset, size,
             isBoot, isSystem, driveLetter ?? string.Empty, label, fileSystem,
             string.IsNullOrWhiteSpace(fileSystem) ? null : allocationUnitSize,
-            remaining, "Healthy", "OK",
+            remaining, "Healthy", operationalStatus,
             string.IsNullOrWhiteSpace(driveLetter) ? string.Empty : $"{driveLetter}:\\",
-            $"sim:osdisk:{disk}");
+            $"sim:osdisk:{disk}",
+            isHidden);
 
     private static NetworkDiskInfo Network(
         string id,

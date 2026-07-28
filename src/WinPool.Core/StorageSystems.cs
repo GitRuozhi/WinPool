@@ -67,7 +67,8 @@ public sealed record StorageSystemDocument(
     StorageSnapshot Snapshot,
     HardwareInventoryReport HardwareReport,
     IReadOnlyList<SimulationJob> Jobs,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    string? SourceHostName = null)
 {
     public const int CurrentSchemaVersion = 1;
 
@@ -104,7 +105,8 @@ public static class StorageSystemDocumentSanitizer
             PhysicalDisks = document.Snapshot.PhysicalDisks
                 .Select(disk => disk with
                 {
-                    MaskedSerialNumber = MaskOnce(disk.MaskedSerialNumber)
+                    MaskedSerialNumber = MaskOnce(disk.MaskedSerialNumber),
+                    PnpDeviceId = string.Empty
                 })
                 .ToArray()
         };
@@ -225,6 +227,9 @@ public sealed class StorageSystemCatalog
         _systems.Add(simulation);
         NormalizeOrder();
     }
+
+    public void RemoveSimulation(string id) =>
+        _systems.RemoveAll(x => !x.IsLocal && x.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
 
     public void Update(StorageSystemDocument document)
     {

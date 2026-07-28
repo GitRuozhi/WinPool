@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -34,6 +34,8 @@ public sealed partial class MainWindow : Window
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
     private readonly IElevationRestartService _elevationRestartService;
+    private readonly IWorkspaceStateService _workspaceStateService = new LocalWorkspaceStateService();
+    private readonly DispatcherTimer _notificationDismissTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
 
     public WorkspaceViewModel ViewModel { get; }
@@ -58,7 +60,8 @@ public sealed partial class MainWindow : Window
             new SimulationOperationService(),
             NotificationService,
             new LocalMachineRecordService(),
-            new GlobalCommandLogService());
+            new GlobalCommandLogService(),
+            _workspaceStateService);
         if (startupOptions.EnterRealModeAfterElevation)
         {
             ViewModel.TrySetExecutionMode(ExecutionMode.Real);
@@ -66,17 +69,35 @@ public sealed partial class MainWindow : Window
 
         InitializeComponent();
 
+        ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
+            .CollectionChanged += Notifications_CollectionChanged;
+        _notificationDismissTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        _notificationDismissTimer.Tick += NotificationDismissTimer_Tick;
+        _notificationDismissTimer.Start();
+
         ExtendsContentIntoTitleBar = true;
         AppWindow.SetIcon("Assets/AppIcon.ico");
         AppWindow.Resize(new SizeInt32(1440, 900));
+        AppWindow.Changed += MainWindow_AppWindowChanged;
         RootGrid.Loaded += RootGrid_Loaded;
         RootGrid.SizeChanged += RootGrid_SizeChanged;
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
+        Closed += MainWindow_Closed;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         _uiSettings.ColorValuesChanged += UiSettings_ColorValuesChanged;
         BuildShellNavigation();
         RootFrame.Navigate(typeof(MainPage), ViewModel);
         SelectShellPage(ShellPageKind.Manage);
+    }
+
+    private void MainWindow_AppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (args.DidPresenterChange)
+        {
+            ViewModel.Monitoring.WindowMinimized =
+                sender.Presenter is OverlappedPresenter presenter
+                && presenter.State == OverlappedPresenterState.Minimized;
+        }
     }
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
@@ -93,6 +114,104 @@ public sealed partial class MainWindow : Window
         RefreshChrome();
         UpdateCaptionInset();
         UpdateCaptionButtonColors();
+        if (Enum.TryParse<ShellPageKind>(ViewModel.RestoredUiState?.ShellPage, out var restoredPage)
+            && restoredPage != ShellPageKind.Manage)
+        {
+            SelectShellPage(restoredPage);
+        }
+        if (ViewModel.CurrentPreferences.ShowWelcomeAtStart)
+        {
+            RootGrid.DispatcherQueue.TryEnqueue(async () => await ShowWelcomeDialogAsync());
+        }
+    }
+
+    private async void MainWindow_Closed(object sender, WindowEventArgs args)
+    {
+        try
+        {
+            await ViewModel.Monitoring.StopAsync();
+            ViewModel.Monitoring.Dispose();
+            await _workspaceStateService.SaveAsync(
+                ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private async Task ShowWelcomeDialogAsync()
+    {
+        if (RootGrid.XamlRoot is null)
+        {
+            return;
+        }
+
+        var localization = ViewModel.Localization;
+        var showAgainCheckBox = new CheckBox
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            IsChecked = ViewModel.CurrentPreferences.ShowWelcomeAtStart,
+            Content = localization["ShowWelcomeAtStart"]
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            RequestedTheme = RootGrid.RequestedTheme,
+            Title = localization["WelcomeTitle"]
+        };
+        var confirmButton = new Button
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            Content = localization["WelcomeConfirm"]
+        };
+        confirmButton.Click += (_, _) => dialog.Hide();
+        var bottomRow = new Grid { Margin = new Thickness(0, 20, 0, 0) };
+        bottomRow.Children.Add(showAgainCheckBox);
+        bottomRow.Children.Add(confirmButton);
+        dialog.Content = new StackPanel
+        {
+            Width = 480,
+            Spacing = 20,
+            Children =
+            {
+                new Border
+                {
+                    Width = 112,
+                    Height = 112,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["WinPoolAccentHoverBrush"],
+                    CornerRadius = new CornerRadius(26),
+                    Child = new FontIcon
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        FontSize = 52,
+                        Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["WinPoolAccentBrush"],
+                        Glyph = "\uEDA2"
+                    }
+                },
+                new TextBlock
+                {
+                    FontSize = 15,
+                    Text = localization["WelcomeMessage"],
+                    TextWrapping = TextWrapping.Wrap
+                },
+                bottomRow
+            }
+        };
+        try
+        {
+            await dialog.ShowAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            return;
+        }
+        if (showAgainCheckBox.IsChecked != ViewModel.CurrentPreferences.ShowWelcomeAtStart)
+        {
+            await ViewModel.SetShowWelcomeAtStartAsync(showAgainCheckBox.IsChecked == true);
+        }
     }
 
     public void ShowWorkspace()
@@ -125,7 +244,7 @@ public sealed partial class MainWindow : Window
 
     public void RefreshChrome()
     {
-        var language = ViewModel.Localization.Language;
+        var language = ViewModel.Localization.EffectiveLanguage;
         var suffix = ViewModel.PrivilegeState == PrivilegeState.Administrator
             ? (language == LanguagePreference.ZhCn ? " [管理员]" : " [Administrator]")
             : string.Empty;
@@ -190,6 +309,7 @@ public sealed partial class MainWindow : Window
             var dialog = new ContentDialog
             {
                 XamlRoot = RootGrid.XamlRoot,
+                RequestedTheme = RootGrid.RequestedTheme,
                 Title = localization["PreviewWarningTitle"],
                 Content = localization["PreviewConfirmation"],
                 PrimaryButtonText = ViewModel.CanUseRealMode
@@ -510,6 +630,33 @@ public sealed partial class MainWindow : Window
         if (sender.DataContext is GlobalNotification notification)
         {
             NotificationService.Dismiss(notification.Id);
+        }
+    }
+
+    private void Notifications_CollectionChanged(
+        object? sender,
+        System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (NotificationService.Notifications.Any(x => x.AutoDismiss))
+        {
+            _notificationDismissTimer.Start();
+        }
+    }
+
+    private void NotificationDismissTimer_Tick(object? sender, object e)
+    {
+        var cutoff = DateTimeOffset.Now - TimeSpan.FromSeconds(4);
+        var expired = NotificationService.Notifications
+            .Where(x => x.AutoDismiss && x.CreatedAt <= cutoff)
+            .Select(x => x.Id)
+            .ToList();
+        foreach (var id in expired)
+        {
+            NotificationService.Dismiss(id);
+        }
+        if (!NotificationService.Notifications.Any(x => x.AutoDismiss))
+        {
+            _notificationDismissTimer.Stop();
         }
     }
 
