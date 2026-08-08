@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.Data.Sqlite 10.0.10 still resolves the vulnerable 2.1.11 native
+         library transitively. Pin the compatible fixed native build explicitly. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
+    <ProjectReference Include="..\WinPool.Domain\WinPool.Domain.csproj" />
+    <ProjectReference Include="..\WinPool.Monitoring\WinPool.Monitoring.csproj" />
+  </ItemGroup>
+</Project>

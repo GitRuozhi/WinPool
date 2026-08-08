@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WinPool.Application;
 using WinPool.Core;
 
 namespace WinPool.Infrastructure.Windows;
@@ -59,5 +60,46 @@ public sealed class LocalMachineRecordService : IMachineRecordService
         {
             return null;
         }
+    }
+}
+
+public sealed class AgentBackedMachineRecordService(IAgentConnection connection)
+    : IMachineRecordService
+{
+    private readonly IAgentConnection connection =
+        connection ?? throw new ArgumentNullException(nameof(connection));
+
+    public Task RecordLocalScanAsync(
+        StorageSystemDocument localDocument,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(localDocument);
+        if (!localDocument.IsLocal)
+        {
+            throw new InvalidOperationException("Only a local inventory document can be recorded.");
+        }
+
+        // AgentBackedHardwareInventoryProvider asks the Agent to persist the
+        // same sanitized document before returning it to the workspace.
+        return Task.CompletedTask;
+    }
+
+    public async Task<StorageSystemDocument?> LoadLocalScanAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var result = await connection.SendAsync(
+            new LoadAgentManageInventoryRequest(CorrelationId.New()),
+            cancellationToken);
+        if (!result.IsSuccess
+            || result.Value is not ManageInventoryLoadedResponse response)
+        {
+            throw new InventoryScanException(
+                "The Agent cached inventory request failed.",
+                result.Messages.FirstOrDefault()?.Code ?? string.Empty);
+        }
+
+        return response.Document is null
+            ? null
+            : LocalInventoryDocumentCodec.Decode(response.Document);
     }
 }

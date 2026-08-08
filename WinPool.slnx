@@ -1,11 +1,41 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/WinPool.Agent/WinPool.Agent.csproj" />
+    <Project Path="src/WinPool.Agent.Client/WinPool.Agent.Client.csproj" />
     <Project Path="src/WinPool.App/WinPool.App.csproj" />
+    <Project Path="src/WinPool.Application/WinPool.Application.csproj" />
     <Project Path="src/WinPool.Core/WinPool.Core.csproj" />
+    <Project Path="src/WinPool.Domain/WinPool.Domain.csproj" />
+    <Project Path="src/WinPool.Execution/WinPool.Execution.csproj" />
+    <Project Path="src/WinPool.Infrastructure.Sqlite/WinPool.Infrastructure.Sqlite.csproj" />
     <Project Path="src/WinPool.Infrastructure.Windows/WinPool.Infrastructure.Windows.csproj" />
+    <Project Path="src/WinPool.Ipc/WinPool.Ipc.csproj" />
+    <Project Path="src/WinPool.Inventory/WinPool.Inventory.csproj" />
+    <Project Path="src/WinPool.Monitoring/WinPool.Monitoring.csproj" />
+    <Project Path="src/WinPool.Testing/WinPool.Testing.csproj" />
+    <Project Path="src/WinPool.Testing.Tools/WinPool.Testing.Tools.csproj" />
+    <Project Path="src/WinPool.ToolManagement/WinPool.ToolManagement.csproj" />
+  </Folder>
+  <Folder Name="/workers/">
+    <Project Path="workers/WinPool.ElevatedBroker/WinPool.ElevatedBroker.csproj" />
+    <Project Path="workers/WinPool.TestWorker/WinPool.TestWorker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WinPool.Agent.Tests/WinPool.Agent.Tests.csproj" />
+    <Project Path="tests/WinPool.Agent.Client.Tests/WinPool.Agent.Client.Tests.csproj" />
+    <Project Path="tests/WinPool.Architecture.Tests/WinPool.Architecture.Tests.csproj" />
     <Project Path="tests/WinPool.Core.Tests/WinPool.Core.Tests.csproj" />
+    <Project Path="tests/WinPool.Domain.Tests/WinPool.Domain.Tests.csproj" />
+    <Project Path="tests/WinPool.Execution.Tests/WinPool.Execution.Tests.csproj" />
     <Project Path="tests/WinPool.Infrastructure.Tests/WinPool.Infrastructure.Tests.csproj" />
+    <Project Path="tests/WinPool.Ipc.Tests/WinPool.Ipc.Tests.csproj" />
+    <Project Path="tests/WinPool.Inventory.Tests/WinPool.Inventory.Tests.csproj" />
+    <Project Path="tests/WinPool.Monitoring.Tests/WinPool.Monitoring.Tests.csproj" />
+    <Project Path="tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj" />
+    <Project Path="tests/WinPool.Testing.Tests/WinPool.Testing.Tests.csproj" />
+    <Project Path="tests/WinPool.Testing.Tools.Tests/WinPool.Testing.Tools.Tests.csproj" />
+    <Project Path="tests/WinPool.TestWorker.Tests/WinPool.TestWorker.Tests.csproj" />
+    <Project Path="tests/WinPool.TestWorker.Tests/Helper/WinPool.TestWorker.ProcessHelper.csproj" />
+    <Project Path="tests/WinPool.ToolManagement.Tests/WinPool.ToolManagement.Tests.csproj" />
   </Folder>
 </Solution>

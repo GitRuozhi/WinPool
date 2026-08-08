@@ -14,7 +14,10 @@
         <Grid.RowDefinitions>
             <RowDefinition x:Name="GraphRow" Height="3*" MinHeight="160" />
             <RowDefinition Height="8" />
-            <RowDefinition x:Name="TableRow" Height="2*" MinHeight="140" />            <RowDefinition Height="12" />
+            <RowDefinition x:Name="TableRow" Height="2*" MinHeight="140" />
+            <RowDefinition Height="8" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -150,8 +153,36 @@
         </Border>
 
         <Border
-            x:Name="ButtonsCard"
             Grid.Row="4"
+            Padding="12,8"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Expander x:Name="HealthEventsExpander">
+                <StackPanel Spacing="6">
+                    <TextBlock
+                        x:Name="SamplingDiagnosticsText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <ItemsControl x:Name="StorageEventRows">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock
+                                    Margin="0,2"
+                                    FontFamily="Consolas"
+                                    Text="{Binding}"
+                                    TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
+        </Border>
+
+        <Border
+            x:Name="ButtonsCard"
+            Grid.Row="6"
             Padding="12,8"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -161,6 +192,7 @@
                 <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
                     <CheckBox
                         x:Name="BackgroundCheckBox"
+                        AccessKey="B"
                         VerticalAlignment="Center"
                         Click="BackgroundCheckBox_Click"
                         Content="后台持续监控" />

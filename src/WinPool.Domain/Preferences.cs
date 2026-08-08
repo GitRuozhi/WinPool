@@ -1,0 +1,42 @@
+namespace WinPool.Domain;
+
+public enum ThemePreference
+{
+    System,
+    Light,
+    Dark
+}
+
+public enum AccentColorPreference
+{
+    System,
+    Blue,
+    Cyan,
+    Green,
+    Purple,
+    Orange,
+    Red
+}
+
+public enum LanguagePreference
+{
+    SystemDefault,
+    ZhCn,
+    EnUs
+}
+
+public enum StorageLocationMode
+{
+    Standard,
+    Portable
+}
+
+public sealed record UserPreferences(
+    ThemePreference Theme = ThemePreference.System,
+    AccentColorPreference AccentColor = AccentColorPreference.System,
+    LanguagePreference Language = LanguagePreference.SystemDefault,
+    bool ShowHardwareIds = false,
+    bool CreateMsrOnInitialize = true,
+    bool ShowWelcomeAtStart = true,
+    bool StartAgentAtLogin = false,
+    bool ContinueMonitoringWhenUiCloses = false);

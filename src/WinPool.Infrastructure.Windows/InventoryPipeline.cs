@@ -7,7 +7,7 @@ using WinPool.Core;
 
 namespace WinPool.Infrastructure.Windows;
 
-public sealed class WindowsPowerShellRunner : IReadOnlyCommandRunner
+public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner
 {
     public const int TimeoutSeconds = 60;
     public static string ExecutablePath { get; } = Path.Combine(
@@ -16,11 +16,10 @@ public sealed class WindowsPowerShellRunner : IReadOnlyCommandRunner
         "v1.0",
         "powershell.exe");
 
-    public async Task<ReadOnlyCommandResult> RunAsync(
-        string fixedCommand,
+    public async Task<ReadOnlyCommandResult> RunInventoryAsync(
         CancellationToken cancellationToken)
     {
-        ReadOnlyStorageCommandPolicy.EnsureSafe(fixedCommand);
+        ReadOnlyStorageCommandPolicy.EnsureSafe(EmbeddedStorageInventoryScript.Source);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
         using var process = new Process
@@ -54,7 +53,9 @@ public sealed class WindowsPowerShellRunner : IReadOnlyCommandRunner
             throw new InvalidOperationException("Unable to start Windows PowerShell 5.1.");
         }
 
-        await process.StandardInput.WriteAsync(fixedCommand.AsMemory(), timeout.Token);
+        await process.StandardInput.WriteAsync(
+            EmbeddedStorageInventoryScript.Source.AsMemory(),
+            timeout.Token);
         process.StandardInput.Close();
         var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
         var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
@@ -122,9 +123,9 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
         PropertyNameCaseInsensitive = true,
         NumberHandling = JsonNumberHandling.AllowReadingFromString
     };
-    private readonly IReadOnlyCommandRunner _runner;
+    private readonly IReadOnlyInventoryCommandRunner _runner;
 
-    public WindowsHardwareInventoryProvider(IReadOnlyCommandRunner? runner = null)
+    public WindowsHardwareInventoryProvider(IReadOnlyInventoryCommandRunner? runner = null)
     {
         _runner = runner ?? new WindowsPowerShellRunner();
     }
@@ -133,7 +134,7 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
 
     public async Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken)
     {
-        var result = await _runner.RunAsync(EmbeddedStorageInventoryScript.Source, cancellationToken);
+        var result = await _runner.RunInventoryAsync(cancellationToken);
         if (result.ExitCode != 0)
         {
             throw new InventoryScanException(

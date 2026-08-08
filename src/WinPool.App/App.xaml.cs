@@ -6,6 +6,9 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.Core;
 using WinPool.Infrastructure.Windows;
+using WinPool.Agent.Client;
+using WinPool.Ipc;
+using System.Security.Principal;
 using System.Runtime.InteropServices;
 
 // To learn more about WinUI, the WinUI project structure,
@@ -19,6 +22,8 @@ namespace WinPool_App;
 public partial class App : Application
 {
     private static bool s_activationPending;
+    private static NamedPipeAgentConnection? s_agentConnection;
+    private static EventWaitHandle? s_exitSignal;
 
     /// <summary>
     /// The main application window. Use <c>App.Window</c> from any class that needs
@@ -96,13 +101,92 @@ public partial class App : Application
         var startupOptions = ApplicationStartupOptions.Parse(
             Environment.GetCommandLineArgs().Skip(1),
             privilegeState);
-        Window = new MainWindow(startupOptions);
+        var agentConnection = EnsureAgentConnection();
+        StartExitSignalListener();
+        Window = new MainWindow(startupOptions, agentConnection);
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Window.Activate();
+        _ = ConnectAgentAsync();
         if (s_activationPending)
         {
             RequestMainWindowActivation();
         }
+    }
+
+    private static async Task ConnectAgentAsync()
+    {
+        try
+        {
+            var connection = EnsureAgentConnection();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var result = await connection.ConnectAsync(timeout.Token);
+            if (!result.IsSuccess && Window is MainWindow mainWindow)
+            {
+                DispatcherQueue.TryEnqueue(
+                    () => mainWindow.NotificationService.PublishWarning(
+                        "WinPool Agent",
+                        "托盘 Agent 未连接；后台监控暂不可用。",
+                        "agent",
+                        "agent-connect-failed"));
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            if (Window is MainWindow mainWindow)
+            {
+                DispatcherQueue.TryEnqueue(
+                    () => mainWindow.NotificationService.PublishWarning(
+                        "WinPool Agent",
+                        "托盘 Agent 启动失败；后台监控暂不可用。",
+                        "agent",
+                        "agent-start-failed"));
+            }
+        }
+    }
+
+    private static NamedPipeAgentConnection EnsureAgentConnection()
+    {
+        if (s_agentConnection is not null)
+        {
+            return s_agentConnection;
+        }
+
+        var executable = Path.Combine(
+            AppContext.BaseDirectory,
+            "Agent",
+            "WinPool.Agent.exe");
+        s_agentConnection = new NamedPipeAgentConnection(
+            NamedPipeAgentConnection.DefaultEndpointPath,
+            new AgentProcessLauncher(executable));
+        return s_agentConnection;
+    }
+
+    private static void StartExitSignalListener()
+    {
+        if (s_exitSignal is not null)
+        {
+            return;
+        }
+
+        var sid = WindowsIdentity.GetCurrent().User?.Value;
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            return;
+        }
+
+        s_exitSignal = new EventWaitHandle(
+            false,
+            EventResetMode.AutoReset,
+            AppExitSignal.CreateName(IpcIdentity.HashUserSid(sid)));
+        _ = Task.Run(
+            () =>
+            {
+                s_exitSignal.WaitOne();
+                DispatcherQueue.TryEnqueue(() => Window?.Close());
+            });
     }
 
     internal static void RequestMainWindowActivation()

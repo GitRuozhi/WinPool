@@ -5,14 +5,17 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
+using Windows.System;
 using Windows.UI;
 using Windows.UI.ViewManagement;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Core;
 using WinPool.Infrastructure.Windows;
+using IAgentConnection = WinPool.Application.IAgentConnection;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -34,7 +37,7 @@ public sealed partial class MainWindow : Window
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
     private readonly IElevationRestartService _elevationRestartService;
-    private readonly IWorkspaceStateService _workspaceStateService = new LocalWorkspaceStateService();
+    private readonly IWorkspaceStateService _workspaceStateService;
     private readonly DispatcherTimer _notificationDismissTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
 
@@ -46,22 +49,34 @@ public sealed partial class MainWindow : Window
 
     public ShellNavigationItem? SelectedShellItem { get; set; }
 
-    public MainWindow(ApplicationStartupOptions startupOptions)
+    public MainWindow(
+        ApplicationStartupOptions startupOptions,
+        IAgentConnection? agentConnection = null)
     {
         NotificationService = new GlobalNotificationService();
         _elevationRestartService = new WindowsElevationRestartService();
+        _workspaceStateService = agentConnection is null
+            ? new LocalWorkspaceStateService()
+            : new AgentBackedWorkspaceStateService(agentConnection);
         var importExportService = new DesktopExportService();
         ViewModel = new WorkspaceViewModel(
-            new WindowsHardwareInventoryProvider(),
+            agentConnection is null
+                ? new WindowsHardwareInventoryProvider()
+                : new AgentBackedHardwareInventoryProvider(agentConnection),
             new WindowsPrivilegeService(),
             new LocalUserPreferencesService(),
             importExportService,
-            new LocalStorageSystemRepository(),
+            agentConnection is null
+                ? new LocalStorageSystemRepository()
+                : new AgentBackedStorageSystemRepository(agentConnection),
             new SimulationOperationService(),
             NotificationService,
-            new LocalMachineRecordService(),
+            agentConnection is null
+                ? new LocalMachineRecordService()
+                : new AgentBackedMachineRecordService(agentConnection),
             new GlobalCommandLogService(),
-            _workspaceStateService);
+            _workspaceStateService,
+            agentConnection);
         if (startupOptions.EnterRealModeAfterElevation)
         {
             ViewModel.TrySetExecutionMode(ExecutionMode.Real);
@@ -86,6 +101,7 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         _uiSettings.ColorValuesChanged += UiSettings_ColorValuesChanged;
         BuildShellNavigation();
+        RegisterShellKeyboardAccelerators();
         RootFrame.Navigate(typeof(MainPage), ViewModel);
         SelectShellPage(ShellPageKind.Manage);
     }
@@ -129,7 +145,14 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await ViewModel.Monitoring.StopAsync();
+            if (ViewModel.Monitoring.UsesAgent)
+            {
+                await ViewModel.Monitoring.DetachAsync();
+            }
+            else
+            {
+                await ViewModel.Monitoring.StopAsync();
+            }
             ViewModel.Monitoring.Dispose();
             await _workspaceStateService.SaveAsync(
                 ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
@@ -157,18 +180,14 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = RootGrid.XamlRoot,
             RequestedTheme = RootGrid.RequestedTheme,
-            Title = localization["WelcomeTitle"]
+            Title = localization["WelcomeTitle"],
+            PrimaryButtonText = localization["WelcomeConfirm"],
+            DefaultButton = ContentDialogButton.Primary
         };
-        var confirmButton = new Button
-        {
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
-            Content = localization["WelcomeConfirm"]
-        };
-        confirmButton.Click += (_, _) => dialog.Hide();
+        dialog.Opened += (_, _) =>
+            showAgainCheckBox.Focus(FocusState.Programmatic);
         var bottomRow = new Grid { Margin = new Thickness(0, 20, 0, 0) };
         bottomRow.Children.Add(showAgainCheckBox);
-        bottomRow.Children.Add(confirmButton);
         dialog.Content = new StackPanel
         {
             Width = 480,
@@ -429,6 +448,34 @@ public sealed partial class MainWindow : Window
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Development, string.Empty, "\uE943"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Settings, string.Empty, "\uE713"));
         RefreshShellNavigationText();
+    }
+
+    private void RegisterShellKeyboardAccelerators()
+    {
+        var shortcuts = new (VirtualKey Key, ShellPageKind Page)[]
+        {
+            (VirtualKey.Number1, ShellPageKind.Manage),
+            (VirtualKey.Number2, ShellPageKind.Create),
+            (VirtualKey.Number3, ShellPageKind.Test),
+            (VirtualKey.Number4, ShellPageKind.Monitor),
+            (VirtualKey.Number5, ShellPageKind.Development),
+            (VirtualKey.Number6, ShellPageKind.Settings)
+        };
+
+        foreach (var (key, page) in shortcuts)
+        {
+            var accelerator = new KeyboardAccelerator
+            {
+                Key = key,
+                Modifiers = VirtualKeyModifiers.Control
+            };
+            accelerator.Invoked += (_, args) =>
+            {
+                SelectShellPage(page);
+                args.Handled = true;
+            };
+            RootGrid.KeyboardAccelerators.Add(accelerator);
+        }
     }
 
     private void RefreshShellNavigationText()

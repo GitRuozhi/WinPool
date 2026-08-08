@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using System.Runtime.InteropServices;
 using WinPool.App.ViewModels;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool_App;
 
@@ -372,107 +372,92 @@ public sealed partial class MainPage : Page
 
     private List<CommandSpec> BuildCommandSpecs()
     {
-        var specs = new List<CommandSpec>();
         var selected = ViewModel.SelectedWorkspaceItem;
         if (selected?.IsAction == true)
         {
-            specs.Add(new CommandSpec(Text("导入", "Import"), "\uE8B5", true, ImportAsync));
-            return specs;
-        }
-        if (selected?.Unit is null)
-        {
-            return specs;
+            return [new CommandSpec(Text("导入", "Import"), "\uE8B5", true, ImportAsync)];
         }
 
-        var simulated = ViewModel.IsUsingSimulatedInventory;
-        switch (ViewModel.SelectedCategory)
-        {
-            case WorkspaceCategory.System:
-                specs.Add(new CommandSpec(Text("刷新本机信息", "Refresh local info"), "\uE72C", ViewModel.IsLocalSystem, RescanAsync));
-                specs.Add(new CommandSpec(Text("转换本机到模拟", "Convert local to simulation"), "\uE8AB", ViewModel.IsLocalSystem, ConvertLocalAsync));
-                specs.Add(new CommandSpec(Text("导入模拟系统", "Import simulated system"), "\uE8B5", true, ImportAsync));
-                specs.Add(new CommandSpec(Text("导出模拟系统", "Export simulated system"), "\uEDE1", true, ExportAsync));
-                specs.Add(new CommandSpec(Text("删除模拟系统", "Delete simulation"), "\uE74D", ViewModel.CanDeleteSelectedSimulation, DeleteSimulationAsync));
-                break;
-            case WorkspaceCategory.Pool:
-                var pool = ViewModel.ActiveSnapshot.StoragePools.FirstOrDefault(
-                    x => x.StableId == selected.Unit.StableId);
-                var editablePool = simulated && pool is { IsPrimordial: false };
-                specs.Add(new CommandSpec(Text("重命名存储池", "Rename pool"), "\uE8AC", editablePool, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("创建存储池", "Create pool"), "\uE710", simulated && pool is not null, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("编辑存储池", "Edit pool"), "\uE90F", editablePool, NavigateEditAsync));
-                specs.Add(new CommandSpec(
-                    Text("优化磁盘使用率", "Optimize disk usage"), "\uE945",
-                    editablePool,
-                    NavigateEditAsync));
-                break;
-            case WorkspaceCategory.Tier:
-                specs.Add(new CommandSpec(Text("重命名存储层", "Rename tier"), "\uE8AC", simulated, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("创建存储层", "Create tier"), "\uE710", simulated, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("编辑存储层", "Edit tier"), "\uE90F", simulated, NavigateEditAsync));
-                break;
-            case WorkspaceCategory.Disk:
-                var selectedDisk = ResolveOsDisk();
-                var selectedPhysicalDisk = selectedDisk is null
-                    ? null
-                    : ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(
-                        x => x.StableId == selectedDisk.PhysicalDiskStableId);
-                var diskCanBeTakenOffline = selectedDisk is { IsOffline: true }
-                    || selectedDisk is
-                    {
-                        IsBoot: false,
-                        IsSystem: false
-                    } && selectedPhysicalDisk is not { IsPageFile: true } and not { IsCrashDump: true };
-                var diskHasPartitions = selectedDisk is not null
-                    && ViewModel.ActiveSnapshot.Partitions.Any(x => x.OsDiskStableId == selectedDisk.StableId);
-                specs.Add(new CommandSpec(
-                    Text("重命名磁盘", "Rename disk"), "\uE8AC",
-                    simulated && selected.Unit.Kind is not StorageUnitKind.NetworkDisk,
-                    NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("初始化磁盘", "Initialize disk"), "\uE9CE", simulated && selectedDisk is not null, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("新建分区", "New partition"), "\uE710", simulated && selectedDisk is not null, NavigateEditAsync));
-                specs.Add(new CommandSpec(
-                    Text("转换到其他类型", "Convert to another style"), "\uE8AB",
-                    simulated && selectedDisk is not null && !diskHasPartitions,
-                    NavigateEditAsync));
-                specs.Add(new CommandSpec(
-                    selectedDisk is { IsOffline: true }
-                        ? Text("联机", "Online")
-                        : Text("脱机", "Offline"),
-                    "\uEDA2",
-                    simulated && selectedDisk is not null && diskCanBeTakenOffline,
-                    NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("系统属性对话框", "System properties dialog"), "\uE90A", ViewModel.IsSelectedSystemLocalConsistent, PropertiesAsync));
-                break;
-            case WorkspaceCategory.Partition:
-                var partition = ViewModel.ActiveSnapshot.Partitions.FirstOrDefault(
-                    x => x.StableId == selected.Unit.StableId);
-                var isPrimaryPartition = partition?.Type == "Primary";
-                var editablePartition = simulated && isPrimaryPartition;
-                specs.Add(new CommandSpec(
-                    Text("打开资源管理器", "Open in File Explorer"), "\uE838",
-                    isPrimaryPartition && ViewModel.CanOpenSelectedPartition,
-                    OpenPartitionAsync));
-                specs.Add(new CommandSpec(Text("修改盘符和路径", "Change drive letter and paths"), "\uE8B7", editablePartition, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("重命名分区", "Rename partition"), "\uE8AC", editablePartition, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("格式化分区", "Format partition"), "\uE9CE", editablePartition, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("编辑分区", "Edit partition"), "\uE90F", editablePartition, NavigateEditAsync));
-                specs.Add(new CommandSpec(Text("删除分区", "Delete partition"), "\uE74D", editablePartition, NavigateEditAsync));
-                specs.Add(new CommandSpec(
-                    Text("优化驱动器", "Optimize drive"), "\uE945",
-                    isPrimaryPartition && ViewModel.IsSelectedSystemLocalConsistent,
-                    OptimizeDrivesAsync));
-                specs.Add(new CommandSpec(Text("系统属性对话框", "System properties dialog"), "\uE90A", ViewModel.IsSelectedSystemLocalConsistent, PropertiesAsync));
-                break;
-        }
-
-        specs.Add(new CommandSpec(
-            Text($"导出 [{ViewModel.SelectedCategoryTitle}] 信息列表", $"Export [{ViewModel.SelectedCategoryTitle}] info list"),
-            "\uE8B6",
-            true,
-            ExportListAsync));
-        return specs;
+        var surface = ViewModel.GetSelectedCommandSurface();
+        return surface is null
+            ? []
+            : surface.Commands.Select(BuildCommandSpec).ToList();
     }
+
+    private CommandSpec BuildCommandSpec(ManageCommandView command) =>
+        command.Kind switch
+        {
+            ManageCommandKind.RefreshLocal =>
+                Spec("刷新本机信息", "Refresh local info", "\uE72C", command, RescanAsync),
+            ManageCommandKind.ConvertLocalToSimulation =>
+                Spec("转换本机到模拟", "Convert local to simulation", "\uE8AB", command, ConvertLocalAsync),
+            ManageCommandKind.ImportSimulation =>
+                Spec("导入模拟系统", "Import simulated system", "\uE8B5", command, ImportAsync),
+            ManageCommandKind.ExportSimulation =>
+                Spec("导出模拟系统", "Export simulated system", "\uEDE1", command, ExportAsync),
+            ManageCommandKind.DeleteSimulation =>
+                Spec("删除模拟系统", "Delete simulation", "\uE74D", command, DeleteSimulationAsync),
+            ManageCommandKind.RenamePool =>
+                Spec("重命名存储池", "Rename pool", "\uE8AC", command, NavigateEditAsync),
+            ManageCommandKind.CreatePool =>
+                Spec("创建存储池", "Create pool", "\uE710", command, NavigateEditAsync),
+            ManageCommandKind.EditPool =>
+                Spec("编辑存储池", "Edit pool", "\uE90F", command, NavigateEditAsync),
+            ManageCommandKind.OptimizePoolUsage =>
+                Spec("优化磁盘使用率", "Optimize disk usage", "\uE945", command, NavigateEditAsync),
+            ManageCommandKind.RenameTier =>
+                Spec("重命名存储层", "Rename tier", "\uE8AC", command, NavigateEditAsync),
+            ManageCommandKind.CreateTier =>
+                Spec("创建存储层", "Create tier", "\uE710", command, NavigateEditAsync),
+            ManageCommandKind.EditTier =>
+                Spec("编辑存储层", "Edit tier", "\uE90F", command, NavigateEditAsync),
+            ManageCommandKind.RenameDisk =>
+                Spec("重命名磁盘", "Rename disk", "\uE8AC", command, NavigateEditAsync),
+            ManageCommandKind.InitializeDisk =>
+                Spec("初始化磁盘", "Initialize disk", "\uE9CE", command, NavigateEditAsync),
+            ManageCommandKind.CreatePartition =>
+                Spec("新建分区", "New partition", "\uE710", command, NavigateEditAsync),
+            ManageCommandKind.ConvertDiskStyle =>
+                Spec("转换到其他类型", "Convert to another style", "\uE8AB", command, NavigateEditAsync),
+            ManageCommandKind.OnlineDisk =>
+                Spec("联机", "Online", "\uEDA2", command, NavigateEditAsync),
+            ManageCommandKind.OfflineDisk =>
+                Spec("脱机", "Offline", "\uEDA2", command, NavigateEditAsync),
+            ManageCommandKind.ShowSystemProperties =>
+                Spec("系统属性对话框", "System properties dialog", "\uE90A", command, PropertiesAsync),
+            ManageCommandKind.OpenExplorer =>
+                Spec("打开资源管理器", "Open in File Explorer", "\uE838", command, OpenPartitionAsync),
+            ManageCommandKind.ChangeDriveLetter =>
+                Spec("修改盘符和路径", "Change drive letter and paths", "\uE8B7", command, NavigateEditAsync),
+            ManageCommandKind.RenamePartition =>
+                Spec("重命名分区", "Rename partition", "\uE8AC", command, NavigateEditAsync),
+            ManageCommandKind.FormatPartition =>
+                Spec("格式化分区", "Format partition", "\uE9CE", command, NavigateEditAsync),
+            ManageCommandKind.EditPartition =>
+                Spec("编辑分区", "Edit partition", "\uE90F", command, NavigateEditAsync),
+            ManageCommandKind.DeletePartition =>
+                Spec("删除分区", "Delete partition", "\uE74D", command, NavigateEditAsync),
+            ManageCommandKind.OptimizeDrive =>
+                Spec("优化驱动器", "Optimize drive", "\uE945", command, OptimizeDrivesAsync),
+            ManageCommandKind.ExportCategory =>
+                new CommandSpec(
+                    Text(
+                        $"导出 [{ViewModel.SelectedCategoryTitle}] 信息列表",
+                        $"Export [{ViewModel.SelectedCategoryTitle}] info list"),
+                    "\uE8B6",
+                    command.IsEnabled,
+                    ExportListAsync),
+            _ => throw new ArgumentOutOfRangeException(nameof(command))
+        };
+
+    private CommandSpec Spec(
+        string zh,
+        string en,
+        string glyph,
+        ManageCommandView command,
+        Func<Task> action) =>
+        new(Text(zh, en), glyph, command.IsEnabled, action);
+
 
     private async Task DeleteSimulationAsync()
     {
@@ -507,7 +492,7 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void ShowNodeContextMenu(StorageUnitRef unit, object target)
+    private void ShowNodeContextMenu(ManageObjectTarget node, object target)
     {
         if (target is not FrameworkElement element)
         {
@@ -515,8 +500,9 @@ public sealed partial class MainPage : Page
         }
 
         var selected = ViewModel.SelectedWorkspaceItem;
-        if (selected?.Unit is null
-            || !selected.Unit.StableId.Equals(unit.StableId, StringComparison.OrdinalIgnoreCase))
+        if (selected?.Projection is null
+            || selected.Projection.Id != node.Id
+            || selected.Projection.Role != node.Role)
         {
             return;
         }
@@ -585,13 +571,10 @@ public sealed partial class MainPage : Page
         {
             await action();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            ViewModel.NotificationService.PublishError(
-                ViewModel.Localization["Error"],
-                $"{ViewModel.Localization["OperationFailed"]} {ex.Message}".Trim(),
-                "workspace-operation",
-                $"workspace-operation:{DateTimeOffset.UtcNow.Ticks}");
+            ViewModel.PresentNotification(WorkspaceNotificationFactory.OperationFailed(
+                $"workspace-operation:{DateTimeOffset.UtcNow.Ticks}"));
         }
         BuildCommandButtons();
     }
@@ -606,61 +589,29 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        var labels = new List<string> { ViewModel.Localization["Name"] };
-        foreach (var column in columns)
-        {
-            foreach (var row in column.Rows)
-            {
-                if (!labels.Contains(row.Label, StringComparer.Ordinal))
-                {
-                    labels.Add(row.Label);
-                }
-            }
-        }
-
-        var builder = new System.Text.StringBuilder();
-        AppendCsvRow(builder, [ViewModel.Localization["Name"], .. columns.Select(x => x.Name)]);
-        foreach (var label in labels.Skip(1))
-        {
-            AppendCsvRow(builder,
-            [
-                label,
-                .. columns.Select(x =>
-                    x.Rows.FirstOrDefault(r => r.Label.Equals(label, StringComparison.Ordinal))?.Value
-                    ?? string.Empty)
-            ]);
-        }
+        var csv = ManageCategoryCsvExporter.Create(
+            ViewModel.Localization["Name"],
+            columns.Select(column => new ManageExportColumn(
+                column.Name,
+                column.Rows.Select(row => new ManageExportProperty(row.Label, row.Value)).ToArray()))
+                .ToArray());
 
         var path = await new WinPool.App.Services.DesktopExportService().ExportCsvAsync(
             $"WinPool-{ViewModel.SelectedCategory}-{DateTime.Now:yyyyMMdd-HHmmss}",
-            builder.ToString());
+            csv);
         if (path is not null)
         {
-            ViewModel.NotificationService.PublishInfo(
-                ViewModel.Localization["Export"],
-                ViewModel.Localization["Exported"],
-                "workspace-operation",
-                $"export-list:{DateTimeOffset.UtcNow.Ticks}");
+            ViewModel.PresentNotification(WorkspaceNotificationFactory.ExportCompleted(
+                $"export-list:{DateTimeOffset.UtcNow.Ticks}"));
         }
     }
-
-    private static void AppendCsvRow(System.Text.StringBuilder builder, string[] values) =>
-        builder.AppendLine(string.Join(",", values.Select(EscapeCsv)));
-
-    private static string EscapeCsv(string value) =>
-        value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r')
-            ? $"\"{value.Replace("\"", "\"\"")}\""
-            : value;
 
     private async Task ExportAsync()
     {
         if (await ViewModel.ExportActiveSystemAsync() is not null)
         {
-            ViewModel.NotificationService.PublishInfo(
-                ViewModel.Localization["Export"],
-                ViewModel.Localization["Exported"],
-                "workspace-operation",
-                $"export:{DateTimeOffset.UtcNow.Ticks}");
+            ViewModel.PresentNotification(WorkspaceNotificationFactory.ExportCompleted(
+                $"export:{DateTimeOffset.UtcNow.Ticks}"));
         }
     }
 
@@ -668,17 +619,15 @@ public sealed partial class MainPage : Page
     {
         if (await ViewModel.ImportSystemAsync())
         {
-            ViewModel.NotificationService.PublishInfo(
-                ViewModel.Localization["Import"],
-                Text("系统已导入为模拟副本。", "System imported as a simulation."),
-                "workspace-operation",
-                $"import:{DateTimeOffset.UtcNow.Ticks}");
+            ViewModel.PresentNotification(WorkspaceNotificationFactory.ImportCompleted(
+                $"import:{DateTimeOffset.UtcNow.Ticks}"));
         }
     }
 
     private Task NavigateEditAsync()
     {
-        ((MainWindow)App.Window).ShowEdit(ViewModel.ResolveDetailUnit()?.StableId);
+        ((MainWindow)App.Window).ShowEdit(
+            ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey);
         return Task.CompletedTask;
     }
 
@@ -699,83 +648,41 @@ public sealed partial class MainPage : Page
             "workspace-operation",
             $"target-missing:{DateTimeOffset.UtcNow.Ticks}");
 
-    private PartitionInfo? ResolveLivePartition(StorageUnitRef unit)
-    {
-        var selected = ViewModel.ActiveSnapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
-        if (selected is null)
-        {
-            return null;
-        }
-        if (ViewModel.IsLocalSystem)
-        {
-            return selected;
-        }
-        return ViewModel.Snapshot.Partitions.FirstOrDefault(
-            x => x.DiskNumber == selected.DiskNumber && x.PartitionNumber == selected.PartitionNumber);
-    }
-
     private async Task OptimizeDrivesAsync()
     {
         await Task.CompletedTask;
-        var unit = ViewModel.ResolveDetailUnit();
-        var arguments = string.Empty;
-        if (unit?.Kind == StorageUnitKind.Partition)
-        {
-            var partition = ResolveLivePartition(unit);
-            if (partition is null)
-            {
-                NotifyTargetMissing();
-                return;
-            }
-            if (!string.IsNullOrWhiteSpace(partition.DriveLetter))
-            {
-                arguments = $"{partition.DriveLetter}:";
-            }
-        }
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "dfrgui.exe",
-            Arguments = arguments,
-            UseShellExecute = true
-        });
-    }
-
-    private OsDiskInfo? ResolveOsDisk()
-    {
-        var unit = ViewModel.ResolveDetailUnit();
-        return unit?.Kind switch
-        {
-            StorageUnitKind.OsDisk =>
-                ViewModel.ActiveSnapshot.OsDisks.FirstOrDefault(x => x.StableId == unit.StableId),
-            StorageUnitKind.PhysicalDisk =>
-                ViewModel.ActiveSnapshot.OsDisks.FirstOrDefault(x => x.PhysicalDiskStableId == unit.StableId),
-            StorageUnitKind.VirtualDisk =>
-                ViewModel.ActiveSnapshot.OsDisks.FirstOrDefault(x => x.VirtualDiskStableId == unit.StableId),
-            _ => null
-        };
-    }
-
-    private async Task OpenPartitionAsync()
-    {
-        var unit = ViewModel.ResolveDetailUnit();
-        if (unit is null || !ViewModel.IsSelectedSystemLocalConsistent)
-        {
-            return;
-        }
-        var partition = ResolveLivePartition(unit);
-        if (partition is null)
+        var target = ViewModel.GetSelectedCommandSurface()?.SystemDialogTarget;
+        if (target is null || !target.HasResolvedPartition)
         {
             NotifyTargetMissing();
             return;
         }
-        if (!Directory.Exists(partition.Path))
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "dfrgui.exe",
+            Arguments = string.IsNullOrWhiteSpace(target.DriveLetter)
+                ? string.Empty
+                : $"{target.DriveLetter}:",
+            UseShellExecute = true
+        });
+    }
+
+    private async Task OpenPartitionAsync()
+    {
+        var target = ViewModel.GetSelectedCommandSurface()?.SystemDialogTarget;
+        if (target is null || !target.HasResolvedPartition)
+        {
+            NotifyTargetMissing();
+            return;
+        }
+        if (!Directory.Exists(target.PartitionPath))
         {
             return;
         }
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = "explorer.exe",
-            Arguments = $"\"{partition.Path}\"",
+            Arguments = $"\"{target.PartitionPath}\"",
             UseShellExecute = true
         });
         await Task.CompletedTask;
@@ -783,87 +690,67 @@ public sealed partial class MainPage : Page
 
     private async Task PropertiesAsync()
     {
-        var unit = ViewModel.ResolveDetailUnit();
-        if (unit is null || !ViewModel.IsSelectedSystemLocalConsistent)
-        {
-            return;
-        }
-
-        if (unit.Kind == StorageUnitKind.Partition)
-        {
-            var partition = ResolveLivePartition(unit);
-            if (partition is null)
-            {
-                NotifyTargetMissing();
-                return;
-            }
-            if (Directory.Exists(partition.Path))
-            {
-                if (!TryShowNativeProperties(partition.Path))
-                {
-                    ViewModel.NotificationService.PublishError(
-                        ViewModel.Localization["Error"],
-                        ViewModel.Localization["OperationFailed"],
-                        "workspace-operation",
-                        $"properties:{DateTimeOffset.UtcNow.Ticks}");
-                }
-            }
-            return;
-        }
-
-        if (unit.Kind is StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk
-            or StorageUnitKind.OsDisk)
-        {
-            await OpenDiskPropertiesAsync(unit);
-        }
-    }
-
-    private async Task OpenDiskPropertiesAsync(StorageUnitRef unit)
-    {
         await Task.CompletedTask;
-        var activeSnapshot = ViewModel.ActiveSnapshot;
-        var physical = unit.Kind == StorageUnitKind.PhysicalDisk
-            ? activeSnapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == unit.StableId)
-            : ResolveOsDisk()?.PhysicalDiskStableId is string physicalId
-                ? activeSnapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == physicalId)
-                : null;
-        if (!ViewModel.IsLocalSystem)
+        var role = ViewModel.SelectedWorkspaceItem?.Projection?.Role;
+        var target = ViewModel.GetSelectedCommandSurface()?.SystemDialogTarget;
+        if (target is null)
         {
-            var activeOsDisk = ResolveOsDisk();
-            if (activeOsDisk is null)
-            {
-                NotifyTargetMissing();
-                return;
-            }
-            var liveOsDisk = ViewModel.Snapshot.OsDisks.FirstOrDefault(x => x.Number == activeOsDisk.Number);
-            if (liveOsDisk is null)
-            {
-                NotifyTargetMissing();
-                return;
-            }
-            physical = liveOsDisk.PhysicalDiskStableId is string livePhysicalId
-                ? ViewModel.Snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == livePhysicalId)
-                : null;
+            return;
         }
-        if (!string.IsNullOrWhiteSpace(physical?.PnpDeviceId))
+
+        if (role == ManageObjectRole.Partition)
+        {
+            if (!target.HasResolvedPartition)
+            {
+                NotifyTargetMissing();
+                return;
+            }
+            if (Directory.Exists(target.PartitionPath)
+                && !TryShowNativeProperties(target.PartitionPath))
+            {
+                ViewModel.NotificationService.PublishError(
+                    ViewModel.Localization["Error"],
+                    ViewModel.Localization["OperationFailed"],
+                    "workspace-operation",
+                    $"properties:{DateTimeOffset.UtcNow.Ticks}");
+            }
+            return;
+        }
+
+        if (role is not (ManageObjectRole.PhysicalDisk
+            or ManageObjectRole.VirtualDisk
+            or ManageObjectRole.OsDisk))
+        {
+            return;
+        }
+        if (!target.HasResolvedDisk)
+        {
+            NotifyTargetMissing();
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(target.PhysicalDeviceInstanceId))
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "rundll32.exe",
-                Arguments = $"devmgr.dll,DeviceProperties_RunDLL /DeviceID \"{physical.PnpDeviceId}\"",
+                Arguments = $"devmgr.dll,DeviceProperties_RunDLL /DeviceID \"{target.PhysicalDeviceInstanceId}\"",
                 UseShellExecute = true
             });
             return;
         }
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        if (target.UseDiskManagementFallback)
         {
-            FileName = "diskmgmt.msc",
-            UseShellExecute = true
-        });
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "diskmgmt.msc",
+                UseShellExecute = true
+            });
+        }
     }
 
+
     private string Text(string zh, string en) =>
-        ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;
+        ViewModel.Localization.IsChinese ? zh : en;
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {

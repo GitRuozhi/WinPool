@@ -1,10 +1,10 @@
 ﻿using System.Collections.ObjectModel;
-using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPool.App.Services;
 using WinPool.Core;
 using WinPool.Infrastructure.Windows;
+using IAgentConnection = WinPool.Application.IAgentConnection;
 
 namespace WinPool.App.ViewModels;
 
@@ -15,8 +15,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly IGlobalNotificationService _notificationService;
     private readonly IStorageSystemRepository _systemRepository;
     private readonly ISimulationOperationService _simulationOperations;
+    private readonly WinPool.Application.ISimulationEditCoordinator _simulationEditCoordinator;
     private readonly IMachineRecordService _machineRecordService;
     private readonly IWorkspaceStateService _workspaceStateService;
+    private readonly IAgentConnection? _agentConnection;
+    private readonly WinPool.Application.IManageSystemProjector<StorageSystemDocument> _manageProjector;
+    private readonly WinPool.Application.IManageComparisonProjector<StorageSystemDocument> _manageComparisonProjector;
+    private readonly WinPool.Application.IManageDetailsProjector<StorageSystemDocument> _manageDetailsProjector;
+    private readonly WinPool.Application.IManageNavigationProjector<StorageSystemDocument> _manageNavigationProjector;
+    private readonly WinPool.Application.IManageCommandProjector<StorageSystemDocument> _manageCommandProjector;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly Dictionary<string, bool> _expandedStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<WorkspaceCategory, string> _categorySelections = [];
@@ -37,7 +44,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         IGlobalNotificationService notificationService,
         IMachineRecordService machineRecordService,
         ICommandLogService commandLogService,
-        IWorkspaceStateService workspaceStateService)
+        IWorkspaceStateService workspaceStateService,
+        IAgentConnection? agentConnection = null,
+        WinPool.Application.IManageSystemProjector<StorageSystemDocument>? manageProjector = null,
+        WinPool.Application.IManageComparisonProjector<StorageSystemDocument>? manageComparisonProjector = null,
+        WinPool.Application.IManageDetailsProjector<StorageSystemDocument>? manageDetailsProjector = null,
+        WinPool.Application.IManageNavigationProjector<StorageSystemDocument>? manageNavigationProjector = null,
+        WinPool.Application.IManageCommandProjector<StorageSystemDocument>? manageCommandProjector = null)
     {
         _hardwareInventoryProvider = hardwareInventoryProvider;
         _preferencesService = preferencesService;
@@ -46,6 +59,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _simulationOperations = simulationOperations;
         _machineRecordService = machineRecordService;
         _workspaceStateService = workspaceStateService;
+        _agentConnection = agentConnection;
+        _manageProjector = manageProjector ?? new LegacyManageSystemProjector();
+        _manageComparisonProjector = manageComparisonProjector ?? new LegacyManageComparisonProjector();
+        _manageDetailsProjector = manageDetailsProjector ?? new LegacyManageDetailsProjector();
+        _manageNavigationProjector = manageNavigationProjector ?? new LegacyManageNavigationProjector();
+        _manageCommandProjector = manageCommandProjector ?? new LegacyManageCommandProjector();
+        _simulationEditCoordinator = new LegacySimulationEditCoordinator(
+            () => ActiveDocument,
+            CommitSimulationDocumentAsync,
+            _simulationOperations,
+            ResetBuiltInSimulation);
+        Monitoring = new MonitoringService(agentConnection);
         CommandLog = commandLogService;
         ImportExportService = importExportService;
         PrivilegeState = privilegeService.Current;
@@ -84,9 +109,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public IGlobalNotificationService NotificationService => _notificationService;
 
-    public MonitoringService Monitoring { get; } = new();
+    public void PresentNotification(WinPool.Application.ApplicationNotification notification) =>
+        new ApplicationNotificationPresenter(_notificationService, Localization).Present(notification);
 
-    public Action<StorageUnitRef, object>? NodeContextMenuRequested { get; set; }
+    public MonitoringService Monitoring { get; }
+
+    public IAgentConnection? AgentConnection => _agentConnection;
+
+    public Action<WinPool.Application.ManageObjectTarget, object>? NodeContextMenuRequested { get; set; }
 
     public ICommandLogService CommandLog { get; }
 
@@ -218,12 +248,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool HasScanError => !string.IsNullOrWhiteSpace(ScanError);
 
-    public bool HasSelection => SelectedWorkspaceItem?.Unit is not null;
+    public bool HasSelection => SelectedWorkspaceItem?.Projection is not null;
 
     public bool CanOpenSelectedPartition =>
         IsSelectedSystemLocalConsistent
-        && ResolveDetailUnit()?.Kind == StorageUnitKind.Partition
-        && ActiveSnapshot.Partitions.Any(x => x.StableId == ResolveDetailUnit()?.StableId);
+        && SelectedWorkspaceItem?.Projection?.Role == WinPool.Application.ManageObjectRole.Partition
+        && ActiveSnapshot.Partitions.Any(
+            partition => partition.StableId == SelectedWorkspaceItem.Projection.Id.ProviderKey);
 
     public bool HasRelatedTarget => GetPrimaryRelatedTarget() is not null;
 
@@ -251,157 +282,25 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private string? FindRelatedStableIdForCategory(WorkspaceCategory target)
     {
         var current = SelectedWorkspaceItem;
-        if (current?.Unit is null || current.IsAction)
+        if (current?.Projection is null || current.IsAction)
         {
             return null;
         }
 
-        var unit = current.Unit;
-        var snapshot = ActiveSnapshot;
-        return target switch
+        var contractCategory = target switch
         {
-            WorkspaceCategory.System => SelectedSystem.Id,
-            WorkspaceCategory.Pool => RelatedPoolId(unit, snapshot),
-            WorkspaceCategory.Tier => RelatedTierId(unit, snapshot),
-            WorkspaceCategory.Disk => RelatedDiskId(unit, snapshot),
-            WorkspaceCategory.Partition => RelatedPartitionId(unit, snapshot),
-            _ => null
+            WorkspaceCategory.System => WinPool.Application.ManageWorkspaceCategory.System,
+            WorkspaceCategory.Pool => WinPool.Application.ManageWorkspaceCategory.Pool,
+            WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
+            WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
+            WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
+            _ => throw new ArgumentOutOfRangeException(nameof(target))
         };
-    }
-
-    private string? RelatedPoolId(StorageUnitRef unit, StorageSnapshot snapshot)
-    {
-        switch (unit.Kind)
-        {
-            case StorageUnitKind.StoragePool:
-            case StorageUnitKind.NetworkDiskGroup:
-            case StorageUnitKind.OtherDiskGroup:
-                return unit.StableId;
-            case StorageUnitKind.StorageTier:
-                return snapshot.StorageTiers.FirstOrDefault(x => x.StableId == unit.StableId)?.PoolStableId;
-            case StorageUnitKind.PhysicalDisk:
-                return snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == unit.StableId)?.PoolStableId
-                    ?? snapshot.StoragePools.FirstOrDefault(x => x.IsPrimordial)?.StableId;
-            case StorageUnitKind.VirtualDisk:
-                return snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == unit.StableId)?.PoolStableId;
-            case StorageUnitKind.NetworkDisk:
-                return TopologyProjector.NetworkGroupStableId(snapshot);
-            case StorageUnitKind.OsDisk:
-                var osDisk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == unit.StableId);
-                if (osDisk is null)
-                {
-                    return null;
-                }
-                if (osDisk.PhysicalDiskStableId is null && osDisk.VirtualDiskStableId is null)
-                {
-                    return TopologyProjector.OtherGroupStableId(snapshot);
-                }
-                var backing = osDisk.VirtualDiskStableId is not null
-                    ? new StorageUnitRef(osDisk.VirtualDiskStableId, StorageUnitKind.VirtualDisk, string.Empty)
-                    : new StorageUnitRef(osDisk.PhysicalDiskStableId!, StorageUnitKind.PhysicalDisk, string.Empty);
-                return RelatedPoolId(backing, snapshot);
-            case StorageUnitKind.Partition:
-                var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
-                var parentId = ResolvePartitionParent(partition);
-                return parentId is null
-                    ? null
-                    : RelatedPoolId(new StorageUnitRef(parentId, StorageUnitKind.OsDisk, string.Empty), snapshot);
-            default:
-                return null;
-        }
-    }
-
-    private string? RelatedTierId(StorageUnitRef unit, StorageSnapshot snapshot)
-    {
-        switch (unit.Kind)
-        {
-            case StorageUnitKind.StorageTier:
-                return unit.StableId;
-            case StorageUnitKind.StoragePool:
-                return snapshot.StorageTiers.FirstOrDefault(x => x.PoolStableId == unit.StableId)?.StableId;
-            case StorageUnitKind.PhysicalDisk:
-                return snapshot.StorageTiers.FirstOrDefault(
-                    x => x.MemberPhysicalDiskIds.Contains(unit.StableId, StringComparer.OrdinalIgnoreCase))?.StableId;
-            case StorageUnitKind.VirtualDisk:
-                return snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == unit.StableId)
-                    ?.TierStableIds.FirstOrDefault();
-            case StorageUnitKind.Partition:
-                var diskId = RelatedDiskId(unit, snapshot);
-                return diskId is null
-                    ? null
-                    : RelatedTierId(new StorageUnitRef(diskId, StorageUnitKind.VirtualDisk, string.Empty), snapshot);
-            default:
-                return null;
-        }
-    }
-
-    private string? RelatedDiskId(StorageUnitRef unit, StorageSnapshot snapshot)
-    {
-        switch (unit.Kind)
-        {
-            case StorageUnitKind.PhysicalDisk:
-            case StorageUnitKind.VirtualDisk:
-            case StorageUnitKind.NetworkDisk:
-            case StorageUnitKind.OsDisk:
-                return unit.StableId;
-            case StorageUnitKind.Partition:
-                return ResolvePartitionParent(snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId));
-            case StorageUnitKind.StorageTier:
-                return snapshot.StorageTiers.FirstOrDefault(x => x.StableId == unit.StableId)
-                    ?.MemberPhysicalDiskIds.FirstOrDefault();
-            case StorageUnitKind.StoragePool:
-                var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId);
-                return pool?.MemberPhysicalDiskIds.FirstOrDefault()
-                    ?? snapshot.VirtualDisks.FirstOrDefault(x => x.PoolStableId == unit.StableId)?.StableId;
-            case StorageUnitKind.NetworkDiskGroup:
-                return snapshot.NetworkDisks.FirstOrDefault()?.StableId;
-            case StorageUnitKind.OtherDiskGroup:
-                return TopologyProjector.GetOtherOsDisks(snapshot).FirstOrDefault()?.StableId;
-            default:
-                return null;
-        }
-    }
-
-    private string? RelatedPartitionId(StorageUnitRef unit, StorageSnapshot snapshot)
-    {
-        switch (unit.Kind)
-        {
-            case StorageUnitKind.Partition:
-            case StorageUnitKind.NetworkDisk:
-                return unit.StableId;
-            case StorageUnitKind.PhysicalDisk:
-                return FindFirstPartitionForPhysicalDisk(unit.StableId);
-            case StorageUnitKind.VirtualDisk:
-                var osDiskIds = snapshot.OsDisks
-                    .Where(x => x.VirtualDiskStableId == unit.StableId)
-                    .Select(x => x.StableId)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                return snapshot.Partitions
-                    .FirstOrDefault(x => x.OsDiskStableId is not null && osDiskIds.Contains(x.OsDiskStableId))
-                    ?.StableId;
-            case StorageUnitKind.OsDisk:
-                return snapshot.Partitions.FirstOrDefault(x => x.OsDiskStableId == unit.StableId)?.StableId;
-            case StorageUnitKind.StoragePool:
-            case StorageUnitKind.StorageTier:
-            case StorageUnitKind.NetworkDiskGroup:
-            case StorageUnitKind.OtherDiskGroup:
-                var diskId = RelatedDiskId(unit, snapshot);
-                if (diskId is null)
-                {
-                    return null;
-                }
-                var kind = snapshot.VirtualDisks.Any(x => x.StableId == diskId)
-                    ? StorageUnitKind.VirtualDisk
-                    : snapshot.NetworkDisks.Any(x => x.StableId == diskId)
-                        ? StorageUnitKind.NetworkDisk
-                        : snapshot.OsDisks.Any(x => x.StableId == diskId)
-                          && snapshot.PhysicalDisks.All(x => x.StableId != diskId)
-                            ? StorageUnitKind.OsDisk
-                            : StorageUnitKind.PhysicalDisk;
-                return RelatedPartitionId(new StorageUnitRef(diskId, kind, string.Empty), snapshot);
-            default:
-                return null;
-        }
+        var navigation = _manageNavigationProjector.Project(
+            ActiveDocument,
+            current.Projection.Id,
+            current.Projection.Role);
+        return navigation.RelatedSelections.GetValueOrDefault(contractCategory)?.Id.ProviderKey;
     }
 
     partial void OnSelectedWorkspaceItemChanged(WorkspaceItem? value)
@@ -508,6 +407,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 }
             }
             SelectedCategory = RestoredUiState.Category;
+            SelectedTopologyStableId = string.IsNullOrWhiteSpace(
+                RestoredUiState.HighlightedTopologyStableId)
+                ? null
+                : RestoredUiState.HighlightedTopologyStableId;
         }
         RefreshLocalizedContent();
     }
@@ -519,7 +422,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             shellPage,
             SelectedSystem.Id,
             SelectedCategory,
-            new Dictionary<WorkspaceCategory, string>(_categorySelections));
+            new Dictionary<WorkspaceCategory, string>(_categorySelections),
+            SelectedTopologyStableId ?? string.Empty);
 
     public UserPreferences CurrentPreferences { get; private set; } = new();
 
@@ -599,56 +503,81 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         return true;
     }
 
-    public async Task<SimulationOperationResult> ApplySimulationOperationAsync(
-        SimulationOperationRequest request,
+    public async Task<WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt>> ApplySimulationOperationAsync(
+        WinPool.Application.SimulationEditRequest request,
         CancellationToken cancellationToken = default)
     {
-        var result = _simulationOperations.Apply(ActiveDocument, request);
-        if (!result.Succeeded)
+        var result = await _simulationEditCoordinator.ExecuteAsync(request, cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
         {
             return result;
         }
-        foreach (var command in result.Commands)
+
+        foreach (var command in result.Value.SimulatedCommands)
         {
             CommandLog.Log("simulation", command, "OK", simulated: true);
         }
-        SelectedSystem = result.Document;
-        SystemCatalog.Update(result.Document);
-        await _systemRepository.SaveSimulationAsync(result.Document, cancellationToken);
+
+        return result;
+    }
+
+    private async Task CommitSimulationDocumentAsync(
+        LegacySimulationEditCommit commit,
+        CancellationToken cancellationToken)
+    {
+        var document = commit.Document;
+        if (_systemRepository is IStructuredSimulationEditRepository structured)
+        {
+            await structured.SaveEditAsync(
+                document,
+                commit.Plan,
+                commit.Events,
+                cancellationToken);
+        }
+        else
+        {
+            await _systemRepository.SaveSimulationAsync(document, cancellationToken);
+        }
+        SelectedSystem = document;
+        SystemCatalog.Update(document);
         OnPropertyChanged(nameof(SelectedSystem));
         OnPropertyChanged(nameof(ActiveDocument));
         OnPropertyChanged(nameof(ActiveSnapshot));
         RebuildTopology();
-        RebuildObjects(request.TargetStableId);
+        RebuildObjects(SelectedStableId);
         BuildDetails();
         RebuildComparisonColumns();
-        return result;
     }
 
     public async Task ResetActiveSimulationAsync()
     {
-        if (!SelectedSystem.Id.StartsWith("simulation:builtin", StringComparison.Ordinal))
+        await ApplySimulationOperationAsync(
+            new WinPool.Application.SimulationEditRequest(
+                WinPool.Application.SimulationEditKind.ResetDocument,
+                ActiveSnapshot.Computer.StableId));
+    }
+
+    private static SimulationOperationResult ResetBuiltInSimulation(
+        StorageSystemDocument document)
+    {
+        if (!document.Id.StartsWith("simulation:builtin", StringComparison.Ordinal))
         {
-            return;
+            return SimulationOperationResult.Failure(
+                document,
+                "Only the built-in simulation document can be reset.");
         }
-        var snapshot = SimulationStorageSnapshotFactory.Create();
-        var document = SelectedSystem with
-        {
-            Snapshot = snapshot,
-            HardwareReport = KsReferenceReportFactory.Create(),
-            Jobs = [],
-            UpdatedAt = DateTimeOffset.Now
-        };
-        SelectedSystem = document;
-        SystemCatalog.Update(document);
-        await _systemRepository.SaveSimulationAsync(document);
-        OnPropertyChanged(nameof(SelectedSystem));
-        OnPropertyChanged(nameof(ActiveDocument));
-        OnPropertyChanged(nameof(ActiveSnapshot));
-        RebuildTopology();
-        RebuildObjects(null);
-        BuildDetails();
-        RebuildComparisonColumns();
+
+        return new SimulationOperationResult(
+            true,
+            document with
+            {
+                Snapshot = SimulationStorageSnapshotFactory.Create(),
+                HardwareReport = KsReferenceReportFactory.Create(),
+                Jobs = [],
+                UpdatedAt = DateTimeOffset.Now
+            },
+            string.Empty,
+            ["Reset-SimulationDocument -BuiltIn"]);
     }
 
     public bool TrySetExecutionMode(ExecutionMode mode)
@@ -671,12 +600,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         ScanError = string.Empty;
         StatusMessage = Localization["Scanning"];
         _notificationService.DismissByKey(ScanningNotificationKey);
-        _notificationService.PublishInfo(
-            Localization["Scanning"],
-            string.Empty,
-            "inventory",
-            ScanningNotificationKey,
-            autoDismiss: false);
+        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted());
         var previous = new WorkspaceSelection(SelectedCategory, SelectedStableId, _contextUnit?.Kind, _contextUnit?.StableId);
         var previousTopologyStableId = SelectedTopologyStableId;
         try
@@ -716,11 +640,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             }
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
             _notificationService.DismissByKey(ScanningNotificationKey);
-            _notificationService.PublishInfo(
-                Localization["ScanComplete"],
+            PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanCompleted(
                 StatusMessage,
-                "inventory",
-                $"inventory:scan-complete:{snapshot.ScannedAt.UtcTicks}");
+                snapshot.ScannedAt));
             foreach (var warning in snapshot.Warnings)
             {
                 _notificationService.PublishWarning(
@@ -738,11 +660,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             ScanError = $"{Localization["ScanFailed"]} {ex.Message}";
             StatusMessage = ScanError;
             _notificationService.DismissByKey(ScanningNotificationKey);
-            _notificationService.PublishError(
-                Localization["Error"],
-                ScanError,
-                "inventory",
-                $"inventory-error:{DateTimeOffset.UtcNow.Ticks}");
+            PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanFailed(
+                $"inventory-error:{DateTimeOffset.UtcNow.Ticks}"));
         }
         finally
         {
@@ -756,54 +675,134 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public void SelectTopologyUnit(StorageUnitRef unit, StorageSnapshot sourceSnapshot)
     {
-        if (SelectedTopologyStableId?.Equals(unit.StableId, StringComparison.OrdinalIgnoreCase) == true)
+        var sourceDocument = SystemCatalog.Systems.FirstOrDefault(
+            document => ReferenceEquals(document.Snapshot, sourceSnapshot))
+            ?? ActiveDocument;
+        var role = unit.Kind switch
+        {
+            StorageUnitKind.System => WinPool.Application.ManageObjectRole.System,
+            StorageUnitKind.StorageSubsystem => WinPool.Application.ManageObjectRole.StorageSubsystem,
+            StorageUnitKind.StoragePool => WinPool.Application.ManageObjectRole.StoragePool,
+            StorageUnitKind.StorageTier => WinPool.Application.ManageObjectRole.StorageTier,
+            StorageUnitKind.PhysicalDisk => WinPool.Application.ManageObjectRole.PhysicalDisk,
+            StorageUnitKind.VirtualDisk => WinPool.Application.ManageObjectRole.VirtualDisk,
+            StorageUnitKind.NetworkDisk => WinPool.Application.ManageObjectRole.NetworkDisk,
+            StorageUnitKind.OsDisk => WinPool.Application.ManageObjectRole.OsDisk,
+            StorageUnitKind.Partition => WinPool.Application.ManageObjectRole.Partition,
+            StorageUnitKind.NetworkDiskGroup => WinPool.Application.ManageObjectRole.NetworkGroup,
+            StorageUnitKind.OtherDiskGroup => WinPool.Application.ManageObjectRole.OtherGroup,
+            StorageUnitKind.DirectDiskGroup => WinPool.Application.ManageObjectRole.DirectDiskGroup,
+            _ => throw new ArgumentOutOfRangeException(nameof(unit))
+        };
+        SelectManageTopologyNode(
+            new WinPool.Domain.StorageObjectId(
+                WinPool.Application.InternalStableIdentity.SystemFromDocumentId(sourceDocument.Id),
+                role is WinPool.Application.ManageObjectRole.NetworkGroup
+                    or WinPool.Application.ManageObjectRole.OtherGroup
+                    or WinPool.Application.ManageObjectRole.DirectDiskGroup
+                    ? WinPool.Domain.StorageObjectKind.LogicalGroup
+                    : MapDomainKind(role),
+                unit.StableId),
+            role,
+            sourceSnapshot);
+    }
+
+    public void SelectManageTopologyNode(
+        WinPool.Domain.StorageObjectId objectId,
+        WinPool.Application.ManageObjectRole role,
+        StorageSnapshot sourceSnapshot)
+    {
+        if (SelectedTopologyStableId?.Equals(
+                objectId.ProviderKey,
+                StringComparison.OrdinalIgnoreCase) == true)
         {
             SelectedTopologyStableId = null;
             return;
         }
 
         var sourceDocument = SystemCatalog.Systems.FirstOrDefault(
+            document => _manageProjector.Project(document).SystemId == objectId.System)
+            ?? SystemCatalog.Systems.FirstOrDefault(
             x => ReferenceEquals(x.Snapshot, sourceSnapshot))
             ?? SystemCatalog.Systems.FirstOrDefault(
                 x => x.Snapshot.SnapshotVersion == sourceSnapshot.SnapshotVersion);
         var switchedInventory = SwitchSystem(sourceDocument?.Id);
-        var selection = unit.Kind == StorageUnitKind.System && sourceDocument is not null
-            ? new WorkspaceSelection(WorkspaceCategory.System, sourceDocument.Id)
-            : WorkspaceMapper.FromUnit(unit, sourceSnapshot);
-        if (selection.StableId is not null)
+        _contextUnit = null;
+        var contractCategory = WinPool.Application.ManageSelectionRules.CategoryFor(role);
+        var category = contractCategory switch
         {
-            _categorySelections[selection.Category] = selection.StableId;
-        }
-        if (SelectedCategory != selection.Category)
+            WinPool.Application.ManageWorkspaceCategory.System => WorkspaceCategory.System,
+            WinPool.Application.ManageWorkspaceCategory.Pool => WorkspaceCategory.Pool,
+            WinPool.Application.ManageWorkspaceCategory.Tier => WorkspaceCategory.Tier,
+            WinPool.Application.ManageWorkspaceCategory.Disk => WorkspaceCategory.Disk,
+            WinPool.Application.ManageWorkspaceCategory.Partition => WorkspaceCategory.Partition,
+            _ => throw new ArgumentOutOfRangeException(nameof(role))
+        };
+        var stableId = role == WinPool.Application.ManageObjectRole.System
+            && sourceDocument is not null
+                ? sourceDocument.Id
+                : objectId.ProviderKey;
+        _categorySelections[category] = stableId;
+        if (SelectedCategory != category)
         {
             _suppressRelatedSelection = true;
-            SelectedCategory = selection.Category;
+            SelectedCategory = category;
             _suppressRelatedSelection = false;
         }
         else if (switchedInventory)
         {
-            RebuildObjects(selection.StableId);
-        }
-        if (selection.ContextStableId is not null)
-        {
-            _contextUnit = sourceSnapshot.FindUnit(selection.ContextStableId);
+            RebuildObjects(stableId);
         }
 
-        var item = Objects.FirstOrDefault(x => x.Unit?.StableId == selection.StableId);
+        var item = Objects.FirstOrDefault(x => x.Unit?.StableId == stableId);
         if (item is not null)
         {
             SelectedWorkspaceItem = item;
-            SelectedTopologyStableId = unit.StableId;
-            if (selection.ContextStableId is not null)
-            {
-                _contextUnit = sourceSnapshot.FindUnit(selection.ContextStableId);
-                BuildDetails();
-            }
+            SelectedTopologyStableId = objectId.ProviderKey;
             ExpandSelectedTopologyPath();
         }
     }
 
+    private static WinPool.Domain.StorageObjectKind MapDomainKind(
+        WinPool.Application.ManageObjectRole role) => role switch
+    {
+        WinPool.Application.ManageObjectRole.System => WinPool.Domain.StorageObjectKind.System,
+        WinPool.Application.ManageObjectRole.StorageSubsystem => WinPool.Domain.StorageObjectKind.StorageSubsystem,
+        WinPool.Application.ManageObjectRole.StoragePool => WinPool.Domain.StorageObjectKind.StoragePool,
+        WinPool.Application.ManageObjectRole.StorageTier => WinPool.Domain.StorageObjectKind.StorageTier,
+        WinPool.Application.ManageObjectRole.PhysicalDisk => WinPool.Domain.StorageObjectKind.PhysicalDisk,
+        WinPool.Application.ManageObjectRole.VirtualDisk => WinPool.Domain.StorageObjectKind.VirtualDisk,
+        WinPool.Application.ManageObjectRole.OsDisk => WinPool.Domain.StorageObjectKind.OsDisk,
+        WinPool.Application.ManageObjectRole.Partition => WinPool.Domain.StorageObjectKind.Partition,
+        WinPool.Application.ManageObjectRole.NetworkDisk => WinPool.Domain.StorageObjectKind.NetworkDisk,
+        _ => throw new ArgumentOutOfRangeException(nameof(role))
+    };
+
     public StorageUnitRef? ResolveDetailUnit() => _contextUnit ?? SelectedWorkspaceItem?.Unit;
+
+    public WinPool.Application.ManageCommandSurfaceView? GetSelectedCommandSurface()
+    {
+        var item = SelectedWorkspaceItem;
+        if (item?.Projection is null || item.IsAction)
+        {
+            return null;
+        }
+        var category = SelectedCategory switch
+        {
+            WorkspaceCategory.System => WinPool.Application.ManageWorkspaceCategory.System,
+            WorkspaceCategory.Pool => WinPool.Application.ManageWorkspaceCategory.Pool,
+            WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
+            WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
+            WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        return _manageCommandProjector.Project(
+            ActiveDocument,
+            SystemCatalog.Systems.First(document => document.IsLocal),
+            item.Projection.Id,
+            item.Projection.Role,
+            category);
+    }
 
     public bool GetExpandedState(string stableId, bool defaultValue) =>
         _expandedStates.GetValueOrDefault(stableId, defaultValue);
@@ -855,7 +854,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var target = GetPrimaryRelatedTarget();
         if (target is not null)
         {
-            SelectTopologyUnit(target);
+            SelectManageTopologyNode(target.Id, target.Role, ActiveSnapshot);
         }
     }
 
@@ -945,24 +944,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private TopologyNodeViewModel CreateTopologyRoot(StorageSystemDocument document)
     {
-        var projected = TopologyProjector.Project(document.Snapshot);
+        var projected = _manageProjector.Project(document);
         var prefix = document.IsLocal
             ? (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
             : (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-        var root = new TopologyNode(
-            new StorageUnitRef(document.Id, StorageUnitKind.System, $"{prefix} {document.DisplayName}"),
-            projected.Summary,
-            projected.Children,
-            projected.IsReference,
-            projected.IsExpanded,
-            projected.IsSelectable,
-            projected.ChildrenLayout,
-            projected.LayoutWeight);
+        var root = projected.Root with
+        {
+            DisplayName = $"{prefix} {projected.DisplayName}"
+        };
         return new TopologyNodeViewModel(
             root,
             this,
-            document.Snapshot,
-            $"{document.Id}:root");
+            document.Snapshot);
     }
 
     private void RebuildObjects(string? preferredStableId)
@@ -980,318 +973,124 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private IEnumerable<WorkspaceItem> CreateWorkspaceItems(WorkspaceCategory category)
     {
-        switch (category)
+        if (category == WorkspaceCategory.System)
         {
-            case WorkspaceCategory.System:
-                foreach (var system in SystemCatalog.Systems)
-                {
-                    var prefix = system.IsLocal
-                        ? (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
-                        : (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-                    yield return new WorkspaceItem(
-                        system.Id,
-                        $"{prefix} {system.DisplayName}",
-                        new StorageUnitRef(system.Id, StorageUnitKind.System, system.DisplayName),
-                        false,
-                        system.Id);
-                }
-                yield return new WorkspaceItem(
-                    AddStorageSystemKey,
-                    Localization["AddStorageSystem"],
-                    null,
-                    true);
-                break;
-            case WorkspaceCategory.Pool:
-                foreach (var pool in ActiveSnapshot.StoragePools
-                             .OrderByDescending(x => x.IsPrimordial)
-                             .ThenBy(x => x.FriendlyName))
-                {
-                    yield return new WorkspaceItem(
-                        pool.StableId,
-                        pool.IsPrimordial ? "Primordial" : pool.FriendlyName,
-                        new StorageUnitRef(pool.StableId, StorageUnitKind.StoragePool, pool.FriendlyName, pool.IsStable),
-                        false);
-                }
-                if (ActiveSnapshot.NetworkDisks.Count > 0)
-                {
-                    var stableId = TopologyProjector.NetworkGroupStableId(ActiveSnapshot);
-                    yield return new WorkspaceItem(
-                        stableId,
-                        Localization["Network"],
-                        new StorageUnitRef(stableId, StorageUnitKind.NetworkDiskGroup, Localization["Network"]),
-                        false);
-                }
-                if (TopologyProjector.GetOtherOsDisks(ActiveSnapshot).Count > 0)
-                {
-                    var stableId = TopologyProjector.OtherGroupStableId(ActiveSnapshot);
-                    yield return new WorkspaceItem(
-                        stableId,
-                        Localization["Other"],
-                        new StorageUnitRef(stableId, StorageUnitKind.OtherDiskGroup, Localization["Other"]),
-                        false);
-                }
-                break;
-            case WorkspaceCategory.Tier:
-                foreach (var tier in ActiveSnapshot.StorageTiers)
-                {
-                    var poolName = ActiveSnapshot.StoragePools.FirstOrDefault(x => x.StableId == tier.PoolStableId)?.FriendlyName;
-                    yield return new WorkspaceItem(
-                        tier.StableId,
-                        tier.FriendlyName,
-                        new StorageUnitRef(tier.StableId, StorageUnitKind.StorageTier, tier.FriendlyName, tier.IsStable, tier.PoolStableId),
-                        false);
-                }
-                break;
-            case WorkspaceCategory.Disk:
-                foreach (var disk in OrderPhysicalDisks(ActiveSnapshot))
-                {
-                    yield return new WorkspaceItem(
-                        disk.StableId,
-                        disk.FriendlyName,
-                        new StorageUnitRef(disk.StableId, StorageUnitKind.PhysicalDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
-                        false);
-                }
-                foreach (var virtualDisk in OrderVirtualDisks(ActiveSnapshot))
-                {
-                    yield return new WorkspaceItem(
-                        virtualDisk.StableId,
-                        virtualDisk.FriendlyName,
-                        new StorageUnitRef(
-                            virtualDisk.StableId,
-                            StorageUnitKind.VirtualDisk,
-                            virtualDisk.FriendlyName,
-                            virtualDisk.IsStable,
-                            virtualDisk.PoolStableId),
-                        false);
-                }
-                foreach (var osDisk in ActiveSnapshot.OsDisks
-                             .Where(x => string.IsNullOrWhiteSpace(x.PhysicalDiskStableId)
-                                         && string.IsNullOrWhiteSpace(x.VirtualDiskStableId))
-                             .OrderBy(x => x.Number))
-                {
-                    yield return new WorkspaceItem(
-                        osDisk.StableId,
-                        osDisk.FriendlyName,
-                        new StorageUnitRef(osDisk.StableId, StorageUnitKind.OsDisk, osDisk.FriendlyName),
-                        false);
-                }
-                break;
-            case WorkspaceCategory.Partition:
-                foreach (var partition in OrderPartitionsByDiskOrder(ActiveSnapshot))
-                {
-                    var title = TopologyProjector.PartitionDisplayName(partition);
-                    if (string.IsNullOrWhiteSpace(title))
-                    {
-                        title = PartitionTypeName(partition.Type);
-                    }
-                    yield return new WorkspaceItem(
-                        partition.StableId,
-                        title,
-                        new StorageUnitRef(partition.StableId, StorageUnitKind.Partition, title, partition.IsStable, partition.OsDiskStableId),
-                        false);
-                }
-                foreach (var network in ActiveSnapshot.NetworkDisks.OrderBy(x => x.Name))
-                {
-                    yield return new WorkspaceItem(
-                        network.StableId,
-                        network.Name,
-                        new StorageUnitRef(network.StableId, StorageUnitKind.NetworkDisk, network.Name, network.IsStable),
-                        false);
-                }
-                break;
+            foreach (var system in SystemCatalog.Systems)
+            {
+                var projection = _manageProjector.Project(system);
+                var item = projection.WorkspaceObjects.Single(
+                    candidate => candidate.Category == WinPool.Application.ManageWorkspaceCategory.System);
+                yield return CreateWorkspaceItem(item, projection, system.Id);
+            }
+            yield return new WorkspaceItem(
+                AddStorageSystemKey,
+                Localization["AddStorageSystem"],
+                null,
+                true);
+            yield break;
+        }
+
+        var requestedCategory = category switch
+        {
+            WorkspaceCategory.Pool => WinPool.Application.ManageWorkspaceCategory.Pool,
+            WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
+            WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
+            WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
+            _ => throw new ArgumentOutOfRangeException(nameof(category))
+        };
+        var activeProjection = _manageProjector.Project(ActiveDocument);
+        foreach (var item in activeProjection.WorkspaceObjects
+                     .Where(candidate => candidate.Category == requestedCategory)
+                     .OrderBy(candidate => candidate.SortOrder))
+        {
+            yield return CreateWorkspaceItem(item, activeProjection);
         }
     }
 
-    private (Dictionary<string, int> PoolOrder, Dictionary<string, int> TierOrder) BuildDiskRankOrders(
-        StorageSnapshot snapshot)
+    private WorkspaceItem CreateWorkspaceItem(
+        WinPool.Application.ManageObjectListItemView item,
+        WinPool.Application.ManageSystemProjection projection,
+        string? storageSystemId = null)
     {
-        var poolOrder = snapshot.StoragePools
-            .OrderByDescending(x => x.IsPrimordial)
-            .ThenBy(x => x.FriendlyName)
-            .Select((x, index) => (x.StableId, Index: index))
-            .ToDictionary(x => x.StableId, x => x.Index, StringComparer.OrdinalIgnoreCase);
-        var tierOrder = snapshot.StorageTiers
-            .OrderBy(x => x.MediaType is "SSD" or "SCM" ? 0 : 1)
-            .ThenBy(x => x.FriendlyName)
-            .Select((x, index) => (x.StableId, Index: index))
-            .ToDictionary(x => x.StableId, x => x.Index, StringComparer.OrdinalIgnoreCase);
-        return (poolOrder, tierOrder);
-    }
-
-    private IReadOnlyList<PhysicalDiskInfo> OrderPhysicalDisks(StorageSnapshot snapshot)
-    {
-        var (poolOrder, tierOrder) = BuildDiskRankOrders(snapshot);
-        int PoolRank(string? poolId) =>
-            poolId is not null && poolOrder.TryGetValue(poolId, out var rank) ? rank : poolOrder.Count;
-        int TierRank(string diskId) =>
-            snapshot.StorageTiers
-                .Where(x => x.MemberPhysicalDiskIds.Contains(diskId, StringComparer.OrdinalIgnoreCase))
-                .Select(x => tierOrder.GetValueOrDefault(x.StableId, int.MaxValue))
-                .DefaultIfEmpty(int.MaxValue)
-                .Min();
-        return snapshot.PhysicalDisks
-            .OrderBy(x => PoolRank(x.PoolStableId))
-            .ThenBy(x => TierRank(x.StableId))
-            .ThenBy(x => x.DeviceId ?? int.MaxValue)
-            .ThenBy(x => x.FriendlyName)
-            .ToList();
-    }
-
-    private IReadOnlyList<VirtualDiskInfo> OrderVirtualDisks(StorageSnapshot snapshot)
-    {
-        var (poolOrder, _) = BuildDiskRankOrders(snapshot);
-        return snapshot.VirtualDisks
-            .OrderBy(x => x.PoolStableId is not null && poolOrder.TryGetValue(x.PoolStableId, out var rank)
-                ? rank
-                : poolOrder.Count)
-            .ThenBy(x => x.OsDiskNumbers.Count > 0 ? x.OsDiskNumbers[0] : int.MaxValue)
-            .ThenBy(x => x.FriendlyName)
-            .ToList();
-    }
-
-    private IReadOnlyList<PartitionInfo> OrderPartitionsByDiskOrder(StorageSnapshot snapshot)
-    {
-        var backingOrder = OrderPhysicalDisks(snapshot).Select(x => x.StableId)
-            .Concat(OrderVirtualDisks(snapshot).Select(x => x.StableId))
-            .Concat(TopologyProjector.GetOtherOsDisks(snapshot)
-                .OrderBy(x => x.Number)
-                .Select(x => x.StableId))
-            .Select((id, index) => (id, index))
-            .ToDictionary(x => x.id, x => x.index, StringComparer.OrdinalIgnoreCase);
-        int Rank(PartitionInfo partition)
+        var kind = item.Role switch
         {
-            var osDisk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == partition.OsDiskStableId);
-            var backing = osDisk?.VirtualDiskStableId ?? osDisk?.PhysicalDiskStableId ?? osDisk?.StableId;
-            return backing is not null && backingOrder.TryGetValue(backing, out var rank)
-                ? rank
-                : int.MaxValue;
-        }
-        return snapshot.Partitions
-            .OrderBy(Rank)
-            .ThenBy(x => x.PartitionNumber)
-            .ToList();
+            WinPool.Application.ManageObjectRole.System => StorageUnitKind.System,
+            WinPool.Application.ManageObjectRole.StoragePool => StorageUnitKind.StoragePool,
+            WinPool.Application.ManageObjectRole.StorageTier => StorageUnitKind.StorageTier,
+            WinPool.Application.ManageObjectRole.PhysicalDisk => StorageUnitKind.PhysicalDisk,
+            WinPool.Application.ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
+            WinPool.Application.ManageObjectRole.OsDisk => StorageUnitKind.OsDisk,
+            WinPool.Application.ManageObjectRole.Partition => StorageUnitKind.Partition,
+            WinPool.Application.ManageObjectRole.NetworkDisk => StorageUnitKind.NetworkDisk,
+            WinPool.Application.ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
+            WinPool.Application.ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
+            WinPool.Application.ManageObjectRole.DirectDiskGroup => StorageUnitKind.DirectDiskGroup,
+            _ => throw new ArgumentOutOfRangeException(nameof(item))
+        };
+        var title = item.Role switch
+        {
+            WinPool.Application.ManageObjectRole.System =>
+                $"{(projection.SourceKind == WinPool.Application.StorageSystemSourceKind.Local
+                    ? Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]"
+                    : Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]")} {item.DisplayName}",
+            WinPool.Application.ManageObjectRole.NetworkGroup => Localization["Network"],
+            WinPool.Application.ManageObjectRole.OtherGroup => Localization["Other"],
+            WinPool.Application.ManageObjectRole.Partition when string.IsNullOrWhiteSpace(item.DisplayName) =>
+                PartitionTypeName(item.Metadata.GetValueOrDefault("partitionType") ?? "Unknown"),
+            _ => item.DisplayName
+        };
+        return new WorkspaceItem(
+            item.Id.ProviderKey,
+            title,
+            new StorageUnitRef(
+                item.Id.ProviderKey,
+                kind,
+                title,
+                item.IsStableIdentity,
+                item.ParentProviderKey),
+            false,
+            storageSystemId,
+            item);
     }
 
     private void BuildDetails()
     {
         Details.Clear();
-        var unit = ResolveDetailUnit();
-        if (unit is null)
+        var item = SelectedWorkspaceItem;
+        if (item?.Projection is null || item.IsAction)
         {
             DetailTitle = string.Empty;
             DetailSubtitle = string.Empty;
+            NotifySelectionState();
             return;
         }
 
-        DetailTitle = unit.DisplayName;
-        DetailSubtitle = TopologyProjector.JoinSummary(KindName(unit.Kind), Localization["ReadOnly"]);
-        switch (unit.Kind)
+        var document = item.StorageSystemId is null
+            ? ActiveDocument
+            : SystemCatalog.Find(item.StorageSystemId) ?? ActiveDocument;
+        var details = _manageDetailsProjector.Project(
+            document,
+            item.Projection.Id,
+            item.Projection.Role,
+            item.Title);
+        DetailTitle = details.DisplayName;
+        DetailSubtitle = TopologyProjector.JoinSummary(
+            ManageRoleName(details.Role),
+            Localization["ReadOnly"]);
+        foreach (var property in details.Properties)
         {
-            case StorageUnitKind.System:
-                Details.Add(new DetailRow("Windows", $"{ActiveSnapshot.Computer.WindowsProductName} {ActiveSnapshot.Computer.WindowsVersion} ({ActiveSnapshot.Computer.OsBuild})"));
-                Details.Add(new DetailRow(Localization["PhysicalDisk"], ActiveSnapshot.PhysicalDisks.Count.ToString()));
-                Details.Add(new DetailRow(Localization["StoragePool"], ActiveSnapshot.StoragePools.Count.ToString()));
-                Details.Add(new DetailRow(Localization["StorageTier"], ActiveSnapshot.StorageTiers.Count.ToString()));
-                Details.Add(new DetailRow(Localization["VirtualDisk"], ActiveSnapshot.VirtualDisks.Count.ToString()));
-                Details.Add(new DetailRow(Localization["NetworkDisk"], ActiveSnapshot.NetworkDisks.Count.ToString()));
-                Details.Add(new DetailRow(Localization["Partition"], ActiveSnapshot.Partitions.Count.ToString()));
-                break;
-            case StorageUnitKind.StoragePool:
-                var pool = ActiveSnapshot.StoragePools.First(x => x.StableId == unit.StableId);
-                Details.Add(new DetailRow(Localization["Type"], pool.IsPrimordial ? Localization["OriginalPool"] : Localization["StoragePool"]));
-                Details.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(pool.HealthStatus, pool.OperationalStatus)));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(pool.Size)));
-                Details.Add(new DetailRow(Localization["Allocated"], TopologyProjector.FormatBytes(pool.AllocatedSize)));
-                Details.Add(new DetailRow(Localization["Members"], pool.MemberPhysicalDiskIds.Count.ToString()));
-                break;
-            case StorageUnitKind.StorageTier:
-                var tier = ActiveSnapshot.StorageTiers.First(x => x.StableId == unit.StableId);
-                Details.Add(new DetailRow(Localization["Media"], tier.MediaType));
-                Details.Add(new DetailRow(Localization["Role"], tier.ResiliencySettingName));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(tier.Size)));
-                Details.Add(new DetailRow(Localization["Members"], tier.MemberPhysicalDiskIds.Count.ToString()));
-                break;
-            case StorageUnitKind.PhysicalDisk:
-                var disk = ActiveSnapshot.PhysicalDisks.First(x => x.StableId == unit.StableId);
-                Details.Add(new DetailRow(Localization["Model"], disk.Model));
-                Details.Add(new DetailRow(Localization["Serial"], FormatSerial(disk.MaskedSerialNumber)));
-                Details.Add(new DetailRow(Localization["Bus"], disk.BusType));
-                Details.Add(new DetailRow(Localization["Media"], disk.MediaType));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(disk.Size)));
-                Details.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(disk.HealthStatus, disk.OperationalStatus)));
-                Details.Add(new DetailRow(Localization["CanPool"], disk.CanPool ? Localization["Yes"] : Localization["No"]));
-                if (!disk.CanPool && !string.IsNullOrWhiteSpace(disk.CannotPoolReason))
-                {
-                    Details.Add(new DetailRow(Localization["CannotPoolReason"], disk.CannotPoolReason));
-                }
-                break;
-            case StorageUnitKind.VirtualDisk:
-                var virtualDisk = ActiveSnapshot.VirtualDisks.First(x => x.StableId == unit.StableId);
-                Details.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(virtualDisk.HealthStatus, virtualDisk.OperationalStatus)));
-                Details.Add(new DetailRow(Localization["Role"], virtualDisk.ResiliencySettingName));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(virtualDisk.Size)));
-                Details.Add(new DetailRow("Columns", virtualDisk.NumberOfColumns?.ToString() ?? "—"));
-                Details.Add(new DetailRow("Interleave", virtualDisk.Interleave is null ? "—" : TopologyProjector.FormatBytes(virtualDisk.Interleave.Value)));
-                break;
-            case StorageUnitKind.Partition:
-                var partition = ActiveSnapshot.Partitions.First(x => x.StableId == unit.StableId);
-                DetailTitle = TopologyProjector.PartitionDisplayName(partition);
-                Details.Add(new DetailRow(Localization["Type"], PartitionTypeName(partition.Type)));
-                Details.Add(new DetailRow(Localization["FileSystem"], string.IsNullOrWhiteSpace(partition.FileSystem) ? Localization["Unknown"] : partition.FileSystem));
-                Details.Add(new DetailRow(Localization["AllocationUnit"], partition.AllocationUnitSize is null ? Localization["Unknown"] : TopologyProjector.FormatBytes(partition.AllocationUnitSize.Value)));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(partition.Size)));
-                Details.Add(new DetailRow(Localization["Available"], TopologyProjector.FormatBytes(partition.SizeRemaining)));
-                Details.Add(new DetailRow(Localization["Health"], TopologyProjector.JoinSummary(partition.HealthStatus, partition.OperationalStatus)));
-                Details.Add(new DetailRow(Localization["Path"], string.IsNullOrWhiteSpace(partition.Path) ? "—" : partition.Path));
-                break;
-            case StorageUnitKind.NetworkDisk:
-                var network = ActiveSnapshot.NetworkDisks.First(x => x.StableId == unit.StableId);
-                Details.Add(new DetailRow(Localization["FileSystem"], network.FileSystem));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(network.Size)));
-                Details.Add(new DetailRow(Localization["Available"], TopologyProjector.FormatBytes(network.SizeRemaining)));
-                Details.Add(new DetailRow(Localization["Path"], network.ProviderPath));
-                break;
-            case StorageUnitKind.NetworkDiskGroup:
-                Details.Add(new DetailRow(Localization["Type"], Localization["NetworkStorageGroup"]));
-                Details.Add(new DetailRow(Localization["NetworkDisk"], ActiveSnapshot.NetworkDisks.Count.ToString()));
-                Details.Add(new DetailRow(
-                    Localization["Capacity"],
-                    TopologyProjector.FormatBytes(ActiveSnapshot.NetworkDisks.Sum(x => x.Size))));
-                Details.Add(new DetailRow(
-                    Localization["Available"],
-                    TopologyProjector.FormatBytes(ActiveSnapshot.NetworkDisks.Sum(x => x.SizeRemaining))));
-                break;
-            case StorageUnitKind.OtherDiskGroup:
-                var otherDisks = TopologyProjector.GetOtherOsDisks(ActiveSnapshot);
-                var otherIds = otherDisks.Select(x => x.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var otherPartitions = ActiveSnapshot.Partitions
-                    .Where(x => x.OsDiskStableId is not null && otherIds.Contains(x.OsDiskStableId))
-                    .ToList();
-                Details.Add(new DetailRow(Localization["Type"], Localization["OtherStorageGroup"]));
-                Details.Add(new DetailRow(Localization["OtherDisk"], otherDisks.Count.ToString()));
-                Details.Add(new DetailRow(Localization["Partition"], otherPartitions.Count.ToString()));
-                Details.Add(new DetailRow(
-                    Localization["Capacity"],
-                    TopologyProjector.FormatBytes(otherDisks.Sum(x => x.Size))));
-                Details.Add(new DetailRow(
-                    Localization["Available"],
-                    TopologyProjector.FormatBytes(otherPartitions.Sum(x => x.SizeRemaining))));
-                break;
-            case StorageUnitKind.OsDisk:
-                var osDisk = ActiveSnapshot.OsDisks.First(x => x.StableId == unit.StableId);
-                Details.Add(new DetailRow(Localization["Type"], osDisk.PartitionStyle));
-                Details.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(osDisk.Size)));
-                break;
+            Details.Add(new DetailRow(
+                Localization[property.PropertyTextKey],
+                PresentManageValue(property)));
         }
-
-        Details.Add(new DetailRow(Localization["LastScan"], ActiveSnapshot.ScannedAt == DateTimeOffset.MinValue ? "—" : ActiveSnapshot.ScannedAt.LocalDateTime.ToString("G")));
         NotifySelectionState();
     }
+
 
     private void RebuildComparisonColumns()
     {
         ComparisonColumns.Clear();
-        foreach (var item in Objects.Where(x => !x.IsAction && x.Unit is not null))
+        foreach (var item in Objects.Where(x => !x.IsAction && x.Projection is not null))
         {
             var document = item.StorageSystemId is null
                 ? ActiveDocument
@@ -1299,7 +1098,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             ComparisonColumns.Add(new ComparisonColumn(
                 item.Key,
                 item.Title,
-                BuildComparisonRows(item.Unit!, document)));
+                BuildProjectedComparisonRows(item.Projection!, document)));
         }
 
         _updatingComparisonSelection = true;
@@ -1308,293 +1107,40 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _updatingComparisonSelection = false;
     }
 
-    private IReadOnlyList<DetailRow> BuildComparisonRows(
-        StorageUnitRef unit,
+    private IReadOnlyList<DetailRow> BuildProjectedComparisonRows(
+        WinPool.Application.ManageObjectListItemView item,
         StorageSystemDocument document)
     {
-        var snapshot = document.Snapshot;
-        var rows = new List<DetailRow>();
-        switch (unit.Kind)
-        {
-            case StorageUnitKind.System:
-            {
-                var uniquePhysical = snapshot.PhysicalDisks
-                    .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                rows.Add(new DetailRow(Localization["HostName"], snapshot.Computer.Name));
-                rows.Add(new DetailRow(Localization["Version"], ProductDisplayName(snapshot.Computer.WindowsProductName)));
-                rows.Add(new DetailRow(Localization["VersionNumber"], snapshot.Computer.DisplayVersion));
-                rows.Add(new DetailRow(
-                    Localization["OsBuild"],
-                    string.IsNullOrWhiteSpace(snapshot.Computer.Ubr)
-                        ? snapshot.Computer.OsBuild
-                        : $"{snapshot.Computer.OsBuild}.{snapshot.Computer.Ubr}"));
-                rows.Add(new DetailRow(Localization["Cpu"], ReportValue(document, "0401") ?? string.Empty));
-                rows.Add(new DetailRow(Localization["Memory"], ReportMemory(document)));
-                rows.Add(new DetailRow(
-                    Localization["LocalStorage"],
-                    TopologyProjector.FormatBytes(uniquePhysical.Sum(x => x.Size))));
-                if (snapshot.NetworkDisks.Count > 0)
-                {
-                    rows.Add(new DetailRow(
-                        Localization["ExternalStorage"],
-                        TopologyProjector.FormatBytes(snapshot.NetworkDisks.Sum(x => x.Size))));
-                }
-                rows.Add(new DetailRow(Localization["StoragePool"], snapshot.StoragePools.Count.ToString()));
-                rows.Add(new DetailRow(Localization["PhysicalDisk"], uniquePhysical.Count.ToString()));
-                if (snapshot.VirtualDisks.Count > 0)
-                {
-                    rows.Add(new DetailRow(Localization["VirtualDisk"], snapshot.VirtualDisks.Count.ToString()));
-                }
-                rows.Add(new DetailRow(Localization["Partition"], snapshot.Partitions.Count.ToString()));
-                rows.Add(new DetailRow(
-                    Localization["AccessibleVolumes"],
-                    (snapshot.Partitions.Count(x => !string.IsNullOrWhiteSpace(x.Path))
-                        + snapshot.NetworkDisks.Count(x => !string.IsNullOrWhiteSpace(x.DriveLetter))).ToString()));
-                break;
-            }
-            case StorageUnitKind.StoragePool:
-            {
-                var pool = snapshot.StoragePools.First(x => x.StableId == unit.StableId);
-                var poolVirtualDisks = snapshot.VirtualDisks
-                    .Where(x => x.PoolStableId == pool.StableId)
-                    .ToList();
-                var poolTiers = snapshot.StorageTiers
-                    .Where(x => x.PoolStableId == pool.StableId)
-                    .ToList();
-                var members = snapshot.PhysicalDisks
-                    .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
-                    .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                rows.Add(new DetailRow(
-                    Localization["Type"],
-                    pool.IsPrimordial ? Localization["OriginalPool"] : Localization["StoragePool"]));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(pool.Size)));
-                rows.Add(new DetailRow(Localization["PhysicalDisk"], members.Count.ToString()));
-                rows.Add(new DetailRow(Localization["VirtualDisk"], poolVirtualDisks.Count.ToString()));
-                rows.Add(new DetailRow(Localization["RunningStatus"], Empty(pool.OperationalStatus)));
-                rows.Add(new DetailRow(Localization["Health"], Empty(pool.HealthStatus)));
-                rows.Add(new DetailRow(
-                    Localization["ProvisioningType"],
-                    FirstNonEmpty(
-                        pool.ProvisioningTypeDefault,
-                        string.Join(", ", poolVirtualDisks.Select(x => x.ProvisioningType).Distinct()))));
-                rows.Add(new DetailRow(
-                    Localization["Resiliency"],
-                    FirstNonEmpty(string.Join(
-                        ", ",
-                        poolVirtualDisks.Select(x => x.ResiliencySettingName).Distinct()))));
-                rows.Add(new DetailRow(
-                    Localization["PhysicalSector"],
-                    pool.PhysicalSectorSize is > 0
-                        ? TopologyProjector.FormatBytes(pool.PhysicalSectorSize.Value)
-                        : FirstNonEmpty(string.Join(
-                            ", ",
-                            members.Select(x => TopologyProjector.FormatBytes(x.PhysicalSectorSize)).Distinct()))));
-                rows.Add(new DetailRow(
-                    Localization["LogicalSector"],
-                    pool.LogicalSectorSize is > 0
-                        ? TopologyProjector.FormatBytes(pool.LogicalSectorSize.Value)
-                        : FirstNonEmpty(string.Join(
-                            ", ",
-                            members.Select(x => TopologyProjector.FormatBytes(x.LogicalSectorSize)).Distinct()))));
-                rows.Add(new DetailRow(
-                    Localization["PerformanceTier"],
-                    TierNames(poolTiers, media => media is "SSD" or "SCM")));
-                rows.Add(new DetailRow(
-                    Localization["CapacityTier"],
-                    TierNames(poolTiers, media => media == "HDD")));
-                break;
-            }
-            case StorageUnitKind.StorageTier:
-            {
-                var tier = snapshot.StorageTiers.First(x => x.StableId == unit.StableId);
-                var virtualDisk = snapshot.VirtualDisks.FirstOrDefault(
-                    x => x.StableId == tier.VirtualDiskStableId);
-                rows.Add(new DetailRow(
-                    Localization["PoolOwner"],
-                    snapshot.StoragePools.FirstOrDefault(x => x.StableId == tier.PoolStableId)?.FriendlyName ?? string.Empty));
-                rows.Add(new DetailRow(Localization["Media"], Empty(tier.MediaType)));
-                rows.Add(new DetailRow(
-                    Localization["Type"],
-                    tier.MediaType is "SSD" or "SCM"
-                        ? Localization["PerformanceTier"]
-                        : tier.MediaType == "HDD"
-                            ? Localization["CapacityTier"]
-                            : Localization["StorageTier"]));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(tier.Size)));
-                rows.Add(new DetailRow(
-                    Localization["ProvisioningType"],
-                    FirstNonEmpty(virtualDisk?.ProvisioningType ?? string.Empty)));
-                rows.Add(new DetailRow(Localization["Resiliency"], Empty(tier.ResiliencySettingName)));
-                rows.Add(new DetailRow(
-                    Localization["FaultTolerance"],
-                    tier.ResiliencySettingName.Equals("Simple", StringComparison.OrdinalIgnoreCase)
-                        ? "0"
-                        : tier.ResiliencySettingName.Equals("Parity", StringComparison.OrdinalIgnoreCase)
-                            ? "1"
-                            : string.Empty));
-                rows.Add(new DetailRow(Localization["PhysicalDisk"], tier.MemberPhysicalDiskIds.Count.ToString()));
-                rows.Add(new DetailRow(
-                    Localization["Columns"],
-                    (tier.NumberOfColumns ?? virtualDisk?.NumberOfColumns)?.ToString() ?? string.Empty));
-                rows.Add(new DetailRow(
-                    Localization["Interleave"],
-                    (tier.Interleave ?? virtualDisk?.Interleave) is { } interleave
-                        ? TopologyProjector.FormatBytes(interleave)
-                        : string.Empty));
-                rows.Add(new DetailRow(Localization["AllocationUnit"], string.Empty));
-                break;
-            }
-            case StorageUnitKind.PhysicalDisk:
-            {
-                var physical = snapshot.PhysicalDisks.First(x => x.StableId == unit.StableId);
-                var osDiskIds = snapshot.OsDisks
-                    .Where(x => x.PhysicalDiskStableId == physical.StableId)
-                    .Select(x => x.StableId)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var partitionStyle = snapshot.OsDisks
-                    .FirstOrDefault(x => x.PhysicalDiskStableId == physical.StableId)
-                    ?.PartitionStyle;
-                rows.Add(new DetailRow(Localization["DiskNumber"], physical.DeviceId?.ToString() ?? string.Empty));
-                rows.Add(new DetailRow(
-                    Localization["PoolOwner"],
-                    snapshot.StoragePools.FirstOrDefault(x => x.StableId == physical.PoolStableId)?.FriendlyName ?? string.Empty));
-                rows.Add(new DetailRow(Localization["Media"], Empty(physical.MediaType)));
-                rows.Add(new DetailRow(Localization["PartitionTable"], Empty(partitionStyle ?? string.Empty)));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(physical.Size)));
-                rows.Add(new DetailRow(
-                    Localization["Partition"],
-                    snapshot.Partitions.Count(x => x.OsDiskStableId is not null && osDiskIds.Contains(x.OsDiskStableId)).ToString()));
-                rows.Add(new DetailRow(Localization["RunningStatus"], Empty(physical.OperationalStatus)));
-                rows.Add(new DetailRow(Localization["Health"], Empty(physical.HealthStatus)));
-                rows.Add(new DetailRow(Localization["LogicalSector"], TopologyProjector.FormatBytes(physical.LogicalSectorSize)));
-                rows.Add(new DetailRow(Localization["PhysicalSector"], TopologyProjector.FormatBytes(physical.PhysicalSectorSize)));
-                rows.Add(new DetailRow(Localization["Model"], Empty(physical.Model)));
-                rows.Add(new DetailRow(
-                    Localization["Serial"],
-                    string.IsNullOrWhiteSpace(physical.MaskedSerialNumber) || physical.MaskedSerialNumber == "—"
-                        ? string.Empty
-                        : FormatSerial(physical.MaskedSerialNumber)));
-                rows.Add(new DetailRow(Localization["Firmware"], Empty(physical.FirmwareVersion)));
-                rows.Add(new DetailRow(Localization["Bus"], Empty(physical.BusType)));
-                rows.Add(new DetailRow(Localization["InterfaceType"], Empty(physical.InterfaceType)));
-                rows.Add(new DetailRow(Localization["ProvisioningType"], Empty(physical.ProvisioningType)));
-                break;
-            }
-            case StorageUnitKind.VirtualDisk:
-            {
-                var virtualDisk = snapshot.VirtualDisks.First(x => x.StableId == unit.StableId);
-                var osDiskIds = snapshot.OsDisks
-                    .Where(x => x.VirtualDiskStableId == virtualDisk.StableId)
-                    .Select(x => x.StableId)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                rows.Add(new DetailRow(
-                    Localization["DiskNumber"],
-                    virtualDisk.OsDiskNumbers.Count > 0 ? virtualDisk.OsDiskNumbers[0].ToString() : string.Empty));
-                rows.Add(new DetailRow(
-                    Localization["PoolOwner"],
-                    snapshot.StoragePools.FirstOrDefault(x => x.StableId == virtualDisk.PoolStableId)?.FriendlyName ?? string.Empty));
-                rows.Add(new DetailRow(
-                    Localization["PartitionTable"],
-                    Empty(snapshot.OsDisks.FirstOrDefault(x => x.VirtualDiskStableId == virtualDisk.StableId)?.PartitionStyle ?? string.Empty)));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(virtualDisk.Size)));
-                rows.Add(new DetailRow(
-                    Localization["Partition"],
-                    snapshot.Partitions.Count(x => x.OsDiskStableId is not null && osDiskIds.Contains(x.OsDiskStableId)).ToString()));
-                rows.Add(new DetailRow(Localization["RunningStatus"], Empty(virtualDisk.OperationalStatus)));
-                rows.Add(new DetailRow(Localization["Health"], Empty(virtualDisk.HealthStatus)));
-                rows.Add(new DetailRow(Localization["ProvisioningType"], Empty(virtualDisk.ProvisioningType)));
-                break;
-            }
-            case StorageUnitKind.OsDisk:
-            {
-                var osDisk = snapshot.OsDisks.First(x => x.StableId == unit.StableId);
-                rows.Add(new DetailRow(Localization["DiskNumber"], osDisk.Number.ToString()));
-                rows.Add(new DetailRow(Localization["PartitionTable"], Empty(osDisk.PartitionStyle)));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(osDisk.Size)));
-                rows.Add(new DetailRow(
-                    Localization["Partition"],
-                    snapshot.Partitions.Count(x => x.OsDiskStableId == osDisk.StableId).ToString()));
-                rows.Add(new DetailRow(
-                    Localization["RunningStatus"],
-                    osDisk.IsOffline ? Localization["Offline"] : Localization["Online"]));
-                break;
-            }
-            case StorageUnitKind.Partition:
-            {
-                var partition = snapshot.Partitions.First(x => x.StableId == unit.StableId);
-                rows.Add(new DetailRow(Localization["OwningDisk"], PartitionOwnerName(snapshot, partition)));
-                rows.Add(new DetailRow(Localization["Type"], PartitionTypeName(partition.Type)));
-                rows.Add(new DetailRow(
-                    Localization["FileSystem"],
-                    string.IsNullOrWhiteSpace(partition.FileSystem) ? string.Empty : partition.FileSystem));
-                rows.Add(new DetailRow(
-                    Localization["AllocationUnit"],
-                    partition.AllocationUnitSize is null ? string.Empty : TopologyProjector.FormatBytes(partition.AllocationUnitSize.Value)));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(partition.Size)));
-                rows.Add(new DetailRow(
-                    Localization["Available"],
-                    string.IsNullOrWhiteSpace(partition.FileSystem)
-                        ? string.Empty
-                        : TopologyProjector.FormatBytes(partition.SizeRemaining)));
-                rows.Add(new DetailRow(
-                    Localization["SystemPartition"],
-                    partition.IsBoot || partition.IsSystem ? "✓" : string.Empty));
-                rows.Add(new DetailRow(Localization["PartitionStatus"], Empty(partition.OperationalStatus)));
-                rows.Add(new DetailRow(Localization["StartOffset"], TopologyProjector.FormatBytes(partition.Offset)));
-                rows.Add(new DetailRow(
-                    Localization["DriveLetter"],
-                    Empty(TopologyProjector.NormalizeDriveLetter(partition.DriveLetter))));
-                rows.Add(new DetailRow(Localization["VolumeLabel"], Empty(partition.FileSystemLabel.Replace('\0', ' ').Trim())));
-                rows.Add(new DetailRow(Localization["Path"], string.IsNullOrWhiteSpace(partition.Path) ? string.Empty : partition.Path));
-                break;
-            }
-            case StorageUnitKind.NetworkDisk:
-            {
-                var network = snapshot.NetworkDisks.First(x => x.StableId == unit.StableId);
-                rows.Add(new DetailRow(Localization["FileSystem"], Empty(network.FileSystem)));
-                rows.Add(new DetailRow(Localization["Capacity"], TopologyProjector.FormatBytes(network.Size)));
-                rows.Add(new DetailRow(Localization["Available"], TopologyProjector.FormatBytes(network.SizeRemaining)));
-                rows.Add(new DetailRow(Localization["DriveLetter"], Empty(TopologyProjector.NormalizeDriveLetter(network.DriveLetter))));
-                rows.Add(new DetailRow(Localization["Path"], Empty(network.ProviderPath)));
-                break;
-            }
-            default:
-                rows.Add(new DetailRow(Localization["Type"], KindName(unit.Kind)));
-                break;
-        }
-        return rows;
+        var comparison = _manageComparisonProjector.Project(
+            document,
+            item.Id,
+            item.Role);
+        return comparison.Properties
+            .Select(property => new DetailRow(
+                Localization[property.PropertyTextKey],
+                PresentManageValue(property)))
+            .ToArray();
     }
 
-    private static string TierNames(
-        IReadOnlyList<StorageTierInfo> tiers,
-        Func<string, bool> mediaPredicate)
-    {
-        var names = tiers
-            .Where(x => mediaPredicate(x.MediaType))
-            .Select(x => x.FriendlyName)
-            .ToList();
-        return names.Count == 0 ? string.Empty : string.Join(", ", names);
-    }
-
-    private string PartitionOwnerName(StorageSnapshot snapshot, PartitionInfo partition)
-    {
-        var osDisk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == partition.OsDiskStableId);
-        if (osDisk is null)
+    private string PresentManageValue(
+        WinPool.Application.ManagePropertyView property) =>
+        property.Presentation switch
         {
-            return string.Empty;
-        }
-        if (osDisk.VirtualDiskStableId is not null)
-        {
-            return snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == osDisk.VirtualDiskStableId)?.FriendlyName ?? string.Empty;
-        }
-        if (osDisk.PhysicalDiskStableId is not null)
-        {
-            return snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == osDisk.PhysicalDiskStableId)?.FriendlyName ?? string.Empty;
-        }
-        return osDisk.FriendlyName;
-    }
+            WinPool.Application.ManageValuePresentation.Plain => property.RawValue,
+            WinPool.Application.ManageValuePresentation.LocalizationKey =>
+                Localization[property.RawValue],
+            WinPool.Application.ManageValuePresentation.PartitionType =>
+                PartitionTypeName(property.RawValue),
+            WinPool.Application.ManageValuePresentation.MaskedSerial =>
+                FormatSerial(property.RawValue),
+            WinPool.Application.ManageValuePresentation.ProductName =>
+                ProductDisplayName(property.RawValue),
+            WinPool.Application.ManageValuePresentation.LocalDateTime =>
+                DateTimeOffset.TryParse(property.RawValue, out var timestamp)
+                    ? timestamp.LocalDateTime.ToString("G")
+                    : "—",
+            _ => throw new ArgumentOutOfRangeException(nameof(property))
+        };
 
     private static string ProductDisplayName(string productName)
     {
@@ -1604,137 +1150,32 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             : trimmed;
     }
 
-    private static string Empty(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
-
-    private static string FirstNonEmpty(params string?[] values) =>
-        values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? string.Empty;
-
-    private static string? ReportValue(StorageSystemDocument document, string itemId)
+    private WinPool.Application.ManageObjectTarget? GetPrimaryRelatedTarget()
     {
-        var item = document.HardwareReport.Items.FirstOrDefault(x => x.Id == itemId);
-        if (item?.FinalValue is not { } element || element.ValueKind != JsonValueKind.Array)
+        var item = SelectedWorkspaceItem;
+        if (item?.Projection is null || item.IsAction)
         {
             return null;
         }
-        return element.EnumerateArray()
-            .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
-            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        return _manageNavigationProjector.Project(
+            ActiveDocument,
+            item.Projection.Id,
+            item.Projection.Role).PrimaryTarget;
     }
 
-    private static string ReportMemory(StorageSystemDocument document)
+    private string ManageRoleName(WinPool.Application.ManageObjectRole role) => role switch
     {
-        var item = document.HardwareReport.Items.FirstOrDefault(x => x.Id == "0504");
-        if (item?.FinalValue is not { } element || element.ValueKind != JsonValueKind.Array)
-        {
-            return string.Empty;
-        }
-        var values = element.EnumerateArray()
-            .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .ToList();
-        if (values.Count == 0)
-        {
-            return string.Empty;
-        }
-        long total = 0;
-        var parsed = 0;
-        foreach (var value in values)
-        {
-            if (TryParseByteSize(value!, out var bytes))
-            {
-                total += bytes;
-                parsed++;
-            }
-        }
-        return parsed == values.Count && parsed > 0
-            ? TopologyProjector.FormatBytes(total)
-            : string.Join(" + ", values);
-    }
-
-    private static bool TryParseByteSize(string text, out long bytes)
-    {
-        bytes = 0;
-        var parts = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2 || !double.TryParse(parts[0], out var amount))
-        {
-            return false;
-        }
-        var multiplier = parts[1] switch
-        {
-            "B" => 1L,
-            "KiB" => 1L << 10,
-            "MiB" => 1L << 20,
-            "GiB" => 1L << 30,
-            "TiB" => 1L << 40,
-            "PiB" => 1L << 50,
-            _ => 0L
-        };
-        if (multiplier == 0)
-        {
-            return false;
-        }
-        bytes = (long)(amount * multiplier);
-        return true;
-    }
-
-    private StorageUnitRef? GetPrimaryRelatedTarget()
-    {
-        var unit = ResolveDetailUnit();
-        if (unit is null)
-        {
-            return null;
-        }
-
-        string? targetId = unit.Kind switch
-        {
-            StorageUnitKind.StoragePool =>
-                ActiveSnapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId)?.MemberPhysicalDiskIds.FirstOrDefault(),
-            StorageUnitKind.NetworkDiskGroup =>
-                ActiveSnapshot.NetworkDisks.FirstOrDefault()?.StableId,
-            StorageUnitKind.OtherDiskGroup =>
-                TopologyProjector.GetOtherOsDisks(ActiveSnapshot).FirstOrDefault()?.StableId,
-            StorageUnitKind.StorageTier =>
-                ActiveSnapshot.StorageTiers.FirstOrDefault(x => x.StableId == unit.StableId)?.PoolStableId,
-            StorageUnitKind.VirtualDisk =>
-                ActiveSnapshot.VirtualDisks.FirstOrDefault(x => x.StableId == unit.StableId)?.PoolStableId,
-            StorageUnitKind.PhysicalDisk =>
-                ActiveSnapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == unit.StableId)?.PoolStableId
-                ?? FindFirstPartitionForPhysicalDisk(unit.StableId),
-            StorageUnitKind.Partition =>
-                ResolvePartitionParent(ActiveSnapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId)),
-            StorageUnitKind.OsDisk =>
-                ActiveSnapshot.Partitions.FirstOrDefault(x => x.OsDiskStableId == unit.StableId)?.StableId,
-            _ => null
-        };
-        return ActiveSnapshot.FindUnit(targetId);
-    }
-
-    private string? FindFirstPartitionForPhysicalDisk(string physicalDiskId)
-    {
-        var osDiskIds = ActiveSnapshot.OsDisks
-            .Where(x => x.PhysicalDiskStableId == physicalDiskId)
-            .Select(x => x.StableId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return ActiveSnapshot.Partitions
-            .Where(x => x.OsDiskStableId is not null && osDiskIds.Contains(x.OsDiskStableId))
-            .Select(x => x.StableId)
-            .FirstOrDefault();
-    }
-
-    private string KindName(StorageUnitKind kind) => kind switch
-    {
-        StorageUnitKind.System => Localization["System"],
-        StorageUnitKind.StoragePool => Localization["StoragePool"],
-        StorageUnitKind.StorageTier => Localization["StorageTier"],
-        StorageUnitKind.PhysicalDisk => Localization["PhysicalDisk"],
-        StorageUnitKind.VirtualDisk => Localization["VirtualDisk"],
-        StorageUnitKind.NetworkDisk => Localization["NetworkDisk"],
-        StorageUnitKind.OsDisk => Localization["OtherDisk"],
-        StorageUnitKind.NetworkDiskGroup => Localization["NetworkStorageGroup"],
-        StorageUnitKind.OtherDiskGroup => Localization["OtherStorageGroup"],
-        StorageUnitKind.Partition => Localization["Partition"],
-        _ => kind.ToString()
+        WinPool.Application.ManageObjectRole.System => Localization["System"],
+        WinPool.Application.ManageObjectRole.StoragePool => Localization["StoragePool"],
+        WinPool.Application.ManageObjectRole.StorageTier => Localization["StorageTier"],
+        WinPool.Application.ManageObjectRole.PhysicalDisk => Localization["PhysicalDisk"],
+        WinPool.Application.ManageObjectRole.VirtualDisk => Localization["VirtualDisk"],
+        WinPool.Application.ManageObjectRole.NetworkDisk => Localization["NetworkDisk"],
+        WinPool.Application.ManageObjectRole.OsDisk => Localization["OtherDisk"],
+        WinPool.Application.ManageObjectRole.NetworkGroup => Localization["NetworkStorageGroup"],
+        WinPool.Application.ManageObjectRole.OtherGroup => Localization["OtherStorageGroup"],
+        WinPool.Application.ManageObjectRole.Partition => Localization["Partition"],
+        _ => role.ToString()
     };
 
     private bool SwitchSystem(string? systemId)
@@ -1777,12 +1218,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             root.RefreshSelection();
         }
-    }
-
-    private string? ResolvePartitionParent(PartitionInfo? partition)
-    {
-        var osDisk = ActiveSnapshot.OsDisks.FirstOrDefault(x => x.StableId == partition?.OsDiskStableId);
-        return osDisk?.VirtualDiskStableId ?? osDisk?.PhysicalDiskStableId ?? osDisk?.StableId;
     }
 
     public string PartitionTypeName(string type) => type switch

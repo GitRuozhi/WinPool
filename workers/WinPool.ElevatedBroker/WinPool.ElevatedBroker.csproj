@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Ipc\WinPool.Ipc.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
+  </ItemGroup>
+</Project>

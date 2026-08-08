@@ -1,5 +1,8 @@
 using System.Text;
+using WinPool.Application;
+using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
+using WinPool.Monitoring;
 
 namespace WinPool.App.Services;
 
@@ -7,7 +10,24 @@ public sealed record MonitorSamplePoint(
     DateTimeOffset Timestamp,
     double ActivityPercent,
     double ReadBytesPerSecond,
-    double WriteBytesPerSecond);
+    double WriteBytesPerSecond,
+    double VirtualDiskActiveBytes = 0,
+    double VirtualDiskMissingBytes = 0,
+    double VirtualDiskStaleBytes = 0,
+    double VirtualDiskNeedRegenerationBytes = 0,
+    double VirtualDiskRegeneratingBytes = 0,
+    double VirtualDiskPendingDeletionBytes = 0)
+{
+    public double VirtualDiskProblemBytes =>
+        MissingOrZero(VirtualDiskMissingBytes) +
+        MissingOrZero(VirtualDiskStaleBytes) +
+        MissingOrZero(VirtualDiskNeedRegenerationBytes) +
+        MissingOrZero(VirtualDiskRegeneratingBytes) +
+        MissingOrZero(VirtualDiskPendingDeletionBytes);
+
+    private static double MissingOrZero(double value) =>
+        double.IsFinite(value) ? Math.Max(0, value) : 0;
+}
 
 public sealed class MonitoringService : IDisposable
 {
@@ -16,12 +36,26 @@ public sealed class MonitoringService : IDisposable
     private static readonly TimeSpan WindowLength = TimeSpan.FromSeconds(60);
 
     private readonly object _sync = new();
+    private readonly IAgentConnection? _agentConnection;
     private readonly Dictionary<string, List<MonitorSamplePoint>> _windows = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _loopCts;
     private DiskPerformanceSampler? _sampler;
     private StreamWriter? _csvWriter;
     private DateTimeOffset _lastFlush = DateTimeOffset.MinValue;
     private bool _disposed;
+    private SessionId? _remoteSessionId;
+    private readonly Dictionary<string, DateTimeOffset> _remoteLastTimestamps =
+        new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<StorageHealthEvent> _recentStorageHealthEvents = [];
+    private readonly SamplingDiagnosticsTracker _diagnostics = new();
+    private MonitorRuntimeDiagnostics _agentDiagnostics = new(0, 0);
+
+    public MonitoringService(IAgentConnection? agentConnection = null)
+    {
+        _agentConnection = agentConnection;
+    }
+
+    public bool UsesAgent => _agentConnection is not null;
 
     public bool IsRunning { get; private set; }
 
@@ -48,6 +82,14 @@ public sealed class MonitoringService : IDisposable
             return;
         }
 
+        if (_agentConnection is not null)
+        {
+            IsRunning = true;
+            _loopCts = new CancellationTokenSource();
+            _ = StartRemoteAsync(rateHz, _loopCts.Token);
+            return;
+        }
+
         _sampler ??= new DiskPerformanceSampler();
         StartSessionFile();
         IsRunning = true;
@@ -56,7 +98,14 @@ public sealed class MonitoringService : IDisposable
         _ = Task.Run(() => RunLoopAsync(token));
     }
 
-    public void SetRate(double rateHz) => SampleRateHz = rateHz;
+    public void SetRate(double rateHz)
+    {
+        SampleRateHz = rateHz;
+        if (_agentConnection is not null && IsRunning)
+        {
+            _ = RestartRemoteAsync(rateHz);
+        }
+    }
 
     public async Task StopAsync()
     {
@@ -67,6 +116,26 @@ public sealed class MonitoringService : IDisposable
 
         IsRunning = false;
         _loopCts?.Cancel();
+        if (_agentConnection is not null)
+        {
+            if (_remoteSessionId is { } sessionId)
+            {
+                await _agentConnection.SendAsync(
+                    new StopAgentMonitoringRequest(
+                        sessionId,
+                        CorrelationId.New()),
+                    CancellationToken.None);
+            }
+
+            _remoteSessionId = null;
+            lock (_sync)
+            {
+                _windows.Clear();
+                _remoteLastTimestamps.Clear();
+            }
+            return;
+        }
+
         try
         {
             if (_csvWriter is not null)
@@ -110,8 +179,36 @@ public sealed class MonitoringService : IDisposable
         }
     }
 
+    public IReadOnlyList<StorageHealthEvent> GetRecentStorageHealthEvents()
+    {
+        lock (_sync)
+        {
+            return _recentStorageHealthEvents.ToArray();
+        }
+    }
+
+    public SamplingDiagnostics GetDiagnostics()
+    {
+        lock (_sync)
+        {
+            return _diagnostics.Snapshot(
+                _windows.Values.Sum(points => points.Count),
+                _agentDiagnostics);
+        }
+    }
+
     public async Task FlushAsync()
     {
+        if (_agentConnection is not null)
+        {
+            if (_remoteSessionId is not null)
+            {
+                await RefreshRemoteSnapshotAsync(CancellationToken.None);
+            }
+
+            return;
+        }
+
         try
         {
             StreamWriter? writer;
@@ -127,6 +224,39 @@ public sealed class MonitoringService : IDisposable
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
         }
+    }
+
+    public async Task<bool> ExportCsvAsync(
+        string destinationPath,
+        bool overwrite,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        if (_agentConnection is not null)
+        {
+            if (_remoteSessionId is not { } sessionId)
+            {
+                return false;
+            }
+
+            var result = await _agentConnection.SendAsync(
+                new ExportAgentMonitorCsvRequest(
+                    sessionId,
+                    destinationPath,
+                    overwrite,
+                    CorrelationId.New()),
+                cancellationToken);
+            return result.IsSuccess
+                   && result.Value is ExportArtifactResponse;
+        }
+
+        if (SessionFilePath is null || !File.Exists(SessionFilePath))
+        {
+            return false;
+        }
+
+        File.Copy(SessionFilePath, destinationPath, overwrite);
+        return true;
     }
 
     private async Task RunLoopAsync(CancellationToken token)
@@ -149,6 +279,205 @@ public sealed class MonitoringService : IDisposable
             {
             }
         }
+    }
+
+    public Task DetachAsync()
+    {
+        _loopCts?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    private async Task StartRemoteAsync(double rateHz, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var existing = await _agentConnection!.SendAsync(
+                new GetAgentSnapshotRequest(CorrelationId.New()),
+                cancellationToken);
+            if (existing.IsSuccess
+                && existing.Value is AgentSnapshotResponse existingSnapshot
+                && existingSnapshot.Snapshot.ActiveMonitoringSession is { } active)
+            {
+                _remoteSessionId = active.SessionId;
+                SampleRateHz = 1 / active.Request.SamplingInterval.TotalSeconds;
+                await RefreshRemoteSnapshotAsync(cancellationToken);
+                await RunRemotePollLoopAsync(cancellationToken);
+                return;
+            }
+
+            var systemId = SystemId.New();
+            var sessionId = SessionId.New();
+            var request = new MonitorRequest(
+                sessionId,
+                systemId,
+                [
+                    new MonitorTarget(
+                        new StorageObjectId(
+                            systemId,
+                            StorageObjectKind.PhysicalDisk,
+                            "pdh-wildcard"),
+                        "*"),
+                    new MonitorTarget(
+                        new StorageObjectId(
+                            systemId,
+                            StorageObjectKind.VirtualDisk,
+                            "pdh-storage-spaces-wildcard"),
+                        "*")
+                ],
+                [
+                    MonitorMetricKind.ActiveTimePercent,
+                    MonitorMetricKind.ReadBytesPerSecond,
+                    MonitorMetricKind.WriteBytesPerSecond,
+                    MonitorMetricKind.AverageQueueLength,
+                    MonitorMetricKind.VirtualDiskActiveBytes,
+                    MonitorMetricKind.VirtualDiskMissingBytes,
+                    MonitorMetricKind.VirtualDiskStaleBytes,
+                    MonitorMetricKind.VirtualDiskNeedRegenerationBytes,
+                    MonitorMetricKind.VirtualDiskRegeneratingBytes,
+                    MonitorMetricKind.VirtualDiskPendingDeletionBytes
+                ],
+                TimeSpan.FromSeconds(1 / Math.Clamp(rateHz, 0.2, 20)),
+                ContinueWhenUiCloses: true);
+            var response = await _agentConnection.SendAsync(
+                new StartAgentMonitoringRequest(request, CorrelationId.New()),
+                cancellationToken);
+            if (!response.IsSuccess)
+            {
+                IsRunning = false;
+                return;
+            }
+
+            _remoteSessionId = sessionId;
+            await RunRemotePollLoopAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or InvalidOperationException
+                or UnauthorizedAccessException)
+        {
+            IsRunning = false;
+        }
+    }
+
+    private async Task RestartRemoteAsync(double rateHz)
+    {
+        await StopAsync();
+        Start(rateHz);
+    }
+
+    private async Task RunRemotePollLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(
+            TimeSpan.FromMilliseconds(
+                Math.Clamp(1000.0 / Math.Max(0.2, SampleRateHz), 50, 1000)));
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            try
+            {
+                await RefreshRemoteSnapshotAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or InvalidDataException
+                    or TimeoutException
+                    or InvalidOperationException)
+            {
+                RecordSamplingFailure($"agent.{exception.GetType().Name}");
+            }
+        }
+    }
+
+    private async Task RefreshRemoteSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var response = await _agentConnection!.SendAsync(
+            new GetAgentSnapshotRequest(CorrelationId.New()),
+            cancellationToken);
+        if (!response.IsSuccess
+            || response.Value is not AgentSnapshotResponse snapshot
+            || snapshot.Snapshot.ActiveMonitoringSession is not { } session)
+        {
+            RecordSamplingFailure(
+                response.Messages.FirstOrDefault()?.Code
+                ?? "agent.snapshot-unavailable");
+            return;
+        }
+
+        _remoteSessionId = session.SessionId;
+        var cutoff = DateTimeOffset.UtcNow - WindowLength;
+        lock (_sync)
+        {
+            _recentStorageHealthEvents =
+                snapshot.Snapshot.RecentStorageHealthEvents?.ToArray() ?? [];
+            _agentDiagnostics =
+                snapshot.Snapshot.MonitorDiagnostics ?? new MonitorRuntimeDiagnostics(0, 0);
+            foreach (var sample in snapshot.Snapshot.LatestMonitorSamples ?? [])
+            {
+                var instance = sample.TargetId.ProviderKey.StartsWith(
+                        "pdh-storage-spaces:",
+                        StringComparison.OrdinalIgnoreCase)
+                    ? $"Storage Space: {sample.TargetId.ProviderKey[19..]}"
+                    : sample.TargetId.ProviderKey.StartsWith(
+                        "pdh:",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? sample.TargetId.ProviderKey[4..]
+                        : sample.TargetId.ProviderKey;
+                if (_remoteLastTimestamps.TryGetValue(instance, out var previous)
+                    && sample.SampledAtUtc <= previous)
+                {
+                    continue;
+                }
+
+                _remoteLastTimestamps[instance] = sample.SampledAtUtc;
+                if (!_windows.TryGetValue(instance, out var points))
+                {
+                    points = [];
+                    _windows[instance] = points;
+                }
+
+                points.Add(
+                    new MonitorSamplePoint(
+                        sample.SampledAtUtc,
+                        Metric(sample, MonitorMetricKind.ActiveTimePercent),
+                        Metric(sample, MonitorMetricKind.ReadBytesPerSecond),
+                        Metric(sample, MonitorMetricKind.WriteBytesPerSecond),
+                        Metric(sample, MonitorMetricKind.VirtualDiskActiveBytes),
+                        Metric(sample, MonitorMetricKind.VirtualDiskMissingBytes),
+                        Metric(sample, MonitorMetricKind.VirtualDiskStaleBytes),
+                        Metric(sample, MonitorMetricKind.VirtualDiskNeedRegenerationBytes),
+                        Metric(sample, MonitorMetricKind.VirtualDiskRegeneratingBytes),
+                        Metric(sample, MonitorMetricKind.VirtualDiskPendingDeletionBytes)));
+                points.RemoveAll(point => point.Timestamp < cutoff);
+            }
+
+            RecordSamplingSuccessLocked(
+                snapshot.Snapshot.LatestMonitorSamples?
+                    .Select(sample => (DateTimeOffset?)sample.SampledAtUtc)
+                    .Max()
+                ?? DateTimeOffset.UtcNow);
+        }
+    }
+
+    private static double Metric(MonitorSample sample, MonitorMetricKind kind) =>
+        sample.Values.FirstOrDefault(value => value.Kind == kind)?.Value ?? 0d;
+
+    private void RecordSamplingFailure(string code)
+    {
+        lock (_sync)
+        {
+            _diagnostics.RecordFailure(code);
+        }
+    }
+
+    private void RecordSamplingSuccessLocked(DateTimeOffset sampledAtUtc)
+    {
+        _diagnostics.RecordSuccess(sampledAtUtc);
     }
 
     private async Task RunLoopCoreAsync(CancellationToken token)
@@ -177,10 +506,15 @@ public sealed class MonitoringService : IDisposable
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
+                RecordSamplingFailure($"local.{ex.GetType().Name}");
                 continue;
             }
 
             var now = DateTimeOffset.Now;
+            lock (_sync)
+            {
+                RecordSamplingSuccessLocked(now);
+            }
             var rows = new StringBuilder();
             lock (_sync)
             {
@@ -260,6 +594,10 @@ public sealed class MonitoringService : IDisposable
 
         _disposed = true;
         _loopCts?.Cancel();
+        if (_agentConnection is not null)
+        {
+            return;
+        }
         lock (_sync)
         {
             _csvWriter?.Dispose();

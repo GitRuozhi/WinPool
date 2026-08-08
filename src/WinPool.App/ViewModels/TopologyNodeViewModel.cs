@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
+using WinPool.Application;
 using WinPool.Core;
 
 namespace WinPool.App.ViewModels;
@@ -14,32 +15,35 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private readonly string _occurrenceKey;
 
     public TopologyNodeViewModel(
-        TopologyNode node,
+        ManageTopologyNodeView node,
         WorkspaceViewModel owner,
-        StorageSnapshot snapshot,
-        string occurrenceKey = "root")
+        StorageSnapshot snapshot)
     {
         _owner = owner;
         _snapshot = snapshot;
-        _occurrenceKey = occurrenceKey;
-        Unit = node.Unit with { DisplayName = LocalizeName(node.Unit, owner) };
+        _occurrenceKey = node.OccurrenceKey;
+        var unit = ToLegacyUnit(node);
+        ObjectId = node.Id;
+        Role = node.Role;
+        Unit = unit with { DisplayName = LocalizeName(unit, owner) };
         Summary = LocalizeSummary(node, owner, snapshot);
-        TypeLabel = LocalizeType(node.Unit, owner, snapshot);
+        TypeLabel = LocalizeType(unit, owner, snapshot);
         IsReference = node.IsReference;
         IsSelectable = node.IsSelectable;
-        ChildrenLayout = node.ChildrenLayout;
+        ChildrenLayout = node.ChildrenLayout switch
+        {
+            ManageTopologyLayout.Stack => TopologyChildrenLayout.Stack,
+            ManageTopologyLayout.Flow => TopologyChildrenLayout.Flow,
+            ManageTopologyLayout.WeightedFlow => TopologyChildrenLayout.WeightedFlow,
+            _ => throw new ArgumentOutOfRangeException(nameof(node))
+        };
         LayoutWeight = node.LayoutWeight;
         _isExpanded = owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
         Children = node.Children
-            .Select((child, index) =>
-                new TopologyNodeViewModel(
-                    child,
-                    owner,
-                    snapshot,
-                    $"{_occurrenceKey}/{index}:{child.Unit.Kind}"))
+            .Select(child => new TopologyNodeViewModel(child, owner, snapshot))
             .ToList();
-        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, node.Unit);
-        IsWindowsBacked = ComputeIsWindowsBacked(snapshot, node.Unit);
+        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit);
+        IsWindowsBacked = ComputeIsWindowsBacked(snapshot, unit);
     }
 
     public string BadgeText { get; }
@@ -128,6 +132,10 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     }
 
     public StorageUnitRef Unit { get; }
+
+    public WinPool.Domain.StorageObjectId ObjectId { get; }
+
+    public ManageObjectRole Role { get; }
 
     public string Summary { get; }
 
@@ -220,7 +228,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     {
         if (IsSelectable)
         {
-            _owner.SelectTopologyUnit(Unit, _snapshot);
+            _owner.SelectManageTopologyNode(ObjectId, Role, _snapshot);
         }
     }
 
@@ -234,7 +242,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     }
 
     public void RequestContextMenu(Microsoft.UI.Xaml.FrameworkElement target) =>
-        _owner.NodeContextMenuRequested?.Invoke(Unit, target);
+        _owner.NodeContextMenuRequested?.Invoke(
+            new ManageObjectTarget(ObjectId, Role),
+            target);
 
     public void RefreshSelection()
     {
@@ -284,11 +294,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         };
 
     private static string LocalizeSummary(
-        TopologyNode node,
+        ManageTopologyNodeView node,
         WorkspaceViewModel owner,
         StorageSnapshot snapshot)
     {
-        if (node.Unit.Kind == StorageUnitKind.System)
+        var unit = ToLegacyUnit(node);
+        if (unit.Kind == StorageUnitKind.System)
         {
             var physical = snapshot.PhysicalDisks
                 .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
@@ -305,9 +316,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(physical.Sum(x => x.Size)));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.StoragePool)
+        if (unit.Kind == StorageUnitKind.StoragePool)
         {
-            var pool = snapshot.StoragePools.First(x => x.StableId == node.Unit.StableId);
+            var pool = snapshot.StoragePools.First(x => x.StableId == unit.StableId);
             var members = snapshot.PhysicalDisks
                 .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
                 .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
@@ -321,9 +332,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(members.Sum(x => x.Size)));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.StorageTier)
+        if (unit.Kind == StorageUnitKind.StorageTier)
         {
-            var tier = snapshot.StorageTiers.First(x => x.StableId == node.Unit.StableId);
+            var tier = snapshot.StorageTiers.First(x => x.StableId == unit.StableId);
             var members = snapshot.PhysicalDisks
                 .Where(x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
                 .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
@@ -333,35 +344,35 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(members.Sum(x => x.Size)));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.PhysicalDisk)
+        if (unit.Kind == StorageUnitKind.PhysicalDisk)
         {
-            var disk = snapshot.PhysicalDisks.First(x => x.StableId == node.Unit.StableId);
+            var disk = snapshot.PhysicalDisks.First(x => x.StableId == unit.StableId);
             var media = disk.MediaType is "HDD" or "SSD" or "SCM" ? disk.MediaType : owner.Localization["Unknown"];
             return TopologyProjector.JoinSummary(media, TopologyProjector.FormatBytes(disk.Size));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.VirtualDisk)
+        if (unit.Kind == StorageUnitKind.VirtualDisk)
         {
-            var disk = snapshot.VirtualDisks.First(x => x.StableId == node.Unit.StableId);
+            var disk = snapshot.VirtualDisks.First(x => x.StableId == unit.StableId);
             return TopologyProjector.JoinSummary(
                 disk.TierStableIds.Count > 0 ? "Tiered" : "Virtual",
                 TopologyProjector.FormatBytes(disk.Size));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.NetworkDisk)
+        if (unit.Kind == StorageUnitKind.NetworkDisk)
         {
-            var disk = snapshot.NetworkDisks.First(x => x.StableId == node.Unit.StableId);
+            var disk = snapshot.NetworkDisks.First(x => x.StableId == unit.StableId);
             return TopologyProjector.JoinSummary("Network", TopologyProjector.FormatBytes(disk.Size));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.NetworkDiskGroup)
+        if (unit.Kind == StorageUnitKind.NetworkDiskGroup)
         {
             return TopologyProjector.JoinSummary(
                 $"{snapshot.NetworkDisks.Count} {owner.Localization["NetworkDisk"]}",
                 TopologyProjector.FormatBytes(snapshot.NetworkDisks.Sum(x => x.Size)));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.OtherDiskGroup)
+        if (unit.Kind == StorageUnitKind.OtherDiskGroup)
         {
             var otherDisks = TopologyProjector.GetOtherOsDisks(snapshot);
             var otherIds = otherDisks.Select(x => x.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -371,9 +382,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(otherDisks.Sum(x => x.Size)));
         }
 
-        if (node.Unit.Kind == StorageUnitKind.Partition)
+        if (unit.Kind == StorageUnitKind.Partition)
         {
-            var partition = snapshot.Partitions.First(x => x.StableId == node.Unit.StableId);
+            var partition = snapshot.Partitions.First(x => x.StableId == unit.StableId);
             return TopologyProjector.JoinSummary(
                 string.IsNullOrWhiteSpace(partition.FileSystem) ? owner.Localization["Unknown"] : partition.FileSystem,
                 TopologyProjector.FormatBytes(partition.Size));
@@ -381,6 +392,28 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
         return node.Summary.Replace(" · ", "  ", StringComparison.Ordinal);
     }
+
+    private static StorageUnitRef ToLegacyUnit(ManageTopologyNodeView node) =>
+        new(
+            node.Id.ProviderKey,
+            node.Role switch
+            {
+                ManageObjectRole.System => StorageUnitKind.System,
+                ManageObjectRole.StorageSubsystem => StorageUnitKind.StorageSubsystem,
+                ManageObjectRole.StoragePool => StorageUnitKind.StoragePool,
+                ManageObjectRole.StorageTier => StorageUnitKind.StorageTier,
+                ManageObjectRole.PhysicalDisk => StorageUnitKind.PhysicalDisk,
+                ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
+                ManageObjectRole.NetworkDisk => StorageUnitKind.NetworkDisk,
+                ManageObjectRole.OsDisk => StorageUnitKind.OsDisk,
+                ManageObjectRole.Partition => StorageUnitKind.Partition,
+                ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
+                ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
+                ManageObjectRole.DirectDiskGroup => StorageUnitKind.DirectDiskGroup,
+                _ => throw new ArgumentOutOfRangeException(nameof(node))
+            },
+            node.DisplayName,
+            node.IsStableIdentity);
 
     private static string LocalizeType(StorageUnitRef unit, WorkspaceViewModel owner, StorageSnapshot snapshot) =>
         unit.Kind switch
