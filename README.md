@@ -14,9 +14,9 @@ WinPool is designed to:
 
 ## Current development stage
 
-WinPool is currently in the **requirements-confirmed and frontend-visual-design stage**.
+WinPool is currently in the **V0.2 one-time architecture rewrite and integration stage**. The accepted V0.13 appearance remains the visual baseline, while frontend fixes and refactoring are allowed.
 
-The repository contains a runnable WinUI 3 frontend draft used to validate information architecture, visual hierarchy, navigation, topology presentation, localization, theming, and interaction behavior. Backend work is intentionally limited to the minimum needed to support frontend development.
+The repository contains a runnable WinUI 3 application plus separate tray Agent, TestWorker, and one-shot elevated Broker processes. Stable internal Application contracts, typed named-pipe IPC, SQLite persistence, testing, monitoring, simulation, and deny-by-default execution boundaries are being integrated without freezing a public API.
 
 The draft now models one read-only local computer and multiple persistent simulated
 storage systems. A captured KS/StatSys hardware report supplies the first simulation,
@@ -26,8 +26,8 @@ simulation.
 At this stage:
 
 - simulated storage data is a normal and approved development source;
-- the backend does not need to implement every capability represented by the frontend;
-- visible Create, Test, Monitor, and Development experiences may be prototypes or placeholders;
+- the backend does not need to implement every future real storage-management capability represented by the frontend;
+- existing features and the former Test-page scope are being preserved and absorbed into the rewritten architecture;
 - current Windows discovery is read-only and may remain incomplete while frontend behavior is refined;
 - local discovery uses fixed, assembly-embedded read-only commands through Windows
   PowerShell 5.1; WinPool does not deploy a writable `.ps1` inventory file;
@@ -40,15 +40,17 @@ At this stage:
   optional MSR, partition extend/shrink/delete/create, drag-and-drop pool creation,
   and virtual-disk provisioning with reviewable 64K interleave and 64K cluster
   defaults — while every local mutation entry point stays disabled;
-- the Monitor page observes local physical and virtual disks through read-only
-  performance counters and presents a task-manager-style activity graph, a
-  per-disk table, adjustable sampling, optional background monitoring, and CSV
-  export, while the Development page shows a read-only log of every command
-  WinPool executes;
+- the Test page orchestrates configured external DiskSpd, fio, Dite, RoboCopy,
+  and RAMMap tools through typed adapters; those tools are discovered or installed
+  separately and are not bundled with WinPool;
+- the visible per-user tray Agent continues monitoring after the main window closes;
+  it is not a service and a tray Exit requests a complete application shutdown;
 - app data lives in `%LocalAppData%\WinPool` by default or in a portable `Data`
   folder next to the executable, with automatic migration when switching;
-- local machine information is refreshed into `%LocalAppData%\WinPool\machine.json`
-  on every launch, always with sensitive serial numbers masked;
+- during a normal launch, the tray Agent performs the fixed read-only inventory,
+  persists a redacted normalized snapshot and bounded full document in SQLite v10,
+  and serves the cached document to the UI; `machine.json` remains only as a
+  no-Agent developer fallback;
 - frontend requirements do not freeze a public API, database, plug-in contract, or C#/Python wire protocol.
 
 The interface expresses the intended product direction. It must not be interpreted as a promise that every displayed workflow is already connected to a production backend.
@@ -66,7 +68,7 @@ Future creation and management workflows should expose the complete relevant par
 
 ### Testing and monitoring
 
-WinPool is intended to bring storage testing, health monitoring, performance observation, result comparison, and evidence export into the same product. These areas are part of the frontend and product design, but their complete backend integration is not required in the current stage.
+WinPool brings storage testing, health monitoring, performance observation, result comparison, and evidence export into the same product. V0.2 integration is implemented in substantial part; real-tool, long-duration, UAC, recovery, and full GUI acceptance testing remains in progress.
 
 ### Developer and AI integration
 
@@ -74,12 +76,12 @@ Developer-facing and AI-facing integration should eventually use typed objects, 
 
 ## Current safety boundary
 
-The current application is a frontend and read-only inspection draft.
+Real storage-structure mutation remains prohibited in the current application.
 
 - It must not create, initialize, format, resize, repair, remove, or otherwise modify storage objects.
-- The Real mode control currently represents execution-mode and privilege UX only.
-- The Local real operations checkbox currently represents privilege UX only and shows
-  a dismissible preview warning.
+- File-scoped tests may write, read, verify, and clean only files registered under an explicitly selected test directory.
+- Typed and audited system-support actions may clean approved temporary files, flush a volume, run TRIM/Optimize, adjust a registered test process, or temporarily change the power plan. Release UX must warn or ask first and restore reversible state.
+- External tools remain separate installations and may be configured by path or installed through confirmed Settings actions.
 - Simulation is the default and may be used for all frontend development and demonstrations.
 - Mutating storage support requires a separately approved implementation stage and a disposable test environment.
 

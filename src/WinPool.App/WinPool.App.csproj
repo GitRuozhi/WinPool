@@ -37,9 +37,27 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\WinPool.Agent.Client\WinPool.Agent.Client.csproj" />
     <ProjectReference Include="..\WinPool.Core\WinPool.Core.csproj" />
     <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\WinPool.Infrastructure.Sqlite\WinPool.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\WinPool.Monitoring\WinPool.Monitoring.csproj" />
+    <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
+    <ProjectReference Include="..\WinPool.Testing\WinPool.Testing.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyAgentRuntimeBesideApp" AfterTargets="Build">
+    <MSBuild Projects="..\WinPool.Agent\WinPool.Agent.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+    <ItemGroup>
+      <AgentRuntimeFiles Include="..\WinPool.Agent\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
+                         Exclude="..\WinPool.Agent\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AgentRuntimeFiles)"
+          DestinationFiles="@(AgentRuntimeFiles->'$(OutDir)Agent\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- V0.1 favors reliable JSON serialization over trimmed output size. -->
   <PropertyGroup>

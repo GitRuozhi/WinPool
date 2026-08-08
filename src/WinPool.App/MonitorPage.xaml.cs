@@ -11,6 +11,7 @@ using WinPool_App.Controls;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool_App;
 
@@ -80,8 +81,10 @@ public sealed partial class MonitorPage : Page
     ];
 
     private readonly ObservableCollection<MonitorRowViewModel> _rows = [];
+    private readonly ObservableCollection<string> _storageEventRows = [];
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByInstance = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, MonitorRowViewModel> _rowsByDiskNumber = new();
+    private DateTimeOffset _storageEventCutoff = DateTimeOffset.UtcNow;
     private WorkspaceViewModel _viewModel = null!;
     private DispatcherQueueTimer? _pollTimer;
     private bool _ready;
@@ -90,6 +93,7 @@ public sealed partial class MonitorPage : Page
     {
         InitializeComponent();
         DiskRows.ItemsSource = _rows;
+        StorageEventRows.ItemsSource = _storageEventRows;
         Unloaded += MonitorPage_Unloaded;
     }
 
@@ -168,6 +172,10 @@ public sealed partial class MonitorPage : Page
         ((TextBlock)((StackPanel)StopButton.Content).Children[1]).Text = l["StopMonitoring"];
         ((TextBlock)((StackPanel)ExportButton.Content).Children[1]).Text = l["ExportData"];
         ToolTipService.SetToolTip(RateOptions, l["RefreshRate"]);
+        HealthEventsExpander.Header =
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "采样诊断与存储健康事件"
+                : "Sampling diagnostics and storage health events";
     }
 
     private void ColorSwatch_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -466,9 +474,26 @@ public sealed partial class MonitorPage : Page
             var row = ResolveRow(instance);
             row.InstanceName = instance;
             _rowsByInstance[instance] = row;
-            row.ActivityText = $"{point.ActivityPercent:F0}%";
-            row.ReadText = FormatRate(point.ReadBytesPerSecond);
-            row.WriteText = FormatRate(point.WriteBytesPerSecond);
+            if (instance.StartsWith("Storage Space:", StringComparison.OrdinalIgnoreCase))
+            {
+                var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+                row.ActivityText = point.VirtualDiskProblemBytes > 0
+                    ? point.VirtualDiskRegeneratingBytes > 0
+                        ? zh ? "修复中" : "Repairing"
+                        : zh ? "警告" : "Warning"
+                    : zh ? "正常" : "Healthy";
+                row.ReadText =
+                    $"{(zh ? "活动" : "Active")} {FormatBytes(point.VirtualDiskActiveBytes)}";
+                row.WriteText = point.VirtualDiskProblemBytes > 0
+                    ? $"{(zh ? "异常" : "Issue")} {FormatBytes(point.VirtualDiskProblemBytes)}"
+                    : $"{(zh ? "异常" : "Issue")} 0 B";
+            }
+            else
+            {
+                row.ActivityText = $"{point.ActivityPercent:F0}%";
+                row.ReadText = FormatRate(point.ReadBytesPerSecond);
+                row.WriteText = FormatRate(point.WriteBytesPerSecond);
+            }
         }
 
         var series = new List<DiskGraphSeries>();
@@ -491,6 +516,82 @@ public sealed partial class MonitorPage : Page
             });
         }
         ActivityGraph.SetSeries(series);
+        UpdateDiagnosticsAndStorageEvents();
+        PublishNewStorageHealthEvent();
+    }
+
+    private void UpdateDiagnosticsAndStorageEvents()
+    {
+        var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        var diagnostics = Monitoring.GetDiagnostics();
+        var queue = diagnostics.SubscriberCapacity > 0
+            ? $"{diagnostics.SubscriberBufferedSamples}/{diagnostics.SubscriberCapacity}"
+            : "0/0";
+        var dropDetails = zh
+            ? $"窗口 {diagnostics.WindowDroppedSamples}、持久化 {diagnostics.PersistenceDroppedSamples}、订阅 {diagnostics.SubscriberDroppedSamples}、拒绝源 {diagnostics.RejectedSourceSamples}；订阅队列 {queue}（{diagnostics.ActiveSubscribers} 个）"
+            : $"window {diagnostics.WindowDroppedSamples}, persistence {diagnostics.PersistenceDroppedSamples}, subscriber {diagnostics.SubscriberDroppedSamples}, rejected source {diagnostics.RejectedSourceSamples}; subscriber queue {queue} ({diagnostics.ActiveSubscribers})";
+        SamplingDiagnosticsText.Text = diagnostics.ConsecutiveFailures > 0
+            ? zh
+                ? $"采样异常：连续失败 {diagnostics.ConsecutiveFailures} 次；代码 {diagnostics.LastFailureCode ?? "unknown"}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
+                : $"Sampling warning: {diagnostics.ConsecutiveFailures} consecutive failures; code {diagnostics.LastFailureCode ?? "unknown"}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})"
+            : zh
+                ? $"采样正常；最近成功 {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
+                : $"Sampling healthy; last success {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})";
+
+        var displayRows = Monitoring.GetRecentStorageHealthEvents()
+            .OrderByDescending(item => item.OccurredAtUtc)
+            .Take(20)
+            .Select(item =>
+                $"{item.OccurredAtUtc.LocalDateTime:yyyy-MM-dd HH:mm:ss} · {item.Severity} · {item.Provider} · Event {item.EventId} · Record {item.RecordId?.ToString() ?? "-"}")
+            .ToArray();
+        if (_storageEventRows.SequenceEqual(displayRows, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        _storageEventRows.Clear();
+        foreach (var row in displayRows)
+        {
+            _storageEventRows.Add(row);
+        }
+    }
+
+    private static string FormatTimestamp(DateTimeOffset? timestamp) =>
+        timestamp?.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+
+    private void PublishNewStorageHealthEvent()
+    {
+        var newest = Monitoring.GetRecentStorageHealthEvents()
+            .Where(item => item.OccurredAtUtc > _storageEventCutoff)
+            .OrderBy(item => item.OccurredAtUtc)
+            .LastOrDefault();
+        if (newest is null)
+        {
+            return;
+        }
+
+        _storageEventCutoff = newest.OccurredAtUtc;
+        var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        var title = zh ? "存储健康事件" : "Storage health event";
+        var summary =
+            $"{newest.Provider} · Event {newest.EventId} · {newest.Severity}";
+        if (newest.Severity is StorageHealthEventSeverity.Critical
+            or StorageHealthEventSeverity.Error)
+        {
+            _viewModel.NotificationService.PublishError(
+                title,
+                summary,
+                "monitor",
+                $"storage-event:{newest.Channel}:{newest.RecordId}:{newest.EventId}");
+        }
+        else if (newest.Severity == StorageHealthEventSeverity.Warning)
+        {
+            _viewModel.NotificationService.PublishWarning(
+                title,
+                summary,
+                "monitor",
+                $"storage-event:{newest.Channel}:{newest.RecordId}:{newest.EventId}");
+        }
     }
 
     private MonitorRowViewModel ResolveRow(string instance)
@@ -513,7 +614,8 @@ public sealed partial class MonitorPage : Page
             string.Empty,
             string.Empty,
             number,
-            instance.Contains(':'));
+            instance.Contains(':') &&
+            !instance.StartsWith("Storage Space:", StringComparison.OrdinalIgnoreCase));
         return row;
     }
 
@@ -590,7 +692,8 @@ public sealed partial class MonitorPage : Page
         var l = _viewModel.Localization;
         await Monitoring.FlushAsync();
         var sessionPath = Monitoring.SessionFilePath;
-        if (sessionPath is null || !File.Exists(sessionPath))
+        if (!Monitoring.UsesAgent
+            && (sessionPath is null || !File.Exists(sessionPath)))
         {
             _viewModel.NotificationService.PublishInfo(
                 l["ExportData"],
@@ -614,7 +717,18 @@ public sealed partial class MonitorPage : Page
 
         try
         {
-            File.Copy(sessionPath, file.Path, true);
+            if (!await Monitoring.ExportCsvAsync(
+                    file.Path,
+                    overwrite: true))
+            {
+                _viewModel.NotificationService.PublishInfo(
+                    l["ExportData"],
+                    l["NoMonitoringData"],
+                    "monitor",
+                    $"monitor-export:{DateTimeOffset.UtcNow.Ticks}");
+                return;
+            }
+
             _viewModel.NotificationService.PublishInfo(
                 l["ExportData"],
                 l["Exported"],
@@ -633,6 +747,15 @@ public sealed partial class MonitorPage : Page
 
     private static string FormatRate(double bytesPerSecond) =>
         DiskActivityGraphControl.FormatRate(bytesPerSecond);
+
+    private static string FormatBytes(double bytes) =>
+        bytes >= 1024 * 1024 * 1024
+            ? $"{bytes / (1024 * 1024 * 1024):F1} GiB"
+            : bytes >= 1024 * 1024
+                ? $"{bytes / (1024 * 1024):F1} MiB"
+                : bytes >= 1024
+                    ? $"{bytes / 1024:F1} KiB"
+                    : $"{bytes:F0} B";
 
     private static string FormatCapacity(long bytes) => $"{bytes / 1073741824.0:F0} GiB";
 }

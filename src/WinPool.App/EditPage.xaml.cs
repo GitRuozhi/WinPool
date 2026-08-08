@@ -7,6 +7,9 @@ using Microsoft.UI.Xaml.Navigation;
 using Windows.ApplicationModel.DataTransfer;
 using WinPool.App.ViewModels;
 using WinPool.Core;
+using SimulationOperationKind = WinPool.Application.SimulationEditKind;
+using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
+using SimulationOperationResult = WinPool.Application.SimulationEditReceipt;
 
 namespace WinPool_App;
 
@@ -696,13 +699,16 @@ public sealed partial class EditPage : Page
     private async Task<SimulationOperationResult?> ApplyAsync(SimulationOperationRequest request)
     {
         var result = await ViewModel.ApplySimulationOperationAsync(request);
-        if (!result.Succeeded)
+        if (!result.IsSuccess || result.Value is null)
         {
-            await ShowMessageAsync(Text("操作不可用", "Operation unavailable"), result.Error);
+            await ShowMessageAsync(
+                Text("操作不可用", "Operation unavailable"),
+                result.Messages.FirstOrDefault()?.UserTextKey
+                    ?? Text("模拟操作未完成。", "The simulation operation did not complete."));
             return null;
         }
         RefreshAll();
-        return result;
+        return result.Value;
     }
 
     private async Task<string?> PromptAsync(string title, string value)

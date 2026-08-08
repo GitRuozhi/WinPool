@@ -13,47 +13,82 @@ Only these four Markdown files at the WinPool repository root define the current
 3. `AGENTS.md` — AI-agent rules.
 4. `DEVELOP.md` — developer architecture and workflow.
 
+The user-approved Chinese V0.2 rewrite plan is stored under `Plan`. The four root
+documents continue to describe the current V0.13 baseline until the rewrite cuts
+over, while `Plan` is authoritative for V0.2 target architecture, scope,
+sequencing, executor boundaries, and acceptance. When they differ, use the
+current documents to understand V0.13 behavior, use `Plan` for the V0.2 target,
+and always preserve the stricter safety rule.
+
 Documents archived under the parent project's `Old` directory are historical references. They do not constrain current implementation and must not be treated as current requirements.
 
 Do not recreate a `Docs` directory without explicit user approval.
 
 ## Current project stage
 
-WinPool is in the **requirements-confirmed and frontend-visual-design stage**.
+WinPool has a runnable V0.13 frontend baseline and is entering the user-approved
+**V0.2 one-time architecture rewrite stage**.
 
-The current priority is to refine:
+The current priorities are:
 
-- product information architecture;
-- shell and title-bar behavior;
-- storage-object hierarchy and topology presentation;
-- selection and interaction behavior;
-- theme, language, accessibility, and responsive layout;
-- frontend representation of future Manage, Create, Test, Monitor, Development, and Settings workflows.
+- freeze the current appearance while allowing frontend fixes and refactoring;
+- preserve every current feature in the new architecture;
+- define stable internal Application contracts without freezing a public API;
+- introduce SQLite for high-volume test and monitoring data;
+- design the executor port and safety model now;
+- replace the Test placeholder with a complete testing workflow that orchestrates
+  DiskSpd, RoboCopy, fio, RAMMap, and other configured tools through typed adapters;
+- split persistent monitoring from the main UI into a visible per-user tray
+  process that communicates with the UI through named pipes;
+- retain the current read-only PowerShell inventory until a native collector is
+  implemented and validated against it.
 
-Backend implementation is intentionally minimal. It only needs to support the current frontend design and verification work.
+The V0.2 backend does not need to implement every future real operation. It does
+need enough architecture, simulation, persistence, testing, monitoring, and
+deny-by-default execution behavior to support the complete V0.2 application.
 
 ## Backend policy
 
 - Simulated data is an approved first-class development source.
 - A frontend element does not require a complete production backend in the current stage.
-- Prefer a small fake or read-only provider over premature integration.
+- Prefer simulation or read-only providers for capabilities that cannot safely
+  run on the current machine.
 - Do not freeze a public API, plug-in contract, IPC protocol, or C#/Python wire format.
-  The current JSON persistence (settings, `machine.json`, simulated system documents)
-  is internal and may change without migration.
+  Current persistence and typed IPC are internal and may change without migration.
+  Normal launches use Agent-owned SQLite v10; legacy JSON stores remain only for
+  explicitly supported no-Agent developer fallback paths.
 - KS/StatSys read-only collection has been explicitly requested. Preserve its
-  structured report boundary, but do not add a Python runtime, Flask service, or
-  external automation.
-- Keep current Windows inventory code fixed and read-only.
-- Do not add a storage executor or any mutating command against the local machine.
-  The only permitted write path is the simulated operation service acting on
-  simulated documents.
+  structured report boundary and current scripts while native alternatives are
+  evaluated; do not turn the Flask prototype into the production boundary.
+- Keep the current Windows inventory code read-only and retain its embedded
+  PowerShell implementation until the native replacement has been validated.
+- Designing the executor port, immutable plans, policy engine, authorization
+  model, simulation executor, replay executor, and explicit deny implementation
+  is approved.
+- Do not add or enable operations that change real storage structure: disk
+  initialization/state conversion, partition creation/deletion/resizing/format,
+  Storage Pool/Tier/VirtualDisk creation/deletion/resizing/repair, or equivalent.
+- The current machine may perform file-scoped tests in an explicitly selected
+  test directory. Creating, writing, reading, verifying, and cleaning only the
+  registered test files is allowed.
+- Development may perform explicitly planned temporary-file cleanup, RAMMap
+  system-cache/standby-list cleanup, volume flush, TRIM/Optimize, process
+  priority/CPU-affinity adjustment, and temporary power-plan changes. The final
+  product must warn or ask before these actions, record them, and restore
+  reversible settings.
+- DiskSpd, RoboCopy, fio, RAMMap, and other benchmark or test-support tools
+  remain external tools. Do not reimplement their engines in C# or Win32. They
+  are not bundled; Settings provides discovery, official installation actions,
+  and custom paths.
 - Sensitive hardware values may remain unmasked in memory to support the
   privacy toggle, but everything persisted, exported, or imported must pass
   through `StorageSystemDocumentSanitizer.RedactSensitiveData`.
 - Do not store or publish a `.ps1` inventory file. Fixed read-only PowerShell text
   must be embedded in the assembly and provided through standard input.
 
-The existing Core and Infrastructure projects may remain broader than the minimum frontend need, but new work should not expand them merely to make every visible prototype functional.
+V0.2 may replace the current project structure and add the projects and internal
+dependencies defined in `Plan`. Do not preserve old boundaries merely for
+compatibility.
 
 ## Product direction
 
@@ -82,7 +117,13 @@ These are product goals, not claims that the current backend already implements 
 - All mutating and destructive workflows live on the Edit page and act on simulated systems only; Manage keeps entries that navigate to Edit.
 - The Monitor page samples local physical and virtual disks through read-only PDH counters (activity capped at 100 percent) and presents a task-manager-style graph (dotted activity, dashed read, solid write with translucent fill, 60-second window, per-disk colors, selectable per row), a disk table, and start/stop/export commands with icons. Every monitoring session records incrementally to `<data root>\Monitoring\yyyyMMdd_HHmmss.csv`; background monitoring is opt-in and monitoring otherwise pauses when the page is closed or the window is minimized. The Development page shows a read-only log of executed commands; the Test page is a placeholder.
 - A welcome dialog with artwork and introduction text appears at startup until disabled through its "show at startup" checkbox or the matching Settings toggle.
-- The last successful local scan is persisted to `machine.json` and loaded at startup so the previous local inventory appears immediately while a background scan refreshes it. The last shell page, active system, and per-category selections persist to `workspace.json` and are restored on the next launch; topology expansion state is not persisted.
+- On a normal launch, the Agent performs the fixed read-only inventory, persists a
+  redacted normalized snapshot plus a bounded SHA-256-protected full local document
+  in SQLite v10, and serves the cached document while a background scan refreshes it.
+  `machine.json` is only a no-Agent developer fallback. Workspace page, document,
+  per-category selections, and topology highlight are likewise Agent/SQLite-owned in
+  normal launches; `workspace.json` is only the no-Agent fallback. Topology expansion
+  state is not persisted.
 - All persistence resolves through `StorageDataLocations`: the standard root is `%LocalAppData%\WinPool`, portable mode uses a `Data` folder next to the executable, and the `storage-location.json` pointer in the standard root selects the mode. Switching modes migrates existing data and keeps the old files; a non-writable executable folder refuses portable mode.
 - Workspace selection and topology highlighting remain independent where the current interaction requires it.
 - Network and other logical storage groups must not be counted as Windows Storage Pools.
@@ -103,11 +144,17 @@ Prefer built-in WinUI controls and shared resources. Add custom controls only wh
 
 ## Safety rules
 
-1. Do not add or run commands that mutate the local machine.
-2. Do not initialize, clear, format, resize, repair, optimize, remove, or create local storage objects.
-   Simulated operations on simulated documents are the approved write path; every
-   local mutation entry point must stay disabled, including in Real mode.
-3. Do not use a real attached disk as a temporary test target.
+1. Do not initialize, clear, format, resize, repair, remove, or create real
+   disks, partitions, volumes, Storage Pools, Storage Tiers, or Virtual Disks.
+   Simulation remains the only implementation for those storage-structure
+   operations, including in Real mode.
+2. File-based tests may use only an explicitly selected test directory and may
+   touch only files registered to that test run. Raw-device writes are forbidden.
+3. Temporary-file cleanup must exclude Windows Update, component store,
+   installer, recovery, file-protection, and other protected operating-system
+   data. Volume flush, TRIM/Optimize, process scheduling changes, and temporary
+   power-plan changes require a typed plan and audit; release builds must warn or
+   ask before execution.
 4. Do not expose unmasked serial numbers in clipboard, logs, persisted files, or
    exports. The settings privacy toggle may reveal them in UI text only.
 5. Do not directly delete files.
@@ -123,14 +170,17 @@ Prefer built-in WinUI controls and shared resources. Add custom controls only wh
 - User-facing wording belongs in `README.md` and `README_CN.md`.
 - AI operational rules belong in `AGENTS.md`.
 - architecture, setup, and developer workflow belong in `DEVELOP.md`.
+- The explicitly approved V0.2 rewrite plan belongs under `Plan` and may contain
+  multiple Chinese Markdown files.
 - Do not use archived documents as active requirements.
-- When product direction changes, update the relevant authoritative file rather than creating another planning document.
+- Do not create another planning directory beside `Plan`.
 
 ## Verification
 
 For documentation-only changes:
 
 - verify that the WinPool root contains only the four approved Markdown files;
+- verify all `Plan` files and their internal links when the V0.2 plan changes;
 - verify all links and referenced paths;
 - verify English and Chinese product statements describe the same stage and scope.
 

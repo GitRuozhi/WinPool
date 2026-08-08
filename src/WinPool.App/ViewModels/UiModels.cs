@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
+using WinPool.Application;
 using WinPool.Core;
 
 namespace WinPool.App.ViewModels;
@@ -11,7 +12,8 @@ public sealed record WorkspaceItem(
     string Title,
     StorageUnitRef? Unit = null,
     bool IsAction = false,
-    string? StorageSystemId = null);
+    string? StorageSystemId = null,
+    ManageObjectListItemView? Projection = null);
 
 public sealed record DetailRow(string Label, string Value);
 

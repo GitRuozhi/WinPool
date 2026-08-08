@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using WinPool.Core;
 
 namespace WinPool.Infrastructure.Windows;
@@ -10,6 +11,8 @@ public static class StorageDataLocations
     private const string PointerFileName = "storage-location.json";
 
     private static readonly object Sync = new();
+    private static readonly JsonSerializerOptions PointerJsonOptions =
+        CreatePointerJsonOptions();
     private static StorageLocationMode? _cachedMode;
 
     public static string StandardRoot { get; } = Path.Combine(
@@ -26,13 +29,32 @@ public static class StorageDataLocations
         {
             lock (Sync)
             {
-                _cachedMode ??= ResolveMode();
+                _cachedMode ??= ResolveMode(PointerPath, PortableRoot);
                 return _cachedMode.Value;
             }
         }
     }
 
     public static string CurrentRoot => Mode == StorageLocationMode.Portable ? PortableRoot : StandardRoot;
+
+    public static string ResolveCurrentRoot(string productRoot)
+        => ResolveCurrentRoot(productRoot, StandardRoot, PointerPath);
+
+    internal static string ResolveCurrentRoot(
+        string productRoot,
+        string standardRoot,
+        string pointerPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(productRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(standardRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pointerPath);
+        var portableRoot = Path.Combine(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(productRoot)),
+            "Data");
+        return ResolveMode(pointerPath, portableRoot) == StorageLocationMode.Portable
+            ? portableRoot
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(standardRoot));
+    }
 
     public static async Task<StorageLocationSwitchResult> SetModeAsync(
         StorageLocationMode mode,
@@ -80,14 +102,17 @@ public static class StorageDataLocations
         }
     }
 
-    private static StorageLocationMode ResolveMode()
+    private static StorageLocationMode ResolveMode(
+        string pointerPath,
+        string portableRoot)
     {
         try
         {
-            if (File.Exists(PointerPath))
+            if (File.Exists(pointerPath))
             {
                 var pointer = JsonSerializer.Deserialize<StorageLocationPointer>(
-                    File.ReadAllText(PointerPath));
+                    File.ReadAllText(pointerPath),
+                    PointerJsonOptions);
                 if (pointer is not null)
                 {
                     return pointer.Mode;
@@ -98,8 +123,8 @@ public static class StorageDataLocations
         {
         }
 
-        return File.Exists(Path.Combine(PortableRoot, "settings.json"))
-               || File.Exists(Path.Combine(PortableRoot, "machine.json"))
+        return File.Exists(Path.Combine(portableRoot, "settings.json"))
+               || File.Exists(Path.Combine(portableRoot, "machine.json"))
             ? StorageLocationMode.Portable
             : StorageLocationMode.Standard;
     }
@@ -138,4 +163,11 @@ public static class StorageDataLocations
     }
 
     private sealed record StorageLocationPointer(StorageLocationMode Mode);
+
+    private static JsonSerializerOptions CreatePointerJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 }

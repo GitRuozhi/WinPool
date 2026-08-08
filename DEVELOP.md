@@ -2,11 +2,9 @@
 
 ## Development status
 
-WinPool is currently in the **requirements-confirmed and frontend-visual-design stage**.
+WinPool is currently in the **V0.2 one-time architecture rewrite and integration stage**. The accepted V0.13 appearance remains frozen while implementation errors and frontend architecture may be corrected.
 
-The immediate objective is a coherent, modern Windows storage interface. Backend completeness is not an acceptance requirement for this stage. Minimal read-only services, fake providers, and simulated storage graphs are appropriate when they allow frontend work to proceed safely.
-
-The current executable should be treated as a frontend and interaction prototype with a small read-only backend, not as a completed storage-management product.
+The current solution has stable internal Application contracts, Agent-owned SQLite persistence, typed named-pipe IPC, a visible per-user tray process, an isolated TestWorker, and a one-shot elevated Broker. Real storage-structure mutation remains denied; simulation, read-only inventory, registered-directory testing, monitoring, and explicitly reviewed system-support actions form the V0.2 implementation boundary.
 
 ## Product goal
 
@@ -20,7 +18,7 @@ The intended product will:
 - expose extension points for developers;
 - make structured operations convenient for AI agents to inspect and invoke.
 
-The current stage defines how these capabilities should appear and interact. It does not require all of them to be connected to a complete backend.
+V0.2 does not freeze a public SDK or require every future real management operation, but every retained feature must pass through the rewritten internal architecture.
 
 ## Technology and deployment
 
@@ -40,12 +38,25 @@ The SDK version used by the repository is pinned in `global.json`.
 ```text
 WinPool.slnx
 src/
-  WinPool.App/                    WinUI shell, pages, controls, view models, simulation data
-  WinPool.Core/                   Domain records, selection state, topology and layout rules
-  WinPool.Infrastructure.Windows/ Minimal read-only Windows services and inventory script
+  WinPool.App/                    WinUI shell, pages, controls, and presentation adapters
+  WinPool.Application/            Stable internal contracts and use-case policies
+  WinPool.Domain/                 Structured identities and pure storage rules
+  WinPool.Execution/              Immutable plans, authorization, gates, and executors
+  WinPool.Agent/                  Visible tray runtime and SQLite single writer
+  WinPool.Agent.Client/           Typed App-to-Agent client
+  WinPool.Ipc/                    Closed named-pipe envelopes and handshake contracts
+  WinPool.Infrastructure.Sqlite/  Versioned high-volume persistence
+  WinPool.Infrastructure.Windows/ Fixed read-only inventory and Windows ports
+  WinPool.Inventory/              Normalized inventory model
+  WinPool.Monitoring/             Sampling, buffering, rollups, and sessions
+  WinPool.Testing/                Test planning, workspaces, metrics, and evidence
+  WinPool.Testing.Tools/          Typed external-tool adapters
+  WinPool.ToolManagement/         Tool discovery and controlled installation planning
+workers/
+  WinPool.TestWorker/             Isolated supervised test execution
+  WinPool.ElevatedBroker/         One-shot typed R3 execution process
 tests/
-  WinPool.Core.Tests/
-  WinPool.Infrastructure.Tests/
+  WinPool.*.Tests/                Per-layer and architecture regression suites
 Ref/                              Read-only reference material (KS/StatSys collector and capture)
 ```
 
@@ -61,6 +72,12 @@ DEVELOP.md
 Historical documents are stored under the parent project's `Old` directory and are not active constraints.
 
 ## Architecture
+
+The V0.2 dependency direction is presentation/ports → Application → Domain. The
+App never writes SQLite directly. Normal launches use the Agent for inventory,
+workspace state, simulation documents, monitoring, test execution, history, and
+evidence. The Agent owns the database write lease; TestWorker and elevated Broker
+are short-lived, typed children rather than alternate persistence owners.
 
 ### WinPool.App
 
@@ -112,9 +129,10 @@ These types are internal architecture, not a frozen public SDK or serialization 
 - privilege detection;
 - the confirmed elevation-restart handoff;
 - local preference persistence;
-- a fixed read-only PowerShell inventory provider.
+- a fixed read-only PowerShell inventory provider;
 - the persistent simulated-system repository;
-- the per-launch local machine record (`machine.json`, always redacted);
+- Agent-backed normalized inventory and full-document adapters; legacy
+  `machine.json` remains only for no-Agent developer fallback;
 - an assembly-embedded, stdin-driven Windows PowerShell 5.1 command runner;
 - a staged hardware-report collection and storage-projection pipeline;
 - a read-only PDH physical-disk performance sampler for the Monitor page;
@@ -123,9 +141,9 @@ These types are internal architecture, not a frozen public SDK or serialization 
   `Data` folder next to the executable. The tiny `storage-location.json` pointer
   always lives in the standard root; switching modes migrates existing data to
   the new root and keeps the old files. If the executable folder is not
-  writable, portable mode is refused. All persistence (preferences,
-  `machine.json`, `workspace.json`, `Systems`, monitoring CSV) resolves through
-  this service at call time.
+  writable, portable mode is refused. Normal persistence is Agent-owned SQLite
+  v10 plus evidence attachments; legacy JSON repositories remain only on
+  explicit no-Agent developer fallback paths.
 
 The inventory command may query Windows storage state, but it must remain read-only
 and must not accept free-form user commands. No `.ps1` file is shipped. The fixed
@@ -198,9 +216,12 @@ source host name and activates it immediately; from such a copy the native
 target is re-resolved against the live local snapshot at click time, and a
 missing target raises a warning without permanently disabling the command.
 
-The last shell page, active system, and per-category selections persist to
-`<data root>\workspace.json` and are restored on the next launch;
-topology expansion state and the execution mode are never persisted.
+The last shell page, active document, per-category selections, and topology
+highlight persist through Agent-owned SQLite and are restored on the next launch.
+`workspace.json` is only the no-Agent developer fallback; topology expansion
+state and the execution mode are never persisted. `Ctrl+1` through `Ctrl+6`
+select Manage, Edit, Test, Monitor, Development, and Settings without changing
+the frozen title-bar appearance.
 Right-clicking a topology node that is the current workspace selection opens a
 context menu with the same commands as the operation-area buttons, placed at
 the node's right edge (left edge when space runs out); right-clicking an
@@ -243,12 +264,16 @@ exactly fits its rows when there are few disks and caps at 40 percent of the
 workspace with a scrollbar beyond that; the ratio then stays as the user left
 it for the rest of the run, is stored only in memory, and is recomputed on
 the next launch. Monitoring starts when the
-page opens, and each session is recorded incrementally to
-`<data root>\Monitoring\yyyyMMdd_HHmmss.csv` with periodic flushes instead of
-one write at exit. Samples come from read-only PDH English counters for both
-physical and virtual disks, with disk activity capped at 100 percent. The
-Test page is a capability placeholder for the planned Dite/RealSoak-style
-workflows.
+page opens. The independent tray Agent owns the long-running monitoring session,
+bounded buffering, SQLite batch persistence, health-event subscription, and App
+reconnection window. Samples come from read-only PDH English counters for both
+physical and virtual disks, with disk activity capped at 100 percent.
+
+The Test page is a complete V0.2 workflow for immutable plan review, configured
+external DiskSpd/fio/Dite/RoboCopy/RAMMap adapters, registered test directories,
+repeat execution, optional reviewed R3 support actions, live progress, history,
+comparison, and evidence export. External tool engines are not reimplemented or
+bundled with WinPool.
 
 The settings page offers theme, accent, and language drop-downs (the language
 defaults to following Windows and falls back to English for unsupported
@@ -264,11 +289,11 @@ appears at startup until the user clears the "show at startup" checkbox in
 the dialog or in Settings. Pages no longer show a large in-page title; the
 title-bar tabs carry the page identity.
 
-Local machine information is refreshed into
-`<data root>\machine.json` after every successful scan and is loaded
-back at startup so the previous local inventory is visible immediately while a
-background scan refreshes it; simulated systems persist as redacted JSON
-documents in `<data root>\Systems`.
+On normal launches, the Agent executes the fixed read-only inventory, redacts the
+full local document, projects a normalized snapshot, and binds both in SQLite v10.
+The UI loads that cached document immediately while an Agent scan refreshes it.
+Simulation documents are likewise Agent/SQLite-owned. `machine.json` and the
+legacy `Systems` directory are used only by explicit no-Agent developer fallback.
 
 The frontend should continue to support:
 
