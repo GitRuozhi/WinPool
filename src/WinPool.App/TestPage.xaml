@@ -6,24 +6,598 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
-    <StackPanel Padding="24,20,24,40" Spacing="12">
-        <Border
-            Padding="20"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
-            <StackPanel Spacing="10">
-                <TextBlock
-                    x:Name="TestIntro"
-                    TextWrapping="Wrap" />
-                <InfoBar
-                    x:Name="TestStatus"
-                    IsClosable="False"
-                    IsOpen="True"
-                    Severity="Informational"
-                    Title="开发中" />
-            </StackPanel>
-        </Border>
-    </StackPanel>
+    <ScrollViewer HorizontalContentAlignment="Stretch">
+        <StackPanel
+            Padding="24,20,24,40"
+            HorizontalAlignment="Stretch"
+            Spacing="16">
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <StackPanel Spacing="8">
+                    <TextBlock
+                        x:Name="PageTitle"
+                        FontSize="20"
+                        FontWeight="SemiBold"
+                        Text="磁盘测试" />
+                    <TextBlock
+                        x:Name="TestIntro"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <InfoBar
+                        x:Name="SafetyNotice"
+                        IsClosable="False"
+                        IsOpen="True"
+                        Severity="Warning" />
+                </StackPanel>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Name="SystemSupportTitle"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="测试前系统操作" />
+                    <TextBlock
+                        x:Name="SystemSupportDescription"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            x:Name="SystemSupportOptions"
+                            Header="操作"
+                            HorizontalAlignment="Stretch" />
+                        <Button
+                            x:Name="ReviewSystemSupportButton"
+                            Grid.Column="1"
+                            VerticalAlignment="Bottom"
+                            Click="ReviewSystemSupportButton_Click"
+                            Content="审阅操作" />
+                    </Grid>
+                    <InfoBar
+                        x:Name="SystemSupportStatus"
+                        IsClosable="False"
+                        IsOpen="True"
+                        Severity="Informational" />
+                </StackPanel>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <StackPanel Spacing="14">
+                    <TextBlock
+                        x:Name="ConfigurationTitle"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="测试配置" />
+                    <Grid ColumnSpacing="8" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBox
+                            x:Name="CustomPresetName"
+                            Header="自定义预设名称"
+                            MaxLength="80" />
+                        <ComboBox
+                            x:Name="CustomPresetOptions"
+                            Grid.Column="1"
+                            Header="已保存预设"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="CustomPresetOptions_SelectionChanged" />
+                        <Button
+                            x:Name="NewCustomPresetButton"
+                            Grid.Column="2"
+                            VerticalAlignment="Bottom"
+                            Click="NewCustomPresetButton_Click"
+                            Content="新建" />
+                        <Button
+                            x:Name="SaveCustomPresetButton"
+                            Grid.Column="3"
+                            VerticalAlignment="Bottom"
+                            Click="SaveCustomPresetButton_Click"
+                            Content="保存" />
+                        <Button
+                            x:Name="LoadCustomPresetButton"
+                            Grid.Column="4"
+                            VerticalAlignment="Bottom"
+                            Click="LoadCustomPresetButton_Click"
+                            Content="加载" />
+                        <Button
+                            x:Name="DeleteCustomPresetButton"
+                            Grid.Column="5"
+                            VerticalAlignment="Bottom"
+                            Click="DeleteCustomPresetButton_Click"
+                            Content="移除" />
+                        <InfoBar
+                            x:Name="CustomPresetStatus"
+                            Grid.Row="1"
+                            Grid.ColumnSpan="6"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Severity="Informational" />
+                    </Grid>
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            x:Name="ScenarioOptions"
+                            Header="测试场景"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="ScenarioOptions_SelectionChanged" />
+                        <ComboBox
+                            x:Name="VerificationOptions"
+                            Grid.Column="1"
+                            Header="复制验证"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="PlanInput_Changed" />
+                        <NumberBox
+                            x:Name="MixedFileCount"
+                            Grid.Column="2"
+                            Header="混合文件数"
+                            IsEnabled="False"
+                            Minimum="3"
+                            Maximum="200000"
+                            SmallChange="1000"
+                            SpinButtonPlacementMode="Compact"
+                            Value="50505"
+                            ValueChanged="PlanInput_Changed" />
+                    </Grid>
+                    <Grid ColumnSpacing="14" RowSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <ComboBox
+                            x:Name="ToolOptions"
+                            Header="外部工具"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="PlanInput_Changed" />
+                        <ComboBox
+                            x:Name="PresetOptions"
+                            Grid.Column="1"
+                            Header="工作负载"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="PresetOptions_SelectionChanged" />
+                        <NumberBox
+                            x:Name="FileSizeGiB"
+                            Grid.Column="2"
+                            Header="测试文件大小 (GiB)"
+                            Minimum="0.01"
+                            Maximum="1024"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="1" />
+                        <NumberBox
+                            x:Name="BlockSizeKiB"
+                            Grid.Row="1"
+                            Header="块大小 (KiB)"
+                            Minimum="1"
+                            Maximum="16384"
+                            SmallChange="4"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="64" />
+                        <NumberBox
+                            x:Name="ThreadCount"
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Header="线程数"
+                            Minimum="1"
+                            Maximum="256"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="1" />
+                        <NumberBox
+                            x:Name="QueueDepth"
+                            Grid.Row="1"
+                            Grid.Column="2"
+                            Header="队列深度"
+                            Minimum="1"
+                            Maximum="1024"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="8" />
+                        <NumberBox
+                            x:Name="DurationSeconds"
+                            Grid.Row="2"
+                            Header="持续时间 (秒)"
+                            Minimum="1"
+                            Maximum="86400"
+                            SmallChange="10"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="60" />
+                        <NumberBox
+                            x:Name="WritePercentage"
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            Header="写入比例 (%)"
+                            Minimum="0"
+                            Maximum="100"
+                            SmallChange="10"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="0" />
+                        <CheckBox
+                            x:Name="CollectLatency"
+                            Grid.Row="2"
+                            Grid.Column="2"
+                            VerticalAlignment="Bottom"
+                            Checked="PlanInput_Changed"
+                            Content="采集延迟分布"
+                            IsChecked="True"
+                            Unchecked="PlanInput_Changed" />
+                        <NumberBox
+                            x:Name="WarmupSeconds"
+                            Grid.Row="3"
+                            Header="预热时间 (秒)"
+                            Minimum="0"
+                            Maximum="3600"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="5" />
+                        <NumberBox
+                            x:Name="CooldownSeconds"
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            Header="冷却时间 (秒)"
+                            Minimum="0"
+                            Maximum="3600"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="1" />
+                        <NumberBox
+                            x:Name="RepeatCount"
+                            Grid.Row="3"
+                            Grid.Column="2"
+                            Header="重复次数"
+                            Minimum="1"
+                            Maximum="100"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="PlanInput_Changed"
+                            Value="1" />
+                    </Grid>
+
+                    <Expander x:Name="RamMapBatchExpander">
+                        <StackPanel Padding="0,8,0,4" Spacing="8">
+                            <CheckBox
+                                x:Name="EnableRamMapBeforeBatches"
+                                Checked="PlanInput_Changed"
+                                Content="每个外部工具批次前执行 RAMMap"
+                                Unchecked="PlanInput_Changed" />
+                            <TextBlock
+                                x:Name="RamMapBatchHint"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="SchedulingExpander">
+                        <StackPanel Padding="0,8,0,4" Spacing="8">
+                            <CheckBox
+                                x:Name="EnableSchedulingPolicy"
+                                Checked="PlanInput_Changed"
+                                Content="测试期间调整 TestWorker 调度"
+                                Unchecked="PlanInput_Changed" />
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox
+                                    x:Name="SchedulingPriority"
+                                    Header="进程优先级"
+                                    HorizontalAlignment="Stretch"
+                                    SelectionChanged="PlanInput_Changed" />
+                                <TextBox
+                                    x:Name="SchedulingProcessors"
+                                    Grid.Column="1"
+                                    Header="逻辑处理器索引"
+                                    PlaceholderText="例如 0,1,2,3"
+                                    TextChanged="PlanInput_Changed" />
+                            </Grid>
+                            <TextBlock
+                                x:Name="SchedulingHint"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="PowerPlanExpander">
+                        <StackPanel Padding="0,8,0,4" Spacing="8">
+                            <CheckBox
+                                x:Name="EnableTemporaryPowerPlan"
+                                Checked="PlanInput_Changed"
+                                Content="测试期间临时切换电源计划"
+                                Unchecked="PlanInput_Changed" />
+                            <ComboBox
+                                x:Name="TemporaryPowerPlan"
+                                Header="已安装电源计划"
+                                HorizontalAlignment="Stretch"
+                                SelectionChanged="PlanInput_Changed" />
+                            <TextBlock
+                                x:Name="PowerPlanHint"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="CopyBatchFlushExpander">
+                        <StackPanel Padding="0,8,0,4" Spacing="8">
+                            <CheckBox
+                                x:Name="EnableFlushBetweenCopyBatches"
+                                Checked="PlanInput_Changed"
+                                Content="复制批次间 Flush 测试卷"
+                                Unchecked="PlanInput_Changed" />
+                            <TextBlock
+                                x:Name="CopyBatchFlushHint"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
+
+                    <StackPanel Spacing="6">
+                        <TextBlock x:Name="TargetTitle" FontWeight="SemiBold" Text="测试目录" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="TargetPath"
+                                IsReadOnly="True"
+                                PlaceholderText="请选择专用测试目录" />
+                            <Button
+                                x:Name="ChooseTargetButton"
+                                AccessKey="D"
+                                Grid.Column="1"
+                                Click="ChooseTargetButton_Click"
+                                Content="选择目录" />
+                        </Grid>
+                        <TextBlock
+                            x:Name="TargetDetails"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="PrepareButton"
+                            AccessKey="P"
+                            Click="PrepareButton_Click"
+                            Content="检测并生成计划"
+                            Style="{StaticResource WinPoolAccentButtonStyle}" />
+                        <Button
+                            x:Name="OpenToolSettingsButton"
+                            Click="OpenToolSettingsButton_Click"
+                            Content="外部工具设置" />
+                        <Button
+                            x:Name="StartButton"
+                            AccessKey="R"
+                            Click="StartButton_Click"
+                            IsEnabled="False"
+                            Content="开始测试" />
+                        <Button
+                            x:Name="CancelButton"
+                            AccessKey="C"
+                            Click="CancelButton_Click"
+                            Content="取消测试"
+                            IsEnabled="False" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Name="PlanTitle"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="计划预览" />
+                    <InfoBar
+                        x:Name="PlanStatus"
+                        IsClosable="False"
+                        IsOpen="True"
+                        Severity="Informational"
+                        Title="尚未生成计划" />
+                    <TextBox
+                        x:Name="PlanDetails"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        IsReadOnly="True"
+                        MinHeight="180"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="LiveMetricsTitle"
+                        Margin="0,6,0,0"
+                        FontWeight="SemiBold"
+                        Text="运行中指标" />
+                    <ProgressBar
+                        x:Name="NativeProgressBar"
+                        Minimum="0"
+                        Maximum="100"
+                        Value="0" />
+                    <TextBlock
+                        x:Name="NativeProgressText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="等待工具进度事件"
+                        TextWrapping="Wrap" />
+                    <TextBox
+                        x:Name="LiveMetricsDetails"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        IsReadOnly="True"
+                        MinHeight="96"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Name="HistoryTitle"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="测试历史与比较" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ComboBox
+                            x:Name="HistoryFilter"
+                            MinWidth="160"
+                            SelectionChanged="HistoryFilter_SelectionChanged" />
+                        <Button
+                            x:Name="RefreshHistoryButton"
+                            Click="RefreshHistoryButton_Click"
+                            Content="刷新" />
+                        <ComboBox
+                            x:Name="ExportFormat"
+                            MinWidth="150" />
+                        <Button
+                            x:Name="ExportRunButton"
+                            Click="ExportRunButton_Click"
+                            Content="导出所选"
+                            IsEnabled="False" />
+                    </StackPanel>
+                    <ListView
+                        x:Name="HistoryRuns"
+                        MaxHeight="240"
+                        SelectionChanged="HistoryRuns_SelectionChanged"
+                        SelectionMode="Multiple">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <TextBlock
+                        x:Name="HistoryHint"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <TextBox
+                        x:Name="ComparisonDetails"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        IsReadOnly="True"
+                        MinHeight="120"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Name="DiteImportTitle"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="旧 Dite 结果导入" />
+                    <TextBlock
+                        x:Name="DiteImportHint"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="只读分析 Dite V23/V24 CSV；不会执行 Dite 或访问日志引用。"
+                        TextWrapping="Wrap" />
+                    <Button
+                        x:Name="ImportDiteButton"
+                        HorizontalAlignment="Left"
+                        Click="ImportDiteButton_Click"
+                        Content="选择 CSV 并分析" />
+                    <InfoBar
+                        x:Name="DiteImportStatus"
+                        IsClosable="False"
+                        IsOpen="True"
+                        Severity="Informational"
+                        Title="尚未导入" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock
+                            x:Name="DiteHistoryTitle"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="已保存的 Dite 来源" />
+                        <Button
+                            x:Name="RefreshDiteHistoryButton"
+                            Click="RefreshDiteHistoryButton_Click"
+                            Content="刷新" />
+                    </StackPanel>
+                    <ListView
+                        x:Name="DiteHistory"
+                        MaxHeight="180"
+                        SelectionChanged="DiteHistory_SelectionChanged"
+                        SelectionMode="Multiple">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <TextBox
+                        x:Name="DiteImportDetails"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        IsReadOnly="True"
+                        MinHeight="140"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
 </Page>

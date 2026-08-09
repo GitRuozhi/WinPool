@@ -226,6 +226,25 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void StorageLocationRestartRequestsProcessHandoffWithoutRealMode()
+    {
+        var arguments = new[]
+        {
+            WinPool.Core.ApplicationStartupOptions.StorageLocationHandoffArgument,
+            WinPool.Core.ApplicationStartupOptions.WaitForProcessArgument,
+            "42"
+        };
+
+        Assert.True(WinPool.Core.ApplicationStartupOptions.RequestsProcessHandoff(arguments));
+        Assert.Equal(42, WinPool.Core.ApplicationStartupOptions.GetHandoffProcessId(arguments));
+        Assert.False(
+            WinPool.Core.ApplicationStartupOptions.Parse(
+                arguments,
+                WinPool.Core.PrivilegeState.Administrator)
+            .EnterRealModeAfterElevation);
+    }
+
+    [Fact]
     public void PartitionTopologySummaryOmitsClusterSize()
     {
         var root = WinPool.Core.TopologyProjector.Project(TestSnapshotFactory.Create());

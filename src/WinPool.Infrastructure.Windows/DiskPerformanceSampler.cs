@@ -7,7 +7,8 @@ public sealed record DiskPerformanceSample(
     string InstanceName,
     double ActivityPercent,
     double ReadBytesPerSecond,
-    double WriteBytesPerSecond);
+    double WriteBytesPerSecond,
+    double AverageQueueLength);
 
 public sealed class DiskPerformanceSampler : IDisposable
 {
@@ -19,6 +20,7 @@ public sealed class DiskPerformanceSampler : IDisposable
     private IntPtr _activityCounter;
     private IntPtr _readCounter;
     private IntPtr _writeCounter;
+    private IntPtr _queueCounter;
     private bool _primed;
 
     public DiskPerformanceSampler()
@@ -31,6 +33,7 @@ public sealed class DiskPerformanceSampler : IDisposable
         PdhAddEnglishCounter(_query, @"\PhysicalDisk(*)\% Disk Time", IntPtr.Zero, out _activityCounter);
         PdhAddEnglishCounter(_query, @"\PhysicalDisk(*)\Disk Read Bytes/sec", IntPtr.Zero, out _readCounter);
         PdhAddEnglishCounter(_query, @"\PhysicalDisk(*)\Disk Write Bytes/sec", IntPtr.Zero, out _writeCounter);
+        PdhAddEnglishCounter(_query, @"\PhysicalDisk(*)\Avg. Disk Queue Length", IntPtr.Zero, out _queueCounter);
         PdhCollectQueryData(_query);
     }
 
@@ -58,13 +61,15 @@ public sealed class DiskPerformanceSampler : IDisposable
         var activity = ReadCounter(_activityCounter);
         var reads = ReadCounter(_readCounter);
         var writes = ReadCounter(_writeCounter);
+        var queues = ReadCounter(_queueCounter);
         return activity.Keys
             .Where(x => !x.Equals("_Total", StringComparison.OrdinalIgnoreCase))
             .Select(x => new DiskPerformanceSample(
                 x,
                 Math.Clamp(activity.GetValueOrDefault(x), 0, 100),
                 reads.GetValueOrDefault(x),
-                writes.GetValueOrDefault(x)))
+                writes.GetValueOrDefault(x),
+                Math.Max(0, queues.GetValueOrDefault(x))))
             .OrderBy(x => x.InstanceName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }

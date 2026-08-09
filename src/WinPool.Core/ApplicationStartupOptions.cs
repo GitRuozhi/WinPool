@@ -3,7 +3,15 @@ namespace WinPool.Core;
 public sealed record ApplicationStartupOptions(bool EnterRealModeAfterElevation)
 {
     public const string ElevatedRealArgument = "--winpool-elevated-real";
+    public const string StorageLocationHandoffArgument = "--winpool-storage-location-handoff";
     public const string WaitForProcessArgument = "--winpool-wait-for-process";
+
+    public static bool RequestsProcessHandoff(IEnumerable<string> arguments) =>
+        arguments.Any(argument =>
+            argument.Equals(ElevatedRealArgument, StringComparison.OrdinalIgnoreCase)
+            || argument.Equals(
+                StorageLocationHandoffArgument,
+                StringComparison.OrdinalIgnoreCase));
 
     public static ApplicationStartupOptions Parse(
         IEnumerable<string> arguments,

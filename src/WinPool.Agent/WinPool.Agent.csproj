@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationIcon>..\WinPool.App\Assets\AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
+    <ProjectReference Include="..\WinPool.Infrastructure.Sqlite\WinPool.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\WinPool.Ipc\WinPool.Ipc.csproj" />
+    <ProjectReference Include="..\WinPool.Inventory\WinPool.Inventory.csproj" />
+    <ProjectReference Include="..\WinPool.Monitoring\WinPool.Monitoring.csproj" />
+    <ProjectReference Include="..\WinPool.Testing\WinPool.Testing.csproj" />
+    <ProjectReference Include="..\WinPool.Testing.Tools\WinPool.Testing.Tools.csproj" />
+    <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
+    <ProjectReference Include="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+    <ProjectReference Include="..\..\workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\WinPool.App\Assets\AppIcon.ico" Link="Assets\AppIcon.ico" />
+  </ItemGroup>
+  <Target Name="CopyTestWorkerRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <TestWorkerRuntimeFiles Include="..\..\workers\WinPool.TestWorker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
+                              Exclude="..\..\workers\WinPool.TestWorker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TestWorkerRuntimeFiles)"
+          DestinationFiles="@(TestWorkerRuntimeFiles->'$(OutDir)TestWorker\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyElevatedBrokerRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <ElevatedBrokerRuntimeFiles Include="..\..\workers\WinPool.ElevatedBroker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
+                                  Exclude="..\..\workers\WinPool.ElevatedBroker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ElevatedBrokerRuntimeFiles)"
+          DestinationFiles="@(ElevatedBrokerRuntimeFiles->'$(OutDir)Broker\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

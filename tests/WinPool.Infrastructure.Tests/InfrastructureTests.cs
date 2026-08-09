@@ -3,6 +3,31 @@
 public sealed class InfrastructureTests
 {
     [Fact]
+    public void StorageSpacesVirtualDiskCountersAreReadOnlyAndFiniteWhenPresent()
+    {
+        using var sampler =
+            new WinPool.Infrastructure.Windows.StorageSpacesVirtualDiskSampler();
+        var samples = sampler.Sample();
+        Assert.All(
+            samples,
+            sample =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(sample.InstanceName));
+                Assert.All(
+                    new[]
+                    {
+                        sample.ActiveBytes,
+                        sample.MissingBytes,
+                        sample.StaleBytes,
+                        sample.NeedRegenerationBytes,
+                        sample.RegeneratingBytes,
+                        sample.PendingDeletionBytes
+                    },
+                    value => Assert.True(double.IsFinite(value) && value >= 0));
+            });
+    }
+
+    [Fact]
     public void EmbeddedInventoryContainsNoMutatingStorageCommands()
     {
         var script = WinPool.Infrastructure.Windows.WindowsHardwareInventoryProvider.FixedStorageCommand;
@@ -21,6 +46,25 @@ public sealed class InfrastructureTests
             @"WindowsPowerShell\v1.0\powershell.exe",
             WinPool.Infrastructure.Windows.WindowsPowerShellRunner.ExecutablePath,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PowerShellInventoryRunnerExposesNoCallerSuppliedScriptOrCommandText()
+    {
+        var publicMethods = typeof(WinPool.Infrastructure.Windows.WindowsPowerShellRunner)
+            .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+            .Where(method => method.DeclaringType == typeof(
+                WinPool.Infrastructure.Windows.WindowsPowerShellRunner))
+            .ToArray();
+
+        var method = Assert.Single(publicMethods);
+        Assert.Equal("RunInventoryAsync", method.Name);
+        Assert.DoesNotContain(
+            method.GetParameters(),
+            parameter => parameter.ParameterType == typeof(string));
+        Assert.Equal(
+            [typeof(CancellationToken)],
+            method.GetParameters().Select(parameter => parameter.ParameterType));
     }
 
     [Fact]
@@ -137,6 +181,101 @@ public sealed class InfrastructureTests
             disk => Assert.True(
                 !disk.MaskedSerialNumber.Any(char.IsLetterOrDigit)
                 || disk.MaskedSerialNumber.Contains('•')));
+
+        var systemId = WinPool.Domain.SystemId.New();
+        var compatibilityProvider =
+            new WinPool.Infrastructure.Windows.LegacyPowerShellInventoryProvider(
+                new FixedHardwareProvider(document));
+        var projected = await compatibilityProvider.CaptureAsync(
+            new WinPool.Application.InventoryRequest(
+                systemId,
+                WinPool.Application.InventoryCaptureReason.Comparison,
+                IncludeSensitiveValuesInMemory: false),
+            CancellationToken.None);
+        Assert.True(projected.IsSuccess);
+        Assert.Equal(
+            WinPool.Application.InventoryProviderKind.EmbeddedReadOnlyPowerShell,
+            projected.Value!.ProviderKind);
+        Assert.Equal(64, projected.Value.MachineBinding.Length);
+        Assert.Contains(
+            projected.Value.Objects,
+            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk);
+        Assert.Contains(
+            projected.Value.Objects,
+            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Partition);
+        Assert.All(
+            projected.Value.Objects.Where(
+                item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk),
+            item => Assert.False(item.Properties.ContainsKey("pnpDeviceId")));
+
+        var stale = await compatibilityProvider.CaptureAsync(
+            new WinPool.Application.InventoryRequest(
+                systemId,
+                WinPool.Application.InventoryCaptureReason.PreExecutionValidation,
+                IncludeSensitiveValuesInMemory: false,
+                ExpectedInventoryVersion: "stale-version"),
+            CancellationToken.None);
+        Assert.Equal(WinPool.Application.ApplicationStatus.Rejected, stale.Status);
+        Assert.NotNull(stale.Value);
+    }
+
+    [Fact]
+    public async Task NativeReadOnlyScanReturnsSystemAndMountedVolumesWithoutSensitiveIds()
+    {
+        var provider =
+            new WinPool.Infrastructure.Windows.NativeWindowsInventoryProvider();
+        var result = await provider.CaptureAsync(
+            new WinPool.Application.InventoryRequest(
+                WinPool.Domain.SystemId.New(),
+                WinPool.Application.InventoryCaptureReason.Comparison,
+                IncludeSensitiveValuesInMemory: false),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Value);
+        Assert.Equal(
+            WinPool.Application.InventoryProviderKind.NativeWindows,
+            result.Value.ProviderKind);
+        Assert.Equal(64, result.Value.InventoryVersion.Length);
+        Assert.Equal(64, result.Value.MachineBinding.Length);
+        Assert.Contains(
+            result.Value.Objects,
+            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.System);
+        Assert.Contains(
+            result.Value.Objects,
+            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Partition);
+        Assert.Contains(
+            result.Value.Objects,
+            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk
+                    && item.Properties.ContainsKey("physicalDriveNumber")
+                    && item.Properties.ContainsKey("busType"));
+        Assert.All(
+            result.Value.Objects,
+            item => Assert.Equal(64, item.Id.ProviderKey.Length));
+        Assert.All(
+            result.Value.Objects,
+            item => Assert.False(item.Properties.ContainsKey("volumeGuid")));
+        Assert.NotEmpty(result.Value.Relationships ?? []);
+        var objectIds = result.Value.Objects.Select(item => item.Id).ToHashSet();
+        Assert.All(
+            result.Value.Relationships ?? [],
+            relationship =>
+            {
+                Assert.Contains(relationship.FromObjectId, objectIds);
+                Assert.Contains(relationship.ToObjectId, objectIds);
+            });
+    }
+
+    private sealed class FixedHardwareProvider(
+        WinPool.Core.StorageSystemDocument document)
+        : WinPool.Core.IHardwareInventoryProvider
+    {
+        public Task<WinPool.Core.StorageSystemDocument> CollectLocalAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(document);
+        }
     }
 
 }

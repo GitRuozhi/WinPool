@@ -23,6 +23,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -68,6 +69,36 @@
                         MinWidth="220"
                         HorizontalAlignment="Left"
                         SelectionChanged="LanguageOptions_SelectionChanged" />
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="4">
+                        <TextBlock
+                            x:Name="ExternalToolsTitle"
+                            FontSize="16"
+                            FontWeight="SemiBold"
+                            Text="外部工具" />
+                        <TextBlock
+                            x:Name="ExternalToolsDescription"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="工具不随 WinPool 发布。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel
+                        x:Name="ExternalToolRows"
+                        Grid.Column="1"
+                        Spacing="12" />
                 </Grid>
             </Border>
 
@@ -144,13 +175,27 @@
                         Click="WelcomeCheckBox_Click"
                         Content="启动时显示欢迎页面" />
                     <TextBlock
-                        x:Name="DataLocationTitle"
+                        x:Name="StartupAgentTitle"
                         Grid.Row="4"
                         VerticalAlignment="Center"
                         FontSize="16"
                         FontWeight="SemiBold"
+                        Text="登录启动" />
+                    <CheckBox
+                        x:Name="StartupAgentCheckBox"
+                        Grid.Row="4"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Click="StartupAgentCheckBox_Click"
+                        Content="登录 Windows 时启动托盘 Agent" />
+                    <TextBlock
+                        x:Name="DataLocationTitle"
+                        Grid.Row="5"
+                        VerticalAlignment="Center"
+                        FontSize="16"
+                        FontWeight="SemiBold"
                         Text="数据存储位置" />
-                    <StackPanel Grid.Row="4" Grid.Column="1" Spacing="4">
+                    <StackPanel Grid.Row="5" Grid.Column="1" Spacing="4">
                         <ComboBox
                             x:Name="DataLocationOptions"
                             MinWidth="220"

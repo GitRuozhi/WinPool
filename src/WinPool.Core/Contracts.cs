@@ -12,9 +12,9 @@ public interface IHardwareInventoryProvider
     Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken);
 }
 
-public interface IReadOnlyCommandRunner
+public interface IReadOnlyInventoryCommandRunner
 {
-    Task<ReadOnlyCommandResult> RunAsync(string fixedCommand, CancellationToken cancellationToken);
+    Task<ReadOnlyCommandResult> RunInventoryAsync(CancellationToken cancellationToken);
 }
 
 public sealed record ReadOnlyCommandResult(
@@ -60,7 +60,8 @@ public sealed record WorkspaceUiState(
     string ShellPage = "",
     string ActiveSystemId = "",
     WorkspaceCategory Category = WorkspaceCategory.System,
-    IReadOnlyDictionary<WorkspaceCategory, string>? CategorySelections = null);
+    IReadOnlyDictionary<WorkspaceCategory, string>? CategorySelections = null,
+    string HighlightedTopologyStableId = "");
 
 public interface IWorkspaceStateService
 {

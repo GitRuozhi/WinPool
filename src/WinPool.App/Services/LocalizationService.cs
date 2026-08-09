@@ -162,6 +162,7 @@ public sealed class LocalizationService : ObservableObject
             ["No"] = ("否", "No"),
             ["Copied"] = ("已复制到剪贴板。", "Copied to clipboard."),
             ["Exported"] = ("信息已导出。", "Information exported."),
+            ["ImportedSimulation"] = ("系统已导入为模拟副本。", "System imported as a simulation."),
             ["ReadOnly"] = ("只读", "Read-only"),
             ["About"] = ("关于", "About"),
             ["AboutDescription"] = ("Windows Storage Spaces 只读管理预览版。", "Read-only Windows Storage Spaces management preview."),
@@ -215,8 +216,8 @@ public sealed class LocalizationService : ObservableObject
             ["Welcome"] = ("欢迎页面", "Welcome page"),
             ["WelcomeTitle"] = ("欢迎使用 WinPool", "Welcome to WinPool"),
             ["WelcomeMessage"] = (
-                "WinPool 是一款现代化的 Windows 存储管理工具，可以清晰展示存储池、存储层、磁盘和分区的完整拓扑关系。当前版本为只读预览：所有本机修改操作均已禁用，你可以安全地浏览界面，或在模拟系统中体验完整的编辑流程。",
-                "WinPool is a modern Windows storage management tool that presents the complete topology of storage pools, tiers, disks, and partitions. This build is a read-only preview: all local mutation commands are disabled, so you can safely explore the interface or try the full editing workflow in a simulated system."),
+                "WinPool V0.2 是面向全面试用的测试版，可以浏览本机存储拓扑、编辑模拟系统，并在明确选择的测试目录中执行测试和持续监控。真实存储结构修改仍受严格的目标核验、风险分级和确认流程保护。",
+                "WinPool V0.2 is a broadly usable beta for browsing local storage topology, editing simulated systems, and running tests and continuous monitoring in explicitly selected test directories. Real storage-structure changes remain protected by strict target verification, risk classification, and confirmation flows."),
             ["ShowWelcomeAtStart"] = ("启动时显示欢迎页面", "Show the welcome page at startup"),
             ["WelcomeConfirm"] = ("我知道啦", "Got it"),
             ["Unhealthy"] = ("不健康", "Unhealthy"),
@@ -225,6 +226,7 @@ public sealed class LocalizationService : ObservableObject
             ["PortableLocation"] = ("软件目录（便携）", "App folder (portable)"),
             ["DataLocationSwitched"] = ("数据存储位置已切换，已有数据已迁移。", "Data location changed; existing data was migrated."),
             ["DataLocationFailed"] = ("无法切换数据存储位置：目标目录不可写。", "The data location could not be changed: the target folder is not writable."),
+            ["ExternalTools"] = ("外部工具", "External tools"),
             ["BackgroundMonitoring"] = ("后台持续监控", "Keep monitoring in background"),
             ["SamplingRate"] = ("采样频率", "Sampling rate"),
             ["RefreshRate"] = ("刷新率", "Refresh rate"),
@@ -255,6 +257,7 @@ public sealed class LocalizationService : ObservableObject
             if (SetProperty(ref _language, value))
             {
                 OnPropertyChanged(nameof(EffectiveLanguage));
+                OnPropertyChanged(nameof(IsChinese));
                 OnPropertyChanged(string.Empty);
             }
         }
@@ -275,6 +278,8 @@ public sealed class LocalizationService : ObservableObject
                 : LanguagePreference.EnUs;
         }
     }
+
+    public bool IsChinese => EffectiveLanguage == LanguagePreference.ZhCn;
 
     public string this[string key] =>
         Texts.TryGetValue(key, out var pair)

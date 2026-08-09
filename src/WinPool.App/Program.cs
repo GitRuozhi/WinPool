@@ -15,7 +15,7 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        WaitForElevationHandoff(args);
+        WaitForProcessHandoff(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
         if (DecideRedirection())
@@ -93,12 +93,9 @@ public static class Program
         }
     }
 
-    private static void WaitForElevationHandoff(IReadOnlyList<string> arguments)
+    private static void WaitForProcessHandoff(IReadOnlyList<string> arguments)
     {
-        if (!arguments.Any(argument =>
-                argument.Equals(
-                    ApplicationStartupOptions.ElevatedRealArgument,
-                    StringComparison.OrdinalIgnoreCase)))
+        if (!ApplicationStartupOptions.RequestsProcessHandoff(arguments))
         {
             return;
         }
