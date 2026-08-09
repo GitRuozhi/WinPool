@@ -46,4 +46,14 @@
           DestinationFiles="@(ElevatedBrokerRuntimeFiles->'$(OutDir)Broker\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
+  <Target Name="PublishTestWorkerRuntime" AfterTargets="Publish">
+    <MSBuild Projects="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)TestWorker\" />
+  </Target>
+  <Target Name="PublishElevatedBrokerRuntime" AfterTargets="Publish">
+    <MSBuild Projects="..\..\workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)Broker\" />
+  </Target>
 </Project>

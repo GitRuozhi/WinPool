@@ -438,6 +438,23 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void DeploymentPublishIncludesEveryProcessRuntime()
+    {
+        var root = FindRepositoryRoot();
+        var appProject = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
+        var agentProject = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Agent", "WinPool.Agent.csproj"));
+
+        Assert.Contains("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
+        Assert.Contains("ReferenceOutputAssembly=\"false\"", appProject, StringComparison.Ordinal);
+        Assert.Contains("PublishTestWorkerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.Contains("PublishElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.Contains("PublishDir=$(PublishDir)TestWorker\\", agentProject, StringComparison.Ordinal);
+        Assert.Contains("PublishDir=$(PublishDir)Broker\\", agentProject, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TestPagePrimaryWorkflowHasStableKeyboardAccessKeys()
     {
         var root = FindRepositoryRoot();
