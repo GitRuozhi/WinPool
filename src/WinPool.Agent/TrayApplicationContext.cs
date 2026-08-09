@@ -30,7 +30,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open WinPool", null, (_, _) => OpenApp());
+        menu.Items.Add("Manage", null, (_, _) => OpenApp("Manage"));
+        menu.Items.Add("Edit", null, (_, _) => OpenApp("Edit"));
+        menu.Items.Add("Test", null, (_, _) => OpenApp("Test"));
+        menu.Items.Add("Monitor", null, (_, _) => OpenApp("Monitor"));
+        menu.Items.Add("Development", null, (_, _) => OpenApp("Development"));
+        menu.Items.Add("Settings", null, (_, _) => OpenApp("Settings"));
+        menu.Items.Add("Welcome", null, (_, _) => OpenApp("Welcome"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(monitoringStatus);
         menu.Items.Add("Start monitoring", null, async (_, _) => await StartMonitoringAsync());
@@ -42,10 +48,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 Enabled = false
             });
         menu.Items.Add(cancelTest);
-        menu.Items.Add("Open Test", null, (_, _) => OpenApp("Test"));
-        menu.Items.Add("Open Monitor", null, (_, _) => OpenApp("Monitor"));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Settings", null, (_, _) => OpenApp("Settings"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit WinPool", null, async (_, _) => await BeginCompleteExitAsync());
 

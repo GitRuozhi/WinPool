@@ -20,6 +20,10 @@ sequencing, executor boundaries, and acceptance. When they differ, use the
 current documents to understand V0.13 behavior, use `Plan` for the V0.2 target,
 and always preserve the stricter safety rule.
 
+The product-facing version after the approved architecture merge is `V0.21`.
+`V0.2` remains the name of the rewrite plan and architecture milestone; database
+schema, algorithm, and IPC versions remain independent.
+
 Documents archived under the parent project's `Old` directory are historical references. They do not constrain current implementation and must not be treated as current requirements.
 
 Do not recreate a `Docs` directory without explicit user approval.

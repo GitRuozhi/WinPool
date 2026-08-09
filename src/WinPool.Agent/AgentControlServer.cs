@@ -65,6 +65,8 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<GetDevelopmentDiagnosticsRequest>(envelope),
                 AgentControlMessageTypes.OpenMainWindow =>
                     Deserialize<OpenMainWindowRequest>(envelope),
+                AgentControlMessageTypes.OpenNativeProperties =>
+                    Deserialize<OpenAgentNativePropertiesRequest>(envelope),
                 AgentControlMessageTypes.StartMonitoring =>
                     Deserialize<StartAgentMonitoringRequest>(envelope),
                 AgentControlMessageTypes.StopMonitoring =>

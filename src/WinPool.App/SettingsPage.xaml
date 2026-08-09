@@ -115,6 +115,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -167,13 +168,13 @@
                         FontSize="16"
                         FontWeight="SemiBold"
                         Text="欢迎页面" />
-                    <CheckBox
-                        x:Name="WelcomeCheckBox"
+                    <Button
+                        x:Name="WelcomeButton"
                         Grid.Row="3"
                         Grid.Column="1"
-                        VerticalAlignment="Center"
-                        Click="WelcomeCheckBox_Click"
-                        Content="启动时显示欢迎页面" />
+                        HorizontalAlignment="Left"
+                        Click="WelcomeButton_Click"
+                        Content="打开欢迎页面" />
                     <TextBlock
                         x:Name="StartupAgentTitle"
                         Grid.Row="4"

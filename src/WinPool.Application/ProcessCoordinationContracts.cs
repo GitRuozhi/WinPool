@@ -40,6 +40,12 @@ public sealed record OpenMainWindowRequest(
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
+public sealed record OpenAgentNativePropertiesRequest(
+    StorageObjectId Target,
+    int DiskNumber,
+    CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
 public sealed record StartAgentMonitoringRequest(
     MonitorRequest MonitorRequest,
     CorrelationId CorrelationId)

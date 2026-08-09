@@ -94,7 +94,7 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
 
         if (plan.Risk >= RiskLevel.R5IrreversibleOrBroadDestruction)
         {
-            return PolicyDecision.Reject("policy.r5-not-implemented", "R5 operations are not implemented in WinPool V0.2.");
+            return PolicyDecision.Reject("policy.r5-not-implemented", "R5 operations are not implemented in WinPool V0.21.");
         }
 
         if (plan.Intent == OperationIntent.InstallExternalTool)

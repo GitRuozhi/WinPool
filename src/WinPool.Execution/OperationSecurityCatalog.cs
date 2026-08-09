@@ -87,6 +87,6 @@ public static class OperationSecurityCatalog
             ExecutionCapability.MutateStorageStructure,
             risk,
             impact,
-            "No WinPool V0.2 rollback implementation exists.",
+            "No WinPool V0.21 rollback implementation exists.",
             "May change or destroy real storage structure or data.");
 }

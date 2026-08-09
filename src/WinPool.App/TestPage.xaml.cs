@@ -260,8 +260,8 @@ public sealed partial class TestPage : Page
         RefreshHistoryButton.Content = zh ? "刷新" : "Refresh";
         ExportRunButton.Content = zh ? "导出所选" : "Export selected";
         HistoryHint.Text = zh
-            ? "现代运行与已保存 Dite 来源合计最多选择 4 项；统一比较 V0.2 指标与 Dite 的中位数/min/max。筛选和比较只读取 Agent 的 SQLite。"
-            : "Select up to four modern runs and persisted Dite sources combined. The unified view compares V0.2 metrics with Dite median/min/max values and reads only the Agent's SQLite database.";
+            ? "现代运行与已保存 Dite 来源合计最多选择 4 项；统一比较 V0.21 指标与 Dite 的中位数/min/max。筛选和比较只读取 Agent 的 SQLite。"
+            : "Select up to four modern runs and persisted Dite sources combined. The unified view compares V0.21 metrics with Dite median/min/max values and reads only the Agent's SQLite database.";
         DiteImportTitle.Text = zh
             ? "旧 Dite 结果导入"
             : "Legacy Dite result import";
@@ -1551,7 +1551,7 @@ public sealed partial class TestPage : Page
         var lines = new List<string>();
         foreach (var result in results)
         {
-            lines.Add($"V0.2 {result.RunId.Value:N} [{result.State}]");
+            lines.Add($"V0.21 {result.RunId.Value:N} [{result.State}]");
             lines.AddRange(result.Metrics.Select(metric =>
                 $"  {metric.MetricId} = {metric.Value.ToString("0.###", CultureInfo.InvariantCulture)} {metric.Unit} ({metric.Aggregation})"
                 + FormatMetricSemantic(metric.Semantic)));

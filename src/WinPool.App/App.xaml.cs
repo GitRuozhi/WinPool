@@ -21,9 +21,10 @@ namespace WinPool_App;
 /// </summary>
 public partial class App : Application
 {
-    private static bool s_activationPending;
+    private static ApplicationStartupTarget? s_activationTarget;
     private static NamedPipeAgentConnection? s_agentConnection;
     private static EventWaitHandle? s_exitSignal;
+    private static CancellationTokenSource? s_activationChannelCts;
 
     /// <summary>
     /// The main application window. Use <c>App.Window</c> from any class that needs
@@ -106,11 +107,47 @@ public partial class App : Application
         Window = new MainWindow(startupOptions, agentConnection);
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Window.Activate();
+        StartActivationChannel();
         _ = ConnectAgentAsync();
-        if (s_activationPending)
+        if (s_activationTarget is not null)
         {
-            RequestMainWindowActivation();
+            RequestMainWindowActivation(s_activationTarget);
         }
+    }
+
+    internal static ApplicationStartupTarget? ParseActivationTarget(
+        Microsoft.Windows.AppLifecycle.AppActivationArguments arguments)
+    {
+        var data = arguments.Data;
+        var argumentText = data?
+            .GetType()
+            .GetProperty("Arguments")?
+            .GetValue(data) as string;
+        if (string.IsNullOrWhiteSpace(argumentText))
+        {
+            argumentText = data?
+                .GetType()
+                .GetProperty("Data")?
+                .GetValue(data) as string;
+        }
+        if (string.IsNullOrWhiteSpace(argumentText)
+            && data is Windows.ApplicationModel.Activation.CommandLineActivatedEventArgs commandLine)
+        {
+            argumentText = commandLine.Operation?.Arguments;
+        }
+        if (string.IsNullOrWhiteSpace(argumentText)
+            && data is Windows.ApplicationModel.Activation.LaunchActivatedEventArgs launch)
+        {
+            argumentText = launch.Arguments;
+        }
+        if (string.IsNullOrWhiteSpace(argumentText))
+        {
+            return null;
+        }
+
+        var target = ApplicationStartupOptions.ParseTarget(
+            argumentText.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return target == ApplicationStartupTarget.None ? null : target;
     }
 
     private static async Task ConnectAgentAsync()
@@ -145,6 +182,32 @@ public partial class App : Application
                         "agent-start-failed"));
             }
         }
+    }
+
+    private static void StartActivationChannel()
+    {
+        if (s_activationChannelCts is not null)
+        {
+            return;
+        }
+
+        s_activationChannelCts = new CancellationTokenSource();
+        var cancellationToken = s_activationChannelCts.Token;
+        _ = Task.Run(
+            () => ApplicationActivationChannel.ListenAsync(
+                cancellationToken,
+                target =>
+                {
+                    RequestMainWindowActivation(target);
+                    return Task.CompletedTask;
+                }));
+    }
+
+    internal static void StopActivationChannel()
+    {
+        s_activationChannelCts?.Cancel();
+        s_activationChannelCts?.Dispose();
+        s_activationChannelCts = null;
     }
 
     private static NamedPipeAgentConnection EnsureAgentConnection()
@@ -189,17 +252,22 @@ public partial class App : Application
             });
     }
 
-    internal static void RequestMainWindowActivation()
+    internal static void RequestMainWindowActivation(
+        ApplicationStartupTarget? target = null)
     {
         if (Window is null || DispatcherQueue is null)
         {
-            s_activationPending = true;
+            s_activationTarget = target;
             return;
         }
 
-        s_activationPending = false;
+        s_activationTarget = null;
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (target is not null && Window is MainWindow mainWindow)
+            {
+                mainWindow.ActivateTarget(target.Value);
+            }
             Window.Activate();
             if (WindowHandle != nint.Zero)
             {

@@ -382,7 +382,7 @@ public sealed class ArchitectureBoundaryTests
         var settingsPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
 
-        Assert.Contains("public const string Version = \"V0.2\";", productInformation);
+        Assert.Contains("public const string Version = \"V0.21\";", productInformation);
         Assert.DoesNotContain("V0.13", productInformation, StringComparison.Ordinal);
         Assert.Contains(
             "AboutVersionValue.Text = ProductInformation.Version;",
@@ -403,8 +403,38 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("PrimaryButtonText = localization[\"WelcomeConfirm\"]", source, StringComparison.Ordinal);
         Assert.Contains("DefaultButton = ContentDialogButton.Primary", source, StringComparison.Ordinal);
-        Assert.Contains("showAgainCheckBox.Focus(FocusState.Programmatic)", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "if (_startupTarget is ApplicationStartupTarget.None",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "or ApplicationStartupTarget.Welcome)",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("HasShownWelcome", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("MarkWelcomeShownAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("showAgainCheckBox", source, StringComparison.Ordinal);
         Assert.DoesNotContain("confirmButton.Click += (_, _) => dialog.Hide()", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeDiskPropertiesDoesNotRunAFullInventoryScan()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Agent", "DesktopAgentRuntime.cs"));
+        var start = source.IndexOf(
+            "public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync",
+            StringComparison.Ordinal);
+        var end = source.IndexOf(
+            "public Task<ApplicationResult<AgentResponse>> StartMonitoringAsync",
+            start,
+            StringComparison.Ordinal);
+        var method = source[start..end];
+
+        Assert.Contains("physicalDeviceIds", method, StringComparison.Ordinal);
+        Assert.Contains("physicalDiskDeviceResolver.ResolvePnpDeviceId", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("CollectLocalAsync", method, StringComparison.Ordinal);
     }
 
     [Fact]

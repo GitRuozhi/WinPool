@@ -3,6 +3,20 @@
 public sealed class InfrastructureTests
 {
     [Fact]
+    public void PhysicalDiskDeviceResolverUsesAQuickTargetedReadOnlyLookup()
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var deviceId = new WinPool.Infrastructure.Windows.WindowsPhysicalDiskDeviceResolver()
+            .ResolvePnpDeviceId(0);
+        timer.Stop();
+
+        Assert.False(string.IsNullOrWhiteSpace(deviceId));
+        Assert.True(
+            timer.Elapsed < TimeSpan.FromSeconds(5),
+            $"Targeted disk lookup took {timer.Elapsed.TotalMilliseconds:N0} ms.");
+    }
+
+    [Fact]
     public void StorageSpacesVirtualDiskCountersAreReadOnlyAndFiniteWhenPresent()
     {
         using var sampler =

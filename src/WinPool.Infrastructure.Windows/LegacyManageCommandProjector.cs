@@ -145,6 +145,7 @@ public sealed class LegacyManageCommandProjector
                         && x.PartitionNumber == activePartition.PartitionNumber);
 
         PhysicalDiskInfo? localPhysical = null;
+        OsDiskInfo? localOsDisk = null;
         var hasResolvedDisk = false;
         if (activeDocument.IsLocal && role == ManageObjectRole.PhysicalDisk)
         {
@@ -154,7 +155,7 @@ public sealed class LegacyManageCommandProjector
         else
         {
             var activeOsDisk = ResolveOsDisk(activeSnapshot, providerKey, role);
-            var localOsDisk = activeOsDisk is null
+            localOsDisk = activeOsDisk is null
                 ? null
                 : activeDocument.IsLocal
                     ? activeOsDisk
@@ -171,7 +172,10 @@ public sealed class LegacyManageCommandProjector
             localPartition?.Path ?? string.Empty,
             TopologyProjector.NormalizeDriveLetter(localPartition?.DriveLetter),
             localPhysical?.PnpDeviceId ?? string.Empty,
-            role is ManageObjectRole.PhysicalDisk or ManageObjectRole.VirtualDisk or ManageObjectRole.OsDisk);
+            role is ManageObjectRole.PhysicalDisk or ManageObjectRole.VirtualDisk or ManageObjectRole.OsDisk,
+            role == ManageObjectRole.PhysicalDisk
+                ? localPhysical?.DeviceId
+                : localOsDisk?.Number);
     }
 
     private static OsDiskInfo? ResolveOsDisk(

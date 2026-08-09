@@ -561,6 +561,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             GetDevelopmentDiagnosticsRequest =>
                 AgentControlMessageTypes.GetDevelopmentDiagnostics,
             OpenMainWindowRequest => AgentControlMessageTypes.OpenMainWindow,
+            OpenAgentNativePropertiesRequest => AgentControlMessageTypes.OpenNativeProperties,
             StartAgentMonitoringRequest => AgentControlMessageTypes.StartMonitoring,
             StopAgentMonitoringRequest => AgentControlMessageTypes.StopMonitoring,
             StartAgentTestRequest => AgentControlMessageTypes.StartTest,

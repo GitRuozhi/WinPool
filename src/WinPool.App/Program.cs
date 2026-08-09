@@ -18,7 +18,7 @@ public static class Program
         WaitForProcessHandoff(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
-        if (DecideRedirection())
+        if (DecideRedirection(args))
         {
             return 0;
         }
@@ -33,7 +33,7 @@ public static class Program
         return 0;
     }
 
-    private static bool DecideRedirection()
+    private static bool DecideRedirection(IReadOnlyList<string> args)
     {
         var activationArguments = AppInstance.GetCurrent().GetActivatedEventArgs();
         var keyInstance = AppInstance.FindOrRegisterForKey(SingleInstanceKey);
@@ -43,12 +43,20 @@ public static class Program
             return false;
         }
 
+        var target = ApplicationStartupOptions.ParseTarget(args);
+        if (target != ApplicationStartupTarget.None
+            && ApplicationActivationChannel.TrySend(target))
+        {
+            BringExistingProcessToForeground(keyInstance);
+            return true;
+        }
+
         RedirectActivationTo(activationArguments, keyInstance);
         return true;
     }
 
     private static void OnActivated(object? sender, AppActivationArguments args) =>
-        App.RequestMainWindowActivation();
+        App.RequestMainWindowActivation(App.ParseActivationTarget(args));
 
     private static void RedirectActivationTo(
         AppActivationArguments arguments,
@@ -74,6 +82,13 @@ public static class Program
             [s_redirectEventHandle],
             out _);
 
+        BringExistingProcessToForeground(keyInstance);
+        CloseHandle(s_redirectEventHandle);
+        s_redirectEventHandle = nint.Zero;
+    }
+
+    private static void BringExistingProcessToForeground(AppInstance keyInstance)
+    {
         try
         {
             using var process = Process.GetProcessById((int)keyInstance.ProcessId);
@@ -85,11 +100,6 @@ public static class Program
         }
         catch (ArgumentException)
         {
-        }
-        finally
-        {
-            CloseHandle(s_redirectEventHandle);
-            s_redirectEventHandle = nint.Zero;
         }
     }
 

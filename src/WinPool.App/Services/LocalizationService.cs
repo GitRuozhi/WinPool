@@ -216,9 +216,10 @@ public sealed class LocalizationService : ObservableObject
             ["Welcome"] = ("欢迎页面", "Welcome page"),
             ["WelcomeTitle"] = ("欢迎使用 WinPool", "Welcome to WinPool"),
             ["WelcomeMessage"] = (
-                "WinPool V0.2 是面向全面试用的测试版，可以浏览本机存储拓扑、编辑模拟系统，并在明确选择的测试目录中执行测试和持续监控。真实存储结构修改仍受严格的目标核验、风险分级和确认流程保护。",
-                "WinPool V0.2 is a broadly usable beta for browsing local storage topology, editing simulated systems, and running tests and continuous monitoring in explicitly selected test directories. Real storage-structure changes remain protected by strict target verification, risk classification, and confirmation flows."),
+                "WinPool V0.21 是面向全面试用的测试版，可以浏览本机存储拓扑、编辑模拟系统，并在明确选择的测试目录中执行测试和持续监控。真实存储结构修改仍受严格的目标核验、风险分级和确认流程保护。",
+                "WinPool V0.21 is a broadly usable beta for browsing local storage topology, editing simulated systems, and running tests and continuous monitoring in explicitly selected test directories. Real storage-structure changes remain protected by strict target verification, risk classification, and confirmation flows."),
             ["ShowWelcomeAtStart"] = ("启动时显示欢迎页面", "Show the welcome page at startup"),
+            ["OpenWelcome"] = ("打开欢迎内容", "Open welcome"),
             ["WelcomeConfirm"] = ("我知道啦", "Got it"),
             ["Unhealthy"] = ("不健康", "Unhealthy"),
             ["DataLocation"] = ("数据存储位置", "Data location"),

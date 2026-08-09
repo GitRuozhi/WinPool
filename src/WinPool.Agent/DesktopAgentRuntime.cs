@@ -13,6 +13,7 @@ using WinPool.Testing.Tools;
 using WinPool.ToolManagement;
 using WinPool.Core;
 using WinPool.Infrastructure.Windows;
+using System.Collections.Concurrent;
 
 namespace WinPool.Agent;
 
@@ -39,6 +40,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly IInventoryProvider nativeInventoryProvider;
     private readonly IInventoryProvider legacyInventoryProvider;
     private readonly IHardwareInventoryProvider manageInventoryProvider;
+    private readonly IPhysicalDiskDeviceResolver physicalDiskDeviceResolver;
     private readonly IInventoryComparer inventoryComparer;
     private readonly InventorySnapshotRepository inventorySnapshots;
     private readonly InventoryComparisonRepository inventoryComparisons;
@@ -58,6 +60,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly SystemSupportReviewStore systemSupportReviews = new();
     private readonly Task storageHealthEventTask;
     private readonly object testSync = new();
+    private readonly ConcurrentDictionary<int, string> physicalDeviceIds = new();
     private CancellationTokenSource? activeTestCancellation;
     private Task? activeTestTask;
     private TestRunId? activeTestRunId;
@@ -96,7 +99,8 @@ internal sealed class DesktopAgentRuntime :
         IStorageHealthEventSource storageHealthEventSource,
         StorageHealthEventRepository storageHealthEventRepository,
         IReadOnlyList<StorageHealthEvent> initialStorageHealthEvents,
-        AgentEventHub agentEvents)
+        AgentEventHub agentEvents,
+        IPhysicalDiskDeviceResolver? physicalDiskDeviceResolver = null)
     {
         this.tray = tray ?? throw new ArgumentNullException(nameof(tray));
         this.instanceId = instanceId;
@@ -133,6 +137,8 @@ internal sealed class DesktopAgentRuntime :
             ?? throw new ArgumentNullException(nameof(legacyInventoryProvider));
         this.manageInventoryProvider = manageInventoryProvider
             ?? throw new ArgumentNullException(nameof(manageInventoryProvider));
+        this.physicalDiskDeviceResolver = physicalDiskDeviceResolver
+            ?? new WindowsPhysicalDiskDeviceResolver();
         this.inventoryComparer = inventoryComparer
             ?? throw new ArgumentNullException(nameof(inventoryComparer));
         this.inventorySnapshots = inventorySnapshots
@@ -524,6 +530,56 @@ internal sealed class DesktopAgentRuntime :
         cancellationToken.ThrowIfCancellationRequested();
         tray.OpenMainApplication(request.Destination?.ToString());
         return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
+    }
+
+    public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
+        OpenAgentNativePropertiesRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request.DiskNumber < 0)
+        {
+            return Task.FromResult(
+                Reject(request.CorrelationId, "agent.native-properties.disk-number-invalid"));
+        }
+
+        var physicalDeviceId = physicalDeviceIds.GetValueOrDefault(request.DiskNumber);
+        if (string.IsNullOrWhiteSpace(physicalDeviceId))
+        {
+            physicalDeviceId = physicalDiskDeviceResolver.ResolvePnpDeviceId(
+                request.DiskNumber);
+            if (!string.IsNullOrWhiteSpace(physicalDeviceId))
+            {
+                physicalDeviceIds[request.DiskNumber] = physicalDeviceId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(physicalDeviceId))
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "rundll32.exe",
+                UseShellExecute = true
+            };
+            startInfo.ArgumentList.Add("devmgr.dll,DeviceProperties_RunDLL");
+            startInfo.ArgumentList.Add("/DeviceID");
+            startInfo.ArgumentList.Add(physicalDeviceId);
+            Process.Start(startInfo);
+            return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "diskmgmt.msc",
+            UseShellExecute = true
+        });
+        return Task.FromResult<ApplicationResult<AgentResponse>>(new(
+            ApplicationStatus.PartiallyCompleted,
+            new AgentAcknowledgement(),
+            [AgentMessage(
+                "agent.native-properties.disk-management-fallback",
+                ApplicationMessageSeverity.Warning)],
+            request.CorrelationId));
     }
 
     public Task<ApplicationResult<AgentResponse>> StartMonitoringAsync(
@@ -1209,6 +1265,7 @@ internal sealed class DesktopAgentRuntime :
         {
             var document = await manageInventoryProvider.CollectLocalAsync(
                 cancellationToken);
+            CachePhysicalDeviceIds(document);
             var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
             var projected = LegacyPowerShellInventoryProvider.Project(
                 request.SystemId,
@@ -1252,6 +1309,19 @@ internal sealed class DesktopAgentRuntime :
                     string.Empty,
                     ApplicationMessageSeverity.Error,
                     []));
+        }
+    }
+
+    private void CachePhysicalDeviceIds(StorageSystemDocument document)
+    {
+        physicalDeviceIds.Clear();
+        foreach (var disk in document.Snapshot.PhysicalDisks)
+        {
+            if (disk.DeviceId is int diskNumber
+                && !string.IsNullOrWhiteSpace(disk.PnpDeviceId))
+            {
+                physicalDeviceIds[diskNumber] = disk.PnpDeviceId;
+            }
         }
     }
 

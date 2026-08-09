@@ -71,7 +71,7 @@ internal static class Program
                     new JsonToolPathConfiguration(
                         Path.Combine(dataRoot, "tool-paths.json")),
                     new EnvironmentToolSearchPath()),
-                new FileMetadataToolVersionProbe(),
+                new WindowsToolVersionProbe(),
                 new Sha256ToolFileHasher());
             var workerProcesses = new WorkerProcessRepository(store, writeOwner);
             var testRuns = new TestRunRepository(store, writeOwner);

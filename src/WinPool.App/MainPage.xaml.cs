@@ -651,7 +651,8 @@ public sealed partial class MainPage : Page
     private async Task OptimizeDrivesAsync()
     {
         await Task.CompletedTask;
-        var target = ViewModel.GetSelectedCommandSurface()?.SystemDialogTarget;
+        var surface = ViewModel.GetSelectedCommandSurface();
+        var target = surface?.SystemDialogTarget;
         if (target is null || !target.HasResolvedPartition)
         {
             NotifyTargetMissing();
@@ -692,7 +693,8 @@ public sealed partial class MainPage : Page
     {
         await Task.CompletedTask;
         var role = ViewModel.SelectedWorkspaceItem?.Projection?.Role;
-        var target = ViewModel.GetSelectedCommandSurface()?.SystemDialogTarget;
+        var surface = ViewModel.GetSelectedCommandSurface();
+        var target = surface?.SystemDialogTarget;
         if (target is null)
         {
             return;
@@ -728,14 +730,38 @@ public sealed partial class MainPage : Page
             NotifyTargetMissing();
             return;
         }
+        if (ViewModel.AgentConnection is not null && target.DiskNumber is int diskNumber)
+        {
+            var response = await ViewModel.AgentConnection.SendAsync(
+                new OpenAgentNativePropertiesRequest(
+                    surface!.ObjectId,
+                    diskNumber,
+                    CorrelationId.New()),
+                CancellationToken.None);
+            if (response.IsSuccess)
+            {
+                foreach (var message in response.Messages)
+                {
+                    ViewModel.NotificationService.PublishWarning(
+                        ViewModel.Localization["Warning"],
+                        message.DiagnosticText,
+                        "workspace-operation",
+                        $"properties:{message.Code}");
+                }
+                return;
+            }
+        }
         if (!string.IsNullOrWhiteSpace(target.PhysicalDeviceInstanceId))
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            var startInfo = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "rundll32.exe",
-                Arguments = $"devmgr.dll,DeviceProperties_RunDLL /DeviceID \"{target.PhysicalDeviceInstanceId}\"",
                 UseShellExecute = true
-            });
+            };
+            startInfo.ArgumentList.Add("devmgr.dll,DeviceProperties_RunDLL");
+            startInfo.ArgumentList.Add("/DeviceID");
+            startInfo.ArgumentList.Add(target.PhysicalDeviceInstanceId);
+            System.Diagnostics.Process.Start(startInfo);
             return;
         }
         if (target.UseDiskManagementFallback)

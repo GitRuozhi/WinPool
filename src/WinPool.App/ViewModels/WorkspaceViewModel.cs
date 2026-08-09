@@ -12,6 +12,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 {
     private readonly IHardwareInventoryProvider _hardwareInventoryProvider;
     private readonly IUserPreferencesService _preferencesService;
+    private bool _preferencesInitialized;
     private readonly IGlobalNotificationService _notificationService;
     private readonly IStorageSystemRepository _systemRepository;
     private readonly ISimulationOperationService _simulationOperations;
@@ -356,9 +357,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        var preferences = await _preferencesService.LoadAsync();
-        Localization.Language = preferences.Language;
-        CurrentPreferences = preferences;
+        await InitializePreferencesAsync();
         var cachedLocal = await _machineRecordService.LoadLocalScanAsync();
         if (cachedLocal is not null)
         {
@@ -390,7 +389,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
         else
         {
-            await _systemRepository.SaveSimulationAsync(SelectedSystem);
+            var builtinSimulation = SystemCatalog.Systems
+                .First(x => x.Kind == StorageSystemKind.Simulation);
+            await _systemRepository.SaveSimulationAsync(builtinSimulation);
         }
         RestoredUiState = await _workspaceStateService.LoadAsync();
         if (RestoredUiState is not null)
@@ -413,6 +414,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 : RestoredUiState.HighlightedTopologyStableId;
         }
         RefreshLocalizedContent();
+    }
+
+    public async Task InitializePreferencesAsync()
+    {
+        if (_preferencesInitialized)
+        {
+            return;
+        }
+
+        var preferences = await _preferencesService.LoadAsync();
+        Localization.Language = preferences.Language;
+        CurrentPreferences = preferences;
+        _preferencesInitialized = true;
     }
 
     public WorkspaceUiState? RestoredUiState { get; private set; }
@@ -464,12 +478,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public async Task SetCreateMsrOnInitializeAsync(bool create)
     {
         CurrentPreferences = CurrentPreferences with { CreateMsrOnInitialize = create };
-        await _preferencesService.SaveAsync(CurrentPreferences);
-    }
-
-    public async Task SetShowWelcomeAtStartAsync(bool show)
-    {
-        CurrentPreferences = CurrentPreferences with { ShowWelcomeAtStart = show };
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
@@ -796,6 +804,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
             _ => throw new ArgumentOutOfRangeException()
         };
+        var activeSystemId = WinPool.Application.InternalStableIdentity
+            .SystemFromDocumentId(ActiveDocument.Id);
+        if (item.Projection.Id.System != activeSystemId)
+        {
+            // A restored selection can briefly refer to the previous document
+            // while a local inventory is being replaced. Defer the command
+            // surface until the page rebuilds against the active document.
+            return null;
+        }
         return _manageCommandProjector.Project(
             ActiveDocument,
             SystemCatalog.Systems.First(document => document.IsLocal),

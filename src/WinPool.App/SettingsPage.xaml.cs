@@ -50,7 +50,6 @@ public sealed partial class SettingsPage : Page
         LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
         MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
         ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
-        WelcomeCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowWelcomeAtStart;
         StartupAgentCheckBox.IsChecked = _agentStartup.IsEnabled();
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
@@ -477,13 +476,12 @@ public sealed partial class SettingsPage : Page
         await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsCheckBox.IsChecked == true);
     }
 
-    private async void WelcomeCheckBox_Click(object sender, RoutedEventArgs e)
+    private void WelcomeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_ready)
+        if (App.Window is MainWindow mainWindow)
         {
-            return;
+            mainWindow.ShowWelcome();
         }
-        await ViewModel.SetShowWelcomeAtStartAsync(WelcomeCheckBox.IsChecked == true);
     }
 
     private async void StartupAgentCheckBox_Click(
@@ -544,7 +542,7 @@ public sealed partial class SettingsPage : Page
         PrivacyTitle.Text = l["Privacy"];
         ShowHardwareIdsCheckBox.Content = l["ShowHardwareIds"];
         WelcomeTitle.Text = l["Welcome"];
-        WelcomeCheckBox.Content = l["ShowWelcomeAtStart"];
+        WelcomeButton.Content = l["OpenWelcome"];
         StartupAgentTitle.Text = l.EffectiveLanguage == LanguagePreference.ZhCn
             ? "登录启动"
             : "Windows sign-in";
@@ -699,7 +697,7 @@ public sealed partial class SettingsPage : Page
             var registry = new ExternalToolRegistry(
                 _toolCatalog,
                 new ToolPathDiscovery(_toolPaths, new EnvironmentToolSearchPath()),
-                new FileMetadataToolVersionProbe(),
+                new WindowsToolVersionProbe(),
                 new Sha256ToolFileHasher());
             result = await registry.DetectAsync(toolId, CancellationToken.None);
         }
@@ -866,7 +864,7 @@ public sealed partial class SettingsPage : Page
         {
             Timeout = TimeSpan.FromMinutes(5)
         };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WinPool/0.2");
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WinPool/0.21");
         var dataRoot = StorageDataLocations.CurrentRoot;
         var installer = new ControlledPortableToolInstaller(
             _toolCatalog,
@@ -966,7 +964,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WinPool/0.2");
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WinPool/0.21");
         var installer = new ControlledMsiToolInstaller(
             _toolCatalog,
             new HttpToolPackageDownloader(httpClient),

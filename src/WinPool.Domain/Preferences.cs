@@ -39,4 +39,5 @@ public sealed record UserPreferences(
     bool CreateMsrOnInitialize = true,
     bool ShowWelcomeAtStart = true,
     bool StartAgentAtLogin = false,
-    bool ContinueMonitoringWhenUiCloses = false);
+    bool ContinueMonitoringWhenUiCloses = false,
+    bool HasShownWelcome = false);

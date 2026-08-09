@@ -77,7 +77,8 @@ public sealed record UserPreferences(
     LanguagePreference Language = LanguagePreference.SystemDefault,
     bool ShowHardwareIds = false,
     bool CreateMsrOnInitialize = true,
-    bool ShowWelcomeAtStart = true);
+    bool ShowWelcomeAtStart = true,
+    bool HasShownWelcome = false);
 
 public sealed record StorageUnitRef(
     string StableId,

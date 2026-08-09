@@ -59,6 +59,8 @@ public sealed class MonitoringService : IDisposable
 
     public bool IsRunning { get; private set; }
 
+    public string? LastError { get; private set; }
+
     public bool BackgroundEnabled { get; set; }
 
     public double SampleRateHz { get; private set; } = 1;
@@ -74,29 +76,63 @@ public sealed class MonitoringService : IDisposable
         return int.TryParse(digits, out var number) ? number : null;
     }
 
-    public void Start(double rateHz)
+    public async Task<bool> StartAsync(
+        double rateHz,
+        CancellationToken cancellationToken = default)
     {
         SampleRateHz = rateHz;
         if (IsRunning)
         {
-            return;
+            return true;
         }
 
         if (_agentConnection is not null)
         {
+            LastError = "agent.monitor-starting";
+            using var startupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            startupTimeout.CancelAfter(TimeSpan.FromSeconds(12));
+            var connection = await _agentConnection.ConnectAsync(startupTimeout.Token);
+            if (!connection.IsSuccess)
+            {
+                LastError = connection.Messages.FirstOrDefault()?.DiagnosticText
+                    ?? connection.Messages.FirstOrDefault()?.Code
+                    ?? "agent.connect-failed";
+                IsRunning = false;
+                return false;
+            }
+
             IsRunning = true;
+            LastError = null;
             _loopCts = new CancellationTokenSource();
-            _ = StartRemoteAsync(rateHz, _loopCts.Token);
-            return;
+            var ready = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _ = StartRemoteAsync(rateHz, _loopCts.Token, ready);
+            try
+            {
+                var started = await ready.Task.WaitAsync(startupTimeout.Token);
+                return started;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                IsRunning = false;
+                LastError = "agent.monitor-start-timeout";
+                _loopCts.Cancel();
+                ready.TrySetResult(false);
+                return false;
+            }
         }
 
         _sampler ??= new DiskPerformanceSampler();
+        LastError = null;
         StartSessionFile();
         IsRunning = true;
         _loopCts = new CancellationTokenSource();
         var token = _loopCts.Token;
-        _ = Task.Run(() => RunLoopAsync(token));
+            _ = Task.Run(() => RunLoopAsync(token));
+        return true;
     }
+
+    public void Start(double rateHz) => _ = StartAsync(rateHz);
 
     public void SetRate(double rateHz)
     {
@@ -287,8 +323,12 @@ public sealed class MonitoringService : IDisposable
         return Task.CompletedTask;
     }
 
-    private async Task StartRemoteAsync(double rateHz, CancellationToken cancellationToken)
+    private async Task StartRemoteAsync(
+        double rateHz,
+        CancellationToken cancellationToken,
+        TaskCompletionSource<bool> ready)
     {
+        var signaled = false;
         try
         {
             var existing = await _agentConnection!.SendAsync(
@@ -301,6 +341,8 @@ public sealed class MonitoringService : IDisposable
                 _remoteSessionId = active.SessionId;
                 SampleRateHz = 1 / active.Request.SamplingInterval.TotalSeconds;
                 await RefreshRemoteSnapshotAsync(cancellationToken);
+                signaled = true;
+                ready.TrySetResult(true);
                 await RunRemotePollLoopAsync(cancellationToken);
                 return;
             }
@@ -344,14 +386,26 @@ public sealed class MonitoringService : IDisposable
             if (!response.IsSuccess)
             {
                 IsRunning = false;
+                LastError = response.Messages.FirstOrDefault()?.DiagnosticText
+                    ?? response.Messages.FirstOrDefault()?.Code
+                    ?? "agent.monitor-start-failed";
+                ready.TrySetResult(false);
                 return;
             }
 
             _remoteSessionId = sessionId;
+            signaled = true;
+            ready.TrySetResult(true);
             await RunRemotePollLoopAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            if (!signaled)
+            {
+                IsRunning = false;
+                LastError = "agent.monitor-start-cancelled";
+                ready.TrySetResult(false);
+            }
         }
         catch (Exception ex) when (
             ex is IOException
@@ -359,6 +413,8 @@ public sealed class MonitoringService : IDisposable
                 or UnauthorizedAccessException)
         {
             IsRunning = false;
+            LastError = $"agent.monitor-start-{ex.GetType().Name}";
+            ready.TrySetResult(false);
         }
     }
 

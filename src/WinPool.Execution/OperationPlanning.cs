@@ -138,7 +138,7 @@ public sealed class DefaultOperationPlanner(IOperationInventoryVersionSource inv
 
         if (OperationSecurityCatalog.IsStorageStructureMutation(request.Intent))
         {
-            preconditions.Add("A production local-storage mutation executor is intentionally unavailable in V0.2.");
+            preconditions.Add("A production local-storage mutation executor is intentionally unavailable in V0.21.");
         }
 
         return preconditions;

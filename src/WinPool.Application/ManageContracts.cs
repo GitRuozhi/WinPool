@@ -150,7 +150,8 @@ public sealed record ManageSystemDialogTargetView(
     string PartitionPath,
     string DriveLetter,
     string PhysicalDeviceInstanceId,
-    bool UseDiskManagementFallback);
+    bool UseDiskManagementFallback,
+    int? DiskNumber = null);
 
 public sealed record ManageCommandSurfaceView(
     StorageObjectId ObjectId,

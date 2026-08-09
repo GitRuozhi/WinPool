@@ -9,6 +9,7 @@ public static class AgentControlMessageTypes
     public const string GetDevelopmentDiagnostics =
         "agent.request.get_development_diagnostics";
     public const string OpenMainWindow = "agent.request.open_main_window";
+    public const string OpenNativeProperties = "agent.request.open_native_properties";
     public const string StartMonitoring = "agent.request.start_monitoring";
     public const string StopMonitoring = "agent.request.stop_monitoring";
     public const string StartTest = "agent.request.start_test";

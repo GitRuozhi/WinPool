@@ -27,6 +27,11 @@ public interface IAgentRequestOperations
         OpenMainWindowRequest request,
         CancellationToken cancellationToken);
 
+    Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
+        OpenAgentNativePropertiesRequest request,
+        CancellationToken cancellationToken) =>
+        UnsupportedPersistenceAsync(request.CorrelationId);
+
     Task<ApplicationResult<AgentResponse>> StartMonitoringAsync(
         StartAgentMonitoringRequest request,
         CancellationToken cancellationToken);
@@ -238,6 +243,8 @@ public sealed class AgentSessionCoordinator
                 operations.GetDevelopmentDiagnosticsAsync(typed, cancellationToken),
             OpenMainWindowRequest typed =>
                 operations.OpenMainWindowAsync(typed, cancellationToken),
+            OpenAgentNativePropertiesRequest typed =>
+                operations.OpenNativePropertiesAsync(typed, cancellationToken),
             StartAgentMonitoringRequest typed =>
                 operations.StartMonitoringAsync(typed, cancellationToken),
             StopAgentMonitoringRequest typed =>

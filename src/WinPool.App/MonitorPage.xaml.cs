@@ -110,7 +110,7 @@ public sealed partial class MonitorPage : Page
 
     private MonitoringService Monitoring => _viewModel.Monitoring;
 
-    protected override void OnNavigatedTo(NavigationEventArgs e)
+    protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
         _viewModel = (WorkspaceViewModel)e.Parameter;
@@ -121,7 +121,27 @@ public sealed partial class MonitorPage : Page
         BackgroundCheckBox.IsChecked = Monitoring.BackgroundEnabled;
         if (!Monitoring.IsRunning)
         {
-            Guard("StartClick", () => Monitoring.Start(SelectedRate()));
+            try
+            {
+                var started = await Monitoring.StartAsync(SelectedRate());
+                if (!started)
+                {
+                    _viewModel.NotificationService.PublishWarning(
+                        _viewModel.Localization["MonitorIntro"],
+                        Monitoring.LastError ?? "监控 Agent 未能启动。",
+                        "monitor",
+                        "monitor-start-failed");
+                }
+            }
+            catch (Exception exception)
+            {
+                LogMonitorFailure("Start", exception);
+                _viewModel.NotificationService.PublishWarning(
+                    _viewModel.Localization["MonitorIntro"],
+                    exception.Message,
+                    "monitor",
+                    "monitor-start-exception");
+            }
         }
         UpdateRunningState();
         _pollTimer = DispatcherQueue.CreateTimer();
@@ -464,6 +484,7 @@ public sealed partial class MonitorPage : Page
     {
         if (!Monitoring.IsRunning && Monitoring.SessionFilePath is null)
         {
+            UpdateDiagnosticsAndStorageEvents();
             return;
         }
 
@@ -524,6 +545,17 @@ public sealed partial class MonitorPage : Page
     {
         var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         var diagnostics = Monitoring.GetDiagnostics();
+        var runningState = Monitoring.IsRunning
+            ? (zh ? "运行中" : "running")
+            : (zh ? "未运行" : "stopped");
+        if (!Monitoring.IsRunning && !string.IsNullOrWhiteSpace(Monitoring.LastError))
+        {
+            SamplingDiagnosticsText.Text = zh
+                ? $"监控状态：{runningState}；原因：{Monitoring.LastError}"
+                : $"Monitoring: {runningState}; reason: {Monitoring.LastError}";
+        }
+        else
+        {
         var queue = diagnostics.SubscriberCapacity > 0
             ? $"{diagnostics.SubscriberBufferedSamples}/{diagnostics.SubscriberCapacity}"
             : "0/0";
@@ -535,8 +567,9 @@ public sealed partial class MonitorPage : Page
                 ? $"采样异常：连续失败 {diagnostics.ConsecutiveFailures} 次；代码 {diagnostics.LastFailureCode ?? "unknown"}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
                 : $"Sampling warning: {diagnostics.ConsecutiveFailures} consecutive failures; code {diagnostics.LastFailureCode ?? "unknown"}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})"
             : zh
-                ? $"采样正常；最近成功 {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
-                : $"Sampling healthy; last success {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})";
+                ? $"监控状态：{runningState}；采样正常；最近成功 {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
+                : $"Monitoring: {runningState}; sampling healthy; last success {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})";
+        }
 
         var displayRows = Monitoring.GetRecentStorageHealthEvents()
             .OrderByDescending(item => item.OccurredAtUtc)
@@ -656,10 +689,28 @@ public sealed partial class MonitorPage : Page
         ApplyPollInterval();
     }
 
-    private void StartButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private async void StartButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        Guard("StartClick", () => Monitoring.Start(SelectedRate()));
-        UpdateRunningState();
+        try
+        {
+            var started = await Monitoring.StartAsync(SelectedRate());
+            if (!started)
+            {
+                _viewModel.NotificationService.PublishWarning(
+                    _viewModel.Localization["MonitorIntro"],
+                    Monitoring.LastError ?? "监控 Agent 未能启动。",
+                    "monitor",
+                    "monitor-start-failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMonitorFailure("StartClick", ex);
+        }
+        finally
+        {
+            UpdateRunningState();
+        }
     }
 
     private async void StopButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace WinPool.Domain;
 
@@ -25,6 +26,7 @@ public readonly record struct SessionId(Guid Value)
 
 public readonly record struct StorageObjectId
 {
+    [JsonConstructor]
     public StorageObjectId(SystemId system, StorageObjectKind kind, string providerKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);

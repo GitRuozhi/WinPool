@@ -13,6 +13,29 @@ public sealed class AgentControlProtocolCodecTests
         new(JsonSerializerDefaults.Web);
 
     [Fact]
+    public void MonitorRequestRoundTripsTargetSystemIdentity()
+    {
+        var systemId = SystemId.New();
+        var request = new MonitorRequest(
+            SessionId.New(),
+            systemId,
+            [new MonitorTarget(
+                new StorageObjectId(systemId, StorageObjectKind.PhysicalDisk, "pdh-wildcard"),
+                "*")],
+            [MonitorMetricKind.ActiveTimePercent],
+            TimeSpan.FromSeconds(1),
+            ContinueWhenUiCloses: true);
+
+        var roundTripped = JsonSerializer.Deserialize<MonitorRequest>(
+            JsonSerializer.Serialize(request, SerializerOptions),
+            SerializerOptions);
+
+        Assert.NotNull(roundTripped);
+        Assert.Equal(roundTripped.SystemId, roundTripped.Targets[0].ObjectId.System);
+        Assert.Equal(systemId, roundTripped.Targets[0].ObjectId.System);
+    }
+
+    [Fact]
     public void CodecDecodesAllowlistedTypedRequest()
     {
         var codec = new AgentControlProtocolCodec();
@@ -307,6 +330,23 @@ public sealed class AgentControlProtocolCodecTests
                     SerializerOptions)));
         Assert.IsType<LoadAgentManageInventoryRequest>(loadManageInventoryDecoded.Request);
         Assert.True(loadManageInventoryDecoded.IsAccepted);
+
+        var propertiesCorrelation = CorrelationId.New();
+        var properties = new OpenAgentNativePropertiesRequest(
+            new StorageObjectId(
+                SystemId.New(),
+                StorageObjectKind.PhysicalDisk,
+                "physical:disk-0"),
+            0,
+            propertiesCorrelation);
+        var propertiesDecoded = new AgentControlProtocolCodec().DecodeRequest(
+            Envelope(
+                AgentControlMessageTypes.OpenNativeProperties,
+                propertiesCorrelation,
+                JsonSerializer.SerializeToElement(properties, SerializerOptions)));
+        var propertiesRequest = Assert.IsType<OpenAgentNativePropertiesRequest>(propertiesDecoded.Request);
+        Assert.True(propertiesDecoded.IsAccepted);
+        Assert.Equal(0, propertiesRequest.DiskNumber);
     }
 
     [Fact]

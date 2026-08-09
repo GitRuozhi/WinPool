@@ -16,6 +16,8 @@ WinPool is designed to:
 
 WinPool is currently in the **V0.2 one-time architecture rewrite and integration stage**. The accepted V0.13 appearance remains the visual baseline, while frontend fixes and refactoring are allowed.
 
+The merged architecture is now presented as product version **V0.21**. V0.2 remains the name of the approved rewrite plan and architecture milestone; database schema, algorithm, and IPC versions remain independent.
+
 The repository contains a runnable WinUI 3 application plus separate tray Agent, TestWorker, and one-shot elevated Broker processes. Stable internal Application contracts, typed named-pipe IPC, SQLite persistence, testing, monitoring, simulation, and deny-by-default execution boundaries are being integrated without freezing a public API.
 
 The draft now models one read-only local computer and multiple persistent simulated

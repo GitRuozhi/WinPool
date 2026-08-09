@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
     private bool _updatingNavigation;
     private bool _requestingElevation;
     private bool _realWarningDismissed;
+    private readonly ApplicationStartupTarget _startupTarget;
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
     private readonly IElevationRestartService _elevationRestartService;
@@ -58,6 +59,7 @@ public sealed partial class MainWindow : Window
         _workspaceStateService = agentConnection is null
             ? new LocalWorkspaceStateService()
             : new AgentBackedWorkspaceStateService(agentConnection);
+        _startupTarget = startupOptions.Target;
         var importExportService = new DesktopExportService();
         ViewModel = new WorkspaceViewModel(
             agentConnection is null
@@ -102,8 +104,6 @@ public sealed partial class MainWindow : Window
         _uiSettings.ColorValuesChanged += UiSettings_ColorValuesChanged;
         BuildShellNavigation();
         RegisterShellKeyboardAccelerators();
-        RootFrame.Navigate(typeof(MainPage), ViewModel);
-        SelectShellPage(ShellPageKind.Manage);
     }
 
     private void MainWindow_AppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
@@ -124,25 +124,61 @@ public sealed partial class MainWindow : Window
         }
 
         _initialized = true;
-        await ViewModel.InitializeAsync();
+        try
+        {
+            await ViewModel.InitializePreferencesAsync();
+        }
+        catch (Exception exception)
+        {
+            ViewModel.NotificationService.PublishError(
+                "WinPool",
+                $"偏好设置初始化失败：{exception.Message}",
+                "startup",
+                "startup-preferences-failed");
+        }
+        ApplyTheme(ViewModel.CurrentPreferences.Theme);
+        ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
+        if (_startupTarget is ApplicationStartupTarget.None
+            or ApplicationStartupTarget.Welcome)
+        {
+            await ShowWelcomeDialogAsync();
+        }
+
+        try
+        {
+            await ViewModel.InitializeAsync();
+        }
+        catch (Exception exception)
+        {
+            ViewModel.NotificationService.PublishError(
+                "WinPool",
+                $"工作区初始化失败：{exception.Message}",
+                "startup",
+                "startup-initialize-failed");
+        }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
         RefreshChrome();
         UpdateCaptionInset();
         UpdateCaptionButtonColors();
-        if (Enum.TryParse<ShellPageKind>(ViewModel.RestoredUiState?.ShellPage, out var restoredPage)
+        if (_startupTarget is not (ApplicationStartupTarget.None or ApplicationStartupTarget.Welcome))
+        {
+            ActivateTarget(_startupTarget);
+        }
+        else if (Enum.TryParse<ShellPageKind>(ViewModel.RestoredUiState?.ShellPage, out var restoredPage)
             && restoredPage != ShellPageKind.Manage)
         {
             SelectShellPage(restoredPage);
         }
-        if (ViewModel.CurrentPreferences.ShowWelcomeAtStart)
+        else
         {
-            RootGrid.DispatcherQueue.TryEnqueue(async () => await ShowWelcomeDialogAsync());
+            SelectShellPage(ShellPageKind.Manage);
         }
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        App.StopActivationChannel();
         try
         {
             if (ViewModel.Monitoring.UsesAgent)
@@ -170,12 +206,6 @@ public sealed partial class MainWindow : Window
         }
 
         var localization = ViewModel.Localization;
-        var showAgainCheckBox = new CheckBox
-        {
-            VerticalAlignment = VerticalAlignment.Center,
-            IsChecked = ViewModel.CurrentPreferences.ShowWelcomeAtStart,
-            Content = localization["ShowWelcomeAtStart"]
-        };
         var dialog = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
@@ -184,10 +214,6 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = localization["WelcomeConfirm"],
             DefaultButton = ContentDialogButton.Primary
         };
-        dialog.Opened += (_, _) =>
-            showAgainCheckBox.Focus(FocusState.Programmatic);
-        var bottomRow = new Grid { Margin = new Thickness(0, 20, 0, 0) };
-        bottomRow.Children.Add(showAgainCheckBox);
         dialog.Content = new StackPanel
         {
             Width = 480,
@@ -215,8 +241,7 @@ public sealed partial class MainWindow : Window
                     FontSize = 15,
                     Text = localization["WelcomeMessage"],
                     TextWrapping = TextWrapping.Wrap
-                },
-                bottomRow
+                }
             }
         };
         try
@@ -227,10 +252,28 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        if (showAgainCheckBox.IsChecked != ViewModel.CurrentPreferences.ShowWelcomeAtStart)
+    }
+
+    internal void ShowWelcome() =>
+        RootGrid.DispatcherQueue.TryEnqueue(async () => await ShowWelcomeDialogAsync());
+
+    internal void ActivateTarget(ApplicationStartupTarget target)
+    {
+        if (target == ApplicationStartupTarget.Welcome)
         {
-            await ViewModel.SetShowWelcomeAtStartAsync(showAgainCheckBox.IsChecked == true);
+            ShowWelcome();
+            return;
         }
+
+        SelectShellPage(target switch
+        {
+            ApplicationStartupTarget.Edit => ShellPageKind.Create,
+            ApplicationStartupTarget.Test => ShellPageKind.Test,
+            ApplicationStartupTarget.Monitor => ShellPageKind.Monitor,
+            ApplicationStartupTarget.Development => ShellPageKind.Development,
+            ApplicationStartupTarget.Settings => ShellPageKind.Settings,
+            _ => ShellPageKind.Manage
+        });
     }
 
     public void ShowWorkspace()

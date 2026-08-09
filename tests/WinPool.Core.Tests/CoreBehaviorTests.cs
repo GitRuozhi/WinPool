@@ -213,6 +213,20 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void StartupPageArgumentIsClosedAndInvalidValuesAreIgnored()
+    {
+        var monitor = WinPool.Core.ApplicationStartupOptions.Parse(
+            [WinPool.Core.ApplicationStartupOptions.PageArgument, "monitor"],
+            WinPool.Core.PrivilegeState.StandardUser);
+        var invalid = WinPool.Core.ApplicationStartupOptions.Parse(
+            [WinPool.Core.ApplicationStartupOptions.PageArgument, "--run-anything"],
+            WinPool.Core.PrivilegeState.StandardUser);
+
+        Assert.Equal(WinPool.Core.ApplicationStartupTarget.Monitor, monitor.Target);
+        Assert.Equal(WinPool.Core.ApplicationStartupTarget.None, invalid.Target);
+    }
+
+    [Fact]
     public void ElevatedHandoffProcessIdIsParsedOnlyFromAValidPositiveValue()
     {
         Assert.Equal(

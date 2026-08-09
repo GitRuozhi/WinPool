@@ -4,6 +4,8 @@
 
 WinPool is currently in the **V0.2 one-time architecture rewrite and integration stage**. The accepted V0.13 appearance remains frozen while implementation errors and frontend architecture may be corrected.
 
+The product-facing version after the architecture merge is **V0.21**. V0.2 remains the architecture-plan name; schema, algorithm, and IPC versions are not derived from the product version.
+
 The current solution has stable internal Application contracts, Agent-owned SQLite persistence, typed named-pipe IPC, a visible per-user tray process, an isolated TestWorker, and a one-shot elevated Broker. Real storage-structure mutation remains denied; simulation, read-only inventory, registered-directory testing, monitoring, and explicitly reviewed system-support actions form the V0.2 implementation boundary.
 
 ## Product goal
