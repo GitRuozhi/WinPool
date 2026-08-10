@@ -10,12 +10,12 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前检查点
 
-V0.31 是 V0.3 架构线当前的源码集成检查点，包含 App、Agent、TestWorker、Broker 四进程架构、
+V0.32 是用户确认的 V0.3 当前源码检查点，包含 App、Agent、TestWorker、Broker 四进程架构、
 Agent 独占 SQLite、类型化命名管道 IPC、模拟编辑、本机只读发现、登记目录文件测试、监控和可复现
 四进程 staging。
 
-V0.31 不是二进制发布或 GitHub Release。只有完成原生 UI、托盘、UAC、设备、外部工具、生命周期
-和数据位置验收矩阵，并由用户明确确认后，才进入 V0.32。
+V0.32 不是二进制发布或 GitHub Release。用户已于 2026-08-10 指定该检查点；原生 UI、托盘、
+UAC、设备、外部工具、生命周期和数据位置用例仍如实记录为未验证，不伪造通过结论。
 
 ## 安全边界
 
@@ -42,7 +42,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [产品方向](docs/Product.zh-CN.md)：长期定位、产品边界和路线图。
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
-- [当前计划](docs/Plan.zh-CN.md)：唯一活动 V0.3 阶段的中文阅读副本。
+- 当前无活动计划；已接受的 V0.32 记录见[历史归档](docs/Archive/V0.32/README.zh-CN.md)。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。

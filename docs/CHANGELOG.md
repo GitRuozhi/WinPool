@@ -7,10 +7,22 @@ This file records results that actually occurred. Planned work remains in
 
 ## Unreleased
 
+No unreleased changes are recorded after the V0.32 checkpoint.
+
+## V0.32 source checkpoint — 2026-08-10
+
+- The user explicitly assigned V0.32 after reviewing the V0.31 restructuring.
+- Updated the shared display and technical versions to V0.32 / 0.3.2.0.
 - Added non-authoritative `.zh-CN.md` reading copies for English project
   documentation; unsuffixed documents remain controlling.
 - Added software-consumed `assets` to Git control and excluded user-managed
   `OriginArtWork` from Git.
+- Preserved all 11 outstanding native/manual cases as `unverified`; the version
+  assignment is not evidence that those cases passed.
+- Revalidated all 458 Release tests and the nested four-process V0.32 staging;
+  every staged executable reports V0.32 / 0.3.2.0.
+
+V0.32 is a source checkpoint, not a tag, binary release, or GitHub Release.
 
 ### V0.31 documentation-architecture correction — 2026-08-10
 

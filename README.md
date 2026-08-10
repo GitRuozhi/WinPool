@@ -7,14 +7,14 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current checkpoint
 
-V0.31 is the current V0.3 source integration checkpoint. It includes the
+V0.32 is the current user-confirmed V0.3 source checkpoint. It includes the
 multi-process App/Agent/TestWorker/Broker architecture, Agent-owned SQLite,
 typed named-pipe IPC, simulation editing, read-only local discovery, registered
 file testing, monitoring, and reproducible four-process staging.
 
-V0.31 is not a binary release or GitHub Release. V0.32 requires explicit user
-confirmation after the native UI, tray, UAC, device, external-tool, lifecycle,
-and data-location acceptance matrix is completed.
+V0.32 is not a binary release or GitHub Release. The user assigned the checkpoint
+on 2026-08-10; native UI, tray, UAC, device, external-tool, lifecycle, and
+data-location cases remain recorded as unverified rather than being fabricated.
 
 ## Safety boundary
 
@@ -45,7 +45,8 @@ The reproducible self-contained staging command is documented in
 - [Development](docs/Development.md): architecture, environment, build, staging,
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
-- [Current Plan](docs/Plan.md): the only active V0.3 stage and its evidence.
+- Current stage: no active Plan. The accepted V0.32 record is in
+  [Archive](docs/Archive/V0.32/README.md).
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):

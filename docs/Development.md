@@ -30,7 +30,7 @@ docs/
   Product.md
   Development.md
   Quality.md
-  Plan.md
+  Plan.md                         present only while a stage is active
   CHANGELOG.md
   Reference/
   Archive/

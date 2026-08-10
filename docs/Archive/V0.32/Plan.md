@@ -2,15 +2,16 @@
 project: WinPool
 phase: V0.3
 architecture_version: V0.3
-status: awaiting_acceptance
-integration_checkpoint: V0.31
+status: accepted
+integration_checkpoint: V0.32
 acceptance_checkpoint: V0.32
 branch: main
 confirmed_by_user: 2026-08-10
 code_gate: passed
 native_integration_gate: passed
 manual_gate: unverified
-remote_gate: passed
+remote_gate: pending
+accepted_by_user: 2026-08-10
 ---
 
 # WinPool V0.31 documentation architecture correction
@@ -106,6 +107,15 @@ model.
 After the automatic criteria pass, this plan moves to `awaiting_acceptance`.
 Only explicit user confirmation may establish V0.32.
 
+## V0.32 acceptance decision
+
+On 2026-08-10 the user explicitly assigned the current source checkpoint as
+V0.32. This closes the documentation-architecture stage and archives this Plan.
+The decision does not change the 11 unrun native/manual cases: they remain
+`unverified`, and no test result has been inferred from the version assignment.
+V0.32 remains a source checkpoint without a tag, binary release, or GitHub
+Release.
+
 ## Verified evidence
 
 - V0.2 archive: 16 files, 212,510 bytes, and all 16 pre-migration SHA-256
@@ -117,8 +127,10 @@ Only explicit user confirmation may establish V0.32.
 - Full Release build: 0 warnings and 0 errors.
 - Direct and transitive dependency vulnerability scan: no vulnerable package
   reported for any solution project.
-- Existing V0.31 four-process native staging evidence remains valid because this
-  correction does not change publish projects or runtime behavior.
+- A fresh V0.32 four-process staging completed at
+  `Rubbish/20260810_winpool_v032_staging/Program/WinPool`; App, Agent,
+  TestWorker, and Broker each report product version `V0.32` and file version
+  `0.3.2.0`.
 - Manual GUI, tray, UAC, D: tool, and data-location gates remain unverified.
 - Forward correction commit `236eb3f` was pushed to `origin/main` on 2026-08-10
   after confirming that the previous remote head was its ancestor.
@@ -127,3 +139,7 @@ Only explicit user confirmation may establish V0.32.
   totaling 15,189,113 bytes; `OriginArtWork` is ignored; the full Release suite
   passed 458/458 with 0 failures, and the build completed with 0 warnings and
   0 errors.
+- V0.32 revalidation: all 37 Markdown files passed relative-link checks, the full
+  Release suite passed 458/458 with 0 failures and 0 skipped, the Release build
+  completed with 0 warnings and 0 errors, and no vulnerable direct or transitive
+  dependency was reported.

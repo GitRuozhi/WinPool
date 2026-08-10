@@ -46,10 +46,11 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void CurrentPlanCarriesTheV02CompatibilityAuditAsExplicitDebt()
+    public void V032AcceptanceRecordCarriesTheV02CompatibilityAuditAsExplicitDebt()
     {
         var root = FindRepositoryRoot();
-        var currentPlan = File.ReadAllText(Path.Combine(root, "docs", "Plan.md"));
+        var currentPlan = File.ReadAllText(
+            Path.Combine(root, "docs", "Archive", "V0.32", "Plan.md"));
 
         Assert.Contains("DEBT-01", currentPlan, StringComparison.Ordinal);
         Assert.Contains("205 compatibility IDs", currentPlan, StringComparison.Ordinal);
@@ -64,12 +65,12 @@ public sealed class ArchitectureBoundaryTests
             "Product.md",
             "Development.md",
             "Quality.md",
-            "Plan.md",
             "CHANGELOG.md"
         };
 
         Assert.False(Directory.Exists(Path.Combine(root, "Plan")));
         Assert.False(File.Exists(Path.Combine(root, "DEVELOP.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "Plan.md")));
         Assert.All(
             requiredDocuments,
             name => Assert.True(File.Exists(Path.Combine(root, "docs", name)), name));
@@ -84,7 +85,8 @@ public sealed class ArchitectureBoundaryTests
             "AI-Agent-Harness-项目管理架构参考.md")));
 
         var operationalRules = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
-        var currentPlan = File.ReadAllText(Path.Combine(root, "docs", "Plan.md"));
+        var currentPlan = File.ReadAllText(
+            Path.Combine(root, "docs", "Archive", "V0.32", "Plan.md"));
         Assert.DoesNotContain("Do not create `Docs/docs`", operationalRules, StringComparison.Ordinal);
         Assert.DoesNotContain("docs/Archive` 的提案已撤销", currentPlan, StringComparison.Ordinal);
     }
@@ -100,7 +102,7 @@ public sealed class ArchitectureBoundaryTests
             ("docs/Product.md", "docs/Product.zh-CN.md"),
             ("docs/Development.md", "docs/Development.zh-CN.md"),
             ("docs/Quality.md", "docs/Quality.zh-CN.md"),
-            ("docs/Plan.md", "docs/Plan.zh-CN.md"),
+            ("docs/Archive/V0.32/Plan.md", "docs/Archive/V0.32/Plan.zh-CN.md"),
             ("docs/CHANGELOG.md", "docs/CHANGELOG.zh-CN.md"),
             ("docs/Archive/README.md", "docs/Archive/README.zh-CN.md")
         };
@@ -447,8 +449,8 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
 
         Assert.Contains("<WinPoolArchitectureVersion>V0.3</WinPoolArchitectureVersion>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolDisplayVersion>V0.31</WinPoolDisplayVersion>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolTechnicalVersion>0.3.1.0</WinPoolTechnicalVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolDisplayVersion>V0.32</WinPoolDisplayVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolTechnicalVersion>0.3.2.0</WinPoolTechnicalVersion>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolDisplayVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.Contains("AssemblyInformationalVersionAttribute", productInformation, StringComparison.Ordinal);
         Assert.Contains("AssemblyFileVersionAttribute", productInformation, StringComparison.Ordinal);

@@ -29,7 +29,7 @@ docs/
   Product.md
   Development.md
   Quality.md
-  Plan.md
+  Plan.md                         仅在存在活动阶段时出现
   CHANGELOG.md
   Reference/
   Archive/

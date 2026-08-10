@@ -99,7 +99,7 @@ if ($bundledExternalTools.Count -gt 0) {
     throw "Staging bundles forbidden external tools: $($relativePaths -join ', ')"
 }
 
-Write-Output "Verified V0.31 staging tree: $stageRoot"
+Write-Output "Verified V0.32 staging tree: $stageRoot"
 foreach ($entry in $requiredExecutables.GetEnumerator() | Sort-Object Value) {
     Write-Output "  $($entry.Value)"
 }

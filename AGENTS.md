@@ -91,10 +91,10 @@ protected paths before editing.
   `c=10`; reduce scope, combine work, or advance the minor version.
 - A normal `c` checkpoint requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.31 remains the current source integration checkpoint. V0.32 may be assigned
-  only after the user confirms the restructuring and manual acceptance evidence.
-- The current user request explicitly authorizes the forward V0.31 correction
-  commits and normal pushes described by `docs/Plan.md`.
+- V0.32 is the current user-confirmed source checkpoint. Its remaining manual
+  cases stay `unverified`; the version decision does not fabricate test evidence.
+- The current user request explicitly authorizes the V0.32 marking commits and
+  normal pushes to `main`.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate

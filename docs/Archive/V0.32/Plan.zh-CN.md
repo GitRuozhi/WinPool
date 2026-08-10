@@ -2,16 +2,17 @@
 project: WinPool
 phase: V0.3
 architecture_version: V0.3
-status: awaiting_acceptance
-integration_checkpoint: V0.31
+status: accepted
+integration_checkpoint: V0.32
 acceptance_checkpoint: V0.32
 branch: main
 confirmed_by_user: 2026-08-10
 code_gate: passed
 native_integration_gate: passed
 manual_gate: unverified
-remote_gate: passed
-authority: docs/Plan.md
+remote_gate: pending
+accepted_by_user: 2026-08-10
+authority: docs/Archive/V0.32/Plan.md
 ---
 
 # WinPool V0.31 文档架构修正
@@ -95,6 +96,12 @@ authority: docs/Plan.md
 
 自动条件通过后，本计划进入 `awaiting_acceptance`。只有用户明确确认才能建立 V0.32。
 
+## V0.32 验收决定
+
+用户于 2026-08-10 明确把当前源码检查点指定为 V0.32。本决定关闭文档架构阶段并归档本计划。
+该决定不改变 11 项尚未执行的原生/人工用例：它们继续保持 `unverified`，不得根据版本指定推断测试通过。
+V0.32 仍是源码检查点，不创建 tag、二进制发布或 GitHub Release。
+
 ## 已验证证据
 
 - V0.2 归档：16 个文件、212,510 字节，16 个迁移前 SHA-256 在 2026-08-10 全部匹配。
@@ -102,7 +109,8 @@ authority: docs/Plan.md
 - 完整 Release 测试：456/456 通过（原 455 项加一项文档结构测试），0 失败、0 跳过。
 - 完整 Release 构建：0 警告、0 错误。
 - 直接和传递依赖漏洞扫描：所有解决方案项目均未报告易受攻击包。
-- 本次修正不改变发布工程或运行时行为，已有 V0.31 四进程原生 staging 证据继续有效。
+- 已在 `Rubbish/20260810_winpool_v032_staging/Program/WinPool` 完成新的 V0.32 四进程 staging；App、Agent、TestWorker 和 Broker 均报告产品版本 `V0.32`、文件版本 `0.3.2.0`。
 - 人工 GUI、托盘、UAC、D: 工具和数据位置门仍为 `unverified`。
 - 前向修正提交 `236eb3f` 已于 2026-08-10 推送到 `origin/main`，推送前确认此前远端 HEAD 是其祖先。
 - 文档/资源补充：8 对英文权威文档与中文阅读副本全部通过链接和权威声明检查；`assets` 有 35 个受 Git 控制的文件，共 15,189,113 字节；`OriginArtWork` 已忽略；完整 Release 测试 458/458 通过、0 失败，构建 0 警告、0 错误。
+- V0.32 复验：37 份 Markdown 相对链接全部通过，完整 Release 测试 458/458 通过、0 失败、0 跳过，Release 构建 0 警告、0 错误，直接和传递依赖均未报告已知漏洞。
