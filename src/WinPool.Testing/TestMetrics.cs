@@ -18,13 +18,13 @@ public sealed record NormalizedIoMetrics(
 public static class TestMetrics
 {
     public static readonly AlgorithmIdentity ThroughputAlgorithm =
-        new("ALG-METRIC-001", "1.0.0", AlgorithmConfidence.Proven, "Plan/04 §8.1");
+        new("ALG-METRIC-001", "1.0.0", AlgorithmConfidence.Proven, "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §8.1");
 
     public static readonly AlgorithmIdentity LatencyAlgorithm =
-        new("ALG-METRIC-002", "1.0.0", AlgorithmConfidence.Derived, "Plan/04 §8.2");
+        new("ALG-METRIC-002", "1.0.0", AlgorithmConfidence.Derived, "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §8.2");
 
     public static readonly AlgorithmIdentity RepeatAlgorithm =
-        new("ALG-REPEAT-001", "1.0.0", AlgorithmConfidence.Derived, "Plan/04 §8.3");
+        new("ALG-REPEAT-001", "1.0.0", AlgorithmConfidence.Derived, "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §8.3");
 
     public static NormalizedIoMetrics Normalize(
         long measuredBytes,

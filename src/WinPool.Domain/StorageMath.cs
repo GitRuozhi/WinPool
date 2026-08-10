@@ -12,13 +12,13 @@ public enum BinaryCapacityUnit : ulong
 public static class StorageMath
 {
     public static readonly AlgorithmIdentity CapacityAlgorithm =
-        new("ALG-MATH-001", "1.0.0", AlgorithmConfidence.Proven, "Plan/07 §2");
+        new("ALG-MATH-001", "1.0.0", AlgorithmConfidence.Proven, "docs/Archive/V0.2/07_算法目录与验证计划.md §2");
 
     public static readonly AlgorithmIdentity AlignmentAlgorithm =
-        new("ALG-MATH-002", "1.0.0", AlgorithmConfidence.Proven, "Plan/07 §2");
+        new("ALG-MATH-002", "1.0.0", AlgorithmConfidence.Proven, "docs/Archive/V0.2/07_算法目录与验证计划.md §2");
 
     public static readonly AlgorithmIdentity PercentageAlgorithm =
-        new("ALG-MATH-003", "1.0.0", AlgorithmConfidence.Proven, "Plan/07 §2");
+        new("ALG-MATH-003", "1.0.0", AlgorithmConfidence.Proven, "docs/Archive/V0.2/07_算法目录与验证计划.md §2");
 
     public static ulong ToBytes(ulong value, BinaryCapacityUnit unit) =>
         checked(value * (ulong)unit);
@@ -72,7 +72,7 @@ public static class TheoreticalPoolCapacity
 {
     // 【推测，待验证】ALG-CAP-002：仅用于计划估算，不能成为真实执行参数。
     public static readonly AlgorithmIdentity Algorithm =
-        new("ALG-CAP-002", "1.0.0", AlgorithmConfidence.Speculative, "Plan/07 §5");
+        new("ALG-CAP-002", "1.0.0", AlgorithmConfidence.Speculative, "docs/Archive/V0.2/07_算法目录与验证计划.md §5");
 
     public static TheoreticalPoolCapacityEstimate Estimate(
         ulong minimumSelectedDiskBytes,

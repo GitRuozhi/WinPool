@@ -11,7 +11,7 @@ namespace WinPool.Testing;
 public sealed class TestPlanCompiler : ITestPlanner
 {
     public static readonly AlgorithmIdentity Algorithm =
-        new("ALG-TEST-PLAN-001", "1.3.0", AlgorithmConfidence.Derived, "Plan/04 §3");
+        new("ALG-TEST-PLAN-001", "1.3.0", AlgorithmConfidence.Derived, "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §3");
 
     public ApplicationResult<TestPlan> Compile(
         TestDefinition definition,

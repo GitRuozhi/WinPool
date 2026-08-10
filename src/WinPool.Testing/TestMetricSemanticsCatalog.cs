@@ -16,7 +16,7 @@ public static partial class TestMetricSemanticsCatalog
         "ALG-METRIC-003",
         "1.0.0",
         AlgorithmConfidence.Derived,
-        "Plan/04 §8 cross-tool semantics");
+        "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §8 cross-tool semantics");
 
     public static TestMetricSemantic Describe(
         TestStep? step,

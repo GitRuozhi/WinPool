@@ -39,7 +39,7 @@ public sealed class DefaultOperationPlanner(IOperationInventoryVersionSource inv
     : IOperationPlanner
 {
     public static readonly AlgorithmIdentity Algorithm =
-        new("ALGO-EXEC-PLAN-001", "1.0.0", AlgorithmConfidence.Derived, "Plan/16_V0.3文档与目录重构计划.md");
+        new("ALGO-EXEC-PLAN-001", "1.0.0", AlgorithmConfidence.Derived, "docs/Archive/V0.2/03_执行器端口与安全模型.md");
 
     public async Task<OperationPlan> BuildAsync(
         OperationRequest request,

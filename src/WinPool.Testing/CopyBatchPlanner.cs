@@ -10,7 +10,7 @@ public sealed class CopyBatchPlanner
             "ALG-COPY-BATCH-001",
             "1.0.0",
             AlgorithmConfidence.Derived,
-            "Plan/04 §6");
+            "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §6");
 
     public CopyBatchManifest Compile(
         TestPlan plan,

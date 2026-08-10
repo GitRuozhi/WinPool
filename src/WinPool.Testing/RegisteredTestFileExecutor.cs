@@ -129,7 +129,7 @@ public sealed class RegisteredTestFileExecutor
             "ALG-TEST-FILE-PATTERN-001",
             "1.0.0",
             AlgorithmConfidence.Derived,
-            "Plan/04 §5, §9");
+            "docs/Archive/V0.2/04_外部工具测试监控与SQLite.md §5, §9");
 
     public async Task<RegisteredTestFileRecoveryEntry> CreateAsync(
         AuthorizedTestRun run,

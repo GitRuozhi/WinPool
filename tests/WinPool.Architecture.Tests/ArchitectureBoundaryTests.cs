@@ -49,11 +49,44 @@ public sealed class ArchitectureBoundaryTests
     public void CurrentPlanCarriesTheV02CompatibilityAuditAsExplicitDebt()
     {
         var root = FindRepositoryRoot();
-        var currentPlan = File.ReadAllText(
-            Path.Combine(root, "Plan", "16_V0.3文档与目录重构计划.md"));
+        var currentPlan = File.ReadAllText(Path.Combine(root, "docs", "Plan.md"));
 
         Assert.Contains("DEBT-01", currentPlan, StringComparison.Ordinal);
-        Assert.Contains("205 个兼容 ID", currentPlan, StringComparison.Ordinal);
+        Assert.Contains("205 compatibility IDs", currentPlan, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocumentationArchitectureHasOneActivePlanAndACompleteV02Archive()
+    {
+        var root = FindRepositoryRoot();
+        var requiredDocuments = new[]
+        {
+            "Product.md",
+            "Development.md",
+            "Quality.md",
+            "Plan.md",
+            "CHANGELOG.md"
+        };
+
+        Assert.False(Directory.Exists(Path.Combine(root, "Plan")));
+        Assert.False(File.Exists(Path.Combine(root, "DEVELOP.md")));
+        Assert.All(
+            requiredDocuments,
+            name => Assert.True(File.Exists(Path.Combine(root, "docs", name)), name));
+
+        var archive = Path.Combine(root, "docs", "Archive", "V0.2");
+        Assert.Equal(16, Directory.EnumerateFiles(archive, "*.md").Count());
+        Assert.True(File.Exists(Path.Combine(root, "docs", "Archive", "README.md")));
+        Assert.True(File.Exists(Path.Combine(
+            root,
+            "docs",
+            "Reference",
+            "AI-Agent-Harness-项目管理架构参考.md")));
+
+        var operationalRules = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
+        var currentPlan = File.ReadAllText(Path.Combine(root, "docs", "Plan.md"));
+        Assert.DoesNotContain("Do not create `Docs/docs`", operationalRules, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs/Archive` 的提案已撤销", currentPlan, StringComparison.Ordinal);
     }
 
     [Theory]
