@@ -1,5 +1,7 @@
 # Agent Instructions for WinPool
 
+[English](AGENTS.md) | [简体中文（仅供阅读）](AGENTS.zh-CN.md)
+
 This file contains stable operational rules for work inside `Program\WinPool`.
 Product direction, architecture, quality gates, current work, results, and history
 belong in their dedicated documents under `docs`.
@@ -66,7 +68,7 @@ protected paths before editing.
   tree, preserving relative paths where practical.
 - Low-value generated material goes to the parent-project `Rubbish` tree.
 - Do not create local `Old`, `Rubbish`, or variant directories inside WinPool.
-- `README.md` and `README_CN.md` are user-facing entry points.
+- `README.md` and `README.zh-CN.md` are user-facing entry points.
 - `AGENTS.md` contains operational constraints only.
 - Product, Development, Quality, Plan, CHANGELOG, Reference, and Archive content
   belongs under `docs`.
@@ -74,8 +76,11 @@ protected paths before editing.
   be absent.
 - Completed or invalidated plans are frozen under `docs/Archive`; do not rewrite
   them to make history appear correct.
-- Developer-local art and other non-code resources remain under ignored
-  `local-assets` until the user approves Git LFS or another asset strategy.
+- Repository `assets` contains software-consumed resources and is tracked by Git.
+- `OriginArtWork` contains user-managed source artwork and remains ignored until
+  the user approves Git, Git LFS, or another asset strategy.
+- A `.zh-CN.md` file is a non-authoritative Chinese reading copy of the matching
+  unsuffixed Markdown file. If they differ, the unsuffixed document controls.
 
 ## Version and Git rules
 

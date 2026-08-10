@@ -1,9 +1,16 @@
 # Changelog
 
+[English](CHANGELOG.md) | [简体中文（仅供阅读）](CHANGELOG.zh-CN.md)
+
 This file records results that actually occurred. Planned work remains in
 `Plan.md`; historical plans remain in `Archive`.
 
 ## Unreleased
+
+- Added non-authoritative `.zh-CN.md` reading copies for English project
+  documentation; unsuffixed documents remain controlling.
+- Added software-consumed `assets` to Git control and excluded user-managed
+  `OriginArtWork` from Git.
 
 ### V0.31 documentation-architecture correction — 2026-08-10
 

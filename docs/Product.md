@@ -1,5 +1,7 @@
 # WinPool Product Direction
 
+[English](Product.md) | [简体中文（仅供阅读）](Product.zh-CN.md)
+
 ## Purpose
 
 WinPool is a third-party Windows storage-system desktop application. Its long-term

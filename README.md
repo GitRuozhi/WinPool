@@ -1,6 +1,6 @@
 # WinPool
 
-[English](README.md) | [简体中文](README_CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 WinPool is a third-party WinUI 3 desktop application for understanding, testing,
 monitoring, and safely planning operations across Windows storage systems.

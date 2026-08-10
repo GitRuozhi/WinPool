@@ -1,5 +1,7 @@
 # WinPool Quality and Acceptance
 
+[English](Quality.md) | [简体中文（仅供阅读）](Quality.zh-CN.md)
+
 ## Result vocabulary
 
 Every gate or case must use one of: `passed`, `failed`, `unverified`,
@@ -16,12 +18,15 @@ applicable unless WinPool later introduces a separately approved web surface.
 
 - Required repository and documentation structure is present.
 - Exactly one active `docs/Plan.md` exists when a stage is active.
+- Every English authoritative Markdown document has a matching `.zh-CN.md`
+  reading copy, and every copy identifies the unsuffixed document as controlling.
 - Markdown links and documented paths resolve.
 - Version sources, runtime display values, and tracked documentation agree.
 - Architecture boundaries, closed diagnostics, typed commands, and deny-by-default
   execution remain covered.
-- Git scope excludes local assets, generated output, databases, logs, external
-  tools, and release binaries.
+- Git scope includes software-consumed `assets` and excludes `OriginArtWork`,
+  local-only resources, generated output, databases, logs, external tools, and
+  release binaries.
 
 ### .NET automatic gate
 

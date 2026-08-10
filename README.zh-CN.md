@@ -1,6 +1,9 @@
 # WinPool
 
-[English](README.md) | [简体中文](README_CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+> 本文件仅为中文阅读副本；项目事实和控制规则以无 `.zh-CN` 后缀的
+> [README.md](README.md) 为准。
 
 WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于理解存储拓扑、执行测试与监控，
 并以可审阅、可验证的方式规划操作。
@@ -32,18 +35,18 @@ dotnet restore WinPool.slnx
 dotnet build WinPool.slnx -c Release --no-restore -m:1
 ```
 
-可复现的自包含 staging 命令见[开发文档](docs/Development.md)。
+可复现的自包含 staging 命令见[开发文档中文阅读副本](docs/Development.zh-CN.md)。
 
 ## 文档
 
-- [产品方向](docs/Product.md)：长期定位、产品边界和路线图。
-- [开发文档](docs/Development.md)：架构、环境、构建、staging、版本和文档流程。
-- [质量规则](docs/Quality.md)：自动门、原生集成门和人工验收门。
-- [当前计划](docs/Plan.md)：唯一活动的 V0.3 阶段及其证据。
-- [变更记录](docs/CHANGELOG.md)：已经实际发生的结果。
-- [历史归档](docs/Archive/README.md)：冻结的已完成或已失效历史。
+- [产品方向](docs/Product.zh-CN.md)：长期定位、产品边界和路线图。
+- [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
+- [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
+- [当前计划](docs/Plan.zh-CN.md)：唯一活动 V0.3 阶段的中文阅读副本。
+- [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
+- [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
-- [Agent 规则](AGENTS.md)：操作、安全、授权和 Git 规则。
+- [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 
 ## 研究背景
 

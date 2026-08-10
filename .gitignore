@@ -52,6 +52,6 @@ _ReSharper*/
 Generated\ Files/
 *_wpftmp.csproj
 
-# Developer-local non-code resources. These remain outside Git until a future
-# user-approved Git LFS or asset-management decision.
+# Developer-local resources.
 /local-assets/
+/OriginArtWork/

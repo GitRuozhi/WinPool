@@ -1,5 +1,7 @@
 # WinPool Development Guide
 
+[English](Development.md) | [简体中文（仅供阅读）](Development.zh-CN.md)
+
 ## Technology and deployment
 
 WinPool uses C#, WinUI 3, .NET 10, Windows App SDK, CommunityToolkit components
@@ -19,7 +21,7 @@ The product consists of four processes:
 
 ```text
 README.md
-README_CN.md
+README.zh-CN.md
 AGENTS.md
 Directory.Build.props
 global.json
@@ -34,7 +36,9 @@ docs/
   Archive/
 build/
   Publish-Staged.ps1
-local-assets/                     ignored developer-local non-code resources
+assets/                           tracked software-consumed resources
+OriginArtWork/                    ignored user-managed source artwork
+local-assets/                     ignored developer-local resources
 src/
 workers/
 tests/
@@ -121,9 +125,10 @@ Agent/TestWorker/WinPool.TestWorker.exe
 Agent/Broker/WinPool.ElevatedBroker.exe
 ```
 
-Staging must not contain duplicate child executables, scripts, local assets,
-SQLite files, test results, external tools, or release metadata. Generated output
-is evidence only and is never committed.
+Staging must not contain duplicate child executables, scripts, source artwork,
+unreferenced local assets, SQLite files, test results, external tools, or release
+metadata. Software resources explicitly consumed by the application may be
+included. Generated output is evidence only and is never committed.
 
 ## Version progression
 
@@ -159,6 +164,12 @@ A current user decision outranks a generic project-management reference. Archive
 content is read-only history and cannot become a current requirement merely
 because it is detailed.
 
+An unsuffixed Markdown file is authoritative. A matching `.zh-CN.md` file is a
+Chinese reading copy only and must identify its unsuffixed authority. Documents
+already written in Chinese do not need a duplicate Chinese copy. When an
+authoritative document changes, update its reading copy in the same work item;
+the reading copy never controls behavior, acceptance, status, or history.
+
 When a stage is user-confirmed complete, update the CHANGELOG, freeze the Plan
 under Archive with its real final state, update the Archive index, and remove the
 active Plan if no next stage exists. Tags and releases remain separately
@@ -169,7 +180,8 @@ authorized actions.
 - Preserve the deny-by-default execution and process ownership model.
 - Do not add real storage mutation without a separately confirmed plan and
   disposable environment.
-- Do not make tracked code depend on `local-assets`.
+- Keep software-consumed resources in tracked `assets`.
+- Do not make tracked code depend on ignored `OriginArtWork` or `local-assets`.
 - Do not couple WinPool to another repository through relative paths, copied live
   files, submodules, or runtime imports.
 - Keep path moves, behavior changes, tests, and release actions independently

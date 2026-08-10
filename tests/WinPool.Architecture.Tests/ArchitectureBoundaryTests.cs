@@ -89,6 +89,47 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("docs/Archive` 的提案已撤销", currentPlan, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void EnglishDocumentationHasNonAuthoritativeChineseReadingCopies()
+    {
+        var root = FindRepositoryRoot();
+        var pairs = new[]
+        {
+            ("README.md", "README.zh-CN.md"),
+            ("AGENTS.md", "AGENTS.zh-CN.md"),
+            ("docs/Product.md", "docs/Product.zh-CN.md"),
+            ("docs/Development.md", "docs/Development.zh-CN.md"),
+            ("docs/Quality.md", "docs/Quality.zh-CN.md"),
+            ("docs/Plan.md", "docs/Plan.zh-CN.md"),
+            ("docs/CHANGELOG.md", "docs/CHANGELOG.zh-CN.md"),
+            ("docs/Archive/README.md", "docs/Archive/README.zh-CN.md")
+        };
+
+        Assert.False(File.Exists(Path.Combine(root, "README_CN.md")));
+        Assert.All(
+            pairs,
+            pair =>
+            {
+                Assert.True(File.Exists(Path.Combine(root, pair.Item1)), pair.Item1);
+                var readingCopy = Path.Combine(root, pair.Item2);
+                Assert.True(File.Exists(readingCopy), pair.Item2);
+                Assert.Contains("无 `.zh-CN` 后缀", File.ReadAllText(readingCopy));
+            });
+    }
+
+    [Fact]
+    public void SoftwareAssetsAreRepositoryContentAndOriginArtworkStaysLocal()
+    {
+        var root = FindRepositoryRoot();
+        var gitIgnore = File.ReadAllText(Path.Combine(root, ".gitignore"));
+        var assets = Path.Combine(root, "assets");
+
+        Assert.True(Directory.Exists(assets));
+        Assert.NotEmpty(Directory.EnumerateFiles(assets, "*", SearchOption.AllDirectories));
+        Assert.Contains("/OriginArtWork/", gitIgnore, StringComparison.Ordinal);
+        Assert.DoesNotContain("/assets/", gitIgnore, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("WinPool.Domain")]
     [InlineData("WinPool.Execution")]

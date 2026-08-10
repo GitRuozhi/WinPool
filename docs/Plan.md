@@ -15,6 +15,8 @@ remote_gate: passed
 
 # WinPool V0.31 documentation architecture correction
 
+[English](Plan.md) | [简体中文（仅供阅读）](Plan.zh-CN.md)
+
 ## Background
 
 The first V0.31 restructuring incorrectly replaced the user's explicit
@@ -29,14 +31,18 @@ model.
 ## Confirmed decisions
 
 - No root `Plan` directory remains; the only active plan is `docs/Plan.md`.
-- Root documentation is limited to the English and Chinese README files plus
-  `AGENTS.md`.
+- Root documentation is limited to the English and Chinese README files plus the
+  authoritative and Chinese-reading-copy Agent rules.
 - Product, development, quality, current plan, changelog, references, and archives
   live under `docs`.
 - Historical WinPool documents go to `docs/Archive`; other superseded non-document
   content goes to the parent-project `Old` tree.
-- Developer-local art and other non-code resources remain in ignored
-  `local-assets` and do not enter Git.
+- Software-consumed resources live in tracked `assets`.
+- User-managed source artwork lives in ignored `OriginArtWork`; it does not enter
+  Git until the user decides on Git, Git LFS, or another asset strategy.
+- English authoritative Markdown documents have `.zh-CN.md` reading copies. The
+  unsuffixed document always controls; documents already in Chinese need no
+  duplicate.
 - V0.31 remains a source integration checkpoint, not a tag, binary release, or
   GitHub Release. V0.32 requires explicit user acceptance.
 
@@ -49,6 +55,7 @@ model.
 | DOC-03 | passed | Establish Product, Development, Quality, Plan, CHANGELOG, Reference, and Archive ownership. |
 | DOC-04 | passed | Remove active `Plan`/root `DEVELOP` references and repair source evidence paths. |
 | DOC-05 | passed | Run structure, link, Release test/build, vulnerability, Git-scope, and remote gates. |
+| DOC-06 | passed | Add non-authoritative Chinese reading copies, track `assets`, and ignore `OriginArtWork`. |
 
 ## V0.32 manual acceptance carry-over
 
@@ -115,3 +122,8 @@ Only explicit user confirmation may establish V0.32.
 - Manual GUI, tray, UAC, D: tool, and data-location gates remain unverified.
 - Forward correction commit `236eb3f` was pushed to `origin/main` on 2026-08-10
   after confirming that the previous remote head was its ancestor.
+- Documentation/resource follow-up: all 8 English authoritative document pairs
+  passed link and authority checks; `assets` contains 35 tracked files
+  totaling 15,189,113 bytes; `OriginArtWork` is ignored; the full Release suite
+  passed 458/458 with 0 failures, and the build completed with 0 warnings and
+  0 errors.

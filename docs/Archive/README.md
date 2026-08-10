@@ -1,5 +1,7 @@
 # WinPool Document Archive
 
+[English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
+
 Archive content records historical state and does not define current requirements.
 The active source of current work is [`../Plan.md`](../Plan.md).
 
