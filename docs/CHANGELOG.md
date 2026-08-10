@@ -12,7 +12,7 @@ No unreleased changes are recorded after the V0.32 checkpoint.
 ## V0.32 source checkpoint — 2026-08-10
 
 - The user explicitly assigned V0.32 after reviewing the V0.31 restructuring.
-- Updated the shared display and technical versions to V0.32 / 0.3.2.0.
+- Set the single project version to V0.32 under the user-defined `Va.bc` rule.
 - Added non-authoritative `.zh-CN.md` reading copies for English project
   documentation; unsuffixed documents remain controlling.
 - Added software-consumed `assets` to Git control and excluded user-managed
@@ -20,7 +20,10 @@ No unreleased changes are recorded after the V0.32 checkpoint.
 - Preserved all 11 outstanding native/manual cases as `unverified`; the version
   assignment is not evidence that those cases passed.
 - Revalidated all 458 Release tests and the nested four-process V0.32 staging;
-  every staged executable reports V0.32 / 0.3.2.0.
+  every staged executable reports project version V0.32.
+- Removed the incorrectly introduced `TechnicalVersion` concept. Numeric fields
+  required by .NET/Windows are derived build metadata, not another project
+  version.
 
 V0.32 is a source checkpoint, not a tag, binary release, or GitHub Release.
 Commits: `dc5e263`, `7b7a798` (pushed to `origin/main`).
@@ -39,7 +42,8 @@ This correction is not a tag, binary release, or GitHub Release.
 
 ## V0.31 source integration checkpoint — 2026-08-10
 
-- Added the shared V0.31/0.3.1.0 version source.
+- Added a shared V0.31 version source. That commit also incorrectly named numeric
+  build metadata as a technical version; V0.32 later corrected the semantics.
 - Added reproducible four-process publish staging and real-layout verification.
 - Updated source and automatic architecture checks.
 - Commits: `6cf68e3`, `8d7fb25`.

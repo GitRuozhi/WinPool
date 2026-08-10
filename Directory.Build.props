@@ -1,13 +1,17 @@
 <Project>
   <PropertyGroup>
-    <!-- V0.3 is the architecture line; V0.32 is its current accepted checkpoint. -->
-    <WinPoolArchitectureVersion>V0.3</WinPoolArchitectureVersion>
-    <WinPoolDisplayVersion>V0.32</WinPoolDisplayVersion>
-    <WinPoolTechnicalVersion>0.3.2.0</WinPoolTechnicalVersion>
-    <Version>$(WinPoolTechnicalVersion)</Version>
-    <AssemblyVersion>0.3.0.0</AssemblyVersion>
-    <FileVersion>$(WinPoolTechnicalVersion)</FileVersion>
-    <InformationalVersion>$(WinPoolDisplayVersion)</InformationalVersion>
+    <!-- Va.bc: a=major, b=minor, c=one-digit iteration. V0.32 is the only project version. -->
+    <WinPoolVersionMajor>0</WinPoolVersionMajor>
+    <WinPoolVersionMinor>3</WinPoolVersionMinor>
+    <WinPoolVersionIteration>2</WinPoolVersionIteration>
+    <WinPoolArchitectureVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)</WinPoolArchitectureVersion>
+    <WinPoolVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)$(WinPoolVersionIteration)</WinPoolVersion>
+
+    <!-- Required numeric .NET/Windows fields are mechanical build metadata, not separate project versions. -->
+    <Version>$(WinPoolVersionMajor).$(WinPoolVersionMinor).$(WinPoolVersionIteration)</Version>
+    <AssemblyVersion>$(WinPoolVersionMajor).$(WinPoolVersionMinor).0.0</AssemblyVersion>
+    <FileVersion>$(WinPoolVersionMajor).$(WinPoolVersionMinor).$(WinPoolVersionIteration).0</FileVersion>
+    <InformationalVersion>$(WinPoolVersion)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>

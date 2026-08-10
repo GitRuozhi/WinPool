@@ -7,7 +7,7 @@
 
 ## 技术与部署
 
-WinPool 使用 C#、WinUI 3、.NET 10、Windows App SDK，以及已有充分理由时使用的 CommunityToolkit 组件。部署目标为无打包、自包含的 Windows x64 应用。SDK 固定在 `global.json`；共享产品和技术版本定义在 `Directory.Build.props`。
+WinPool 使用 C#、WinUI 3、.NET 10、Windows App SDK，以及已有充分理由时使用的 CommunityToolkit 组件。部署目标为无打包、自包含的 Windows x64 应用。SDK 固定在 `global.json`；唯一项目版本定义在 `Directory.Build.props`。
 
 产品包含四个进程：
 
@@ -117,7 +117,7 @@ Staging 不得包含重复子进程可执行文件、脚本、艺术源文件、
 
 架构和路线图通常只写到 `Va.b`。迭代编号根据实际工作分配且不能超过 9。普通迭代在本地提交；远端推送、tag 和 release 遵循 `AGENTS.md` 与活动 Plan 的授权规则。
 
-程序集、文件、数据库 schema、算法和 IPC 版本可在兼容性需要时独立演进。
+`Va.bc` 是唯一项目版本体系。`Directory.Build.props` 根据 `a`、`b`、`c` 机械生成 .NET 和 Windows 必需的数字字段；这些字段只是编译元数据，不具有独立版本含义。数据库 schema 修订号、算法 ID 和 IPC 兼容标识不会重新定义项目版本。
 
 ## 文档生命周期
 

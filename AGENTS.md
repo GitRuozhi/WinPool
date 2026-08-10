@@ -86,6 +86,9 @@ protected paths before editing.
 
 - Product versions use `Va.bc`: `a` is major, `b` is minor, and `c` is the
   one-digit iteration inside that minor version.
+- `Va.bc` is the only project-version system. Required numeric .NET/Windows
+  fields are mechanically derived build metadata and must never be named or
+  documented as another project version.
 - Architecture and roadmap documents normally specify only `Va.b`.
 - At `c=8` or `c=9`, remind the developer to control scope. Never create
   `c=10`; reduce scope, combine work, or advance the minor version.

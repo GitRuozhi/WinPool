@@ -11,10 +11,7 @@ public static class ProductInformation
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? throw new InvalidOperationException("WinPool display version metadata is unavailable.");
 
-    public static string UserAgent =>
-        $"{Name}/{typeof(ProductInformation).Assembly
-            .GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version
-        ?? throw new InvalidOperationException("WinPool file version metadata is unavailable.")}";
+    public static string UserAgent => $"{Name}/{Version}";
 
     public static readonly Uri WebsiteUri = new("https://github.com/GitRuozhi/WinPool");
 

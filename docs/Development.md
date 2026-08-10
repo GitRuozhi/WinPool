@@ -6,8 +6,8 @@
 
 WinPool uses C#, WinUI 3, .NET 10, Windows App SDK, CommunityToolkit components
 where already justified, and an unpackaged self-contained Windows x64 deployment.
-The SDK is pinned in `global.json`; shared product and technical versions are
-defined in `Directory.Build.props`.
+The SDK is pinned in `global.json`; the single project version is defined in
+`Directory.Build.props`.
 
 The product consists of four processes:
 
@@ -143,8 +143,11 @@ assigned from actual work and cannot exceed 9. A normal iteration is committed
 locally; remote pushes, tags, and releases require the authorization rules in
 `AGENTS.md` and the active Plan.
 
-Assembly, file, database schema, algorithm, and IPC versions may evolve
-independently when compatibility requires it.
+`Va.bc` is the only project-version system. `Directory.Build.props` derives the
+numeric fields required by .NET and Windows mechanically from `a`, `b`, and `c`;
+those fields are build metadata with no independent version meaning. Database
+schema revisions, algorithm IDs, and IPC compatibility identifiers do not
+redefine the project version.
 
 ## Documentation lifecycle
 

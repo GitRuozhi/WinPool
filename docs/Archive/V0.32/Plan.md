@@ -129,8 +129,7 @@ Release.
   reported for any solution project.
 - A fresh V0.32 four-process staging completed at
   `Rubbish/20260810_winpool_v032_staging/Program/WinPool`; App, Agent,
-  TestWorker, and Broker each report product version `V0.32` and file version
-  `0.3.2.0`.
+  TestWorker, and Broker each report project version `V0.32`.
 - Manual GUI, tray, UAC, D: tool, and data-location gates remain unverified.
 - Forward correction commit `236eb3f` was pushed to `origin/main` on 2026-08-10
   after confirming that the previous remote head was its ancestor.
@@ -145,3 +144,15 @@ Release.
   dependency was reported.
 - Git completion: resource/document commit `dc5e263` and V0.32 checkpoint commit
   `7b7a798` were pushed to `origin/main` by normal fast-forward on 2026-08-10.
+
+## Version-semantics correction
+
+Annotation on 2026-08-10: `V0.32` is the only project version, following
+`Va.bc` with `a=0`, `b=3`, and `c=2`. The previously named technical-version
+field was invalid. Numeric .NET/Windows fields are mechanically derived build
+metadata and have no independent project-version meaning.
+
+The corrected model was revalidated with 458/458 Release tests, a 0-warning and
+0-error Release build, and a fresh four-process staging at
+`Rubbish/20260810_winpool_v032_version_semantics/Program/WinPool`. All four
+executables report the sole project version `V0.32`.

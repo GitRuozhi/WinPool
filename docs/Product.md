@@ -50,8 +50,9 @@ V0.3 retains the accepted V0.13 visual baseline and the V0.2 multi-process rewri
 - one one-shot elevated Broker;
 - typed named-pipe IPC and deny-by-default execution policy.
 
-Architecture, database schema, algorithm, and IPC versions remain independent of
-the product-facing source checkpoint.
+The project version follows `Va.bc` exclusively. Architecture milestones stop at
+`Va.b`; database schema revisions, algorithm IDs, and IPC compatibility
+identifiers are internal contracts and do not form additional project versions.
 
 ## Roadmap
 

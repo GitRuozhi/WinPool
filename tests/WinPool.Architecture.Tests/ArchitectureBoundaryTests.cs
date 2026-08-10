@@ -448,12 +448,15 @@ public sealed class ArchitectureBoundaryTests
         var settingsPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
 
-        Assert.Contains("<WinPoolArchitectureVersion>V0.3</WinPoolArchitectureVersion>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolDisplayVersion>V0.32</WinPoolDisplayVersion>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolTechnicalVersion>0.3.2.0</WinPoolTechnicalVersion>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<InformationalVersion>$(WinPoolDisplayVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionMinor>3</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>2</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)$(WinPoolVersionIteration)</WinPoolVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
         Assert.Contains("AssemblyInformationalVersionAttribute", productInformation, StringComparison.Ordinal);
-        Assert.Contains("AssemblyFileVersionAttribute", productInformation, StringComparison.Ordinal);
+        Assert.Contains("$\"{Name}/{Version}\"", productInformation, StringComparison.Ordinal);
+        Assert.DoesNotContain("AssemblyFileVersionAttribute", productInformation, StringComparison.Ordinal);
         Assert.DoesNotContain("V0.21", productInformation, StringComparison.Ordinal);
         Assert.Contains(
             "AboutVersionValue.Text = ProductInformation.Version;",
