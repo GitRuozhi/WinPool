@@ -10,7 +10,7 @@ confirmed_by_user: 2026-08-10
 code_gate: passed
 native_integration_gate: passed
 manual_gate: unverified
-remote_gate: pending
+remote_gate: passed
 ---
 
 # WinPool V0.31 documentation architecture correction
@@ -48,7 +48,7 @@ model.
 | DOC-02 | passed | Move the 16-file V0.2 archive to `docs/Archive/V0.2` with byte and SHA-256 equality. |
 | DOC-03 | passed | Establish Product, Development, Quality, Plan, CHANGELOG, Reference, and Archive ownership. |
 | DOC-04 | passed | Remove active `Plan`/root `DEVELOP` references and repair source evidence paths. |
-| DOC-05 | in_progress | Run structure, link, Release test/build, vulnerability, Git-scope, and remote gates. |
+| DOC-05 | passed | Run structure, link, Release test/build, vulnerability, Git-scope, and remote gates. |
 
 ## V0.32 manual acceptance carry-over
 
@@ -113,5 +113,5 @@ Only explicit user confirmation may establish V0.32.
 - Existing V0.31 four-process native staging evidence remains valid because this
   correction does not change publish projects or runtime behavior.
 - Manual GUI, tray, UAC, D: tool, and data-location gates remain unverified.
-- Remote completion remains pending until both forward correction commits are
-  confirmed on `origin/main`.
+- Forward correction commit `236eb3f` was pushed to `origin/main` on 2026-08-10
+  after confirming that the previous remote head was its ancestor.

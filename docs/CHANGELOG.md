@@ -13,6 +13,7 @@ This file records results that actually occurred. Planned work remains in
 - Preserved the incorrect V0.31 plan as superseded audit history rather than
   rewriting or force-pushing Git history.
 - Kept V0.32 manual acceptance unverified.
+- Forward correction commit: `236eb3f` (pushed to `origin/main`).
 
 This correction is not a tag, binary release, or GitHub Release.
 
