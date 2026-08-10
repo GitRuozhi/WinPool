@@ -23,6 +23,7 @@ No unreleased changes are recorded after the V0.32 checkpoint.
   every staged executable reports V0.32 / 0.3.2.0.
 
 V0.32 is a source checkpoint, not a tag, binary release, or GitHub Release.
+Commits: `dc5e263`, `7b7a798` (pushed to `origin/main`).
 
 ### V0.31 documentation-architecture correction — 2026-08-10
 

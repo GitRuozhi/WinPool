@@ -10,7 +10,7 @@ confirmed_by_user: 2026-08-10
 code_gate: passed
 native_integration_gate: passed
 manual_gate: unverified
-remote_gate: pending
+remote_gate: passed
 accepted_by_user: 2026-08-10
 ---
 
@@ -143,3 +143,5 @@ Release.
   Release suite passed 458/458 with 0 failures and 0 skipped, the Release build
   completed with 0 warnings and 0 errors, and no vulnerable direct or transitive
   dependency was reported.
+- Git completion: resource/document commit `dc5e263` and V0.32 checkpoint commit
+  `7b7a798` were pushed to `origin/main` by normal fast-forward on 2026-08-10.

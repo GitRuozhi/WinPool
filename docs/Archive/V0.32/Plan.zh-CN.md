@@ -10,7 +10,7 @@ confirmed_by_user: 2026-08-10
 code_gate: passed
 native_integration_gate: passed
 manual_gate: unverified
-remote_gate: pending
+remote_gate: passed
 accepted_by_user: 2026-08-10
 authority: docs/Archive/V0.32/Plan.md
 ---
@@ -114,3 +114,4 @@ V0.32 仍是源码检查点，不创建 tag、二进制发布或 GitHub Release�
 - 前向修正提交 `236eb3f` 已于 2026-08-10 推送到 `origin/main`，推送前确认此前远端 HEAD 是其祖先。
 - 文档/资源补充：8 对英文权威文档与中文阅读副本全部通过链接和权威声明检查；`assets` 有 35 个受 Git 控制的文件，共 15,189,113 字节；`OriginArtWork` 已忽略；完整 Release 测试 458/458 通过、0 失败，构建 0 警告、0 错误。
 - V0.32 复验：37 份 Markdown 相对链接全部通过，完整 Release 测试 458/458 通过、0 失败、0 跳过，Release 构建 0 警告、0 错误，直接和传递依赖均未报告已知漏洞。
+- Git 完成证据：资源/文档提交 `dc5e263` 和 V0.32 检查点提交 `7b7a798` 已于 2026-08-10 通过正常快进推送到 `origin/main`。
