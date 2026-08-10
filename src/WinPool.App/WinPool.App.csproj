@@ -37,9 +37,6 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\WinPool.Agent\WinPool.Agent.csproj"
-                      ReferenceOutputAssembly="false"
-                      PrivateAssets="all" />
     <ProjectReference Include="..\WinPool.Agent.Client\WinPool.Agent.Client.csproj" />
     <ProjectReference Include="..\WinPool.Core\WinPool.Core.csproj" />
     <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
@@ -69,7 +66,7 @@
   <Target Name="PublishAgentRuntimeBesideApp" AfterTargets="Publish">
     <MSBuild Projects="..\WinPool.Agent\WinPool.Agent.csproj"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)Agent\" />
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)Agent\', '$(MSBuildProjectDirectory)'))" />
   </Target>
 
   <!-- V0.1 favors reliable JSON serialization over trimmed output size. -->

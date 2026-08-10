@@ -2,11 +2,11 @@
 
 ## Development status
 
-WinPool is currently in the **V0.2 one-time architecture rewrite and integration stage**. The accepted V0.13 appearance remains frozen while implementation errors and frontend architecture may be corrected.
+WinPool V0.31 is the current source integration checkpoint on the **V0.3** architecture line. It contains the merged V0.2 one-time architecture rewrite and the V0.31 documentation, directory, version-source, and four-process staging refactor. It is not a binary release or GitHub Release; V0.32 requires user-confirmed manual acceptance. The accepted V0.13 appearance remains the visual baseline while acceptance defects and frontend architecture may be corrected.
 
-The product-facing version after the architecture merge is **V0.21**. V0.2 remains the architecture-plan name; schema, algorithm, and IPC versions are not derived from the product version.
+V0.3 is the architecture-plan name; V0.31 is its current integration checkpoint. Schema, algorithm, and IPC versions remain independent. Outstanding work is tracked as V0.32 manual acceptance and later debt, not as an unimplemented architecture cutover.
 
-The current solution has stable internal Application contracts, Agent-owned SQLite persistence, typed named-pipe IPC, a visible per-user tray process, an isolated TestWorker, and a one-shot elevated Broker. Real storage-structure mutation remains denied; simulation, read-only inventory, registered-directory testing, monitoring, and explicitly reviewed system-support actions form the V0.2 implementation boundary.
+The current solution has stable internal Application contracts, Agent-owned SQLite persistence, typed named-pipe IPC, a visible per-user tray process, an isolated TestWorker, and a one-shot elevated Broker. Real storage-structure mutation remains denied; simulation, read-only inventory, registered-directory testing, monitoring, and explicitly reviewed system-support actions form the V0.3 implementation boundary.
 
 ## Product goal
 
@@ -38,7 +38,12 @@ The SDK version used by the repository is pinned in `global.json`.
 ## Repository structure
 
 ```text
+Directory.Build.props             Single V0.31 display/technical version source
 WinPool.slnx
+Plan/                             Current V0.3 plan and non-authoritative references
+  Reference/                      Non-authoritative architecture-management reference
+local-assets/                     Ignored developer-local art/source material
+build/                            Reproducible publish/staging command and validation
 src/
   WinPool.App/                    WinUI shell, pages, controls, and presentation adapters
   WinPool.Application/            Stable internal contracts and use-case policies
@@ -59,7 +64,6 @@ workers/
   WinPool.ElevatedBroker/         One-shot typed R3 execution process
 tests/
   WinPool.*.Tests/                Per-layer and architecture regression suites
-Ref/                              Read-only reference material (KS/StatSys collector and capture)
 ```
 
 The repository root intentionally contains only four Markdown documents:
@@ -71,7 +75,12 @@ AGENTS.md
 DEVELOP.md
 ```
 
-Historical documents are stored under the parent project's `Old` directory and are not active constraints.
+Historical documents are stored under the parent project's `Old\Program\WinPool` directory and are not active constraints.
+
+`local-assets` holds developer-local visual source material and is intentionally
+ignored. It is neither generated output nor a build input: tracked code must not
+depend on it. A future runtime-art or Git LFS decision requires explicit user
+approval and a reproducible distribution design.
 
 ## Architecture
 
@@ -87,7 +96,7 @@ are short-lived, typed children rather than alternate persistence owners.
 
 - application startup and the main window;
 - title-bar navigation and execution-mode presentation;
-- Manage and Settings pages;
+- Manage, Edit, Test, Monitor, Development, and Settings pages;
 - frontend view models;
 - localization and appearance behavior;
 - storage-topology controls and layout panels;
@@ -328,7 +337,7 @@ Use simulation when:
 - a frontend workflow has no backend yet;
 - testing the real system would introduce risk or unnecessary coupling.
 
-Backend work should be limited to the smallest change needed for the current frontend task. Do not implement complete command execution, monitoring infrastructure, Dite integration, databases, services, or plug-in systems merely because the frontend shows their intended location.
+Backend work should stay within the current internal contracts and approved acceptance scope. The Agent, SQLite persistence, monitoring, typed external-tool adapters, TestWorker, and one-shot Broker already exist; do not add a public SDK, general service, free-form command channel, bundled third-party engine, or real storage-structure mutation merely because the frontend shows a future capability.
 
 Real mode currently demonstrates execution-mode and privilege UX. It does not authorize or enable storage mutation.
 
@@ -340,19 +349,33 @@ resolve simulated identities to local storage commands.
 From the WinPool repository root:
 
 ```powershell
-dotnet test WinPool.slnx -c Release
+dotnet test WinPool.slnx -c Release --no-restore --maxcpucount:1
 dotnet build src\WinPool.App\WinPool.App.csproj -c Release -p:Platform=x64
 ```
 
-To produce the unpackaged self-contained build:
+To publish and validate the self-contained four-process staging tree, pass a new,
+empty path outside the repository. The script refuses to overwrite an existing path:
 
 ```powershell
-dotnet publish src\WinPool.App\WinPool.App.csproj `
-  -c Release `
-  -p:Platform=x64 `
-  -r win-x64 `
-  --self-contained true
+.\build\Publish-Staged.ps1 `
+  -OutputPath ..\..\Rubbish\20260810_winpool_v031_staging\Program\WinPool `
+  -Configuration Release
 ```
+
+The command publishes the App and its child projects into one staging root and
+validates this exact runtime layout:
+
+```text
+<stage>/WinPool.App.exe
+<stage>/Agent/WinPool.Agent.exe
+<stage>/Agent/TestWorker/WinPool.TestWorker.exe
+<stage>/Agent/Broker/WinPool.ElevatedBroker.exe
+```
+
+The staging check rejects duplicate child executables at the root and rejects
+scripts, local assets, SQLite files, test results, and known external tools. Its
+output is verification evidence only: do not commit it, package it, tag it, or
+create a release from it during V0.31.
 
 For frontend changes, build success alone is not sufficient. Launch the generated `WinPool.App.exe` and confirm:
 
@@ -366,7 +389,12 @@ Use simulation for normal frontend verification. Run real inventory only when th
 
 ## Testing policy
 
-Current tests cover pure Core behavior and the fixed read-only Windows inventory boundary.
+The V0.31 automatic suite covers Core, Domain, Application,
+Execution, Agent/IPC, SQLite persistence, inventory, monitoring, external-tool
+planning/adapters, ToolManagement, TestWorker, and architecture boundaries. These
+tests cover the deny-by-default and process-boundary design, but they do not
+replace the manual GUI/UAC/external-tool/lifecycle matrix in
+`Plan/16_V0.3文档与目录重构计划.md`.
 
 New frontend work should favor:
 
@@ -382,7 +410,7 @@ Hardware-specific inventory assertions should be separated from portable unit te
 
 ## Near-term priorities
 
-1. Refine requirements and remove ambiguity from the four authoritative root documents.
+1. Complete the V0.32 manual acceptance matrix recorded in `Plan/16_V0.3文档与目录重构计划.md`.
 2. Stabilize frontend information architecture and visual behavior.
 3. Improve responsive, bilingual, keyboard, and high-contrast behavior.
 4. Expand simulation scenarios to cover representative storage hierarchies and abnormal states.

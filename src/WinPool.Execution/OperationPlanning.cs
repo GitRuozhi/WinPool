@@ -39,7 +39,7 @@ public sealed class DefaultOperationPlanner(IOperationInventoryVersionSource inv
     : IOperationPlanner
 {
     public static readonly AlgorithmIdentity Algorithm =
-        new("ALGO-EXEC-PLAN-001", "1.0.0", AlgorithmConfidence.Derived, "Plan/03_执行器端口与安全模型.md");
+        new("ALGO-EXEC-PLAN-001", "1.0.0", AlgorithmConfidence.Derived, "Plan/16_V0.3文档与目录重构计划.md");
 
     public async Task<OperationPlan> BuildAsync(
         OperationRequest request,
@@ -138,7 +138,7 @@ public sealed class DefaultOperationPlanner(IOperationInventoryVersionSource inv
 
         if (OperationSecurityCatalog.IsStorageStructureMutation(request.Intent))
         {
-            preconditions.Add("A production local-storage mutation executor is intentionally unavailable in V0.21.");
+            preconditions.Add("A production local-storage mutation executor is intentionally unavailable in the current WinPool release.");
         }
 
         return preconditions;

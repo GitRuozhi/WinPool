@@ -864,7 +864,7 @@ public sealed partial class SettingsPage : Page
         {
             Timeout = TimeSpan.FromMinutes(5)
         };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WinPool/0.21");
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(ProductInformation.UserAgent);
         var dataRoot = StorageDataLocations.CurrentRoot;
         var installer = new ControlledPortableToolInstaller(
             _toolCatalog,
@@ -964,7 +964,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WinPool/0.21");
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(ProductInformation.UserAgent);
         var installer = new ControlledMsiToolInstaller(
             _toolCatalog,
             new HttpToolPackageDownloader(httpClient),

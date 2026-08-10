@@ -95,7 +95,7 @@ public sealed class LocalStorageMutationExecutor(TimeProvider? timeProvider = nu
             ExecutionEventKind.Rejected,
             _timeProvider.GetUtcNow(),
             "executor.local-storage-mutation-unavailable",
-            "WinPool V0.21 does not implement real local storage-structure mutation.");
+            "WinPool does not implement real local storage-structure mutation.");
 
         await Task.CompletedTask;
     }

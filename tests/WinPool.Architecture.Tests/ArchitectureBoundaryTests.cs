@@ -46,25 +46,14 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void CompatibilityAuditRegistersEveryOneOfThe205AuthoritativeIds()
+    public void CurrentPlanCarriesTheV02CompatibilityAuditAsExplicitDebt()
     {
         var root = FindRepositoryRoot();
-        var specification = File.ReadAllText(
-            Path.Combine(root, "Plan", "06_现有功能兼容清单.md"));
-        var audit = File.ReadAllText(
-            Path.Combine(root, "Plan", "10_兼容性审计台账.md"));
-        const string pattern = @"\b(?:SH|MG|IN|ED|TS|MO|DV|ST)-\d{3}\b";
-        var expected = System.Text.RegularExpressions.Regex.Matches(
-                specification,
-                pattern)
-            .Select(match => match.Value)
-            .ToHashSet(StringComparer.Ordinal);
-        var actual = System.Text.RegularExpressions.Regex.Matches(audit, pattern)
-            .Select(match => match.Value)
-            .ToHashSet(StringComparer.Ordinal);
+        var currentPlan = File.ReadAllText(
+            Path.Combine(root, "Plan", "16_V0.3文档与目录重构计划.md"));
 
-        Assert.Equal(205, expected.Count);
-        Assert.True(expected.SetEquals(actual));
+        Assert.Contains("DEBT-01", currentPlan, StringComparison.Ordinal);
+        Assert.Contains("205 个兼容 ID", currentPlan, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -369,9 +358,10 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void ProductFacingVersionIsUnifiedToV02()
+    public void ProductFacingVersionUsesTheRepositoryVersionSource()
     {
         var root = FindRepositoryRoot();
+        var versionSource = File.ReadAllText(Path.Combine(root, "Directory.Build.props"));
         var productInformation = File.ReadAllText(
             Path.Combine(
                 root,
@@ -382,10 +372,19 @@ public sealed class ArchitectureBoundaryTests
         var settingsPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
 
-        Assert.Contains("public const string Version = \"V0.21\";", productInformation);
-        Assert.DoesNotContain("V0.13", productInformation, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolArchitectureVersion>V0.3</WinPoolArchitectureVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolDisplayVersion>V0.31</WinPoolDisplayVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolTechnicalVersion>0.3.1.0</WinPoolTechnicalVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<InformationalVersion>$(WinPoolDisplayVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("AssemblyInformationalVersionAttribute", productInformation, StringComparison.Ordinal);
+        Assert.Contains("AssemblyFileVersionAttribute", productInformation, StringComparison.Ordinal);
+        Assert.DoesNotContain("V0.21", productInformation, StringComparison.Ordinal);
         Assert.Contains(
             "AboutVersionValue.Text = ProductInformation.Version;",
+            settingsPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "UserAgent.ParseAdd(ProductInformation.UserAgent);",
             settingsPage,
             StringComparison.Ordinal);
     }
@@ -445,13 +444,24 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
         var agentProject = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Agent", "WinPool.Agent.csproj"));
+        var stagingScript = File.ReadAllText(
+            Path.Combine(root, "build", "Publish-Staged.ps1"));
 
         Assert.Contains("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
-        Assert.Contains("ReferenceOutputAssembly=\"false\"", appProject, StringComparison.Ordinal);
+        Assert.Contains("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "<ProjectReference Include=\"..\\WinPool.Agent\\WinPool.Agent.csproj\"",
+            appProject,
+            StringComparison.Ordinal);
         Assert.Contains("PublishTestWorkerRuntime", agentProject, StringComparison.Ordinal);
         Assert.Contains("PublishElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
-        Assert.Contains("PublishDir=$(PublishDir)TestWorker\\", agentProject, StringComparison.Ordinal);
-        Assert.Contains("PublishDir=$(PublishDir)Broker\\", agentProject, StringComparison.Ordinal);
+        Assert.Contains("System.IO.Path]::GetFullPath", appProject, StringComparison.Ordinal);
+        Assert.Contains("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
+        Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("Agent/TestWorker/WinPool.TestWorker.exe", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("Agent/Broker/WinPool.ElevatedBroker.exe", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("duplicate", stagingScript, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

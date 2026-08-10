@@ -18,17 +18,14 @@
     <ProjectReference Include="..\WinPool.Testing\WinPool.Testing.csproj" />
     <ProjectReference Include="..\WinPool.Testing.Tools\WinPool.Testing.Tools.csproj" />
     <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
-    <ProjectReference Include="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"
-                      ReferenceOutputAssembly="false"
-                      PrivateAssets="all" />
-    <ProjectReference Include="..\..\workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj"
-                      ReferenceOutputAssembly="false"
-                      PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\WinPool.App\Assets\AppIcon.ico" Link="Assets\AppIcon.ico" />
   </ItemGroup>
   <Target Name="CopyTestWorkerRuntime" AfterTargets="Build">
+    <MSBuild Projects="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
     <ItemGroup>
       <TestWorkerRuntimeFiles Include="..\..\workers\WinPool.TestWorker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
                               Exclude="..\..\workers\WinPool.TestWorker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
@@ -38,6 +35,9 @@
           SkipUnchangedFiles="true" />
   </Target>
   <Target Name="CopyElevatedBrokerRuntime" AfterTargets="Build">
+    <MSBuild Projects="..\..\workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
     <ItemGroup>
       <ElevatedBrokerRuntimeFiles Include="..\..\workers\WinPool.ElevatedBroker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
                                   Exclude="..\..\workers\WinPool.ElevatedBroker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
@@ -49,11 +49,11 @@
   <Target Name="PublishTestWorkerRuntime" AfterTargets="Publish">
     <MSBuild Projects="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)TestWorker\" />
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)TestWorker\', '$(MSBuildProjectDirectory)'))" />
   </Target>
   <Target Name="PublishElevatedBrokerRuntime" AfterTargets="Publish">
     <MSBuild Projects="..\..\workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$(PublishDir)Broker\" />
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)Broker\', '$(MSBuildProjectDirectory)'))" />
   </Target>
 </Project>

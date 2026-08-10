@@ -14,13 +14,13 @@ WinPool is designed to:
 
 ## Current development stage
 
-WinPool is currently in the **V0.2 one-time architecture rewrite and integration stage**. The accepted V0.13 appearance remains the visual baseline, while frontend fixes and refactoring are allowed.
+WinPool V0.31 is the current source integration checkpoint for the **V0.3** architecture line. It contains the merged V0.2 one-time architecture rewrite and the V0.31 documentation, directory, version, and four-process staging refactor. It is not a binary release or GitHub Release; V0.32 remains the user-confirmed manual acceptance checkpoint. The accepted V0.13 appearance remains the visual baseline while acceptance fixes and refactoring continue.
 
-The merged architecture is now presented as product version **V0.21**. V0.2 remains the name of the approved rewrite plan and architecture milestone; database schema, algorithm, and IPC versions remain independent.
+The remaining work is release hardening rather than an unstarted rewrite: full manual GUI/UAC/external-tool/lifecycle acceptance, long-running validation, data-location round trips, and reproducible packaging still need completion. Database schema, algorithm, and IPC versions remain independent of the product version.
 
-The repository contains a runnable WinUI 3 application plus separate tray Agent, TestWorker, and one-shot elevated Broker processes. Stable internal Application contracts, typed named-pipe IPC, SQLite persistence, testing, monitoring, simulation, and deny-by-default execution boundaries are being integrated without freezing a public API.
+The repository contains a runnable WinUI 3 application plus separate tray Agent, TestWorker, and one-shot elevated Broker processes. Stable internal Application contracts, typed named-pipe IPC, SQLite persistence, testing, monitoring, simulation, and deny-by-default execution boundaries are implemented without freezing a public API.
 
-The draft now models one read-only local computer and multiple persistent simulated
+The application models one read-only local computer and multiple persistent simulated
 storage systems. A captured KS/StatSys hardware report supplies the first simulation,
 and WinPool can export a complete system document or import it as another editable
 simulation.
@@ -70,7 +70,7 @@ Future creation and management workflows should expose the complete relevant par
 
 ### Testing and monitoring
 
-WinPool brings storage testing, health monitoring, performance observation, result comparison, and evidence export into the same product. V0.2 integration is implemented in substantial part; real-tool, long-duration, UAC, recovery, and full GUI acceptance testing remains in progress.
+WinPool brings storage testing, health monitoring, performance observation, result comparison, and evidence export into the same product. The V0.3 integration work is complete only after its stated automatic gates; real-tool, long-duration, UAC, recovery, and full GUI acceptance remain V0.32 human gates.
 
 ### Developer and AI integration
 
@@ -115,7 +115,7 @@ Equivalent Windows 11 testing has not yet been completed.
 - [AGENTS.md](AGENTS.md): operational constraints for AI agents.
 - [DEVELOP.md](DEVELOP.md): developer-facing architecture and workflow.
 
-Historical product and implementation documents are archived outside this repository directory under the parent project's `Old` tree. They are retained for reference but no longer constrain current development.
+Historical product and implementation documents are archived outside this repository directory under `Old\Program\WinPool`. They are retained for reference but no longer constrain current development. The current plan and its non-authoritative management reference are in [Plan/](Plan/).
 
 ## Rights
 
