@@ -65,11 +65,13 @@ internal static class Program
             var monitoring = new MonitoringSessionCoordinator(
                 new PdhDiskMonitorSource(),
                 new SqliteMonitorSessionPersistenceFactory(store, writeOwner));
+            var toolPathConfiguration = new JsonToolPathConfiguration(
+                Path.Combine(dataRoot, "tool-paths.json"));
+            var toolCatalog = new ToolCatalog();
             var toolRegistry = new ExternalToolRegistry(
-                new ToolCatalog(),
+                toolCatalog,
                 new ToolPathDiscovery(
-                    new JsonToolPathConfiguration(
-                        Path.Combine(dataRoot, "tool-paths.json")),
+                    toolPathConfiguration,
                     new EnvironmentToolSearchPath()),
                 new WindowsToolVersionProbe(),
                 new Sha256ToolFileHasher());
@@ -169,6 +171,10 @@ internal static class Program
                 new MonitorCsvExporter(store),
                 processRegistry,
                 toolRegistry,
+                new ToolPathConfigurationCoordinator(
+                    toolCatalog,
+                    toolPathConfiguration,
+                    toolRegistry),
                 new ExternalToolStateRepository(store, writeOwner),
                 workerProcesses,
                 testRuns,

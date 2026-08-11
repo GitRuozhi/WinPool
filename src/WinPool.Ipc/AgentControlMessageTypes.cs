@@ -47,6 +47,7 @@ public static class AgentControlMessageTypes
     public const string LoadManageInventory =
         "agent.request.load_manage_inventory";
     public const string DetectTool = "agent.request.detect_tool";
+    public const string ConfigureToolPath = "agent.request.configure_tool_path";
     public const string InstallMsiTool = "agent.request.install_msi_tool";
     public const string ExportMonitorCsv = "agent.request.export_monitor_csv";
     public const string ReviewSystemSupport = "agent.request.review_system_support";

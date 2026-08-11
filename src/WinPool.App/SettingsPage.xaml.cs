@@ -28,10 +28,7 @@ public sealed partial class SettingsPage : Page
     private readonly AgentStartupRegistration _agentStartup = new();
     private readonly Dictionary<ToolId, TextBlock> _toolStatuses = [];
     private readonly JsonToolPathConfiguration _toolPaths = new(
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinPool",
-            "tool-paths.json"));
+        Path.Combine(StorageDataLocations.CurrentRoot, "tool-paths.json"));
 
     public SettingsPage()
     {
@@ -733,11 +730,7 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        await _toolPaths.SetCustomExecutablePathAsync(
-            toolId,
-            file.Path,
-            CancellationToken.None);
-        await DetectToolAsync(toolId);
+        await ConfigureToolPathAsync(toolId, file.Path);
     }
 
     private async void ClearToolPath_Click(object sender, RoutedEventArgs e)
@@ -747,10 +740,37 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        await _toolPaths.SetCustomExecutablePathAsync(
-            toolId,
-            null,
-            CancellationToken.None);
+        await ConfigureToolPathAsync(toolId, null);
+    }
+
+    private async Task ConfigureToolPathAsync(ToolId toolId, string? path)
+    {
+        if (ViewModel.AgentConnection is not null)
+        {
+            var response = await ViewModel.AgentConnection.SendAsync(
+                new ConfigureAgentToolPathRequest(
+                    toolId,
+                    path,
+                    CorrelationId.New()),
+                CancellationToken.None);
+            if (!response.IsSuccess)
+            {
+                await ShowToolDialogAsync(
+                    response.Messages.FirstOrDefault()?.Code
+                    ?? "agent.tool.configuration_failed");
+                return;
+            }
+        }
+        else
+        {
+            // Explicit no-Agent development fallback only. It still targets the
+            // currently active data root rather than a fixed Standard-mode copy.
+            await _toolPaths.SetCustomExecutablePathAsync(
+                toolId,
+                path,
+                CancellationToken.None);
+        }
+
         await DetectToolAsync(toolId);
     }
 
@@ -872,7 +892,8 @@ public sealed partial class SettingsPage : Page
             new WindowsToolExecutableTrustVerifier(),
             _toolPaths,
             Path.Combine(dataRoot, "tool-downloads"),
-            Path.Combine(dataRoot, "tools"));
+            Path.Combine(dataRoot, "tools"),
+            configurePath: false);
         var prepared = await installer.PrepareAsync(
             initialPlan,
             CancellationToken.None);
@@ -925,7 +946,9 @@ public sealed partial class SettingsPage : Page
             zh
                 ? $"{descriptor.DisplayName} 已安装到 WinPool 当前用户工具目录，并已配置自定义路径。"
                 : $"{descriptor.DisplayName} was installed into the WinPool per-user tools directory and its custom path was configured.");
-        await DetectToolAsync(descriptor.Id);
+        await ConfigureToolPathAsync(
+            descriptor.Id,
+            installed.Value.State.ExecutablePath);
     }
 
     private async Task InstallMsiToolAsync(
@@ -1031,10 +1054,8 @@ public sealed partial class SettingsPage : Page
             "fio.exe");
         if (descriptor.Id == KnownToolIds.Fio && File.Exists(installedFioPath))
         {
-            await _toolPaths.SetCustomExecutablePathAsync(
-                descriptor.Id,
-                installedFioPath,
-                CancellationToken.None);
+            await ConfigureToolPathAsync(descriptor.Id, installedFioPath);
+            return;
         }
         await DetectToolAsync(descriptor.Id);
     }

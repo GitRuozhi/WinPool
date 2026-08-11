@@ -26,6 +26,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly MonitorCsvExporter monitorCsvExporter;
     private readonly AgentProcessRegistry processRegistry;
     private readonly IExternalToolRegistry toolRegistry;
+    private readonly ToolPathConfigurationCoordinator toolPathCoordinator;
     private readonly ExternalToolStateRepository toolStateRepository;
     private readonly WorkerProcessRepository workerProcessRepository;
     private readonly TestRunRepository testRunRepository;
@@ -71,6 +72,7 @@ internal sealed class DesktopAgentRuntime :
         MonitorCsvExporter monitorCsvExporter,
         AgentProcessRegistry processRegistry,
         IExternalToolRegistry toolRegistry,
+        ToolPathConfigurationCoordinator toolPathCoordinator,
         ExternalToolStateRepository toolStateRepository,
         WorkerProcessRepository workerProcessRepository,
         TestRunRepository testRunRepository,
@@ -110,6 +112,8 @@ internal sealed class DesktopAgentRuntime :
             ?? throw new ArgumentNullException(nameof(processRegistry));
         this.toolRegistry = toolRegistry
             ?? throw new ArgumentNullException(nameof(toolRegistry));
+        this.toolPathCoordinator = toolPathCoordinator
+            ?? throw new ArgumentNullException(nameof(toolPathCoordinator));
         this.toolStateRepository = toolStateRepository
             ?? throw new ArgumentNullException(nameof(toolStateRepository));
         this.workerProcessRepository = workerProcessRepository
@@ -1489,6 +1493,36 @@ internal sealed class DesktopAgentRuntime :
                 new ToolStateResponse(result.Value),
                 result.Messages,
                 request.CorrelationId);
+    }
+
+    public async Task<ApplicationResult<AgentResponse>> ConfigureToolPathAsync(
+        ConfigureAgentToolPathRequest request,
+        CancellationToken cancellationToken)
+    {
+        var detected = await toolPathCoordinator.ConfigureAsync(
+            request.ToolId,
+            request.ExecutablePath,
+            request.CorrelationId,
+            cancellationToken);
+        if (detected.Value is not { } state)
+        {
+            return new(
+                detected.Status,
+                null,
+                detected.Messages,
+                request.CorrelationId);
+        }
+
+        await toolStateRepository.SaveAsync(
+            state,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        agentEvents.Publish(new AgentToolStateEvent(state, DateTimeOffset.UtcNow));
+        return new(
+            detected.Status,
+            new ToolStateResponse(state),
+            detected.Messages,
+            request.CorrelationId);
     }
 
     public async Task<ApplicationResult<AgentResponse>> InstallMsiToolAsync(

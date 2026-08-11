@@ -639,3 +639,19 @@ remote_gate: not_required
 - 真实 named-pipe 回归会停止第一组 control/event server、启动替代 server，并验证
   三阶段状态顺序和 snapshot reseed。Agent.Client tests：4 passed、0 failed、0 skipped。
 - V33-06 自动门：`passed`；V33-M09/M10 native/manual：`unverified`。
+
+### 2026-08-11：V33-08 Agent-owned tool path configuration
+
+- 新增封闭的 `ConfigureAgentToolPathRequest`；App 的选择、清除、Portable install 和
+  MSI install 后路径登记均通过 Agent，不再由正常 App 直接写活动 JSON。
+- Agent-side coordinator 校验 ToolId、绝对路径、登记的 executable filename 和文件
+  存在性；随后原子写入 active data root 的 `tool-paths.json`、立即重新检测、持久化
+  `ToolState` 并发布状态事件。
+- Standard/Portable 的配置文件由 Agent 启动时解析出的唯一 active data root 决定，
+  不再固定写 LocalAppData 副本。
+- 仅在明确没有 Agent 的 development fallback 中允许 App 使用
+  `StorageDataLocations.CurrentRoot` 直接访问 JSON。
+- Portable installer 支持“只安装、不声明配置所有权”模式；正常 App 采用该模式后
+  再交由 Agent 登记最终 executable path。既有独立 installer 场景默认行为不变。
+- ToolManagement tests：28 passed；Agent tests：69 passed；均为 0 failed、0 skipped。
+  V33-08 自动门：`passed`；V33-M06 native/manual：`unverified`。

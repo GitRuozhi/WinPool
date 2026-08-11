@@ -113,6 +113,8 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<LoadAgentManageInventoryRequest>(envelope),
                 AgentControlMessageTypes.DetectTool =>
                     Deserialize<DetectAgentToolRequest>(envelope),
+                AgentControlMessageTypes.ConfigureToolPath =>
+                    Deserialize<ConfigureAgentToolPathRequest>(envelope),
                 AgentControlMessageTypes.InstallMsiTool =>
                     Deserialize<InstallAgentMsiToolRequest>(envelope),
                 AgentControlMessageTypes.ExportMonitorCsv =>

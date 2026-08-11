@@ -146,6 +146,11 @@ public interface IAgentRequestOperations
         DetectAgentToolRequest request,
         CancellationToken cancellationToken);
 
+    Task<ApplicationResult<AgentResponse>> ConfigureToolPathAsync(
+        ConfigureAgentToolPathRequest request,
+        CancellationToken cancellationToken) =>
+        UnsupportedPersistenceAsync(request.CorrelationId);
+
     Task<ApplicationResult<AgentResponse>> InstallMsiToolAsync(
         InstallAgentMsiToolRequest request,
         CancellationToken cancellationToken);
@@ -299,6 +304,8 @@ public sealed class AgentSessionCoordinator
                 operations.LoadManageInventoryAsync(typed, cancellationToken),
             DetectAgentToolRequest typed =>
                 operations.DetectToolAsync(typed, cancellationToken),
+            ConfigureAgentToolPathRequest typed =>
+                operations.ConfigureToolPathAsync(typed, cancellationToken),
             InstallAgentMsiToolRequest typed =>
                 operations.InstallMsiToolAsync(typed, cancellationToken),
             ExportAgentMonitorCsvRequest typed =>

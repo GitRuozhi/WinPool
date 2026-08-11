@@ -104,6 +104,7 @@ public sealed class ControlledPortableToolInstaller : IToolInstaller
     private readonly string _stagingRoot;
     private readonly string _managedRoot;
     private readonly TimeProvider _timeProvider;
+    private readonly bool _configurePath;
 
     public ControlledPortableToolInstaller(
         ToolCatalog catalog,
@@ -112,7 +113,8 @@ public sealed class ControlledPortableToolInstaller : IToolInstaller
         IMutableToolPathConfiguration pathConfiguration,
         string stagingRoot,
         string managedRoot,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool configurePath = true)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
@@ -122,6 +124,7 @@ public sealed class ControlledPortableToolInstaller : IToolInstaller
         _stagingRoot = Path.GetFullPath(stagingRoot);
         _managedRoot = Path.GetFullPath(managedRoot);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _configurePath = configurePath;
     }
 
     public Task<ApplicationResult<ToolInstallPlan>> PlanAsync(
@@ -316,10 +319,13 @@ public sealed class ControlledPortableToolInstaller : IToolInstaller
                 }
             }
 
-            await _pathConfiguration.SetCustomExecutablePathAsync(
-                plan.ToolId,
-                destinationPath,
-                cancellationToken).ConfigureAwait(false);
+            if (_configurePath)
+            {
+                await _pathConfiguration.SetCustomExecutablePathAsync(
+                    plan.ToolId,
+                    destinationPath,
+                    cancellationToken).ConfigureAwait(false);
+            }
             var version = FileVersionInfo.GetVersionInfo(destinationPath).ProductVersion;
             var state = new ToolState(
                 plan.ToolId,

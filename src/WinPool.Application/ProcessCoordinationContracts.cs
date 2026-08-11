@@ -186,6 +186,12 @@ public sealed record DetectAgentToolRequest(
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
+public sealed record ConfigureAgentToolPathRequest(
+    ToolId ToolId,
+    string? ExecutablePath,
+    CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
 public sealed record InstallAgentMsiToolRequest(
     ToolInstallPlan Plan,
     string PackageRelativePath,

@@ -322,6 +322,78 @@ public sealed class ToolManagementTests
     }
 
     [Fact]
+    public async Task ConfigurationCoordinatorValidatesWritesAndRedetectsActivePath()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new JsonToolPathConfiguration(
+            Path.Combine(workspace.Root, "active", "tool-paths.json"));
+        var catalog = new ToolCatalog();
+        var registry = new ExternalToolRegistry(
+            catalog,
+            new ToolPathDiscovery(configuration, new FixedSearchPath([])),
+            new StubVersionProbe("3.42"),
+            new Sha256ToolFileHasher());
+        var coordinator = new ToolPathConfigurationCoordinator(
+            catalog,
+            configuration,
+            registry);
+        var executable = workspace.Write("tools/fio.exe", [1, 2, 3]);
+
+        var configured = await coordinator.ConfigureAsync(
+            KnownToolIds.Fio,
+            executable,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.True(configured.IsSuccess);
+        Assert.Equal(Path.GetFullPath(executable), configured.Value!.ExecutablePath);
+        Assert.Equal(ToolPathSource.CustomPath, configured.Value.PathSource);
+        Assert.Equal(
+            Path.GetFullPath(executable),
+            configuration.GetCustomExecutablePath(KnownToolIds.Fio));
+
+        var cleared = await coordinator.ConfigureAsync(
+            KnownToolIds.Fio,
+            null,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Null(configuration.GetCustomExecutablePath(KnownToolIds.Fio));
+        Assert.Equal(ToolAvailability.NotFound, cleared.Value!.Availability);
+    }
+
+    [Fact]
+    public async Task ConfigurationCoordinatorRejectsWrongExecutableWithoutWriting()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new JsonToolPathConfiguration(
+            Path.Combine(workspace.Root, "active", "tool-paths.json"));
+        var catalog = new ToolCatalog();
+        var registry = new ExternalToolRegistry(
+            catalog,
+            new ToolPathDiscovery(configuration, new FixedSearchPath([])),
+            new StubVersionProbe("1"),
+            new Sha256ToolFileHasher());
+        var coordinator = new ToolPathConfigurationCoordinator(
+            catalog,
+            configuration,
+            registry);
+        var wrongName = workspace.Write("tools/not-fio.exe", [1]);
+
+        var result = await coordinator.ConfigureAsync(
+            KnownToolIds.Fio,
+            wrongName,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(
+            result.Messages,
+            message => message.Code == "agent.tool.executable_name_mismatch");
+        Assert.Null(configuration.GetCustomExecutablePath(KnownToolIds.Fio));
+    }
+
+    [Fact]
     public async Task InstallPlanner_OnlyCreatesOfficialPlan_AndRequiresConfirmation()
     {
         var now = new DateTimeOffset(2026, 7, 29, 1, 2, 3, TimeSpan.Zero);

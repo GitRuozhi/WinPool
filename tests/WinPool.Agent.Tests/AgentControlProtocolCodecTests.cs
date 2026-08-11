@@ -53,6 +53,26 @@ public sealed class AgentControlProtocolCodecTests
     }
 
     [Fact]
+    public void CodecDecodesClosedToolPathConfigurationRequest()
+    {
+        var codec = new AgentControlProtocolCodec();
+        var correlationId = CorrelationId.New();
+        var request = new ConfigureAgentToolPathRequest(
+            new ToolId("fio"),
+            @"D:\Tools\fio.exe",
+            correlationId);
+        var envelope = Envelope(
+            AgentControlMessageTypes.ConfigureToolPath,
+            correlationId,
+            JsonSerializer.SerializeToElement(request, SerializerOptions));
+
+        var decoded = codec.DecodeRequest(envelope);
+
+        Assert.True(decoded.IsAccepted);
+        Assert.Equal(request, Assert.IsType<ConfigureAgentToolPathRequest>(decoded.Request));
+    }
+
+    [Fact]
     public void CodecRejectsUnknownCommandDiscriminator()
     {
         var codec = new AgentControlProtocolCodec();

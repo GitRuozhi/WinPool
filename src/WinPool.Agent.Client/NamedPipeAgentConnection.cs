@@ -710,6 +710,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             LoadAgentManageInventoryRequest =>
                 AgentControlMessageTypes.LoadManageInventory,
             DetectAgentToolRequest => AgentControlMessageTypes.DetectTool,
+            ConfigureAgentToolPathRequest =>
+                AgentControlMessageTypes.ConfigureToolPath,
             InstallAgentMsiToolRequest => AgentControlMessageTypes.InstallMsiTool,
             ExportAgentMonitorCsvRequest => AgentControlMessageTypes.ExportMonitorCsv,
             ReviewAgentSystemSupportRequest =>
