@@ -12,7 +12,7 @@ started_on: 2026-08-11
 code_gate: passed
 native_integration_gate: unverified
 manual_gate: unverified
-remote_gate: pending
+remote_gate: passed
 accepted_by_user: 2026-08-11
 authority: docs/Archive/V0.33/Plan.md
 ---
@@ -535,12 +535,12 @@ V0.33 进入版本评审前必须同时满足：
 
 ```text
 local version commit: recorded by the rewritten V0.33 acceptance history
-push: authorized; corrected history pending
+push: completed to origin/main
 tag: not authorized
 GitHub Release: not authorized
 binary upload: not authorized
 deployment: not authorized
-remote_gate: pending
+remote_gate: passed
 ```
 
 ## 15. 执行记录
@@ -723,7 +723,8 @@ remote_gate: pending
 ### 2026-08-11：远端历史修正授权
 
 - 用户要求从全部文档清除被错误引入的版本术语，并删除包含该错误的远端提交。
-- 保留 V0.33 全部实现提交至 `636092d`，以修正后的当前文件树重新生成验收文档提交。
-- 使用 `--force-with-lease` 保护远端并替换错误历史；替换完成前
-  `remote_gate: pending`。
+- 保留 V0.33 全部实现提交至 `0dcd22a`；版本提交重建为 `38ff043`，验收文档提交
+  重建为 `e148b61`。
+- 使用 `--force-with-lease` 保护远端并成功替换错误历史；`origin/main` 已指向修正后的
+  V0.33 历史，`remote_gate: passed`。
 - 未授权或创建 tag、GitHub Release，未上传发布包或部署。

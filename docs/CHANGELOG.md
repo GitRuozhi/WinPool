@@ -37,8 +37,8 @@ No unreleased changes are recorded after V0.33.
   evidence that those cases passed.
 
 V0.33 is the confirmed project version, not a tag, binary release, or GitHub Release.
-Implementation range: `6b66c68` through `636092d`. The acceptance documentation
-is recorded by the rewritten V0.33 history.
+Implementation range: `6b66c68` through `0dcd22a`; version commit `38ff043`;
+acceptance documentation `e148b61`. These commits are present on `origin/main`.
 
 ## V0.32 — 2026-08-10
 
