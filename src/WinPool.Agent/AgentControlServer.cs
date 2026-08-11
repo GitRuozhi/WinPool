@@ -236,6 +236,7 @@ public sealed class CurrentUserAgentControlServer
     private readonly Func<ProcessRegistration, CancellationToken, Task>?
         persistProcess;
     private readonly Func<int, bool> verifyClientProcess;
+    private readonly Func<int, DateTimeOffset?> readClientProcessStartedAtUtc;
     private readonly AgentEventHub eventHub;
 
     public CurrentUserAgentControlServer(
@@ -249,7 +250,8 @@ public sealed class CurrentUserAgentControlServer
         TimeProvider? timeProvider = null,
         Func<ProcessRegistration, CancellationToken, Task>? persistProcess = null,
         Func<int, bool>? verifyClientProcess = null,
-        AgentEventHub? eventHub = null)
+        AgentEventHub? eventHub = null,
+        Func<int, DateTimeOffset?>? readClientProcessStartedAtUtc = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedUserSidHash);
@@ -274,6 +276,8 @@ public sealed class CurrentUserAgentControlServer
         this.persistProcess = persistProcess;
         this.verifyClientProcess = verifyClientProcess ?? (_ => true);
         this.eventHub = eventHub ?? new AgentEventHub();
+        this.readClientProcessStartedAtUtc = readClientProcessStartedAtUtc
+            ?? AgentClientProcessVerifier.TryGetStartedAtUtc;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -328,12 +332,46 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-image-mismatch");
         }
+        var clientStartedAtUtc = validation.IsAccepted
+            ? readClientProcessStartedAtUtc(handshake.ProcessId)
+            : null;
+        if (validation.IsAccepted && clientStartedAtUtc is null)
+        {
+            validation = new(
+                false,
+                HandshakeRejection.InvalidProcess,
+                "ipc.handshake.client-start-witness-mismatch");
+        }
         if (coordinator.State == AgentSessionState.Stopped)
         {
             validation = new(
                 false,
                 HandshakeRejection.None,
                 "ipc.handshake.agent_shutting_down");
+        }
+
+        AgentManagedProcess? registration = null;
+        if (validation.IsAccepted)
+        {
+            registration = new AgentManagedProcess(
+                new ProcessInstanceId(handshake.ProcessInstanceId),
+                handshake.ProcessId,
+                AgentManagedProcessKind.MainApplication,
+                new CorrelationId(handshakeEnvelope.CorrelationId),
+                clientStartedAtUtc!.Value,
+                now,
+                SupervisedProcessState.Running,
+                OwnsJobObject: false,
+                ShutdownDeadlineUtc: null);
+            if (coordinator.ProcessRegistry.RegisterOrReconnect(registration, now)
+                == AgentProcessRegistrationResult.Rejected)
+            {
+                validation = new(
+                    false,
+                    HandshakeRejection.InvalidProcess,
+                    "ipc.handshake.process_instance_mismatch");
+                registration = null;
+            }
         }
 
         var connectionId = Guid.NewGuid();
@@ -383,33 +421,21 @@ public sealed class CurrentUserAgentControlServer
 
         try
         {
-            var registration = new AgentManagedProcess(
-                ProcessInstanceId.New(),
-                handshake.ProcessId,
-                AgentManagedProcessKind.MainApplication,
-                new CorrelationId(handshakeEnvelope.CorrelationId),
-                now,
-                now,
-                SupervisedProcessState.Running,
-                OwnsJobObject: false,
-                ShutdownDeadlineUtc: null);
-            if (coordinator.TryRegisterProcess(registration))
+            var activeRegistration = registration
+                ?? throw new InvalidOperationException(
+                    "An accepted Agent control connection has no process registration.");
+            coordinator.ProcessRegistry.TryRecordHeartbeat(
+                activeRegistration.ProcessInstanceId,
+                activeRegistration.ProcessId,
+                now);
+            if (coordinator.ProcessRegistry.TryGet(
+                    activeRegistration.ProcessInstanceId,
+                    out var currentRegistration)
+                && currentRegistration is not null)
             {
-                await PersistProcessAsync(registration, cancellationToken);
+                activeRegistration = currentRegistration;
             }
-            else
-            {
-                coordinator.ProcessRegistry.TryRecordHeartbeat(
-                    handshake.ProcessId,
-                    now);
-                if (coordinator.ProcessRegistry.TryGet(
-                        handshake.ProcessId,
-                        out var existingRegistration)
-                    && existingRegistration is not null)
-                {
-                    await PersistProcessAsync(existingRegistration, cancellationToken);
-                }
-            }
+            await PersistProcessAsync(activeRegistration, cancellationToken);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -425,10 +451,11 @@ public sealed class CurrentUserAgentControlServer
 
                 var decoded = codec.DecodeRequest(envelope);
                 coordinator.ProcessRegistry.TryRecordHeartbeat(
-                    handshake.ProcessId,
+                    activeRegistration.ProcessInstanceId,
+                    activeRegistration.ProcessId,
                     timeProvider.GetUtcNow());
                 if (coordinator.ProcessRegistry.TryGet(
-                        handshake.ProcessId,
+                        activeRegistration.ProcessInstanceId,
                         out var heartbeatRegistration)
                     && heartbeatRegistration is not null)
                 {
@@ -475,6 +502,30 @@ public sealed class CurrentUserAgentControlServer
 
 public static class AgentClientProcessVerifier
 {
+    public static DateTimeOffset? TryGetStartedAtUtc(int processId)
+    {
+        if (processId <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.HasExited
+                ? null
+                : process.StartTime.ToUniversalTime();
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or InvalidOperationException
+                or System.ComponentModel.Win32Exception
+                or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     public static bool IsExpectedExecutable(int processId, string expectedExecutablePath)
     {
         if (processId <= 0 ||

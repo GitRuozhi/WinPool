@@ -170,6 +170,7 @@ internal sealed class DesktopAgentRuntime :
         CancellationToken cancellationToken)
     {
         var brokerProcessId = 0;
+        ProcessInstanceId? brokerProcessInstanceId = null;
         try
         {
             return await elevatedBrokerHost.ExecuteAsync(
@@ -178,18 +179,22 @@ internal sealed class DesktopAgentRuntime :
                 {
                     brokerProcessId = processId;
                     var now = DateTimeOffset.UtcNow;
+                    brokerProcessInstanceId = ProcessInstanceId.New();
                     if (!processRegistry.TryRegister(
                             new AgentManagedProcess(
-                                ProcessInstanceId.New(),
+                                brokerProcessInstanceId.Value,
                                 processId,
                                 AgentManagedProcessKind.ElevatedBroker,
                                 correlationId,
-                                now,
+                                GetProcessStartedAtUtc(processId),
                                 now,
                                 SupervisedProcessState.Starting,
                                 OwnsJobObject: false,
                                 ShutdownDeadlineUtc: now.AddMinutes(1))) ||
-                        !processRegistry.TryMarkRunning(processId, now))
+                        !processRegistry.TryMarkRunning(
+                            brokerProcessInstanceId.Value,
+                            processId,
+                            now))
                     {
                         throw new InvalidOperationException(
                             "The elevated Broker process identity was already registered.");
@@ -201,11 +206,13 @@ internal sealed class DesktopAgentRuntime :
         }
         finally
         {
-            if (brokerProcessId > 0)
+            if (brokerProcessId > 0 && brokerProcessInstanceId is { } processInstanceId)
             {
                 processRegistry.TryMarkExited(
+                    processInstanceId,
                     brokerProcessId,
-                    DateTimeOffset.UtcNow);
+                    DateTimeOffset.UtcNow,
+                    out _);
             }
         }
     }
@@ -1280,7 +1287,10 @@ internal sealed class DesktopAgentRuntime :
         var deadline = DateTimeOffset.UtcNow.AddSeconds(8);
         foreach (var registration in registrations)
         {
-            processRegistry.TryBeginStopping(registration.ProcessId, deadline);
+            processRegistry.TryBeginStopping(
+                registration.ProcessInstanceId,
+                registration.ProcessId,
+                deadline);
         }
 
         while (DateTimeOffset.UtcNow < deadline)
@@ -1295,8 +1305,10 @@ internal sealed class DesktopAgentRuntime :
                 else
                 {
                     processRegistry.TryMarkExited(
+                        registration.ProcessInstanceId,
                         registration.ProcessId,
-                        DateTimeOffset.UtcNow);
+                        DateTimeOffset.UtcNow,
+                        out _);
                 }
             }
 
@@ -2123,6 +2135,7 @@ internal sealed class DesktopAgentRuntime :
     {
         var runId = run.Plan.RunId;
         var workerProcessId = 0;
+        ProcessInstanceId? workerProcessInstanceId = null;
         var workerFailed = false;
         var eventProjector = new TestWorkerAgentEventProjector(
             runId,
@@ -2188,11 +2201,13 @@ internal sealed class DesktopAgentRuntime :
                     }
 
                     if (workerProcessId > 0
+                        && workerProcessInstanceId is { } processInstanceId
                         && processRegistry.TryRecordHeartbeat(
+                            processInstanceId,
                             workerProcessId,
                             DateTimeOffset.UtcNow)
                         && processRegistry.TryGet(
-                            workerProcessId,
+                            processInstanceId,
                             out var currentProcess)
                         && currentProcess is not null)
                     {
@@ -2206,12 +2221,13 @@ internal sealed class DesktopAgentRuntime :
                 {
                     workerProcessId = processId;
                     var now = DateTimeOffset.UtcNow;
+                    workerProcessInstanceId = ProcessInstanceId.New();
                     var registration = new AgentManagedProcess(
-                        ProcessInstanceId.New(),
+                        workerProcessInstanceId.Value,
                         processId,
                         AgentManagedProcessKind.TestWorker,
                         correlationId,
-                        now,
+                        GetProcessStartedAtUtc(processId),
                         now,
                         SupervisedProcessState.Running,
                         OwnsJobObject: true,
@@ -2247,13 +2263,14 @@ internal sealed class DesktopAgentRuntime :
 
                     tray.SetTestRun(runId, "running");
                 },
-                async (_, _) =>
+                async (_, callbackToken) =>
                 {
                     if (schedulingScope is not null)
                     {
                         await testProcessSchedulingScope.RestoreAsync(
                             schedulingScope,
-                            correlationId);
+                            correlationId,
+                            callbackToken);
                         schedulingScope = null;
                     }
                 },
@@ -2267,15 +2284,18 @@ internal sealed class DesktopAgentRuntime :
         finally
         {
             Exception? schedulingRestoreFailure = null;
-            if (workerProcessId > 0)
+            if (workerProcessId > 0 && workerProcessInstanceId is { } processInstanceId)
             {
                 if (schedulingScope is not null)
                 {
                     try
                     {
+                        using var restoreDeadline = new CancellationTokenSource(
+                            TimeSpan.FromSeconds(10));
                         await testProcessSchedulingScope.RestoreAsync(
                             schedulingScope,
-                            correlationId);
+                            correlationId,
+                            restoreDeadline.Token);
                     }
                     catch (Exception exception)
                     {
@@ -2285,6 +2305,7 @@ internal sealed class DesktopAgentRuntime :
                 }
 
                 if (processRegistry.TryMarkExited(
+                        processInstanceId,
                         workerProcessId,
                         DateTimeOffset.UtcNow,
                         out var finalProcess,
@@ -2997,6 +3018,11 @@ internal sealed class DesktopAgentRuntime :
             return false;
         }
     }
+
+    private static DateTimeOffset GetProcessStartedAtUtc(int processId) =>
+        AgentClientProcessVerifier.TryGetStartedAtUtc(processId)
+        ?? throw new InvalidOperationException(
+            "The supervised child-process start witness is unavailable.");
 }
 
 internal sealed record AgentEndpointRecord(

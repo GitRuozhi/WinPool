@@ -22,7 +22,7 @@ public sealed class TestProcessSchedulingScopeTests
             42,
             CorrelationId.New(),
             CancellationToken.None);
-        await scope.RestoreAsync(prepared, CorrelationId.New());
+        await scope.RestoreAsync(prepared, CorrelationId.New(), CancellationToken.None);
 
         Assert.Empty(store.Entries);
         Assert.Equal(
@@ -85,7 +85,7 @@ public sealed class TestProcessSchedulingScopeTests
         port.FailRestore = true;
 
         await Assert.ThrowsAsync<IOException>(() =>
-            scope.RestoreAsync(prepared, CorrelationId.New()));
+            scope.RestoreAsync(prepared, CorrelationId.New(), CancellationToken.None));
 
         Assert.Single(store.Entries);
     }

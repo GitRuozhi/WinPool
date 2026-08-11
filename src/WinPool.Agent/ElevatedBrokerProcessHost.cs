@@ -17,6 +17,7 @@ public sealed class ElevatedBrokerProcessHost
     private readonly Guid _agentSessionId;
     private readonly string _dataRoot;
     private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _callbackTimeout;
 
     public ElevatedBrokerProcessHost(
         string brokerExecutablePath,
@@ -24,7 +25,8 @@ public sealed class ElevatedBrokerProcessHost
         int agentProcessId,
         Guid agentSessionId,
         string dataRoot,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        TimeSpan? callbackTimeout = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(brokerExecutablePath);
         if (!Path.IsPathFullyQualified(brokerExecutablePath) ||
@@ -43,12 +45,18 @@ public sealed class ElevatedBrokerProcessHost
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
+        if (callbackTimeout is { } configuredCallbackTimeout
+            && configuredCallbackTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(callbackTimeout));
+        }
         _brokerExecutablePath = Path.GetFullPath(brokerExecutablePath);
         _userSidHash = userSidHash;
         _agentProcessId = agentProcessId;
         _agentSessionId = agentSessionId;
         _dataRoot = Path.GetFullPath(dataRoot);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _callbackTimeout = callbackTimeout ?? TimeSpan.FromSeconds(10);
     }
 
     public async Task<ElevatedBrokerExecutionResult> ExecuteAsync(
@@ -73,14 +81,16 @@ public sealed class ElevatedBrokerProcessHost
         };
 
         await using var server = CurrentUserPipeFactory.CreateServer(pipeName);
-        using var broker = StartBroker(pipeName, nonce, expiresAtUtc);
-        if (brokerStarted is not null)
-        {
-            await brokerStarted(broker.Id, cancellationToken).ConfigureAwait(false);
-        }
-
+        Process? broker = null;
         try
         {
+            broker = StartBroker(pipeName, nonce, expiresAtUtc);
+            await ChildLifecycleCallbacks.InvokeAsync(
+                    brokerStarted,
+                    broker.Id,
+                    _callbackTimeout,
+                    "started")
+                .ConfigureAwait(false);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(45));
@@ -122,7 +132,7 @@ public sealed class ElevatedBrokerProcessHost
         }
         finally
         {
-            if (!broker.HasExited)
+            if (broker is not null && !broker.HasExited)
             {
                 var exit = await SupervisedProcessExitPolicy.EnsureExitedAsync(
                         broker,
@@ -135,6 +145,7 @@ public sealed class ElevatedBrokerProcessHost
                         "The elevated Broker process tree did not exit after termination.");
                 }
             }
+            broker?.Dispose();
         }
     }
 

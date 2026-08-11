@@ -54,6 +54,7 @@ public sealed class IpcProtocolTests
             nonce,
             userHash,
             Environment.ProcessId,
+            Guid.NewGuid(),
             now);
 
         Assert.True(AgentHandshakeValidator.Validate(valid, nonce, userHash, now).IsAccepted);
@@ -71,6 +72,13 @@ public sealed class IpcProtocolTests
             HandshakeRejection.Expired,
             AgentHandshakeValidator.Validate(
                 valid with { SentAtUtc = now.AddMinutes(-1) },
+                nonce,
+                userHash,
+                now).Rejection);
+        Assert.Equal(
+            HandshakeRejection.InvalidProcess,
+            AgentHandshakeValidator.Validate(
+                valid with { ProcessInstanceId = Guid.Empty },
                 nonce,
                 userHash,
                 now).Rejection);

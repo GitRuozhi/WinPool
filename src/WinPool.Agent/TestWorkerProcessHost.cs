@@ -21,6 +21,7 @@ public sealed class TestWorkerProcessHost
     private readonly TimeProvider timeProvider;
     private readonly long maximumCapturedOutputBytes;
     private readonly int maximumCapturedEvents;
+    private readonly TimeSpan callbackTimeout;
 
     public TestWorkerProcessHost(
         string workerExecutablePath,
@@ -28,7 +29,8 @@ public sealed class TestWorkerProcessHost
         int agentProcessId,
         TimeProvider? timeProvider = null,
         long maximumCapturedOutputBytes = 64L * 1024 * 1024,
-        int maximumCapturedEvents = 131_072)
+        int maximumCapturedEvents = 131_072,
+        TimeSpan? callbackTimeout = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workerExecutablePath);
         if (!Path.IsPathFullyQualified(workerExecutablePath)
@@ -44,12 +46,18 @@ public sealed class TestWorkerProcessHost
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
             maximumCapturedOutputBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCapturedEvents);
+        if (callbackTimeout is { } configuredCallbackTimeout
+            && configuredCallbackTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(callbackTimeout));
+        }
         this.workerExecutablePath = Path.GetFullPath(workerExecutablePath);
         this.userSidHash = userSidHash;
         this.agentProcessId = agentProcessId;
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.maximumCapturedOutputBytes = maximumCapturedOutputBytes;
         this.maximumCapturedEvents = maximumCapturedEvents;
+        this.callbackTimeout = callbackTimeout ?? TimeSpan.FromSeconds(10);
     }
 
     public async Task<TestWorkerRunResult> RunAsync(
@@ -99,15 +107,17 @@ public sealed class TestWorkerProcessHost
             runId.Value,
             nonce);
         await using var server = CurrentUserPipeFactory.CreateServer(pipeName);
-        using var worker = StartWorker(pipeName, nonce, runId);
+        Process? worker = null;
         var completingInvoked = false;
-        if (workerStarted is not null)
-        {
-            await workerStarted(worker.Id, cancellationToken)
-                .ConfigureAwait(false);
-        }
         try
         {
+            worker = StartWorker(pipeName, nonce, runId);
+            await ChildLifecycleCallbacks.InvokeAsync(
+                    workerStarted,
+                    worker.Id,
+                    callbackTimeout,
+                    "started")
+                .ConfigureAwait(false);
             // Keep transport authentication separate from a user-requested test
             // cancellation. Once the worker is authenticated, an already-cancelled
             // token is delivered through the normal Cancel message so the worker can
@@ -215,7 +225,7 @@ public sealed class TestWorkerProcessHost
                         item.Code == "tool.process.started");
                     if (receiveBatch is not null)
                     {
-                        await receiveBatch(batch, CancellationToken.None)
+                        await InvokeBatchCallbackAsync(receiveBatch, batch)
                             .ConfigureAwait(false);
                     }
 
@@ -244,7 +254,11 @@ public sealed class TestWorkerProcessHost
                     if (workerCompleting is not null)
                     {
                         completingInvoked = true;
-                        await workerCompleting(worker.Id, CancellationToken.None)
+                        await ChildLifecycleCallbacks.InvokeAsync(
+                                workerCompleting,
+                                worker.Id,
+                                callbackTimeout,
+                                "completing")
                             .ConfigureAwait(false);
                     }
 
@@ -279,23 +293,29 @@ public sealed class TestWorkerProcessHost
         }
         finally
         {
-            if (!worker.HasExited)
+            Exception? completingFailure = null;
+            if (worker is not null
+                && !completingInvoked
+                && workerCompleting is not null)
             {
-                Exception? completingFailure = null;
-                if (!completingInvoked && workerCompleting is not null)
+                completingInvoked = true;
+                try
                 {
-                    completingInvoked = true;
-                    try
-                    {
-                        await workerCompleting(worker.Id, CancellationToken.None)
-                            .ConfigureAwait(false);
-                    }
-                    catch (Exception exception)
-                    {
-                        completingFailure = exception;
-                    }
+                    await ChildLifecycleCallbacks.InvokeAsync(
+                            workerCompleting,
+                            worker.Id,
+                            callbackTimeout,
+                            "completing")
+                        .ConfigureAwait(false);
                 }
+                catch (Exception exception)
+                {
+                    completingFailure = exception;
+                }
+            }
 
+            if (worker is not null && !worker.HasExited)
+            {
                 var exit = await SupervisedProcessExitPolicy.EnsureExitedAsync(
                         worker,
                         TimeSpan.Zero,
@@ -306,13 +326,40 @@ public sealed class TestWorkerProcessHost
                     throw new TimeoutException(
                         "The TestWorker process tree did not exit after termination.");
                 }
-                if (completingFailure is not null)
-                {
-                    throw new InvalidOperationException(
-                        "The TestWorker completion callback failed before process-tree termination.",
-                        completingFailure);
-                }
             }
+            if (completingFailure is not null)
+            {
+                throw new InvalidOperationException(
+                    "The TestWorker completion callback failed before process-tree termination.",
+                    completingFailure);
+            }
+
+            worker?.Dispose();
+        }
+    }
+
+    private Task InvokeBatchCallbackAsync(
+        Func<TestWorkerEventBatch, CancellationToken, Task> callback,
+        TestWorkerEventBatch batch) =>
+        InvokeCallbackAsync(
+            token => callback(batch, token),
+            "event batch");
+
+    private async Task InvokeCallbackAsync(
+        Func<CancellationToken, Task> callback,
+        string callbackName)
+    {
+        using var deadline = new CancellationTokenSource(callbackTimeout);
+        try
+        {
+            await callback(deadline.Token)
+                .WaitAsync(deadline.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"The TestWorker {callbackName} callback exceeded its lifecycle deadline.");
         }
     }
 

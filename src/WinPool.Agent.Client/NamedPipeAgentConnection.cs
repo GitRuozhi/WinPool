@@ -69,6 +69,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly TimeProvider timeProvider;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
     private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly Guid clientProcessInstanceId = Guid.NewGuid();
     private readonly Channel<AgentEvent> observedEvents =
         Channel.CreateBounded<AgentEvent>(
             new BoundedChannelOptions(1_024)
@@ -141,6 +142,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     endpoint.Nonce,
                     IpcIdentity.HashUserSid(sid),
                     Environment.ProcessId,
+                    clientProcessInstanceId,
                     timeProvider.GetUtcNow());
                 var messageId = Guid.NewGuid();
                 await IpcFrameCodec.WriteAsync(

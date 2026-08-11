@@ -6,7 +6,7 @@ namespace WinPool.Ipc;
 
 public static class IpcProtocol
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const int MaximumFrameBytes = 4 * 1024 * 1024;
     public static readonly TimeSpan MaximumHandshakeAge = TimeSpan.FromSeconds(30);
 }
@@ -24,6 +24,7 @@ public sealed record AgentHandshakeRequest(
     Guid Nonce,
     string UserSidHash,
     int ProcessId,
+    Guid ProcessInstanceId,
     DateTimeOffset SentAtUtc);
 
 public sealed record AgentHandshakeReply(
@@ -332,7 +333,7 @@ public static class AgentHandshakeValidator
             return Reject(HandshakeRejection.UserMismatch, "ipc.handshake.user_mismatch");
         }
 
-        if (request.ProcessId <= 0)
+        if (request.ProcessId <= 0 || request.ProcessInstanceId == Guid.Empty)
         {
             return Reject(HandshakeRejection.InvalidProcess, "ipc.handshake.invalid_process");
         }

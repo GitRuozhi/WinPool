@@ -494,7 +494,28 @@ public sealed class TestWorkerProcessHostTests
         Assert.True(await WaitForExitAsync(callbackProcessId));
     }
 
-    private static TestWorkerProcessHost CreateHost()
+    [Fact]
+    public async Task LifecycleCallbackTimeoutStillReapsStartedWorker()
+    {
+        var host = CreateHost(TimeSpan.FromMilliseconds(50));
+        var workerProcessId = 0;
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => host.RunAsync(
+                CreateCommandRequest(["/d", "/c", "echo", "NEVER_REACHES_WORKER"]),
+                null,
+                (processId, cancellationToken) =>
+                {
+                    workerProcessId = processId;
+                    return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                },
+                CancellationToken.None));
+
+        Assert.True(workerProcessId > 0);
+        Assert.True(await WaitForExitAsync(workerProcessId));
+    }
+
+    private static TestWorkerProcessHost CreateHost(TimeSpan? callbackTimeout = null)
     {
         var workerPath = Path.Combine(
             Path.GetDirectoryName(typeof(ExternalToolProcessRunner).Assembly.Location)!,
@@ -504,7 +525,8 @@ public sealed class TestWorkerProcessHostTests
         return new(
             workerPath,
             IpcIdentity.HashUserSid(sid),
-            Environment.ProcessId);
+            Environment.ProcessId,
+            callbackTimeout: callbackTimeout);
     }
 
     private static ToolProcessRequest CreateCommandRequest(

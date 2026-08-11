@@ -89,22 +89,23 @@ internal sealed class TestProcessSchedulingScope
 
     public async Task RestoreAsync(
         PreparedTestProcessSchedulingScope prepared,
-        CorrelationId correlationId)
+        CorrelationId correlationId,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(prepared);
         await scheduling.RestoreAsync(
                 ((ProcessSchedulingRecoveryState)prepared.RecoveryEntry.State).Snapshot,
-                CancellationToken.None)
+                cancellationToken)
             .ConfigureAwait(false);
         await WriteAuditAsync(
             prepared.RecoveryEntry,
             correlationId,
             SystemSupportAuditStage.Restored,
             "system-support.scheduling-restored",
-            CancellationToken.None).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(false);
         await recovery.RemoveAsync(
                 prepared.RecoveryEntry.RecoveryId,
-                CancellationToken.None)
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -116,7 +117,8 @@ internal sealed class TestProcessSchedulingScope
         {
             await RestoreAsync(
                 new PreparedTestProcessSchedulingScope(entry),
-                correlationId).ConfigureAwait(false);
+                correlationId,
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {

@@ -115,6 +115,81 @@ public sealed class AgentProcessRegistryTests
             startedAt.AddHours(1))));
     }
 
+    [Fact]
+    public void ExactIdentityOperationsCannotMutateAPidReplacement()
+    {
+        var registry = new AgentProcessRegistry();
+        var startedAt = new DateTimeOffset(2026, 8, 11, 1, 0, 0, TimeSpan.Zero);
+        var original = Create(
+            501,
+            AgentManagedProcessKind.MainApplication,
+            startedAt);
+        var replacement = Create(
+            501,
+            AgentManagedProcessKind.MainApplication,
+            startedAt.AddMinutes(1));
+
+        Assert.Equal(
+            AgentProcessRegistrationResult.Registered,
+            registry.RegisterOrReconnect(original, startedAt));
+        Assert.Equal(
+            AgentProcessRegistrationResult.ReplacedStaleProcess,
+            registry.RegisterOrReconnect(replacement, startedAt.AddMinutes(1)));
+
+        Assert.False(registry.TryRecordHeartbeat(
+            original.ProcessInstanceId,
+            original.ProcessId,
+            startedAt.AddMinutes(2)));
+        Assert.False(registry.TryMarkExited(
+            original.ProcessInstanceId,
+            original.ProcessId,
+            startedAt.AddMinutes(2),
+            out _));
+        Assert.True(registry.TryRecordHeartbeat(
+            replacement.ProcessInstanceId,
+            replacement.ProcessId,
+            startedAt.AddMinutes(2)));
+
+        var live = Assert.Single(registry.Snapshot());
+        Assert.Equal(replacement.ProcessInstanceId, live.ProcessInstanceId);
+        Assert.Equal(startedAt.AddMinutes(2), live.LastHeartbeatUtc);
+        Assert.Contains(
+            registry.TerminalDiagnosticsSnapshot(),
+            item => item.ProcessInstanceId == original.ProcessInstanceId
+                    && item.State == SupervisedProcessState.Exited);
+    }
+
+    [Fact]
+    public void ReconnectRequiresTheSameInstancePidAndStartWitness()
+    {
+        var registry = new AgentProcessRegistry();
+        var startedAt = new DateTimeOffset(2026, 8, 11, 2, 0, 0, TimeSpan.Zero);
+        var original = Create(
+            601,
+            AgentManagedProcessKind.MainApplication,
+            startedAt);
+
+        Assert.Equal(
+            AgentProcessRegistrationResult.Registered,
+            registry.RegisterOrReconnect(original, startedAt));
+        Assert.Equal(
+            AgentProcessRegistrationResult.Reconnected,
+            registry.RegisterOrReconnect(original, startedAt.AddSeconds(5)));
+        Assert.Equal(
+            AgentProcessRegistrationResult.Rejected,
+            registry.RegisterOrReconnect(
+                original with { ProcessId = 602 },
+                startedAt.AddSeconds(6)));
+        Assert.Equal(
+            AgentProcessRegistrationResult.Rejected,
+            registry.RegisterOrReconnect(
+                Create(
+                    601,
+                    AgentManagedProcessKind.MainApplication,
+                    startedAt),
+                startedAt.AddSeconds(7)));
+    }
+
     private static AgentManagedProcess Create(
         int processId,
         AgentManagedProcessKind kind,
