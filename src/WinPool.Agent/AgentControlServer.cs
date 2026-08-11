@@ -382,6 +382,7 @@ public sealed class CurrentUserAgentControlServer
         try
         {
             var registration = new AgentManagedProcess(
+                ProcessInstanceId.New(),
                 handshake.ProcessId,
                 AgentManagedProcessKind.MainApplication,
                 new CorrelationId(handshakeEnvelope.CorrelationId),
@@ -457,6 +458,7 @@ public sealed class CurrentUserAgentControlServer
         CancellationToken cancellationToken) =>
         persistProcess?.Invoke(
             new(
+                process.ProcessInstanceId,
                 process.ProcessId,
                 WorkerKind.MainApplication,
                 process.CorrelationId,

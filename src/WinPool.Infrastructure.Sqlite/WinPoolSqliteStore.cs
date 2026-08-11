@@ -4,7 +4,7 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WinPoolSqliteStore
 {
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 
     private readonly string connectionString;
 
@@ -85,6 +85,39 @@ public sealed class WinPoolSqliteStore
             command.CommandText = """
                 ALTER TABLE test_runs
                 ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}';
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        if (existingVersion is { Version: < 11 })
+        {
+            command.CommandText = """
+                DROP INDEX IF EXISTS ix_worker_processes_live_pid;
+                ALTER TABLE worker_processes RENAME TO worker_processes_v10;
+                CREATE TABLE worker_processes(
+                    process_instance_id TEXT PRIMARY KEY,
+                    process_id INTEGER NOT NULL,
+                    agent_session_id TEXT NOT NULL REFERENCES agent_sessions(session_id),
+                    process_kind INTEGER NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    started_at_utc_ms INTEGER NOT NULL,
+                    last_heartbeat_utc_ms INTEGER NOT NULL,
+                    state INTEGER NOT NULL,
+                    owns_job_object INTEGER NOT NULL DEFAULT 0,
+                    shutdown_deadline_utc_ms INTEGER
+                );
+                CREATE INDEX ix_worker_processes_live_pid
+                    ON worker_processes(process_id, state);
+                INSERT INTO worker_processes(
+                    process_instance_id, process_id, agent_session_id,
+                    process_kind, correlation_id, started_at_utc_ms,
+                    last_heartbeat_utc_ms, state, owns_job_object,
+                    shutdown_deadline_utc_ms)
+                SELECT lower(hex(randomblob(16))), process_id, agent_session_id,
+                       process_kind, correlation_id, started_at_utc_ms,
+                       last_heartbeat_utc_ms, state, owns_job_object,
+                       shutdown_deadline_utc_ms
+                FROM worker_processes_v10;
+                DROP TABLE worker_processes_v10;
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -516,7 +549,8 @@ public sealed class WinPoolSqliteStore
             shutdown_clean INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS worker_processes(
-            process_id INTEGER PRIMARY KEY,
+            process_instance_id TEXT PRIMARY KEY,
+            process_id INTEGER NOT NULL,
             agent_session_id TEXT NOT NULL REFERENCES agent_sessions(session_id),
             process_kind INTEGER NOT NULL,
             correlation_id TEXT NOT NULL,
@@ -526,5 +560,7 @@ public sealed class WinPoolSqliteStore
             owns_job_object INTEGER NOT NULL DEFAULT 0,
             shutdown_deadline_utc_ms INTEGER
         );
+        CREATE INDEX IF NOT EXISTS ix_worker_processes_live_pid
+            ON worker_processes(process_id, state);
         """;
 }

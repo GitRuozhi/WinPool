@@ -521,7 +521,13 @@ public sealed record WorkerHandle(
     int ProcessId,
     DateTimeOffset StartedAtUtc);
 
+public readonly record struct ProcessInstanceId(Guid Value)
+{
+    public static ProcessInstanceId New() => new(Guid.NewGuid());
+}
+
 public sealed record ProcessRegistration(
+    ProcessInstanceId ProcessInstanceId,
     int ProcessId,
     WorkerKind Kind,
     CorrelationId CorrelationId,

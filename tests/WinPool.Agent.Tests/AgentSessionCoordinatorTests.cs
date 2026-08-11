@@ -208,6 +208,7 @@ public sealed class AgentSessionCoordinatorTests
         var now = DateTimeOffset.UtcNow;
         Assert.False(coordinator.TryRegisterProcess(
             new(
+                ProcessInstanceId.New(),
                 987,
                 AgentManagedProcessKind.TestWorker,
                 CorrelationId.New(),
@@ -229,6 +230,7 @@ public sealed class AgentSessionCoordinatorTests
         var now = DateTimeOffset.UtcNow;
         Assert.True(coordinator.TryRegisterProcess(
             new(
+                ProcessInstanceId.New(),
                 654,
                 AgentManagedProcessKind.ExternalTool,
                 CorrelationId.New(),
@@ -265,6 +267,7 @@ public sealed class AgentSessionCoordinatorTests
         var now = DateTimeOffset.UtcNow;
         Assert.True(coordinator.TryRegisterProcess(
             new(
+                ProcessInstanceId.New(),
                 765,
                 AgentManagedProcessKind.ExternalTool,
                 CorrelationId.New(),

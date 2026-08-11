@@ -193,6 +193,7 @@ internal sealed class DesktopAgentRuntime :
                     var now = DateTimeOffset.UtcNow;
                     if (!processRegistry.TryRegister(
                             new AgentManagedProcess(
+                                ProcessInstanceId.New(),
                                 processId,
                                 AgentManagedProcessKind.ElevatedBroker,
                                 correlationId,
@@ -1813,6 +1814,7 @@ internal sealed class DesktopAgentRuntime :
     private static ProcessRegistration ToProcessRegistration(
         AgentManagedProcess process) =>
         new(
+            process.ProcessInstanceId,
             process.ProcessId,
             process.Kind switch
             {
@@ -2631,6 +2633,7 @@ internal sealed class DesktopAgentRuntime :
                     workerProcessId = processId;
                     var now = DateTimeOffset.UtcNow;
                     var registration = new AgentManagedProcess(
+                        ProcessInstanceId.New(),
                         processId,
                         AgentManagedProcessKind.TestWorker,
                         correlationId,
@@ -2707,11 +2710,11 @@ internal sealed class DesktopAgentRuntime :
                     }
                 }
 
-                processRegistry.TryMarkExited(
-                    workerProcessId,
-                    DateTimeOffset.UtcNow,
-                    workerFailed);
-                if (processRegistry.TryGet(workerProcessId, out var finalProcess)
+                if (processRegistry.TryMarkExited(
+                        workerProcessId,
+                        DateTimeOffset.UtcNow,
+                        out var finalProcess,
+                        workerFailed)
                     && finalProcess is not null)
                 {
                     try

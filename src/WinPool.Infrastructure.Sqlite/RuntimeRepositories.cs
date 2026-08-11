@@ -440,18 +440,25 @@ public sealed class WorkerProcessRepository
         }
 
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(registration.ProcessId);
+        if (registration.ProcessInstanceId.Value == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "Process instance ID is required.",
+                nameof(registration));
+        }
         AssertWriteOwnership();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO worker_processes(
-                process_id, agent_session_id, process_kind, correlation_id,
+                process_instance_id, process_id, agent_session_id, process_kind, correlation_id,
                 started_at_utc_ms, last_heartbeat_utc_ms, state,
                 owns_job_object, shutdown_deadline_utc_ms)
             VALUES(
-                $process, $session, $kind, $correlation, $started,
+                $instance, $process, $session, $kind, $correlation, $started,
                 $heartbeat, $state, $ownsJob, $deadline)
-            ON CONFLICT(process_id) DO UPDATE SET
+            ON CONFLICT(process_instance_id) DO UPDATE SET
+                process_id = excluded.process_id,
                 agent_session_id = excluded.agent_session_id,
                 process_kind = excluded.process_kind,
                 correlation_id = excluded.correlation_id,
@@ -461,6 +468,9 @@ public sealed class WorkerProcessRepository
                 owns_job_object = excluded.owns_job_object,
                 shutdown_deadline_utc_ms = excluded.shutdown_deadline_utc_ms;
             """;
+        command.Parameters.AddWithValue(
+            "$instance",
+            registration.ProcessInstanceId.Value.ToString("N"));
         command.Parameters.AddWithValue("$process", registration.ProcessId);
         command.Parameters.AddWithValue("$session", agentSessionId.Value.ToString("N"));
         command.Parameters.AddWithValue("$kind", (int)registration.Kind);
@@ -492,12 +502,12 @@ public sealed class WorkerProcessRepository
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT process_id, process_kind, correlation_id,
+            SELECT process_instance_id, process_id, process_kind, correlation_id,
                    started_at_utc_ms, last_heartbeat_utc_ms, state,
                    owns_job_object, shutdown_deadline_utc_ms
             FROM worker_processes
             WHERE agent_session_id = $session
-            ORDER BY process_id;
+            ORDER BY started_at_utc_ms, process_instance_id;
             """;
         command.Parameters.AddWithValue(
             "$session",
@@ -508,16 +518,17 @@ public sealed class WorkerProcessRepository
         {
             results.Add(
                 new(
-                    reader.GetInt32(0),
-                    (WorkerKind)reader.GetInt32(1),
-                    new CorrelationId(Guid.ParseExact(reader.GetString(2), "N")),
-                    DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(3)),
+                    new ProcessInstanceId(Guid.ParseExact(reader.GetString(0), "N")),
+                    reader.GetInt32(1),
+                    (WorkerKind)reader.GetInt32(2),
+                    new CorrelationId(Guid.ParseExact(reader.GetString(3), "N")),
                     DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
-                    (SupervisedProcessState)reader.GetInt32(5),
-                    OwnsJobObject: reader.GetInt32(6) != 0,
-                    ShutdownDeadlineUtc: reader.IsDBNull(7)
+                    DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(5)),
+                    (SupervisedProcessState)reader.GetInt32(6),
+                    OwnsJobObject: reader.GetInt32(7) != 0,
+                    ShutdownDeadlineUtc: reader.IsDBNull(8)
                         ? null
-                        : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(7))));
+                        : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(8))));
         }
 
         return results;

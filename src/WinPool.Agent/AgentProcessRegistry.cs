@@ -12,6 +12,7 @@ public enum AgentManagedProcessKind
 }
 
 public sealed record AgentManagedProcess(
+    ProcessInstanceId ProcessInstanceId,
     int ProcessId,
     AgentManagedProcessKind Kind,
     CorrelationId CorrelationId,
@@ -26,8 +27,11 @@ public sealed record AgentManagedProcess(
 /// </summary>
 public sealed class AgentProcessRegistry
 {
+    private const int MaximumTerminalDiagnostics = 128;
     private readonly object syncRoot = new();
-    private readonly Dictionary<int, AgentManagedProcess> registrations = [];
+    private readonly Dictionary<ProcessInstanceId, AgentManagedProcess> registrations = [];
+    private readonly Dictionary<int, ProcessInstanceId> processIndex = [];
+    private readonly Queue<AgentManagedProcess> terminalDiagnostics = [];
 
     public bool TryRegister(AgentManagedProcess registration)
     {
@@ -36,12 +40,20 @@ public sealed class AgentProcessRegistry
 
         lock (syncRoot)
         {
-            return registrations.TryAdd(registration.ProcessId, registration);
+            if (registrations.ContainsKey(registration.ProcessInstanceId)
+                || processIndex.ContainsKey(registration.ProcessId))
+            {
+                return false;
+            }
+
+            registrations.Add(registration.ProcessInstanceId, registration);
+            processIndex.Add(registration.ProcessId, registration.ProcessInstanceId);
+            return true;
         }
     }
 
     public bool TryMarkRunning(int processId, DateTimeOffset observedAtUtc) =>
-        TryUpdate(
+        TryUpdateByProcessId(
             processId,
             current => current.State is SupervisedProcessState.Starting
                 ? current with
@@ -52,7 +64,7 @@ public sealed class AgentProcessRegistry
                 : null);
 
     public bool TryRecordHeartbeat(int processId, DateTimeOffset observedAtUtc) =>
-        TryUpdate(
+        TryUpdateByProcessId(
             processId,
             current => IsHeartbeatEligible(current)
                        && observedAtUtc >= current.LastHeartbeatUtc
@@ -66,7 +78,7 @@ public sealed class AgentProcessRegistry
     public bool TryBeginStopping(
         int processId,
         DateTimeOffset shutdownDeadlineUtc) =>
-        TryUpdate(
+        TryUpdateByProcessId(
             processId,
             current => current.State is not (
                     SupervisedProcessState.Exited or SupervisedProcessState.Failed)
@@ -82,17 +94,22 @@ public sealed class AgentProcessRegistry
         int processId,
         DateTimeOffset observedAtUtc,
         bool failed = false) =>
-        TryUpdate(
+        TryCompleteByProcessId(
             processId,
-            current => observedAtUtc >= current.StartedAtUtc
-                ? current with
-                {
-                    State = failed
-                        ? SupervisedProcessState.Failed
-                        : SupervisedProcessState.Exited,
-                    LastHeartbeatUtc = Max(current.LastHeartbeatUtc, observedAtUtc)
-                }
-                : null);
+            observedAtUtc,
+            failed,
+            out _);
+
+    public bool TryMarkExited(
+        int processId,
+        DateTimeOffset observedAtUtc,
+        out AgentManagedProcess? terminalRegistration,
+        bool failed = false) =>
+        TryCompleteByProcessId(
+            processId,
+            observedAtUtc,
+            failed,
+            out terminalRegistration);
 
     public IReadOnlyList<AgentManagedProcess> SweepUnresponsive(
         DateTimeOffset observedAtUtc,
@@ -140,11 +157,25 @@ public sealed class AgentProcessRegistry
         }
     }
 
+    public IReadOnlyList<AgentManagedProcess> TerminalDiagnosticsSnapshot()
+    {
+        lock (syncRoot)
+        {
+            return terminalDiagnostics.ToArray();
+        }
+    }
+
     public bool TryGet(int processId, out AgentManagedProcess? registration)
     {
         lock (syncRoot)
         {
-            return registrations.TryGetValue(processId, out registration);
+            if (processIndex.TryGetValue(processId, out var instanceId))
+            {
+                return registrations.TryGetValue(instanceId, out registration);
+            }
+
+            registration = null;
+            return false;
         }
     }
 
@@ -153,15 +184,13 @@ public sealed class AgentProcessRegistry
         lock (syncRoot)
         {
             return registrations.Values
-                .Where(registration => registration.State is not (
-                    SupervisedProcessState.Exited or SupervisedProcessState.Failed))
                 .Select(registration => registration.ProcessId)
                 .Order()
                 .ToArray();
         }
     }
 
-    private bool TryUpdate(
+    private bool TryUpdateByProcessId(
         int processId,
         Func<AgentManagedProcess, AgentManagedProcess?> update)
     {
@@ -172,7 +201,8 @@ public sealed class AgentProcessRegistry
 
         lock (syncRoot)
         {
-            if (!registrations.TryGetValue(processId, out var current))
+            if (!processIndex.TryGetValue(processId, out var instanceId)
+                || !registrations.TryGetValue(instanceId, out var current))
             {
                 return false;
             }
@@ -183,7 +213,48 @@ public sealed class AgentProcessRegistry
                 return false;
             }
 
-            registrations[processId] = updated;
+            registrations[instanceId] = updated;
+            return true;
+        }
+    }
+
+    private bool TryCompleteByProcessId(
+        int processId,
+        DateTimeOffset observedAtUtc,
+        bool failed,
+        out AgentManagedProcess? terminalRegistration)
+    {
+        terminalRegistration = null;
+        if (processId <= 0)
+        {
+            return false;
+        }
+
+        lock (syncRoot)
+        {
+            if (!processIndex.TryGetValue(processId, out var instanceId)
+                || !registrations.TryGetValue(instanceId, out var current)
+                || observedAtUtc < current.StartedAtUtc)
+            {
+                return false;
+            }
+
+            var terminal = current with
+            {
+                State = failed
+                    ? SupervisedProcessState.Failed
+                    : SupervisedProcessState.Exited,
+                LastHeartbeatUtc = Max(current.LastHeartbeatUtc, observedAtUtc)
+            };
+            registrations.Remove(instanceId);
+            processIndex.Remove(processId);
+            terminalDiagnostics.Enqueue(terminal);
+            while (terminalDiagnostics.Count > MaximumTerminalDiagnostics)
+            {
+                terminalDiagnostics.Dequeue();
+            }
+
+            terminalRegistration = terminal;
             return true;
         }
     }
@@ -204,6 +275,13 @@ public sealed class AgentProcessRegistry
 
     private static void ValidateRegistration(AgentManagedProcess registration)
     {
+        if (registration.ProcessInstanceId.Value == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "A process registration requires an instance ID.",
+                nameof(registration));
+        }
+
         if (registration.ProcessId <= 0)
         {
             throw new ArgumentOutOfRangeException(

@@ -57,7 +57,18 @@ public sealed class AgentProcessRegistryTests
 
         Assert.True(registry.TryMarkExited(201, deadline));
         Assert.Empty(registry.GetLiveProcessIds());
+        Assert.Empty(registry.Snapshot());
+        Assert.Equal(
+            SupervisedProcessState.Exited,
+            Assert.Single(registry.TerminalDiagnosticsSnapshot()).State);
         Assert.False(registry.TryRecordHeartbeat(201, deadline.AddSeconds(1)));
+
+        var reused = Create(
+            201,
+            AgentManagedProcessKind.ExternalTool,
+            deadline.AddSeconds(2));
+        Assert.True(registry.TryRegister(reused));
+        Assert.Equal(reused.ProcessInstanceId, registry.Snapshot().Single().ProcessInstanceId);
     }
 
     [Fact]
@@ -76,12 +87,41 @@ public sealed class AgentProcessRegistryTests
         Assert.False(registry.TryGet(999, out _));
     }
 
+    [Fact]
+    public void TerminalDiagnosticsAreBoundedAndDoNotBlockPidReuse()
+    {
+        var registry = new AgentProcessRegistry();
+        var startedAt = DateTimeOffset.UtcNow;
+        for (var index = 0; index < 130; index++)
+        {
+            var processId = 1_000 + index;
+            Assert.True(registry.TryRegister(Create(
+                processId,
+                AgentManagedProcessKind.ExternalTool,
+                startedAt.AddSeconds(index))));
+            Assert.True(registry.TryMarkExited(
+                processId,
+                startedAt.AddSeconds(index + 1)));
+        }
+
+        var diagnostics = registry.TerminalDiagnosticsSnapshot();
+        Assert.Equal(128, diagnostics.Count);
+        Assert.Equal(1_002, diagnostics[0].ProcessId);
+        Assert.Empty(registry.Snapshot());
+
+        Assert.True(registry.TryRegister(Create(
+            1_000,
+            AgentManagedProcessKind.ExternalTool,
+            startedAt.AddHours(1))));
+    }
+
     private static AgentManagedProcess Create(
         int processId,
         AgentManagedProcessKind kind,
         DateTimeOffset startedAt,
         bool ownsJobObject = false) =>
         new(
+            ProcessInstanceId.New(),
             processId,
             kind,
             CorrelationId.New(),

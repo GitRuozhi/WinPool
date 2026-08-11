@@ -161,6 +161,71 @@ public sealed class SqliteSchemaTests
     }
 
     [Fact]
+    public async Task VersionTenWorkerHistoryMigratesToUniqueProcessInstancesWithoutRowLoss()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        var sessionId = Guid.NewGuid().ToString("N");
+        var correlationId = Guid.NewGuid().ToString("N");
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var downgrade = connection.CreateCommand();
+            downgrade.CommandText = """
+                DROP INDEX IF EXISTS ix_worker_processes_live_pid;
+                DROP TABLE worker_processes;
+                CREATE TABLE worker_processes(
+                    process_id INTEGER PRIMARY KEY,
+                    agent_session_id TEXT NOT NULL REFERENCES agent_sessions(session_id),
+                    process_kind INTEGER NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    started_at_utc_ms INTEGER NOT NULL,
+                    last_heartbeat_utc_ms INTEGER NOT NULL,
+                    state INTEGER NOT NULL,
+                    owns_job_object INTEGER NOT NULL DEFAULT 0,
+                    shutdown_deadline_utc_ms INTEGER
+                );
+                INSERT INTO agent_sessions(
+                    session_id, process_id, started_at_utc_ms,
+                    ended_at_utc_ms, shutdown_clean)
+                VALUES($session, 10, 1000, NULL, 0);
+                INSERT INTO worker_processes(
+                    process_id, agent_session_id, process_kind, correlation_id,
+                    started_at_utc_ms, last_heartbeat_utc_ms, state,
+                    owns_job_object, shutdown_deadline_utc_ms)
+                VALUES(42, $session, 1, $correlation, 1000, 2000, 3, 1, 3000);
+                UPDATE schema_info SET schema_version = 10 WHERE singleton = 1;
+                """;
+            downgrade.Parameters.AddWithValue("$session", sessionId);
+            downgrade.Parameters.AddWithValue("$correlation", correlationId);
+            await downgrade.ExecuteNonQueryAsync();
+        }
+
+        await database.Store.InitializeAsync();
+
+        await using var verify = await database.Store.OpenConnectionAsync();
+        await using var query = verify.CreateCommand();
+        query.CommandText = """
+            SELECT process_instance_id, process_id, agent_session_id,
+                   correlation_id, owns_job_object
+            FROM worker_processes;
+            """;
+        await using var reader = await query.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.True(Guid.TryParseExact(reader.GetString(0), "N", out var instanceId));
+        Assert.NotEqual(Guid.Empty, instanceId);
+        Assert.Equal(42, reader.GetInt32(1));
+        Assert.Equal(sessionId, reader.GetString(2));
+        Assert.Equal(correlationId, reader.GetString(3));
+        Assert.Equal(1, reader.GetInt32(4));
+        Assert.False(await reader.ReadAsync());
+        await reader.DisposeAsync();
+        Assert.Equal(
+            WinPoolSqliteStore.CurrentSchemaVersion,
+            await ScalarInt64Async(
+                verify,
+                "SELECT schema_version FROM schema_info WHERE singleton=1;"));
+    }
+
+    [Fact]
     public async Task BatchWriterFlushesSamplesWithoutPersistingProviderIdentity()
     {
         await using var database = await TemporaryDatabase.CreateAsync();

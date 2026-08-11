@@ -605,3 +605,21 @@ remote_gate: not_required
 - Agent tests：67 passed、0 failed、0 skipped；Agent.Client tests：3 passed、0 failed、
   0 skipped。
 - V33-02～V33-05 自动回归状态：`passed`；对应 native/manual 项仍为 `unverified`。
+
+### 2026-08-11：V33-07 进程实例身份与 SQLite v11
+
+- Application process contract 新增 Guid `ProcessInstanceId`；PID 只保留为 Windows
+  process lookup 和当前 live instance 的辅助索引。
+- Agent registry 以 instance ID 为主键。terminal instance 会立即离开 live registry
+  和 PID index，因此同一 PID 后续可安全注册为新的 instance。
+- terminal diagnostics 为独立的有界内存队列，最多保留 128 条；不会因长期运行而
+  无界增长，也不会阻止 PID reuse。
+- terminal TestWorker registration 仍会在离开 live registry 前形成完整结果并写入
+  SQLite 历史，不以清理 live state 为代价丢失审计记录。
+- SQLite schema 从 v10 升至 v11；`worker_processes` 以
+  `process_instance_id` 为主键并保留 PID。真实 v10 结构迁移回归验证旧行获得唯一
+  Guid、row count 与 session/correlation/ownership 字段保持不变。
+- 本阶段唯一 wire bump 已执行：`IpcProtocol.CurrentVersion` 从 1 升至 2，覆盖新增
+  process instance wire field 和 Worker Abort command；不建立长期 v1 negotiation。
+- Agent tests：68 passed；Persistence tests：70 passed；IPC tests：10 passed；均为
+  0 failed、0 skipped。V33-07 自动门：`passed`；native/manual 仍为 `unverified`。

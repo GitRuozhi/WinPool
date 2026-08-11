@@ -138,6 +138,7 @@ public sealed class RuntimeRepositoryTests
         var started = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
         await sessions.StartAsync(sessionId, 10, started);
         var expected = new ProcessRegistration(
+            ProcessInstanceId.New(),
             42,
             WorkerKind.Test,
             CorrelationId.New(),
