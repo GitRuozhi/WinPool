@@ -549,6 +549,8 @@ public sealed class ArchitectureBoundaryTests
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Agent", "DesktopAgentRuntime.cs"));
+        var coordinator = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Agent", "AgentInventoryCoordinator.cs"));
         var start = source.IndexOf(
             "public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync",
             StringComparison.Ordinal);
@@ -558,9 +560,37 @@ public sealed class ArchitectureBoundaryTests
             StringComparison.Ordinal);
         var method = source[start..end];
 
-        Assert.Contains("physicalDeviceIds", method, StringComparison.Ordinal);
-        Assert.Contains("physicalDiskDeviceResolver.ResolvePnpDeviceId", method, StringComparison.Ordinal);
+        Assert.Contains("inventoryCoordinator.ResolvePhysicalDeviceId", method, StringComparison.Ordinal);
         Assert.DoesNotContain("CollectLocalAsync", method, StringComparison.Ordinal);
+        Assert.Contains("physicalDeviceIds", coordinator, StringComparison.Ordinal);
+        Assert.Contains("deviceResolver.ResolvePnpDeviceId", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("CollectLocalAsync", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DesktopAgentRuntimeDelegatesTheThreeExtractedResponsibilities()
+    {
+        var root = FindRepositoryRoot();
+        var agentRoot = Path.Combine(root, "src", "WinPool.Agent");
+        var runtime = File.ReadAllText(Path.Combine(agentRoot, "DesktopAgentRuntime.cs"));
+
+        foreach (var coordinator in new[]
+                 {
+                     "AgentTestCoordinator",
+                     "AgentSystemSupportCoordinator",
+                     "AgentInventoryCoordinator"
+                 })
+        {
+            Assert.True(File.Exists(Path.Combine(agentRoot, coordinator + ".cs")), coordinator);
+            Assert.Contains(coordinator, runtime, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("systemSupportCoordinator.ReviewAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("systemSupportCoordinator.ExecuteAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("inventoryCoordinator.CaptureManageAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("inventoryCoordinator.CaptureComparisonAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("testCoordinator.TryReserve", runtime, StringComparison.Ordinal);
+        Assert.Contains("testCoordinator.TryCancel", runtime, StringComparison.Ordinal);
     }
 
     [Fact]
