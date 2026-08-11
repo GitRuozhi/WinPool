@@ -22,6 +22,22 @@ public sealed class UnsupportedSqliteSchemaVersionException : InvalidOperationEx
     public int MaximumSupportedVersion { get; }
 }
 
+public sealed class LegacySqliteSchemaNotSupportedException : InvalidOperationException
+{
+    public const string StableCode = "storage.schema.legacy_not_supported";
+
+    public LegacySqliteSchemaNotSupportedException(int? actualVersion)
+        : base(actualVersion is null
+            ? $"{StableCode}: existing data has no supported WinPool schema."
+            : $"{StableCode}: schema {actualVersion} is older than the required schema "
+              + $"{WinPoolSqliteStore.CurrentSchemaVersion}.")
+    {
+        ActualVersion = actualVersion;
+    }
+
+    public int? ActualVersion { get; }
+}
+
 public sealed class SqliteSchemaVersionReader
 {
     private readonly WinPoolSqliteStore store;

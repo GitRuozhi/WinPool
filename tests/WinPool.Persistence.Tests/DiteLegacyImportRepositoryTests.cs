@@ -94,7 +94,7 @@ public sealed class DiteLegacyImportRepositoryTests
     }
 
     [Fact]
-    public async Task VersionSixDatabaseCreatesVersionSevenLegacyImportTables()
+    public async Task LegacySchemaSixDatabaseIsRejectedWithoutMigration()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
         await using (var connection = await database.Store.OpenConnectionAsync())
@@ -109,25 +109,11 @@ public sealed class DiteLegacyImportRepositoryTests
             await downgrade.ExecuteNonQueryAsync();
         }
 
-        await database.Store.InitializeAsync();
-
-        await using var verify = await database.Store.OpenConnectionAsync();
-        Assert.Equal(
-            WinPoolSqliteStore.CurrentSchemaVersion,
-            await ScalarAsync(
-                verify,
-                "SELECT schema_version FROM schema_info WHERE singleton=1;"));
-        Assert.Equal(
-            3,
-            await ScalarAsync(
-                verify,
-                """
-                SELECT COUNT(*) FROM sqlite_schema
-                WHERE type='table' AND name IN (
-                    'legacy_test_imports',
-                    'legacy_test_runs',
-                    'legacy_test_metrics');
-                """));
+        var before = File.ReadAllBytes(database.Store.DatabasePath);
+        var exception = await Assert.ThrowsAsync<LegacySqliteSchemaNotSupportedException>(
+            () => database.Store.InitializeAsync());
+        Assert.Equal(6, exception.ActualVersion);
+        Assert.Equal(before, File.ReadAllBytes(database.Store.DatabasePath));
     }
 
     private static DiteLegacyImportResult CreateImport() =>

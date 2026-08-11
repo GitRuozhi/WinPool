@@ -4,7 +4,7 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WinPoolSqliteStore
 {
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 12;
 
     private readonly string connectionString;
 
@@ -55,72 +55,30 @@ public sealed class WinPoolSqliteStore
             ?? throw new InvalidOperationException("The database path has no parent directory.");
         Directory.CreateDirectory(parent);
 
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        var existingVersion = await SqliteSchemaVersionReader.ReadAsync(
-            connection,
-            cancellationToken);
-        SqliteSchemaVersionReader.ThrowIfNewer(existingVersion, CurrentSchemaVersion);
-        var needsTestPlanColumn = existingVersion is not null
-            && !await HasColumnAsync(
-                connection,
-                "test_runs",
-                "plan_json",
-                cancellationToken);
+        var existing = await InspectExistingDatabaseAsync(cancellationToken);
+        if (existing.HasUserTables)
+        {
+            var version = existing.Version;
+            if (version is null || version.Version < CurrentSchemaVersion)
+            {
+                throw new LegacySqliteSchemaNotSupportedException(version?.Version);
+            }
+            if (version.Version > CurrentSchemaVersion)
+            {
+                throw new UnsupportedSqliteSchemaVersionException(
+                    version.Version,
+                    CurrentSchemaVersion);
+            }
 
+            return;
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = SchemaV1;
         await command.ExecuteNonQueryAsync(cancellationToken);
-        if (existingVersion is { Version: < 3 })
-        {
-            command.CommandText = """
-                ALTER TABLE worker_processes
-                ADD COLUMN owns_job_object INTEGER NOT NULL DEFAULT 0;
-                """;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-        if (needsTestPlanColumn)
-        {
-            command.CommandText = """
-                ALTER TABLE test_runs
-                ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}';
-                """;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-        if (existingVersion is { Version: < 11 })
-        {
-            command.CommandText = """
-                DROP INDEX IF EXISTS ix_worker_processes_live_pid;
-                ALTER TABLE worker_processes RENAME TO worker_processes_v10;
-                CREATE TABLE worker_processes(
-                    process_instance_id TEXT PRIMARY KEY,
-                    process_id INTEGER NOT NULL,
-                    agent_session_id TEXT NOT NULL REFERENCES agent_sessions(session_id),
-                    process_kind INTEGER NOT NULL,
-                    correlation_id TEXT NOT NULL,
-                    started_at_utc_ms INTEGER NOT NULL,
-                    last_heartbeat_utc_ms INTEGER NOT NULL,
-                    state INTEGER NOT NULL,
-                    owns_job_object INTEGER NOT NULL DEFAULT 0,
-                    shutdown_deadline_utc_ms INTEGER
-                );
-                CREATE INDEX ix_worker_processes_live_pid
-                    ON worker_processes(process_id, state);
-                INSERT INTO worker_processes(
-                    process_instance_id, process_id, agent_session_id,
-                    process_kind, correlation_id, started_at_utc_ms,
-                    last_heartbeat_utc_ms, state, owns_job_object,
-                    shutdown_deadline_utc_ms)
-                SELECT lower(hex(randomblob(16))), process_id, agent_session_id,
-                       process_kind, correlation_id, started_at_utc_ms,
-                       last_heartbeat_utc_ms, state, owns_job_object,
-                       shutdown_deadline_utc_ms
-                FROM worker_processes_v10;
-                DROP TABLE worker_processes_v10;
-                """;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
 
         command.CommandText = """
             INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
@@ -133,6 +91,44 @@ public sealed class WinPoolSqliteStore
         command.Parameters.AddWithValue("$applied", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         await command.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task<ExistingDatabaseInspection> InspectExistingDatabaseAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(DatabasePath) || new FileInfo(DatabasePath).Length == 0)
+        {
+            return new ExistingDatabaseInspection(false, null);
+        }
+
+        var readOnlyConnectionString = new SqliteConnectionStringBuilder
+        {
+            // immutable=1 prevents a read-only schema probe from creating a
+            // SQLite shared-memory sidecar beside an unsupported database.
+            DataSource = $"file:{DatabasePath.Replace('\\', '/')}?immutable=1",
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString();
+        await using var connection = new SqliteConnection(readOnlyConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var tables = connection.CreateCommand();
+        tables.CommandText = """
+            SELECT COUNT(*)
+            FROM sqlite_schema
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%';
+            """;
+        var hasUserTables = Convert.ToInt64(
+            await tables.ExecuteScalarAsync(cancellationToken),
+            System.Globalization.CultureInfo.InvariantCulture) > 0;
+        if (!hasUserTables)
+        {
+            return new ExistingDatabaseInspection(false, null);
+        }
+
+        return new ExistingDatabaseInspection(
+            true,
+            await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken));
     }
 
     public async Task<SqliteConnection> OpenConnectionAsync(
@@ -152,28 +148,9 @@ public sealed class WinPoolSqliteStore
         return connection;
     }
 
-    private static async Task<bool> HasColumnAsync(
-        SqliteConnection connection,
-        string table,
-        string column,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA table_info({table});";
-        await using var reader = await command.ExecuteReaderAsync(
-            cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            if (StringComparer.OrdinalIgnoreCase.Equals(
-                    reader.GetString(1),
-                    column))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private sealed record ExistingDatabaseInspection(
+        bool HasUserTables,
+        SqliteSchemaVersion? Version);
 
     private const string SchemaV1 = """
         CREATE TABLE IF NOT EXISTS schema_info(

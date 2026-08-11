@@ -158,10 +158,12 @@ public static class SimulationDocumentCodec
             throw new InvalidDataException("The Agent simulation document metadata is inconsistent.");
         }
 
-        return StorageSystemDocumentSanitizer.RedactSensitiveData(document) with
+        if (document.Revision != payload.Revision)
         {
-            Revision = payload.Revision
-        };
+            throw new InvalidDataException("The Agent simulation document revision is inconsistent.");
+        }
+
+        return StorageSystemDocumentSanitizer.RedactSensitiveData(document);
     }
 }
 
@@ -246,7 +248,6 @@ public sealed class AgentBackedHardwareInventoryProvider(IAgentConnection connec
     {
         var result = await connection.SendAsync(
             new CaptureAgentManageInventoryRequest(
-                SystemId.New(),
                 CorrelationId.New()),
             cancellationToken);
         if (!result.IsSuccess

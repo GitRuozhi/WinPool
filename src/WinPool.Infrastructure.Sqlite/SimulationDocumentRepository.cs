@@ -55,6 +55,18 @@ public sealed class SimulationDocumentRepository
     {
         Validate(document);
         ValidateExpectedHash(expectedPreviousSha256, allowNull: true);
+        if (expectedPreviousSha256 is null && document.Revision != 1)
+        {
+            throw new ArgumentException(
+                "A new simulation document must start at revision 1.",
+                nameof(document));
+        }
+        if (expectedPreviousSha256 is not null && document.Revision < 2)
+        {
+            throw new ArgumentException(
+                "A simulation update must advance its revision.",
+                nameof(document));
+        }
         writeOwner.AssertOwnership(store);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var transaction =
@@ -104,6 +116,12 @@ public sealed class SimulationDocumentRepository
     {
         Validate(document);
         ValidateExpectedHash(expectedPreviousSha256, allowNull: false);
+        if (document.Revision < 2)
+        {
+            throw new ArgumentException(
+                "A simulation edit must advance its document revision.",
+                nameof(document));
+        }
         ValidatePlan(plan, events);
         writeOwner.AssertOwnership(store);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
@@ -154,7 +172,7 @@ public sealed class SimulationDocumentRepository
                     document_id, document_schema_version, display_name,
                     sanitized_json, sha256, revision,
                     created_at_utc_ms, updated_at_utc_ms)
-                VALUES($id, $schema, $name, $json, $sha, 1, $now, $updated)
+                VALUES($id, $schema, $name, $json, $sha, $targetRevision, $now, $updated)
                 ON CONFLICT(document_id) DO NOTHING;
                 """;
         }
@@ -166,11 +184,16 @@ public sealed class SimulationDocumentRepository
                     display_name = $name,
                     sanitized_json = $json,
                     sha256 = $sha,
-                    revision = revision + 1,
+                    revision = $targetRevision,
                     updated_at_utc_ms = $updated
-                WHERE document_id = $id AND sha256 = $expected;
+                WHERE document_id = $id
+                  AND sha256 = $expected
+                  AND revision = $previousRevision;
                 """;
             command.Parameters.AddWithValue("$expected", expectedPreviousSha256);
+            command.Parameters.AddWithValue(
+                "$previousRevision",
+                checked(document.Revision - 1));
         }
 
         command.Parameters.AddWithValue("$id", document.DocumentId);
@@ -178,6 +201,7 @@ public sealed class SimulationDocumentRepository
         command.Parameters.AddWithValue("$name", document.DisplayName.Trim());
         command.Parameters.AddWithValue("$json", document.SanitizedJson);
         command.Parameters.AddWithValue("$sha", document.Sha256);
+        command.Parameters.AddWithValue("$targetRevision", document.Revision);
         command.Parameters.AddWithValue("$now", now.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$updated", document.UpdatedAtUtc.ToUnixTimeMilliseconds());
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
@@ -312,7 +336,10 @@ public sealed class SimulationDocumentRepository
             || !root.TryGetProperty("DisplayName", out var displayName)
             || !StringComparer.Ordinal.Equals(displayName.GetString(), document.DisplayName)
             || !root.TryGetProperty("Kind", out var kind)
-            || !StringComparer.OrdinalIgnoreCase.Equals(kind.GetString(), "Simulation"))
+            || !StringComparer.OrdinalIgnoreCase.Equals(kind.GetString(), "Simulation")
+            || !root.TryGetProperty("Revision", out var revision)
+            || revision.GetInt64() != document.Revision
+            || document.Revision < 1)
         {
             throw new ArgumentException(
                 "The simulation document envelope does not match its JSON payload.",
@@ -357,8 +384,9 @@ public sealed class SimulationDocumentRepository
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
-    private static SimulationDocumentPayload Read(SqliteDataReader reader) =>
-        new(
+    private static SimulationDocumentPayload Read(SqliteDataReader reader)
+    {
+        var document = new SimulationDocumentPayload(
             reader.GetString(0),
             reader.GetInt32(1),
             reader.GetString(2),
@@ -366,6 +394,9 @@ public sealed class SimulationDocumentRepository
             reader.GetString(4),
             reader.GetInt64(5),
             DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(6)));
+        Validate(document);
+        return document;
+    }
 
     private static string Id(Guid value) => value.ToString("N");
 }

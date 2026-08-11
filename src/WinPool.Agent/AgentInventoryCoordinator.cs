@@ -59,18 +59,21 @@ internal sealed class AgentInventoryCoordinator
         CaptureAgentManageInventoryRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.SystemId.Value == Guid.Empty)
-        {
-            return Reject(request.CorrelationId, "agent.inventory.system_id_invalid");
-        }
-
         try
         {
             var document = await manageProvider.CollectLocalAsync(cancellationToken);
             CachePhysicalDeviceIds(document);
             var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+            var provisional = EmbeddedPowerShellInventoryProvider.Project(
+                sanitized.SystemId,
+                sanitized.Snapshot,
+                includeSensitiveValuesInMemory: false);
+            var canonicalSystemId = await ResolveCanonicalLocalSystemIdAsync(
+                provisional.MachineBinding,
+                cancellationToken);
+            sanitized = sanitized with { SystemId = canonicalSystemId };
             var projected = EmbeddedPowerShellInventoryProvider.Project(
-                request.SystemId,
+                canonicalSystemId,
                 sanitized.Snapshot,
                 includeSensitiveValuesInMemory: false);
             var saved = await snapshots.SaveAsync(
@@ -125,13 +128,8 @@ internal sealed class AgentInventoryCoordinator
         CaptureAgentInventoryRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.SystemId.Value == Guid.Empty)
-        {
-            return Reject(request.CorrelationId, "agent.inventory.system_id_invalid");
-        }
-
         var captureRequest = new InventoryRequest(
-            request.SystemId,
+            SystemId.New(),
             InventoryCaptureReason.Comparison,
             IncludeSensitiveValuesInMemory: false);
         var native = await nativeProvider.CaptureAsync(captureRequest, cancellationToken);
@@ -142,8 +140,12 @@ internal sealed class AgentInventoryCoordinator
 
         try
         {
+            var canonicalSystemId = await ResolveCanonicalLocalSystemIdAsync(
+                native.Value.MachineBinding,
+                cancellationToken);
+            var nativeSnapshot = Rebind(native.Value, canonicalSystemId);
             var savedNative = await snapshots.SaveAsync(
-                native.Value,
+                nativeSnapshot,
                 PersistedSystemKind.Local,
                 Environment.MachineName,
                 cancellationToken);
@@ -177,7 +179,7 @@ internal sealed class AgentInventoryCoordinator
             }
 
             var savedLegacy = await snapshots.SaveAsync(
-                legacy.Value,
+                Rebind(legacy.Value, canonicalSystemId),
                 PersistedSystemKind.Local,
                 Environment.MachineName,
                 cancellationToken);
@@ -228,13 +230,58 @@ internal sealed class AgentInventoryCoordinator
         }
     }
 
-    private static ApplicationResult<AgentResponse> Reject(
-        CorrelationId correlationId,
-        string code) =>
-        ApplicationResult<AgentResponse>.FromStatus(
-            ApplicationStatus.Rejected,
-            correlationId,
-            new ApplicationMessage(code, code, string.Empty, ApplicationMessageSeverity.Error, []));
+    private async Task<SystemId> ResolveCanonicalLocalSystemIdAsync(
+        string machineBinding,
+        CancellationToken cancellationToken)
+    {
+        var persisted = await localDocument.LoadAsync(cancellationToken);
+        if (persisted is not null)
+        {
+            var previous = LocalInventoryDocumentCodec.Decode(persisted.Document);
+            var previousBinding = EmbeddedPowerShellInventoryProvider.Project(
+                previous.SystemId,
+                previous.Snapshot,
+                includeSensitiveValuesInMemory: false).MachineBinding;
+            if (StringComparer.Ordinal.Equals(previousBinding, machineBinding))
+            {
+                return previous.SystemId;
+            }
+        }
+
+        return SystemId.New();
+    }
+
+    private static InventorySnapshot Rebind(
+        InventorySnapshot snapshot,
+        SystemId systemId)
+    {
+        if (snapshot.SystemId == systemId)
+        {
+            return snapshot;
+        }
+
+        StorageObjectId RebindId(StorageObjectId id) =>
+            new(systemId, id.Kind, id.ProviderKey);
+
+        return snapshot with
+        {
+            SystemId = systemId,
+            Objects = snapshot.Objects.Select(item => item with
+            {
+                Id = RebindId(item.Id),
+                ParentId = item.ParentId is { } parent ? RebindId(parent) : null
+            }).ToArray(),
+            IdentityDiagnostics = snapshot.IdentityDiagnostics.Select(item => item with
+            {
+                ObjectId = RebindId(item.ObjectId)
+            }).ToArray(),
+            Relationships = snapshot.Relationships?.Select(item => item with
+            {
+                FromObjectId = RebindId(item.FromObjectId),
+                ToObjectId = RebindId(item.ToObjectId)
+            }).ToArray()
+        };
+    }
 
     private static ApplicationResult<AgentResponse> Failed(
         CorrelationId correlationId,

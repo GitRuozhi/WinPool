@@ -314,7 +314,6 @@ public sealed class AgentControlProtocolCodecTests
 
         var inventoryCorrelation = CorrelationId.New();
         var inventory = new CaptureAgentInventoryRequest(
-            SystemId.New(),
             IncludeLegacyComparison: true,
             inventoryCorrelation);
         var inventoryDecoded = new AgentControlProtocolCodec().DecodeRequest(
@@ -327,7 +326,6 @@ public sealed class AgentControlProtocolCodecTests
 
         var manageInventoryCorrelation = CorrelationId.New();
         var manageInventory = new CaptureAgentManageInventoryRequest(
-            SystemId.New(),
             manageInventoryCorrelation);
         var manageInventoryDecoded = new AgentControlProtocolCodec().DecodeRequest(
             Envelope(

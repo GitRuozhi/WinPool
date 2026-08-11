@@ -273,7 +273,6 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken.None);
         var manageInventoryResponse = await connection.SendAsync(
             new CaptureAgentManageInventoryRequest(
-                SystemId.New(),
                 CorrelationId.New()),
             CancellationToken.None);
         var manageInventory = Assert.IsType<ManageInventoryCaptureResponse>(

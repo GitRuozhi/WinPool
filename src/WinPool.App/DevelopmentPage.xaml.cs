@@ -291,7 +291,6 @@ public sealed partial class DevelopmentPage : Page
             : "Running the read-only native and fixed-script collectors…";
         var response = await ViewModel.AgentConnection.SendAsync(
             new CaptureAgentInventoryRequest(
-                SystemId.New(),
                 IncludeLegacyComparison: true,
                 CorrelationId.New()),
             CancellationToken.None);

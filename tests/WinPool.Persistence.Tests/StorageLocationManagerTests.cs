@@ -87,6 +87,46 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
+    public async Task PostCommitCleanupFailureKeepsTargetStateAndReportsPartialSuccess()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        var coordinator = new RecordingCoordinator();
+        var manager = locations.CreateManager(
+            coordinator,
+            new ObservingCommitter(coordinator),
+            cleanup: path =>
+            {
+                if (Path.GetFileName(path).Contains(".portable.winpool-rollback-", StringComparison.Ordinal))
+                {
+                    throw new IOException("Injected post-commit cleanup failure.");
+                }
+
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, recursive: true);
+                }
+            });
+        var correlation = CorrelationId.New();
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                correlation,
+                CancellationToken.None)).Value);
+
+        var applied = await manager.ApplySwitchAsync(plan, correlation, CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.PartiallyCompleted, applied.Status);
+        Assert.Equal(StorageLocationMode.Portable, applied.Value!.Mode);
+        Assert.Contains(applied.Messages, message =>
+            message.Code == "storage.location.cleanup_pending");
+        Assert.Equal("database", File.ReadAllText(
+            Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName)));
+        var current = await manager.GetCurrentAsync(correlation, CancellationToken.None);
+        Assert.Equal(StorageLocationMode.Portable, current.Value!.Mode);
+    }
+
+    [Fact]
     public async Task QuiesceReleasesSourceDatabaseHandleBeforeSnapshot()
     {
         using var locations = TemporaryLocations.Create();
@@ -928,8 +968,9 @@ public sealed class StorageLocationManagerTests
         public StorageLocationManager CreateManager(
             IStorageWriteQuiescenceCoordinator coordinator,
             IStorageLocationPointerCommitter? committer = null,
-            ISqliteMigrationAuditor? auditor = null) =>
-            new(StandardRoot, PortableRoot, coordinator, committer, auditor);
+            ISqliteMigrationAuditor? auditor = null,
+            Action<string>? cleanup = null) =>
+            new(StandardRoot, PortableRoot, coordinator, committer, auditor, cleanup);
 
         public void WriteStandard(string relativePath, string contents)
         {

@@ -89,7 +89,7 @@ public sealed class SqliteSchemaTests
     }
 
     [Fact]
-    public async Task VersionTwoDatabaseMigratesWorkerJobOwnershipToCurrentVersion()
+    public async Task LegacySchemaTwoDatabaseIsRejectedWithoutChangingItsFiles()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
         await using (var connection = await database.Store.OpenConnectionAsync())
@@ -104,28 +104,11 @@ public sealed class SqliteSchemaTests
             await downgrade.ExecuteNonQueryAsync();
         }
 
-        await database.Store.InitializeAsync();
-
-        await using var verify = await database.Store.OpenConnectionAsync();
-        Assert.Equal(
-            WinPoolSqliteStore.CurrentSchemaVersion,
-            await ScalarInt64Async(
-                verify,
-                "SELECT schema_version FROM schema_info WHERE singleton=1;"));
-        await using var columns = verify.CreateCommand();
-        columns.CommandText = "PRAGMA table_info(worker_processes);";
-        var names = new List<string>();
-        await using var reader = await columns.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            names.Add(reader.GetString(1));
-        }
-
-        Assert.Contains("owns_job_object", names);
+        await AssertLegacyDatabaseIsUnchangedAsync(database.Store, 2);
     }
 
     [Fact]
-    public async Task VersionSevenDatabaseAddsPersistedTestPlanForRecovery()
+    public async Task LegacySchemaSevenDatabaseIsRejectedWithoutChangingItsFiles()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
         await using (var connection = await database.Store.OpenConnectionAsync())
@@ -140,28 +123,11 @@ public sealed class SqliteSchemaTests
             await downgrade.ExecuteNonQueryAsync();
         }
 
-        await database.Store.InitializeAsync();
-
-        await using var verify = await database.Store.OpenConnectionAsync();
-        await using var columns = verify.CreateCommand();
-        columns.CommandText = "PRAGMA table_info(test_runs);";
-        var names = new List<string>();
-        await using var reader = await columns.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            names.Add(reader.GetString(1));
-        }
-
-        Assert.Contains("plan_json", names);
-        Assert.Equal(
-            WinPoolSqliteStore.CurrentSchemaVersion,
-            await ScalarInt64Async(
-                verify,
-                "SELECT schema_version FROM schema_info WHERE singleton=1;"));
+        await AssertLegacyDatabaseIsUnchangedAsync(database.Store, 7);
     }
 
     [Fact]
-    public async Task VersionTenWorkerHistoryMigratesToUniqueProcessInstancesWithoutRowLoss()
+    public async Task LegacySchemaTenDatabaseIsRejectedWithoutChangingItsFiles()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
         var sessionId = Guid.NewGuid().ToString("N");
@@ -199,30 +165,21 @@ public sealed class SqliteSchemaTests
             await downgrade.ExecuteNonQueryAsync();
         }
 
-        await database.Store.InitializeAsync();
+        await AssertLegacyDatabaseIsUnchangedAsync(database.Store, 10);
+    }
 
-        await using var verify = await database.Store.OpenConnectionAsync();
-        await using var query = verify.CreateCommand();
-        query.CommandText = """
-            SELECT process_instance_id, process_id, agent_session_id,
-                   correlation_id, owns_job_object
-            FROM worker_processes;
-            """;
-        await using var reader = await query.ExecuteReaderAsync();
-        Assert.True(await reader.ReadAsync());
-        Assert.True(Guid.TryParseExact(reader.GetString(0), "N", out var instanceId));
-        Assert.NotEqual(Guid.Empty, instanceId);
-        Assert.Equal(42, reader.GetInt32(1));
-        Assert.Equal(sessionId, reader.GetString(2));
-        Assert.Equal(correlationId, reader.GetString(3));
-        Assert.Equal(1, reader.GetInt32(4));
-        Assert.False(await reader.ReadAsync());
-        await reader.DisposeAsync();
-        Assert.Equal(
-            WinPoolSqliteStore.CurrentSchemaVersion,
-            await ScalarInt64Async(
-                verify,
-                "SELECT schema_version FROM schema_info WHERE singleton=1;"));
+    [Fact]
+    public async Task ExistingDatabaseWithoutSchemaInfoIsRejectedWithoutChangingItsFiles()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE schema_info;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await AssertLegacyDatabaseIsUnchangedAsync(database.Store, null);
     }
 
     [Fact]
@@ -309,6 +266,31 @@ public sealed class SqliteSchemaTests
         return Convert.ToInt64(
             await command.ExecuteScalarAsync(),
             System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task AssertLegacyDatabaseIsUnchangedAsync(
+        WinPoolSqliteStore store,
+        int? expectedVersion)
+    {
+        var paths = new[] { store.DatabasePath, store.DatabasePath + "-wal", store.DatabasePath + "-shm" };
+        var before = paths.ToDictionary(
+            path => path,
+            path => File.Exists(path) ? File.ReadAllBytes(path) : null,
+            StringComparer.Ordinal);
+
+        var exception = await Assert.ThrowsAsync<LegacySqliteSchemaNotSupportedException>(
+            () => store.InitializeAsync());
+        Assert.Equal(expectedVersion, exception.ActualVersion);
+        Assert.Contains(LegacySqliteSchemaNotSupportedException.StableCode, exception.Message);
+
+        foreach (var path in paths)
+        {
+            Assert.Equal(before[path] is not null, File.Exists(path));
+            if (before[path] is not null)
+            {
+                Assert.Equal(before[path], File.ReadAllBytes(path));
+            }
+        }
     }
 
     private sealed class TemporaryDatabase : IAsyncDisposable

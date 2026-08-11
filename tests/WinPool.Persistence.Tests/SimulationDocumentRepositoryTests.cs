@@ -16,17 +16,17 @@ public sealed class SimulationDocumentRepositoryTests
         await using var database = await TemporaryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
         var repository = new SimulationDocumentRepository(database.Store, lease);
-        var first = Payload("simulation:test", "one");
+        var first = Payload("simulation:test", "one", 1);
 
         var saved = await repository.SaveAsync(first, null);
-        var second = Payload(first.DocumentId, "two");
+        var second = Payload(first.DocumentId, "two", 2);
         var updated = await repository.SaveAsync(second, saved.Sha256);
 
         Assert.Equal(1, saved.Revision);
         Assert.Equal(2, updated.Revision);
         Assert.Equal(second.Sha256, Assert.Single(await repository.ListAsync()).Sha256);
         await Assert.ThrowsAsync<SimulationDocumentConflictException>(
-            () => repository.SaveAsync(Payload(first.DocumentId, "stale"), saved.Sha256));
+            () => repository.SaveAsync(Payload(first.DocumentId, "stale", 2), saved.Sha256));
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public sealed class SimulationDocumentRepositoryTests
         await using var database = await TemporaryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
         var repository = new SimulationDocumentRepository(database.Store, lease);
-        var initial = await repository.SaveAsync(Payload("simulation:test", "one"), null);
+        var initial = await repository.SaveAsync(Payload("simulation:test", "one", 1), null);
         var plan = Plan();
         var events = new[]
         {
@@ -44,7 +44,7 @@ public sealed class SimulationDocumentRepositoryTests
         };
 
         var saved = await repository.CommitEditAsync(
-            Payload(initial.DocumentId, "two"),
+            Payload(initial.DocumentId, "two", 2),
             initial.Sha256,
             plan,
             events);
@@ -67,11 +67,11 @@ public sealed class SimulationDocumentRepositoryTests
         await using var database = await TemporaryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
         var repository = new SimulationDocumentRepository(database.Store, lease);
-        var initial = await repository.SaveAsync(Payload("simulation:test", "one"), null);
+        var initial = await repository.SaveAsync(Payload("simulation:test", "one", 1), null);
         var plan = Plan();
 
         await Assert.ThrowsAsync<ArgumentException>(() => repository.CommitEditAsync(
-            Payload(initial.DocumentId, "two"),
+            Payload(initial.DocumentId, "two", 2),
             initial.Sha256,
             plan,
             [new ExecutionEvent(plan.OperationId, ExecutionEventKind.Failed, plan.CreatedAt, "failed", "")])) ;
@@ -81,12 +81,12 @@ public sealed class SimulationDocumentRepositoryTests
         Assert.Null(await new OperationPlanRepository(database.Store).GetAsync(plan.OperationId));
     }
 
-    private static SimulationDocumentPayload Payload(string id, string value)
+    private static SimulationDocumentPayload Payload(string id, string value, long revision)
     {
-        var json = $$"""{"Id":"{{id}}","SchemaVersion":1,"DisplayName":"Test","Kind":"Simulation","Value":"{{value}}"}""";
+        var json = $$"""{"Id":"{{id}}","SchemaVersion":1,"DisplayName":"Test","Kind":"Simulation","Revision":{{revision}},"Value":"{{value}}"}""";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)))
             .ToLowerInvariant();
-        return new(id, 1, "Test", json, hash, 0, DateTimeOffset.UtcNow);
+        return new(id, 1, "Test", json, hash, revision, DateTimeOffset.UtcNow);
     }
 
     private static OperationPlan Plan()

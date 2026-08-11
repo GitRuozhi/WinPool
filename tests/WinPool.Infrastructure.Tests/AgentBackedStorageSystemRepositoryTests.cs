@@ -19,6 +19,8 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         Assert.Equal(64, payload.Sha256.Length);
         Assert.Throws<InvalidOperationException>(
             () => SimulationDocumentCodec.Encode(Document(StorageSystemKind.Local)));
+        Assert.Throws<InvalidDataException>(
+            () => SimulationDocumentCodec.Decode(payload with { Revision = 2 }));
     }
 
     [Fact]
@@ -36,6 +38,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
             document with
             {
                 DisplayName = "Changed",
+                Revision = 2,
                 UpdatedAt = document.UpdatedAt.AddSeconds(1)
             });
 
@@ -132,7 +135,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
             SaveAgentSimulationDocumentRequest request)
         {
             Assert.Equal(current?.Sha256, request.ExpectedPreviousSha256);
-            current = request.Document with { Revision = (current?.Revision ?? 0) + 1 };
+            current = request.Document;
             return new(current);
         }
     }

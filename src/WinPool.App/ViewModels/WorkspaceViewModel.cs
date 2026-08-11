@@ -376,6 +376,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 Snapshot = SimulationStorageSnapshotFactory.Create(),
                 HardwareReport = KsReferenceReportFactory.Create(),
                 Jobs = [],
+                Revision = checked(persisted[builtinIndex].Revision + 1),
                 UpdatedAt = DateTimeOffset.Now
             };
             await _systemRepository.SaveSimulationAsync(persisted[builtinIndex]);

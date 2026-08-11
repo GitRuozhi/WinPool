@@ -113,6 +113,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
     private readonly IStorageWriteQuiescenceCoordinator writeCoordinator;
     private readonly IStorageLocationPointerCommitter pointerCommitter;
     private readonly ISqliteMigrationAuditor migrationAuditor;
+    private readonly Action<string> deleteDirectoryTree;
     private readonly SemaphoreSlim switchGate = new(1, 1);
     private readonly Dictionary<StorageLocationSwitchPlan, PlannedSwitch> issuedPlans = [];
 
@@ -121,7 +122,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
         string portableRoot,
         IStorageWriteQuiescenceCoordinator writeCoordinator,
         IStorageLocationPointerCommitter? pointerCommitter = null,
-        ISqliteMigrationAuditor? migrationAuditor = null)
+        ISqliteMigrationAuditor? migrationAuditor = null,
+        Action<string>? deleteDirectoryTree = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(standardRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(portableRoot);
@@ -135,6 +137,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
         this.pointerCommitter = pointerCommitter
             ?? new AtomicStorageLocationPointerCommitter();
         this.migrationAuditor = migrationAuditor ?? new SqliteMigrationAuditor();
+        this.deleteDirectoryTree = deleteDirectoryTree ?? DeleteDirectoryTree;
     }
 
     public async Task<ApplicationResult<StorageLocationState>> GetCurrentAsync(
@@ -192,6 +195,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
             ValidateTreeHasNoReparsePoints(sourceRoot);
             ValidateTreeHasNoReparsePoints(targetRoot);
+            CleanupOwnedTransactionRoots(sourceRoot);
+            CleanupOwnedTransactionRoots(targetRoot);
             if (!CanWriteTarget(targetRoot))
             {
                 return Result<StorageLocationSwitchPlan>(
@@ -327,6 +332,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
             var rollbackRoot = CreateSiblingTransactionRoot(plan.TargetRoot, "rollback");
             var targetWasReplaced = false;
             var pointerCommitted = false;
+            ApplicationResult<StorageLocationState>? committedResult = null;
+            Exception? postCommitCleanupFailure = null;
             try
             {
                 await CopySnapshotAsync(
@@ -442,7 +449,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                 pointerCommitted = true;
 
                 issuedPlans.Remove(plan);
-                return ApplicationResult<StorageLocationState>.Succeeded(
+                committedResult = ApplicationResult<StorageLocationState>.Succeeded(
                     CreateState(plan.TargetMode, plan.TargetRoot),
                     correlationId);
             }
@@ -453,9 +460,41 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     RestorePreviousTarget(plan.TargetRoot, rollbackRoot);
                 }
 
-                DeleteDirectoryTree(stagingRoot);
-                DeleteDirectoryTree(rollbackRoot);
+                if (pointerCommitted)
+                {
+                    TryPostCommitCleanup(stagingRoot, ref postCommitCleanupFailure);
+                    TryPostCommitCleanup(rollbackRoot, ref postCommitCleanupFailure);
+                }
+                else
+                {
+                    deleteDirectoryTree(stagingRoot);
+                    deleteDirectoryTree(rollbackRoot);
+                }
             }
+
+            if (pointerCommitted)
+            {
+                if (postCommitCleanupFailure is not null)
+                {
+                    return new ApplicationResult<StorageLocationState>(
+                        ApplicationStatus.PartiallyCompleted,
+                        CreateState(plan.TargetMode, plan.TargetRoot),
+                        [new ApplicationMessage(
+                            "storage.location.cleanup_pending",
+                            "storage.location.cleanup_pending",
+                            "The active data location was switched, but transaction cleanup is pending.",
+                            ApplicationMessageSeverity.Warning,
+                            [])],
+                        correlationId);
+                }
+
+                return committedResult
+                    ?? throw new InvalidOperationException(
+                        "A committed storage-location switch has no result.");
+            }
+
+            throw new InvalidOperationException(
+                "A storage-location switch exited without committing or returning a result.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -755,6 +794,74 @@ public sealed class StorageLocationManager : IStorageLocationManager
         {
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    private void TryPostCommitCleanup(string path, ref Exception? failure)
+    {
+        try
+        {
+            deleteDirectoryTree(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            failure ??= exception;
+        }
+    }
+
+    private void CleanupOwnedTransactionRoots(string targetRoot)
+    {
+        var normalizedTarget = NormalizeRoot(targetRoot);
+        var parent = Path.GetDirectoryName(normalizedTarget)
+            ?? throw new IOException("The target data root has no parent directory.");
+        EnsureExistingPathHasNoReparsePoint(parent);
+        if (!Directory.Exists(parent))
+        {
+            return;
+        }
+
+        var targetName = Path.GetFileName(normalizedTarget);
+        foreach (var candidate in Directory.EnumerateDirectories(parent))
+        {
+            if (!IsOwnedTransactionRoot(candidate, parent, targetName))
+            {
+                continue;
+            }
+
+            if (File.GetAttributes(candidate).HasFlag(FileAttributes.ReparsePoint))
+            {
+                throw new ReparsePointException();
+            }
+
+            deleteDirectoryTree(candidate);
+        }
+    }
+
+    private static bool IsOwnedTransactionRoot(
+        string candidate,
+        string expectedParent,
+        string targetName)
+    {
+        var fullCandidate = Path.GetFullPath(candidate);
+        if (!string.Equals(
+                Path.GetDirectoryName(fullCandidate),
+                Path.GetFullPath(expectedParent),
+                PathComparison))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileName(fullCandidate);
+        foreach (var role in new[] { "stage", "rollback" })
+        {
+            var prefix = $".{targetName}.winpool-{role}-";
+            if (name.StartsWith(prefix, StringComparison.Ordinal)
+                && Guid.TryParseExact(name[prefix.Length..], "N", out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string HashManifest(IReadOnlyList<SourceFile> files)

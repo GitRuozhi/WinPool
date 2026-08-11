@@ -200,13 +200,11 @@ public sealed record InstallAgentMsiToolRequest(
     : AgentRequest(CorrelationId);
 
 public sealed record CaptureAgentInventoryRequest(
-    SystemId SystemId,
     bool IncludeLegacyComparison,
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
 public sealed record CaptureAgentManageInventoryRequest(
-    SystemId SystemId,
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
