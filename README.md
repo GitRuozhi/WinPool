@@ -49,8 +49,9 @@ The reproducible self-contained staging command is documented in
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
+- [Plan](docs/Plan.md): confirmed V0.34 defect-closure execution plan.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
-  including the accepted V0.33 Plan. There is currently no active Plan.
+  including the accepted V0.33 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

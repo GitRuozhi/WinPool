@@ -44,8 +44,9 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
+- [当前计划](docs/Plan.md)：已确认的 V0.34 缺陷收口执行计划。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已验收的
-  V0.33 Plan。当前没有活动 Plan。
+  V0.33 Plan。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
 - [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 
