@@ -9,7 +9,21 @@
 
 ## Unreleased
 
-V0.32 检查点之后暂无未发布变更记录。
+### V0.33 重构进行中 — 2026-08-11
+
+- 将 `WinPool.Core` 收敛进权威 Application 模型，并保留系统/文档身份、模拟、投影、
+  启动、通知和布局行为。
+- 强化 Agent、Worker、Broker、Control IPC 和 Event IPC 生命周期：可重试关闭、有界
+  进程终止、typed abort、坏客户端隔离、断线恢复、snapshot reseed 和明确 event-gap 状态。
+- 增加进程实例身份、有界 terminal diagnostics 和真实 SQLite v10→v11 历史迁移；
+  V0.33 唯一一次 wire protocol bump 为 2。
+- 外部工具路径改由 Agent 持有；每次工具调用只解析一次 numeric output code page，
+  stdout/stderr 分别进行 stateful decoding，同时保留原始字节。
+- storage-location 从覆盖复制改成同卷精确 staging 事务：捕获源和目标，只 drain 源
+  store，验证 manifest 与 SQLite identity，在取消或失败时恢复旧目标，并移除陈旧的
+  managed target payload。
+- V0.33 仍是进行中的集成检查点。原生/人工门仍为 `unverified`；未为 V0.33 创建 tag、
+  二进制发布、GitHub Release 或远端推送。
 
 ## V0.32 源码检查点 — 2026-08-10
 

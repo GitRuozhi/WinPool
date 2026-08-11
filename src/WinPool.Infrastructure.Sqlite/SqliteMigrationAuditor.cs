@@ -52,12 +52,19 @@ public sealed record SqliteMigrationAuditReport(
     }
 }
 
+public interface ISqliteMigrationAuditor
+{
+    Task<SqliteMigrationAuditReport> CaptureAsync(
+        string databasePath,
+        CancellationToken cancellationToken = default);
+}
+
 /// <summary>
 /// Produces a bounded-memory, read-only migration audit. It intentionally
 /// fingerprints row identity rather than arbitrary payload fields; the root
 /// file manifest supplies the byte-for-byte SHA-256 evidence.
 /// </summary>
-public sealed class SqliteMigrationAuditor
+public sealed class SqliteMigrationAuditor : ISqliteMigrationAuditor
 {
     public async Task<SqliteMigrationAuditReport> CaptureAsync(
         string databasePath,

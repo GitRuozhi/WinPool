@@ -673,3 +673,19 @@ remote_gate: not_required
   交错、EOF invalid tail fallback 和 Worker resolution metadata。
 - Testing.Tools tests：48 passed；TestWorker tests：10 passed；Persistence tests：
   70 passed；均为 0 failed、0 skipped。V33-09 自动门：`passed`。
+
+### 2026-08-11：V33-10B 精确且可回滚的数据迁移
+
+- `StorageLocationManager` 现在在目标同卷 sibling 目录构建 staging，捕获并复核源与
+  目标，quiesce 后 drain 源 store 专属连接池并重新 snapshot，再把旧目标整体移入
+  rollback、将 staging 原子移入目标。
+- SQLite `-wal`、`-shm` 和 `-journal` 被明确视为 quiescence 控制的 transient sidecar，
+  不进入 managed payload manifest；数据库本体和附件仍按 path、length、SHA-256 与
+  manifest hash 精确验证，SQLite 另做 schema、row count、primary-key identity 检查。
+- 目标替换后再次验证 exact manifest 与 SQLite identity，只有全部通过才提交
+  `storage-location.json`；pointer、取消、hash 或 SQLite 校验失败都会恢复先前目标。
+- 已覆盖计划列出的 12 项强制回归，包括 source mutation after drain、普通陈旧目标
+  文件移除、临时目录即时清理和 Standard→Portable→Standard 精确往返。
+- Persistence tests：81 passed、0 failed、0 skipped；完整 Release test：483 passed、
+  0 failed、0 skipped；Release build：0 warnings、0 errors。
+- V33-10B 自动门：`passed`；原生/人工数据位置迁移门仍为 `unverified`。

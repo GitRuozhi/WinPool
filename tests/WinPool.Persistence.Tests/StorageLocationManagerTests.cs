@@ -48,7 +48,10 @@ public sealed class StorageLocationManagerTests
             correlation,
             CancellationToken.None);
 
-        Assert.True(applied.IsSuccess);
+        Assert.True(
+            applied.IsSuccess,
+            string.Join(" | ", applied.Messages.Select(message => message.DiagnosticText))
+            + " events=" + string.Join(",", coordinator.Events));
         Assert.Equal(StorageLocationMode.Portable, applied.Value!.Mode);
         Assert.Equal(
             Path.Combine(locations.PortableRoot, "winpool.db"),
@@ -84,7 +87,7 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
-    public async Task RealSqliteMigrationVerifiesIdentityAndReleasesDatabaseHandles()
+    public async Task QuiesceReleasesSourceDatabaseHandleBeforeSnapshot()
     {
         using var locations = TemporaryLocations.Create();
         Directory.CreateDirectory(locations.StandardRoot);
@@ -118,7 +121,10 @@ public sealed class StorageLocationManagerTests
             CorrelationId.New(),
             CancellationToken.None);
 
-        Assert.True(applied.IsSuccess);
+        Assert.True(
+            applied.IsSuccess,
+            string.Join(" | ", applied.Messages.Select(message => message.DiagnosticText))
+            + " events=" + string.Join(",", coordinator.Events));
         var destinationDatabase = Path.Combine(
             locations.PortableRoot,
             StorageLocationManager.DatabaseFileName);
@@ -184,7 +190,7 @@ public sealed class StorageLocationManagerTests
         Assert.Contains(
             result.Messages,
             message => message.Code == "storage.location.plan_stale");
-        Assert.Equal(["quiesce", "resume"], coordinator.Events);
+        Assert.Empty(coordinator.Events);
         Assert.False(coordinator.IsQuiesced);
         var current = await manager.GetCurrentAsync(
             CorrelationId.New(),
@@ -193,7 +199,7 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
-    public async Task ApplyRejectsStaleTargetSqliteSidecarInsteadOfReusingIt()
+    public async Task StaleTargetSqliteSidecarDoesNotSurviveManagedPayloadMigration()
     {
         using var locations = TemporaryLocations.Create();
         locations.WriteStandard("winpool.db", "database");
@@ -214,11 +220,9 @@ public sealed class StorageLocationManagerTests
             CorrelationId.New(),
             CancellationToken.None);
 
-        Assert.Equal(ApplicationStatus.Failed, result.Status);
-        Assert.Contains(
-            result.Messages,
-            message => message.Code == "storage.location.apply_failed");
-        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
+        Assert.True(result.IsSuccess);
+        Assert.True(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
+        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db-wal")));
         Assert.Equal(["quiesce", "resume"], coordinator.Events);
     }
 
@@ -249,7 +253,7 @@ public sealed class StorageLocationManagerTests
             result.Messages,
             message => message.Code == "storage.location.plan_stale");
         Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
-        Assert.Equal(["quiesce", "resume"], coordinator.Events);
+        Assert.Empty(coordinator.Events);
     }
 
     [Fact]
@@ -281,7 +285,7 @@ public sealed class StorageLocationManagerTests
                 locations.StandardRoot,
                 StorageLocationManager.PointerFileName)));
         Assert.True(File.Exists(Path.Combine(locations.StandardRoot, "winpool.db")));
-        Assert.True(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
+        Assert.False(Directory.Exists(locations.PortableRoot));
         Assert.Equal(["quiesce", "commit-failed", "resume"], coordinator.Events);
         Assert.False(coordinator.IsQuiesced);
 
@@ -410,6 +414,393 @@ public sealed class StorageLocationManagerTests
         Assert.Equal(ApplicationStatus.Cancelled, result.Status);
     }
 
+    [Fact]
+    public async Task SourceMutationAfterHandleDrainRejectsPlan()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        var manager = locations.CreateManager(new CallbackCoordinator(
+            () => locations.WriteStandard("late-write.bin", "changed")));
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages, message => message.Code == "storage.location.plan_stale");
+        Assert.False(Directory.Exists(locations.PortableRoot));
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+    }
+
+    [Fact]
+    public async Task StaleOrdinaryTargetFileDoesNotSurviveManagedPayloadMigration()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "new-database");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "stale.txt"), "old");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "stale.txt")));
+        Assert.Equal("new-database", File.ReadAllText(
+            Path.Combine(locations.PortableRoot, "winpool.db")));
+    }
+
+    [Fact]
+    public async Task TargetManifestExactlyMatchesSource()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        locations.WriteStandard(Path.Combine("Artifacts", "a.bin"), "alpha");
+        locations.WriteStandard(Path.Combine("Nested", "b.json"), "{\"b\":2}");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "stale.txt"), "stale");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            ReadManagedPayload(locations.StandardRoot),
+            ReadManagedPayload(locations.PortableRoot));
+    }
+
+    [Fact]
+    public async Task PointerFailureRestoresPreviousTarget()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "new");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "previous.txt"), "previous");
+        var coordinator = new RecordingCoordinator();
+        var manager = locations.CreateManager(coordinator, new FailingCommitter(coordinator));
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.Equal("previous", File.ReadAllText(
+            Path.Combine(locations.PortableRoot, "previous.txt")));
+        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+    }
+
+    [Fact]
+    public async Task CancellationRestoresPreviousTarget()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "new");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "previous.txt"), "previous");
+        using var cancellation = new CancellationTokenSource();
+        var manager = locations.CreateManager(
+            new RecordingCoordinator(),
+            new CancellingCommitter(cancellation));
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            cancellation.Token);
+
+        Assert.Equal(ApplicationStatus.Cancelled, result.Status);
+        Assert.Equal("previous", File.ReadAllText(
+            Path.Combine(locations.PortableRoot, "previous.txt")));
+        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+    }
+
+    [Fact]
+    public async Task HashMismatchRestoresPreviousTarget()
+    {
+        using var locations = TemporaryLocations.Create();
+        await CreateRealDatabaseAsync(locations.StandardRoot);
+        locations.WriteStandard("attachment.txt", "source");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "previous.txt"), "previous");
+        var auditor = new DelegatingAuditor((call, path, report) =>
+        {
+            if (call == 4)
+            {
+                File.WriteAllText(Path.Combine(Path.GetDirectoryName(path)!, "attachment.txt"), "tampered");
+            }
+
+            return report;
+        });
+        var manager = locations.CreateManager(new RecordingCoordinator(), auditor: auditor);
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.Equal("previous", File.ReadAllText(
+            Path.Combine(locations.PortableRoot, "previous.txt")));
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+    }
+
+    [Fact]
+    public async Task SqliteVerificationFailureRestoresPreviousTarget()
+    {
+        using var locations = TemporaryLocations.Create();
+        await CreateRealDatabaseAsync(locations.StandardRoot);
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "previous.txt"), "previous");
+        var auditor = new DelegatingAuditor((call, _, report) =>
+            call == 4 ? report with { SchemaVersion = report.SchemaVersion + 1 } : report);
+        var manager = locations.CreateManager(new RecordingCoordinator(), auditor: auditor);
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.Equal("previous", File.ReadAllText(
+            Path.Combine(locations.PortableRoot, "previous.txt")));
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+    }
+
+    [Fact]
+    public async Task StandardToPortableToStandardRoundTripIsExact()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        locations.WriteStandard(Path.Combine("Artifacts", "result.json"), "{\"ok\":true}");
+        var original = ReadManagedPayload(locations.StandardRoot);
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var toPortable = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+        Assert.True((await manager.ApplySwitchAsync(
+            toPortable,
+            CorrelationId.New(),
+            CancellationToken.None)).IsSuccess);
+        var toStandard = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Standard,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            toStandard,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(original, ReadManagedPayload(locations.StandardRoot));
+        AssertNoMigrationTemporaryRoots(locations, "standard");
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+    }
+
+    [Fact]
+    public async Task MigrationTemporaryRootsCanBeCleanedImmediately()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        Assert.True((await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None)).IsSuccess);
+
+        AssertNoMigrationTemporaryRoots(locations, "portable");
+        Directory.Move(locations.PortableRoot, locations.PortableRoot + ".moved");
+        Directory.Move(locations.PortableRoot + ".moved", locations.PortableRoot);
+    }
+
+    [Fact]
+    public async Task MigratedDatabaseCanBeReopenedImmediately()
+    {
+        using var locations = TemporaryLocations.Create();
+        await CreateRealDatabaseAsync(locations.StandardRoot);
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        Assert.True((await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None)).IsSuccess);
+
+        var migrated = Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName);
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = migrated,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA quick_check;";
+        Assert.Equal("ok", Convert.ToString(await command.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task MigrationDoesNotDependOnGlobalSqlitePoolCleanup()
+    {
+        using var locations = TemporaryLocations.Create();
+        await CreateRealDatabaseAsync(locations.StandardRoot);
+        var unrelatedPath = Path.Combine(locations.BaseDirectory, "unrelated.db");
+        await using var unrelated = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = unrelatedPath,
+                Pooling = true
+            }.ToString());
+        await unrelated.OpenAsync();
+        await using (var command = unrelated.CreateCommand())
+        {
+            command.CommandText = "CREATE TABLE marker(value INTEGER); INSERT INTO marker VALUES(7);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        Assert.True((await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None)).IsSuccess);
+        await using var verify = unrelated.CreateCommand();
+        verify.CommandText = "SELECT value FROM marker;";
+        Assert.Equal(7L, Convert.ToInt64(await verify.ExecuteScalarAsync()));
+    }
+
+    private static async Task CreateRealDatabaseAsync(string root)
+    {
+        Directory.CreateDirectory(root);
+        var store = new WinPoolSqliteStore(Path.Combine(
+            root,
+            StorageLocationManager.DatabaseFileName));
+        await store.InitializeAsync();
+        await using var connection = await store.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static string[] ReadManagedPayload(string root) =>
+        Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path =>
+            {
+                var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                return !string.Equals(
+                           relative,
+                           StorageLocationManager.PointerFileName,
+                           StringComparison.OrdinalIgnoreCase)
+                       && !relative.StartsWith(
+                           StorageLocationManager.PointerFileName + ".tmp-",
+                           StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           relative,
+                           StorageLocationManager.DatabaseFileName + "-wal",
+                           StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           relative,
+                           StorageLocationManager.DatabaseFileName + "-shm",
+                           StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           relative,
+                           StorageLocationManager.DatabaseFileName + "-journal",
+                           StringComparison.OrdinalIgnoreCase);
+            })
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(path =>
+                Path.GetRelativePath(root, path).Replace('\\', '/')
+                + "=" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    File.ReadAllBytes(path))))
+            .ToArray();
+
+    private static void AssertNoMigrationTemporaryRoots(
+        TemporaryLocations locations,
+        string targetName) =>
+        Assert.Empty(Directory.EnumerateDirectories(
+            locations.BaseDirectory,
+            $".{targetName}.winpool-*",
+            SearchOption.TopDirectoryOnly));
+
+    private sealed class CallbackCoordinator(Action onQuiesced)
+        : IStorageWriteQuiescenceCoordinator
+    {
+        public Task<IAsyncDisposable> QuiesceAndFlushAsync(
+            CorrelationId correlationId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            onQuiesced();
+            return Task.FromResult<IAsyncDisposable>(new NoopLease());
+        }
+
+        private sealed class NoopLease : IAsyncDisposable
+        {
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
     private sealed class RecordingCoordinator : IStorageWriteQuiescenceCoordinator
     {
         public List<string> Events { get; } = [];
@@ -479,6 +870,36 @@ public sealed class StorageLocationManagerTests
         }
     }
 
+    private sealed class CancellingCommitter(CancellationTokenSource cancellation)
+        : IStorageLocationPointerCommitter
+    {
+        public Task CommitAsync(
+            string pointerPath,
+            StorageLocationMode mode,
+            CancellationToken cancellationToken)
+        {
+            cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("The cancellation token should have thrown.");
+        }
+    }
+
+    private sealed class DelegatingAuditor(
+        Func<int, string, SqliteMigrationAuditReport, SqliteMigrationAuditReport> transform)
+        : ISqliteMigrationAuditor
+    {
+        private readonly SqliteMigrationAuditor inner = new();
+        private int callCount;
+
+        public async Task<SqliteMigrationAuditReport> CaptureAsync(
+            string databasePath,
+            CancellationToken cancellationToken = default)
+        {
+            var report = await inner.CaptureAsync(databasePath, cancellationToken);
+            return transform(++callCount, databasePath, report);
+        }
+    }
+
     private sealed class TemporaryLocations : IDisposable
     {
         private TemporaryLocations(string baseDirectory)
@@ -506,8 +927,9 @@ public sealed class StorageLocationManagerTests
 
         public StorageLocationManager CreateManager(
             IStorageWriteQuiescenceCoordinator coordinator,
-            IStorageLocationPointerCommitter? committer = null) =>
-            new(StandardRoot, PortableRoot, coordinator, committer);
+            IStorageLocationPointerCommitter? committer = null,
+            ISqliteMigrationAuditor? auditor = null) =>
+            new(StandardRoot, PortableRoot, coordinator, committer, auditor);
 
         public void WriteStandard(string relativePath, string contents)
         {

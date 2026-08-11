@@ -7,7 +7,26 @@ This file records results that actually occurred. Planned work remains in
 
 ## Unreleased
 
-No unreleased changes are recorded after the V0.32 checkpoint.
+### V0.33 refactor in progress — 2026-08-11
+
+- Retired `WinPool.Core` into the canonical Application model and preserved
+  system/document identity, simulation, projection, startup, notification, and
+  layout behavior.
+- Hardened Agent, Worker, Broker, Control IPC, and Event IPC lifecycles with
+  retryable shutdown, bounded process termination, typed abort, isolated bad
+  clients, disconnect recovery, snapshot reseeding, and explicit event-gap state.
+- Added process-instance identity, bounded terminal diagnostics, and the real
+  SQLite v10-to-v11 history migration; the single V0.33 wire-protocol bump is 2.
+- Made the Agent own external-tool path configuration and made each tool
+  invocation resolve one numeric output code page for stateful stdout/stderr
+  decoding while preserving raw bytes.
+- Replaced storage-location overwrite-copy with an exact same-volume staging
+  transaction. It captures source and target, drains only the source store,
+  verifies manifests and SQLite identity, rolls the previous target back on
+  cancellation or failure, and removes stale managed target payload.
+- V0.33 remains an in-progress integration checkpoint. Native/manual gates are
+  still `unverified`; no tag, binary release, GitHub Release, or remote push has
+  been performed for V0.33.
 
 ## V0.32 source checkpoint — 2026-08-10
 

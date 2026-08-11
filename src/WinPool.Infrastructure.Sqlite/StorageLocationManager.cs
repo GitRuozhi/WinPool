@@ -112,16 +112,16 @@ public sealed class StorageLocationManager : IStorageLocationManager
     private readonly string pointerPath;
     private readonly IStorageWriteQuiescenceCoordinator writeCoordinator;
     private readonly IStorageLocationPointerCommitter pointerCommitter;
-    private readonly SqliteMigrationAuditor migrationAuditor;
+    private readonly ISqliteMigrationAuditor migrationAuditor;
     private readonly SemaphoreSlim switchGate = new(1, 1);
-    private readonly Dictionary<StorageLocationSwitchPlan, SourceSnapshot> issuedPlans = [];
+    private readonly Dictionary<StorageLocationSwitchPlan, PlannedSwitch> issuedPlans = [];
 
     public StorageLocationManager(
         string standardRoot,
         string portableRoot,
         IStorageWriteQuiescenceCoordinator writeCoordinator,
         IStorageLocationPointerCommitter? pointerCommitter = null,
-        SqliteMigrationAuditor? migrationAuditor = null)
+        ISqliteMigrationAuditor? migrationAuditor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(standardRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(portableRoot);
@@ -202,6 +202,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
             }
 
             var snapshot = await SnapshotSourceAsync(sourceRoot, cancellationToken);
+            var targetSnapshot = await SnapshotSourceAsync(targetRoot, cancellationToken);
             var plan = new StorageLocationSwitchPlan(
                 sourceMode,
                 targetMode,
@@ -211,7 +212,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                 snapshot.TotalBytes,
                 snapshot.ManifestSha256,
                 DateTimeOffset.UtcNow);
-            issuedPlans[plan] = snapshot;
+            issuedPlans[plan] = new PlannedSwitch(snapshot, targetSnapshot);
             return ApplicationResult<StorageLocationSwitchPlan>.Succeeded(plan, correlationId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -259,7 +260,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
         {
             await switchGate.WaitAsync(cancellationToken);
             enteredGate = true;
-            if (!issuedPlans.TryGetValue(plan, out var plannedSnapshot)
+            if (!issuedPlans.TryGetValue(plan, out var plannedSwitch)
                 || !PlanUsesConfiguredRoots(plan))
             {
                 return Result<StorageLocationState>(
@@ -298,18 +299,10 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     "The requested data root is not writable.");
             }
 
-            await using var writeLease = await writeCoordinator.QuiesceAndFlushAsync(
-                correlationId,
-                cancellationToken);
-
-            DrainSourceDatabaseHandles(plan.SourceRoot);
-
-            // Flush happens while acquiring the lease. Re-snapshot afterwards so
-            // the immutable plan cannot silently omit writes made since planning.
-            var sourceSnapshot = await SnapshotSourceAsync(
+            var currentSourceSnapshot = await SnapshotSourceAsync(
                 plan.SourceRoot,
                 cancellationToken);
-            if (!plannedSnapshot.Matches(sourceSnapshot))
+            if (!plannedSwitch.Source.Matches(currentSourceSnapshot))
             {
                 return Result<StorageLocationState>(
                     ApplicationStatus.Rejected,
@@ -318,37 +311,151 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     "The source data changed after planning; create a new plan.");
             }
 
-            var sourceDatabasePath = Path.Combine(
-                plan.SourceRoot,
-                DatabaseFileName);
-            var sourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
-                ? await migrationAuditor.CaptureAsync(
-                    sourceDatabasePath,
-                    cancellationToken)
-                : null;
-            ValidateTargetDatabaseFamily(sourceSnapshot, plan.TargetRoot);
-            await CopySnapshotAsync(
-                sourceSnapshot,
+            var currentTargetSnapshot = await SnapshotSourceAsync(
                 plan.TargetRoot,
                 cancellationToken);
-            if (sourceDatabaseAudit is not null)
+            if (!plannedSwitch.Target.Matches(currentTargetSnapshot))
             {
-                var targetDatabaseAudit = await migrationAuditor.CaptureAsync(
-                    Path.Combine(plan.TargetRoot, DatabaseFileName),
-                    cancellationToken);
-                if (!sourceDatabaseAudit.HasSameLogicalIdentity(targetDatabaseAudit))
-                {
-                    throw new IOException(
-                        "The migrated SQLite database failed schema, row-count, or primary-key verification.");
-                }
+                return Result<StorageLocationState>(
+                    ApplicationStatus.Rejected,
+                    correlationId,
+                    "storage.location.target_changed",
+                    "The target data changed after planning; create a new plan.");
             }
 
-            await pointerCommitter.CommitAsync(pointerPath, plan.TargetMode, cancellationToken);
+            var stagingRoot = CreateSiblingTransactionRoot(plan.TargetRoot, "stage");
+            var rollbackRoot = CreateSiblingTransactionRoot(plan.TargetRoot, "rollback");
+            var targetWasReplaced = false;
+            var pointerCommitted = false;
+            try
+            {
+                await CopySnapshotAsync(
+                    plannedSwitch.Source,
+                    stagingRoot,
+                    cancellationToken);
+                var stagedSnapshot = await SnapshotSourceAsync(
+                    stagingRoot,
+                    cancellationToken);
+                EnsureSameManifest(plannedSwitch.Source, stagedSnapshot, "staging");
 
-            issuedPlans.Remove(plan);
-            return ApplicationResult<StorageLocationState>.Succeeded(
-                CreateState(plan.TargetMode, plan.TargetRoot),
-                correlationId);
+                var sourceDatabasePath = Path.Combine(
+                    plan.SourceRoot,
+                    DatabaseFileName);
+                var stagedSourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
+                    ? await migrationAuditor.CaptureAsync(
+                        sourceDatabasePath,
+                        cancellationToken)
+                    : null;
+                if (stagedSourceDatabaseAudit is not null)
+                {
+                    await EnsureDatabaseIdentityAsync(
+                        stagedSourceDatabaseAudit,
+                        stagingRoot,
+                        cancellationToken);
+                }
+
+                await using var writeLease = await writeCoordinator.QuiesceAndFlushAsync(
+                    correlationId,
+                    cancellationToken);
+
+                DrainSourceDatabaseHandles(plan.SourceRoot);
+
+            // Flush happens while acquiring the lease. Re-snapshot afterwards so
+            // the immutable plan cannot silently omit writes made since planning.
+                var sourceSnapshot = await SnapshotSourceAsync(
+                    plan.SourceRoot,
+                    cancellationToken);
+                if (!plannedSwitch.Source.Matches(sourceSnapshot))
+                {
+                    return Result<StorageLocationState>(
+                        ApplicationStatus.Rejected,
+                        correlationId,
+                        "storage.location.plan_stale",
+                        "The source data changed after planning; create a new plan.");
+                }
+
+                EnsureSameManifest(sourceSnapshot, stagedSnapshot, "staging");
+
+                var sourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
+                    ? await migrationAuditor.CaptureAsync(
+                        sourceDatabasePath,
+                        cancellationToken)
+                    : null;
+                if (stagedSourceDatabaseAudit is not null
+                    && (sourceDatabaseAudit is null
+                        || !stagedSourceDatabaseAudit.HasSameLogicalIdentity(sourceDatabaseAudit)))
+                {
+                    return Result<StorageLocationState>(
+                        ApplicationStatus.Rejected,
+                        correlationId,
+                        "storage.location.plan_stale",
+                        "The source database changed after staging; create a new plan.");
+                }
+
+                if (sourceDatabaseAudit is not null)
+                {
+                    await EnsureDatabaseIdentityAsync(
+                        sourceDatabaseAudit,
+                        stagingRoot,
+                        cancellationToken);
+                }
+
+                currentTargetSnapshot = await SnapshotSourceAsync(
+                    plan.TargetRoot,
+                    cancellationToken);
+                if (!plannedSwitch.Target.Matches(currentTargetSnapshot))
+                {
+                    return Result<StorageLocationState>(
+                        ApplicationStatus.Rejected,
+                        correlationId,
+                        "storage.location.target_changed",
+                        "The target data changed after staging; create a new plan.");
+                }
+
+                ReplaceTargetWithStaging(
+                    plan.TargetRoot,
+                    stagingRoot,
+                    rollbackRoot);
+                targetWasReplaced = true;
+
+                var targetSnapshot = await SnapshotSourceAsync(
+                    plan.TargetRoot,
+                    cancellationToken);
+                EnsureSameManifest(sourceSnapshot, targetSnapshot, "target");
+                if (sourceDatabaseAudit is not null)
+                {
+                    await EnsureDatabaseIdentityAsync(
+                        sourceDatabaseAudit,
+                        plan.TargetRoot,
+                        cancellationToken);
+                }
+
+                targetSnapshot = await SnapshotSourceAsync(
+                    plan.TargetRoot,
+                    cancellationToken);
+                EnsureSameManifest(sourceSnapshot, targetSnapshot, "target");
+
+                await pointerCommitter.CommitAsync(
+                    pointerPath,
+                    plan.TargetMode,
+                    cancellationToken);
+                pointerCommitted = true;
+
+                issuedPlans.Remove(plan);
+                return ApplicationResult<StorageLocationState>.Succeeded(
+                    CreateState(plan.TargetMode, plan.TargetRoot),
+                    correlationId);
+            }
+            finally
+            {
+                if (targetWasReplaced && !pointerCommitted)
+                {
+                    RestorePreviousTarget(plan.TargetRoot, rollbackRoot);
+                }
+
+                DeleteDirectoryTree(stagingRoot);
+                DeleteDirectoryTree(rollbackRoot);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -445,7 +552,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
         foreach (var file in EnumerateFilesWithoutReparsePoints(sourceRoot))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsManagerFile(file))
+            if (IsControlOrTransientFile(file, sourceRoot))
             {
                 continue;
             }
@@ -571,28 +678,82 @@ public sealed class StorageLocationManager : IStorageLocationManager
             && header.SequenceEqual("SQLite format 3\0"u8);
     }
 
-    private static void ValidateTargetDatabaseFamily(
-        SourceSnapshot sourceSnapshot,
-        string targetRoot)
+    private async Task EnsureDatabaseIdentityAsync(
+        SqliteMigrationAuditReport sourceAudit,
+        string root,
+        CancellationToken cancellationToken)
     {
-        var sourceFiles = sourceSnapshot.Files
-            .Select(file => file.RelativePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        string[] databaseFamily =
-        [
-            DatabaseFileName,
-            DatabaseFileName + "-wal",
-            DatabaseFileName + "-shm",
-            DatabaseFileName + "-journal"
-        ];
-        foreach (var relativePath in databaseFamily)
+        var targetAudit = await migrationAuditor.CaptureAsync(
+            Path.Combine(root, DatabaseFileName),
+            cancellationToken);
+        if (!sourceAudit.HasSameLogicalIdentity(targetAudit))
         {
-            if (!sourceFiles.Contains(relativePath)
-                && File.Exists(Path.Combine(targetRoot, relativePath)))
+            throw new IOException(
+                "The migrated SQLite database failed schema, row-count, or primary-key verification.");
+        }
+    }
+
+    private static void EnsureSameManifest(
+        SourceSnapshot source,
+        SourceSnapshot candidate,
+        string candidateName)
+    {
+        if (!source.HasSameManifest(candidate))
+        {
+            throw new IOException(
+                $"The {candidateName} payload manifest does not exactly match the source manifest.");
+        }
+    }
+
+    private static string CreateSiblingTransactionRoot(string targetRoot, string role)
+    {
+        var parent = Path.GetDirectoryName(targetRoot)
+            ?? throw new IOException("The target data root has no parent directory.");
+        var name = Path.GetFileName(targetRoot);
+        return Path.Combine(
+            parent,
+            $".{name}.winpool-{role}-{Guid.NewGuid():N}");
+    }
+
+    private static void ReplaceTargetWithStaging(
+        string targetRoot,
+        string stagingRoot,
+        string rollbackRoot)
+    {
+        if (Directory.Exists(targetRoot))
+        {
+            Directory.Move(targetRoot, rollbackRoot);
+        }
+
+        try
+        {
+            Directory.Move(stagingRoot, targetRoot);
+        }
+        catch
+        {
+            if (Directory.Exists(rollbackRoot) && !Directory.Exists(targetRoot))
             {
-                throw new IOException(
-                    "The target contains a stale SQLite database or sidecar file.");
+                Directory.Move(rollbackRoot, targetRoot);
             }
+
+            throw;
+        }
+    }
+
+    private static void RestorePreviousTarget(string targetRoot, string rollbackRoot)
+    {
+        DeleteDirectoryTree(targetRoot);
+        if (Directory.Exists(rollbackRoot))
+        {
+            Directory.Move(rollbackRoot, targetRoot);
+        }
+    }
+
+    private static void DeleteDirectoryTree(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
         }
     }
 
@@ -635,19 +796,26 @@ public sealed class StorageLocationManager : IStorageLocationManager
         _ = stream.ReadByte();
     }
 
-    private bool IsManagerFile(string file)
+    private bool IsControlOrTransientFile(string file, string root)
     {
         if (!string.Equals(
                 Path.GetDirectoryName(file),
-                standardRoot,
+                root,
                 PathComparison))
         {
             return false;
         }
 
         var name = Path.GetFileName(file);
-        return string.Equals(name, PointerFileName, StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith(PointerFileName + ".tmp-", StringComparison.OrdinalIgnoreCase);
+        var isPointer = string.Equals(root, standardRoot, PathComparison)
+            && (string.Equals(name, PointerFileName, StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith(
+                    PointerFileName + ".tmp-",
+                    StringComparison.OrdinalIgnoreCase));
+        return isPointer
+            || string.Equals(name, DatabaseFileName + "-wal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, DatabaseFileName + "-shm", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, DatabaseFileName + "-journal", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> EnumerateFilesWithoutReparsePoints(string root)
@@ -858,6 +1026,11 @@ public sealed class StorageLocationManager : IStorageLocationManager
     {
         public long Count => Files.Count;
 
+        public bool HasSameManifest(SourceSnapshot other) =>
+            TotalBytes == other.TotalBytes
+            && Files.Count == other.Files.Count
+            && StringComparer.Ordinal.Equals(ManifestSha256, other.ManifestSha256);
+
         public bool Matches(SourceSnapshot other)
         {
             if (TotalBytes != other.TotalBytes
@@ -890,6 +1063,10 @@ public sealed class StorageLocationManager : IStorageLocationManager
             return true;
         }
     }
+
+    private sealed record PlannedSwitch(
+        SourceSnapshot Source,
+        SourceSnapshot Target);
 
     private sealed class ReparsePointException : IOException;
 }
