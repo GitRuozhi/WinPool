@@ -13,7 +13,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem cancelTest;
     private readonly SynchronizationContext uiContext;
     private AgentSessionCoordinator? coordinator;
-    private bool shuttingDown;
 
     public TrayApplicationContext()
     {
@@ -67,8 +66,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
     }
 
     internal bool IsTrayVisible => trayIcon.Visible;
-
-    internal bool IsShuttingDown => shuttingDown;
 
     internal void AttachCoordinator(AgentSessionCoordinator value) =>
         coordinator = value ?? throw new ArgumentNullException(nameof(value));
@@ -164,7 +161,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OpenApp(string? page = null)
     {
-        if (shuttingDown)
+        if (coordinator?.State != AgentLifecycleState.Running)
         {
             return;
         }
@@ -222,7 +219,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task StartMonitoringAsync()
     {
-        if (coordinator is null || shuttingDown)
+        if (coordinator?.State != AgentLifecycleState.Running)
         {
             ShowNotConnected();
             return;
@@ -275,7 +272,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task StopMonitoringAsync()
     {
-        if (coordinator is null || shuttingDown)
+        if (coordinator?.State != AgentLifecycleState.Running)
         {
             ShowNotConnected();
             return;
@@ -308,7 +305,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task CancelTestAsync()
     {
-        if (coordinator is null || shuttingDown)
+        if (coordinator?.State != AgentLifecycleState.Running)
         {
             ShowNotConnected();
             return;
@@ -333,14 +330,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task BeginCompleteExitAsync()
     {
-        if (shuttingDown)
-        {
-            return;
-        }
-
         if (coordinator is null)
         {
             ShowNotConnected();
+            return;
+        }
+
+        if (coordinator.State is AgentLifecycleState.ShuttingDown
+            or AgentLifecycleState.Stopped)
+        {
             return;
         }
 
@@ -362,7 +360,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
         }
 
-        shuttingDown = true;
         trayIcon.Text = "WinPool — Shutting down";
         var result = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
@@ -371,7 +368,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 CorrelationId.New()));
         if (!result.IsSuccess)
         {
-            shuttingDown = false;
             trayIcon.Visible = true;
             trayIcon.Text = "WinPool — Shutdown incomplete";
             trayIcon.ShowBalloonTip(

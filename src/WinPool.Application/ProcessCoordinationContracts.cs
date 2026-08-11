@@ -420,16 +420,32 @@ public sealed record SystemSupportReviewResponse(
 
 public sealed record ShutdownResponse(ShutdownResult Result) : AgentResponse;
 
+public enum AgentLifecycleState
+{
+    Running,
+    ShuttingDown,
+    ShutdownPending,
+    Stopped
+}
+
+public sealed record AgentShutdownStatus(
+    AgentLifecycleState State,
+    DateTimeOffset? AttemptedAtUtc,
+    IReadOnlyList<string> FailedStepCodes,
+    IReadOnlyList<int> RemainingProcessIds,
+    bool CanRetry);
+
 public sealed record AgentSnapshot(
     AgentInstanceId AgentInstanceId,
     bool IsTrayVisible,
     MonitoringSession? ActiveMonitoringSession,
     TestRunId? ActiveTestRunId,
-    bool IsShuttingDown,
+    AgentShutdownStatus ShutdownStatus,
     IReadOnlyList<ProcessRegistration> Processes,
     IReadOnlyList<MonitorSample>? LatestMonitorSamples = null,
     IReadOnlyList<StorageHealthEvent>? RecentStorageHealthEvents = null,
-    MonitorRuntimeDiagnostics? MonitorDiagnostics = null);
+    MonitorRuntimeDiagnostics? MonitorDiagnostics = null,
+    IReadOnlyList<ToolState>? CurrentToolStates = null);
 
 public abstract record AgentEvent(DateTimeOffset OccurredAtUtc);
 
@@ -454,6 +470,16 @@ public sealed record AgentProcessStateEvent(
 
 public sealed record AgentShutdownEvent(
     ShutdownReason Reason,
+    DateTimeOffset OccurredAtUtc)
+    : AgentEvent(OccurredAtUtc);
+
+/// <summary>
+/// A complete replacement boundary after initial connection or an event gap.
+/// Consumers must discard previously projected Agent state before applying it.
+/// </summary>
+public sealed record AgentStateReseedEvent(
+    AgentSnapshot Snapshot,
+    string Reason,
     DateTimeOffset OccurredAtUtc)
     : AgentEvent(OccurredAtUtc);
 

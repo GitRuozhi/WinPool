@@ -31,8 +31,28 @@ public sealed class TestWorkerAgentEventProjector
 
         if (workerEvent.Code == "tool.process.exited")
         {
-            _progress.Complete(_runId, workerEvent.StepId);
-            return null;
+            var flushed = _progress.Complete(
+                _runId,
+                workerEvent.StepId,
+                request.Invocation.ToolId,
+                workerEvent.OccurredAtUtc);
+            return flushed is null
+                ? null
+                : new AgentTestEvent(
+                    new TestEvent(
+                        _runId,
+                        TestEventKind.Progress,
+                        new ApplicationTaskEvent(
+                            new ApplicationTaskId(_runId.Value),
+                            _correlationId,
+                            ApplicationTaskEventKind.Progress,
+                            ApplicationTaskState.Running,
+                            flushed.OccurredAtUtc,
+                            flushed.Code,
+                            flushed.Code,
+                            string.Empty,
+                            flushed.StepId,
+                            flushed.Fraction)));
         }
 
         var native = _progress.Consume(

@@ -58,6 +58,8 @@ public sealed class NamedPipeAgentConnectionTests
         using var watchTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         await using var events = connection.WatchAsync(watchTimeout.Token)
             .GetAsyncEnumerator(watchTimeout.Token);
+        Assert.True(await events.MoveNextAsync());
+        Assert.IsType<AgentStateReseedEvent>(events.Current);
 
         firstCancellation.Cancel();
         try
@@ -79,12 +81,18 @@ public sealed class NamedPipeAgentConnectionTests
         var secondTask = secondServer.RunAsync(secondCancellation.Token);
 
         var states = new List<AgentEventTransportState>();
-        while (states.Count < 3 && await events.MoveNextAsync())
+        var reseedAfterGap = false;
+        while ((!reseedAfterGap || states.Count < 3) && await events.MoveNextAsync())
         {
             if (events.Current is AgentEventTransportStateEvent transport)
             {
                 Assert.True(transport.HasEventGap);
                 states.Add(transport.State);
+            }
+            else if (events.Current is AgentStateReseedEvent
+                     && states.Contains(AgentEventTransportState.Reconnecting))
+            {
+                reseedAfterGap = true;
             }
         }
 
@@ -95,6 +103,7 @@ public sealed class NamedPipeAgentConnectionTests
                 AgentEventTransportState.Reconnected
             ],
             states);
+        Assert.True(reseedAfterGap);
         Assert.True(operations.SnapshotRequestCount > 0);
 
         secondCancellation.Cancel();
@@ -244,6 +253,13 @@ public sealed class NamedPipeAgentConnectionTests
         await using var eventEnumerator = connection
             .WatchAsync(eventTimeout.Token)
             .GetAsyncEnumerator(eventTimeout.Token);
+        await using var secondEventEnumerator = connection
+            .WatchAsync(eventTimeout.Token)
+            .GetAsyncEnumerator(eventTimeout.Token);
+        Assert.True(await eventEnumerator.MoveNextAsync());
+        Assert.IsType<AgentStateReseedEvent>(eventEnumerator.Current);
+        Assert.True(await secondEventEnumerator.MoveNextAsync());
+        Assert.IsType<AgentStateReseedEvent>(secondEventEnumerator.Current);
         var occurredAt = DateTimeOffset.UtcNow;
         eventHub.Publish(
             new AgentTestEvent(
@@ -264,6 +280,10 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.True(await eventEnumerator.MoveNextAsync());
         var pushed = Assert.IsType<AgentTestEvent>(eventEnumerator.Current);
         Assert.Equal(0.42, pushed.TestEvent.TaskEvent.ProgressFraction);
+        Assert.True(await secondEventEnumerator.MoveNextAsync());
+        var pushedToSecondWatcher = Assert.IsType<AgentTestEvent>(
+            secondEventEnumerator.Current);
+        Assert.Equal(0.42, pushedToSecondWatcher.TestEvent.TaskEvent.ProgressFraction);
         var correlation = CorrelationId.New();
         var response = await connection.SendAsync(
             new GetAgentSnapshotRequest(correlation),
@@ -494,7 +514,12 @@ public sealed class NamedPipeAgentConnectionTests
                             true,
                             null,
                             null,
-                            false,
+                            new AgentShutdownStatus(
+                                AgentLifecycleState.Running,
+                                null,
+                                [],
+                                [],
+                                false),
                             [])),
                     request.CorrelationId));
         }
@@ -511,7 +536,12 @@ public sealed class NamedPipeAgentConnectionTests
                                 true,
                                 null,
                                 null,
-                                false,
+                                new AgentShutdownStatus(
+                                    AgentLifecycleState.Running,
+                                    null,
+                                    [],
+                                    [],
+                                    false),
                                 []),
                             [],
                             [new AlgorithmIdentity(

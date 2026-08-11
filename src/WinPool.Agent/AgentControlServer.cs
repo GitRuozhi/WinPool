@@ -283,7 +283,7 @@ public sealed class CurrentUserAgentControlServer
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested
-               && coordinator.State != AgentSessionState.Stopped)
+               && coordinator.State != AgentLifecycleState.Stopped)
         {
             await using var server = CurrentUserPipeFactory.CreateServer(pipeName);
             await server.WaitForConnectionAsync(cancellationToken);
@@ -342,7 +342,7 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-start-witness-mismatch");
         }
-        if (coordinator.State == AgentSessionState.Stopped)
+        if (coordinator.State == AgentLifecycleState.Stopped)
         {
             validation = new(
                 false,
@@ -469,7 +469,7 @@ public sealed class CurrentUserAgentControlServer
                     codec.EncodeResponse(result, timeProvider.GetUtcNow()),
                     cancellationToken);
 
-                if (coordinator.State == AgentSessionState.Stopped)
+                if (coordinator.State == AgentLifecycleState.Stopped)
                 {
                     return;
                 }

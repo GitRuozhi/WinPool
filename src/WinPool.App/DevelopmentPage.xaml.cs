@@ -144,7 +144,7 @@ public sealed partial class DevelopmentPage : Page
         var agent = diagnostics.Agent;
         _runtimeLines.Add($"Agent {agent.AgentInstanceId.Value:N}");
         _runtimeLines.Add(
-            $"Tray={agent.IsTrayVisible}  Shutdown={agent.IsShuttingDown}  "
+            $"Tray={agent.IsTrayVisible}  Shutdown={agent.ShutdownStatus.State}  "
             + $"Monitor={agent.ActiveMonitoringSession?.State.ToString() ?? "None"}  "
             + $"Test={agent.ActiveTestRunId?.Value.ToString("N") ?? "None"}");
         if (agent.MonitorDiagnostics is { } queue)

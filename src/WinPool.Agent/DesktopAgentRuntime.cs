@@ -46,6 +46,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly IStorageHealthEventSource storageHealthEventSource;
     private readonly StorageHealthEventRepository storageHealthEventRepository;
     private readonly AgentEventHub agentEvents;
+    private readonly AgentLifecycleStateStore lifecycle;
     private readonly CancellationTokenSource storageHealthEventCancellation = new();
     private readonly object storageHealthEventSync = new();
     private readonly Queue<StorageHealthEvent> recentStorageHealthEvents = new();
@@ -88,6 +89,7 @@ internal sealed class DesktopAgentRuntime :
         StorageHealthEventRepository storageHealthEventRepository,
         IReadOnlyList<StorageHealthEvent> initialStorageHealthEvents,
         AgentEventHub agentEvents,
+        AgentLifecycleStateStore lifecycle,
         IPhysicalDiskDeviceResolver? physicalDiskDeviceResolver = null)
     {
         this.tray = tray ?? throw new ArgumentNullException(nameof(tray));
@@ -155,6 +157,7 @@ internal sealed class DesktopAgentRuntime :
         this.storageHealthEventRepository = storageHealthEventRepository
             ?? throw new ArgumentNullException(nameof(storageHealthEventRepository));
         this.agentEvents = agentEvents ?? throw new ArgumentNullException(nameof(agentEvents));
+        this.lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         ArgumentNullException.ThrowIfNull(initialStorageHealthEvents);
         foreach (var storageEvent in initialStorageHealthEvents.TakeLast(200))
         {
@@ -219,24 +222,27 @@ internal sealed class DesktopAgentRuntime :
 
     public bool HasActiveTest => testCoordinator.HasActiveTest;
 
-    public Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
+    public async Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
         GetAgentSnapshotRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var toolStates = await toolRegistry.ListAsync(cancellationToken)
+            .ConfigureAwait(false);
         var snapshot = new AgentSnapshot(
             instanceId,
             tray.IsTrayVisible,
             ActiveMonitoringSession: monitoring.CurrentSession,
             ActiveTestRunId: testCoordinator.ActiveRunId,
-            IsShuttingDown: tray.IsShuttingDown,
+            ShutdownStatus: lifecycle.Snapshot(),
             Processes: processRegistry.Snapshot()
                 .Select(ToProcessRegistration)
                 .ToArray(),
             LatestMonitorSamples: monitoring.CurrentSamples,
             RecentStorageHealthEvents: GetRecentStorageHealthEvents(),
-            MonitorDiagnostics: monitoring.CurrentDiagnostics);
-        return SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
+            MonitorDiagnostics: monitoring.CurrentDiagnostics,
+            CurrentToolStates: toolStates.Value ?? []);
+        return await SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
     }
 
     public async Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(

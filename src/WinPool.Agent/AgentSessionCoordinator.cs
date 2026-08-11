@@ -2,14 +2,6 @@ using WinPool.Application;
 
 namespace WinPool.Agent;
 
-public enum AgentSessionState
-{
-    Running,
-    ShuttingDown,
-    ShutdownPending,
-    Stopped
-}
-
 /// <summary>
 /// Application-facing operations are expressed as closed, typed methods.
 /// </summary>
@@ -174,33 +166,28 @@ public sealed class AgentSessionCoordinator
     private readonly SemaphoreSlim shutdownGate = new(1, 1);
     private readonly IAgentRequestOperations operations;
     private readonly AgentShutdownWorkflow shutdownWorkflow;
-    private AgentSessionState state = AgentSessionState.Running;
+    private readonly AgentLifecycleStateStore lifecycle;
     private AgentShutdownExecution? shutdownExecution;
 
     public AgentSessionCoordinator(
         IAgentRequestOperations operations,
         AgentShutdownWorkflow shutdownWorkflow,
-        AgentProcessRegistry processRegistry)
+        AgentProcessRegistry processRegistry,
+        AgentLifecycleStateStore? lifecycle = null)
     {
         this.operations = operations ?? throw new ArgumentNullException(nameof(operations));
         this.shutdownWorkflow = shutdownWorkflow
             ?? throw new ArgumentNullException(nameof(shutdownWorkflow));
         ProcessRegistry = processRegistry
             ?? throw new ArgumentNullException(nameof(processRegistry));
+        this.lifecycle = lifecycle ?? new AgentLifecycleStateStore(ProcessRegistry);
     }
 
     public AgentProcessRegistry ProcessRegistry { get; }
 
-    public AgentSessionState State
-    {
-        get
-        {
-            lock (stateLock)
-            {
-                return state;
-            }
-        }
-    }
+    public AgentLifecycleState State => lifecycle.State;
+
+    public AgentShutdownStatus ShutdownStatus => lifecycle.Snapshot();
 
     public AgentShutdownExecution? ShutdownExecution
     {
@@ -217,7 +204,7 @@ public sealed class AgentSessionCoordinator
     {
         lock (stateLock)
         {
-            return state == AgentSessionState.Running
+            return lifecycle.State == AgentLifecycleState.Running
                    && ProcessRegistry.TryRegister(registration);
         }
     }
@@ -235,7 +222,7 @@ public sealed class AgentSessionCoordinator
 
         lock (stateLock)
         {
-            if (state != AgentSessionState.Running)
+            if (lifecycle.State != AgentLifecycleState.Running)
             {
                 if (request is GetAgentSnapshotRequest snapshotRequest)
                 {
@@ -326,12 +313,12 @@ public sealed class AgentSessionCoordinator
         {
             lock (stateLock)
             {
-                if (state == AgentSessionState.Stopped && shutdownExecution is not null)
+                if (lifecycle.State == AgentLifecycleState.Stopped && shutdownExecution is not null)
                 {
                     return ResultForExecution(shutdownExecution, request.CorrelationId);
                 }
 
-                if (state == AgentSessionState.Running
+                if (lifecycle.State == AgentLifecycleState.Running
                     && shutdownWorkflow.HasActiveTest
                     && !request.UserConfirmedActiveTestCancellation)
                 {
@@ -340,16 +327,14 @@ public sealed class AgentSessionCoordinator
 
                 // The gate guarantees one workflow. A second request joins the first,
                 // then retries only after the first has reached ShutdownPending.
-                state = AgentSessionState.ShuttingDown;
+                lifecycle.MarkShuttingDown(DateTimeOffset.UtcNow);
             }
 
             var execution = await shutdownWorkflow.ExecuteAsync(request.Reason);
             lock (stateLock)
             {
                 shutdownExecution = execution;
-                state = execution.Result.Completed
-                    ? AgentSessionState.Stopped
-                    : AgentSessionState.ShutdownPending;
+                lifecycle.RecordExecution(execution);
             }
 
             return ResultForExecution(execution, request.CorrelationId);

@@ -100,6 +100,47 @@ public sealed class ToolNativeProgressParserTests
             ToolOutputEncoding.Utf8));
     }
 
+    [Fact]
+    public void DoesNotJoinTokensAcrossStandardOutputAndStandardError()
+    {
+        var parser = new ToolNativeProgressParser();
+        var runId = TestRunId.New();
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Null(parser.Consume(
+            StreamEvent(runId, "step", WorkerEventKind.StandardOutput, "50", now),
+            new ToolId("windows.robocopy"),
+            ToolOutputEncoding.Utf8));
+        Assert.Null(parser.Consume(
+            StreamEvent(runId, "step", WorkerEventKind.StandardError, "%", now.AddSeconds(1)),
+            new ToolId("windows.robocopy"),
+            ToolOutputEncoding.Utf8));
+    }
+
+    [Fact]
+    public void CompleteFlushesBothDecodersAndRemovesInvocationState()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var parser = new ToolNativeProgressParser();
+        var runId = TestRunId.New();
+        var now = DateTimeOffset.UtcNow;
+        var bytes = Encoding.GetEncoding(936).GetBytes("已复制 42.5%");
+
+        Assert.Null(parser.Consume(
+            RawEvent(runId, bytes[..1], now, 936),
+            new ToolId("windows.robocopy"),
+            ToolOutputEncoding.Oem));
+        Assert.Null(parser.Complete(
+            runId,
+            "step",
+            new ToolId("windows.robocopy"),
+            now.AddSeconds(1)));
+        Assert.Null(parser.Consume(
+            Event(runId, "step", "%", now.AddSeconds(2)),
+            new ToolId("windows.robocopy"),
+            ToolOutputEncoding.Utf8));
+    }
+
     private static WorkerEvent Event(
         TestRunId runId,
         string stepId,
@@ -112,6 +153,23 @@ public sealed class ToolNativeProgressParserTests
             WorkerEventImportance.Progress,
             occurredAtUtc,
             "tool.process.stdout",
+            Encoding.UTF8.GetBytes(text));
+
+    private static WorkerEvent StreamEvent(
+        TestRunId runId,
+        string stepId,
+        WorkerEventKind kind,
+        string text,
+        DateTimeOffset occurredAtUtc) =>
+        new(
+            runId,
+            stepId,
+            kind,
+            WorkerEventImportance.Progress,
+            occurredAtUtc,
+            kind == WorkerEventKind.StandardOutput
+                ? "tool.process.stdout"
+                : "tool.process.stderr",
             Encoding.UTF8.GetBytes(text));
 
     private static WorkerEvent RawEvent(

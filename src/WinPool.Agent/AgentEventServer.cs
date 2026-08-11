@@ -19,7 +19,7 @@ public sealed class AgentEventHub
             {
                 SingleReader = true,
                 SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
+                FullMode = BoundedChannelFullMode.Wait
             });
         lock (_sync)
         {
@@ -32,23 +32,35 @@ public sealed class AgentEventHub
     public void Publish(AgentEvent agentEvent)
     {
         ArgumentNullException.ThrowIfNull(agentEvent);
-        Channel<AgentEvent>[] subscribers;
+        KeyValuePair<Guid, Channel<AgentEvent>>[] subscribers;
         lock (_sync)
         {
-            subscribers = _subscribers.Values.ToArray();
+            subscribers = _subscribers.ToArray();
         }
 
         foreach (var subscriber in subscribers)
         {
-            subscriber.Writer.TryWrite(agentEvent);
+            if (!subscriber.Value.Writer.TryWrite(agentEvent))
+            {
+                Remove(subscriber.Key, subscriber.Value);
+            }
         }
     }
 
     private void Remove(Guid id)
+        => Remove(id, null);
+
+    private void Remove(Guid id, Channel<AgentEvent>? expected)
     {
         Channel<AgentEvent>? channel;
         lock (_sync)
         {
+            if (!_subscribers.TryGetValue(id, out var current)
+                || (expected is not null && !ReferenceEquals(current, expected)))
+            {
+                return;
+            }
+
             _subscribers.Remove(id, out channel);
         }
 
@@ -107,6 +119,9 @@ public sealed class CurrentUserAgentEventServer
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         await using var pipe = CurrentUserPipeFactory.CreateServer(_endpoint.PipeName);
+        using var cancellationRegistration = cancellationToken.Register(
+            static state => ((System.IO.Pipes.NamedPipeServerStream)state!).Dispose(),
+            pipe);
         using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
         var remaining = _endpoint.ExpiresAtUtc - _timeProvider.GetUtcNow();
@@ -147,20 +162,36 @@ public sealed class CurrentUserAgentEventServer
                     _timeProvider.GetUtcNow())),
             connectTimeout.Token).ConfigureAwait(false);
 
-        await foreach (var item in subscription.Reader.ReadAllAsync(cancellationToken))
+        try
         {
-            await IpcFrameCodec.WriteAsync(
-                pipe,
-                Envelope(
-                    AgentEventMessageTypes.Event,
-                    Guid.NewGuid(),
-                    new AgentEventWirePayload(
-                        item.GetType().Name,
-                        JsonSerializer.SerializeToElement(
-                            item,
-                            item.GetType(),
-                            JsonOptions))),
-                cancellationToken).ConfigureAwait(false);
+            await foreach (var item in subscription.Reader.ReadAllAsync(cancellationToken))
+            {
+                await IpcFrameCodec.WriteAsync(
+                    pipe,
+                    Envelope(
+                        AgentEventMessageTypes.Event,
+                        Guid.NewGuid(),
+                        new AgentEventWirePayload(
+                            item.GetType().Name,
+                            JsonSerializer.SerializeToElement(
+                                item,
+                                item.GetType(),
+                                JsonOptions))),
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (pipe.IsConnected)
+                {
+                    pipe.Disconnect();
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
 

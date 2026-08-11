@@ -3,7 +3,6 @@ using System.IO.Pipes;
 using System.Runtime.CompilerServices;
 using System.Security.Principal;
 using System.Text.Json;
-using System.Threading.Channels;
 using WinPool.Application;
 using WinPool.Ipc;
 
@@ -70,14 +69,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly SemaphoreSlim connectionGate = new(1, 1);
     private readonly SemaphoreSlim requestGate = new(1, 1);
     private readonly Guid clientProcessInstanceId = Guid.NewGuid();
-    private readonly Channel<AgentEvent> observedEvents =
-        Channel.CreateBounded<AgentEvent>(
-            new BoundedChannelOptions(1_024)
-            {
-                SingleReader = false,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
-            });
+    private readonly AgentClientEventFanout eventFanout = new();
     private NamedPipeClientStream? stream;
     private NamedPipeClientStream? eventStream;
     private CancellationTokenSource? eventCancellation;
@@ -190,6 +182,23 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     | AgentCapability.Tray
                     | AgentCapability.Persistence,
                     endpoint.StartedAtUtc);
+                var snapshotResult = await SendConnectedAsync(
+                        new GetAgentSnapshotRequest(CorrelationId.New()),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!snapshotResult.IsSuccess
+                    || snapshotResult.Value is not AgentSnapshotResponse snapshot)
+                {
+                    throw new IOException(
+                        "The Agent did not provide a recovery snapshot after event subscription.");
+                }
+
+                await eventFanout.PublishReseedAsync(
+                        snapshot.Snapshot,
+                        "agent.events.connected_snapshot",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                StartEventReader(eventStream!);
                 return ApplicationResult<AgentHandshake>.Succeeded(
                     handshake,
                     correlation);
@@ -244,7 +253,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             connectionGate.Release();
         }
 
-        return await ConnectAsync(cancellationToken);
+        return await ConnectAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ApplicationResult<AgentResponse>> SendAsync(
@@ -262,7 +271,39 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 request.CorrelationId);
         }
 
-        await requestGate.WaitAsync(cancellationToken);
+        return await SendConnectedAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async IAsyncEnumerable<AgentEvent> WatchAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using var subscription = eventFanout.Subscribe();
+        await foreach (var item in subscription.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return item;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        eventFanout.Dispose();
+        await DisposeStreamAsync();
+        connectionGate.Dispose();
+        requestGate.Dispose();
+    }
+
+    private async Task<ApplicationResult<AgentResponse>> SendConnectedAsync(
+        AgentRequest request,
+        CancellationToken cancellationToken)
+    {
+        await requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
@@ -314,29 +355,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         {
             requestGate.Release();
         }
-    }
-
-    public async IAsyncEnumerable<AgentEvent> WatchAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await foreach (var item in observedEvents.Reader.ReadAllAsync(cancellationToken))
-        {
-            yield return item;
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (disposed)
-        {
-            return;
-        }
-
-        disposed = true;
-        observedEvents.Writer.TryComplete();
-        await DisposeStreamAsync();
-        connectionGate.Dispose();
-        requestGate.Dispose();
     }
 
     private async Task<AgentEndpoint?> ReadLiveEndpointAsync(
@@ -471,10 +489,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             }
 
             eventStream = client;
-            eventCancellation = new CancellationTokenSource();
-            eventReaderTask = SuperviseEventStreamAsync(
-                client,
-                eventCancellation.Token);
         }
         catch
         {
@@ -504,18 +518,27 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 var item = DeserializeEvent(payload);
                 if (item is not null)
                 {
-                    observedEvents.Writer.TryWrite(item);
+                    await eventFanout.PublishAsync(item, cancellationToken)
+                        .ConfigureAwait(false);
                 }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (OperationCanceledException)
+        {
+            disconnectedUnexpectedly = true;
+        }
         catch (EndOfStreamException)
         {
             disconnectedUnexpectedly = true;
         }
         catch (IOException)
+        {
+            disconnectedUnexpectedly = true;
+        }
+        catch (ObjectDisposedException)
         {
             disconnectedUnexpectedly = true;
         }
@@ -527,6 +550,13 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         {
             disconnectedUnexpectedly = true;
         }
+        catch (Exception exception) when (
+            exception is not StackOverflowException
+            and not OutOfMemoryException
+            and not AccessViolationException)
+        {
+            disconnectedUnexpectedly = true;
+        }
 
         if (!disconnectedUnexpectedly
             || cancellationToken.IsCancellationRequested
@@ -535,12 +565,16 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             return;
         }
 
-        PublishTransportState(
-            AgentEventTransportState.Disconnected,
-            "agent.events.disconnected");
-        PublishTransportState(
-            AgentEventTransportState.Reconnecting,
-            "agent.events.reconnecting");
+        await PublishTransportStateAsync(
+                AgentEventTransportState.Disconnected,
+                "agent.events.disconnected",
+                cancellationToken)
+            .ConfigureAwait(false);
+        await PublishTransportStateAsync(
+                AgentEventTransportState.Reconnecting,
+                "agent.events.reconnecting",
+                cancellationToken)
+            .ConfigureAwait(false);
         try
         {
             await DisconnectFailedEventTransportAsync(client, cancellationToken)
@@ -558,17 +592,12 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             var connected = await ConnectAsync(attempt.Token).ConfigureAwait(false);
             if (connected.IsSuccess)
             {
-                var snapshot = await SendAsync(
-                        new GetAgentSnapshotRequest(CorrelationId.New()),
+                await PublishTransportStateAsync(
+                        AgentEventTransportState.Reconnected,
+                        "agent.events.reconnected_with_snapshot",
                         attempt.Token)
                     .ConfigureAwait(false);
-                if (snapshot.IsSuccess)
-                {
-                    PublishTransportState(
-                        AgentEventTransportState.Reconnected,
-                        "agent.events.reconnected_with_snapshot");
-                    return;
-                }
+                return;
             }
 
             try
@@ -585,15 +614,32 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
     }
 
-    private void PublishTransportState(
+    private void StartEventReader(NamedPipeClientStream client)
+    {
+        if (!ReferenceEquals(eventStream, client)
+            || eventReaderTask is not null)
+        {
+            throw new InvalidOperationException(
+                "The Agent event reader cannot start without its current stream.");
+        }
+
+        eventCancellation = new CancellationTokenSource();
+        eventReaderTask = SuperviseEventStreamAsync(
+            client,
+            eventCancellation.Token);
+    }
+
+    private Task PublishTransportStateAsync(
         AgentEventTransportState state,
-        string diagnosticCode) =>
-        observedEvents.Writer.TryWrite(
+        string diagnosticCode,
+        CancellationToken cancellationToken) =>
+        eventFanout.PublishAsync(
             new AgentEventTransportStateEvent(
                 state,
                 HasEventGap: true,
                 diagnosticCode,
-                timeProvider.GetUtcNow()));
+                timeProvider.GetUtcNow()),
+            cancellationToken);
 
     private async Task DisconnectFailedEventTransportAsync(
         NamedPipeClientStream failedEventStream,
@@ -646,6 +692,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 payload.Event.Deserialize<AgentProcessStateEvent>(JsonOptions),
             nameof(AgentShutdownEvent) =>
                 payload.Event.Deserialize<AgentShutdownEvent>(JsonOptions),
+            nameof(AgentStateReseedEvent) =>
+                payload.Event.Deserialize<AgentStateReseedEvent>(JsonOptions),
             _ => null
         };
 
@@ -797,11 +845,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     {
         if (response is AgentSnapshotResponse snapshot)
         {
-            foreach (var process in snapshot.Snapshot.Processes)
-            {
-                observedEvents.Writer.TryWrite(
-                    new AgentProcessStateEvent(process, timeProvider.GetUtcNow()));
-            }
+            eventFanout.CacheSnapshot(snapshot.Snapshot);
         }
     }
 

@@ -164,6 +164,7 @@ internal static class Program
                 agentSessionId,
                 dataRoot);
             var agentEvents = new AgentEventHub();
+            var lifecycle = new AgentLifecycleStateStore(processRegistry);
             var runtime = new DesktopAgentRuntime(
                 context,
                 instanceId,
@@ -205,12 +206,14 @@ internal static class Program
                 new WindowsStorageHealthEventSource(),
                 storageHealthEvents,
                 initialStorageHealthEvents,
-                agentEvents);
+                agentEvents,
+                lifecycle);
             var shutdown = new AgentShutdownWorkflow(runtime, processRegistry);
             var coordinator = new AgentSessionCoordinator(
                 runtime,
                 shutdown,
-                processRegistry);
+                processRegistry,
+                lifecycle);
             context.AttachCoordinator(coordinator);
 
             var nonce = Guid.NewGuid();
@@ -262,7 +265,7 @@ internal static class Program
                     agentSessions.EndAsync(
                             instanceId,
                             DateTimeOffset.UtcNow,
-                            shutdownClean: coordinator.State == AgentSessionState.Stopped)
+                            shutdownClean: coordinator.State == AgentLifecycleState.Stopped)
                         .GetAwaiter()
                         .GetResult();
                 }

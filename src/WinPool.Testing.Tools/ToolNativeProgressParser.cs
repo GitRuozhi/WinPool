@@ -61,13 +61,67 @@ public sealed partial class ToolNativeProgressParser
         }
 
         stream.CodePage = codePage;
-        state.Text.Append(stream.Decoder.Decode(workerEvent.RawBytes.Span));
-        if (state.Text.Length > MaximumBufferedCharacters)
+        AppendBounded(stream, stream.Decoder.Decode(workerEvent.RawBytes.Span));
+        return TryProject(state, stream, workerEvent, toolId);
+    }
+
+    public ToolNativeProgress? Complete(
+        TestRunId runId,
+        string stepId,
+        ToolId toolId,
+        DateTimeOffset occurredAtUtc)
+    {
+        if (!_states.Remove((runId, stepId), out var state))
         {
-            state.Text.Remove(0, state.Text.Length - MaximumBufferedCharacters);
+            return null;
         }
 
-        var matches = PercentagePattern().Matches(state.Text.ToString());
+        ToolNativeProgress? latest = null;
+        foreach (var stream in new[] { state.StandardOutput, state.StandardError })
+        {
+            if (stream.Decoder is null)
+            {
+                continue;
+            }
+
+            AppendBounded(stream, stream.Decoder.Complete());
+            var flushed = TryProject(
+                state,
+                stream,
+                new WorkerEvent(
+                    runId,
+                    stepId,
+                    WorkerEventKind.StandardOutput,
+                    WorkerEventImportance.Progress,
+                    occurredAtUtc,
+                    "tool.process.output.completed",
+                    ReadOnlyMemory<byte>.Empty),
+                toolId);
+            if (flushed is not null)
+            {
+                latest = flushed;
+            }
+        }
+
+        return latest;
+    }
+
+    private static void AppendBounded(StreamState stream, string text)
+    {
+        stream.Text.Append(text);
+        if (stream.Text.Length > MaximumBufferedCharacters)
+        {
+            stream.Text.Remove(0, stream.Text.Length - MaximumBufferedCharacters);
+        }
+    }
+
+    private static ToolNativeProgress? TryProject(
+        State state,
+        StreamState stream,
+        WorkerEvent workerEvent,
+        ToolId toolId)
+    {
+        var matches = PercentagePattern().Matches(stream.Text.ToString());
         if (matches.Count == 0 ||
             !double.TryParse(
                 matches[^1].Groups["percent"].Value,
@@ -105,9 +159,6 @@ public sealed partial class ToolNativeProgressParser
             $"tool.progress.{SanitizeCode(toolId.Value)}.native");
     }
 
-    public void Complete(TestRunId runId, string stepId) =>
-        _states.Remove((runId, stepId));
-
     private static string SanitizeCode(string value) =>
         string.Concat(value.Select(character =>
             char.IsAsciiLetterOrDigit(character) || character is '.' or '-'
@@ -116,7 +167,6 @@ public sealed partial class ToolNativeProgressParser
 
     private sealed class State
     {
-        public StringBuilder Text { get; } = new();
         public StreamState StandardOutput { get; } = new();
         public StreamState StandardError { get; } = new();
         public double? LastFraction { get; set; }
@@ -125,6 +175,7 @@ public sealed partial class ToolNativeProgressParser
 
     private sealed class StreamState
     {
+        public StringBuilder Text { get; } = new();
         public int? CodePage { get; set; }
         public ToolOutputTextDecoder? Decoder { get; set; }
     }
