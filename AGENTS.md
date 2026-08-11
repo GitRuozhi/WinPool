@@ -97,12 +97,13 @@ protected paths before editing.
 - Architecture and roadmap documents normally specify only `Va.b`.
 - At `c=8` or `c=9`, remind the developer to control scope. Never create
   `c=10`; reduce scope, combine work, or advance the minor version.
-- A normal `c` checkpoint requires a local commit but no push, tag, or release
+- A normal `c` iteration requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.32 remains the current user-confirmed source checkpoint while the approved
-  V0.33 Plan is in progress. Its remaining manual cases stay `unverified`.
-- V0.33 work may create the local commits required by its confirmed Plan. Push,
-  tag, GitHub Release, binary upload, and deployment are not authorized.
+- V0.33 is the current user-confirmed version. Its ten native/manual cases remain
+  `unverified`; version confirmation is not evidence that they passed.
+- The accepted V0.33 Plan is archived under `docs/Archive/V0.33`. No active Plan
+  currently exists. Tag, GitHub Release, binary upload, and deployment remain
+  unauthorized without a new explicit decision.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate

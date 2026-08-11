@@ -5,20 +5,19 @@
 WinPool is a third-party WinUI 3 desktop application for understanding, testing,
 monitoring, and safely planning operations across Windows storage systems.
 
-## Current checkpoint
+## Current version
 
-V0.32 is the current user-confirmed V0.3 source checkpoint. It includes the
-multi-process App/Agent/TestWorker/Broker architecture, Agent-owned SQLite,
-typed named-pipe IPC, simulation editing, read-only local discovery, registered
-file testing, monitoring, and reproducible four-process staging.
+V0.33 is the current user-confirmed version. It retains the
+multi-process App/Agent/TestWorker/Broker architecture while converging the
+Application model, hardening process and IPC lifecycles, making the Agent own
+tool configuration, preserving raw tool output with consistent decoding, and
+making storage-location migration exact and recoverable.
 
-V0.32 is not a binary release or GitHub Release. The user assigned the checkpoint
-on 2026-08-10; native UI, tray, UAC, device, external-tool, lifecycle, and
-data-location cases remain recorded as unverified rather than being fabricated.
-
-The user approved the [V0.33 active Plan](docs/Plan.md) on 2026-08-11. Its
-architecture-convergence and lifecycle-hardening work is in progress; V0.33 is
-not yet the current checkpoint.
+The user accepted V0.33 on 2026-08-11 after all 486 automatic Release tests,
+the Release build, dependency audit, documentation checks, and reproducible
+four-process staging passed. Native UI, tray, UAC, device, external-tool, and
+data-location cases remain `unverified`; acceptance does not fabricate those
+results. V0.33 is not a tag, binary release, or GitHub Release.
 
 ## Safety boundary
 
@@ -49,10 +48,9 @@ The reproducible self-contained staging command is documented in
 - [Development](docs/Development.md): architecture, environment, build, staging,
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
-- [Current Plan](docs/Plan.md): approved V0.33 architecture convergence and
-  lifecycle hardening, currently in progress.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
-- [Archive](docs/Archive/README.md): frozen completed or superseded history.
+- [Archive](docs/Archive/README.md): frozen completed or superseded history,
+  including the accepted V0.33 Plan. There is currently no active Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

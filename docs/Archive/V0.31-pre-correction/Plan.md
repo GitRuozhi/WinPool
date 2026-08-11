@@ -3,8 +3,6 @@ project: WinPool
 objective: 完成 V0.31 文档、目录、版本与发布工程重构，并承接 V0.2 未完成事项
 status: completed
 architecture_version: V0.3
-integration_checkpoint: V0.31
-acceptance_checkpoint: V0.32
 current_work_package: V0.32_USER_CONFIRMATION
 next_action: 等待用户人工确认重构结果，并按 CARRY-01～CARRY-11 执行 V0.32 实机验收
 branch: main
@@ -106,9 +104,9 @@ WinPool/
 版本格式为 `Va.bc`：`a` 是大版本，`b` 是小版本，`c` 是小版本内一位迭代阶段。
 
 - 架构和计划只规定 `Va.b`，当前架构为 `V0.3`。
-- 未经用户明确指定，不预分配 c；c 在实际开发中形成检查点。
+- 未经用户明确指定，不预分配 c；c 在实际开发中形成迭代编号。
 - c 到 8 时提醒范围控制；c=9 后不得继续增加，必须缩小范围、合并工作或提升小版本。
-- 普通 c 检查点只做本地提交。
+- 普通 c 迭代只做本地提交。
 - V0.31 是用户明确授权的例外：自动门全部通过后自动提交并推送源码集合，但不创建 tag、
   release 或二进制发布包。
 - V0.32 只能在用户人工确认重构结果和核心实机门后建立本地验收提交；是否推送由用户当次

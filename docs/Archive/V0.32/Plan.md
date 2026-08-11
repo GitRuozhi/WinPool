@@ -3,8 +3,6 @@ project: WinPool
 phase: V0.3
 architecture_version: V0.3
 status: accepted
-integration_checkpoint: V0.32
-acceptance_checkpoint: V0.32
 branch: main
 confirmed_by_user: 2026-08-10
 code_gate: passed
@@ -44,7 +42,7 @@ model.
 - English authoritative Markdown documents have `.zh-CN.md` reading copies. The
   unsuffixed document always controls; documents already in Chinese need no
   duplicate.
-- V0.31 remains a source integration checkpoint, not a tag, binary release, or
+- V0.31 remains a source integration version, not a tag, binary release, or
   GitHub Release. V0.32 requires explicit user acceptance.
 
 ## Correction work packages
@@ -109,11 +107,11 @@ Only explicit user confirmation may establish V0.32.
 
 ## V0.32 acceptance decision
 
-On 2026-08-10 the user explicitly assigned the current source checkpoint as
+On 2026-08-10 the user explicitly assigned the current project version as
 V0.32. This closes the documentation-architecture stage and archives this Plan.
 The decision does not change the 11 unrun native/manual cases: they remain
 `unverified`, and no test result has been inferred from the version assignment.
-V0.32 remains a source checkpoint without a tag, binary release, or GitHub
+V0.32 remains the confirmed project version without a tag, binary release, or GitHub
 Release.
 
 ## Verified evidence
@@ -142,7 +140,7 @@ Release.
   Release suite passed 458/458 with 0 failures and 0 skipped, the Release build
   completed with 0 warnings and 0 errors, and no vulnerable direct or transitive
   dependency was reported.
-- Git completion: resource/document commit `dc5e263` and V0.32 checkpoint commit
+- Git completion: resource/document commit `dc5e263` and V0.32 version commit
   `7b7a798` were pushed to `origin/main` by normal fast-forward on 2026-08-10.
 
 ## Version-semantics correction

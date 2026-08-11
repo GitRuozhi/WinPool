@@ -2,9 +2,7 @@
 project: WinPool
 phase: V0.3
 architecture_version: V0.3
-status: awaiting_acceptance
-integration_checkpoint: V0.33
-acceptance_checkpoint: V0.33
+status: accepted
 branch: main
 confirmed_by_user: 2026-08-11
 refactor_scope_approved_by_user: 2026-08-11
@@ -14,24 +12,32 @@ started_on: 2026-08-11
 code_gate: passed
 native_integration_gate: unverified
 manual_gate: unverified
-remote_gate: not_required
+remote_gate: pending
+accepted_by_user: 2026-08-11
+authority: docs/Archive/V0.33/Plan.md
 ---
 
 # WinPool V0.33 架构收口与生命周期硬化计划
 
-本文是用户已确认的唯一活动计划，合并并取代以下两份提案在执行阶段的控制作用：
+[权威归档](Plan.md) | 简体中文阅读副本
+
+> 本文件仅为中文阅读副本；状态、任务和验收结论以无 `.zh-CN` 后缀的
+> [Plan.md](Plan.md) 为准。权威 Plan 本身已经使用中文，本副本只为满足统一的
+> 双文件阅读约定。
+
+本文在 V0.33 执行期间是用户确认的唯一活动计划，合并并取代以下两份提案在该阶段的控制作用：
 
 - `V0.33重构.md`；
 - `V0.33重构补充.md`。
 
 两份原始提案保留为用户输入记录。用户已于 2026-08-11 明确批准本计划并要求
-开始执行；自动实现与 final-candidate 门已完成，当前状态为 `awaiting_acceptance`。
-本次授权允许按本文约束实施源码重构和
-严格限定的 Core 删除；不授权推送、tag、GitHub Release、二进制上传或部署。
+开始执行，并于 2026-08-11 明确确认 V0.33。当前状态为 `accepted`。
+本次授权允许按本文约束实施源码重构、严格限定的 Core 删除、验收文档归档、
+Git 提交和推送；仍不授权 tag、GitHub Release、二进制上传或部署。
 
 ## 1. 阶段定位
 
-V0.33 是 V0.3 架构线的第三个迭代检查点：
+V0.33 是 V0.3 架构线的第三个迭代版本：
 
 ```text
 a = 0
@@ -42,8 +48,8 @@ c = 3
 本阶段不扩大产品能力边界，而是收口 V0.2/V0.3 迁移后遗留的双领域模型、
 进程生命周期、IPC 故障恢复、配置所有权、工具输出编码和数据位置迁移问题。
 
-V0.33 是源码集成检查点，不自动创建 Git tag、GitHub Release、二进制发布、
-上传或部署。正常 V0.33 checkpoint 只要求本地提交；远端推送需要新的明确授权。
+V0.33 是项目版本，不自动创建 Git tag、GitHub Release、二进制发布、上传或部署。
+正常 V0.33 迭代只要求本地提交；远端推送需要新的明确授权。
 
 ## 2. 当前进入基线
 
@@ -408,7 +414,7 @@ Core migration 直接相关的人工门至少包括：
 - normal/second launch、startup arguments、activation、elevation handoff；
 - 常见/narrow width、resize、high DPI 和 item count 变化后的 layout。
 
-未执行项保持 `unverified`，是否接受 checkpoint 由用户决定。
+未执行项保持 `unverified`，是否接受该版本由用户决定。
 
 ## 8. 针对性 Native / Manual Gate
 
@@ -440,7 +446,7 @@ V33-00 Plan/baseline
 → V33-02/03/04/05/07 lifecycle and control/process identity
 → V33-06/08/09/10B event/config/encoding/exact migration
 → V33-11 runtime decomposition
-→ closure gates and final candidate
+→ closure gates and V0.33 verification
 ```
 
 每个提交必须可独立 build/test。禁止一个提交先删除旧模型、下一提交才恢复编译。
@@ -453,13 +459,13 @@ V33-00 Plan/baseline
 - App、Agent、Worker、Broker staging 必须使用匹配协议。
 - Process identity migration 使用 SQLite schema v11，从真实 v10 事务升级。
 - Schema revision 和 IPC version 是内部契约，不是另一套项目版本。
-- 开发期间保持 V0.32；不得提前宣称 V0.33 是当前确认 checkpoint。
-- Final candidate 验证前将 `Directory.Build.props` iteration 从 2 改为 3，随后重跑
+- 开发期间保持 V0.32；不得提前宣称 V0.33 是当前确认版本。
+- V0.33 验收前将 `Directory.Build.props` iteration 从 2 改为 3，随后重跑
   完整门并验证四个 executable 都显示 V0.33。
 
 ## 11. 自动质量门
 
-Final candidate 必须运行：
+V0.33 验收版本必须运行：
 
 ```powershell
 dotnet restore WinPool.slnx
@@ -503,7 +509,7 @@ Worker/Broker、脚本、数据库、测试结果、外部工具或源艺术目�
 
 ## 13. Definition of Done
 
-V0.33 进入 checkpoint 评审前必须同时满足：
+V0.33 进入版本评审前必须同时满足：
 
 - Core 项目、测试项目和运行时依赖已按特批退役；
 - Domain/Application/Execution ownership 和依赖方向正确；
@@ -518,29 +524,29 @@ V0.33 进入 checkpoint 评审前必须同时满足：
 - storage migration exact、可回滚、不会依赖未释放的 SQLite handle；
 - 完整自动门达到要求；
 - 所有 native/manual 项有 `passed/failed/unverified/...` 真实状态；
-- Final candidate 四进程版本一致为 V0.33；
+- 四进程版本一致为 V0.33；
 - 未执行任何未授权 push/tag/release/upload/deploy。
 
 ## 14. 用户确认后的版本、文档和 Git 生命周期
 
-只有用户明确接受 V0.33 checkpoint 后才能：
+只有用户明确接受 V0.33 版本后才能：
 
 1. 把最终状态写入 README / README.zh-CN 和 CHANGELOG / reading copy；
 2. 冻结 Plan 到 `docs/Archive/V0.33/`；
 3. 更新 Archive 双语索引；
 4. 没有下一活动阶段时移除 `docs/Plan.md`；
-5. 创建正常 V0.33 local checkpoint commit。
+5. 创建正常 V0.33 本地版本提交。
 
 任何未验证人工项继续保持 `unverified`。当前：
 
 ```text
-local commit: required at confirmed checkpoint
-push: not authorized
+local version commit: recorded by the rewritten V0.33 acceptance history
+push: authorized; corrected history pending
 tag: not authorized
 GitHub Release: not authorized
 binary upload: not authorized
 deployment: not authorized
-remote_gate: not_required
+remote_gate: pending
 ```
 
 ## 15. 执行记录
@@ -691,7 +697,7 @@ remote_gate: not_required
   0 failed、0 skipped；Release build：0 warnings、0 errors。
 - V33-10B 自动门：`passed`；原生/人工数据位置迁移门仍为 `unverified`。
 
-### 2026-08-11：V33-11 与 V0.33 final candidate
+### 2026-08-11：V33-11 与 V0.33 验收版本
 
 - 拆出 `AgentTestCoordinator`、`AgentSystemSupportCoordinator` 和
   `AgentInventoryCoordinator`。它们分别持有活动测试槽与取消状态、系统支持
@@ -699,7 +705,7 @@ remote_gate: not_required
 - `DesktopAgentRuntime` 保留 request facade、monitoring/tool delegation、event
   integration、shutdown adapter 和测试执行 pipeline；没有新增项目或拆成 handler
   集合。新增 test-slot 状态回归和 coordinator 结构门。
-- 按 `Va.bc` 规则把唯一项目 iteration 从 2 改为 3，因此 final candidate 为
+- 按 `Va.bc` 规则把唯一项目 iteration 从 2 改为 3，因此当前项目版本为
   `V0.33`（`a=0`、`b=3`、`c=3`）；IPC 2 和 SQLite schema 11 仍只是内部契约。
 - 串行执行 restore、Release test 和 Release build：486 passed、0 failed、0 skipped，
   0 warnings、0 errors；33 个项目的 transitive vulnerable package audit 无报告项。
@@ -707,6 +713,23 @@ remote_gate: not_required
   校验通过，App、Agent、TestWorker、Broker 的 ProductVersion 均为 `V0.33`、
   FileVersion 均为 `0.3.3.0`。
 - staging 证据保存在父项目可恢复目录
-  `Rubbish/20260811_winpool_v033_final_candidate_staging/Program/WinPool/`，未纳入 Git。
+  `Rubbish/20260811_winpool_v033_verification_staging/Program/WinPool/`，未纳入 Git。
 - `code_gate: passed`；native/manual 项保持 `unverified`；状态进入
   `awaiting_acceptance`。未 push、tag、创建 GitHub Release、上传或部署。
+
+### 2026-08-11：用户确认 V0.33
+
+- 用户明确确认 V0.33，并授权归档活动 Plan、更新文档、提交 Git 和推送 `main`。
+- V33-M01～M10 保持 `unverified`；确认版本不伪造原生 UI、托盘、UAC、
+  设备、外部工具或数据位置人工证据。
+- Plan 状态改为 `accepted`，权威归档位置为 `docs/Archive/V0.33/Plan.md`。
+- 本次确认不授权 tag、GitHub Release、二进制上传或部署。
+- 首次验收提交前 `remote_gate: pending`；推送成功后只补充远端证据并冻结归档。
+
+### 2026-08-11：远端历史修正授权
+
+- 用户要求从全部文档清除被错误引入的版本术语，并删除包含该错误的远端提交。
+- 保留 V0.33 全部实现提交至 `636092d`，以修正后的当前文件树重新生成验收文档提交。
+- 使用 `--force-with-lease` 保护远端并替换错误历史；替换完成前
+  `remote_gate: pending`。
+- 未授权或创建 tag、GitHub Release，未上传发布包或部署。

@@ -3,8 +3,6 @@ project: WinPool
 phase: V0.3
 architecture_version: V0.3
 status: accepted
-integration_checkpoint: V0.32
-acceptance_checkpoint: V0.32
 branch: main
 confirmed_by_user: 2026-08-10
 code_gate: passed
@@ -37,7 +35,7 @@ authority: docs/Archive/V0.32/Plan.md
 - 软件引用资源放在纳入 Git 的 `assets`。
 - 用户手动管理的艺术源文件放在被忽略的 `OriginArtWork`；在用户决定 Git、Git LFS 或其他方案前不进入 Git。
 - 英文权威 Markdown 配有 `.zh-CN.md` 阅读副本；始终以无后缀文档为准。原文已经是中文的文档无需重复。
-- V0.31 是源码集成检查点，不是 tag、二进制发布或 GitHub Release。V0.32 需要用户明确验收。
+- V0.31 是源码集成版本，不是 tag、二进制发布或 GitHub Release。V0.32 需要用户明确验收。
 
 ## 修正工作包
 
@@ -98,9 +96,9 @@ authority: docs/Archive/V0.32/Plan.md
 
 ## V0.32 验收决定
 
-用户于 2026-08-10 明确把当前源码检查点指定为 V0.32。本决定关闭文档架构阶段并归档本计划。
+用户于 2026-08-10 明确把当前项目版本指定为 V0.32。本决定关闭文档架构阶段并归档本计划。
 该决定不改变 11 项尚未执行的原生/人工用例：它们继续保持 `unverified`，不得根据版本指定推断测试通过。
-V0.32 仍是源码检查点，不创建 tag、二进制发布或 GitHub Release。
+V0.32 是已确认的项目版本，不创建 tag、二进制发布或 GitHub Release。
 
 ## 已验证证据
 
@@ -114,7 +112,7 @@ V0.32 仍是源码检查点，不创建 tag、二进制发布或 GitHub Release�
 - 前向修正提交 `236eb3f` 已于 2026-08-10 推送到 `origin/main`，推送前确认此前远端 HEAD 是其祖先。
 - 文档/资源补充：8 对英文权威文档与中文阅读副本全部通过链接和权威声明检查；`assets` 有 35 个受 Git 控制的文件，共 15,189,113 字节；`OriginArtWork` 已忽略；完整 Release 测试 458/458 通过、0 失败，构建 0 警告、0 错误。
 - V0.32 复验：37 份 Markdown 相对链接全部通过，完整 Release 测试 458/458 通过、0 失败、0 跳过，Release 构建 0 警告、0 错误，直接和传递依赖均未报告已知漏洞。
-- Git 完成证据：资源/文档提交 `dc5e263` 和 V0.32 检查点提交 `7b7a798` 已于 2026-08-10 通过正常快进推送到 `origin/main`。
+- Git 完成证据：资源/文档提交 `dc5e263` 和 V0.32 版本提交 `7b7a798` 已于 2026-08-10 通过正常快进推送到 `origin/main`。
 
 ## 版本语义修正
 

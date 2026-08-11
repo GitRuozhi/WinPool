@@ -286,7 +286,7 @@ V0.2 已实现 `ALG-COPY-BATCH-001` 1.0.0（`Derived`）作为 WEMigration
   最大文件数形成不可变批次；超大单文件允许单独形成一个批次；
 - 文件相对路径、长度、最后写入时间、属性、可选 SHA-256、源/目标登记目录身份、
   测试计划哈希和算法版本共同进入 manifest，并生成独立 SHA-256；
-- manifest、批次和逐文件 `Pending/Copying/Completed/Failed/Conflict` 检查点由
+- manifest、批次和逐文件 `Pending/Copying/Completed/Failed/Conflict` 进度状态由
   Agent 在 SQLite 单事务保存，不能用同一 run/step 覆盖为另一份 manifest；
 - Agent 非正常结束后把开放批次标为 `Interrupted`，把未完成的 `Copying` 条目退回
   `Pending`；恢复只接受原计划哈希完全一致且用户再次确认的运行；
@@ -298,7 +298,7 @@ V0.2 已实现 `ALG-COPY-BATCH-001` 1.0.0（`Derived`）作为 WEMigration
 - RoboCopy adapter 已能把 manifest 中的单个相对文件安全投影为“对应源父目录、对应
   目标父目录、字面文件名”的外部调用，拒绝 rooted、`..` 和通配符路径；这是后续
   逐批执行器的封闭参数边界。
-- `CopyBatchInvocationPlanner` 会核对 manifest、step、工具身份和完整 checkpoint 集，
+- `CopyBatchInvocationPlanner` 会核对 manifest、step、工具身份和完整进度状态集，
   跳过 `Completed`，只把 `Pending/Failed` 条目转换为类型化请求；`Conflict`、
   `FailedFinal` 或遗留 `Copying` 不会被静默重放。SQLite 可在单事务中仅把本次最多
   512 个明确 ordinal 标为 `Copying` 并递增 attempt，未调度的后续批次保持 Pending。

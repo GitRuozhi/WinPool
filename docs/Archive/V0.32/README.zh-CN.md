@@ -9,4 +9,4 @@
 
 Plan 中记录的源码、文档、资源、自动和 staging 门均已通过。11 项原生/人工用例仍为 `unverified`；V0.32 版本决定不代表这些检查通过。
 
-V0.32 是源码检查点。未创建 tag、二进制发布、GitHub Release 或发布包。
+V0.32 是当时确认的项目版本。未创建 tag、二进制发布、GitHub Release 或发布包。

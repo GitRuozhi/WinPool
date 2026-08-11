@@ -10,5 +10,5 @@ The source, documentation, resource, automatic, and staging gates recorded in th
 Plan passed. Eleven native/manual cases remain `unverified`; the V0.32 version
 decision does not assert that those checks passed.
 
-V0.32 is a source checkpoint. No tag, binary release, GitHub Release, or release
+V0.32 was the confirmed project version. No tag, binary release, GitHub Release, or release
 package was created.

@@ -136,7 +136,7 @@ Product versions use `Va.bc`:
 
 - `a`: major version;
 - `b`: minor architecture/product line;
-- `c`: one-digit iteration checkpoint.
+- `c`: one-digit iteration within the minor version.
 
 Architecture and roadmap documents normally stop at `Va.b`. Iteration values are
 assigned from actual work and cannot exceed 9. A normal iteration is committed

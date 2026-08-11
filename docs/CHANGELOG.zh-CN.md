@@ -5,11 +5,15 @@
 > 本文件仅为中文阅读副本；实际变更历史以无 `.zh-CN` 后缀的
 > [CHANGELOG.md](CHANGELOG.md) 为准。
 
-本文件只记录已经实际发生的结果。计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
+本文件只记录已经实际发生的结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
 
 ## Unreleased
 
-### V0.33 final candidate 等待验收 — 2026-08-11
+V0.33 之后暂无未发布变更记录。
+
+## V0.33 — 2026-08-11
+
+- 用户明确确认 V0.33，并授权归档文档、提交 Git 和推送 `main`。
 
 - 将 `WinPool.Core` 收敛进权威 Application 模型，并保留系统/文档身份、模拟、投影、
   启动、通知和布局行为。
@@ -22,10 +26,16 @@
 - storage-location 从覆盖复制改成同卷精确 staging 事务：捕获源和目标，只 drain 源
   store，验证 manifest 与 SQLite identity，在取消或失败时恢复旧目标，并移除陈旧的
   managed target payload。
-- V0.33 已通过全部自动 final-candidate 门。原生/人工门仍为 `unverified`；未为 V0.33 创建 tag、
-  二进制发布、GitHub Release 或远端推送。
+- 将测试状态、系统支持和库存所有权拆入三个聚焦的 Agent coordinator，
+  `DesktopAgentRuntime` 继续作为 request facade。
+- 全部 486 项 Release 测试、无警告 Release 构建、传递依赖审计、Markdown 检查和
+  V0.33 四进程 staging 均通过。
+- 十项原生/人工用例继续保持 `unverified`；版本确认不代表这些用例通过。
 
-## V0.32 源码检查点 — 2026-08-10
+V0.33 是已确认的项目版本，不是 tag、二进制发布或 GitHub Release。
+实现提交范围：`6b66c68` 至 `636092d`。验收文档由重写后的 V0.33 历史记录。
+
+## V0.32 — 2026-08-10
 
 - 用户在审阅 V0.31 重构后明确指定 V0.32。
 - 按用户规定的 `Va.bc` 规则将唯一项目版本设为 V0.32。
@@ -35,7 +45,7 @@
 - 重新验证全部 458 项 Release 测试和 V0.32 四进程嵌套 staging；四个可执行文件均报告项目版本 V0.32。
 - 删除错误引入的 `TechnicalVersion` 概念。.NET/Windows 必需的数字字段是派生编译元数据，不是另一套项目版本。
 
-V0.32 是源码检查点，不是 tag、二进制发布或 GitHub Release。
+V0.32 是当时确认的项目版本，不是 tag、二进制发布或 GitHub Release。
 提交：`dc5e263`、`7b7a798`（已推送到 `origin/main`）。
 
 ### V0.31 文档架构修正 — 2026-08-10
@@ -48,7 +58,7 @@ V0.32 是源码检查点，不是 tag、二进制发布或 GitHub Release。
 
 本次修正不是 tag、二进制发布或 GitHub Release。
 
-## V0.31 源码集成检查点 — 2026-08-10
+## V0.31 源码集成 — 2026-08-10
 
 - 增加共享 V0.31 版本源。该提交也曾错误地把数字编译元数据命名为技术版本；V0.32 后续修正了该语义。
 - 增加可复现四进程发布 staging 和真实布局验证。

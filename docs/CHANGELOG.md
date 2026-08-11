@@ -2,12 +2,17 @@
 
 [English](CHANGELOG.md) | [简体中文（仅供阅读）](CHANGELOG.zh-CN.md)
 
-This file records results that actually occurred. Planned work remains in
-`Plan.md`; historical plans remain in `Archive`.
+This file records results that actually occurred. Planned work belongs in
+`Plan.md` while a stage is active; historical plans remain in `Archive`.
 
 ## Unreleased
 
-### V0.33 final candidate awaiting acceptance — 2026-08-11
+No unreleased changes are recorded after V0.33.
+
+## V0.33 — 2026-08-11
+
+- The user explicitly accepted V0.33 and authorized documentation archival,
+  Git commit, and push to `main`.
 
 - Retired `WinPool.Core` into the canonical Application model and preserved
   system/document identity, simulation, projection, startup, notification, and
@@ -24,11 +29,18 @@ This file records results that actually occurred. Planned work remains in
   transaction. It captures source and target, drains only the source store,
   verifies manifests and SQLite identity, rolls the previous target back on
   cancellation or failure, and removes stale managed target payload.
-- V0.33 has passed all automatic final-candidate gates. Native/manual gates are
-  still `unverified`; no tag, binary release, GitHub Release, or remote push has
-  been performed for V0.33.
+- Split test-state, system-support, and inventory ownership into three focused
+  Agent coordinators while keeping `DesktopAgentRuntime` as the request facade.
+- All 486 Release tests, the warning-free Release build, transitive dependency
+  audit, Markdown checks, and four-process V0.33 staging passed.
+- Ten native/manual cases remain `unverified`; version confirmation is not
+  evidence that those cases passed.
 
-## V0.32 source checkpoint — 2026-08-10
+V0.33 is the confirmed project version, not a tag, binary release, or GitHub Release.
+Implementation range: `6b66c68` through `636092d`. The acceptance documentation
+is recorded by the rewritten V0.33 history.
+
+## V0.32 — 2026-08-10
 
 - The user explicitly assigned V0.32 after reviewing the V0.31 restructuring.
 - Set the single project version to V0.32 under the user-defined `Va.bc` rule.
@@ -44,7 +56,7 @@ This file records results that actually occurred. Planned work remains in
   required by .NET/Windows are derived build metadata, not another project
   version.
 
-V0.32 is a source checkpoint, not a tag, binary release, or GitHub Release.
+V0.32 was a confirmed project version, not a tag, binary release, or GitHub Release.
 Commits: `dc5e263`, `7b7a798` (pushed to `origin/main`).
 
 ### V0.31 documentation-architecture correction — 2026-08-10
@@ -59,7 +71,7 @@ Commits: `dc5e263`, `7b7a798` (pushed to `origin/main`).
 
 This correction is not a tag, binary release, or GitHub Release.
 
-## V0.31 source integration checkpoint — 2026-08-10
+## V0.31 source integration — 2026-08-10
 
 - Added a shared V0.31 version source. That commit also incorrectly named numeric
   build metadata as a technical version; V0.32 later corrected the semantics.
