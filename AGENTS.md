@@ -99,12 +99,13 @@ protected paths before editing.
   `c=10`; reduce scope, combine work, or advance the minor version.
 - A normal `c` iteration requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.33 is the current user-confirmed version. Its ten native/manual cases remain
-  `unverified`; version confirmation is not evidence that they passed.
-- The accepted V0.33 Plan is archived under `docs/Archive/V0.33`. The confirmed
-  V0.34 candidate plan is active at `docs/Plan.md`; it does not make V0.34
-  user-confirmed. Tag, GitHub Release, binary upload, and deployment remain
-  unauthorized without a new explicit decision.
+- V0.34 is the current user-confirmed version. Its M01--M07 and inherited
+  native/manual cases remain `unverified`; version confirmation is not evidence
+  that they passed.
+- The accepted V0.34 Plan and its unchanged manual source record are archived
+  under `docs/Archive/V0.34`; there is no active `docs/Plan.md`. The V0.34
+  decision authorizes its local checkpoint, `main` push, and local portable
+  deployment only. Tag, GitHub Release, and binary upload remain unauthorized.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate

@@ -10,15 +10,14 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.33 是用户确认的当前版本。它保留 App、Agent、TestWorker、Broker 四进程架构，
-同时完成 Application 模型收口、进程与 IPC 生命周期硬化、Agent 持有工具配置、原始工具输出保留与
-一致解码，以及精确、可恢复的数据位置迁移。
+V0.34 是用户确认的当前版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并完成 V0.33
+之后发现的 Local identity、存储边界、进程生命周期、事件恢复和工具流缺陷收口。IPC 协议为 3，
+Agent 持有的 SQLite 合同为 schema 12。
 
-用户于 2026-08-11 在全部 486 项 Release 自动测试、Release 构建、依赖审计、文档检查和可复现
-四进程 staging 通过后确认 V0.33。原生 UI、托盘、UAC、设备、外部工具和数据位置用例继续保持
-`unverified`；确认版本不代表伪造这些结果。V0.33 不是 tag、二进制发布或 GitHub Release。
-
-V0.34 是已实现的缺陷收口 candidate，尚未获得用户版本确认；其原生/人工用例在指定 Windows 环境执行前仍保持 `unverified`。
+用户于 2026-08-11 在 494 项 Release 自动测试、零警告 Release 构建、依赖审计和可复现四进程
+staging 通过后确认 V0.34。原生 UI、托盘、UAC、设备、外部工具、数据位置和 V0.34 M01--M07
+用例继续保持 `unverified`；确认版本不代表伪造这些结果。该确认授权对应的本地 checkpoint、
+`main` 推送和本机 portable 部署，但不授权 tag、二进制上传或 GitHub Release。
 
 ## 安全边界
 
@@ -46,9 +45,8 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
-- [当前计划](docs/Plan.md)：已确认的 V0.34 缺陷收口执行计划。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已验收的
-  V0.33 Plan。
+  V0.34 Plan。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
 - [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 

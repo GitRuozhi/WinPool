@@ -7,7 +7,7 @@ This file records results that actually occurred. Planned work belongs in
 
 ## Unreleased
 
-## V0.34 candidate — 2026-08-11
+## V0.34 — 2026-08-11
 
 - Bound every supervised process mutation to a process instance ID, PID, and OS
   process-start witness; IPC is now protocol 3.
@@ -17,12 +17,14 @@ This file records results that actually occurred. Planned work belongs in
 - Added authoritative shutdown status, snapshot reseeding after event gaps,
   explicit event backpressure, and isolated stdout/stderr progress decoders
   with EOF flushing.
-- The candidate passed 494 automatic Release tests, a warning-free Release
+- V0.34 passed 494 automatic Release tests, a warning-free Release
   build, dependency audit, and four-process self-contained staging at
   `D:\WinPool-V034-Candidate-Staging-Final`.
 
-V0.34 remains a candidate, not a user-confirmed version, tag, binary release,
-or GitHub Release. Native/manual cases remain `unverified`.
+The user explicitly accepted V0.34 and authorized the associated documentation
+archival, Git checkpoint, `main` push, and local portable deployment.
+Native/manual cases remain `unverified`; acceptance does not represent them as
+passing. No tag, binary upload, or GitHub Release is authorized.
 
 ## V0.33 — 2026-08-11
 

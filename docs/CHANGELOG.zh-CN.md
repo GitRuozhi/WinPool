@@ -9,15 +9,17 @@
 
 ## Unreleased
 
-## V0.34 candidate — 2026-08-11
+## V0.34 — 2026-08-11
 
 - 所有受监督进程更新均绑定进程实例 ID、PID 与 OS 启动时间 witness；IPC 协议提升为 3。
 - Local inventory identity 改为由 Agent 负责；数据位置 pointer 提交后的清理会报告部分完成；schema 12 采用 clean break，旧数据库会被拒绝且不被改写。
 - 新增 authoritative shutdown status、事件 gap 后整份 snapshot reseed、显式 event backpressure，以及 stdout/stderr 隔离并在 EOF flush 的进度解码。
-- candidate 已通过 494 项 Release 自动测试、零警告 Release 构建、依赖审计，以及
+- V0.34 已通过 494 项 Release 自动测试、零警告 Release 构建、依赖审计，以及
   `D:\WinPool-V034-Candidate-Staging-Final` 的四进程 self-contained staging。
 
-V0.34 仍是 candidate，不是用户确认的版本、tag、二进制发布或 GitHub Release。原生/人工用例继续保持 `unverified`。
+用户明确确认 V0.34，并授权对应的文档归档、Git checkpoint、`main` 推送和本机 portable 部署。
+原生/人工用例继续保持 `unverified`；确认不代表将其写为通过。未授权 tag、二进制上传或
+GitHub Release。
 
 ## V0.33 — 2026-08-11
 

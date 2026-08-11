@@ -7,21 +7,19 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.33 is the current user-confirmed version. It retains the
-multi-process App/Agent/TestWorker/Broker architecture while converging the
-Application model, hardening process and IPC lifecycles, making the Agent own
-tool configuration, preserving raw tool output with consistent decoding, and
-making storage-location migration exact and recoverable.
+V0.34 is the current user-confirmed version. It retains the multi-process
+App/Agent/TestWorker/Broker architecture and closes the local identity,
+storage-boundary, process-lifecycle, event-recovery, and tool-stream defects
+identified after V0.33. IPC is protocol 3 and the Agent-owned SQLite contract
+is schema 12.
 
-The user accepted V0.33 on 2026-08-11 after all 486 automatic Release tests,
-the Release build, dependency audit, documentation checks, and reproducible
-four-process staging passed. Native UI, tray, UAC, device, external-tool, and
-data-location cases remain `unverified`; acceptance does not fabricate those
-results. V0.33 is not a tag, binary release, or GitHub Release.
-
-V0.34 is the implemented candidate for defect closure. It is not yet a
-user-confirmed version; its native/manual cases remain `unverified` until they
-are executed on the designated Windows environment.
+The user accepted V0.34 on 2026-08-11 after 494 automatic Release tests, a
+warning-free Release build, dependency audit, and reproducible four-process
+staging passed. Native UI, tray, UAC, device, external-tool, data-location,
+and V0.34 M01--M07 cases remain `unverified`; acceptance does not fabricate
+those results. This confirmation authorizes the associated local checkpoint,
+`main` push, and local portable deployment, but not a tag, binary upload, or
+GitHub Release.
 
 ## Safety boundary
 
@@ -53,9 +51,8 @@ The reproducible self-contained staging command is documented in
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
-- [Plan](docs/Plan.md): confirmed V0.34 defect-closure execution plan.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
-  including the accepted V0.33 Plan.
+  including the accepted V0.34 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

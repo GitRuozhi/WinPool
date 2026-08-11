@@ -2,15 +2,15 @@
 
 ## 0. 状态与授权
 
-- 状态：`confirmed_execution`
-- 用户确认：2026-08-11；授权本计划范围内的实现、验证与本地 Git 提交
+- 状态：`accepted`
+- 用户确认：2026-08-11；确认 V0.34，并授权归档、Git 提交、推送 `main` 与本机 portable 部署
 - 目标项目版本：V0.34（`c=4`）
 - 基线版本：V0.33
 - 代码基线：`de6bae8ee530829e1e341896b7786167e23d132f`
-- 计划来源：`docs/V0.34修BUG.md`
+- 计划来源：`docs/Archive/V0.34/V0.34修BUG.md`
 - IPC 目标协议：3（由当前 2 只提升一次）
 - SQLite 目标 schema：12（新的严格数据合同；不提供旧 schema 迁移）
-- remote gate：`not_required`
+- remote gate：`authorized; fetch-and-fast-forward verification required before push`
 
 本文件是 V0.34 唯一的当前权威执行计划，基于对手工计划的代码核验形成。原始手工计划保持不动，不能把本计划写回 V0.33 归档历史。本次授权只覆盖本地实现、验证和有明确范围的本地 Git 提交；推送、打标签、GitHub Release、二进制上传和部署仍需单独授权。
 
@@ -344,4 +344,12 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 - `dotnet list WinPool.slnx package --vulnerable --include-transitive` 已通过；未发现易受攻击包。
 - 四进程自包含 staging 已通过：`D:\WinPool-V034-Candidate-Staging-Final`，包含唯一的 App、Agent、TestWorker、ElevatedBroker，四者 ProductVersion 均为 V0.34，且未包含禁用的数据库、日志、脚本、外部工具或重复 child。
 - M01～M07 以及既有 V0.33 原生/人工矩阵没有在本轮自动标记为通过，均保持 `unverified`。
-- V0.34 仍是 candidate，未变更“V0.33 是用户确认的当前版本”的事实；未 push、未 tag、未创建 GitHub Release、未上传二进制、未部署。
+- 上述 candidate gate 完成时，V0.34 尚未取得版本确认；该历史状态不改变其后取得的确认结果。
+
+## 18. V0.34 验收记录（2026-08-11）
+
+- 用户明确确认 V0.34 为当前项目版本，并授权归档本 Plan、更新事实文档、创建本地 Git
+  checkpoint、推送 `main`，以及部署已验证的四进程 portable 包到本机。
+- M01～M07 与既有 V0.33 原生/人工矩阵均未在本次确认中补做；它们继续保持
+  `unverified`，版本确认不代表这些用例通过。
+- 此确认不授权 tag、GitHub Release、向 GitHub 上传二进制或任何真实存储结构修改。
