@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 
-namespace WinPool.Core;
+namespace WinPool.Application;
 
 public sealed class GlobalNotificationService : IGlobalNotificationService
 {

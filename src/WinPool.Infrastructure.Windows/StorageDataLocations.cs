@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
 

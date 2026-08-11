@@ -1,6 +1,5 @@
 using System.Globalization;
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -9,11 +8,11 @@ namespace WinPool.Infrastructure.Windows;
 /// Compatibility provider for the fixed embedded read-only PowerShell collector.
 /// No caller-supplied script or command text crosses this boundary.
 /// </summary>
-public sealed class LegacyPowerShellInventoryProvider : IInventoryProvider
+public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
 {
     private readonly IHardwareInventoryProvider provider;
 
-    public LegacyPowerShellInventoryProvider(
+    public EmbeddedPowerShellInventoryProvider(
         IHardwareInventoryProvider? provider = null)
     {
         this.provider = provider ?? new WindowsHardwareInventoryProvider();

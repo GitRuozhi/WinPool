@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 
 namespace WinPool.App.Services;
 

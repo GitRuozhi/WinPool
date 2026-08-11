@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 using WinPool.Execution;
 using ExecutionMode = WinPool.Domain.ExecutionMode;
@@ -11,7 +10,7 @@ using PrivilegeState = WinPool.Domain.PrivilegeState;
 
 namespace WinPool.Infrastructure.Windows;
 
-public sealed record LegacySimulationEditCommit(
+public sealed record SimulationEditCommit(
     StorageSystemDocument Document,
     OperationPlan Plan,
     IReadOnlyList<ExecutionEvent> Events);
@@ -21,18 +20,18 @@ public sealed record LegacySimulationEditCommit(
 /// through the V0.2 planner, policy, one-shot authorization and simulation executor.
 /// It never exposes a local-storage mutation executor.
 /// </summary>
-public sealed class LegacySimulationEditCoordinator(
+public sealed class SimulationEditCoordinator(
     Func<StorageSystemDocument> currentDocument,
-    Func<LegacySimulationEditCommit, CancellationToken, Task> commitDocument,
-    ISimulationOperationService legacyEditor,
+    Func<SimulationEditCommit, CancellationToken, Task> commitDocument,
+    ISimulationOperationService simulationEditor,
     Func<StorageSystemDocument, SimulationOperationResult>? resetEditor = null) : ISimulationEditCoordinator
 {
     private readonly Func<StorageSystemDocument> currentDocument =
         currentDocument ?? throw new ArgumentNullException(nameof(currentDocument));
-    private readonly Func<LegacySimulationEditCommit, CancellationToken, Task> commitDocument =
+    private readonly Func<SimulationEditCommit, CancellationToken, Task> commitDocument =
         commitDocument ?? throw new ArgumentNullException(nameof(commitDocument));
-    private readonly ISimulationOperationService legacyEditor =
-        legacyEditor ?? throw new ArgumentNullException(nameof(legacyEditor));
+    private readonly ISimulationOperationService simulationEditor =
+        simulationEditor ?? throw new ArgumentNullException(nameof(simulationEditor));
     private readonly Func<StorageSystemDocument, SimulationOperationResult>? resetEditor = resetEditor;
 
     public async Task<ApplicationResult<SimulationEditReceipt>> ExecuteAsync(
@@ -71,7 +70,7 @@ public sealed class LegacySimulationEditCoordinator(
                 "The selected simulation target no longer exists.");
         }
 
-        var systemId = InternalStableIdentity.SystemFromDocumentId(document.Id);
+        var systemId = document.SystemId;
         var target = new StorageObjectId(
             systemId,
             MapKind(targetUnit.Kind),
@@ -142,11 +141,11 @@ public sealed class LegacySimulationEditCoordinator(
                     authorization.Message);
             }
 
-            var store = new LegacyDocumentStore(
+            var store = new ApplicationSimulationDocumentStore(
                 document,
                 request,
                 parameters,
-                legacyEditor,
+                simulationEditor,
                 resetEditor);
             var executor = new SimulationOperationExecutor(store);
             var gate = new ExecutorGate(policy, authority);
@@ -184,7 +183,7 @@ public sealed class LegacySimulationEditCoordinator(
             }
 
             await commitDocument(
-                new LegacySimulationEditCommit(
+                new SimulationEditCommit(
                     store.Result.Document,
                     plan,
                     executionEvents),
@@ -284,7 +283,7 @@ public sealed class LegacySimulationEditCoordinator(
     }
 
     private static string InventoryVersion(StorageSystemDocument document) =>
-        $"legacy:{document.SchemaVersion}:{document.Snapshot.SchemaVersion}:{document.UpdatedAt.UtcTicks}:{document.Snapshot.ScannedAt.UtcTicks}";
+        $"application:{document.SchemaVersion}:{document.Snapshot.SchemaVersion}:{document.UpdatedAt.UtcTicks}:{document.Snapshot.ScannedAt.UtcTicks}";
 
     private static StorageUnitRef? ResolveTarget(
         StorageSnapshot snapshot,
@@ -322,7 +321,7 @@ public sealed class LegacySimulationEditCoordinator(
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
-    private sealed class LegacyDocumentStore(
+    private sealed class ApplicationSimulationDocumentStore(
         StorageSystemDocument document,
         SimulationEditRequest request,
         IReadOnlyDictionary<string, string> expectedParameters,
@@ -348,22 +347,25 @@ public sealed class LegacySimulationEditCoordinator(
             }
 
             beforeDocument = current;
-            BeforeRevision = Math.Max(0, current.UpdatedAt.UtcTicks);
+            BeforeRevision = current.Revision;
             var result = request.Kind == SimulationEditKind.ResetDocument
                 ? resetEditor?.Invoke(current)
                     ?? SimulationOperationResult.Failure(
                         current,
                         "The built-in simulation reset adapter is unavailable.")
-                : editor.Apply(current, ToLegacyRequest(request));
+                : editor.Apply(current, ToApplicationRequest(request));
             if (!result.Succeeded)
             {
                 FailureText = result.Error;
-                throw new InvalidOperationException("The legacy simulation document adapter rejected the edit.");
+                throw new InvalidOperationException("The application simulation document adapter rejected the edit.");
             }
 
-            Result = result;
-            current = result.Document;
             AfterRevision = checked(BeforeRevision + 1);
+            Result = result with
+            {
+                Document = result.Document with { Revision = AfterRevision }
+            };
+            current = Result.Document;
             return Task.FromResult(
                 new SimulationMutationReceipt(
                     SimulationDocumentSnapshot.Create(plan.SystemId, BeforeRevision, expectedParameters),
@@ -392,7 +394,7 @@ public sealed class LegacySimulationEditCoordinator(
             && left.All(pair => right.TryGetValue(pair.Key, out var value)
                 && StringComparer.Ordinal.Equals(pair.Value, value));
 
-        private static SimulationOperationRequest ToLegacyRequest(SimulationEditRequest request) =>
+        private static SimulationOperationRequest ToApplicationRequest(SimulationEditRequest request) =>
             new(
                 Enum.Parse<SimulationOperationKind>(request.Kind.ToString()),
                 request.TargetProviderKey,

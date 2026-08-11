@@ -180,7 +180,7 @@ internal static class Program
                 testArtifacts,
                 new TestRunExporter(store, testRuns, testArtifacts),
                 new NativeWindowsInventoryProvider(),
-                new LegacyPowerShellInventoryProvider(),
+                new EmbeddedPowerShellInventoryProvider(),
                 new WindowsHardwareInventoryProvider(),
                 new InventoryComparer(),
                 new InventorySnapshotRepository(store, writeOwner),

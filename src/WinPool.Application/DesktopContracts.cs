@@ -1,6 +1,7 @@
-namespace WinPool.Core;
+namespace WinPool.Application;
 
 using System.Collections.ObjectModel;
+using WinPool.Domain;
 
 public interface IStorageInventoryProvider
 {

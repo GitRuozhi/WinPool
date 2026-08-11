@@ -3,7 +3,8 @@ using System.ComponentModel;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
 

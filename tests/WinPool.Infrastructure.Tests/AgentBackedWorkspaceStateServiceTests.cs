@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
@@ -7,7 +6,7 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class AgentBackedWorkspaceStateServiceTests
 {
     [Fact]
-    public async Task LoadMapsAgentContractToLegacyUiState()
+    public async Task LoadMapsAgentContractToWorkspaceUiState()
     {
         var connection = new WorkspaceConnection(State());
         var service = new AgentBackedWorkspaceStateService(connection);
@@ -25,7 +24,7 @@ public sealed class AgentBackedWorkspaceStateServiceTests
     }
 
     [Fact]
-    public async Task SaveMapsLegacyUiStateToAgentContractWithoutFallback()
+    public async Task SaveMapsWorkspaceUiStateToAgentContractWithoutFallback()
     {
         var connection = new WorkspaceConnection(null);
         var service = new AgentBackedWorkspaceStateService(connection);

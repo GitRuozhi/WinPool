@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -9,13 +8,13 @@ namespace WinPool.Infrastructure.Windows;
 /// The App consumes the Application topology contract while the legacy
 /// collector remains available for parity testing.
 /// </summary>
-public sealed class LegacyManageSystemProjector
+public sealed class ManageSystemProjector
     : IManageSystemProjector<StorageSystemDocument>
 {
     public ManageSystemProjection Project(StorageSystemDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
-        var systemId = InternalStableIdentity.SystemFromDocumentId(document.Id);
+        var systemId = document.SystemId;
         var root = TopologyProjector.Project(document.Snapshot);
         var rootView = Convert(root, systemId, $"{document.Id}:root") with
         {
@@ -32,7 +31,7 @@ public sealed class LegacyManageSystemProjector
             document.Kind == StorageSystemKind.Local
                 ? StorageSystemSourceKind.Local
                 : StorageSystemSourceKind.Simulation,
-            $"legacy:{document.SchemaVersion}:{document.Snapshot.SchemaVersion}:{document.UpdatedAt.UtcTicks}:{document.Snapshot.ScannedAt.UtcTicks}",
+            $"application:{document.SchemaVersion}:{document.Snapshot.SchemaVersion}:{document.UpdatedAt.UtcTicks}:{document.Snapshot.ScannedAt.UtcTicks}",
             document.Snapshot.ScannedAt,
             rootView,
             CreateWorkspaceObjects(document, systemId));

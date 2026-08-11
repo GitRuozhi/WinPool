@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -10,8 +10,8 @@ using Windows.UI;
 using WinPool_App.Controls;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
-using WinPool.Core;
 using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool_App;
 

@@ -2,7 +2,7 @@ using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool_App;
 

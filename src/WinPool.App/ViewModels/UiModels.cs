@@ -1,7 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
 using WinPool.Application;
-using WinPool.Core;
 
 namespace WinPool.App.ViewModels;
 

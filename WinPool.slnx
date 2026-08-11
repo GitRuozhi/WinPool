@@ -4,7 +4,6 @@
     <Project Path="src/WinPool.Agent.Client/WinPool.Agent.Client.csproj" />
     <Project Path="src/WinPool.App/WinPool.App.csproj" />
     <Project Path="src/WinPool.Application/WinPool.Application.csproj" />
-    <Project Path="src/WinPool.Core/WinPool.Core.csproj" />
     <Project Path="src/WinPool.Domain/WinPool.Domain.csproj" />
     <Project Path="src/WinPool.Execution/WinPool.Execution.csproj" />
     <Project Path="src/WinPool.Infrastructure.Sqlite/WinPool.Infrastructure.Sqlite.csproj" />
@@ -24,7 +23,7 @@
     <Project Path="tests/WinPool.Agent.Tests/WinPool.Agent.Tests.csproj" />
     <Project Path="tests/WinPool.Agent.Client.Tests/WinPool.Agent.Client.Tests.csproj" />
     <Project Path="tests/WinPool.Architecture.Tests/WinPool.Architecture.Tests.csproj" />
-    <Project Path="tests/WinPool.Core.Tests/WinPool.Core.Tests.csproj" />
+    <Project Path="tests/WinPool.Application.Tests/WinPool.Application.Tests.csproj" />
     <Project Path="tests/WinPool.Domain.Tests/WinPool.Domain.Tests.csproj" />
     <Project Path="tests/WinPool.Execution.Tests/WinPool.Execution.Tests.csproj" />
     <Project Path="tests/WinPool.Infrastructure.Tests/WinPool.Infrastructure.Tests.csproj" />

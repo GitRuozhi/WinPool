@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Windows.Storage.Pickers;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.App.Services;
 

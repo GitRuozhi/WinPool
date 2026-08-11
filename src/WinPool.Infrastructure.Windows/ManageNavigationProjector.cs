@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -9,7 +8,7 @@ namespace WinPool.Infrastructure.Windows;
 /// All results use stable Application identities so the App does not inspect
 /// snapshot relationships when switching Manage categories.
 /// </summary>
-public sealed class LegacyManageNavigationProjector
+public sealed class ManageNavigationProjector
     : IManageNavigationProjector<StorageSystemDocument>
 {
     public ManageObjectNavigationView Project(
@@ -18,7 +17,7 @@ public sealed class LegacyManageNavigationProjector
         ManageObjectRole role)
     {
         ArgumentNullException.ThrowIfNull(document);
-        var systemId = InternalStableIdentity.SystemFromDocumentId(document.Id);
+        var systemId = document.SystemId;
         if (objectId.System != systemId)
         {
             throw new ArgumentException(

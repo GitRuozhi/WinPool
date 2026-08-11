@@ -1,4 +1,4 @@
-namespace WinPool.Core;
+namespace WinPool.Application;
 
 public enum StorageFindingKind
 {

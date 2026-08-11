@@ -2,7 +2,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using WinPool.Application;
-using WinPool.Core;
 
 namespace WinPool.App.ViewModels;
 
@@ -22,7 +21,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         _owner = owner;
         _snapshot = snapshot;
         _occurrenceKey = node.OccurrenceKey;
-        var unit = ToLegacyUnit(node);
+        var unit = ToStorageUnit(node);
         ObjectId = node.Id;
         Role = node.Role;
         Unit = unit with { DisplayName = LocalizeName(unit, owner) };
@@ -298,7 +297,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         WorkspaceViewModel owner,
         StorageSnapshot snapshot)
     {
-        var unit = ToLegacyUnit(node);
+        var unit = ToStorageUnit(node);
         if (unit.Kind == StorageUnitKind.System)
         {
             var physical = snapshot.PhysicalDisks
@@ -393,7 +392,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         return node.Summary.Replace(" · ", "  ", StringComparison.Ordinal);
     }
 
-    private static StorageUnitRef ToLegacyUnit(ManageTopologyNodeView node) =>
+    private static StorageUnitRef ToStorageUnit(ManageTopologyNodeView node) =>
         new(
             node.Id.ProviderKey,
             node.Role switch

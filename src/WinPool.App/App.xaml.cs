@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
-using WinPool.Core;
+using WinPool.Application;
 using WinPool.Infrastructure.Windows;
 using WinPool.Agent.Client;
 using WinPool.Ipc;

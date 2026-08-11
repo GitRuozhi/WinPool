@@ -1,18 +1,17 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
 
-public sealed class LegacySimulationEditCoordinatorTests
+public sealed class SimulationEditCoordinatorTests
 {
     [Fact]
     public async Task EditPassesThroughPlanAuthorizationAndSimulationExecutorBeforeCommit()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
         StorageSystemDocument? committed = null;
-        LegacySimulationEditCommit? structuredCommit = null;
-        var coordinator = new LegacySimulationEditCoordinator(
+        SimulationEditCommit? structuredCommit = null;
+        var coordinator = new SimulationEditCoordinator(
             () => active,
             (commit, _) =>
             {
@@ -47,17 +46,17 @@ public sealed class LegacySimulationEditCoordinatorTests
     }
 
     [Fact]
-    public async Task LocalDocumentIsRejectedBeforeLegacyEditorOrCommit()
+    public async Task LocalDocumentIsRejectedBeforeSimulationEditorOrCommit()
     {
         var committed = false;
-        var coordinator = new LegacySimulationEditCoordinator(
+        var coordinator = new SimulationEditCoordinator(
             () => CreateDocument(StorageSystemKind.Local),
             (_, _) =>
             {
                 committed = true;
                 return Task.CompletedTask;
             },
-            new ThrowingLegacyEditor());
+            new ThrowingSimulationEditor());
 
         var result = await coordinator.ExecuteAsync(
             new SimulationEditRequest(
@@ -72,11 +71,11 @@ public sealed class LegacySimulationEditCoordinatorTests
     }
 
     [Fact]
-    public async Task InvalidLegacyEditDoesNotCommitPartialDocument()
+    public async Task InvalidSimulationEditDoesNotCommitPartialDocument()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
         var committed = false;
-        var coordinator = new LegacySimulationEditCoordinator(
+        var coordinator = new SimulationEditCoordinator(
             () => active,
             (_, _) =>
             {
@@ -101,7 +100,7 @@ public sealed class LegacySimulationEditCoordinatorTests
     public async Task PrimordialUiAliasResolvesToStablePoolAndBindsMemberDisk()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
-        var coordinator = new LegacySimulationEditCoordinator(
+        var coordinator = new SimulationEditCoordinator(
             () => active,
             (commit, _) =>
             {
@@ -131,9 +130,10 @@ public sealed class LegacySimulationEditCoordinatorTests
     {
         var active = CreateDocument(StorageSystemKind.Simulation) with
         {
-            Id = "simulation:builtin:test"
+            Id = "simulation:builtin:test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("simulation:builtin:test")
         };
-        var coordinator = new LegacySimulationEditCoordinator(
+        var coordinator = new SimulationEditCoordinator(
             () => active,
             (commit, _) =>
             {
@@ -166,7 +166,7 @@ public sealed class LegacySimulationEditCoordinatorTests
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
         var resetCalled = false;
-        var coordinator = new LegacySimulationEditCoordinator(
+        var coordinator = new SimulationEditCoordinator(
             () => active,
             (_, _) => Task.CompletedTask,
             new SimulationOperationService(),
@@ -234,11 +234,11 @@ public sealed class LegacySimulationEditCoordinatorTests
             DateTimeOffset.FromUnixTimeSeconds(1_800_000_001));
     }
 
-    private sealed class ThrowingLegacyEditor : ISimulationOperationService
+    private sealed class ThrowingSimulationEditor : ISimulationOperationService
     {
         public SimulationOperationResult Apply(
             StorageSystemDocument document,
             SimulationOperationRequest request) =>
-            throw new InvalidOperationException("The legacy editor must not be invoked.");
+            throw new InvalidOperationException("The simulation editor must not be invoked.");
     }
 }

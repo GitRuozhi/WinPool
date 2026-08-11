@@ -1,4 +1,4 @@
-namespace WinPool.Core;
+namespace WinPool.Application;
 
 public sealed record EqualFillFlowRow(int StartIndex, int Count, double ItemWidth);
 

@@ -4,7 +4,6 @@
     <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.0" />
     <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
-    <ProjectReference Include="..\WinPool.Core\WinPool.Core.csproj" />
     <ProjectReference Include="..\WinPool.Domain\WinPool.Domain.csproj" />
     <ProjectReference Include="..\WinPool.Execution\WinPool.Execution.csproj" />
     <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />

@@ -1,4 +1,4 @@
-﻿namespace WinPool.Infrastructure.Tests;
+namespace WinPool.Infrastructure.Tests;
 
 public sealed class InfrastructureTests
 {
@@ -90,16 +90,16 @@ public sealed class InfrastructureTests
         Assert.Equal(13, report.Items.Select(x => x.Category).Distinct(StringComparer.Ordinal).Count());
         Assert.All(report.Items, item => Assert.False(string.IsNullOrWhiteSpace(item.StandardName)));
 
-        var document = new WinPool.Core.StorageSystemDocument(
-            WinPool.Core.StorageSystemDocument.CurrentSchemaVersion,
+        var document = new WinPool.Application.StorageSystemDocument(
+            WinPool.Application.StorageSystemDocument.CurrentSchemaVersion,
             "simulation:test",
-            WinPool.Core.StorageSystemKind.Simulation,
+            WinPool.Application.StorageSystemKind.Simulation,
             "Test",
-            WinPool.Core.StorageSnapshot.Empty("TEST"),
+            WinPool.Application.StorageSnapshot.Empty("TEST"),
             report,
             [],
             DateTimeOffset.Now);
-        var redacted = WinPool.Core.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+        var redacted = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
         foreach (var item in redacted.HardwareReport.Items.Where(x => x.Id is "0304" or "0510" or "0718" or "0803" or "1206"))
         {
             Assert.DoesNotContain(
@@ -115,14 +115,14 @@ public sealed class InfrastructureTests
         var original = await service.LoadAsync();
         try
         {
-            await service.SaveAsync(new WinPool.Core.UserPreferences(
-                WinPool.Core.ThemePreference.Dark,
-                WinPool.Core.AccentColorPreference.Purple,
-                WinPool.Core.LanguagePreference.EnUs));
+            await service.SaveAsync(new WinPool.Domain.UserPreferences(
+                WinPool.Domain.ThemePreference.Dark,
+                WinPool.Domain.AccentColorPreference.Purple,
+                WinPool.Domain.LanguagePreference.EnUs));
             var loaded = await service.LoadAsync();
-            Assert.Equal(WinPool.Core.ThemePreference.Dark, loaded.Theme);
-            Assert.Equal(WinPool.Core.AccentColorPreference.Purple, loaded.AccentColor);
-            Assert.Equal(WinPool.Core.LanguagePreference.EnUs, loaded.Language);
+            Assert.Equal(WinPool.Domain.ThemePreference.Dark, loaded.Theme);
+            Assert.Equal(WinPool.Domain.AccentColorPreference.Purple, loaded.AccentColor);
+            Assert.Equal(WinPool.Domain.LanguagePreference.EnUs, loaded.Language);
             Assert.DoesNotContain("ExecutionMode", await File.ReadAllTextAsync(service.SettingsPath));
         }
         finally
@@ -163,7 +163,7 @@ public sealed class InfrastructureTests
         };
         var unavailable = document.HardwareReport.Items
             .Where(x => x.Sources.Any(source =>
-                source.Status == WinPool.Core.CollectorSourceStatus.Unavailable))
+                source.Status == WinPool.Application.CollectorSourceStatus.Unavailable))
             .Select(x => x.Id)
             .ToHashSet(StringComparer.Ordinal);
         Assert.Subset(expectedUnavailable, unavailable);
@@ -173,10 +173,10 @@ public sealed class InfrastructureTests
             var item = Assert.Single(document.HardwareReport.Items, x => x.Id == id);
             Assert.Contains(
                 item.Sources,
-                source => source.Status == WinPool.Core.CollectorSourceStatus.Success);
+                source => source.Status == WinPool.Application.CollectorSourceStatus.Success);
         }
 
-        var redacted = WinPool.Core.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+        var redacted = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
         foreach (var item in redacted.HardwareReport.Items.Where(
                      x => x.Id is "0304" or "0510" or "0718" or "0803" or "1206"))
         {
@@ -198,7 +198,7 @@ public sealed class InfrastructureTests
 
         var systemId = WinPool.Domain.SystemId.New();
         var compatibilityProvider =
-            new WinPool.Infrastructure.Windows.LegacyPowerShellInventoryProvider(
+            new WinPool.Infrastructure.Windows.EmbeddedPowerShellInventoryProvider(
                 new FixedHardwareProvider(document));
         var projected = await compatibilityProvider.CaptureAsync(
             new WinPool.Application.InventoryRequest(
@@ -281,10 +281,10 @@ public sealed class InfrastructureTests
     }
 
     private sealed class FixedHardwareProvider(
-        WinPool.Core.StorageSystemDocument document)
-        : WinPool.Core.IHardwareInventoryProvider
+        WinPool.Application.StorageSystemDocument document)
+        : WinPool.Application.IHardwareInventoryProvider
     {
-        public Task<WinPool.Core.StorageSystemDocument> CollectLocalAsync(
+        public Task<WinPool.Application.StorageSystemDocument> CollectLocalAsync(
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

@@ -1,28 +1,28 @@
-﻿namespace WinPool.Core.Tests;
+namespace WinPool.Application.Tests;
 
-public sealed class CoreBehaviorTests
+public sealed class ApplicationBehaviorTests
 {
     [Fact]
     public void StandardUserCannotEnterRealMode()
     {
-        var controller = new WinPool.Core.ExecutionModeController(WinPool.Core.PrivilegeState.StandardUser);
-        Assert.False(controller.TrySetMode(WinPool.Core.ExecutionMode.Real));
-        Assert.Equal(WinPool.Core.ExecutionMode.Simulation, controller.Mode);
+        var controller = new WinPool.Application.ExecutionModeController(WinPool.Domain.PrivilegeState.StandardUser);
+        Assert.False(controller.TrySetMode(WinPool.Domain.ExecutionMode.Real));
+        Assert.Equal(WinPool.Domain.ExecutionMode.Simulation, controller.Mode);
     }
 
     [Fact]
     public void AdministratorStillStartsInSimulation()
     {
-        var controller = new WinPool.Core.ExecutionModeController(WinPool.Core.PrivilegeState.Administrator);
-        Assert.Equal(WinPool.Core.ExecutionMode.Simulation, controller.Mode);
-        Assert.True(controller.TrySetMode(WinPool.Core.ExecutionMode.Real));
+        var controller = new WinPool.Application.ExecutionModeController(WinPool.Domain.PrivilegeState.Administrator);
+        Assert.Equal(WinPool.Domain.ExecutionMode.Simulation, controller.Mode);
+        Assert.True(controller.TrySetMode(WinPool.Domain.ExecutionMode.Real));
     }
 
     [Fact]
     public void StableFallbackIdIsDeterministicAndMarkedUnstable()
     {
-        var first = WinPool.Core.StableId.Create("physical", null, null, 4, "disk", 1000);
-        var second = WinPool.Core.StableId.Create("physical", null, null, 4, "disk", 1000);
+        var first = WinPool.Application.StableId.Create("physical", null, null, 4, "disk", 1000);
+        var second = WinPool.Application.StableId.Create("physical", null, null, 4, "disk", 1000);
         Assert.False(first.IsStable);
         Assert.Equal(first.Value, second.Value);
     }
@@ -39,32 +39,32 @@ public sealed class CoreBehaviorTests
             ]
         };
         var raw = System.Text.Json.JsonSerializer.SerializeToElement(new[] { "SERIAL-123456" });
-        var item = new WinPool.Core.HardwareInventoryItemResult(
+        var item = new WinPool.Application.HardwareInventoryItemResult(
             "0803",
             "Disk",
             "SerialNumber",
             "序列号",
             raw,
             [
-                new WinPool.Core.CollectorSourceResult(
+                new WinPool.Application.CollectorSourceResult(
                     "test",
-                    WinPool.Core.CollectorSourceStatus.Success,
+                    WinPool.Application.CollectorSourceStatus.Success,
                     raw,
                     string.Empty,
                     0)
             ],
             []);
-        var document = new WinPool.Core.StorageSystemDocument(
+        var document = new WinPool.Application.StorageSystemDocument(
             1,
             "simulation:test",
-            WinPool.Core.StorageSystemKind.Simulation,
+            WinPool.Application.StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            new WinPool.Core.HardwareInventoryReport(1, DateTimeOffset.Now, [item], []),
+            new WinPool.Application.HardwareInventoryReport(1, DateTimeOffset.Now, [item], []),
             [],
             DateTimeOffset.Now);
 
-        var sanitized = WinPool.Core.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+        var sanitized = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
 
         Assert.Contains('•', sanitized.Snapshot.PhysicalDisks[0].MaskedSerialNumber);
         Assert.All(
@@ -79,8 +79,8 @@ public sealed class CoreBehaviorTests
     public void TieredPoolDoesNotDuplicatePhysicalDiskAtPoolLevel()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var root = WinPool.Core.TopologyProjector.Project(snapshot);
-        var references = WinPool.Core.TopologyProjector.Flatten(root)
+        var root = WinPool.Application.TopologyProjector.Project(snapshot);
+        var references = WinPool.Application.TopologyProjector.Flatten(root)
             .Where(x => x.Unit.StableId == "physical:1")
             .ToList();
         Assert.Single(references);
@@ -91,13 +91,13 @@ public sealed class CoreBehaviorTests
     public void PartitionIsTheOnlyLeafUnderItsDisk()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var root = WinPool.Core.TopologyProjector.Project(snapshot);
-        var virtualDisk = WinPool.Core.TopologyProjector.Flatten(root)
+        var root = WinPool.Application.TopologyProjector.Project(snapshot);
+        var virtualDisk = WinPool.Application.TopologyProjector.Flatten(root)
             .Single(x => x.Unit.StableId == "virtual:1");
 
         Assert.Contains(virtualDisk.Children, x => x.Unit.StableId == "partition:1");
         Assert.DoesNotContain(
-            WinPool.Core.TopologyProjector.Flatten(root),
+            WinPool.Application.TopologyProjector.Flatten(root),
             x => x.Unit.Kind.ToString().Contains("Volume", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -105,10 +105,10 @@ public sealed class CoreBehaviorTests
     public void VirtualDiskAndPartitionClicksMapToRequiredCategories()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var virtualSelection = WinPool.Core.WorkspaceMapper.FromUnit(snapshot.FindUnit("virtual:1")!, snapshot);
-        var partitionSelection = WinPool.Core.WorkspaceMapper.FromUnit(snapshot.FindUnit("partition:1")!, snapshot);
-        Assert.Equal(WinPool.Core.WorkspaceCategory.Disk, virtualSelection.Category);
-        Assert.Equal(WinPool.Core.WorkspaceCategory.Partition, partitionSelection.Category);
+        var virtualSelection = WinPool.Application.WorkspaceMapper.FromUnit(snapshot.FindUnit("virtual:1")!, snapshot);
+        var partitionSelection = WinPool.Application.WorkspaceMapper.FromUnit(snapshot.FindUnit("partition:1")!, snapshot);
+        Assert.Equal(WinPool.Application.WorkspaceCategory.Disk, virtualSelection.Category);
+        Assert.Equal(WinPool.Application.WorkspaceCategory.Partition, partitionSelection.Category);
         Assert.Equal("partition:1", partitionSelection.StableId);
     }
 
@@ -116,10 +116,10 @@ public sealed class CoreBehaviorTests
     public void RescanRestoresStableSelectionOrFallsBack()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var current = new WinPool.Core.WorkspaceSelection(WinPool.Core.WorkspaceCategory.Partition, "partition:1");
-        Assert.Equal(current, WinPool.Core.WorkspaceState.Restore(snapshot, current));
-        var missing = new WinPool.Core.WorkspaceSelection(WinPool.Core.WorkspaceCategory.Partition, "partition:gone");
-        Assert.Equal("partition:1", WinPool.Core.WorkspaceState.Restore(snapshot, missing).StableId);
+        var current = new WinPool.Application.WorkspaceSelection(WinPool.Application.WorkspaceCategory.Partition, "partition:1");
+        Assert.Equal(current, WinPool.Application.WorkspaceSelectionState.Restore(snapshot, current));
+        var missing = new WinPool.Application.WorkspaceSelection(WinPool.Application.WorkspaceCategory.Partition, "partition:gone");
+        Assert.Equal("partition:1", WinPool.Application.WorkspaceSelectionState.Restore(snapshot, missing).StableId);
     }
 
     [Fact]
@@ -128,9 +128,9 @@ public sealed class CoreBehaviorTests
         var source = TestSnapshotFactory.Create();
         var primordial = source.StoragePools[0] with { FriendlyName = "Ignored", IsPrimordial = true };
         var snapshot = source with { StoragePools = [primordial], StorageTiers = [], VirtualDisks = [] };
-        var root = WinPool.Core.TopologyProjector.Project(snapshot);
+        var root = WinPool.Application.TopologyProjector.Project(snapshot);
         var pool = Assert.Single(root.Children);
-        Assert.Equal(WinPool.Core.StorageUnitKind.StoragePool, pool.Unit.Kind);
+        Assert.Equal(WinPool.Application.StorageUnitKind.StoragePool, pool.Unit.Kind);
         Assert.Equal("Primordial", pool.Unit.DisplayName);
         Assert.DoesNotContain("virtual disk", root.Summary, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("virtual disk", pool.Summary, StringComparison.OrdinalIgnoreCase);
@@ -146,7 +146,7 @@ public sealed class CoreBehaviorTests
             FileSystemLabel = "本地磁盘\0 "
         };
 
-        Assert.Equal("C: 本地磁盘", WinPool.Core.TopologyProjector.PartitionDisplayName(partition));
+        Assert.Equal("C: 本地磁盘", WinPool.Application.TopologyProjector.PartitionDisplayName(partition));
     }
 
     [Theory]
@@ -157,7 +157,7 @@ public sealed class CoreBehaviorTests
     [InlineData("d:", "D")]
     public void DriveLetterNormalizationRejectsInvalidPlaceholders(string source, string expected)
     {
-        Assert.Equal(expected, WinPool.Core.TopologyProjector.NormalizeDriveLetter(source));
+        Assert.Equal(expected, WinPool.Application.TopologyProjector.NormalizeDriveLetter(source));
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public sealed class CoreBehaviorTests
         };
         var snapshot = source with { Partitions = [second, first] };
 
-        var ordered = WinPool.Core.TopologyProjector.OrderPartitionsForWorkspace(snapshot);
+        var ordered = WinPool.Application.TopologyProjector.OrderPartitionsForWorkspace(snapshot);
 
         Assert.Equal(["partition:1", "partition:2"], ordered.Select(x => x.StableId));
     }
@@ -182,7 +182,7 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void GlobalNotificationsAreIndependentDeduplicatedAndDismissible()
     {
-        var service = new WinPool.Core.GlobalNotificationService();
+        var service = new WinPool.Application.GlobalNotificationService();
         service.PublishWarning("Warning", "One", "scan", "same");
         service.PublishWarning("Warning", "One", "scan", "same");
         service.PublishError("Error", "Two", "operation", "other");
@@ -197,15 +197,15 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void ElevatedRealStartupOptionRequiresAdministrator()
     {
-        var admin = WinPool.Core.ApplicationStartupOptions.Parse(
-            [WinPool.Core.ApplicationStartupOptions.ElevatedRealArgument],
-            WinPool.Core.PrivilegeState.Administrator);
-        var standard = WinPool.Core.ApplicationStartupOptions.Parse(
-            [WinPool.Core.ApplicationStartupOptions.ElevatedRealArgument],
-            WinPool.Core.PrivilegeState.StandardUser);
-        var normalAdmin = WinPool.Core.ApplicationStartupOptions.Parse(
+        var admin = WinPool.Application.ApplicationStartupOptions.Parse(
+            [WinPool.Application.ApplicationStartupOptions.ElevatedRealArgument],
+            WinPool.Domain.PrivilegeState.Administrator);
+        var standard = WinPool.Application.ApplicationStartupOptions.Parse(
+            [WinPool.Application.ApplicationStartupOptions.ElevatedRealArgument],
+            WinPool.Domain.PrivilegeState.StandardUser);
+        var normalAdmin = WinPool.Application.ApplicationStartupOptions.Parse(
             [],
-            WinPool.Core.PrivilegeState.Administrator);
+            WinPool.Domain.PrivilegeState.Administrator);
 
         Assert.True(admin.EnterRealModeAfterElevation);
         Assert.False(standard.EnterRealModeAfterElevation);
@@ -215,15 +215,15 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void StartupPageArgumentIsClosedAndInvalidValuesAreIgnored()
     {
-        var monitor = WinPool.Core.ApplicationStartupOptions.Parse(
-            [WinPool.Core.ApplicationStartupOptions.PageArgument, "monitor"],
-            WinPool.Core.PrivilegeState.StandardUser);
-        var invalid = WinPool.Core.ApplicationStartupOptions.Parse(
-            [WinPool.Core.ApplicationStartupOptions.PageArgument, "--run-anything"],
-            WinPool.Core.PrivilegeState.StandardUser);
+        var monitor = WinPool.Application.ApplicationStartupOptions.Parse(
+            [WinPool.Application.ApplicationStartupOptions.PageArgument, "monitor"],
+            WinPool.Domain.PrivilegeState.StandardUser);
+        var invalid = WinPool.Application.ApplicationStartupOptions.Parse(
+            [WinPool.Application.ApplicationStartupOptions.PageArgument, "--run-anything"],
+            WinPool.Domain.PrivilegeState.StandardUser);
 
-        Assert.Equal(WinPool.Core.ApplicationStartupTarget.Monitor, monitor.Target);
-        Assert.Equal(WinPool.Core.ApplicationStartupTarget.None, invalid.Target);
+        Assert.Equal(WinPool.Application.ApplicationStartupTarget.Monitor, monitor.Target);
+        Assert.Equal(WinPool.Application.ApplicationStartupTarget.None, invalid.Target);
     }
 
     [Fact]
@@ -231,12 +231,12 @@ public sealed class CoreBehaviorTests
     {
         Assert.Equal(
             42,
-            WinPool.Core.ApplicationStartupOptions.GetHandoffProcessId(
-                [WinPool.Core.ApplicationStartupOptions.WaitForProcessArgument, "42"]));
+            WinPool.Application.ApplicationStartupOptions.GetHandoffProcessId(
+                [WinPool.Application.ApplicationStartupOptions.WaitForProcessArgument, "42"]));
         Assert.Null(
-            WinPool.Core.ApplicationStartupOptions.GetHandoffProcessId(
-                [WinPool.Core.ApplicationStartupOptions.WaitForProcessArgument, "invalid"]));
-        Assert.Null(WinPool.Core.ApplicationStartupOptions.GetHandoffProcessId([]));
+            WinPool.Application.ApplicationStartupOptions.GetHandoffProcessId(
+                [WinPool.Application.ApplicationStartupOptions.WaitForProcessArgument, "invalid"]));
+        Assert.Null(WinPool.Application.ApplicationStartupOptions.GetHandoffProcessId([]));
     }
 
     [Fact]
@@ -244,25 +244,25 @@ public sealed class CoreBehaviorTests
     {
         var arguments = new[]
         {
-            WinPool.Core.ApplicationStartupOptions.StorageLocationHandoffArgument,
-            WinPool.Core.ApplicationStartupOptions.WaitForProcessArgument,
+            WinPool.Application.ApplicationStartupOptions.StorageLocationHandoffArgument,
+            WinPool.Application.ApplicationStartupOptions.WaitForProcessArgument,
             "42"
         };
 
-        Assert.True(WinPool.Core.ApplicationStartupOptions.RequestsProcessHandoff(arguments));
-        Assert.Equal(42, WinPool.Core.ApplicationStartupOptions.GetHandoffProcessId(arguments));
+        Assert.True(WinPool.Application.ApplicationStartupOptions.RequestsProcessHandoff(arguments));
+        Assert.Equal(42, WinPool.Application.ApplicationStartupOptions.GetHandoffProcessId(arguments));
         Assert.False(
-            WinPool.Core.ApplicationStartupOptions.Parse(
+            WinPool.Application.ApplicationStartupOptions.Parse(
                 arguments,
-                WinPool.Core.PrivilegeState.Administrator)
+                WinPool.Domain.PrivilegeState.Administrator)
             .EnterRealModeAfterElevation);
     }
 
     [Fact]
     public void PartitionTopologySummaryOmitsClusterSize()
     {
-        var root = WinPool.Core.TopologyProjector.Project(TestSnapshotFactory.Create());
-        var partition = WinPool.Core.TopologyProjector.Flatten(root)
+        var root = WinPool.Application.TopologyProjector.Project(TestSnapshotFactory.Create());
+        var partition = WinPool.Application.TopologyProjector.Flatten(root)
             .Single(x => x.Unit.StableId == "partition:1");
 
         Assert.Contains("NTFS", partition.Summary);
@@ -272,16 +272,16 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void EqualFillFlowLayoutFillsEveryRowIncludingLastAndNarrowRows()
     {
-        var rows = WinPool.Core.EqualFillFlowLayout.CreateRows(5, 500);
+        var rows = WinPool.Application.EqualFillFlowLayout.CreateRows(5, 500);
         Assert.Equal(2, rows.Count);
         Assert.Equal(3, rows[0].Count);
         Assert.Equal((500d - 12d) / 3d, rows[0].ItemWidth, 6);
         Assert.Equal(2, rows[1].Count);
         Assert.Equal((500d - 6d) / 2d, rows[1].ItemWidth, 6);
 
-        var singleton = Assert.Single(WinPool.Core.EqualFillFlowLayout.CreateRows(1, 800));
+        var singleton = Assert.Single(WinPool.Application.EqualFillFlowLayout.CreateRows(1, 800));
         Assert.Equal(800d, singleton.ItemWidth, 6);
-        var narrow = Assert.Single(WinPool.Core.EqualFillFlowLayout.CreateRows(1, 100));
+        var narrow = Assert.Single(WinPool.Application.EqualFillFlowLayout.CreateRows(1, 100));
         Assert.Equal(100d, narrow.ItemWidth, 6);
     }
 
@@ -289,7 +289,7 @@ public sealed class CoreBehaviorTests
     public void CompressedDiskCardsKeepFourTierMembersOnOneRow()
     {
         var row = Assert.Single(
-            WinPool.Core.EqualFillFlowLayout.CreateRows(
+            WinPool.Application.EqualFillFlowLayout.CreateRows(
                 itemCount: 4,
                 availableWidth: 479,
                 minimumItemWidth: 112,
@@ -304,7 +304,7 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void SummariesUseExactlyTwoSpacesBetweenFields()
     {
-        var summary = WinPool.Core.TopologyProjector.JoinSummary("one", "two", "three");
+        var summary = WinPool.Application.TopologyProjector.JoinSummary("one", "two", "three");
         Assert.Equal("one  two  three", summary);
         Assert.DoesNotContain('·', summary);
         Assert.DoesNotContain('|', summary);
@@ -325,18 +325,18 @@ public sealed class CoreBehaviorTests
         };
         var snapshot = source with { StoragePools = [pool], StorageTiers = tiers };
 
-        Assert.Equal(4, WinPool.Core.TopologyProjector.CalculatePoolWeight(pool, snapshot));
+        Assert.Equal(4, WinPool.Application.TopologyProjector.CalculatePoolWeight(pool, snapshot));
     }
 
     [Fact]
     public void WeightedPoolLayoutProducesFiveThenFourToTwoRows()
     {
-        var rows = WinPool.Core.WeightedPoolLayout.CreateRows([5, 4, 2], 1000);
+        var rows = WinPool.Application.WeightedPoolLayout.CreateRows([5, 4, 2], 1000);
         Assert.Equal(2, rows.Count);
         Assert.Equal([0], rows[0]);
         Assert.Equal([1, 2], rows[1]);
 
-        var widths = WinPool.Core.WeightedPoolLayout.AllocateWidths([4, 2], 1000);
+        var widths = WinPool.Application.WeightedPoolLayout.AllocateWidths([4, 2], 1000);
         Assert.Equal(2d, widths[0] / widths[1], 6);
     }
 
@@ -344,7 +344,7 @@ public sealed class CoreBehaviorTests
     public void SystemSummaryOmitsZeroVirtualAndNetworkDiskCounts()
     {
         var source = TestSnapshotFactory.Create();
-        var root = WinPool.Core.TopologyProjector.Project(
+        var root = WinPool.Application.TopologyProjector.Project(
             source with { VirtualDisks = [], NetworkDisks = [] });
 
         Assert.DoesNotContain("virtual disks", root.Summary);
@@ -354,7 +354,7 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void InfoNotificationsSupportStickyAndDismissByKey()
     {
-        var service = new WinPool.Core.GlobalNotificationService();
+        var service = new WinPool.Application.GlobalNotificationService();
         service.PublishInfo("Scanning", string.Empty, "inventory", "scan", autoDismiss: false);
         service.PublishInfo("Done", "Finished", "inventory", "done");
 
@@ -362,7 +362,7 @@ public sealed class CoreBehaviorTests
         Assert.False(service.Notifications[0].AutoDismiss);
         Assert.True(service.Notifications[1].AutoDismiss);
         Assert.Equal(
-            WinPool.Core.GlobalNotificationSeverity.Info,
+            WinPool.Application.GlobalNotificationSeverity.Info,
             service.Notifications[0].Severity);
 
         service.DismissByKey("scan");
@@ -373,20 +373,20 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void ReservedPartitionOtherStatusIsNotUnhealthy()
     {
-        Assert.False(WinPool.Core.StorageFindingInspector.IsUnhealthy("Healthy", "Other"));
-        Assert.False(WinPool.Core.StorageFindingInspector.IsUnhealthy("Healthy", "OK"));
-        Assert.True(WinPool.Core.StorageFindingInspector.IsUnhealthy("Healthy", "Failed"));
-        Assert.True(WinPool.Core.StorageFindingInspector.IsUnhealthy("Warning", "OK"));
+        Assert.False(WinPool.Application.StorageFindingInspector.IsUnhealthy("Healthy", "Other"));
+        Assert.False(WinPool.Application.StorageFindingInspector.IsUnhealthy("Healthy", "OK"));
+        Assert.True(WinPool.Application.StorageFindingInspector.IsUnhealthy("Healthy", "Failed"));
+        Assert.True(WinPool.Application.StorageFindingInspector.IsUnhealthy("Warning", "OK"));
     }
 
     [Fact]
     public void NetworkAndOtherGroupsAreSelectablePoolCategoryObjectsButNotPools()
     {
         var source = TestSnapshotFactory.Create();
-        var network = new WinPool.Core.NetworkDiskInfo(
+        var network = new WinPool.Application.NetworkDiskInfo(
             "network:r", true, "R: Network", "R", "\\\\server\\share", "NTFS",
             4_000_000, 1_000_000);
-        var otherDisk = new WinPool.Core.OsDiskInfo(
+        var otherDisk = new WinPool.Application.OsDiskInfo(
             "osdisk:other", "Other disk", 9, "GPT", 8_000_000,
             false, false, false, null, null);
         var otherPartition = source.Partitions[0] with
@@ -402,18 +402,18 @@ public sealed class CoreBehaviorTests
             Partitions = source.Partitions.Append(otherPartition).ToArray()
         };
 
-        var root = WinPool.Core.TopologyProjector.Project(snapshot);
-        var networkGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Core.StorageUnitKind.NetworkDiskGroup);
-        var otherGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Core.StorageUnitKind.OtherDiskGroup);
+        var root = WinPool.Application.TopologyProjector.Project(snapshot);
+        var networkGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Application.StorageUnitKind.NetworkDiskGroup);
+        var otherGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Application.StorageUnitKind.OtherDiskGroup);
 
         Assert.True(networkGroup.IsSelectable);
         Assert.True(otherGroup.IsSelectable);
         Assert.Equal(
-            WinPool.Core.WorkspaceCategory.Pool,
-            WinPool.Core.WorkspaceMapper.FromUnit(networkGroup.Unit, snapshot).Category);
+            WinPool.Application.WorkspaceCategory.Pool,
+            WinPool.Application.WorkspaceMapper.FromUnit(networkGroup.Unit, snapshot).Category);
         Assert.Equal(
-            WinPool.Core.WorkspaceCategory.Pool,
-            WinPool.Core.WorkspaceMapper.FromUnit(otherGroup.Unit, snapshot).Category);
+            WinPool.Application.WorkspaceCategory.Pool,
+            WinPool.Application.WorkspaceMapper.FromUnit(otherGroup.Unit, snapshot).Category);
         Assert.NotNull(snapshot.FindUnit(networkGroup.Unit.StableId));
         Assert.NotNull(snapshot.FindUnit(otherGroup.Unit.StableId));
         Assert.StartsWith("1 pools  1 physical disks  1 virtual disks  1 network disks  ", root.Summary);
@@ -426,25 +426,30 @@ public sealed class CoreBehaviorTests
 
         Assert.Equal(
             "group:network:system:test",
-            WinPool.Core.TopologyProjector.NetworkGroupStableId(snapshot));
+            WinPool.Application.TopologyProjector.NetworkGroupStableId(snapshot));
         Assert.Equal(
             "group:other:system:test",
-            WinPool.Core.TopologyProjector.OtherGroupStableId(snapshot));
+            WinPool.Application.TopologyProjector.OtherGroupStableId(snapshot));
     }
 
     [Fact]
     public void StorageSystemCatalogKeepsLocalFirstAndImportedSimulationsInOrder()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var report = WinPool.Core.HardwareInventoryReport.Empty(DateTimeOffset.Now);
-        var local = new WinPool.Core.StorageSystemDocument(
-            1, "local", WinPool.Core.StorageSystemKind.Local, "Local",
+        var report = WinPool.Application.HardwareInventoryReport.Empty(DateTimeOffset.Now);
+        var local = new WinPool.Application.StorageSystemDocument(
+            1, "local", WinPool.Application.StorageSystemKind.Local, "Local",
             snapshot, report, [], DateTimeOffset.Now);
-        var first = new WinPool.Core.StorageSystemDocument(
-            1, "sim:1", WinPool.Core.StorageSystemKind.Simulation, "First",
+        var first = new WinPool.Application.StorageSystemDocument(
+            1, "sim:1", WinPool.Application.StorageSystemKind.Simulation, "First",
             snapshot, report, [], DateTimeOffset.Now);
-        var second = first with { Id = "sim:2", DisplayName = "Second" };
-        var catalog = new WinPool.Core.StorageSystemCatalog();
+        var second = first with
+        {
+            Id = "sim:2",
+            SystemId = WinPool.Domain.SystemId.New(),
+            DisplayName = "Second"
+        };
+        var catalog = new WinPool.Application.StorageSystemCatalog();
 
         catalog.AddSimulation(first);
         catalog.ReplaceLocal(local);
@@ -457,32 +462,30 @@ public sealed class CoreBehaviorTests
     public void SimulationOperationsRejectLocalAndPersistSnapshotChanges()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var report = WinPool.Core.HardwareInventoryReport.Empty(DateTimeOffset.Now);
-        var local = new WinPool.Core.StorageSystemDocument(
-            1, "local", WinPool.Core.StorageSystemKind.Local, "Local",
+        var report = WinPool.Application.HardwareInventoryReport.Empty(DateTimeOffset.Now);
+        var local = new WinPool.Application.StorageSystemDocument(
+            1, "local", WinPool.Application.StorageSystemKind.Local, "Local",
             snapshot, report, [], DateTimeOffset.Now);
-        var simulation = local with
-        {
-            Id = "simulation",
-            Kind = WinPool.Core.StorageSystemKind.Simulation
-        };
-        var service = new WinPool.Core.SimulationOperationService();
+        var simulation = local.AsImportedSimulation("Simulation");
+        var service = new WinPool.Application.SimulationOperationService();
 
         var rejected = service.Apply(
             local,
-            new WinPool.Core.SimulationOperationRequest(
-                WinPool.Core.SimulationOperationKind.Rename,
+            new WinPool.Application.SimulationOperationRequest(
+                WinPool.Application.SimulationOperationKind.Rename,
                 "pool:1",
                 Name: "Changed"));
         var changed = service.Apply(
             simulation,
-            new WinPool.Core.SimulationOperationRequest(
-                WinPool.Core.SimulationOperationKind.Rename,
+            new WinPool.Application.SimulationOperationRequest(
+                WinPool.Application.SimulationOperationKind.Rename,
                 "pool:1",
                 Name: "Changed"));
 
         Assert.False(rejected.Succeeded);
         Assert.True(changed.Succeeded);
+        Assert.NotEqual(local.SystemId, simulation.SystemId);
+        Assert.Equal(local.Id, simulation.ProvenanceDocumentId);
         Assert.Equal("Changed", changed.Document.Snapshot.StoragePools[0].FriendlyName);
     }
 }

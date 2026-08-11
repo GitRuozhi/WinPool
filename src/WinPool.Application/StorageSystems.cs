@@ -1,6 +1,8 @@
 using System.Text.Json;
 
-namespace WinPool.Core;
+using WinPool.Domain;
+
+namespace WinPool.Application;
 
 public enum StorageSystemKind
 {
@@ -72,16 +74,34 @@ public sealed record StorageSystemDocument(
 {
     public const int CurrentSchemaVersion = 1;
 
+    public string DocumentId => Id;
+
+    public SystemId SystemId { get; init; } =
+        InternalStableIdentity.SystemFromDocumentId(Id);
+
+    public long Revision { get; init; } =
+        Kind == StorageSystemKind.Simulation ? 1 : 0;
+
+    public string? ProvenanceDocumentId { get; init; }
+
+    public string InventoryVersion => Snapshot.SnapshotVersion;
+
     public bool IsLocal => Kind == StorageSystemKind.Local;
 
-    public StorageSystemDocument AsImportedSimulation(string? displayName = null) =>
-        this with
+    public StorageSystemDocument AsImportedSimulation(string? displayName = null)
+    {
+        var sourceDocumentId = Id;
+        return this with
         {
             Id = $"simulation:{Guid.NewGuid():N}",
+            SystemId = WinPool.Domain.SystemId.New(),
             Kind = StorageSystemKind.Simulation,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? DisplayName : displayName.Trim(),
+            Revision = 1,
+            ProvenanceDocumentId = sourceDocumentId,
             UpdatedAt = DateTimeOffset.Now
         };
+    }
 }
 
 public static class StorageSystemDocumentSanitizer

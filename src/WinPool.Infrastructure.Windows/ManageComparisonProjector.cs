@@ -1,6 +1,5 @@
 using System.Text.Json;
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -10,7 +9,7 @@ namespace WinPool.Infrastructure.Windows;
 /// Values stay UI-neutral; localization, privacy masking, and display-only
 /// normalization are applied by the App from the presentation hint.
 /// </summary>
-public sealed class LegacyManageComparisonProjector
+public sealed class ManageComparisonProjector
     : IManageComparisonProjector<StorageSystemDocument>
 {
     public ManageObjectComparisonView Project(
@@ -19,7 +18,7 @@ public sealed class LegacyManageComparisonProjector
         ManageObjectRole role)
     {
         ArgumentNullException.ThrowIfNull(document);
-        var expectedSystem = InternalStableIdentity.SystemFromDocumentId(document.Id);
+        var expectedSystem = document.SystemId;
         if (objectId.System != expectedSystem)
         {
             throw new ArgumentException(

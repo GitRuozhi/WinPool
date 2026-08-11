@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.App.Services;
 

@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -13,7 +13,8 @@ using Windows.UI;
 using Windows.UI.ViewManagement;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
 using IAgentConnection = WinPool.Application.IAgentConnection;
 

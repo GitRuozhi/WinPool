@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -9,7 +8,7 @@ namespace WinPool.Infrastructure.Windows;
 /// It exposes command availability and already-resolved local dialog targets;
 /// the App retains only labels, icons, dialogs, and process launching.
 /// </summary>
-public sealed class LegacyManageCommandProjector
+public sealed class ManageCommandProjector
     : IManageCommandProjector<StorageSystemDocument>
 {
     public ManageCommandSurfaceView Project(
@@ -25,7 +24,7 @@ public sealed class LegacyManageCommandProjector
         {
             throw new ArgumentException("The local document must represent the local system.", nameof(localDocument));
         }
-        if (objectId.System != InternalStableIdentity.SystemFromDocumentId(activeDocument.Id))
+        if (objectId.System != activeDocument.SystemId)
         {
             throw new ArgumentException(
                 "The command object does not belong to the active document.",

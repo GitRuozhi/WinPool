@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 

@@ -1,4 +1,6 @@
-namespace WinPool.Core;
+using WinPool.Domain;
+
+namespace WinPool.Application;
 
 public enum ApplicationStartupTarget
 {

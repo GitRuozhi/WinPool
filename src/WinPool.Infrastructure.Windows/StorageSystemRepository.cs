@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 using WinPool.Execution;
 
@@ -106,7 +105,7 @@ public interface IStructuredSimulationEditRepository
         CancellationToken cancellationToken = default);
 }
 
-public static class LegacySimulationDocumentCodec
+public static class SimulationDocumentCodec
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -133,7 +132,7 @@ public static class LegacySimulationDocumentCodec
             sanitized.DisplayName,
             json,
             sha256,
-            0,
+            sanitized.Revision,
             sanitized.UpdatedAt);
     }
 
@@ -159,7 +158,10 @@ public static class LegacySimulationDocumentCodec
             throw new InvalidDataException("The Agent simulation document metadata is inconsistent.");
         }
 
-        return StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+        return StorageSystemDocumentSanitizer.RedactSensitiveData(document) with
+        {
+            Revision = payload.Revision
+        };
     }
 }
 
@@ -223,7 +225,10 @@ public static class LocalInventoryDocumentCodec
             throw new InvalidDataException("The Agent local inventory metadata is inconsistent.");
         }
 
-        return StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+        return StorageSystemDocumentSanitizer.RedactSensitiveData(document) with
+        {
+            Revision = 0
+        };
     }
 
     private static string Hash(byte[] bytes) =>
@@ -282,7 +287,7 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
             var documents = new List<StorageSystemDocument>(list.Documents.Count);
             foreach (var payload in list.Documents)
             {
-                var document = LegacySimulationDocumentCodec.Decode(payload);
+                var document = SimulationDocumentCodec.Decode(payload);
                 hashes.Add(document.Id, payload.Sha256);
                 documents.Add(document);
             }
@@ -301,7 +306,7 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var payload = LegacySimulationDocumentCodec.Encode(document);
+            var payload = SimulationDocumentCodec.Encode(document);
             hashes.TryGetValue(document.Id, out var expected);
             var response = await SendAsync(
                 new SaveAgentSimulationDocumentRequest(
@@ -333,7 +338,7 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
             }
             var response = await SendAsync(
                 new CommitAgentSimulationEditRequest(
-                    LegacySimulationDocumentCodec.Encode(document),
+                    SimulationDocumentCodec.Encode(document),
                     expected,
                     plan,
                     events,
@@ -401,7 +406,7 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         {
             throw new InvalidDataException("The Agent returned an unexpected save response.");
         }
-        LegacySimulationDocumentCodec.Decode(saved.Document);
+        SimulationDocumentCodec.Decode(saved.Document);
         hashes[documentId] = saved.Document.Sha256;
     }
 }

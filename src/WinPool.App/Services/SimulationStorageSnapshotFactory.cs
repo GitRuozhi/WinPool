@@ -1,4 +1,4 @@
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.App.Services;
 

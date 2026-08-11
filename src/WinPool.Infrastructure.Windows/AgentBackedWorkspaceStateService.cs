@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -68,9 +67,9 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
         return new WorkspaceUiState(
             state.ActivePage.ToString(),
             state.ActiveDocumentId,
-            ToLegacy(state.ActiveCategory),
+            ToWorkspaceCategory(state.ActiveCategory),
             state.RememberedProviderKeys.ToDictionary(
-                pair => ToLegacy(pair.Key),
+                pair => ToWorkspaceCategory(pair.Key),
                 pair => pair.Value),
             state.HighlightedTopologyProviderKey);
     }
@@ -100,7 +99,7 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
             _ => throw new ArgumentOutOfRangeException(nameof(category))
         };
 
-    private static WorkspaceCategory ToLegacy(ManageWorkspaceCategory category) =>
+    private static WorkspaceCategory ToWorkspaceCategory(ManageWorkspaceCategory category) =>
         category switch
         {
             ManageWorkspaceCategory.System => WorkspaceCategory.System,

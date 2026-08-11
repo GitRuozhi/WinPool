@@ -1,7 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 

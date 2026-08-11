@@ -1,13 +1,12 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
-using CoreLanguagePreference = WinPool.Core.LanguagePreference;
+using CoreLanguagePreference = WinPool.Domain.LanguagePreference;
 
 namespace WinPool_App;
 

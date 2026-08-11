@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
@@ -10,14 +9,16 @@ public sealed class AgentBackedStorageSystemRepositoryTests
     public void CodecRoundTripsSimulationAndRejectsLocalDocument()
     {
         var simulation = Document(StorageSystemKind.Simulation);
-        var payload = LegacySimulationDocumentCodec.Encode(simulation);
-        var decoded = LegacySimulationDocumentCodec.Decode(payload);
+        var payload = SimulationDocumentCodec.Encode(simulation);
+        var decoded = SimulationDocumentCodec.Decode(payload);
 
         Assert.Equal(simulation.Id, decoded.Id);
+        Assert.Equal(simulation.SystemId, decoded.SystemId);
+        Assert.Equal(simulation.Revision, decoded.Revision);
         Assert.Equal(simulation.DisplayName, decoded.DisplayName);
         Assert.Equal(64, payload.Sha256.Length);
         Assert.Throws<InvalidOperationException>(
-            () => LegacySimulationDocumentCodec.Encode(Document(StorageSystemKind.Local)));
+            () => SimulationDocumentCodec.Encode(Document(StorageSystemKind.Local)));
     }
 
     [Fact]

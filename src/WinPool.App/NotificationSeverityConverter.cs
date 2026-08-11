@@ -1,6 +1,6 @@
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool_App;
 

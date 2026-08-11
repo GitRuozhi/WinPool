@@ -19,7 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\WinPool.Core\WinPool.Core.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Domain\WinPool.Domain.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,6 @@
-using WinPool.Core;
+using WinPool.Application;
 
-namespace WinPool.Core.Tests;
+namespace WinPool.Application.Tests;
 
 internal static class TestSnapshotFactory
 {

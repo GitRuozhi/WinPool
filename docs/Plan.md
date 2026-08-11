@@ -162,6 +162,34 @@ projection，但不预设它们必须共享一个 mutable runtime document：
 该门未关闭前，禁止创建临时 `Application.StorageSystemDocument` 后靠编译错误
 猜字段。
 
+#### 已确认实施决定（2026-08-11）
+
+V33-SUP-A 已关闭，采用以下合同：
+
+- Application 需要一个内部 `StorageSystemDocument` aggregate，作为 Manage
+  projection、Simulation edit、import/export 与 persistence mapper 的结构化输入；
+  它不是公共 API，也不是 Domain entity。
+- aggregate 字段为：document schema、独立 document ID、明确 `SystemId`、source
+  kind、display name、`StorageSnapshot`、hardware report、simulation jobs、document
+  revision、updated time、source host 与可选 provenance document ID。
+- Local 与 Simulation 可以共用上述**不可变结构 envelope**，以保持同一 projection
+  语言；它们不共用 mutable lifecycle。Local 只能由 inventory capture replace，
+  revision 固定为 0；Simulation 由 edit coordinator/repository 维护 revision 并执行
+  optimistic conflict check。
+- `SystemId` 由 Domain 定义并表示被观察/编辑的系统；document ID 只表示文档。
+  新建、clone、convert 或 import 为 Simulation 时生成新的 document ID 和新的
+  `SystemId`，来源关系只写入 provenance，不参与 equality。
+- inventory version 归 Local capture/snapshot 所有；document revision 归 Simulation
+  repository/edit lifecycle 所有；source kind 归 Application document envelope 所有。
+- runtime 使用上述 typed aggregate；IPC/persistence 继续传递有边界的 payload，
+  SQLite 继续保存经校验与脱敏的 JSON representation，不把 JSON 当业务模型。
+- codec/mapper 归 Infrastructure serialization boundary；Manage projector 只消费
+  Application aggregate/projection contract。import/replay 先解码为受校验的
+  Application document，再按目标 lifecycle 建立新 identity。
+- V0.32 payload 缺失显式 `SystemId`/revision 时由 codec 在边界执行一次兼容读取：
+  根据旧 document ID 稳定派生旧 identity、revision 归一为 0；下次保存写入新合同。
+  该兼容仅用于持久化迁移，不建立旧 Core 或旧 IPC 的长期运行时兼容层。
+
 ## 6. 工作包
 
 ### V33-00：确认 Plan、记录基线并恢复绿色基线
@@ -535,3 +563,26 @@ remote_gate: not_required
 - transitive vulnerable package audit：所有 33 个项目均无已报告易受攻击依赖。
 - V33-10A 状态：`passed`。V33-10B 的 exact replacement、rollback 和 round-trip
   工作仍待执行。
+
+### 2026-08-11：V33-SUP-A 与 V33-01 自动迁移门
+
+- V33-SUP-A 已关闭，权威 aggregate、identity、revision、inventory version、source
+  kind、payload 和 codec ownership 决定写入第 5.3 节。
+- 原 `WinPool.Core` 的有效模型、投影、模拟、启动、通知与布局代码按职责迁入
+  `WinPool.Application`；Domain 中的 execution/preferences/location 类型保持唯一。
+- Manage projector、Simulation coordinator、PowerShell inventory provider 和 codec
+  已移除 `Legacy*` 正常运行路径命名。
+- `StorageSystemDocument` 现在显式区分 document ID、`SystemId`、document revision、
+  inventory version、source kind 与 provenance。Local → Simulation 生成新的 document
+  ID 和 `SystemId`。
+- 有效 Core 测试迁入 `WinPool.Application.Tests`；solution、csproj 和生产源码均不再
+  引用 `WinPool.Core`。
+- `src/WinPool.Core` 与 `tests/WinPool.Core.Tests` 已从工作树移除。删除生成目录的
+  shell 操作被本地安全策略拦截，因此仅剩的 `bin/obj` 已移动到可恢复的父项目
+  `Rubbish/20260811_winpool_v033_core_generated/`，没有扩大删除范围。
+- Application tests：38 passed；Infrastructure tests：39 passed；Architecture tests：
+  27 passed；完整 Release test：459 passed、0 failed、0 skipped；Release build：
+  0 warnings、0 errors。
+- V33-01 automatic semantic/structure gate：`passed`。
+- V33-01 native/manual regression：`unverified`，不得据此宣称 UI 视觉、DPI、启动、
+  UAC 或设备行为已人工验收。

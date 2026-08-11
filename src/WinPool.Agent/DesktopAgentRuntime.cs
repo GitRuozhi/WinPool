@@ -11,7 +11,6 @@ using System.Text.Json;
 using WinPool.Testing;
 using WinPool.Testing.Tools;
 using WinPool.ToolManagement;
-using WinPool.Core;
 using WinPool.Infrastructure.Windows;
 using System.Collections.Concurrent;
 
@@ -1267,7 +1266,7 @@ internal sealed class DesktopAgentRuntime :
                 cancellationToken);
             CachePhysicalDeviceIds(document);
             var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
-            var projected = LegacyPowerShellInventoryProvider.Project(
+            var projected = EmbeddedPowerShellInventoryProvider.Project(
                 request.SystemId,
                 sanitized.Snapshot,
                 includeSensitiveValuesInMemory: false);

@@ -1,50 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace WinPool.Core;
-
-public enum ExecutionMode
-{
-    Simulation,
-    Real
-}
-
-public enum PrivilegeState
-{
-    StandardUser,
-    Administrator
-}
-
-public enum ThemePreference
-{
-    System,
-    Light,
-    Dark
-}
-
-public enum AccentColorPreference
-{
-    System,
-    Blue,
-    Cyan,
-    Green,
-    Purple,
-    Orange,
-    Red
-}
-
-public enum LanguagePreference
-{
-    SystemDefault,
-    ZhCn,
-    EnUs
-}
-
-public enum StorageLocationMode
-{
-    Standard,
-    Portable
-}
+namespace WinPool.Application;
 
 public enum WorkspaceCategory
 {
@@ -70,15 +27,6 @@ public enum StorageUnitKind
     OtherDiskGroup,
     DirectDiskGroup
 }
-
-public sealed record UserPreferences(
-    ThemePreference Theme = ThemePreference.System,
-    AccentColorPreference AccentColor = AccentColorPreference.System,
-    LanguagePreference Language = LanguagePreference.SystemDefault,
-    bool ShowHardwareIds = false,
-    bool CreateMsrOnInitialize = true,
-    bool ShowWelcomeAtStart = true,
-    bool HasShownWelcome = false);
 
 public sealed record StorageUnitRef(
     string StableId,

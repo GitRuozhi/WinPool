@@ -2,7 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Foundation;
 using WinPool.App.ViewModels;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool_App.Controls;
 

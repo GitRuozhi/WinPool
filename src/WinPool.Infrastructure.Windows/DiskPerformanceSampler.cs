@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 

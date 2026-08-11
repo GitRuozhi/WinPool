@@ -1,8 +1,9 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPool.App.Services;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
 using IAgentConnection = WinPool.Application.IAgentConnection;
 
@@ -61,12 +62,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _machineRecordService = machineRecordService;
         _workspaceStateService = workspaceStateService;
         _agentConnection = agentConnection;
-        _manageProjector = manageProjector ?? new LegacyManageSystemProjector();
-        _manageComparisonProjector = manageComparisonProjector ?? new LegacyManageComparisonProjector();
-        _manageDetailsProjector = manageDetailsProjector ?? new LegacyManageDetailsProjector();
-        _manageNavigationProjector = manageNavigationProjector ?? new LegacyManageNavigationProjector();
-        _manageCommandProjector = manageCommandProjector ?? new LegacyManageCommandProjector();
-        _simulationEditCoordinator = new LegacySimulationEditCoordinator(
+        _manageProjector = manageProjector ?? new ManageSystemProjector();
+        _manageComparisonProjector = manageComparisonProjector ?? new ManageComparisonProjector();
+        _manageDetailsProjector = manageDetailsProjector ?? new ManageDetailsProjector();
+        _manageNavigationProjector = manageNavigationProjector ?? new ManageNavigationProjector();
+        _manageCommandProjector = manageCommandProjector ?? new ManageCommandProjector();
+        _simulationEditCoordinator = new SimulationEditCoordinator(
             () => ActiveDocument,
             CommitSimulationDocumentAsync,
             _simulationOperations,
@@ -181,11 +182,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public async Task ConvertLocalToSimulationAsync(CancellationToken cancellationToken = default)
     {
         var local = SystemCatalog.Systems.First(x => x.IsLocal);
-        var copy = StorageSystemDocumentSanitizer.RedactSensitiveData(local) with
+        var copy = StorageSystemDocumentSanitizer.RedactSensitiveData(local)
+            .AsImportedSimulation(
+                $"{local.Snapshot.Computer.Name} {DateTime.Now:yyyy-MM-dd HH:mm}") with
         {
-            Id = $"simulation:local-copy:{Guid.NewGuid():N}",
-            Kind = StorageSystemKind.Simulation,
-            DisplayName = $"{local.Snapshot.Computer.Name} {DateTime.Now:yyyy-MM-dd HH:mm}",
             SourceHostName = Environment.MachineName,
             Jobs = [],
             UpdatedAt = DateTimeOffset.Now
@@ -530,7 +530,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     private async Task CommitSimulationDocumentAsync(
-        LegacySimulationEditCommit commit,
+        SimulationEditCommit commit,
         CancellationToken cancellationToken)
     {
         var document = commit.Document;
@@ -638,7 +638,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             else
             {
                 SelectedSystem = localDocument;
-                var restored = WorkspaceState.Restore(snapshot, previous);
+                var restored = WorkspaceSelectionState.Restore(snapshot, previous);
                 SelectedCategory = restored.Category;
                 RebuildTopology();
                 RebuildObjects(restored.StableId);
@@ -704,7 +704,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         };
         SelectManageTopologyNode(
             new WinPool.Domain.StorageObjectId(
-                WinPool.Application.InternalStableIdentity.SystemFromDocumentId(sourceDocument.Id),
+                sourceDocument.SystemId,
                 role is WinPool.Application.ManageObjectRole.NetworkGroup
                     or WinPool.Application.ManageObjectRole.OtherGroup
                     or WinPool.Application.ManageObjectRole.DirectDiskGroup
@@ -804,8 +804,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
             _ => throw new ArgumentOutOfRangeException()
         };
-        var activeSystemId = WinPool.Application.InternalStableIdentity
-            .SystemFromDocumentId(ActiveDocument.Id);
+        var activeSystemId = ActiveDocument.SystemId;
         if (item.Projection.Id.System != activeSystemId)
         {
             // A restored selection can briefly refer to the previous document

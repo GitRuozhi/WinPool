@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Text;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -6,7 +6,8 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.ApplicationModel.DataTransfer;
 using WinPool.App.ViewModels;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 using SimulationOperationKind = WinPool.Application.SimulationEditKind;
 using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
 using SimulationOperationResult = WinPool.Application.SimulationEditReceipt;

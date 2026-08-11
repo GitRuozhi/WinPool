@@ -1,5 +1,4 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -9,7 +8,7 @@ namespace WinPool.Infrastructure.Windows;
 /// It preserves the frozen row order while keeping localization and privacy
 /// presentation in the App.
 /// </summary>
-public sealed class LegacyManageDetailsProjector
+public sealed class ManageDetailsProjector
     : IManageDetailsProjector<StorageSystemDocument>
 {
     public ManageObjectDetailsView Project(
@@ -20,7 +19,7 @@ public sealed class LegacyManageDetailsProjector
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
-        if (objectId.System != InternalStableIdentity.SystemFromDocumentId(document.Id))
+        if (objectId.System != document.SystemId)
         {
             throw new ArgumentException(
                 "The details object does not belong to the supplied document.",

@@ -1,5 +1,6 @@
 using System.Text.Json;
-using WinPool.Core;
+using WinPool.Application;
+using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;

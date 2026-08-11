@@ -1,6 +1,6 @@
-using WinPool.Core;
+using WinPool.Application;
 
-namespace WinPool.Core.Tests;
+namespace WinPool.Application.Tests;
 
 public sealed class SimulationOperationTests
 {

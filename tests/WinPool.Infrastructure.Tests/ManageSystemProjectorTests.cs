@@ -1,17 +1,16 @@
 using WinPool.Application;
-using WinPool.Core;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
 
-public sealed class LegacyManageSystemProjectorTests
+public sealed class ManageSystemProjectorTests
 {
     [Fact]
     public void ProjectionPreservesIdentityHierarchyAndOccurrenceKeys()
     {
         var document = Document();
 
-        var projection = new LegacyManageSystemProjector().Project(document);
+        var projection = new ManageSystemProjector().Project(document);
         var nodes = Flatten(projection.Root).ToArray();
 
         Assert.Equal(document.Id, projection.DocumentId);
@@ -51,7 +50,7 @@ public sealed class LegacyManageSystemProjectorTests
             }
         };
 
-        var nodes = Flatten(new LegacyManageSystemProjector().Project(document).Root)
+        var nodes = Flatten(new ManageSystemProjector().Project(document).Root)
             .ToArray();
         var networkGroup = Assert.Single(
             nodes,
@@ -73,7 +72,7 @@ public sealed class LegacyManageSystemProjectorTests
     {
         var document = Document();
         var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
-        var projector = new LegacyManageComparisonProjector();
+        var projector = new ManageComparisonProjector();
 
         var systemView = projector.Project(
             document,
@@ -137,7 +136,7 @@ public sealed class LegacyManageSystemProjectorTests
         var allocationUnit = partitionView.Properties.Single(
             property => property.PropertyTextKey == "AllocationUnit").RawValue;
         Assert.NotEmpty(allocationUnit);
-        var topologyPartition = Flatten(new LegacyManageSystemProjector().Project(document).Root)
+        var topologyPartition = Flatten(new ManageSystemProjector().Project(document).Root)
             .First(node => node.Role == ManageObjectRole.Partition);
         Assert.DoesNotContain(allocationUnit, topologyPartition.Summary, StringComparison.Ordinal);
     }
@@ -149,7 +148,7 @@ public sealed class LegacyManageSystemProjectorTests
         var foreign = InternalStableIdentity.SystemFromDocumentId("simulation:foreign");
 
         Assert.Throws<ArgumentException>(() =>
-            new LegacyManageComparisonProjector().Project(
+            new ManageComparisonProjector().Project(
                 document,
                 Object(foreign, WinPool.Domain.StorageObjectKind.StoragePool, "pool:1"),
                 ManageObjectRole.StoragePool));
@@ -160,7 +159,7 @@ public sealed class LegacyManageSystemProjectorTests
     {
         var document = Document();
         var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
-        var projector = new LegacyManageDetailsProjector();
+        var projector = new ManageDetailsProjector();
 
         var physical = projector.Project(
             document,
@@ -199,7 +198,7 @@ public sealed class LegacyManageSystemProjectorTests
     {
         var document = Document();
         var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
-        var view = new LegacyManageNavigationProjector().Project(
+        var view = new ManageNavigationProjector().Project(
             document,
             Object(system, WinPool.Domain.StorageObjectKind.Partition, "partition:1"),
             ManageObjectRole.Partition);
@@ -230,11 +229,12 @@ public sealed class LegacyManageSystemProjectorTests
         var local = simulation with
         {
             Id = "local:manage-test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("local:manage-test"),
             Kind = StorageSystemKind.Local,
             DisplayName = "Local"
         };
         var system = InternalStableIdentity.SystemFromDocumentId(simulation.Id);
-        var projector = new LegacyManageCommandProjector();
+        var projector = new ManageCommandProjector();
         var partition = projector.Project(
             simulation,
             local,

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Principal;
 using Microsoft.UI.Xaml;
@@ -10,7 +10,7 @@ using WinPool.Agent.Client;
 using WinPool.Application;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
-using WinPool.Core;
+using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
 using WinPool.Ipc;

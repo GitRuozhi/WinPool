@@ -8,11 +8,10 @@ using Windows.Storage.Pickers;
 using WinPool.Application;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
-using WinPool.Core;
 using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
 using WinPool.Testing;
-using CoreLanguagePreference = WinPool.Core.LanguagePreference;
+using CoreLanguagePreference = WinPool.Domain.LanguagePreference;
 
 namespace WinPool_App;
 

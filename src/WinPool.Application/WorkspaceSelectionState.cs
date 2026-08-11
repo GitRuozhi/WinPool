@@ -1,4 +1,6 @@
-namespace WinPool.Core;
+using WinPool.Domain;
+
+namespace WinPool.Application;
 
 public sealed class ExecutionModeController
 {
@@ -23,7 +25,7 @@ public sealed class ExecutionModeController
     }
 }
 
-public static class WorkspaceState
+public static class WorkspaceSelectionState
 {
     public static WorkspaceSelection Restore(StorageSnapshot snapshot, WorkspaceSelection previous)
     {

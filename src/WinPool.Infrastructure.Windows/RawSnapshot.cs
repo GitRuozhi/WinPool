@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 

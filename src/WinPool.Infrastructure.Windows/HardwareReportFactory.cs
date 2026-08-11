@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
-using WinPool.Core;
+using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 

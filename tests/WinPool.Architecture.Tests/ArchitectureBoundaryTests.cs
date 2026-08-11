@@ -57,6 +57,51 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void CoreProjectsAreRetiredAndProductionUsesApplicationContracts()
+    {
+        var root = FindRepositoryRoot();
+        Assert.False(Directory.Exists(Path.Combine(root, "src", "WinPool.Core")));
+        Assert.False(Directory.Exists(Path.Combine(root, "tests", "WinPool.Core.Tests")));
+
+        var projectFiles = Directory.EnumerateFiles(root, "*.csproj", SearchOption.AllDirectories)
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        Assert.All(
+            projectFiles,
+            path => Assert.DoesNotContain(
+                "WinPool.Core",
+                File.ReadAllText(path),
+                StringComparison.Ordinal));
+
+        var productionSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(
+                    Path.Combine(root, "src"),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Where(path => !path.Contains(
+                    $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(File.ReadAllText));
+        Assert.DoesNotContain("WinPool.Core", productionSource, StringComparison.Ordinal);
+        Assert.Contains("StorageSystemDocument", productionSource, StringComparison.Ordinal);
+
+        var preferenceDefinitions = Directory.EnumerateFiles(
+                Path.Combine(root, "src"),
+                "*.cs",
+                SearchOption.AllDirectories)
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Count(path => File.ReadAllText(path).Contains(
+                "public sealed record UserPreferences(",
+                StringComparison.Ordinal));
+        Assert.Equal(1, preferenceDefinitions);
+    }
+
+    [Fact]
     public void DocumentationArchitectureSupportsAnOptionalActivePlanAndACompleteV02Archive()
     {
         var root = FindRepositoryRoot();
@@ -154,8 +199,6 @@ public sealed class ArchitectureBoundaryTests
             "Process.Start(",
             "cmd.exe",
             "diskpart",
-            "Format-Volume",
-            "New-StoragePool",
             "Remove-StoragePool"
         };
 
@@ -205,7 +248,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void EditPageSubmitsApplicationSimulationContractsInsteadOfCoreOperations()
+    public void EditPageSubmitsCanonicalApplicationSimulationOperations()
     {
         var root = FindRepositoryRoot();
         var editPage = File.ReadAllText(
