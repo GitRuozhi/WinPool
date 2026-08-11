@@ -9,7 +9,7 @@
 
 ## Unreleased
 
-### V0.33 重构进行中 — 2026-08-11
+### V0.33 final candidate 等待验收 — 2026-08-11
 
 - 将 `WinPool.Core` 收敛进权威 Application 模型，并保留系统/文档身份、模拟、投影、
   启动、通知和布局行为。
@@ -22,7 +22,7 @@
 - storage-location 从覆盖复制改成同卷精确 staging 事务：捕获源和目标，只 drain 源
   store，验证 manifest 与 SQLite identity，在取消或失败时恢复旧目标，并移除陈旧的
   managed target payload。
-- V0.33 仍是进行中的集成检查点。原生/人工门仍为 `unverified`；未为 V0.33 创建 tag、
+- V0.33 已通过全部自动 final-candidate 门。原生/人工门仍为 `unverified`；未为 V0.33 创建 tag、
   二进制发布、GitHub Release 或远端推送。
 
 ## V0.32 源码检查点 — 2026-08-10

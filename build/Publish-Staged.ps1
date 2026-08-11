@@ -13,6 +13,11 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $stageRoot = [System.IO.Path]::GetFullPath($OutputPath)
+[xml]$versionProps = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Directory.Build.props') -Raw
+$versionGroup = @($versionProps.Project.PropertyGroup) |
+    Where-Object { $null -ne $_.WinPoolVersionMajor } |
+    Select-Object -First 1
+$expectedProductVersion = "V$($versionGroup.WinPoolVersionMajor).$($versionGroup.WinPoolVersionMinor)$($versionGroup.WinPoolVersionIteration)"
 
 if (Test-Path -LiteralPath $stageRoot) {
     throw "Staging path already exists and will not be overwritten: $stageRoot"
@@ -64,6 +69,11 @@ foreach ($entry in $requiredExecutables.GetEnumerator()) {
     if ($actualRelativePath -ne $entry.Value) {
         throw "Expected $($entry.Key) at $($entry.Value), found $actualRelativePath."
     }
+
+    $actualProductVersion = $matches[0].VersionInfo.ProductVersion
+    if ($actualProductVersion -ne $expectedProductVersion) {
+        throw "Expected $($entry.Key) product version $expectedProductVersion, found $actualProductVersion."
+    }
 }
 
 $forbiddenFilePatterns = @('*.ps1', '*.db', '*.db-wal', '*.db-shm', '*.trx', '*.log')
@@ -99,7 +109,7 @@ if ($bundledExternalTools.Count -gt 0) {
     throw "Staging bundles forbidden external tools: $($relativePaths -join ', ')"
 }
 
-Write-Output "Verified V0.32 staging tree: $stageRoot"
+Write-Output "Verified $expectedProductVersion staging tree: $stageRoot"
 foreach ($entry in $requiredExecutables.GetEnumerator() | Sort-Object Value) {
     Write-Output "  $($entry.Value)"
 }

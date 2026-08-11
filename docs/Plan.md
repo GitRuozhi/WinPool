@@ -2,7 +2,7 @@
 project: WinPool
 phase: V0.3
 architecture_version: V0.3
-status: in_progress
+status: awaiting_acceptance
 integration_checkpoint: V0.33
 acceptance_checkpoint: V0.33
 branch: main
@@ -11,8 +11,8 @@ refactor_scope_approved_by_user: 2026-08-11
 execution_authorized: true
 started_from_commit: d4979fa84d516ebecff16a089590ee8af8d6cc76
 started_on: 2026-08-11
-code_gate: pending
-native_integration_gate: pending
+code_gate: passed
+native_integration_gate: unverified
 manual_gate: unverified
 remote_gate: not_required
 ---
@@ -25,7 +25,8 @@ remote_gate: not_required
 - `V0.33重构补充.md`。
 
 两份原始提案保留为用户输入记录。用户已于 2026-08-11 明确批准本计划并要求
-开始执行，因此当前状态为 `in_progress`。本次授权允许按本文约束实施源码重构和
+开始执行；自动实现与 final-candidate 门已完成，当前状态为 `awaiting_acceptance`。
+本次授权允许按本文约束实施源码重构和
 严格限定的 Core 删除；不授权推送、tag、GitHub Release、二进制上传或部署。
 
 ## 1. 阶段定位
@@ -689,3 +690,23 @@ remote_gate: not_required
 - Persistence tests：81 passed、0 failed、0 skipped；完整 Release test：483 passed、
   0 failed、0 skipped；Release build：0 warnings、0 errors。
 - V33-10B 自动门：`passed`；原生/人工数据位置迁移门仍为 `unverified`。
+
+### 2026-08-11：V33-11 与 V0.33 final candidate
+
+- 拆出 `AgentTestCoordinator`、`AgentSystemSupportCoordinator` 和
+  `AgentInventoryCoordinator`。它们分别持有活动测试槽与取消状态、系统支持
+  review/audit/elevated 流程、库存采集/比较与设备 ID 缓存。
+- `DesktopAgentRuntime` 保留 request facade、monitoring/tool delegation、event
+  integration、shutdown adapter 和测试执行 pipeline；没有新增项目或拆成 handler
+  集合。新增 test-slot 状态回归和 coordinator 结构门。
+- 按 `Va.bc` 规则把唯一项目 iteration 从 2 改为 3，因此 final candidate 为
+  `V0.33`（`a=0`、`b=3`、`c=3`）；IPC 2 和 SQLite schema 11 仍只是内部契约。
+- 串行执行 restore、Release test 和 Release build：486 passed、0 failed、0 skipped，
+  0 warnings、0 errors；33 个项目的 transitive vulnerable package audit 无报告项。
+- Markdown relative links 与 `git diff --check` 通过。四进程 staging 结构及禁止内容
+  校验通过，App、Agent、TestWorker、Broker 的 ProductVersion 均为 `V0.33`、
+  FileVersion 均为 `0.3.3.0`。
+- staging 证据保存在父项目可恢复目录
+  `Rubbish/20260811_winpool_v033_final_candidate_staging/Program/WinPool/`，未纳入 Git。
+- `code_gate: passed`；native/manual 项保持 `unverified`；状态进入
+  `awaiting_acceptance`。未 push、tag、创建 GitHub Release、上传或部署。

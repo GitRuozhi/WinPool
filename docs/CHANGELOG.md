@@ -7,7 +7,7 @@ This file records results that actually occurred. Planned work remains in
 
 ## Unreleased
 
-### V0.33 refactor in progress — 2026-08-11
+### V0.33 final candidate awaiting acceptance — 2026-08-11
 
 - Retired `WinPool.Core` into the canonical Application model and preserved
   system/document identity, simulation, projection, startup, notification, and
@@ -24,7 +24,7 @@ This file records results that actually occurred. Planned work remains in
   transaction. It captures source and target, drains only the source store,
   verifies manifests and SQLite identity, rolls the previous target back on
   cancellation or failure, and removes stale managed target payload.
-- V0.33 remains an in-progress integration checkpoint. Native/manual gates are
+- V0.33 has passed all automatic final-candidate gates. Native/manual gates are
   still `unverified`; no tag, binary release, GitHub Release, or remote push has
   been performed for V0.33.
 
