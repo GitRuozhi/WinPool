@@ -263,6 +263,10 @@ public sealed partial class DevelopmentPage : Page
                 + $"state={tool.ToolState.Availability}",
             AgentShutdownEvent shutdown =>
                 $"{shutdown.OccurredAtUtc:HH:mm:ss.fff} Shutdown reason={shutdown.Reason}",
+            AgentEventTransportStateEvent transport =>
+                $"{transport.OccurredAtUtc:HH:mm:ss.fff} EventTransport "
+                + $"state={transport.State} gap={transport.HasEventGap} "
+                + $"code={transport.DiagnosticCode}",
             _ => null
         };
     }

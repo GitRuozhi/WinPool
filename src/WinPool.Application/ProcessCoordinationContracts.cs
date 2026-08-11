@@ -453,6 +453,20 @@ public sealed record AgentShutdownEvent(
     DateTimeOffset OccurredAtUtc)
     : AgentEvent(OccurredAtUtc);
 
+public enum AgentEventTransportState
+{
+    Disconnected,
+    Reconnecting,
+    Reconnected
+}
+
+public sealed record AgentEventTransportStateEvent(
+    AgentEventTransportState State,
+    bool HasEventGap,
+    string DiagnosticCode,
+    DateTimeOffset OccurredAtUtc)
+    : AgentEvent(OccurredAtUtc);
+
 public interface IAgentConnection
 {
     Task<ApplicationResult<AgentHandshake>> ConnectAsync(

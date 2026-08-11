@@ -11,6 +11,104 @@ namespace WinPool.Agent.Client.Tests;
 public sealed class NamedPipeAgentConnectionTests
 {
     [Fact]
+    public async Task EventTransportReconnectReportsGapAndReseedsSnapshot()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var operations = new SnapshotOperations(sessionId);
+        var coordinator = new AgentSessionCoordinator(
+            operations,
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        await File.WriteAllTextAsync(
+            endpointPath,
+            JsonSerializer.Serialize(
+                new AgentEndpoint(
+                    IpcProtocol.CurrentVersion,
+                    pipeName,
+                    nonce,
+                    sessionId,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow)));
+
+        using var firstCancellation = new CancellationTokenSource();
+        var firstServer = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator);
+        var firstTask = firstServer.RunAsync(firstCancellation.Token);
+        await using var connection = new NamedPipeAgentConnection(
+            endpointPath,
+            new RecordingLauncher());
+        Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
+        using var watchTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var events = connection.WatchAsync(watchTimeout.Token)
+            .GetAsyncEnumerator(watchTimeout.Token);
+
+        firstCancellation.Cancel();
+        try
+        {
+            await firstTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        using var secondCancellation = new CancellationTokenSource();
+        var secondServer = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator);
+        var secondTask = secondServer.RunAsync(secondCancellation.Token);
+
+        var states = new List<AgentEventTransportState>();
+        while (states.Count < 3 && await events.MoveNextAsync())
+        {
+            if (events.Current is AgentEventTransportStateEvent transport)
+            {
+                Assert.True(transport.HasEventGap);
+                states.Add(transport.State);
+            }
+        }
+
+        Assert.Equal(
+            [
+                AgentEventTransportState.Disconnected,
+                AgentEventTransportState.Reconnecting,
+                AgentEventTransportState.Reconnected
+            ],
+            states);
+        Assert.True(operations.SnapshotRequestCount > 0);
+
+        secondCancellation.Cancel();
+        try
+        {
+            await secondTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
     public async Task MalformedConnectionDoesNotStopControlListener()
     {
         var directory = Path.Combine(
@@ -380,11 +478,16 @@ public sealed class NamedPipeAgentConnectionTests
         : IAgentRequestOperations
     {
         private ElevatedBrokerOperationKind reviewedOperation;
+        private int snapshotRequestCount;
+
+        public int SnapshotRequestCount => Volatile.Read(ref snapshotRequestCount);
 
         public Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
             GetAgentSnapshotRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref snapshotRequestCount);
+            return Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
                     new AgentSnapshotResponse(
                         new AgentSnapshot(
@@ -395,6 +498,7 @@ public sealed class NamedPipeAgentConnectionTests
                             false,
                             [])),
                     request.CorrelationId));
+        }
 
         public Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
             GetDevelopmentDiagnosticsRequest request,

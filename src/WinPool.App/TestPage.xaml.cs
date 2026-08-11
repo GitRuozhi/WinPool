@@ -904,6 +904,13 @@ public sealed partial class TestPage : Page
             await foreach (var item in viewModel.AgentConnection!
                                .WatchAsync(cancellationToken))
             {
+                if (item is AgentEventTransportStateEvent transport)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                        ApplyEventTransportState(transport));
+                    continue;
+                }
+
                 if (item is not AgentTestEvent testEvent)
                 {
                     continue;
@@ -915,6 +922,25 @@ public sealed partial class TestPage : Page
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+    }
+
+    private void ApplyEventTransportState(AgentEventTransportStateEvent transport)
+    {
+        var zh = viewModel.Localization.EffectiveLanguage
+                 == CoreLanguagePreference.ZhCn;
+        NativeProgressText.Text = transport.State switch
+        {
+            AgentEventTransportState.Disconnected => zh
+                ? "Agent 事件连接已断开；断线期间可能存在事件缺口。"
+                : "The Agent event connection was lost; events may be missing during the gap.",
+            AgentEventTransportState.Reconnecting => zh
+                ? "正在重新连接 Agent 事件通道…"
+                : "Reconnecting the Agent event channel…",
+            AgentEventTransportState.Reconnected => zh
+                ? "Agent 事件通道已恢复，并已重新同步当前状态。"
+                : "The Agent event channel recovered and current state was reseeded.",
+            _ => transport.DiagnosticCode
+        };
     }
 
     private void ApplyTestEvent(TestEvent testEvent)

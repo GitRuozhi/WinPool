@@ -623,3 +623,19 @@ remote_gate: not_required
   process instance wire field 和 Worker Abort command；不建立长期 v1 negotiation。
 - Agent tests：68 passed；Persistence tests：70 passed；IPC tests：10 passed；均为
   0 failed、0 skipped。V33-07 自动门：`passed`；native/manual 仍为 `unverified`。
+
+### 2026-08-11：V33-06 Event IPC 断线恢复
+
+- event reader 的异常 EOF、I/O、JSON 和 invalid frame 不再被静默吞掉；public watch
+  channel 保持开放，并依次产生 `Disconnected`、`Reconnecting`、`Reconnected` 状态。
+- transport 状态明确携带 `HasEventGap=true`，不伪造 durable replay 或声称补齐断线
+  期间的事件。
+- reader 先退出，再由 supervisor 在 reader 调用栈之外释放失败 transport、重建完整
+  control/event connection，避免 self-await deadlock。
+- 重连成功后主动请求 `GetAgentSnapshot`，通过既有 observe 流程重新 seed 可恢复状态，
+  之后才报告 `Reconnected`。
+- Test 页面显示断线/重连/已重新同步提示；Development 页面记录 transport state、
+  gap 和诊断 code。
+- 真实 named-pipe 回归会停止第一组 control/event server、启动替代 server，并验证
+  三阶段状态顺序和 snapshot reseed。Agent.Client tests：4 passed、0 failed、0 skipped。
+- V33-06 自动门：`passed`；V33-M09/M10 native/manual：`unverified`。

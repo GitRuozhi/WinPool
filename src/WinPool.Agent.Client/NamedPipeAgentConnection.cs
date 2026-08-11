@@ -470,7 +470,9 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
             eventStream = client;
             eventCancellation = new CancellationTokenSource();
-            eventReaderTask = ReadEventStreamAsync(client, eventCancellation.Token);
+            eventReaderTask = SuperviseEventStreamAsync(
+                client,
+                eventCancellation.Token);
         }
         catch
         {
@@ -479,10 +481,11 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
     }
 
-    private async Task ReadEventStreamAsync(
+    private async Task SuperviseEventStreamAsync(
         NamedPipeClientStream client,
         CancellationToken cancellationToken)
     {
+        var disconnectedUnexpectedly = false;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -508,15 +511,123 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
         catch (EndOfStreamException)
         {
+            disconnectedUnexpectedly = true;
         }
         catch (IOException)
         {
+            disconnectedUnexpectedly = true;
         }
         catch (JsonException)
         {
+            disconnectedUnexpectedly = true;
         }
         catch (InvalidDataException)
         {
+            disconnectedUnexpectedly = true;
+        }
+
+        if (!disconnectedUnexpectedly
+            || cancellationToken.IsCancellationRequested
+            || disposed)
+        {
+            return;
+        }
+
+        PublishTransportState(
+            AgentEventTransportState.Disconnected,
+            "agent.events.disconnected");
+        PublishTransportState(
+            AgentEventTransportState.Reconnecting,
+            "agent.events.reconnecting");
+        try
+        {
+            await DisconnectFailedEventTransportAsync(client, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var delay = TimeSpan.FromMilliseconds(100);
+        while (!disposed)
+        {
+            using var attempt = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var connected = await ConnectAsync(attempt.Token).ConfigureAwait(false);
+            if (connected.IsSuccess)
+            {
+                var snapshot = await SendAsync(
+                        new GetAgentSnapshotRequest(CorrelationId.New()),
+                        attempt.Token)
+                    .ConfigureAwait(false);
+                if (snapshot.IsSuccess)
+                {
+                    PublishTransportState(
+                        AgentEventTransportState.Reconnected,
+                        "agent.events.reconnected_with_snapshot");
+                    return;
+                }
+            }
+
+            try
+            {
+                await Task.Delay(delay).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            delay = TimeSpan.FromMilliseconds(
+                Math.Min(delay.TotalMilliseconds * 2, 2_000));
+        }
+    }
+
+    private void PublishTransportState(
+        AgentEventTransportState state,
+        string diagnosticCode) =>
+        observedEvents.Writer.TryWrite(
+            new AgentEventTransportStateEvent(
+                state,
+                HasEventGap: true,
+                diagnosticCode,
+                timeProvider.GetUtcNow()));
+
+    private async Task DisconnectFailedEventTransportAsync(
+        NamedPipeClientStream failedEventStream,
+        CancellationToken cancellationToken)
+    {
+        await requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (!ReferenceEquals(eventStream, failedEventStream))
+                {
+                    return;
+                }
+
+                handshake = null;
+                await failedEventStream.DisposeAsync().ConfigureAwait(false);
+                eventStream = null;
+                eventCancellation?.Dispose();
+                eventCancellation = null;
+                eventReaderTask = null;
+                if (stream is not null)
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
+                    stream = null;
+                }
+            }
+            finally
+            {
+                connectionGate.Release();
+            }
+        }
+        finally
+        {
+            requestGate.Release();
         }
     }
 
