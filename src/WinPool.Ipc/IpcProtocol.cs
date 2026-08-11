@@ -219,6 +219,7 @@ public static class TestWorkerMessageTypes
     public const string HandshakeRequest = "worker.handshake.request";
     public const string HandshakeReply = "worker.handshake.reply";
     public const string Start = "worker.command.start";
+    public const string Abort = "worker.command.abort";
     public const string Cancel = "worker.command.cancel";
     public const string CompletionAcknowledged = "worker.command.completion-acknowledged";
     public const string EventBatch = "worker.event.batch";

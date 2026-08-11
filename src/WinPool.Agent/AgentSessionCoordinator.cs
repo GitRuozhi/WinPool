@@ -6,6 +6,7 @@ public enum AgentSessionState
 {
     Running,
     ShuttingDown,
+    ShutdownPending,
     Stopped
 }
 
@@ -231,6 +232,11 @@ public sealed class AgentSessionCoordinator
         {
             if (state != AgentSessionState.Running)
             {
+                if (request is GetAgentSnapshotRequest snapshotRequest)
+                {
+                    return operations.GetSnapshotAsync(snapshotRequest, cancellationToken);
+                }
+
                 return Task.FromResult(RejectNewRequest(request.CorrelationId));
             }
         }
@@ -313,18 +319,20 @@ public sealed class AgentSessionCoordinator
         {
             lock (stateLock)
             {
-                if (state != AgentSessionState.Running)
+                if (state == AgentSessionState.Stopped && shutdownExecution is not null)
                 {
-                    return RejectNewRequest(request.CorrelationId);
+                    return ResultForExecution(shutdownExecution, request.CorrelationId);
                 }
 
-                if (shutdownWorkflow.HasActiveTest
+                if (state == AgentSessionState.Running
+                    && shutdownWorkflow.HasActiveTest
                     && !request.UserConfirmedActiveTestCancellation)
                 {
                     return RequiresActiveTestConfirmation(request.CorrelationId);
                 }
 
-                // The state transition happens before notifications or any awaited work.
+                // The gate guarantees one workflow. A second request joins the first,
+                // then retries only after the first has reached ShutdownPending.
                 state = AgentSessionState.ShuttingDown;
             }
 
@@ -332,34 +340,31 @@ public sealed class AgentSessionCoordinator
             lock (stateLock)
             {
                 shutdownExecution = execution;
-                if (execution.CompletedSteps.Contains(AgentShutdownStep.ExitAgent))
-                {
-                    state = AgentSessionState.Stopped;
-                }
+                state = execution.Result.Completed
+                    ? AgentSessionState.Stopped
+                    : AgentSessionState.ShutdownPending;
             }
 
-            var response = new ShutdownResponse(execution.Result);
-            if (execution.Result.Completed)
-            {
-                return ApplicationResult<AgentResponse>.Succeeded(
-                    response,
-                    request.CorrelationId);
-            }
-
-            return new(
-                ApplicationStatus.PartiallyCompleted,
-                response,
-                [
-                    Message(
-                        "agent.shutdown.incomplete",
-                        ApplicationMessageSeverity.Warning)
-                ],
-                request.CorrelationId);
+            return ResultForExecution(execution, request.CorrelationId);
         }
         finally
         {
             shutdownGate.Release();
         }
+    }
+
+    private static ApplicationResult<AgentResponse> ResultForExecution(
+        AgentShutdownExecution execution,
+        CorrelationId correlationId)
+    {
+        var response = new ShutdownResponse(execution.Result);
+        return execution.Result.Completed
+            ? ApplicationResult<AgentResponse>.Succeeded(response, correlationId)
+            : new(
+                ApplicationStatus.PartiallyCompleted,
+                response,
+                [Message("agent.shutdown.incomplete", ApplicationMessageSeverity.Warning)],
+                correlationId);
     }
 
     private static ApplicationResult<AgentResponse> RejectNewRequest(

@@ -277,11 +277,24 @@ public sealed class CurrentUserAgentControlServer
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested
-               && coordinator.State == AgentSessionState.Running)
+               && coordinator.State != AgentSessionState.Stopped)
         {
             await using var server = CurrentUserPipeFactory.CreateServer(pipeName);
             await server.WaitForConnectionAsync(cancellationToken);
-            await ServeConnectionAsync(server, cancellationToken);
+            try
+            {
+                await ServeConnectionAsync(server, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is
+                EndOfStreamException or InvalidDataException or JsonException or IOException)
+            {
+                // A malformed or disconnected client owns only this connection.
+                // The listener remains available for status and shutdown retry.
+            }
         }
     }
 
@@ -313,7 +326,7 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-image-mismatch");
         }
-        if (coordinator.State != AgentSessionState.Running)
+        if (coordinator.State == AgentSessionState.Stopped)
         {
             validation = new(
                 false,
@@ -426,7 +439,7 @@ public sealed class CurrentUserAgentControlServer
                     codec.EncodeResponse(result, timeProvider.GetUtcNow()),
                     cancellationToken);
 
-                if (coordinator.State != AgentSessionState.Running)
+                if (coordinator.State == AgentSessionState.Stopped)
                 {
                     return;
                 }

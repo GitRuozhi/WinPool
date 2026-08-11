@@ -74,9 +74,9 @@ public sealed class AgentSessionCoordinatorTests
                 AgentShutdownStep.StopMonitoring,
                 AgentShutdownStep.RestoreTemporarySystemState,
                 AgentShutdownStep.FlushSqliteQueues,
-                AgentShutdownStep.CloseNamedPipes,
                 AgentShutdownStep.CloseMainApplication,
                 AgentShutdownStep.StopSupervisedProcesses,
+                AgentShutdownStep.CloseNamedPipes,
                 AgentShutdownStep.RemoveTrayIcon,
                 AgentShutdownStep.ExitAgent
             ],
@@ -103,7 +103,7 @@ public sealed class AgentSessionCoordinatorTests
         await actions.NotificationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var result = await coordinator.HandleAsync(
-            new GetAgentSnapshotRequest(CorrelationId.New()));
+            new OpenMainWindowRequest(null, CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.Rejected, result.Status);
         Assert.Equal(
@@ -135,8 +135,9 @@ public sealed class AgentSessionCoordinatorTests
             AgentShutdownStep.StopMonitoring,
             coordinator.ShutdownExecution!.FailedSteps);
         Assert.Contains(AgentShutdownStep.FlushSqliteQueues, actions.Calls);
-        Assert.Contains(AgentShutdownStep.RemoveTrayIcon, actions.Calls);
-        Assert.Contains(AgentShutdownStep.ExitAgent, actions.Calls);
+        Assert.DoesNotContain(AgentShutdownStep.RemoveTrayIcon, actions.Calls);
+        Assert.DoesNotContain(AgentShutdownStep.ExitAgent, actions.Calls);
+        Assert.Equal(AgentSessionState.ShutdownPending, coordinator.State);
     }
 
     [Fact]
@@ -167,8 +168,9 @@ public sealed class AgentSessionCoordinatorTests
             coordinator.ShutdownExecution!.FailedSteps);
         Assert.Contains(AgentShutdownStep.StopMonitoring, actions.Calls);
         Assert.Contains(AgentShutdownStep.FlushSqliteQueues, actions.Calls);
-        Assert.Contains(AgentShutdownStep.RemoveTrayIcon, actions.Calls);
-        Assert.Contains(AgentShutdownStep.ExitAgent, actions.Calls);
+        Assert.DoesNotContain(AgentShutdownStep.RemoveTrayIcon, actions.Calls);
+        Assert.DoesNotContain(AgentShutdownStep.ExitAgent, actions.Calls);
+        Assert.Equal(AgentSessionState.ShutdownPending, coordinator.State);
     }
 
     [Fact]
@@ -243,11 +245,58 @@ public sealed class AgentSessionCoordinatorTests
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.PartiallyCompleted, result.Status);
-        Assert.Equal(AgentSessionState.ShuttingDown, coordinator.State);
+        Assert.Equal(AgentSessionState.ShutdownPending, coordinator.State);
         Assert.DoesNotContain(AgentShutdownStep.RemoveTrayIcon, actions.Calls);
         Assert.DoesNotContain(AgentShutdownStep.ExitAgent, actions.Calls);
         var response = Assert.IsType<ShutdownResponse>(result.Value);
         Assert.Equal([654], response.Result.RemainingProcessIds);
+    }
+
+    [Fact]
+    public async Task ShutdownPendingKeepsSnapshotAvailableAndCanRetryToStopped()
+    {
+        var actions = new RecordingShutdownActions();
+        var operations = new RecordingRequestOperations();
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            operations,
+            new AgentShutdownWorkflow(actions, registry),
+            registry);
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(coordinator.TryRegisterProcess(
+            new(
+                765,
+                AgentManagedProcessKind.ExternalTool,
+                CorrelationId.New(),
+                now,
+                now,
+                SupervisedProcessState.Running,
+                true,
+                null)));
+
+        var first = await coordinator.HandleAsync(
+            new RequestAgentShutdownRequest(
+                ShutdownReason.TrayExit,
+                true,
+                CorrelationId.New()));
+
+        Assert.Equal(ApplicationStatus.PartiallyCompleted, first.Status);
+        Assert.Equal(AgentSessionState.ShutdownPending, coordinator.State);
+        var snapshot = await coordinator.HandleAsync(
+            new GetAgentSnapshotRequest(CorrelationId.New()));
+        Assert.Equal(ApplicationStatus.Succeeded, snapshot.Status);
+
+        Assert.True(registry.TryMarkExited(765, DateTimeOffset.UtcNow));
+        var retried = await coordinator.HandleAsync(
+            new RequestAgentShutdownRequest(
+                ShutdownReason.TrayExit,
+                true,
+                CorrelationId.New()));
+
+        Assert.Equal(ApplicationStatus.Succeeded, retried.Status);
+        Assert.Equal(AgentSessionState.Stopped, coordinator.State);
+        Assert.Contains(AgentShutdownStep.CloseNamedPipes, actions.Calls);
+        Assert.Contains(AgentShutdownStep.ExitAgent, actions.Calls);
     }
 
     private static AgentSessionCoordinator CreateCoordinator(

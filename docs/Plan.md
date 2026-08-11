@@ -586,3 +586,22 @@ remote_gate: not_required
 - V33-01 automatic semantic/structure gate：`passed`。
 - V33-01 native/manual regression：`unverified`，不得据此宣称 UI 视觉、DPI、启动、
   UAC 或设备行为已人工验收。
+
+### 2026-08-11：V33-02～V33-05 生命周期与 Control IPC
+
+- Agent shutdown 状态机新增 `ShutdownPending`。失败步骤或残留进程不再永久停在
+  `ShuttingDown`；snapshot 保持可用，后续 shutdown request 可串行重试。
+- named pipe、tray icon 和 Agent exit 移至 terminal phase；只有 quiesce 无失败且
+  live process 清零后才执行，`Stopped` 才结束 Control listener。
+- Worker/Broker 共用有界退出策略：短宽限、必要时终止进程树、最终有界等待；删除
+  terminal response 后和清理路径中的无限 `WaitForExitAsync(None)`。
+- Broker 的 45 秒 linked deadline 覆盖 terminal grace；最终 kill 后仍有独立的有界
+  reap，不会因取消令牌使进程遗留。
+- Worker transport connect/handshake 现在响应 caller cancellation；新增 typed
+  `worker.command.abort`，覆盖 Start 前和 tool process 尚未启动阶段。发送 abort/cancel
+  后等待 terminal response 也有 5 秒上限，超时进入进程树终止。
+- 一个 invalid-length/malformed Control client 现在只结束当前连接；真实 named-pipe
+  回归证明后续客户端仍能完成 handshake 和 snapshot request。
+- Agent tests：67 passed、0 failed、0 skipped；Agent.Client tests：3 passed、0 failed、
+  0 skipped。
+- V33-02～V33-05 自动回归状态：`passed`；对应 native/manual 项仍为 `unverified`。

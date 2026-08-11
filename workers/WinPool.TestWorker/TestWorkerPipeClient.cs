@@ -75,6 +75,22 @@ internal sealed class TestWorkerPipeClient(TestWorkerLaunchOptions options)
         await ReceiveHandshakeAsync(pipe, cancellationToken).ConfigureAwait(false);
         var startEnvelope = await IpcFrameCodec.ReadAsync(pipe, cancellationToken)
             .ConfigureAwait(false);
+        if (string.Equals(
+                startEnvelope.MessageType,
+                TestWorkerMessageTypes.Abort,
+                StringComparison.Ordinal))
+        {
+            var abort = startEnvelope.Payload.Deserialize<CancelToolProcessCommand>(
+                JsonOptions);
+            if (abort?.RunId != options.RunId)
+            {
+                throw new InvalidDataException(
+                    "The worker Abort command does not match this run.");
+            }
+
+            return 0;
+        }
+
         if (!string.Equals(
                 startEnvelope.MessageType,
                 TestWorkerMessageTypes.Start,
@@ -205,10 +221,9 @@ internal sealed class TestWorkerPipeClient(TestWorkerLaunchOptions options)
             {
                 var envelope = await IpcFrameCodec.ReadAsync(pipe, cancellationToken)
                     .ConfigureAwait(false);
-                if (!string.Equals(
-                        envelope.MessageType,
-                        TestWorkerMessageTypes.Cancel,
-                        StringComparison.Ordinal))
+                if (envelope.MessageType is not (
+                        TestWorkerMessageTypes.Cancel or
+                        TestWorkerMessageTypes.Abort))
                 {
                     continue;
                 }

@@ -138,11 +138,6 @@ public sealed class AgentShutdownWorkflow
             },
             completed,
             failed);
-        await RunStepAsync(
-            AgentShutdownStep.CloseNamedPipes,
-            actions.CloseNamedPipesAsync,
-            completed,
-            failed);
         if (reason != ShutdownReason.StorageLocationSwitch)
         {
             await RunStepAsync(
@@ -158,24 +153,31 @@ public sealed class AgentShutdownWorkflow
             failed);
 
         var remainingProcessIds = processRegistry.GetLiveProcessIds();
-        if (remainingProcessIds.Count == 0)
+        if (remainingProcessIds.Count == 0 && failed.Count == 0)
+        {
+            await RunStepAsync(
+                AgentShutdownStep.CloseNamedPipes,
+                actions.CloseNamedPipesAsync,
+                completed,
+                failed);
+        }
+
+        if (remainingProcessIds.Count == 0 && failed.Count == 0)
         {
             await RunStepAsync(
                 AgentShutdownStep.RemoveTrayIcon,
                 actions.RemoveTrayIconAsync,
                 completed,
                 failed);
+        }
+
+        if (remainingProcessIds.Count == 0 && failed.Count == 0)
+        {
             await RunStepAsync(
                 AgentShutdownStep.ExitAgent,
                 actions.ExitAgentAsync,
                 completed,
                 failed);
-        }
-        else
-        {
-            // Do not hide or exit the Agent while it still owns live processes.
-            failed.Add(AgentShutdownStep.RemoveTrayIcon);
-            failed.Add(AgentShutdownStep.ExitAgent);
         }
 
         var result = new ShutdownResult(

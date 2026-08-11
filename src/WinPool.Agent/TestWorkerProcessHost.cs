@@ -112,8 +112,9 @@ public sealed class TestWorkerProcessHost
             // cancellation. Once the worker is authenticated, an already-cancelled
             // token is delivered through the normal Cancel message so the worker can
             // terminate its job and return a durable cancellation audit.
-            using var connectTimeout = new CancellationTokenSource(
-                TimeSpan.FromSeconds(15));
+            using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            connectTimeout.CancelAfter(TimeSpan.FromSeconds(15));
             await server.WaitForConnectionAsync(connectTimeout.Token)
                 .ConfigureAwait(false);
             await AuthenticateAsync(
@@ -123,6 +124,18 @@ public sealed class TestWorkerProcessHost
                     runId,
                     connectTimeout.Token)
                 .ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                await WriteAsync(
+                        server,
+                        TestWorkerMessageTypes.Abort,
+                        runId.Value,
+                        new CancelToolProcessCommand(runId),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                throw new OperationCanceledException(cancellationToken);
+            }
+
             await WriteAsync(
                     server,
                     TestWorkerMessageTypes.Start,
@@ -135,6 +148,7 @@ public sealed class TestWorkerProcessHost
             long capturedOutputBytes = 0;
             var cancellationSent = false;
             var toolProcessStarted = false;
+            Task? cancellationDeadline = null;
             var cancellationSignal = Task.Delay(
                 Timeout.InfiniteTimeSpan,
                 cancellationToken);
@@ -148,16 +162,31 @@ public sealed class TestWorkerProcessHost
                 {
                     var first = await Task.WhenAny(readTask, cancellationSignal)
                         .ConfigureAwait(false);
-                    if (first == cancellationSignal && toolProcessStarted)
+                    if (first == cancellationSignal)
                     {
                         await WriteAsync(
                                 server,
-                                TestWorkerMessageTypes.Cancel,
+                                toolProcessStarted
+                                    ? TestWorkerMessageTypes.Cancel
+                                    : TestWorkerMessageTypes.Abort,
                                 runId.Value,
                                 new CancelToolProcessCommand(runId),
                                 CancellationToken.None)
                             .ConfigureAwait(false);
                         cancellationSent = true;
+                        cancellationDeadline = Task.Delay(TimeSpan.FromSeconds(5));
+                    }
+                }
+
+                if (cancellationSent && cancellationDeadline is not null)
+                {
+                    var next = await Task.WhenAny(readTask, cancellationDeadline)
+                        .ConfigureAwait(false);
+                    if (next == cancellationDeadline)
+                    {
+                        throw new OperationCanceledException(
+                            "The TestWorker did not stop within the cancellation grace.",
+                            cancellationToken);
                     }
                 }
 
@@ -202,6 +231,7 @@ public sealed class TestWorkerProcessHost
                                 CancellationToken.None)
                             .ConfigureAwait(false);
                         cancellationSent = true;
+                        cancellationDeadline = Task.Delay(TimeSpan.FromSeconds(5));
                     }
                 }
                 else if (envelope.MessageType == TestWorkerMessageTypes.Completed)
@@ -226,8 +256,16 @@ public sealed class TestWorkerProcessHost
                             CancellationToken.None)
                         .ConfigureAwait(false);
 
-                    await worker.WaitForExitAsync(CancellationToken.None)
+                    var exit = await SupervisedProcessExitPolicy.EnsureExitedAsync(
+                            worker,
+                            SupervisedProcessExitPolicy.DefaultExitGrace,
+                            SupervisedProcessExitPolicy.DefaultFinalWait)
                         .ConfigureAwait(false);
+                    if (!exit.ExitedAfterKill)
+                    {
+                        throw new TimeoutException(
+                            "The TestWorker did not exit after process-tree termination.");
+                    }
                     return new(worker.Id, completed.Results, events);
                 }
                 else if (envelope.MessageType == TestWorkerMessageTypes.Failed)
@@ -258,9 +296,16 @@ public sealed class TestWorkerProcessHost
                     }
                 }
 
-                worker.Kill(entireProcessTree: true);
-                await worker.WaitForExitAsync(CancellationToken.None)
+                var exit = await SupervisedProcessExitPolicy.EnsureExitedAsync(
+                        worker,
+                        TimeSpan.Zero,
+                        SupervisedProcessExitPolicy.DefaultFinalWait)
                     .ConfigureAwait(false);
+                if (!exit.ExitedAfterKill)
+                {
+                    throw new TimeoutException(
+                        "The TestWorker process tree did not exit after termination.");
+                }
                 if (completingFailure is not null)
                 {
                     throw new InvalidOperationException(

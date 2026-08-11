@@ -11,6 +11,55 @@ namespace WinPool.Agent.Tests;
 public sealed class TestWorkerProcessHostTests
 {
     [Fact]
+    public async Task CancellationBeforeWorkerConnectDoesNotLeaveWorkerAlive()
+    {
+        var host = CreateHost();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var workerPid = 0;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => host.RunAsync(
+                CreateCommandRequest(["/d", "/c", "echo", "MUST_NOT_RUN"]),
+                null,
+                (processId, _) =>
+                {
+                    workerPid = processId;
+                    return Task.CompletedTask;
+                },
+                cancellation.Token));
+
+        Assert.True(workerPid > 0);
+        Assert.True(await WaitForExitAsync(workerPid));
+    }
+
+    [Fact]
+    public async Task ExitPolicyKillsHungProcessTreeAfterBoundedGrace()
+    {
+        var commandPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "cmd.exe");
+        using var process = System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = commandPath,
+                Arguments = "/d /c ping -n 30 127.0.0.1",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }) ?? throw new InvalidOperationException("Test process did not start.");
+
+        var outcome = await SupervisedProcessExitPolicy.EnsureExitedAsync(
+            process,
+            TimeSpan.FromMilliseconds(50),
+            TimeSpan.FromSeconds(5));
+
+        Assert.False(outcome.ExitedDuringGrace);
+        Assert.True(outcome.ProcessTreeKillRequested);
+        Assert.True(outcome.ExitedAfterKill);
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
     public async Task AgentHostAuthenticatesWorkerAndReceivesStreamedEvents()
     {
         var workerPath = Path.Combine(

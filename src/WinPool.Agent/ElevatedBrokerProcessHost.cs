@@ -107,15 +107,33 @@ public sealed class ElevatedBrokerProcessHost
 
             var result = envelope.Payload.Deserialize<ElevatedBrokerExecutionResult>(JsonOptions)
                 ?? throw new InvalidDataException("The elevated Broker result is empty.");
-            await broker.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            var exit = await SupervisedProcessExitPolicy.EnsureExitedAsync(
+                    broker,
+                    SupervisedProcessExitPolicy.DefaultExitGrace,
+                    SupervisedProcessExitPolicy.DefaultFinalWait,
+                    timeout.Token)
+                .ConfigureAwait(false);
+            if (!exit.ExitedAfterKill)
+            {
+                throw new TimeoutException(
+                    "The elevated Broker did not exit after process-tree termination.");
+            }
             return result;
         }
         finally
         {
             if (!broker.HasExited)
             {
-                broker.Kill(entireProcessTree: true);
-                await broker.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                var exit = await SupervisedProcessExitPolicy.EnsureExitedAsync(
+                        broker,
+                        TimeSpan.Zero,
+                        SupervisedProcessExitPolicy.DefaultFinalWait)
+                    .ConfigureAwait(false);
+                if (!exit.ExitedAfterKill)
+                {
+                    throw new TimeoutException(
+                        "The elevated Broker process tree did not exit after termination.");
+                }
             }
         }
     }

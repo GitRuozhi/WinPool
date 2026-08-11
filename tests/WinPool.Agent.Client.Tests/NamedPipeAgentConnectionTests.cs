@@ -11,6 +11,77 @@ namespace WinPool.Agent.Client.Tests;
 public sealed class NamedPipeAgentConnectionTests
 {
     [Fact]
+    public async Task MalformedConnectionDoesNotStopControlListener()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator);
+        var serverTask = server.RunAsync(serverCancellation.Token);
+
+        await using (var malformed = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await malformed.ConnectAsync(CancellationToken.None);
+            await malformed.WriteAsync(new byte[sizeof(int)]);
+            await malformed.FlushAsync();
+        }
+
+        await File.WriteAllTextAsync(
+            endpointPath,
+            JsonSerializer.Serialize(
+                new AgentEndpoint(
+                    IpcProtocol.CurrentVersion,
+                    pipeName,
+                    nonce,
+                    sessionId,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow)));
+        await using var connection = new NamedPipeAgentConnection(
+            endpointPath,
+            new RecordingLauncher());
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var connected = await connection.ConnectAsync(timeout.Token);
+        var response = await connection.SendAsync(
+            new GetAgentSnapshotRequest(CorrelationId.New()),
+            timeout.Token);
+
+        Assert.True(connected.IsSuccess);
+        Assert.True(response.IsSuccess);
+
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
     public async Task ConnectsWithPidBoundHandshakeAndSendsTypedRequest()
     {
         var directory = Path.Combine(
