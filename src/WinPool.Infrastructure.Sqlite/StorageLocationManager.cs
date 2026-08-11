@@ -8,8 +8,9 @@ using WinPool.Domain;
 namespace WinPool.Infrastructure.Sqlite;
 
 /// <summary>
-/// Stops new persistence writes, flushes outstanding writes, and keeps them
-/// quiesced until the returned lease is disposed.
+/// Stops new persistence writes and connections, waits for outstanding work,
+/// flushes it, and keeps storage access quiesced until the returned lease is
+/// disposed.
 /// </summary>
 public interface IStorageWriteQuiescenceCoordinator
 {
@@ -300,6 +301,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
             await using var writeLease = await writeCoordinator.QuiesceAndFlushAsync(
                 correlationId,
                 cancellationToken);
+
+            DrainSourceDatabaseHandles(plan.SourceRoot);
 
             // Flush happens while acquiring the lease. Re-snapshot afterwards so
             // the immutable plan cannot silently omit writes made since planning.
@@ -606,6 +609,30 @@ public sealed class StorageLocationManager : IStorageLocationManager
         }
 
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void DrainSourceDatabaseHandles(string sourceRoot)
+    {
+        var databasePath = Path.Combine(sourceRoot, DatabaseFileName);
+        if (!IsSqliteDatabase(databasePath))
+        {
+            return;
+        }
+
+        WinPoolSqliteStore.DrainConnectionPool(databasePath);
+        VerifyExclusiveRead(databasePath);
+    }
+
+    private static void VerifyExclusiveRead(string databasePath)
+    {
+        using var stream = new FileStream(
+            databasePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None,
+            bufferSize: 1,
+            FileOptions.RandomAccess);
+        _ = stream.ReadByte();
     }
 
     private bool IsManagerFile(string file)

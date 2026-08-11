@@ -84,7 +84,7 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
-    public async Task RealSqliteMigrationVerifiesLogicalIdentityBeforePointerCommit()
+    public async Task RealSqliteMigrationVerifiesIdentityAndReleasesDatabaseHandles()
     {
         using var locations = TemporaryLocations.Create();
         Directory.CreateDirectory(locations.StandardRoot);
@@ -127,7 +127,8 @@ public sealed class StorageLocationManagerTests
         var destinationAudit = await auditor.CaptureAsync(destinationDatabase);
         Assert.True(sourceAudit.HasSameLogicalIdentity(destinationAudit));
         Assert.Equal(["quiesce", "commit", "resume"], coordinator.Events);
-        SqliteConnection.ClearAllPools();
+        AssertDatabaseCanBeOpenedExclusively(sourceDatabase);
+        AssertDatabaseCanBeOpenedExclusively(destinationDatabase);
     }
 
     [Fact]
@@ -436,6 +437,16 @@ public sealed class StorageLocationManagerTests
                 return ValueTask.CompletedTask;
             }
         }
+    }
+
+    private static void AssertDatabaseCanBeOpenedExclusively(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None);
+        Assert.True(stream.Length > 0);
     }
 
     private sealed class ObservingCommitter(RecordingCoordinator coordinator)

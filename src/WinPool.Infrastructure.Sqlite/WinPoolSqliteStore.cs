@@ -12,17 +12,42 @@ public sealed class WinPoolSqliteStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         DatabasePath = Path.GetFullPath(databasePath);
-        connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
-            ForeignKeys = true,
-            DefaultTimeout = 5
-        }.ToString();
+        connectionString = BuildConnectionString(DatabasePath);
     }
 
     public string DatabasePath { get; }
+
+    /// <summary>
+    /// Drains only the Microsoft.Data.Sqlite pool associated with this WinPool
+    /// database. Open connections are marked so they cannot return to that pool.
+    /// Callers must first stop new connections and wait for in-flight work.
+    /// </summary>
+    internal void DrainConnectionPool()
+    {
+        using var poolIdentity = new SqliteConnection(connectionString);
+        SqliteConnection.ClearPool(poolIdentity);
+    }
+
+    internal static void DrainConnectionPool(string databasePath)
+    {
+        using var poolIdentity = new SqliteConnection(
+            BuildConnectionString(Path.GetFullPath(databasePath)));
+        SqliteConnection.ClearPool(poolIdentity);
+    }
+
+    private static string BuildConnectionString(string databasePath) =>
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            // Storage-location migration requires deterministic handle release.
+            // WinPool has one Agent writer, so connection reuse is less valuable
+            // than making each awaited disposal close its native file handles.
+            Pooling = false,
+            ForeignKeys = true,
+            DefaultTimeout = 5
+        }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
