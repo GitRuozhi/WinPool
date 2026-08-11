@@ -48,7 +48,20 @@ public sealed partial class ToolNativeProgressParser
             _states.Add(key, state);
         }
 
-        state.Text.Append(Decode(workerEvent.RawBytes.Span, encoding));
+        var stream = workerEvent.Kind == WorkerEventKind.StandardOutput
+            ? state.StandardOutput
+            : state.StandardError;
+        var codePage = workerEvent.OutputCodePage
+            ?? new SystemToolOutputCodePageResolver().Resolve(encoding).CodePage;
+        stream.Decoder ??= new ToolOutputTextDecoder(codePage);
+        if (stream.CodePage is not null && stream.CodePage != codePage)
+        {
+            throw new InvalidDataException(
+                "A tool output stream changed code page within one invocation.");
+        }
+
+        stream.CodePage = codePage;
+        state.Text.Append(stream.Decoder.Decode(workerEvent.RawBytes.Span));
         if (state.Text.Length > MaximumBufferedCharacters)
         {
             state.Text.Remove(0, state.Text.Length - MaximumBufferedCharacters);
@@ -95,13 +108,6 @@ public sealed partial class ToolNativeProgressParser
     public void Complete(TestRunId runId, string stepId) =>
         _states.Remove((runId, stepId));
 
-    private static string Decode(
-        ReadOnlySpan<byte> bytes,
-        ToolOutputEncoding encoding) =>
-        encoding == ToolOutputEncoding.Utf16LittleEndian
-            ? Encoding.Unicode.GetString(bytes)
-            : Encoding.UTF8.GetString(bytes);
-
     private static string SanitizeCode(string value) =>
         string.Concat(value.Select(character =>
             char.IsAsciiLetterOrDigit(character) || character is '.' or '-'
@@ -111,7 +117,15 @@ public sealed partial class ToolNativeProgressParser
     private sealed class State
     {
         public StringBuilder Text { get; } = new();
+        public StreamState StandardOutput { get; } = new();
+        public StreamState StandardError { get; } = new();
         public double? LastFraction { get; set; }
         public DateTimeOffset? LastPublishedAtUtc { get; set; }
+    }
+
+    private sealed class StreamState
+    {
+        public int? CodePage { get; set; }
+        public ToolOutputTextDecoder? Decoder { get; set; }
     }
 }

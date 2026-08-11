@@ -240,22 +240,34 @@ internal static class ToolAdapterSupport
             CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(streams);
-        using var standardOutput = new MemoryStream();
-        using var standardError = new MemoryStream();
+        var codePage = streams.ResolvedOutputCodePage
+            ?? new SystemToolOutputCodePageResolver()
+                .Resolve(streams.OutputEncoding).CodePage;
+        var standardOutputDecoder = new ToolOutputTextDecoder(codePage);
+        var standardErrorDecoder = new ToolOutputTextDecoder(codePage);
+        var standardOutput = new StringBuilder();
+        var standardError = new StringBuilder();
 
         await foreach (var chunk in streams.Chunks.WithCancellation(cancellationToken)
                            .ConfigureAwait(false))
         {
-            var destination = chunk.Stream is ToolOutputStream.StandardOutput
-                ? standardOutput
-                : standardError;
-            await destination.WriteAsync(chunk.Bytes, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (chunk.Stream is ToolOutputStream.StandardOutput)
+            {
+                standardOutput.Append(
+                    standardOutputDecoder.Decode(chunk.Bytes.Span));
+            }
+            else
+            {
+                standardError.Append(
+                    standardErrorDecoder.Decode(chunk.Bytes.Span));
+            }
         }
 
         var exitCode = await streams.ExitCode.WaitAsync(cancellationToken).ConfigureAwait(false);
         return (
-            Decode(standardOutput.ToArray()),
-            Decode(standardError.ToArray()),
+            standardOutput.Append(standardOutputDecoder.Complete()).ToString(),
+            standardError.Append(standardErrorDecoder.Complete()).ToString(),
             exitCode);
     }
 
@@ -499,23 +511,6 @@ internal static class ToolAdapterSupport
         return builder.ToString();
     }
 
-    private static string Decode(byte[] bytes)
-    {
-        if (bytes.Length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe)
-        {
-            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
-        }
-
-        if (bytes.Length >= 3
-            && bytes[0] == 0xef
-            && bytes[1] == 0xbb
-            && bytes[2] == 0xbf)
-        {
-            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-        }
-
-        return Encoding.UTF8.GetString(bytes);
-    }
 }
 
 internal sealed class ToolAdapterValidationException(

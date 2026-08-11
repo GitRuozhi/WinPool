@@ -6,6 +6,51 @@ namespace WinPool.Testing.Tools.Tests;
 public sealed class ToolNativeProgressParserTests
 {
     [Fact]
+    public void StatefulDecoderPreservesDbcsAcrossChunksAndFlushesInvalidTail()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var encoding = Encoding.GetEncoding(936);
+        var bytes = encoding.GetBytes("复制 42.5%");
+        var split = Array.FindIndex(bytes, value => value >= 0x80) + 1;
+        var decoder = new ToolOutputTextDecoder(936);
+
+        var text = decoder.Decode(bytes.AsSpan(0, split))
+                   + decoder.Decode(bytes.AsSpan(split))
+                   + decoder.Complete();
+
+        Assert.Equal("复制 42.5%", text);
+
+        var invalid = new ToolOutputTextDecoder(936);
+        Assert.Equal(string.Empty, invalid.Decode([0xB8]));
+        Assert.Contains('\uFFFD', invalid.Complete());
+    }
+
+    [Fact]
+    public void ParsesDbcsProgressSplitInsideChineseCharacter()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var parser = new ToolNativeProgressParser();
+        var runId = TestRunId.New();
+        var now = DateTimeOffset.UtcNow;
+        var bytes = Encoding.GetEncoding(936).GetBytes("已复制 42.5%");
+        var split = Array.FindIndex(bytes, value => value >= 0x80) + 1;
+        var first = RawEvent(runId, bytes[..split], now, 936);
+        var second = RawEvent(runId, bytes[split..], now.AddSeconds(1), 936);
+
+        Assert.Null(parser.Consume(
+            first,
+            new ToolId("windows.robocopy"),
+            ToolOutputEncoding.Oem));
+        var progress = parser.Consume(
+            second,
+            new ToolId("windows.robocopy"),
+            ToolOutputEncoding.Oem);
+
+        Assert.NotNull(progress);
+        Assert.Equal(0.425, progress.Fraction, 6);
+    }
+
+    [Fact]
     public void ParsesSplitNativePercentageWithoutForwardingOriginalPath()
     {
         var parser = new ToolNativeProgressParser();
@@ -68,4 +113,19 @@ public sealed class ToolNativeProgressParserTests
             occurredAtUtc,
             "tool.process.stdout",
             Encoding.UTF8.GetBytes(text));
+
+    private static WorkerEvent RawEvent(
+        TestRunId runId,
+        byte[] bytes,
+        DateTimeOffset occurredAtUtc,
+        int codePage) =>
+        new(
+            runId,
+            "step",
+            WorkerEventKind.StandardOutput,
+            WorkerEventImportance.Progress,
+            occurredAtUtc,
+            "tool.process.stdout",
+            bytes,
+            OutputCodePage: codePage);
 }

@@ -11,6 +11,7 @@ public sealed class TestToolResultRepositoryWriter(
         IExternalToolAdapter adapter,
         IReadOnlyList<WorkerEvent> events,
         int exitCode,
+        ToolOutputEncoding outputEncoding,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stepId);
@@ -21,7 +22,10 @@ public sealed class TestToolResultRepositoryWriter(
         await foreach (var toolEvent in adapter.ParseAsync(
                            new ToolProcessStreams(
                                ToOutputChunks(events),
-                               Task.FromResult(exitCode)),
+                               Task.FromResult(exitCode),
+                               outputEncoding,
+                               events.Select(item => item.OutputCodePage)
+                                   .FirstOrDefault(item => item is not null)),
                            cancellationToken))
         {
             if (toolEvent.Metric is { } metric)

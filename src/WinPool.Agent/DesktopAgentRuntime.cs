@@ -2298,6 +2298,7 @@ internal sealed class DesktopAgentRuntime :
                             adapter,
                             processEvents,
                             toolResult.Audit.ExitCode,
+                            prepared.Request.Invocation.OutputEncoding,
                             CancellationToken.None);
                     var itemFailed = parseFailed
                         || !ToolProcessExitPolicy.IsAccepted(
@@ -2933,6 +2934,7 @@ internal sealed class DesktopAgentRuntime :
                                     StringComparison.Ordinal))
                                 .ToArray(),
                             toolResult.Audit.ExitCode,
+                            prepared.Request!.Invocation.OutputEncoding,
                             CancellationToken.None);
                     parseFailed |= stepParseFailed;
                     var cancelled = toolResult.Audit.TerminationReason

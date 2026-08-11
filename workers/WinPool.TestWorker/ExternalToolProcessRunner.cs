@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using WinPool.Application;
+using WinPool.Testing.Tools;
 
 namespace WinPool.TestWorker;
 
@@ -12,19 +13,22 @@ public sealed class ExternalToolProcessRunner
     private readonly IProcessTreeJobFactory _jobFactory;
     private readonly IGracefulToolTermination _gracefulTermination;
     private readonly TimeProvider _timeProvider;
+    private readonly IToolOutputCodePageResolver _outputCodePageResolver;
 
     public ExternalToolProcessRunner()
         : this(
             new WindowsJobObjectFactory(),
             new WindowCloseGracefulToolTermination(),
-            TimeProvider.System)
+            TimeProvider.System,
+            new SystemToolOutputCodePageResolver())
     {
     }
 
     internal ExternalToolProcessRunner(
         IProcessTreeJobFactory jobFactory,
         IGracefulToolTermination gracefulTermination,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IToolOutputCodePageResolver? outputCodePageResolver = null)
     {
         _jobFactory = jobFactory
             ?? throw new ArgumentNullException(nameof(jobFactory));
@@ -32,6 +36,8 @@ public sealed class ExternalToolProcessRunner
             ?? throw new ArgumentNullException(nameof(gracefulTermination));
         _timeProvider = timeProvider
             ?? throw new ArgumentNullException(nameof(timeProvider));
+        _outputCodePageResolver = outputCodePageResolver
+            ?? new SystemToolOutputCodePageResolver();
     }
 
     public async Task<ToolProcessResult> ExecuteAsync(
@@ -48,6 +54,8 @@ public sealed class ExternalToolProcessRunner
             .ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         ValidateExpectedIdentity(request.ExpectedTool, sha256);
+        var outputEncoding = _outputCodePageResolver.Resolve(
+            request.Invocation.OutputEncoding);
         var versionInformation = FileVersionInfo.GetVersionInfo(normalizedPath);
         var fileVersion = versionInformation.FileVersion
             ?? versionInformation.ProductVersion
@@ -100,13 +108,15 @@ public sealed class ExternalToolProcessRunner
                 ToolOutputStream.StandardOutput,
                 request,
                 identity.ProcessId,
-                eventBuffer);
+                eventBuffer,
+                outputEncoding.CodePage);
             var stderrTask = CopyOutputAsync(
                 process.StandardError.BaseStream,
                 ToolOutputStream.StandardError,
                 request,
                 identity.ProcessId,
-                eventBuffer);
+                eventBuffer,
+                outputEncoding.CodePage);
 
             var outcome = await WaitForCompletionAsync(
                     request,
@@ -290,7 +300,8 @@ public sealed class ExternalToolProcessRunner
         ToolOutputStream stream,
         ToolProcessRequest request,
         int processId,
-        BoundedWorkerEventBuffer eventBuffer)
+        BoundedWorkerEventBuffer eventBuffer,
+        int outputCodePage)
     {
         var buffer = new byte[OutputChunkSize];
         while (true)
@@ -319,7 +330,8 @@ public sealed class ExternalToolProcessRunner
                     ? "tool.process.stderr"
                     : "tool.process.stdout",
                 copy,
-                processId));
+                processId,
+                OutputCodePage: outputCodePage));
         }
     }
 

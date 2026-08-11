@@ -655,3 +655,21 @@ remote_gate: not_required
   再交由 Agent 登记最终 executable path。既有独立 installer 场景默认行为不变。
 - ToolManagement tests：28 passed；Agent tests：69 passed；均为 0 failed、0 skipped。
   V33-08 自动门：`passed`；V33-M06 native/manual：`unverified`。
+
+### 2026-08-11：V33-09 一致的工具输出编码
+
+- 新增 injectable `IToolOutputCodePageResolver`；Worker 在每次 invocation 启动前把
+  UTF-8、UTF-16LE、System ANSI 或 OEM family 解析为固定 numeric code page，并把
+  同一 resolution 附在该次 stdout/stderr 原始事件上。
+- code-page provider 在唯一 decoder/resolver 边界注册；ANSI/OEM 不再回退为 UTF-8。
+- stdout 与 stderr 各自使用独立、stateful `Decoder`，支持 multibyte character 跨
+  chunk，并在 EOF 执行 final flush；非法尾序列统一使用 U+FFFD，结果确定且可测试。
+- native progress parser 与 final adapter parser 都消费 Worker 记录的同一 numeric
+  code page；SQLite result writer 从原始 Worker events 传递 resolution，不再靠 BOM/
+  UTF-8 猜测。
+- raw stdout/stderr bytes 的 Worker event、artifact 和 persistence 路径保持不变；
+  文本只作为 progress/metric/evidence 的派生视图。
+- 回归覆盖 CP936 中文 DBCS 字符中间分块、中文 RoboCopy summary、stdout/stderr
+  交错、EOF invalid tail fallback 和 Worker resolution metadata。
+- Testing.Tools tests：48 passed；TestWorker tests：10 passed；Persistence tests：
+  70 passed；均为 0 failed、0 skipped。V33-09 自动门：`passed`。

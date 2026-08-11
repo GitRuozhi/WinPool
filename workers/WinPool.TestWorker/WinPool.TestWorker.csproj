@@ -10,5 +10,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\..\src\WinPool.Ipc\WinPool.Ipc.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Testing.Tools\WinPool.Testing.Tools.csproj" />
   </ItemGroup>
 </Project>

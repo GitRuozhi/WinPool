@@ -225,6 +225,61 @@ public sealed class ToolParserTests
     }
 
     [Fact]
+    public async Task RoboCopyFinalParserUsesResolvedDbcsAcrossInterleavedChunks()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var encoding = Encoding.GetEncoding(936);
+        const string output = "文件 : 2 2 0 0 0 0\r\n"
+                              + "字节 : 4096 4096 0 0 0 0\r\n"
+                              + "时间 : 0:00:01\r\n"
+                              + "速度 : 4096 字节/秒\r\n";
+        var bytes = encoding.GetBytes(output);
+        var split = Array.FindIndex(bytes, value => value >= 0x80) + 1;
+        var stderr = encoding.GetBytes("警告");
+        var streams = new ToolProcessStreams(
+            Yield(
+                new(
+                    ToolOutputStream.StandardOutput,
+                    bytes[..split],
+                    DateTimeOffset.UtcNow),
+                new(
+                    ToolOutputStream.StandardError,
+                    stderr[..1],
+                    DateTimeOffset.UtcNow),
+                new(
+                    ToolOutputStream.StandardOutput,
+                    bytes[split..],
+                    DateTimeOffset.UtcNow),
+                new(
+                    ToolOutputStream.StandardError,
+                    stderr[1..],
+                    DateTimeOffset.UtcNow)),
+            Task.FromResult(0),
+            ToolOutputEncoding.Oem,
+            936);
+        var robocopy = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "robocopy.exe");
+        var events = new List<ToolEvent>();
+
+        await foreach (var item in new RoboCopyAdapter(robocopy)
+                           .ParseAsync(streams, CancellationToken.None))
+        {
+            events.Add(item);
+        }
+
+        Assert.Contains(
+            events,
+            item => item.Metric is { MetricId: "files.copied" }
+                    && item.Metric.Value == 2d);
+        Assert.Contains(
+            events,
+            item => item.Metric is { MetricId: "bytes.copied" }
+                    && item.Metric.Value == 4096d);
+        Assert.Contains(events, item => item.Kind == ToolEventKind.Evidence);
+    }
+
+    [Fact]
     public async Task DiteFileGenParsesStructuredTerminalResultAfterProgressLines()
     {
         const string output = """
@@ -290,9 +345,14 @@ public sealed class ToolParserTests
     }
 
     private static async IAsyncEnumerable<ToolOutputChunk> Yield(
-        ToolOutputChunk chunk)
+        ToolOutputChunk first,
+        params ToolOutputChunk[] remaining)
     {
-        yield return chunk;
+        yield return first;
+        foreach (var chunk in remaining)
+        {
+            yield return chunk;
+        }
         await Task.CompletedTask;
     }
 }

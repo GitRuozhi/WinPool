@@ -80,7 +80,9 @@ public sealed record ToolOutputChunk(
 
 public sealed record ToolProcessStreams(
     IAsyncEnumerable<ToolOutputChunk> Chunks,
-    Task<int> ExitCode);
+    Task<int> ExitCode,
+    ToolOutputEncoding OutputEncoding = ToolOutputEncoding.Utf8,
+    int? ResolvedOutputCodePage = null);
 
 public enum ToolEventKind
 {

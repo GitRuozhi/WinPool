@@ -284,7 +284,8 @@ public sealed class ExecutionAndTestRepositoryTests
                 "step-1",
                 new ControlledAdapter(),
                 events,
-                0);
+                0,
+                ToolOutputEncoding.Utf8);
 
         Assert.False(failed);
         await using var connection = await database.Store.OpenConnectionAsync();

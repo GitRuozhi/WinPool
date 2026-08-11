@@ -49,6 +49,10 @@ public sealed class ExternalToolProcessRunnerTests
             .Where(item => item.Kind is WorkerEventKind.StandardOutput)
             .SelectMany(item => item.RawBytes.ToArray())
             .ToArray();
+        Assert.All(
+            events.Where(item => item.Kind is
+                WorkerEventKind.StandardOutput or WorkerEventKind.StandardError),
+            item => Assert.Equal(Encoding.UTF8.CodePage, item.OutputCodePage));
         var arguments = JsonSerializer.Deserialize<string[]>(
             Encoding.UTF8.GetString(outputBytes).Trim());
 

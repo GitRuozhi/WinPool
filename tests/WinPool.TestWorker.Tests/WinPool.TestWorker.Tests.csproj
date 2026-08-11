@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Testing.Tools\WinPool.Testing.Tools.csproj" />
     <ProjectReference Include="Helper\WinPool.TestWorker.ProcessHelper.csproj"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>

@@ -71,7 +71,8 @@ public sealed record WorkerEvent(
     ReadOnlyMemory<byte> RawBytes,
     int? ProcessId = null,
     int? ExitCode = null,
-    ToolProcessIdentity? ProcessIdentity = null);
+    ToolProcessIdentity? ProcessIdentity = null,
+    int? OutputCodePage = null);
 
 public sealed record WorkerEventBufferStatistics(
     int Capacity,
