@@ -16,6 +16,10 @@ V0.32 is not a binary release or GitHub Release. The user assigned the checkpoin
 on 2026-08-10; native UI, tray, UAC, device, external-tool, lifecycle, and
 data-location cases remain recorded as unverified rather than being fabricated.
 
+The user approved the [V0.33 active Plan](docs/Plan.md) on 2026-08-11. Its
+architecture-convergence and lifecycle-hardening work is in progress; V0.33 is
+not yet the current checkpoint.
+
 ## Safety boundary
 
 Real storage-structure mutation is not implemented or authorized. WinPool must
@@ -45,8 +49,8 @@ The reproducible self-contained staging command is documented in
 - [Development](docs/Development.md): architecture, environment, build, staging,
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
-- Current stage: no active Plan. The accepted V0.32 record is in
-  [Archive](docs/Archive/V0.32/README.md).
+- [Current Plan](docs/Plan.md): approved V0.33 architecture convergence and
+  lifecycle hardening, currently in progress.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):

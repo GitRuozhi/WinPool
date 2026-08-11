@@ -61,7 +61,12 @@ protected paths before editing.
 
 ## File and documentation rules
 
-- Do not directly delete files.
+- Do not directly delete files by default. A narrow exception may be granted only
+  for a user-approved refactoring whose confirmed Plan names the exact obsolete
+  source/test targets and requires replacement and regression evidence first.
+  The user has approved that exception for V0.33 retirement of
+  `src/WinPool.Core` and `tests/WinPool.Core.Tests`; this does not authorize
+  execution before the V0.33 Plan is confirmed, or deletion of any other content.
 - Historical WinPool documents go to `docs/Archive`, with an index and truthful
   status. Archive content is not a current requirement.
 - Other confirmed superseded WinPool content goes to the parent-project `Old`
@@ -94,10 +99,10 @@ protected paths before editing.
   `c=10`; reduce scope, combine work, or advance the minor version.
 - A normal `c` checkpoint requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.32 is the current user-confirmed source checkpoint. Its remaining manual
-  cases stay `unverified`; the version decision does not fabricate test evidence.
-- The current user request explicitly authorizes the V0.32 marking commits and
-  normal pushes to `main`.
+- V0.32 remains the current user-confirmed source checkpoint while the approved
+  V0.33 Plan is in progress. Its remaining manual cases stay `unverified`.
+- V0.33 work may create the local commits required by its confirmed Plan. Push,
+  tag, GitHub Release, binary upload, and deployment are not authorized.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate

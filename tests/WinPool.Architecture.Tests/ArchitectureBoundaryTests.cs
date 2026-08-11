@@ -57,7 +57,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DocumentationArchitectureHasOneActivePlanAndACompleteV02Archive()
+    public void DocumentationArchitectureSupportsAnOptionalActivePlanAndACompleteV02Archive()
     {
         var root = FindRepositoryRoot();
         var requiredDocuments = new[]
@@ -70,10 +70,15 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.False(Directory.Exists(Path.Combine(root, "Plan")));
         Assert.False(File.Exists(Path.Combine(root, "DEVELOP.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Plan.md")));
         Assert.All(
             requiredDocuments,
             name => Assert.True(File.Exists(Path.Combine(root, "docs", name)), name));
+
+        var activePlan = Path.Combine(root, "docs", "Plan.md");
+        if (File.Exists(activePlan))
+        {
+            Assert.False(string.IsNullOrWhiteSpace(File.ReadAllText(activePlan)));
+        }
 
         var archive = Path.Combine(root, "docs", "Archive", "V0.2");
         Assert.Equal(16, Directory.EnumerateFiles(archive, "*.md").Count());

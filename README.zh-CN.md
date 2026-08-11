@@ -17,6 +17,9 @@ Agent 独占 SQLite、类型化命名管道 IPC、模拟编辑、本机只读发
 V0.32 不是二进制发布或 GitHub Release。用户已于 2026-08-10 指定该检查点；原生 UI、托盘、
 UAC、设备、外部工具、生命周期和数据位置用例仍如实记录为未验证，不伪造通过结论。
 
+用户已于 2026-08-11 批准 [V0.33 活动计划](docs/Plan.md)，架构收口和生命周期硬化工作
+正在执行；V0.33 尚未成为当前检查点。
+
 ## 安全边界
 
 WinPool 未实现也未授权真实存储结构修改。不得创建、初始化、格式化、调整、修复或删除真实磁盘、
@@ -42,7 +45,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [产品方向](docs/Product.zh-CN.md)：长期定位、产品边界和路线图。
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
-- 当前无活动计划；已接受的 V0.32 记录见[历史归档](docs/Archive/V0.32/README.zh-CN.md)。
+- [当前计划](docs/Plan.md)：已批准且正在执行的 V0.33 架构收口与生命周期硬化。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
