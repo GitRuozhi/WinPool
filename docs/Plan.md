@@ -333,3 +333,15 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 - client fan-out 需要改变 App 页面生命周期或扩大为通用事件框架；
 - bounded callback 仍允许 terminal state 被 late write 回退；
 - cleanup retry 无法仅凭 manager-owned、验证后的临时 root 安全执行。
+
+## 17. V0.34 candidate 执行记录（2026-08-11）
+
+- V34-01～V34-11 已完成；实现恢复点为 `f9a9869`（identity/storage/schema）、
+  `15b40b6`（进程严格身份与生命周期）和 `aee9eb6`（关停状态、reseed、背压与工具流）。
+- `Directory.Build.props` 已设为 iteration 4；产品 candidate 为 V0.34，IPC 为 3，SQLite schema 为 12。
+- 版本切换后执行 `dotnet build WinPool.slnx -c Release --no-restore --nologo`：0 warnings、0 errors。
+- 版本切换后执行完整 Release 自动门：494/494 passed，0 skipped、0 failed。
+- `dotnet list WinPool.slnx package --vulnerable --include-transitive` 已通过；未发现易受攻击包。
+- 四进程自包含 staging 已通过：`D:\WinPool-V034-Candidate-Staging-Final`，包含唯一的 App、Agent、TestWorker、ElevatedBroker，四者 ProductVersion 均为 V0.34，且未包含禁用的数据库、日志、脚本、外部工具或重复 child。
+- M01～M07 以及既有 V0.33 原生/人工矩阵没有在本轮自动标记为通过，均保持 `unverified`。
+- V0.34 仍是 candidate，未变更“V0.33 是用户确认的当前版本”的事实；未 push、未 tag、未创建 GitHub Release、未上传二进制、未部署。

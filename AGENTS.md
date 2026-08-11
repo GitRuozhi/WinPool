@@ -101,8 +101,9 @@ protected paths before editing.
   unless explicitly authorized.
 - V0.33 is the current user-confirmed version. Its ten native/manual cases remain
   `unverified`; version confirmation is not evidence that they passed.
-- The accepted V0.33 Plan is archived under `docs/Archive/V0.33`. No active Plan
-  currently exists. Tag, GitHub Release, binary upload, and deployment remain
+- The accepted V0.33 Plan is archived under `docs/Archive/V0.33`. The confirmed
+  V0.34 candidate plan is active at `docs/Plan.md`; it does not make V0.34
+  user-confirmed. Tag, GitHub Release, binary upload, and deployment remain
   unauthorized without a new explicit decision.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.

@@ -74,9 +74,11 @@ writable `Data` directory beside the executable. The standard-root
 `storage-location.json` pointer selects the mode; migrations retain the old copy
 and verify the destination.
 
-Normal launches use Agent-owned SQLite v10 for inventory, workspace state,
-simulation documents, monitoring, test history, evidence, and recovery. JSON
-stores remain only for explicitly supported no-Agent development fallbacks.
+Normal launches use Agent-owned SQLite schema 12 for inventory, workspace state,
+simulation documents, monitoring, test history, evidence, and recovery. V0.34
+creates or reopens only schema 12 data; older schemas are rejected without being
+migrated or changed. JSON stores remain only for explicitly supported no-Agent
+development fallbacks.
 
 WinPool is single-instance through Windows App SDK application lifecycle. Normal
 relaunch activates the existing window. An approved elevation handoff waits for

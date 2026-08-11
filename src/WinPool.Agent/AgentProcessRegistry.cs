@@ -60,65 +60,6 @@ public sealed class AgentProcessRegistry
         }
     }
 
-    public bool TryMarkRunning(int processId, DateTimeOffset observedAtUtc) =>
-        TryUpdateByProcessId(
-            processId,
-            current => current.State is SupervisedProcessState.Starting
-                ? current with
-                {
-                    State = SupervisedProcessState.Running,
-                    LastHeartbeatUtc = Max(current.LastHeartbeatUtc, observedAtUtc)
-                }
-                : null);
-
-    public bool TryRecordHeartbeat(int processId, DateTimeOffset observedAtUtc) =>
-        TryUpdateByProcessId(
-            processId,
-            current => IsHeartbeatEligible(current)
-                       && observedAtUtc >= current.LastHeartbeatUtc
-                ? current with
-                {
-                    State = SupervisedProcessState.Running,
-                    LastHeartbeatUtc = observedAtUtc
-                }
-                : null);
-
-    public bool TryBeginStopping(
-        int processId,
-        DateTimeOffset shutdownDeadlineUtc) =>
-        TryUpdateByProcessId(
-            processId,
-            current => current.State is not (
-                    SupervisedProcessState.Exited or SupervisedProcessState.Failed)
-                && shutdownDeadlineUtc >= current.StartedAtUtc
-                    ? current with
-                    {
-                        State = SupervisedProcessState.Stopping,
-                        ShutdownDeadlineUtc = shutdownDeadlineUtc
-                    }
-                    : null);
-
-    public bool TryMarkExited(
-        int processId,
-        DateTimeOffset observedAtUtc,
-        bool failed = false) =>
-        TryCompleteByProcessId(
-            processId,
-            observedAtUtc,
-            failed,
-            out _);
-
-    public bool TryMarkExited(
-        int processId,
-        DateTimeOffset observedAtUtc,
-        out AgentManagedProcess? terminalRegistration,
-        bool failed = false) =>
-        TryCompleteByProcessId(
-            processId,
-            observedAtUtc,
-            failed,
-            out terminalRegistration);
-
     public bool TryMarkRunning(
         ProcessInstanceId processInstanceId,
         int expectedProcessId,
@@ -306,34 +247,6 @@ public sealed class AgentProcessRegistry
         }
     }
 
-    private bool TryUpdateByProcessId(
-        int processId,
-        Func<AgentManagedProcess, AgentManagedProcess?> update)
-    {
-        if (processId <= 0)
-        {
-            return false;
-        }
-
-        lock (syncRoot)
-        {
-            if (!processIndex.TryGetValue(processId, out var instanceId)
-                || !registrations.TryGetValue(instanceId, out var current))
-            {
-                return false;
-            }
-
-            var updated = update(current);
-            if (updated is null)
-            {
-                return false;
-            }
-
-            registrations[instanceId] = updated;
-            return true;
-        }
-    }
-
     private bool TryUpdate(
         ProcessInstanceId processInstanceId,
         int expectedProcessId,
@@ -361,32 +274,6 @@ public sealed class AgentProcessRegistry
             }
 
             registrations[processInstanceId] = updated;
-            return true;
-        }
-    }
-
-    private bool TryCompleteByProcessId(
-        int processId,
-        DateTimeOffset observedAtUtc,
-        bool failed,
-        out AgentManagedProcess? terminalRegistration)
-    {
-        terminalRegistration = null;
-        if (processId <= 0)
-        {
-            return false;
-        }
-
-        lock (syncRoot)
-        {
-            if (!processIndex.TryGetValue(processId, out var instanceId)
-                || !registrations.TryGetValue(instanceId, out var current)
-                || observedAtUtc < current.StartedAtUtc)
-            {
-                return false;
-            }
-
-            terminalRegistration = CompleteLocked(instanceId, current, observedAtUtc, failed);
             return true;
         }
     }

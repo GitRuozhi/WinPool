@@ -10,18 +10,21 @@ public sealed class AgentProcessRegistryTests
     {
         var registry = new AgentProcessRegistry();
         var startedAt = new DateTimeOffset(2026, 7, 29, 1, 0, 0, TimeSpan.Zero);
-        Assert.True(registry.TryRegister(Create(
+        var mainApplication = Create(
             101,
             AgentManagedProcessKind.MainApplication,
-            startedAt)));
-        Assert.True(registry.TryRegister(Create(
+            startedAt);
+        var testWorker = Create(
             102,
             AgentManagedProcessKind.TestWorker,
-            startedAt)));
-        Assert.True(registry.TryRegister(Create(
+            startedAt);
+        var broker = Create(
             103,
             AgentManagedProcessKind.ElevatedBroker,
-            startedAt)));
+            startedAt);
+        Assert.True(registry.TryRegister(mainApplication));
+        Assert.True(registry.TryRegister(testWorker));
+        Assert.True(registry.TryRegister(broker));
 
         var unresponsive = registry.SweepUnresponsive(
             startedAt.AddSeconds(16),
@@ -33,7 +36,10 @@ public sealed class AgentProcessRegistryTests
             process => process.ProcessId == 103
                        && process.State == SupervisedProcessState.Unresponsive);
 
-        Assert.True(registry.TryRecordHeartbeat(101, startedAt.AddSeconds(17)));
+        Assert.True(registry.TryRecordHeartbeat(
+            mainApplication.ProcessInstanceId,
+            mainApplication.ProcessId,
+            startedAt.AddSeconds(17)));
         Assert.Equal(
             SupervisedProcessState.Running,
             registry.Snapshot().Single(process => process.ProcessId == 101).State);
@@ -44,24 +50,35 @@ public sealed class AgentProcessRegistryTests
     {
         var registry = new AgentProcessRegistry();
         var startedAt = DateTimeOffset.UtcNow;
-        Assert.True(registry.TryRegister(Create(
+        var registration = Create(
             201,
             AgentManagedProcessKind.ExternalTool,
             startedAt,
-            ownsJobObject: true)));
+            ownsJobObject: true);
+        Assert.True(registry.TryRegister(registration));
         var deadline = startedAt.AddSeconds(10);
 
-        Assert.True(registry.TryBeginStopping(201, deadline));
+        Assert.True(registry.TryBeginStopping(
+            registration.ProcessInstanceId,
+            registration.ProcessId,
+            deadline));
         Assert.Equal(deadline, registry.Snapshot().Single().ShutdownDeadlineUtc);
         Assert.Equal([201], registry.GetLiveProcessIds());
 
-        Assert.True(registry.TryMarkExited(201, deadline));
+        Assert.True(registry.TryMarkExited(
+            registration.ProcessInstanceId,
+            registration.ProcessId,
+            deadline,
+            out _));
         Assert.Empty(registry.GetLiveProcessIds());
         Assert.Empty(registry.Snapshot());
         Assert.Equal(
             SupervisedProcessState.Exited,
             Assert.Single(registry.TerminalDiagnosticsSnapshot()).State);
-        Assert.False(registry.TryRecordHeartbeat(201, deadline.AddSeconds(1)));
+        Assert.False(registry.TryRecordHeartbeat(
+            registration.ProcessInstanceId,
+            registration.ProcessId,
+            deadline.AddSeconds(1)));
 
         var reused = Create(
             201,
@@ -95,13 +112,16 @@ public sealed class AgentProcessRegistryTests
         for (var index = 0; index < 130; index++)
         {
             var processId = 1_000 + index;
-            Assert.True(registry.TryRegister(Create(
+            var registration = Create(
                 processId,
                 AgentManagedProcessKind.ExternalTool,
-                startedAt.AddSeconds(index))));
+                startedAt.AddSeconds(index));
+            Assert.True(registry.TryRegister(registration));
             Assert.True(registry.TryMarkExited(
-                processId,
-                startedAt.AddSeconds(index + 1)));
+                registration.ProcessInstanceId,
+                registration.ProcessId,
+                startedAt.AddSeconds(index + 1),
+                out _));
         }
 
         var diagnostics = registry.TerminalDiagnosticsSnapshot();

@@ -18,6 +18,8 @@ V0.33 是用户确认的当前版本。它保留 App、Agent、TestWorker、Brok
 四进程 staging 通过后确认 V0.33。原生 UI、托盘、UAC、设备、外部工具和数据位置用例继续保持
 `unverified`；确认版本不代表伪造这些结果。V0.33 不是 tag、二进制发布或 GitHub Release。
 
+V0.34 是已实现的缺陷收口 candidate，尚未获得用户版本确认；其原生/人工用例在指定 Windows 环境执行前仍保持 `unverified`。
+
 ## 安全边界
 
 WinPool 未实现也未授权真实存储结构修改。不得创建、初始化、格式化、调整、修复或删除真实磁盘、

@@ -19,6 +19,10 @@ four-process staging passed. Native UI, tray, UAC, device, external-tool, and
 data-location cases remain `unverified`; acceptance does not fabricate those
 results. V0.33 is not a tag, binary release, or GitHub Release.
 
+V0.34 is the implemented candidate for defect closure. It is not yet a
+user-confirmed version; its native/manual cases remain `unverified` until they
+are executed on the designated Windows environment.
+
 ## Safety boundary
 
 Real storage-structure mutation is not implemented or authorized. WinPool must

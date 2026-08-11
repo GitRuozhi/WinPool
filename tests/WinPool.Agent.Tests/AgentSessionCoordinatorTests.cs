@@ -270,17 +270,17 @@ public sealed class AgentSessionCoordinatorTests
             new AgentShutdownWorkflow(actions, registry),
             registry);
         var now = DateTimeOffset.UtcNow;
-        Assert.True(coordinator.TryRegisterProcess(
-            new(
-                ProcessInstanceId.New(),
-                765,
-                AgentManagedProcessKind.ExternalTool,
-                CorrelationId.New(),
-                now,
-                now,
-                SupervisedProcessState.Running,
-                true,
-                null)));
+        var registration = new AgentManagedProcess(
+            ProcessInstanceId.New(),
+            765,
+            AgentManagedProcessKind.ExternalTool,
+            CorrelationId.New(),
+            now,
+            now,
+            SupervisedProcessState.Running,
+            true,
+            null);
+        Assert.True(coordinator.TryRegisterProcess(registration));
 
         var first = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
@@ -294,7 +294,11 @@ public sealed class AgentSessionCoordinatorTests
             new GetAgentSnapshotRequest(CorrelationId.New()));
         Assert.Equal(ApplicationStatus.Succeeded, snapshot.Status);
 
-        Assert.True(registry.TryMarkExited(765, DateTimeOffset.UtcNow));
+        Assert.True(registry.TryMarkExited(
+            registration.ProcessInstanceId,
+            registration.ProcessId,
+            DateTimeOffset.UtcNow,
+            out _));
         var retried = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,

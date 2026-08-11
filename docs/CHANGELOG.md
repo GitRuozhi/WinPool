@@ -7,7 +7,22 @@ This file records results that actually occurred. Planned work belongs in
 
 ## Unreleased
 
-No unreleased changes are recorded after V0.33.
+## V0.34 candidate — 2026-08-11
+
+- Bound every supervised process mutation to a process instance ID, PID, and OS
+  process-start witness; IPC is now protocol 3.
+- Made Local inventory identity Agent-owned, made storage-location post-commit
+  cleanup report partial completion, and adopted schema 12 as a clean break
+  that rejects older databases without changing them.
+- Added authoritative shutdown status, snapshot reseeding after event gaps,
+  explicit event backpressure, and isolated stdout/stderr progress decoders
+  with EOF flushing.
+- The candidate passed 494 automatic Release tests, a warning-free Release
+  build, dependency audit, and four-process self-contained staging at
+  `D:\WinPool-V034-Candidate-Staging-Final`.
+
+V0.34 remains a candidate, not a user-confirmed version, tag, binary release,
+or GitHub Release. Native/manual cases remain `unverified`.
 
 ## V0.33 — 2026-08-11
 
