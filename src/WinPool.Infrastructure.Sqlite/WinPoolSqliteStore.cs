@@ -126,9 +126,13 @@ public sealed class WinPoolSqliteStore
             return new ExistingDatabaseInspection(false, null);
         }
 
-        return new ExistingDatabaseInspection(
-            true,
-            await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken));
+        var version = await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken);
+        if (version?.Version == CurrentSchemaVersion)
+        {
+            await CurrentSchemaVerifier.VerifyAsync(connection, cancellationToken);
+        }
+
+        return new ExistingDatabaseInspection(true, version);
     }
 
     public async Task<SqliteConnection> OpenConnectionAsync(
@@ -151,6 +155,196 @@ public sealed class WinPoolSqliteStore
     private sealed record ExistingDatabaseInspection(
         bool HasUserTables,
         SqliteSchemaVersion? Version);
+
+    /// <summary>
+    /// Validates a current-version database without opening it for write. The
+    /// contract is the complete schema definition below, materialized only in
+    /// an isolated in-memory connection and compared as tables, columns,
+    /// indexes, and foreign keys.
+    /// </summary>
+    private static class CurrentSchemaVerifier
+    {
+        public static async Task VerifyAsync(
+            SqliteConnection actualConnection,
+            CancellationToken cancellationToken)
+        {
+            await using var expectedConnection = new SqliteConnection(
+                new SqliteConnectionStringBuilder
+                {
+                    DataSource = ":memory:",
+                    Mode = SqliteOpenMode.Memory,
+                    Cache = SqliteCacheMode.Private,
+                    Pooling = false,
+                    ForeignKeys = true
+                }.ToString());
+            await expectedConnection.OpenAsync(cancellationToken);
+            await using (var create = expectedConnection.CreateCommand())
+            {
+                create.CommandText = SchemaV1;
+                await create.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            var expected = await ReadContractAsync(expectedConnection, cancellationToken);
+            var actual = await ReadContractAsync(actualConnection, cancellationToken);
+            var mismatch = FindMismatch(expected, actual);
+            if (mismatch is not null)
+            {
+                throw new CurrentSqliteSchemaCorruptException(mismatch);
+            }
+        }
+
+        private static async Task<SchemaContract> ReadContractAsync(
+            SqliteConnection connection,
+            CancellationToken cancellationToken)
+        {
+            var tableNames = new List<string>();
+            await using (var tables = connection.CreateCommand())
+            {
+                tables.CommandText = """
+                    SELECT name
+                    FROM sqlite_schema
+                    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                    ORDER BY name;
+                    """;
+                await using var reader = await tables.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    tableNames.Add(reader.GetString(0));
+                }
+            }
+
+            var tablesByName = new Dictionary<string, TableContract>(StringComparer.Ordinal);
+            foreach (var tableName in tableNames)
+            {
+                var columns = await ReadRowsAsync(
+                    connection,
+                    $"PRAGMA table_info({QuoteIdentifier(tableName)});",
+                    reader => string.Join(
+                        '|',
+                        reader.GetInt32(0),
+                        reader.GetString(1),
+                        reader.GetString(2),
+                        reader.GetInt32(3),
+                        reader.IsDBNull(4) ? "<null>" : reader.GetString(4),
+                        reader.GetInt32(5)),
+                    cancellationToken);
+                var indexes = await ReadIndexesAsync(connection, tableName, cancellationToken);
+                var foreignKeys = await ReadRowsAsync(
+                    connection,
+                    $"PRAGMA foreign_key_list({QuoteIdentifier(tableName)});",
+                    reader => string.Join(
+                        '|',
+                        reader.GetInt32(0),
+                        reader.GetInt32(1),
+                        reader.GetString(2),
+                        reader.GetString(3),
+                        reader.GetString(4),
+                        reader.GetString(5),
+                        reader.GetString(6),
+                        reader.GetString(7)),
+                    cancellationToken);
+                tablesByName.Add(
+                    tableName,
+                    new(
+                        columns.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+                        indexes.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+                        foreignKeys.OrderBy(value => value, StringComparer.Ordinal).ToArray()));
+            }
+
+            return new(tablesByName);
+        }
+
+        private static async Task<IReadOnlyList<string>> ReadIndexesAsync(
+            SqliteConnection connection,
+            string tableName,
+            CancellationToken cancellationToken)
+        {
+            var indexNames = await ReadRowsAsync(
+                connection,
+                $"PRAGMA index_list({QuoteIdentifier(tableName)});",
+                reader => string.Join(
+                    '|',
+                    reader.GetString(1),
+                    reader.GetInt32(2),
+                    reader.GetString(3),
+                    reader.GetInt32(4)),
+                cancellationToken);
+            var indexes = new List<string>();
+            foreach (var index in indexNames)
+            {
+                var name = index.Split('|', 2)[0];
+                var columns = await ReadRowsAsync(
+                    connection,
+                    $"PRAGMA index_info({QuoteIdentifier(name)});",
+                    reader => string.Join('|', reader.GetInt32(0), reader.GetInt32(1), reader.GetString(2)),
+                    cancellationToken);
+                indexes.Add($"{index}|{string.Join(',', columns.OrderBy(value => value, StringComparer.Ordinal))}");
+            }
+
+            return indexes;
+        }
+
+        private static async Task<IReadOnlyList<string>> ReadRowsAsync(
+            SqliteConnection connection,
+            string commandText,
+            Func<SqliteDataReader, string> project,
+            CancellationToken cancellationToken)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = commandText;
+            var rows = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(project(reader));
+            }
+
+            return rows;
+        }
+
+        private static string? FindMismatch(
+            SchemaContract expected,
+            SchemaContract actual)
+        {
+            var expectedTables = expected.Tables.Keys.OrderBy(value => value, StringComparer.Ordinal);
+            var actualTables = actual.Tables.Keys.OrderBy(value => value, StringComparer.Ordinal);
+            if (!expectedTables.SequenceEqual(actualTables, StringComparer.Ordinal))
+            {
+                return "tables";
+            }
+
+            foreach (var tableName in expectedTables)
+            {
+                var expectedTable = expected.Tables[tableName];
+                var actualTable = actual.Tables[tableName];
+                if (!expectedTable.Columns.SequenceEqual(actualTable.Columns, StringComparer.Ordinal))
+                {
+                    return $"{tableName}.columns";
+                }
+                if (!expectedTable.Indexes.SequenceEqual(actualTable.Indexes, StringComparer.Ordinal))
+                {
+                    return $"{tableName}.indexes";
+                }
+                if (!expectedTable.ForeignKeys.SequenceEqual(actualTable.ForeignKeys, StringComparer.Ordinal))
+                {
+                    return $"{tableName}.foreign_keys";
+                }
+            }
+
+            return null;
+        }
+
+        private static string QuoteIdentifier(string value) =>
+            $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+        private sealed record SchemaContract(
+            IReadOnlyDictionary<string, TableContract> Tables);
+
+        private sealed record TableContract(
+            IReadOnlyList<string> Columns,
+            IReadOnlyList<string> Indexes,
+            IReadOnlyList<string> ForeignKeys);
+    }
 
     private const string SchemaV1 = """
         CREATE TABLE IF NOT EXISTS schema_info(

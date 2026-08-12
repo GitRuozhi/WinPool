@@ -182,6 +182,53 @@ public sealed class SqliteSchemaTests
         await AssertLegacyDatabaseIsUnchangedAsync(database.Store, null);
     }
 
+    [Theory]
+    [InlineData("DROP TABLE external_tools;", "tables")]
+    [InlineData("ALTER TABLE worker_processes DROP COLUMN owns_job_object;", "worker_processes.columns")]
+    [InlineData("DROP INDEX ix_worker_processes_live_pid;", "worker_processes.indexes")]
+    public async Task CurrentSchemaMismatchIsRejectedWithoutChangingItsFiles(
+        string mutation,
+        string expectedMismatch)
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = mutation;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await AssertCurrentCorruptDatabaseIsUnchangedAsync(
+            database.Store,
+            expectedMismatch);
+    }
+
+    [Fact]
+    public async Task CurrentSchemaForeignKeyMismatchIsRejectedWithoutChangingItsFiles()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                PRAGMA foreign_keys=OFF;
+                DROP TABLE monitor_devices;
+                CREATE TABLE monitor_devices(
+                    session_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    sanitized_name TEXT NOT NULL,
+                    source_kind INTEGER NOT NULL,
+                    PRIMARY KEY(session_id, device_id)
+                );
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await AssertCurrentCorruptDatabaseIsUnchangedAsync(
+            database.Store,
+            "monitor_devices.foreign_keys");
+    }
+
     [Fact]
     public async Task BatchWriterFlushesSamplesWithoutPersistingProviderIdentity()
     {
@@ -282,6 +329,31 @@ public sealed class SqliteSchemaTests
             () => store.InitializeAsync());
         Assert.Equal(expectedVersion, exception.ActualVersion);
         Assert.Contains(LegacySqliteSchemaNotSupportedException.StableCode, exception.Message);
+
+        foreach (var path in paths)
+        {
+            Assert.Equal(before[path] is not null, File.Exists(path));
+            if (before[path] is not null)
+            {
+                Assert.Equal(before[path], File.ReadAllBytes(path));
+            }
+        }
+    }
+
+    private static async Task AssertCurrentCorruptDatabaseIsUnchangedAsync(
+        WinPoolSqliteStore store,
+        string expectedMismatch)
+    {
+        var paths = new[] { store.DatabasePath, store.DatabasePath + "-wal", store.DatabasePath + "-shm" };
+        var before = paths.ToDictionary(
+            path => path,
+            path => File.Exists(path) ? File.ReadAllBytes(path) : null,
+            StringComparer.Ordinal);
+
+        var exception = await Assert.ThrowsAsync<CurrentSqliteSchemaCorruptException>(
+            () => store.InitializeAsync());
+        Assert.Equal(expectedMismatch, exception.Mismatch);
+        Assert.Contains(CurrentSqliteSchemaCorruptException.StableCode, exception.Message);
 
         foreach (var path in paths)
         {

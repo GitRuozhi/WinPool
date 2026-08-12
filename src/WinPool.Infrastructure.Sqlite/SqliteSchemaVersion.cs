@@ -38,6 +38,19 @@ public sealed class LegacySqliteSchemaNotSupportedException : InvalidOperationEx
     public int? ActualVersion { get; }
 }
 
+public sealed class CurrentSqliteSchemaCorruptException : InvalidOperationException
+{
+    public const string StableCode = "storage.schema.current_corrupt";
+
+    public CurrentSqliteSchemaCorruptException(string mismatch) : base(
+        $"{StableCode}: the schema-12 database does not match the required contract ({mismatch}).")
+    {
+        Mismatch = mismatch;
+    }
+
+    public string Mismatch { get; }
+}
+
 public sealed class SqliteSchemaVersionReader
 {
     private readonly WinPoolSqliteStore store;
