@@ -1,0 +1,1881 @@
+# WinPool V0.35 代码缺陷收口计划
+
+## 0. 状态与基线
+
+* **目标版本**：V0.35
+* **版本迭代**：`c=5`
+* **基线版本**：V0.34
+* **基线提交**：`5cc676b4873c29e7b00af9fd48e689627eb1dad4`
+* **性质**：V0.34 后续缺陷收口与一致性硬化
+* **新增产品功能**：无
+* **新增项目**：无
+* **IPC protocol**：默认保持 `3`
+* **SQLite schema**：默认保持 `12`
+* **V0.34 Archive**：冻结，不回写历史
+* **V0.34 manual/native evidence**：保持原状
+* **remote_gate**：`not_required`
+* **Push / Tag / GitHub Release / Binary Upload / Deployment**：未经本轮新的明确授权不得执行
+
+V0.35 不进行新的架构重构，只修复 V0.34 验收后确认的剩余缺陷。
+
+---
+
+# 1. 缺陷清单
+
+| ID        | 优先级 | 缺陷                                                           |
+| --------- | --- | ------------------------------------------------------------ |
+| V35-P1-01 | P1  | Comparison-first 场景仍会重复创建 Local `SystemId`                   |
+| V35-P1-02 | P1  | 一个慢的 client event watcher 可以阻塞全部事件读取与 reconnect              |
+| V35-P2-01 | P2  | `worker_processes` terminal state 可被迟到 callback 写回非 terminal |
+| V35-P2-02 | P2  | shutdown timeout 仍依赖被调用方主动响应 cancellation                    |
+| V35-P2-03 | P2  | schema version=12 时没有验证数据库真实结构                               |
+| V35-P2-04 | P2  | Main App shutdown 存活检查仍可能被 PID reuse 干扰                      |
+
+---
+
+# 2. V0.35 必须建立的不变量
+
+## INV-01 Local identity authority
+
+同一 machine binding 的 Local system：
+
+```text
+Manage capture
+Native capture
+Legacy capture
+Comparison capture
+App restart
+Agent restart
+```
+
+必须始终解析为同一个：
+
+```text
+SystemId
+```
+
+不能依赖：
+
+```text
+local_inventory_document 是否已经存在
+```
+
+来决定 identity。
+
+---
+
+## INV-02 Local capture serialization
+
+两个并发 Local capture 不得执行：
+
+```text
+resolve: none
+→ create A
+
+resolve: none
+→ create B
+```
+
+首次 Local identity 建立过程必须串行化。
+
+---
+
+## INV-03 Watcher isolation
+
+任何一个 App-side event watcher：
+
+```text
+停止消费
+消费过慢
+忘记 Dispose
+```
+
+都不得阻塞：
+
+```text
+Agent event pipe reader
+其他 watcher
+transport disconnect detection
+reconnect
+snapshot reseed
+```
+
+---
+
+## INV-04 Terminal persistence is absorbing
+
+一旦某个 `ProcessInstanceId` 持久化为：
+
+```text
+Exited
+Failed
+```
+
+之后任何迟到 callback 都不得将其恢复为：
+
+```text
+Starting
+Running
+Stopping
+Unresponsive
+```
+
+---
+
+## INV-05 Timeout means bounded caller progress
+
+声明：
+
+```text
+step timeout = 15s
+```
+
+必须意味着 workflow 在 timeout 后可以继续。
+
+不能只意味着：
+
+```text
+15s 后 CancellationToken 被取消
+```
+
+但仍无限：
+
+```text
+await operation
+```
+
+---
+
+## INV-06 Timed-out operation cannot commit late terminal effects
+
+shutdown step 超时以后，其迟到完成不得随后：
+
+```text
+关闭 control pipe
+隐藏 tray
+退出 Agent
+```
+
+从而使已经进入 `ShutdownPending` 的 Agent 突然退出。
+
+---
+
+## INV-07 Current schema means actual current schema
+
+数据库：
+
+```text
+schema_info.schema_version = 12
+```
+
+不等价于：
+
+```text
+数据库结构正确
+```
+
+只有 version 和当前最低结构合同同时满足才能正常打开。
+
+---
+
+## INV-08 Process incarnation is used until lifecycle end
+
+Main App lifecycle 从：
+
+```text
+handshake
+```
+
+直到：
+
+```text
+shutdown/reap
+```
+
+都必须使用：
+
+```text
+ProcessInstanceId
+PID
+executable identity
+OS process-start witness
+```
+
+不能在 shutdown 最后一段重新退化成只判断 PID。
+
+---
+
+# 3. V35-P1-01 — Local `SystemId` 最终收口
+
+## 3.1 问题
+
+当前 canonical Local identity resolver 主要依赖：
+
+```text
+local_inventory_document
+```
+
+如果 Local document 尚未建立，则返回新的：
+
+```text
+SystemId.New()
+```
+
+Comparison capture 本身又不会建立 Local document。
+
+因此 fresh database 下：
+
+```text
+Comparison #1 → A
+Comparison #2 → B
+Comparison #3 → C
+```
+
+仍然可能创建多个 Local system row。
+
+---
+
+## 3.2 修复决策
+
+**Local document 不再作为 Local identity authority。**
+
+新的 authority 应来自：
+
+```text
+Agent-owned persisted Local system records
++
+machine binding
+```
+
+不新增新的数据库表，不提升 schema version。
+
+---
+
+## 3.3 实施结构
+
+增加一个聚焦的小型组件，例如：
+
+```text
+LocalSystemIdentityResolver
+```
+
+它可以位于：
+
+```text
+WinPool.Infrastructure.Sqlite
+```
+
+或作为 `InventorySnapshotRepository` 的一个明确接口。
+
+不要将 identity 查询重新放回 UI/App。
+
+---
+
+## 3.4 Resolution algorithm
+
+输入：
+
+```text
+machineBinding
+```
+
+转换为与 `systems.machine_binding_hash` 当前持久化格式完全相同的 canonical binding key。
+
+然后查询：
+
+```text
+systems
+WHERE
+    kind = Local
+    AND machine_binding_hash = expected
+```
+
+### 0 个结果
+
+创建一个新的：
+
+```text
+SystemId
+```
+
+并作为当前 capture 的 canonical identity。
+
+### 1 个结果
+
+直接复用。
+
+### 多个结果
+
+这表示历史上已经发生过 identity fragmentation。
+
+V0.35 不删除、不 merge、不修改旧 snapshot evidence。
+
+选择未来 canonical ID 的规则必须确定性。
+
+优先级：
+
+1. 如果当前 `local_inventory_document` 指向其中一个匹配 system，则采用其 `SystemId`。
+2. 否则采用最早创建的 Local system。
+3. `created_at` 相同则以 `system_id` 做稳定排序。
+
+同时产生内部 diagnostic：
+
+```text
+agent.inventory.local_identity_fragmented
+```
+
+但以后所有新 capture 统一使用选定 ID。
+
+---
+
+## 3.5 Capture gate
+
+在 `AgentInventoryCoordinator` 增加专用：
+
+```text
+SemaphoreSlim localCaptureGate
+```
+
+以下两个入口都必须进入该 gate：
+
+```text
+CaptureManageAsync
+CaptureComparisonAsync
+```
+
+gate 至少覆盖：
+
+```text
+capture completed
+→ machine binding resolved
+→ canonical SystemId resolved
+→ snapshot persistence completed
+→ Local document persistence completed when applicable
+```
+
+避免首次采集并发创建两个 ID。
+
+---
+
+## 3.6 Comparison flow
+
+Comparison provider 内部临时 `SystemId` 可以继续存在，仅作为 collector 内部临时 namespace。
+
+但在任何 persistence/comparison 输出之前必须：
+
+```text
+Rebind(canonicalSystemId)
+```
+
+最终 persisted native/legacy snapshot 不得包含 provisional ID。
+
+---
+
+## 3.7 Manage persistence
+
+Manage capture 必须验证：
+
+```text
+decoded document.SystemId
+==
+projected snapshot.SystemId
+==
+persisted snapshot.SystemId
+```
+
+如果不一致：
+
+```text
+fail closed
+```
+
+不得继续写 Local document。
+
+进一步建议将：
+
+```text
+InventorySnapshot
++
+LocalInventoryDocument
+```
+
+封装为一个专用 persistence operation，使同一次 Manage capture 的两个持久化结果具有单一 transaction boundary。
+
+如果本轮不建立跨 repository transaction，则至少保证：
+
+> Local document 写入失败不能造成下一次 capture 创建新的 Local identity。
+
+---
+
+## 3.8 Tests
+
+### V35-T-ID-01
+
+fresh DB：
+
+```text
+Comparison × 10
+```
+
+验证全部：
+
+```text
+SystemId == A
+```
+
+且：
+
+```text
+systems(Local) == 1
+```
+
+---
+
+### V35-T-ID-02
+
+fresh DB：
+
+```text
+Comparison
+→ Manage
+→ Comparison
+```
+
+全部为同一 Local ID。
+
+---
+
+### V35-T-ID-03
+
+```text
+Manage
+→ Agent restart
+→ Comparison
+```
+
+identity 不变。
+
+---
+
+### V35-T-ID-04
+
+```text
+Comparison
+→ Agent restart
+→ Comparison
+```
+
+即使从未产生 Manage document，identity 也不变。
+
+---
+
+### V35-T-ID-05
+
+并发启动：
+
+```text
+Manage
+Comparison
+```
+
+最终只产生一个 canonical Local identity。
+
+---
+
+### V35-T-ID-06
+
+构造已有两个 Local system row、同一 machine binding。
+
+验证：
+
+* 不删除历史；
+* 不 merge snapshot；
+* canonical selection 稳定；
+* 后续 capture 不再产生第三个 ID。
+
+---
+
+### V35-T-ID-07
+
+Local → Simulation：
+
+```text
+simulation.SystemId != local.SystemId
+```
+
+provenance 仍正确。
+
+---
+
+# 4. V35-P1-02 — Client event watcher backpressure isolation
+
+## 4.1 问题
+
+当前 client fanout 对每个 watcher 使用 bounded channel，并在 publish 时逐个：
+
+```text
+await WriteAsync
+```
+
+一个 watcher 满后会阻塞唯一 transport reader。
+
+这会进一步阻止：
+
+```text
+读取下一 event frame
+发现 server disconnect
+启动 reconnect
+发布 snapshot reseed
+```
+
+---
+
+## 4.2 修复原则
+
+transport reader 不等待 watcher queue 腾空间。
+
+client fanout 应改为：
+
+```text
+TryWrite
+```
+
+语义：
+
+```text
+一个 watcher overflow
+!=
+整个 transport reader overflow
+```
+
+---
+
+## 4.3 Fanout API
+
+建议由：
+
+```text
+Task PublishAsync(...)
+```
+
+调整为类似：
+
+```text
+AgentClientFanoutPublishResult Publish(...)
+```
+
+结果至少包含：
+
+```text
+Delivered
+OverflowedSubscriberCount
+HasGap
+```
+
+---
+
+## 4.4 Watcher overflow
+
+对每个 watcher：
+
+```text
+TryWrite(event)
+```
+
+失败：
+
+1. 从 fanout 中移除该 watcher。
+2. complete 该 watcher channel。
+3. 不等待其恢复。
+4. 将本次 publish 标记为 local event gap。
+
+其他 watcher 继续收到当前事件。
+
+---
+
+## 4.5 Overflow 后 authoritative recovery
+
+因为被删除 watcher 已经丢事件，因此 client 必须建立 recovery boundary。
+
+transport supervisor 收到：
+
+```text
+HasGap = true
+```
+
+后：
+
+```text
+disconnect current event transport
+→ reconnect
+→ GetAgentSnapshot
+→ cache authoritative snapshot
+→ publish AgentStateReseedEvent to remaining watchers
+```
+
+这与 server overflow 使用同一恢复语义。
+
+---
+
+## 4.6 Dropped watcher resubscribe
+
+当原 watcher 重新调用：
+
+```text
+WatchAsync
+```
+
+新的 subscription 必须首先获得：
+
+```text
+latest cached AgentStateReseedEvent
+```
+
+然后再接收后续 delta。
+
+---
+
+## 4.7 禁止模式
+
+V0.35 后 transport reader 路径中不得出现：
+
+```text
+await watcher.Writer.WriteAsync(...)
+```
+
+也不得重新使用：
+
+```text
+DropOldest
+```
+
+---
+
+## 4.8 Tests
+
+### V35-T-EVT-01
+
+创建：
+
+```text
+Watcher A: 不读取
+Watcher B: 正常读取
+capacity = small
+```
+
+发送超过容量的事件。
+
+要求：
+
+```text
+A completed
+B continues
+Publish returns
+transport reader not blocked
+```
+
+---
+
+### V35-T-EVT-02
+
+A overflow 后：
+
+```text
+event transport reconnect
+snapshot reseed delivered to B
+```
+
+---
+
+### V35-T-EVT-03
+
+A 重新订阅：
+
+首个 state-bearing event 必须是 authoritative reseed。
+
+---
+
+### V35-T-EVT-04
+
+两个 slow watcher 不得阻塞 transport recovery。
+
+---
+
+### V35-T-EVT-05
+
+server overflow 与 client watcher overflow 都进入相同：
+
+```text
+gap → reconnect → reseed
+```
+
+状态机。
+
+---
+
+### V35-T-EVT-06
+
+连续多次 overflow/reconnect 不得产生：
+
+```text
+两个并行 event reader
+重复 event stream
+旧 stream 重新写入
+```
+
+---
+
+# 5. V35-P2-01 — Worker terminal persistence 单调性
+
+## 5.1 问题
+
+当前 registry 内存状态已经按 `ProcessInstanceId` 管理得较严格。
+
+但 SQLite repository 的 upsert 仍允许：
+
+```text
+Exited → Running
+Failed → Starting
+```
+
+数据库 evidence 与内存 registry 可能因此分叉。
+
+---
+
+## 5.2 明确状态机
+
+允许至少以下 transition：
+
+```text
+Starting
+→ Running
+→ Stopping
+→ Exited
+
+Starting
+→ Failed
+
+Running
+→ Unresponsive
+→ Running
+
+Running
+→ Failed
+
+Stopping
+→ Failed
+```
+
+terminal：
+
+```text
+Exited
+Failed
+```
+
+为 absorbing states。
+
+---
+
+## 5.3 Repository policy
+
+新增统一：
+
+```text
+ProcessStateTransitionPolicy
+```
+
+例如：
+
+```text
+CanTransition(current, incoming)
+```
+
+repository 自身必须执行检查。
+
+不能仅依赖调用方。
+
+---
+
+## 5.4 SQLite write
+
+选择以下任一方案：
+
+### 方案 A：transaction read + validate + update
+
+```text
+SELECT current state
+→ validate transition
+→ UPDATE
+```
+
+优点是语义最清晰。
+
+### 方案 B：SQL guarded UPSERT
+
+通过 `WHERE` 明确限制 transition。
+
+如果使用 SQL guard，不允许只写：
+
+```text
+current NOT terminal
+```
+
+还应防止：
+
+```text
+Stopping → Running
+```
+
+等明显逆向 transition。
+
+---
+
+## 5.5 Late callback
+
+callback timeout 后允许其 Task 最终自然完成，但它后续发起的 stale persistence：
+
+```text
+Running
+Starting
+```
+
+必须被 repository 拒绝/no-op。
+
+不得覆盖 terminal evidence。
+
+---
+
+## 5.6 Tests
+
+### V35-T-PROC-01
+
+```text
+Starting
+→ Running
+→ Exited
+→ Running
+```
+
+最终 DB：
+
+```text
+Exited
+```
+
+---
+
+### V35-T-PROC-02
+
+```text
+Running
+→ Failed
+→ Starting
+```
+
+最终：
+
+```text
+Failed
+```
+
+---
+
+### V35-T-PROC-03
+
+验证合法：
+
+```text
+Running → Unresponsive → Running
+```
+
+---
+
+### V35-T-PROC-04
+
+迟到 callback 在 process 已 terminal 后完成。
+
+验证：
+
+```text
+registry terminal
+DB terminal
+```
+
+一致。
+
+---
+
+# 6. V35-P2-02 — Shutdown hard timeout
+
+## 6.1 问题
+
+当前：
+
+```text
+CancellationTokenSource(stepTimeout)
+await operation(token)
+```
+
+仅能约束愿意响应 token 的 operation。
+
+---
+
+## 6.2 Bounded await
+
+建立：
+
+```text
+RunBoundedShutdownStepAsync
+```
+
+核心：
+
+```text
+operationTask = operation(token)
+await operationTask.WaitAsync(deadlineToken)
+```
+
+timeout 时：
+
+1. cancel operation token；
+2. 记录该 step failed；
+3. workflow 继续；
+4. observation continuation 必须消费 operationTask 后续 exception，避免 unobserved fault；
+5. operation late completion 不得修改 workflow result。
+
+---
+
+## 6.3 Late-effect contract
+
+所有 shutdown action 必须分类审计。
+
+### 可重复 safety actions
+
+例如：
+
+```text
+StopMonitoring
+RequestTestCancellation
+RestoreTemporarySystemState
+```
+
+必须 idempotent。
+
+late completion 可以被允许，但不得把 lifecycle state 从 Pending 改成 Stopped。
+
+### Terminal actions
+
+```text
+CloseNamedPipes
+RemoveTrayIcon
+ExitAgent
+```
+
+必须在执行不可逆动作之前：
+
+```text
+cancellationToken.ThrowIfCancellationRequested()
+```
+
+一旦 deadline 已过，不得在后台继续 commit terminal effect。
+
+---
+
+## 6.4 ExitAgent 特别要求
+
+顺序应保证：
+
+```text
+cancel background source
+→ bounded wait
+→ check shutdown-step token
+→ ExitAgentThread
+```
+
+如果 bounded wait timeout：
+
+```text
+不得稍后自动执行 ExitAgentThread
+```
+
+---
+
+## 6.5 Tests
+
+### V35-T-SD-01
+
+fake operation 完全忽略 CancellationToken 且永不完成。
+
+验证 workflow 仍在 bounded deadline 后进入下一 step。
+
+---
+
+### V35-T-SD-02
+
+operation timeout 后稍后完成。
+
+验证 lifecycle 仍由当前 shutdown execution 决定。
+
+---
+
+### V35-T-SD-03
+
+模拟 `ExitAgent` timeout。
+
+timeout 后 fake operation later completion 不得调用 exit commit。
+
+---
+
+### V35-T-SD-04
+
+两个 shutdown retry 继续保持 serialization。
+
+---
+
+# 7. V35-P2-03 — Current SQLite schema structural verification
+
+## 7.1 问题
+
+当前逻辑：
+
+```text
+schema version == 12
+→ accepted
+```
+
+没有继续证明 schema 结构完整。
+
+---
+
+## 7.2 修复原则
+
+V0.35 不更改 schema。
+
+仍然：
+
+```text
+CurrentSchemaVersion = 12
+```
+
+新增：
+
+```text
+CurrentSchemaVerifier
+```
+
+只验证，不修改。
+
+---
+
+## 7.3 最低检查项
+
+### Required tables
+
+至少验证所有程序直接依赖的 current tables。
+
+---
+
+### Critical columns
+
+重点：
+
+```text
+worker_processes.process_instance_id
+worker_processes.process_id
+worker_processes.state
+
+simulation_documents.revision
+simulation_documents.sha256
+
+systems.system_id
+systems.machine_binding_hash
+
+local_inventory_document.snapshot_id
+local_inventory_document.sanitized_json
+```
+
+以及其它 schema 12 必需字段。
+
+---
+
+### Critical indexes
+
+至少检查：
+
+```text
+inventory snapshot query indexes
+monitor sample indexes
+worker process indexes
+simulation document indexes
+```
+
+---
+
+### Foreign keys
+
+检查关键 ownership/reference FK。
+
+例如：
+
+```text
+inventory_snapshots → systems
+local_inventory_document → inventory_snapshots
+worker_processes → agent_sessions
+```
+
+---
+
+## 7.4 Failure semantics
+
+version 正确但结构错误：
+
+```text
+storage.schema.current_corrupt
+```
+
+或等价稳定 code。
+
+必须：
+
+```text
+fail closed
+```
+
+同时：
+
+* 不 CREATE；
+* 不 ALTER；
+* 不 DROP；
+* 不自动补列；
+* 不修改 `schema_info`；
+* 不删除数据库。
+
+---
+
+## 7.5 Tests
+
+### V35-T-DB-01
+
+schema 12 + 缺 table。
+
+启动拒绝且文件完全不变。
+
+### V35-T-DB-02
+
+schema 12 + 缺 critical column。
+
+拒绝。
+
+### V35-T-DB-03
+
+schema 12 + 缺 critical index。
+
+按 contract 拒绝。
+
+### V35-T-DB-04
+
+schema 12 + 错误 FK。
+
+拒绝。
+
+### V35-T-DB-05
+
+完整 schema 12 正常接受。
+
+---
+
+# 8. V35-P2-04 — Main App shutdown process witness 收口
+
+## 8.1 问题
+
+handshake/registry 已经使用：
+
+```text
+ProcessInstanceId
+PID
+executable
+StartedAtUtc
+```
+
+但是 `CloseMainApplicationAsync` 的 wait loop 仍主要判断：
+
+```text
+IsProcessLive(PID)
+```
+
+PID reuse 后会把无关新进程当成旧 App 仍然存活。
+
+---
+
+## 8.2 统一 process witness service
+
+避免 control server 和 shutdown 各自实现不同规则。
+
+引入小型 internal abstraction，例如：
+
+```text
+IProcessIncarnationVerifier
+```
+
+能力：
+
+```text
+ReadWitness(pid)
+Matches(registration, expectedExecutable)
+```
+
+Witness 至少：
+
+```text
+PID
+normalized executable path
+start time UTC
+```
+
+---
+
+## 8.3 Handshake
+
+继续使用现有严格规则。
+
+不改变 IPC contract。
+
+---
+
+## 8.4 Shutdown wait
+
+每轮检查 registration：
+
+### PID 不存在
+
+```text
+old process exited
+→ terminalize registration
+```
+
+### PID 存在且 witness 完全一致
+
+```text
+same App process still alive
+```
+
+继续等待。
+
+### PID 存在但 start witness 不同
+
+解释为：
+
+```text
+PID reused
+```
+
+旧 registration terminalize。
+
+禁止等待新进程。
+
+### executable 不匹配
+
+同样：
+
+```text
+stale old registration
+```
+
+不得终止无关 PID。
+
+---
+
+## 8.5 安全原则
+
+V0.35 不因为 witness mismatch 去 kill process。
+
+语义只有：
+
+```text
+not the process we own
+```
+
+因此将旧 registration 清理为 stale/terminal。
+
+---
+
+## 8.6 Tests
+
+### V35-T-INC-01
+
+same PID + same start + same image：
+
+仍认为 App live。
+
+### V35-T-INC-02
+
+same PID + different start：
+
+旧 App registration terminalized。
+
+### V35-T-INC-03
+
+same PID + different image：
+
+不操作新 process。
+
+### V35-T-INC-04
+
+PID no longer exists：
+
+正常 exited。
+
+### V35-T-INC-05
+
+PID reuse 不再导致 shutdown 永久 Pending。
+
+---
+
+# 9. 实施顺序
+
+## Phase A — Regression lock
+
+先增加能够在 V0.34 行为上暴露问题的 tests：
+
+```text
+comparison-first identity
+slow watcher
+terminal resurrection
+non-cooperative shutdown
+schema-12 corruption
+PID reuse shutdown
+```
+
+不能先改实现再写无法证明旧 bug 的测试。
+
+---
+
+## Phase B — P1 data identity
+
+### V35-01
+
+修复 Local canonical identity。
+
+### V35-02
+
+增加 Local capture serialization。
+
+### V35-03
+
+验证 Manage/Comparison/restart/concurrency。
+
+在这一步结束后：
+
+> 正常运行路径不得再新增 Local identity fragmentation。
+
+---
+
+## Phase C — P1 event liveness
+
+### V35-04
+
+将 client fanout 从 blocking `WriteAsync` 改为 watcher-isolated nonblocking publish。
+
+### V35-05
+
+接入：
+
+```text
+local overflow
+→ event gap
+→ reconnect
+→ authoritative reseed
+```
+
+---
+
+## Phase D — persistence monotonicity
+
+### V35-06
+
+建立 Worker process state transition policy。
+
+### V35-07
+
+repository 自身执行 transition guard。
+
+---
+
+## Phase E — shutdown lifecycle
+
+### V35-08
+
+引入真正 bounded shutdown step。
+
+### V35-09
+
+审计 terminal actions 的 late-effect safety。
+
+### V35-10
+
+统一 Main App process witness verifier。
+
+---
+
+## Phase F — database startup hardening
+
+### V35-11
+
+实现 current schema structural verifier。
+
+不修改 schema 12。
+
+---
+
+## Phase G — integration
+
+### V35-12
+
+运行所有 focused + solution-wide tests。
+
+只修 regression。
+
+不得在该阶段顺手：
+
+* 拆 runtime；
+* 重命名大量 public types；
+* 调整无关 UI；
+* 增加 feature。
+
+---
+
+# 10. IPC / SQLite 决策
+
+## IPC
+
+V0.35 默认：
+
+```text
+IpcProtocol.CurrentVersion = 3
+```
+
+六个缺陷均可在现有 contract 内解决。
+
+如果实现过程中发现必须修改 wire contract：
+
+> 停止，重新评估。
+
+不得为了内部实现方便随意 bump 到 4。
+
+---
+
+## SQLite
+
+V0.35 默认：
+
+```text
+CurrentSchemaVersion = 12
+```
+
+Local identity 优先通过现有：
+
+```text
+systems
+machine_binding_hash
+```
+
+建立 authority。
+
+schema verification 也只是读取验证。
+
+因此默认不增加：
+
+```text
+schema 13
+```
+
+如果最终发现必须新增 column/table/index 才能保证 correctness，则必须作为独立设计决策重新评审，而不是静默修改 schema。
+
+---
+
+# 11. 建议 commit slicing
+
+```text
+01 docs: add V0.35 defect closure plan
+
+02 test: reproduce V0.35 identity and event regressions
+
+03 fix: make Local system identity persistence-authoritative
+
+04 fix: isolate slow Agent event watchers
+
+05 fix: make worker process terminal persistence monotonic
+
+06 fix: enforce bounded shutdown step deadlines
+
+07 fix: verify Main App process incarnation during shutdown
+
+08 fix: verify current SQLite schema structure
+
+09 test: harden V0.35 lifecycle and persistence regressions
+
+10 build: set project version to V0.35
+
+11 docs: record V0.35 candidate validation
+```
+
+每个 implementation commit 应保持 solution buildable。
+
+---
+
+# 12. 自动验收
+
+从 repository root：
+
+```powershell
+dotnet restore WinPool.slnx
+dotnet test WinPool.slnx -c Release --no-restore --maxcpucount:1 -m:1
+dotnet build WinPool.slnx -c Release --no-restore -m:1
+dotnet list WinPool.slnx package --vulnerable --include-transitive
+```
+
+要求：
+
+### Restore
+
+passed。
+
+### Test
+
+* 所有 deterministic tests 完成；
+* 不硬编码总测试数；
+* failure 不得隐藏；
+* skipped/unavailable 不记作 passed。
+
+### Build
+
+```text
+0 errors
+```
+
+warning：
+
+* 修复；
+* 或明确记录理由。
+
+### Dependency audit
+
+记录真实输出。
+
+---
+
+# 13. V0.35 新增关键 regression matrix
+
+## Identity
+
+```text
+comparison-first × 10
+comparison → manage
+manage → comparison
+restart without manage
+concurrent manage/comparison
+fragmented-history canonical selection
+```
+
+## Events
+
+```text
+one slow watcher
+multiple slow watchers
+healthy + slow watcher
+overflow reconnect
+reseed after overflow
+repeated overflow
+```
+
+## Process persistence
+
+```text
+Starting → Running
+Running → Unresponsive → Running
+Running → Exited
+Exited → Running rejected
+Failed → Starting rejected
+late callback after terminal
+```
+
+## Shutdown
+
+```text
+cooperative timeout
+non-cooperative timeout
+late completion
+terminal action late-effect rejection
+retry serialization
+```
+
+## Process witness
+
+```text
+same incarnation
+PID gone
+PID reuse
+image mismatch
+start-time mismatch
+```
+
+## Schema
+
+```text
+valid 12
+missing table
+missing column
+missing index
+broken FK
+legacy version
+future version
+```
+
+---
+
+# 14. Manual / native targeted validation
+
+没有真实执行证据时一律：
+
+```text
+unverified
+```
+
+## V35-M01 — Comparison-first identity
+
+使用新 V0.35 data root。
+
+在打开 Manage 页面之前连续运行 Comparison 多次。
+
+随后：
+
+```text
+Manage refresh
+App restart
+Agent restart
+Comparison
+```
+
+确认 UI 始终表示同一个 Local system。
+
+---
+
+## V35-M02 — Event watcher recovery
+
+运行 monitoring/test 时反复切换相关页面或创建/销毁 watcher。
+
+确认：
+
+* UI 不冻结；
+* monitoring event 持续更新；
+* reconnect 后状态恢复；
+* 不需要重启 App。
+
+---
+
+## V35-M03 — Shutdown retry
+
+制造一个可控 shutdown incomplete 状态。
+
+确认：
+
+```text
+ShutdownPending
+→ retry
+→ Stopped
+```
+
+且没有延迟的旧 shutdown action 在 Pending 状态下突然退出 Agent。
+
+---
+
+## V35-M04 — Main App shutdown/reopen
+
+反复：
+
+```text
+open App
+close
+reopen
+tray exit
+```
+
+确认没有 ghost MainApplication registration。
+
+PID reuse 本身不要求人工强制制造，主要由 deterministic fake witness tests 验证。
+
+---
+
+# 15. 版本收口
+
+六项缺陷关闭且 automatic gate 通过后，才进入 V0.35 candidate。
+
+届时：
+
+```xml
+<WinPoolVersionIteration>5</WinPoolVersionIteration>
+```
+
+确认：
+
+```text
+InformationalVersion = V0.35
+```
+
+staging 必须再次包含匹配的：
+
+```text
+App
+Agent
+TestWorker
+ElevatedBroker
+```
+
+不得混入 V0.34 binary。
+
+---
+
+# 16. 文档规则
+
+V0.34 archive 保持冻结。
+
+V0.35 active stage 使用当前 repository 文档规则。
+
+CHANGELOG 只能记录：
+
+```text
+实际完成
+实际验证
+```
+
+不能提前写：
+
+```text
+V0.35 passed
+```
+
+manual/native 未执行项目保持：
+
+```text
+unverified
+```
+
+---
+
+# 17. Git 收口
+
+本计划不继承 V0.34 的 remote authorization。
+
+因此 V0.35 默认只允许：
+
+```text
+local implementation
+local tests
+local commits
+```
+
+未经本轮用户新的明确授权：
+
+```text
+禁止 push
+禁止 tag
+禁止 GitHub Release
+禁止 binary upload
+禁止 deployment
+```
+
+---
+
+# 18. V0.35 完成定义
+
+## P1
+
+以下必须全部关闭：
+
+```text
+V35-P1-01
+V35-P1-02
+```
+
+P1 不允许 defer。
+
+---
+
+## P2
+
+以下必须全部关闭：
+
+```text
+V35-P2-01
+V35-P2-02
+V35-P2-03
+V35-P2-04
+```
+
+如果某项最终不修，必须有新的用户 scope 决策，不能自行降低标准。
+
+---
+
+## Correctness
+
+必须证明：
+
+```text
+Local identity stable
+event transport cannot be blocked by watcher
+terminal process evidence cannot resurrect
+shutdown deadlines are truly bounded
+schema 12 is structurally verified
+PID reuse cannot wedge Main App shutdown
+```
+
+---
+
+## Automatic
+
+完整 Release test/build/dependency gate 通过。
+
+---
+
+## Manual
+
+实际执行项目如实记录。
+
+未执行：
+
+```text
+unverified
+```
+
+---
+
+# 19. 最终验收重点
+
+V0.35 review 重点不再看“是否改了相关代码”，而看下面六个问题能否被确定性证明。
+
+### A. Comparison-first
+
+在没有 Local document 的情况下，Local identity 是否仍稳定？
+
+### B. Slow watcher
+
+一个坏 watcher 是否仍能拖死整个 App event pipeline？
+
+### C. Late callback
+
+process 已经 Exited 后，迟到 callback 是否还能复活 SQLite 状态？
+
+### D. Fake timeout
+
+一个完全不响应 cancellation 的 shutdown operation 是否还能卡死 workflow？
+
+### E. Fake schema 12
+
+一个只修改版本号、实际缺表的数据库是否还能通过启动检查？
+
+### F. PID reuse
+
+旧 App 已退出且 PID 被复用后，Agent 是否能正确认出“这已经不是原来的 App”？
+
+只有上述六项全部回答为正确行为，V0.35 才视为完成本轮缺陷收口。
