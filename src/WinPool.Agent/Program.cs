@@ -165,6 +165,12 @@ internal static class Program
                 dataRoot);
             var agentEvents = new AgentEventHub();
             var lifecycle = new AgentLifecycleStateStore(processRegistry);
+            var processIncarnationVerifier = new WindowsProcessIncarnationVerifier();
+            var mainApplicationExecutablePath = Path.GetFullPath(
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "..",
+                    "WinPool.App.exe"));
             var runtime = new DesktopAgentRuntime(
                 context,
                 instanceId,
@@ -194,6 +200,8 @@ internal static class Program
                 new InventoryComparisonRepository(store, writeOwner),
                 new LocalInventoryDocumentRepository(store, writeOwner),
                 new LocalSystemIdentityResolver(store, writeOwner),
+                processIncarnationVerifier,
+                mainApplicationExecutablePath,
                 testWorkerHost,
                 elevatedBrokerHost,
                 systemSupportAudit,
@@ -240,15 +248,9 @@ internal static class Program
                         instanceId,
                         registration,
                         cancellationToken),
-                verifyClientProcess: processId =>
-                    AgentClientProcessVerifier.IsExpectedExecutable(
-                        processId,
-                        Path.GetFullPath(
-                            Path.Combine(
-                                AppContext.BaseDirectory,
-                                "..",
-                                "WinPool.App.exe"))),
-                eventHub: agentEvents);
+                eventHub: agentEvents,
+                processIncarnationVerifier: processIncarnationVerifier,
+                expectedClientExecutablePath: mainApplicationExecutablePath);
             var serverTask = server.RunAsync(pipeCancellation.Token);
 
             try

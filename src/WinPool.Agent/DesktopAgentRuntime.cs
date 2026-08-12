@@ -48,6 +48,8 @@ internal sealed class DesktopAgentRuntime :
     private readonly StorageHealthEventRepository storageHealthEventRepository;
     private readonly AgentEventHub agentEvents;
     private readonly AgentLifecycleStateStore lifecycle;
+    private readonly IProcessIncarnationVerifier processIncarnationVerifier;
+    private readonly string mainApplicationExecutablePath;
     private readonly CancellationTokenSource storageHealthEventCancellation = new();
     private readonly object storageHealthEventSync = new();
     private readonly Queue<StorageHealthEvent> recentStorageHealthEvents = new();
@@ -80,6 +82,8 @@ internal sealed class DesktopAgentRuntime :
         InventoryComparisonRepository inventoryComparisons,
         LocalInventoryDocumentRepository localInventoryDocument,
         LocalSystemIdentityResolver localSystemIdentity,
+        IProcessIncarnationVerifier processIncarnationVerifier,
+        string mainApplicationExecutablePath,
         TestWorkerProcessHost testWorkerHost,
         ElevatedBrokerProcessHost elevatedBrokerHost,
         SystemSupportAuditRepository systemSupportAuditRepository,
@@ -125,6 +129,17 @@ internal sealed class DesktopAgentRuntime :
             ?? throw new ArgumentNullException(nameof(testArtifactStore));
         this.testRunExporter = testRunExporter
             ?? throw new ArgumentNullException(nameof(testRunExporter));
+        this.processIncarnationVerifier = processIncarnationVerifier
+            ?? throw new ArgumentNullException(nameof(processIncarnationVerifier));
+        if (string.IsNullOrWhiteSpace(mainApplicationExecutablePath)
+            || !Path.IsPathFullyQualified(mainApplicationExecutablePath))
+        {
+            throw new ArgumentException(
+                "The expected Main App executable path is required.",
+                nameof(mainApplicationExecutablePath));
+        }
+
+        this.mainApplicationExecutablePath = Path.GetFullPath(mainApplicationExecutablePath);
         inventoryCoordinator = new(
             nativeInventoryProvider,
             legacyInventoryProvider,
@@ -1307,7 +1322,9 @@ internal sealed class DesktopAgentRuntime :
             var anyLive = false;
             foreach (var registration in registrations)
             {
-                if (IsProcessLive(registration.ProcessId))
+                if (processIncarnationVerifier.Matches(
+                        registration,
+                        mainApplicationExecutablePath))
                 {
                     anyLive = true;
                 }
@@ -3051,19 +3068,6 @@ internal sealed class DesktopAgentRuntime :
             string.Empty,
             ApplicationMessageSeverity.Warning,
             []);
-
-    private static bool IsProcessLive(int processId)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
 
     private static DateTimeOffset GetProcessStartedAtUtc(int processId) =>
         AgentClientProcessVerifier.TryGetStartedAtUtc(processId)

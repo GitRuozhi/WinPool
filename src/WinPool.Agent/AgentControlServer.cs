@@ -237,6 +237,8 @@ public sealed class CurrentUserAgentControlServer
         persistProcess;
     private readonly Func<int, bool> verifyClientProcess;
     private readonly Func<int, DateTimeOffset?> readClientProcessStartedAtUtc;
+    private readonly IProcessIncarnationVerifier? processIncarnationVerifier;
+    private readonly string? expectedClientExecutablePath;
     private readonly AgentEventHub eventHub;
 
     public CurrentUserAgentControlServer(
@@ -251,7 +253,9 @@ public sealed class CurrentUserAgentControlServer
         Func<ProcessRegistration, CancellationToken, Task>? persistProcess = null,
         Func<int, bool>? verifyClientProcess = null,
         AgentEventHub? eventHub = null,
-        Func<int, DateTimeOffset?>? readClientProcessStartedAtUtc = null)
+        Func<int, DateTimeOffset?>? readClientProcessStartedAtUtc = null,
+        IProcessIncarnationVerifier? processIncarnationVerifier = null,
+        string? expectedClientExecutablePath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedUserSidHash);
@@ -274,7 +278,24 @@ public sealed class CurrentUserAgentControlServer
         this.codec = codec ?? new AgentControlProtocolCodec();
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.persistProcess = persistProcess;
-        this.verifyClientProcess = verifyClientProcess ?? (_ => true);
+        if (processIncarnationVerifier is not null
+            && (string.IsNullOrWhiteSpace(expectedClientExecutablePath)
+                || !Path.IsPathFullyQualified(expectedClientExecutablePath)))
+        {
+            throw new ArgumentException(
+                "An expected client executable path is required with an incarnation verifier.",
+                nameof(expectedClientExecutablePath));
+        }
+
+        this.processIncarnationVerifier = processIncarnationVerifier;
+        this.expectedClientExecutablePath = expectedClientExecutablePath is null
+            ? null
+            : Path.GetFullPath(expectedClientExecutablePath);
+        this.verifyClientProcess = processIncarnationVerifier is null
+            ? verifyClientProcess ?? (_ => true)
+            : processId => processIncarnationVerifier.IsExpectedExecutable(
+                processId,
+                this.expectedClientExecutablePath!);
         this.eventHub = eventHub ?? new AgentEventHub();
         this.readClientProcessStartedAtUtc = readClientProcessStartedAtUtc
             ?? AgentClientProcessVerifier.TryGetStartedAtUtc;
@@ -332,8 +353,12 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-image-mismatch");
         }
+        var clientWitness = validation.IsAccepted
+            ? processIncarnationVerifier?.TryRead(handshake.ProcessId)
+            : null;
         var clientStartedAtUtc = validation.IsAccepted
-            ? readClientProcessStartedAtUtc(handshake.ProcessId)
+            ? clientWitness?.StartedAtUtc
+                ?? readClientProcessStartedAtUtc(handshake.ProcessId)
             : null;
         if (validation.IsAccepted && clientStartedAtUtc is null)
         {
@@ -502,55 +527,11 @@ public sealed class CurrentUserAgentControlServer
 
 public static class AgentClientProcessVerifier
 {
-    public static DateTimeOffset? TryGetStartedAtUtc(int processId)
-    {
-        if (processId <= 0)
-        {
-            return null;
-        }
+    private static readonly WindowsProcessIncarnationVerifier verifier = new();
 
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return process.HasExited
-                ? null
-                : process.StartTime.ToUniversalTime();
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException
-                or InvalidOperationException
-                or System.ComponentModel.Win32Exception
-                or NotSupportedException)
-        {
-            return null;
-        }
-    }
+    public static DateTimeOffset? TryGetStartedAtUtc(int processId)
+        => verifier.TryRead(processId)?.StartedAtUtc;
 
     public static bool IsExpectedExecutable(int processId, string expectedExecutablePath)
-    {
-        if (processId <= 0 ||
-            string.IsNullOrWhiteSpace(expectedExecutablePath) ||
-            !Path.IsPathFullyQualified(expectedExecutablePath))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            var actual = process.MainModule?.FileName;
-            return actual is not null &&
-                   StringComparer.OrdinalIgnoreCase.Equals(
-                       Path.GetFullPath(actual),
-                       Path.GetFullPath(expectedExecutablePath));
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException
-                or InvalidOperationException
-                or System.ComponentModel.Win32Exception
-                or NotSupportedException)
-        {
-            return false;
-        }
-    }
+        => verifier.IsExpectedExecutable(processId, expectedExecutablePath);
 }
