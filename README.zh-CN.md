@@ -10,13 +10,14 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.35 是当前 candidate build。它保留 App、Agent、TestWorker、Broker 四进程架构，并完成 Local
+V0.35 是用户确认的当前版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并完成 Local
 identity、event-watcher 隔离、worker 终态、bounded shutdown、schema-12 验证以及 Main App
 process-incarnation 缺陷收口。IPC 协议保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
 
-V0.34 仍是最近的用户确认版本。V0.35 尚未获得用户确认、推送、打 tag、发布、上传或部署。原生
-UI、托盘、UAC、设备、外部工具、数据位置和 V0.35 M01--M04 用例继续保持 `unverified`；candidate
-状态不代表伪造这些结果。
+用户于 2026-08-12 在 507 项 Release 自动测试、零警告 Release 构建、依赖审计和可复现四进程
+staging 通过后确认 V0.35。原生 UI、托盘、UAC、设备、外部工具、数据位置和 V0.35 M01--M04
+用例继续保持 `unverified`；确认版本不代表伪造这些结果。该确认授权对应的文档归档、本地 Git
+checkpoint、`main` 推送和本机 portable 部署，但不授权 tag、二进制上传或 GitHub Release。
 
 ## 安全边界
 
@@ -45,7 +46,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已验收的
-  V0.34 Plan。
+  V0.35 Plan。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
 - [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 

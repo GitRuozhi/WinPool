@@ -2,15 +2,15 @@
 
 ## 0. 状态、授权与基线
 
-- 状态：`candidate_validated_pending_user_confirmation`
-- 用户确认：2026-08-12；授权本计划范围内的实现、验证与路径限定的本地 Git 提交
+- 状态：`accepted`
+- 用户确认：2026-08-12；确认 V0.35，并授权归档、Git 提交、推送 `main` 与本机 portable 部署
 - 目标项目版本：V0.35（`c=5`）
 - 基线版本：V0.34
 - 代码基线：`5cc676b4873c29e7b00af9fd48e689627eb1dad4`
 - 计划来源：`docs/V0.35补充.txt`（原始手工补充保持不改）
 - IPC：保持 protocol 3
 - SQLite：保持 schema 12；只增加只读结构验证，不迁移、不自动修复
-- remote gate：`not_required`
+- remote gate：`authorized`
 
 本文件是 V0.35 唯一活动且权威的执行计划。它将手工补充中已确认的六项缺陷改写为可验证的
 实现合同，并补齐对当前 V0.34 代码必要的并发、身份和提交边界。授权不包括 push、tag、
@@ -179,5 +179,14 @@ TestWorker、Broker 全部 ProductVersion=V0.35，IPC=3，schema=12，且不含 
   warnings / 0 errors，`dotnet list package --vulnerable --include-transitive` 未报告 vulnerable package。
 - self-contained 四进程 staging 已通过：`D:\WinPool-V035-Candidate-Staging-Final-20260812`；唯一的 App、
   Agent、TestWorker、Broker 均报告 `V0.35`，布局和禁入文件检查通过。
-- V35-07 已完成：版本 iteration 从 `4` 更新为 `5`，README/CHANGELOG 仅声明 `V0.35 candidate`。
-  本 Plan 保持活动状态，等待用户确认；没有执行 push、tag、release、上传或部署。
+- V35-07 已完成：版本 iteration 从 `4` 更新为 `5`，README/CHANGELOG 已在用户确认后更新为
+  `V0.35`。本 Plan 已冻结为归档；没有授权 tag、release 或二进制上传。
+
+## 7. V0.35 验收记录（2026-08-12）
+
+- 用户明确确认 V0.35 为当前项目版本，并授权归档本 Plan、更新事实文档、创建本地 Git checkpoint、
+  推送 `main` 与部署到 `D:\Program_Portable`。
+- 507 项 Release 自动测试、零警告 Release 构建、依赖审计和最终四进程 self-contained staging
+  `D:\WinPool-V035-Candidate-Staging-Final-20260812` 均通过。
+- M01--M04 与继承的原生/人工用例继续保持 `unverified`；确认不代表这些用例通过。
+- 未授权 tag、GitHub Release、二进制上传或任何真实存储结构修改。

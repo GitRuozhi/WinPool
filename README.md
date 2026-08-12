@@ -7,16 +7,19 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.35 is the current candidate build. It retains the multi-process
+V0.35 is the current user-confirmed version. It retains the multi-process
 App/Agent/TestWorker/Broker architecture and closes the Local identity,
 event-watcher isolation, worker terminal-state, bounded shutdown, schema-12
 verification, and Main App process-incarnation defects. IPC remains protocol 3
 and the Agent-owned SQLite contract remains schema 12.
 
-V0.34 remains the latest user-confirmed version. V0.35 is not yet user
-confirmed, pushed, tagged, released, uploaded, or deployed. Native UI, tray,
-UAC, device, external-tool, data-location, and V0.35 M01--M04 cases remain
-`unverified`; candidate status does not fabricate those results.
+The user accepted V0.35 on 2026-08-12 after 507 automatic Release tests, a
+warning-free Release build, dependency audit, and reproducible four-process
+staging passed. Native UI, tray, UAC, device, external-tool, data-location,
+and V0.35 M01--M04 cases remain `unverified`; acceptance does not fabricate
+those results. This confirmation authorizes the associated documentation
+archive, local Git checkpoint, `main` push, and local portable deployment, but
+not a tag, binary upload, or GitHub Release.
 
 ## Safety boundary
 
@@ -49,7 +52,7 @@ The reproducible self-contained staging command is documented in
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
-  including the accepted V0.34 Plan.
+  including the accepted V0.35 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

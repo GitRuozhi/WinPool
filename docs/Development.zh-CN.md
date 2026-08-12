@@ -65,7 +65,7 @@ tests/
 
 标准数据根为 `%LocalAppData%\WinPool`。便携模式使用可执行文件旁可写的 `Data` 目录。标准根中的 `storage-location.json` 指针选择模式；迁移保留旧副本并验证目标。
 
-正常启动使用 Agent 独占的 SQLite schema 12 保存采集、工作区状态、模拟文档、监控、测试历史、证据和恢复数据。V0.34 只创建或打开 schema 12 数据；发现旧 schema 时明确拒绝且不迁移、不改写。JSON 仅用于明确支持的无 Agent 开发回退。
+正常启动使用 Agent 独占的 SQLite schema 12 保存采集、工作区状态、模拟文档、监控、测试历史、证据和恢复数据。V0.35 只创建或打开 schema 12 数据；发现旧 schema 时明确拒绝且不迁移、不改写；schema 12 结构不匹配时也会以只读验证拒绝。JSON 仅用于明确支持的无 Agent 开发回退。
 
 WinPool 通过 Windows App SDK 应用生命周期实现单实例。普通重复启动激活已有窗口。批准的提权交接在提权后继进程占用实例键前等待旧进程退出。执行模式永不持久化。
 

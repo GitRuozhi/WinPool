@@ -75,7 +75,7 @@ writable `Data` directory beside the executable. The standard-root
 and verify the destination.
 
 Normal launches use Agent-owned SQLite schema 12 for inventory, workspace state,
-simulation documents, monitoring, test history, evidence, and recovery. V0.34
+simulation documents, monitoring, test history, evidence, and recovery. V0.35
 creates or reopens only schema 12 data; older schemas are rejected without being
 migrated or changed. JSON stores remain only for explicitly supported no-Agent
 development fallbacks.

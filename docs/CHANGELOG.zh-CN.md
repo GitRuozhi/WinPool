@@ -9,7 +9,7 @@
 
 ## Unreleased
 
-## V0.35 candidate — 2026-08-12
+## V0.35 — 2026-08-12
 
 - 将 Agent 持有的 Local system identity 固定为 SQLite 权威记录，comparison-first capture 不再创建新的 Local `SystemId`。
 - 隔离卡顿的 App-side event watcher，将队列溢出作为明确 event gap，并在恢复后为健康 watcher 重新提供 snapshot。
@@ -18,7 +18,10 @@
 - schema-12 数据库的表、列、索引或外键与只读 current-schema contract 不符时会被拒绝。
 - Main App 的 handshake 与 shutdown 统一检查 PID、可执行文件镜像和进程启动 incarnation witness。
 
-V0.35 是等待最终验证和用户确认的本地 candidate，不代表已推送、打 tag、发布二进制、GitHub Release、上传或部署。
+用户明确确认 V0.35：507 项 Release 自动测试、零警告 Release 构建、依赖审计，以及
+`D:\WinPool-V035-Candidate-Staging-Final-20260812` 的四进程 self-contained staging 均已通过。
+原生/人工用例继续保持 `unverified`；确认不代表将其写为通过。该决定授权文档归档、本地 checkpoint、
+`main` 推送和本机 portable 部署；未授权 tag、二进制上传或 GitHub Release。
 
 ## V0.34 — 2026-08-11
 

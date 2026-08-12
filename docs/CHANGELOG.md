@@ -7,7 +7,7 @@ This file records results that actually occurred. Planned work belongs in
 
 ## Unreleased
 
-## V0.35 candidate — 2026-08-12
+## V0.35 — 2026-08-12
 
 - Made the Agent-owned Local system identity authoritative in SQLite so
   comparison-first capture cannot create a new Local `SystemId`.
@@ -22,8 +22,13 @@ This file records results that actually occurred. Planned work belongs in
 - Unified Main App handshake and shutdown checks around PID, executable image,
   and process-start incarnation witnesses.
 
-V0.35 is a local candidate pending final verification and user confirmation.
-It is not a push, tag, binary release, GitHub Release, upload, or deployment.
+The user explicitly accepted V0.35 after 507 automatic Release tests, a
+warning-free Release build, dependency audit, and four-process self-contained
+staging at `D:\WinPool-V035-Candidate-Staging-Final-20260812` passed.
+Native/manual cases remain `unverified`; acceptance does not represent them as
+passing. The decision authorizes the documentation archive, local checkpoint,
+`main` push, and local portable deployment. No tag, binary upload, or GitHub
+Release is authorized.
 
 ## V0.34 — 2026-08-11
 
