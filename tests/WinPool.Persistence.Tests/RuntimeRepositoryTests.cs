@@ -148,12 +148,60 @@ public sealed class RuntimeRepositoryTests
             OwnsJobObject: true,
             ShutdownDeadlineUtc: null);
         var writer = new WorkerProcessRepository(database.Store, lease);
-        await writer.SaveAsync(sessionId, expected);
+        Assert.Equal(
+            WorkerProcessSaveResult.Applied,
+            await writer.SaveAsync(sessionId, expected));
 
         var actual = Assert.Single(
             await new WorkerProcessRepository(database.Store).ListAsync(sessionId));
 
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public async Task WorkerProcessTerminalStateRejectsLateHeartbeat()
+    {
+        await using var database = await RuntimeDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var sessionId = new AgentInstanceId(Guid.NewGuid());
+        var started = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
+        await new AgentSessionRepository(database.Store, lease)
+            .StartAsync(sessionId, 10, started);
+        var running = new ProcessRegistration(
+            ProcessInstanceId.New(),
+            42,
+            WorkerKind.Test,
+            CorrelationId.New(),
+            started,
+            started.AddSeconds(5),
+            SupervisedProcessState.Running,
+            OwnsJobObject: true,
+            ShutdownDeadlineUtc: null);
+        var repository = new WorkerProcessRepository(database.Store, lease);
+        Assert.Equal(
+            WorkerProcessSaveResult.Applied,
+            await repository.SaveAsync(sessionId, running));
+        var exited = running with
+        {
+            State = SupervisedProcessState.Exited,
+            LastHeartbeatUtc = started.AddSeconds(10)
+        };
+        Assert.Equal(
+            WorkerProcessSaveResult.Applied,
+            await repository.SaveAsync(sessionId, exited));
+
+        var lateHeartbeat = running with
+        {
+            LastHeartbeatUtc = started.AddMinutes(1)
+        };
+        Assert.Equal(
+            WorkerProcessSaveResult.IgnoredStale,
+            await repository.SaveAsync(sessionId, lateHeartbeat));
+
+        var stored = Assert.Single(await new WorkerProcessRepository(database.Store)
+            .ListAsync(sessionId));
+        Assert.Equal(SupervisedProcessState.Exited, stored.State);
+        Assert.Equal(exited.LastHeartbeatUtc, stored.LastHeartbeatUtc);
     }
 
     [Fact]

@@ -407,6 +407,12 @@ public sealed class ExternalToolStateRepository
     }
 }
 
+public enum WorkerProcessSaveResult
+{
+    Applied,
+    IgnoredStale
+}
+
 public sealed class WorkerProcessRepository
 {
     private readonly WinPoolSqliteStore store;
@@ -426,7 +432,7 @@ public sealed class WorkerProcessRepository
         writeOwner.AssertOwnership(store);
     }
 
-    public async Task SaveAsync(
+    public async Task<WorkerProcessSaveResult> SaveAsync(
         AgentInstanceId agentSessionId,
         ProcessRegistration registration,
         CancellationToken cancellationToken = default)
@@ -445,6 +451,12 @@ public sealed class WorkerProcessRepository
             throw new ArgumentException(
                 "Process instance ID is required.",
                 nameof(registration));
+        }
+        if (!Enum.IsDefined(registration.State))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(registration),
+                "Worker process state is invalid.");
         }
         AssertWriteOwnership();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
@@ -466,7 +478,17 @@ public sealed class WorkerProcessRepository
                 last_heartbeat_utc_ms = excluded.last_heartbeat_utc_ms,
                 state = excluded.state,
                 owns_job_object = excluded.owns_job_object,
-                shutdown_deadline_utc_ms = excluded.shutdown_deadline_utc_ms;
+                shutdown_deadline_utc_ms = excluded.shutdown_deadline_utc_ms
+            WHERE
+                worker_processes.state = excluded.state
+                OR (worker_processes.state = $starting
+                    AND excluded.state IN ($running, $failed))
+                OR (worker_processes.state = $running
+                    AND excluded.state IN ($stopping, $exited, $unresponsive, $failed))
+                OR (worker_processes.state = $stopping
+                    AND excluded.state IN ($exited, $failed))
+                OR (worker_processes.state = $unresponsive
+                    AND excluded.state IN ($running, $exited, $failed));
             """;
         command.Parameters.AddWithValue(
             "$instance",
@@ -484,6 +506,14 @@ public sealed class WorkerProcessRepository
             "$heartbeat",
             registration.LastHeartbeatUtc.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$state", (int)registration.State);
+        command.Parameters.AddWithValue("$starting", (int)SupervisedProcessState.Starting);
+        command.Parameters.AddWithValue("$running", (int)SupervisedProcessState.Running);
+        command.Parameters.AddWithValue("$stopping", (int)SupervisedProcessState.Stopping);
+        command.Parameters.AddWithValue("$exited", (int)SupervisedProcessState.Exited);
+        command.Parameters.AddWithValue(
+            "$unresponsive",
+            (int)SupervisedProcessState.Unresponsive);
+        command.Parameters.AddWithValue("$failed", (int)SupervisedProcessState.Failed);
         command.Parameters.AddWithValue(
             "$ownsJob",
             registration.OwnsJobObject ? 1 : 0);
@@ -492,7 +522,9 @@ public sealed class WorkerProcessRepository
             registration.ShutdownDeadlineUtc is null
                 ? DBNull.Value
                 : registration.ShutdownDeadlineUtc.Value.ToUnixTimeMilliseconds());
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 0
+            ? WorkerProcessSaveResult.IgnoredStale
+            : WorkerProcessSaveResult.Applied;
     }
 
     public async Task<IReadOnlyList<ProcessRegistration>> ListAsync(
