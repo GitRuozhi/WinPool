@@ -17,7 +17,8 @@ namespace WinPool.Agent;
 
 internal sealed class DesktopAgentRuntime :
     IAgentRequestOperations,
-    IAgentShutdownActions
+    IAgentShutdownActions,
+    IAgentShutdownTerminalActions
 {
     private readonly TrayApplicationContext tray;
     private readonly AgentInstanceId instanceId;
@@ -1337,6 +1338,7 @@ internal sealed class DesktopAgentRuntime :
 
     public Task RemoveTrayIconAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         tray.HideTrayIcon();
         return Task.CompletedTask;
     }
@@ -1355,6 +1357,42 @@ internal sealed class DesktopAgentRuntime :
         {
         }
 
+        tray.ExitAgentThread();
+    }
+
+    Task IAgentShutdownTerminalActions.CloseNamedPipesAsync(
+        AgentShutdownAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        attempt.ThrowIfTerminalEffectIsNotAllowed(cancellationToken);
+        return CloseNamedPipesAsync(cancellationToken);
+    }
+
+    Task IAgentShutdownTerminalActions.RemoveTrayIconAsync(
+        AgentShutdownAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        attempt.ThrowIfTerminalEffectIsNotAllowed(cancellationToken);
+        return RemoveTrayIconAsync(cancellationToken);
+    }
+
+    async Task IAgentShutdownTerminalActions.ExitAgentAsync(
+        AgentShutdownAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        storageHealthEventCancellation.Cancel();
+        try
+        {
+            await storageHealthEventTask.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested ||
+            storageHealthEventCancellation.IsCancellationRequested)
+        {
+        }
+
+        attempt.ThrowIfTerminalEffectIsNotAllowed(cancellationToken);
         tray.ExitAgentThread();
     }
 

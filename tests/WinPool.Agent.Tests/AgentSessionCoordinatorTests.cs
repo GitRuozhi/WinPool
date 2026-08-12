@@ -179,6 +179,45 @@ public sealed class AgentSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task NonCooperativeShutdownStepTimesOutWithoutBlockingWorkflow()
+    {
+        var actions = new RecordingShutdownActions
+        {
+            StepToIgnoreCancellation = AgentShutdownStep.StopMonitoring
+        };
+        var workflow = new AgentShutdownWorkflow(
+            actions,
+            new AgentProcessRegistry(),
+            TimeSpan.FromMilliseconds(50));
+
+        var execution = await workflow.ExecuteAsync(ShutdownReason.TrayExit)
+            .WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Contains(AgentShutdownStep.StopMonitoring, execution.FailedSteps);
+        Assert.DoesNotContain(AgentShutdownStep.ExitAgent, execution.CompletedSteps);
+        actions.ContinueNonCooperativeStep.TrySetResult();
+    }
+
+    [Fact]
+    public async Task TimedOutTerminalActionCannotCommitAfterItsAttemptExpires()
+    {
+        var actions = new FencedTerminalShutdownActions();
+        var workflow = new AgentShutdownWorkflow(
+            actions,
+            new AgentProcessRegistry(),
+            TimeSpan.FromMilliseconds(50));
+        var executionTask = workflow.ExecuteAsync(ShutdownReason.TrayExit);
+        await actions.ExitEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var execution = await executionTask.WaitAsync(TimeSpan.FromSeconds(2));
+        actions.AllowLateExit.TrySetResult();
+        await actions.LateExitFinished.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Contains(AgentShutdownStep.ExitAgent, execution.FailedSteps);
+        Assert.False(actions.ExitCommitted);
+    }
+
+    [Fact]
     public async Task StorageLocationSwitchStopsAgentWithoutClosingMainApplication()
     {
         var actions = new RecordingShutdownActions();
@@ -454,12 +493,17 @@ public sealed class AgentSessionCoordinatorTests
 
         public AgentShutdownStep? StepToHang { get; init; }
 
+        public AgentShutdownStep? StepToIgnoreCancellation { get; init; }
+
         public List<AgentShutdownStep> Calls { get; } = [];
 
         public TaskCompletionSource NotificationEntered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource ContinueNotification { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ContinueNonCooperativeStep { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async Task NotifyClientsAsync(
@@ -526,6 +570,10 @@ public sealed class AgentSessionCoordinatorTests
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
+            else if (StepToIgnoreCancellation == step)
+            {
+                await ContinueNonCooperativeStep.Task;
+            }
         }
 
         private void Record(AgentShutdownStep step)
@@ -534,6 +582,63 @@ public sealed class AgentSessionCoordinatorTests
             if (StepToFail == step)
             {
                 throw new ControlledShutdownStepException();
+            }
+        }
+    }
+
+    private sealed class FencedTerminalShutdownActions :
+        IAgentShutdownActions,
+        IAgentShutdownTerminalActions
+    {
+        public bool HasActiveTest => false;
+
+        public bool ExitCommitted { get; private set; }
+
+        public TaskCompletionSource ExitEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowLateExit { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource LateExitFinished { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task NotifyClientsAsync(ShutdownReason reason, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task RequestTestCancellationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task TerminateExternalToolJobsAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopMonitoringAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<bool> RestoreTemporarySystemStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+        public Task<int> FlushSqliteQueuesAsync(CancellationToken cancellationToken) => Task.FromResult(0);
+        public Task CloseNamedPipesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task CloseMainApplicationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopSupervisedProcessesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task RemoveTrayIconAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task ExitAgentAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task CloseNamedPipesAsync(AgentShutdownAttempt attempt, CancellationToken cancellationToken)
+        {
+            attempt.ThrowIfTerminalEffectIsNotAllowed(cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveTrayIconAsync(AgentShutdownAttempt attempt, CancellationToken cancellationToken)
+        {
+            attempt.ThrowIfTerminalEffectIsNotAllowed(cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        public async Task ExitAgentAsync(AgentShutdownAttempt attempt, CancellationToken cancellationToken)
+        {
+            ExitEntered.TrySetResult();
+            await AllowLateExit.Task;
+            try
+            {
+                attempt.ThrowIfTerminalEffectIsNotAllowed(cancellationToken);
+                ExitCommitted = true;
+            }
+            finally
+            {
+                LateExitFinished.TrySetResult();
             }
         }
     }
