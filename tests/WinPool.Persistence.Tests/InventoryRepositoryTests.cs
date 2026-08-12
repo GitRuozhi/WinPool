@@ -177,6 +177,67 @@ public sealed class InventoryRepositoryTests
         Assert.Equal(payload, loaded.Document);
     }
 
+    [Fact]
+    public async Task LocalIdentityResolverCreatesOneIdentityForConcurrentFirstCapture()
+    {
+        await using var database = await InventoryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var resolver = new LocalSystemIdentityResolver(database.Store, lease);
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => resolver.ResolveAsync("LOCALHOST"))
+            .ToArray();
+
+        var resolutions = await Task.WhenAll(tasks);
+
+        var canonical = Assert.Single(resolutions.Select(item => item.SystemId).Distinct());
+        await using var connection = await database.Store.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM systems
+            WHERE kind = $kind AND machine_binding_hash = $binding;
+            """;
+        command.Parameters.AddWithValue("$kind", (int)PersistedSystemKind.Local);
+        command.Parameters.AddWithValue(
+            "$binding",
+            LocalSystemIdentityResolver.CreateAuthorityBinding("LOCALHOST"));
+        var count = Convert.ToInt64(
+            await command.ExecuteScalarAsync(),
+            System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(1, count);
+        Assert.Equal(canonical, resolutions[0].SystemId);
+    }
+
+    [Fact]
+    public async Task LocalIdentityResolverUsesStablePreferredFragmentAndStopsCreatingNewRows()
+    {
+        await using var database = await InventoryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var snapshots = new InventorySnapshotRepository(database.Store, lease);
+        var resolver = new LocalSystemIdentityResolver(database.Store, lease);
+        var first = SystemId.New();
+        var preferred = SystemId.New();
+        var binding = LocalSystemIdentityResolver.CreateAuthorityBinding("LOCALHOST");
+        await snapshots.SaveAsync(
+            CreateSnapshot("first", DateTimeOffset.FromUnixTimeMilliseconds(1), first),
+            PersistedSystemKind.Local,
+            "LOCALHOST",
+            canonicalLocalSystemBinding: binding);
+        await snapshots.SaveAsync(
+            CreateSnapshot("preferred", DateTimeOffset.FromUnixTimeMilliseconds(2), preferred),
+            PersistedSystemKind.Local,
+            "LOCALHOST",
+            canonicalLocalSystemBinding: binding);
+
+        var resolved = await resolver.ResolveAsync("LOCALHOST", preferred);
+        var repeated = await resolver.ResolveAsync("LOCALHOST", preferred);
+
+        Assert.Equal(preferred, resolved.SystemId);
+        Assert.Equal(preferred, repeated.SystemId);
+        Assert.True(resolved.HasFragmentedHistory);
+        Assert.True(repeated.HasFragmentedHistory);
+    }
+
     private static InventorySnapshot CreateSnapshot(
         string version,
         DateTimeOffset capturedAt,

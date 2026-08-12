@@ -193,6 +193,7 @@ internal static class Program
                 new InventorySnapshotRepository(store, writeOwner),
                 new InventoryComparisonRepository(store, writeOwner),
                 new LocalInventoryDocumentRepository(store, writeOwner),
+                new LocalSystemIdentityResolver(store, writeOwner),
                 testWorkerHost,
                 elevatedBrokerHost,
                 systemSupportAudit,

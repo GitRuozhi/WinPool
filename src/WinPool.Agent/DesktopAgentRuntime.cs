@@ -78,6 +78,7 @@ internal sealed class DesktopAgentRuntime :
         InventorySnapshotRepository inventorySnapshots,
         InventoryComparisonRepository inventoryComparisons,
         LocalInventoryDocumentRepository localInventoryDocument,
+        LocalSystemIdentityResolver localSystemIdentity,
         TestWorkerProcessHost testWorkerHost,
         ElevatedBrokerProcessHost elevatedBrokerHost,
         SystemSupportAuditRepository systemSupportAuditRepository,
@@ -131,6 +132,7 @@ internal sealed class DesktopAgentRuntime :
             inventorySnapshots,
             inventoryComparisons,
             localInventoryDocument,
+            localSystemIdentity,
             physicalDiskDeviceResolver ?? new WindowsPhysicalDiskDeviceResolver());
         this.testWorkerHost = testWorkerHost
             ?? throw new ArgumentNullException(nameof(testWorkerHost));

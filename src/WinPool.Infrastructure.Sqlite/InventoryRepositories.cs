@@ -51,7 +51,8 @@ public sealed class InventorySnapshotRepository
         InventorySnapshot snapshot,
         PersistedSystemKind systemKind,
         string displayName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? canonicalLocalSystemBinding = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
@@ -64,6 +65,11 @@ public sealed class InventorySnapshotRepository
 
         AssertWriteOwnership();
         var sanitized = InventoryPersistenceSanitizer.Sanitize(snapshot);
+        var persistedMachineBinding = systemKind == PersistedSystemKind.Local
+            ? !string.IsNullOrWhiteSpace(canonicalLocalSystemBinding)
+                ? canonicalLocalSystemBinding
+                : sanitized.MachineBinding
+            : sanitized.MachineBinding;
         var snapshotId = Guid.NewGuid();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var transaction =
@@ -85,7 +91,7 @@ public sealed class InventorySnapshotRepository
             systemCommand.Parameters.AddWithValue("$system", Id(snapshot.SystemId.Value));
             systemCommand.Parameters.AddWithValue("$kind", (int)systemKind);
             systemCommand.Parameters.AddWithValue("$name", displayName.Trim());
-            systemCommand.Parameters.AddWithValue("$binding", sanitized.MachineBinding);
+            systemCommand.Parameters.AddWithValue("$binding", persistedMachineBinding);
             systemCommand.Parameters.AddWithValue(
                 "$created",
                 sanitized.CapturedAtUtc.ToUnixTimeMilliseconds());

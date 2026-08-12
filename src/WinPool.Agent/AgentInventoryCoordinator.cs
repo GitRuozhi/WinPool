@@ -16,7 +16,9 @@ internal sealed class AgentInventoryCoordinator
     private readonly InventorySnapshotRepository snapshots;
     private readonly InventoryComparisonRepository comparisons;
     private readonly LocalInventoryDocumentRepository localDocument;
+    private readonly LocalSystemIdentityResolver localIdentity;
     private readonly ConcurrentDictionary<int, string> physicalDeviceIds = new();
+    private readonly SemaphoreSlim localCaptureGate = new(1, 1);
 
     public AgentInventoryCoordinator(
         IInventoryProvider nativeProvider,
@@ -26,6 +28,7 @@ internal sealed class AgentInventoryCoordinator
         InventorySnapshotRepository snapshots,
         InventoryComparisonRepository comparisons,
         LocalInventoryDocumentRepository localDocument,
+        LocalSystemIdentityResolver localIdentity,
         IPhysicalDiskDeviceResolver deviceResolver)
     {
         this.nativeProvider = nativeProvider ?? throw new ArgumentNullException(nameof(nativeProvider));
@@ -35,6 +38,7 @@ internal sealed class AgentInventoryCoordinator
         this.snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
         this.comparisons = comparisons ?? throw new ArgumentNullException(nameof(comparisons));
         this.localDocument = localDocument ?? throw new ArgumentNullException(nameof(localDocument));
+        this.localIdentity = localIdentity ?? throw new ArgumentNullException(nameof(localIdentity));
         this.deviceResolver = deviceResolver ?? throw new ArgumentNullException(nameof(deviceResolver));
     }
 
@@ -59,6 +63,7 @@ internal sealed class AgentInventoryCoordinator
         CaptureAgentManageInventoryRequest request,
         CancellationToken cancellationToken)
     {
+        await localCaptureGate.WaitAsync(cancellationToken);
         try
         {
             var document = await manageProvider.CollectLocalAsync(cancellationToken);
@@ -68,9 +73,12 @@ internal sealed class AgentInventoryCoordinator
                 sanitized.SystemId,
                 sanitized.Snapshot,
                 includeSensitiveValuesInMemory: false);
-            var canonicalSystemId = await ResolveCanonicalLocalSystemIdAsync(
-                provisional.MachineBinding,
+            var preferredSystemId = await TryReadPreferredLocalSystemIdAsync(cancellationToken);
+            var identity = await localIdentity.ResolveAsync(
+                Environment.MachineName,
+                preferredSystemId,
                 cancellationToken);
+            var canonicalSystemId = identity.SystemId;
             sanitized = sanitized with { SystemId = canonicalSystemId };
             var projected = EmbeddedPowerShellInventoryProvider.Project(
                 canonicalSystemId,
@@ -80,12 +88,20 @@ internal sealed class AgentInventoryCoordinator
                 projected,
                 PersistedSystemKind.Local,
                 Environment.MachineName,
-                cancellationToken);
+                cancellationToken,
+                LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
             var payload = LocalInventoryDocumentCodec.Encode(sanitized);
+            if (LocalInventoryDocumentCodec.Decode(payload).SystemId != canonicalSystemId
+                || projected.SystemId != canonicalSystemId
+                || saved.Snapshot.SystemId != canonicalSystemId)
+            {
+                throw new InvalidDataException("The Local inventory identity is inconsistent.");
+            }
             await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
-            return ApplicationResult<AgentResponse>.Succeeded(
+            return Succeeded(
                 new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
-                request.CorrelationId);
+                request.CorrelationId,
+                identity.HasFragmentedHistory);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -101,6 +117,10 @@ internal sealed class AgentInventoryCoordinator
                 or UnauthorizedAccessException)
         {
             return Failed(request.CorrelationId, "agent.inventory.manage_capture_failed");
+        }
+        finally
+        {
+            localCaptureGate.Release();
         }
     }
 
@@ -128,92 +148,107 @@ internal sealed class AgentInventoryCoordinator
         CaptureAgentInventoryRequest request,
         CancellationToken cancellationToken)
     {
+        await localCaptureGate.WaitAsync(cancellationToken);
         var captureRequest = new InventoryRequest(
             SystemId.New(),
             InventoryCaptureReason.Comparison,
             IncludeSensitiveValuesInMemory: false);
-        var native = await nativeProvider.CaptureAsync(captureRequest, cancellationToken);
-        if (!native.IsSuccess || native.Value is null)
-        {
-            return new(native.Status, null, native.Messages, request.CorrelationId);
-        }
-
         try
         {
-            var canonicalSystemId = await ResolveCanonicalLocalSystemIdAsync(
-                native.Value.MachineBinding,
-                cancellationToken);
-            var nativeSnapshot = Rebind(native.Value, canonicalSystemId);
-            var savedNative = await snapshots.SaveAsync(
-                nativeSnapshot,
-                PersistedSystemKind.Local,
-                Environment.MachineName,
-                cancellationToken);
-            if (!request.IncludeLegacyComparison)
+            var native = await nativeProvider.CaptureAsync(captureRequest, cancellationToken);
+            if (!native.IsSuccess || native.Value is null)
             {
-                return ApplicationResult<AgentResponse>.Succeeded(
-                    new InventoryCaptureResponse(
-                        savedNative.SnapshotId,
-                        savedNative.Snapshot,
-                        null,
-                        null,
-                        null,
-                        null),
-                    request.CorrelationId);
+                return new(native.Status, null, native.Messages, request.CorrelationId);
             }
 
-            var legacy = await legacyProvider.CaptureAsync(captureRequest, cancellationToken);
-            if (!legacy.IsSuccess || legacy.Value is null)
+            try
             {
-                return new(
-                    ApplicationStatus.PartiallyCompleted,
-                    new InventoryCaptureResponse(
-                        savedNative.SnapshotId,
-                        savedNative.Snapshot,
-                        null,
-                        null,
-                        null,
-                        null),
-                    legacy.Messages,
-                    request.CorrelationId);
-            }
+                var preferredSystemId = await TryReadPreferredLocalSystemIdAsync(cancellationToken);
+                var identity = await localIdentity.ResolveAsync(
+                    Environment.MachineName,
+                    preferredSystemId,
+                    cancellationToken);
+                var canonicalSystemId = identity.SystemId;
+                var nativeSnapshot = Rebind(native.Value, canonicalSystemId);
+                var savedNative = await snapshots.SaveAsync(
+                    nativeSnapshot,
+                    PersistedSystemKind.Local,
+                    Environment.MachineName,
+                    cancellationToken,
+                    LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
+                if (!request.IncludeLegacyComparison)
+                {
+                    return Succeeded(
+                        new InventoryCaptureResponse(
+                            savedNative.SnapshotId,
+                            savedNative.Snapshot,
+                            null,
+                            null,
+                            null,
+                            null),
+                        request.CorrelationId,
+                        identity.HasFragmentedHistory);
+                }
 
-            var savedLegacy = await snapshots.SaveAsync(
-                Rebind(legacy.Value, canonicalSystemId),
-                PersistedSystemKind.Local,
-                Environment.MachineName,
-                cancellationToken);
-            var comparison = comparer.Compare(savedLegacy.Snapshot, savedNative.Snapshot);
-            var savedComparison = await comparisons.SaveAsync(
-                savedLegacy.SnapshotId,
-                savedNative.SnapshotId,
-                comparison,
-                cancellationToken);
-            return ApplicationResult<AgentResponse>.Succeeded(
-                new InventoryCaptureResponse(
-                    savedNative.SnapshotId,
-                    savedNative.Snapshot,
+                var legacy = await legacyProvider.CaptureAsync(captureRequest, cancellationToken);
+                if (!legacy.IsSuccess || legacy.Value is null)
+                {
+                    return new(
+                        ApplicationStatus.PartiallyCompleted,
+                        new InventoryCaptureResponse(
+                            savedNative.SnapshotId,
+                            savedNative.Snapshot,
+                            null,
+                            null,
+                            null,
+                            null),
+                        legacy.Messages,
+                        request.CorrelationId);
+                }
+
+                var savedLegacy = await snapshots.SaveAsync(
+                    Rebind(legacy.Value, canonicalSystemId),
+                    PersistedSystemKind.Local,
+                    Environment.MachineName,
+                    cancellationToken,
+                    LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
+                var comparison = comparer.Compare(savedLegacy.Snapshot, savedNative.Snapshot);
+                var savedComparison = await comparisons.SaveAsync(
                     savedLegacy.SnapshotId,
-                    savedLegacy.Snapshot,
-                    savedComparison.ComparisonId,
-                    savedComparison.Comparison),
-                request.CorrelationId);
+                    savedNative.SnapshotId,
+                    comparison,
+                    cancellationToken);
+                return Succeeded(
+                    new InventoryCaptureResponse(
+                        savedNative.SnapshotId,
+                        savedNative.Snapshot,
+                        savedLegacy.SnapshotId,
+                        savedLegacy.Snapshot,
+                        savedComparison.ComparisonId,
+                        savedComparison.Comparison),
+                    request.CorrelationId,
+                    identity.HasFragmentedHistory);
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or InvalidDataException
+                    or Microsoft.Data.Sqlite.SqliteException
+                    or ArgumentException)
+            {
+                return ApplicationResult<AgentResponse>.FromStatus(
+                    ApplicationStatus.Failed,
+                    request.CorrelationId,
+                    new ApplicationMessage(
+                        "agent.inventory.persistence_or_comparison_failed",
+                        "agent.inventory.persistence_or_comparison_failed",
+                        exception.Message,
+                        ApplicationMessageSeverity.Error,
+                        []));
+            }
         }
-        catch (Exception exception) when (
-            exception is IOException
-                or InvalidDataException
-                or Microsoft.Data.Sqlite.SqliteException
-                or ArgumentException)
+        finally
         {
-            return ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.Failed,
-                request.CorrelationId,
-                new ApplicationMessage(
-                    "agent.inventory.persistence_or_comparison_failed",
-                    "agent.inventory.persistence_or_comparison_failed",
-                    exception.Message,
-                    ApplicationMessageSeverity.Error,
-                    []));
+            localCaptureGate.Release();
         }
     }
 
@@ -230,25 +265,22 @@ internal sealed class AgentInventoryCoordinator
         }
     }
 
-    private async Task<SystemId> ResolveCanonicalLocalSystemIdAsync(
-        string machineBinding,
+    private async Task<SystemId?> TryReadPreferredLocalSystemIdAsync(
         CancellationToken cancellationToken)
     {
         var persisted = await localDocument.LoadAsync(cancellationToken);
         if (persisted is not null)
         {
             var previous = LocalInventoryDocumentCodec.Decode(persisted.Document);
-            var previousBinding = EmbeddedPowerShellInventoryProvider.Project(
-                previous.SystemId,
-                previous.Snapshot,
-                includeSensitiveValuesInMemory: false).MachineBinding;
-            if (StringComparer.Ordinal.Equals(previousBinding, machineBinding))
+            if (StringComparer.OrdinalIgnoreCase.Equals(
+                    previous.Snapshot.Computer.Name,
+                    Environment.MachineName))
             {
                 return previous.SystemId;
             }
         }
 
-        return SystemId.New();
+        return null;
     }
 
     private static InventorySnapshot Rebind(
@@ -290,4 +322,21 @@ internal sealed class AgentInventoryCoordinator
             ApplicationStatus.Failed,
             correlationId,
             new ApplicationMessage(code, code, string.Empty, ApplicationMessageSeverity.Error, []));
+
+    private static ApplicationResult<AgentResponse> Succeeded(
+        AgentResponse response,
+        CorrelationId correlationId,
+        bool hasFragmentedHistory) =>
+        hasFragmentedHistory
+            ? new(
+                ApplicationStatus.PartiallyCompleted,
+                response,
+                [new ApplicationMessage(
+                    "agent.inventory.local_identity_fragmented",
+                    "agent.inventory.local_identity_fragmented",
+                    string.Empty,
+                    ApplicationMessageSeverity.Warning,
+                    [])],
+                correlationId)
+            : ApplicationResult<AgentResponse>.Succeeded(response, correlationId);
 }
