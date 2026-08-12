@@ -9,6 +9,17 @@
 
 ## Unreleased
 
+## V0.35 candidate — 2026-08-12
+
+- 将 Agent 持有的 Local system identity 固定为 SQLite 权威记录，comparison-first capture 不再创建新的 Local `SystemId`。
+- 隔离卡顿的 App-side event watcher，将队列溢出作为明确 event gap，并在恢复后为健康 watcher 重新提供 snapshot。
+- `worker_processes` 的终态持久化改为不可回退，迟到写入会被原子忽略。
+- shutdown operation 即使忽略取消也会有界结束，迟到 terminal effect 受 attempt fence 约束。
+- schema-12 数据库的表、列、索引或外键与只读 current-schema contract 不符时会被拒绝。
+- Main App 的 handshake 与 shutdown 统一检查 PID、可执行文件镜像和进程启动 incarnation witness。
+
+V0.35 是等待最终验证和用户确认的本地 candidate，不代表已推送、打 tag、发布二进制、GitHub Release、上传或部署。
+
 ## V0.34 — 2026-08-11
 
 - 所有受监督进程更新均绑定进程实例 ID、PID 与 OS 启动时间 witness；IPC 协议提升为 3。

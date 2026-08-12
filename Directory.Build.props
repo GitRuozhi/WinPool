@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
-    <!-- Va.bc: a=major, b=minor, c=one-digit iteration. V0.34 is the candidate project version. -->
+    <!-- Va.bc: a=major, b=minor, c=one-digit iteration. V0.35 is the candidate project version. -->
     <WinPoolVersionMajor>0</WinPoolVersionMajor>
     <WinPoolVersionMinor>3</WinPoolVersionMinor>
-    <WinPoolVersionIteration>4</WinPoolVersionIteration>
+    <WinPoolVersionIteration>5</WinPoolVersionIteration>
     <WinPoolArchitectureVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)</WinPoolArchitectureVersion>
     <WinPoolVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)$(WinPoolVersionIteration)</WinPoolVersion>
 

@@ -2,7 +2,7 @@
 
 ## 0. 状态、授权与基线
 
-- 状态：`confirmed_execution`
+- 状态：`candidate_validated_pending_user_confirmation`
 - 用户确认：2026-08-12；授权本计划范围内的实现、验证与路径限定的本地 Git 提交
 - 目标项目版本：V0.35（`c=5`）
 - 基线版本：V0.34
@@ -170,3 +170,14 @@ TestWorker、Broker 全部 ProductVersion=V0.35，IPC=3，schema=12，且不含 
 用户确认 V0.35 前，README 和 CHANGELOG 只能称 `V0.35 candidate`。确认后才更新 current version、冻结
 本 Plan 至 `docs/Archive/V0.35/` 并删除 active Plan。push、tag、release、binary upload 和 deployment
 仍需要新的明确授权。
+
+## 6. 实际执行记录（2026-08-12）
+
+- V35-01 至 V35-06 均已完成，分别保留为本地 implementation commits：`ab83458`、`442f8a4`、
+  `cf45748`、`d1868f0`、`e57093d`、`5338603`。
+- 全量 Release 门禁已完成：restore 成功、串行 `dotnet test` 为 507/507 通过、`dotnet build` 为 0
+  warnings / 0 errors，`dotnet list package --vulnerable --include-transitive` 未报告 vulnerable package。
+- self-contained 四进程 staging 已通过：`D:\WinPool-V035-Candidate-Staging-Final-20260812`；唯一的 App、
+  Agent、TestWorker、Broker 均报告 `V0.35`，布局和禁入文件检查通过。
+- V35-07 已完成：版本 iteration 从 `4` 更新为 `5`，README/CHANGELOG 仅声明 `V0.35 candidate`。
+  本 Plan 保持活动状态，等待用户确认；没有执行 push、tag、release、上传或部署。

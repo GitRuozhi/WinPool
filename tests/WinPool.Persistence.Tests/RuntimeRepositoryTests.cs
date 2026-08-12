@@ -202,6 +202,15 @@ public sealed class RuntimeRepositoryTests
             .ListAsync(sessionId));
         Assert.Equal(SupervisedProcessState.Exited, stored.State);
         Assert.Equal(exited.LastHeartbeatUtc, stored.LastHeartbeatUtc);
+
+        Assert.Equal(
+            WorkerProcessSaveResult.IgnoredStale,
+            await repository.SaveAsync(
+                sessionId,
+                exited with { LastHeartbeatUtc = started.AddMinutes(2) }));
+        stored = Assert.Single(await new WorkerProcessRepository(database.Store)
+            .ListAsync(sessionId));
+        Assert.Equal(exited.LastHeartbeatUtc, stored.LastHeartbeatUtc);
     }
 
     [Fact]

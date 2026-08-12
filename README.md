@@ -7,19 +7,16 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.34 is the current user-confirmed version. It retains the multi-process
-App/Agent/TestWorker/Broker architecture and closes the local identity,
-storage-boundary, process-lifecycle, event-recovery, and tool-stream defects
-identified after V0.33. IPC is protocol 3 and the Agent-owned SQLite contract
-is schema 12.
+V0.35 is the current candidate build. It retains the multi-process
+App/Agent/TestWorker/Broker architecture and closes the Local identity,
+event-watcher isolation, worker terminal-state, bounded shutdown, schema-12
+verification, and Main App process-incarnation defects. IPC remains protocol 3
+and the Agent-owned SQLite contract remains schema 12.
 
-The user accepted V0.34 on 2026-08-11 after 494 automatic Release tests, a
-warning-free Release build, dependency audit, and reproducible four-process
-staging passed. Native UI, tray, UAC, device, external-tool, data-location,
-and V0.34 M01--M07 cases remain `unverified`; acceptance does not fabricate
-those results. This confirmation authorizes the associated local checkpoint,
-`main` push, and local portable deployment, but not a tag, binary upload, or
-GitHub Release.
+V0.34 remains the latest user-confirmed version. V0.35 is not yet user
+confirmed, pushed, tagged, released, uploaded, or deployed. Native UI, tray,
+UAC, device, external-tool, data-location, and V0.35 M01--M04 cases remain
+`unverified`; candidate status does not fabricate those results.
 
 ## Safety boundary
 

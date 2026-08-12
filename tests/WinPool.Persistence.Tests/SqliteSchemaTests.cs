@@ -52,6 +52,33 @@ public sealed class SqliteSchemaTests
     }
 
     [Fact]
+    public async Task ValidCurrentSchemaCanBeReopenedWithoutChangingItsFiles()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        var paths = new[]
+        {
+            database.Store.DatabasePath,
+            database.Store.DatabasePath + "-wal",
+            database.Store.DatabasePath + "-shm"
+        };
+        var before = paths.ToDictionary(
+            path => path,
+            path => File.Exists(path) ? File.ReadAllBytes(path) : null,
+            StringComparer.Ordinal);
+
+        await database.Store.InitializeAsync();
+
+        foreach (var path in paths)
+        {
+            Assert.Equal(before[path] is not null, File.Exists(path));
+            if (before[path] is not null)
+            {
+                Assert.Equal(before[path], File.ReadAllBytes(path));
+            }
+        }
+    }
+
+    [Fact]
     public async Task ForeignKeysRejectOrphanMonitoringDevices()
     {
         await using var database = await TemporaryDatabase.CreateAsync();

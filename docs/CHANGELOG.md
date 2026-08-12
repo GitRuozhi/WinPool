@@ -7,6 +7,24 @@ This file records results that actually occurred. Planned work belongs in
 
 ## Unreleased
 
+## V0.35 candidate — 2026-08-12
+
+- Made the Agent-owned Local system identity authoritative in SQLite so
+  comparison-first capture cannot create a new Local `SystemId`.
+- Isolated slow App-side event watchers, made their overflow an explicit event
+  gap, and reseeded healthy watchers after recovery.
+- Made `worker_processes` terminal persistence states absorbing; stale writes
+  are ignored atomically.
+- Bounded shutdown operations even when an implementation ignores cancellation,
+  and fenced late terminal effects.
+- Reject schema-12 databases whose actual tables, columns, indexes, or foreign
+  keys no longer match the read-only current-schema contract.
+- Unified Main App handshake and shutdown checks around PID, executable image,
+  and process-start incarnation witnesses.
+
+V0.35 is a local candidate pending final verification and user confirmation.
+It is not a push, tag, binary release, GitHub Release, upload, or deployment.
+
 ## V0.34 — 2026-08-11
 
 - Bound every supervised process mutation to a process instance ID, PID, and OS

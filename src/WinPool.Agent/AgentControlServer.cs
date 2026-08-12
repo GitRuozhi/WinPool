@@ -346,16 +346,30 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.process_mismatch");
         }
-        if (validation.IsAccepted && !verifyClientProcess(handshake.ProcessId))
+        var clientWitness = validation.IsAccepted
+            ? processIncarnationVerifier?.TryRead(handshake.ProcessId)
+            : null;
+        if (validation.IsAccepted
+            && processIncarnationVerifier is not null
+            && !ProcessIncarnationMatcher.HasExpectedImage(
+                clientWitness,
+                handshake.ProcessId,
+                expectedClientExecutablePath!))
         {
             validation = new(
                 false,
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-image-mismatch");
         }
-        var clientWitness = validation.IsAccepted
-            ? processIncarnationVerifier?.TryRead(handshake.ProcessId)
-            : null;
+        else if (validation.IsAccepted
+                 && processIncarnationVerifier is null
+                 && !verifyClientProcess(handshake.ProcessId))
+        {
+            validation = new(
+                false,
+                HandshakeRejection.InvalidProcess,
+                "ipc.handshake.client-image-mismatch");
+        }
         var clientStartedAtUtc = validation.IsAccepted
             ? clientWitness?.StartedAtUtc
                 ?? readClientProcessStartedAtUtc(handshake.ProcessId)

@@ -480,7 +480,8 @@ public sealed class WorkerProcessRepository
                 owns_job_object = excluded.owns_job_object,
                 shutdown_deadline_utc_ms = excluded.shutdown_deadline_utc_ms
             WHERE
-                worker_processes.state = excluded.state
+                (worker_processes.state = excluded.state
+                    AND worker_processes.state NOT IN ($exited, $failed))
                 OR (worker_processes.state = $starting
                     AND excluded.state IN ($running, $failed))
                 OR (worker_processes.state = $running

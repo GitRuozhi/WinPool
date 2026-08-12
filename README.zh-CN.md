@@ -10,14 +10,13 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.34 是用户确认的当前版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并完成 V0.33
-之后发现的 Local identity、存储边界、进程生命周期、事件恢复和工具流缺陷收口。IPC 协议为 3，
-Agent 持有的 SQLite 合同为 schema 12。
+V0.35 是当前 candidate build。它保留 App、Agent、TestWorker、Broker 四进程架构，并完成 Local
+identity、event-watcher 隔离、worker 终态、bounded shutdown、schema-12 验证以及 Main App
+process-incarnation 缺陷收口。IPC 协议保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
 
-用户于 2026-08-11 在 494 项 Release 自动测试、零警告 Release 构建、依赖审计和可复现四进程
-staging 通过后确认 V0.34。原生 UI、托盘、UAC、设备、外部工具、数据位置和 V0.34 M01--M07
-用例继续保持 `unverified`；确认版本不代表伪造这些结果。该确认授权对应的本地 checkpoint、
-`main` 推送和本机 portable 部署，但不授权 tag、二进制上传或 GitHub Release。
+V0.34 仍是最近的用户确认版本。V0.35 尚未获得用户确认、推送、打 tag、发布、上传或部署。原生
+UI、托盘、UAC、设备、外部工具、数据位置和 V0.35 M01--M04 用例继续保持 `unverified`；candidate
+状态不代表伪造这些结果。
 
 ## 安全边界
 
