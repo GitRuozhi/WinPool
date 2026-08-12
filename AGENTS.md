@@ -41,11 +41,23 @@ protected paths before editing.
 
 ## Safety and data boundaries
 
-- Do not implement or enable real disk, partition, volume, Storage Pool, Storage
-  Tier, or Virtual Disk creation, removal, initialization, formatting, resizing,
-  repair, or equivalent mutation.
-- Simulation is the implementation path for storage-structure changes, including
-  when the UI is in Real mode.
+- Through V0.3, do not implement or enable real disk, partition, volume, Storage
+  Pool, Storage Tier, or Virtual Disk creation, removal, initialization,
+  formatting, resizing, repair, or equivalent mutation.
+- V0.5 is the earliest stage permitted to add a real storage-structure mutation
+  path. It must use reviewed typed operations, exact target validation, a
+  preview, an audit record, and the authorization rules below; free-form storage
+  commands remain forbidden.
+- Before a development Agent performs each actual storage mutation, it must ask
+  the developer for specific approval of that operation and its targets. A
+  previous, broad, or implied approval is insufficient.
+- In the product, a user's explicit current-session selection of the local
+  real-mutation option authorizes V0.5 controlled real operations. Elevation or
+  selecting Real mode alone is not authorization; the option must not be
+  preselected or persisted as consent.
+- Simulation remains the default implementation path for storage-structure
+  changes, including when the UI is in Real mode until the user has completed
+  the real-mutation authorization flow.
 - File tests may touch only files registered to a run inside an explicitly selected
   test directory. Raw-device writes are forbidden.
 - Support actions such as cache cleanup, volume flush, TRIM/Optimize, process
@@ -99,13 +111,12 @@ protected paths before editing.
   `c=10`; reduce scope, combine work, or advance the minor version.
 - A normal `c` iteration requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.35 is the current user-confirmed version. Its M01--M04 and inherited
-  native/manual cases remain `unverified`; version confirmation is not evidence
-  that they passed.
-- The accepted V0.35 Plan and its unchanged manual source record are archived
-  under `docs/Archive/V0.35`; there is no active `docs/Plan.md`. The V0.35
-  decision authorizes its local checkpoint, `main` push, and local portable
-  deployment only. Tag, GitHub Release, and binary upload remain unauthorized.
+- V0.36 is the current local implementation version. Its automatic quality and
+  staging gates are recorded in `CHANGELOG.md`; inherited native/manual cases
+  remain `unverified` and no result may represent them as passing.
+- The implemented V0.36 Plan is archived under `docs/Archive/V0.36`; there is
+  no active `docs/Plan.md`. The user authorized this local Git checkpoint only;
+  push, tag, GitHub Release, binary upload, and deployment remain unauthorized.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate
@@ -117,4 +128,5 @@ protected paths before editing.
 - Automatic checks do not substitute for UAC, tray, native-picker, visual, device,
   or long-duration human evidence.
 - Never report an unavailable or unrun gate as passed.
-- Real hardware mutation is not a verification method.
+- Real hardware mutation is not a V0.3 verification method. V0.5-or-later
+  controlled verification must follow the real-mutation authorization rules.

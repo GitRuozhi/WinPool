@@ -66,9 +66,16 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly string endpointPath;
     private readonly IAgentProcessLauncher launcher;
     private readonly TimeProvider timeProvider;
+    private readonly Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
     private readonly SemaphoreSlim requestGate = new(1, 1);
     private readonly SemaphoreSlim eventRecoveryGate = new(1, 1);
+    private readonly CancellationTokenSource lifetimeCancellation = new();
+    private readonly object lifetimeSync = new();
+    private readonly TaskCompletionSource activeOperationsDrained = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource disposeCompletion = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Guid clientProcessInstanceId = Guid.NewGuid();
     private readonly AgentClientEventFanout eventFanout = new();
     private NamedPipeClientStream? stream;
@@ -76,17 +83,28 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private CancellationTokenSource? eventCancellation;
     private Task? eventReaderTask;
     private AgentHandshake? handshake;
-    private bool disposed;
+    private int disposeStarted;
+    private int activeOperations;
 
     public NamedPipeAgentConnection(
         string endpointPath,
         IAgentProcessLauncher launcher,
         TimeProvider? timeProvider = null)
+        : this(endpointPath, launcher, timeProvider, null)
+    {
+    }
+
+    internal NamedPipeAgentConnection(
+        string endpointPath,
+        IAgentProcessLauncher launcher,
+        TimeProvider? timeProvider,
+        Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpointPath);
         this.endpointPath = Path.GetFullPath(endpointPath);
         this.launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.beforeEventRecoveryConnectAsync = beforeEventRecoveryConnectAsync;
     }
 
     public static string DefaultEndpointPath =>
@@ -98,8 +116,9 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     public async Task<ApplicationResult<AgentHandshake>> ConnectAsync(
         CancellationToken cancellationToken)
     {
+        using var operation = EnterOperation(cancellationToken);
         var correlation = CorrelationId.New();
-        await connectionGate.WaitAsync(cancellationToken);
+        await connectionGate.WaitAsync(operation.Token);
         try
         {
             ThrowIfDisposed();
@@ -111,11 +130,11 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             }
 
             await DisposeStreamAsync();
-            var endpoint = await ReadLiveEndpointAsync(cancellationToken);
+            var endpoint = await ReadLiveEndpointAsync(operation.Token);
             if (endpoint is null)
             {
-                await launcher.EnsureStartedAsync(cancellationToken);
-                endpoint = await WaitForLiveEndpointAsync(cancellationToken);
+                await launcher.EnsureStartedAsync(operation.Token);
+                endpoint = await WaitForLiveEndpointAsync(operation.Token);
             }
 
             ValidateEndpoint(endpoint);
@@ -126,7 +145,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 PipeOptions.Asynchronous);
             try
             {
-                await client.ConnectAsync(5_000, cancellationToken);
+                await client.ConnectAsync(5_000, operation.Token);
                 var sid = WindowsIdentity.GetCurrent().User?.Value
                     ?? throw new InvalidOperationException(
                         "The current Windows SID is unavailable.");
@@ -145,10 +164,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                         correlation.Value,
                         AgentControlMessageTypes.HandshakeRequest,
                         request),
-                    cancellationToken);
+                    operation.Token);
                 var replyEnvelope = await IpcFrameCodec.ReadAsync(
                     client,
-                    cancellationToken);
+                    operation.Token);
                 if (replyEnvelope.CorrelationId != correlation.Value
                     || replyEnvelope.MessageType
                         != AgentControlMessageTypes.HandshakeAccepted)
@@ -172,7 +191,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 await ConnectEventStreamAsync(
                     reply,
                     endpoint,
-                    cancellationToken).ConfigureAwait(false);
+                    operation.Token).ConfigureAwait(false);
                 handshake = new AgentHandshake(
                     reply.ProtocolVersion,
                     new AgentInstanceId(reply.AgentSessionId),
@@ -185,7 +204,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     endpoint.StartedAtUtc);
                 var snapshotResult = await SendConnectedAsync(
                         new GetAgentSnapshotRequest(CorrelationId.New()),
-                        cancellationToken)
+                        operation.Token)
                     .ConfigureAwait(false);
                 if (!snapshotResult.IsSuccess
                     || snapshotResult.Value is not AgentSnapshotResponse snapshot)
@@ -215,11 +234,21 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 correlation,
                 "agent.connect.cancelled");
         }
+        catch (OperationCanceledException) when (IsDisposing)
+        {
+            await DisposeStreamAsync();
+            return Failure<AgentHandshake>(
+                ApplicationStatus.RequiresEnvironment,
+                correlation,
+                "agent.connect.failed");
+        }
         catch (Exception exception) when (
             exception is IOException
                 or InvalidDataException
                 or InvalidOperationException
-                or UnauthorizedAccessException)
+                or UnauthorizedAccessException
+                or JsonException
+                or NotSupportedException)
         {
             await DisposeStreamAsync();
             return Failure<AgentHandshake>(
@@ -241,7 +270,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     public async Task<ApplicationResult<AgentHandshake>> ReconnectAsync(
         CancellationToken cancellationToken)
     {
-        await connectionGate.WaitAsync(cancellationToken);
+        using var operation = EnterOperation(cancellationToken);
+        await connectionGate.WaitAsync(operation.Token);
         try
         {
             ThrowIfDisposed();
@@ -252,7 +282,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             connectionGate.Release();
         }
 
-        return await ConnectAsync(cancellationToken).ConfigureAwait(false);
+        return await ConnectAsync(operation.Token).ConfigureAwait(false);
     }
 
     public async Task<ApplicationResult<AgentResponse>> SendAsync(
@@ -260,7 +290,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var connected = await ConnectAsync(cancellationToken);
+        using var operation = EnterOperation(cancellationToken);
+        var connected = await ConnectAsync(operation.Token);
         if (!connected.IsSuccess)
         {
             return new(
@@ -270,7 +301,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 request.CorrelationId);
         }
 
-        return await SendConnectedAsync(request, cancellationToken)
+        return await SendConnectedAsync(request, operation.Token)
             .ConfigureAwait(false);
     }
 
@@ -286,24 +317,42 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
     public async ValueTask DisposeAsync()
     {
-        if (disposed)
+        if (Interlocked.Exchange(ref disposeStarted, 1) != 0)
         {
+            await disposeCompletion.Task.ConfigureAwait(false);
             return;
         }
 
-        disposed = true;
-        eventFanout.Dispose();
-        await DisposeStreamAsync();
-        connectionGate.Dispose();
-        requestGate.Dispose();
-        eventRecoveryGate.Dispose();
+        lifetimeCancellation.Cancel();
+        try
+        {
+            eventFanout.Dispose();
+            lock (lifetimeSync)
+            {
+                if (activeOperations == 0)
+                {
+                    activeOperationsDrained.TrySetResult();
+                }
+            }
+            await activeOperationsDrained.Task.ConfigureAwait(false);
+            await DisposeStreamAsync().ConfigureAwait(false);
+            connectionGate.Dispose();
+            requestGate.Dispose();
+            eventRecoveryGate.Dispose();
+            lifetimeCancellation.Dispose();
+        }
+        finally
+        {
+            disposeCompletion.TrySetResult();
+        }
     }
 
     private async Task<ApplicationResult<AgentResponse>> SendConnectedAsync(
         AgentRequest request,
         CancellationToken cancellationToken)
     {
-        await requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var operation = EnterOperation(cancellationToken);
+        await requestGate.WaitAsync(operation.Token).ConfigureAwait(false);
         try
         {
             ThrowIfDisposed();
@@ -316,10 +365,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     messageType,
                     request,
                     request.GetType()),
-                cancellationToken);
+                operation.Token);
             var responseEnvelope = await IpcFrameCodec.ReadAsync(
                 stream!,
-                cancellationToken);
+                operation.Token);
             if (responseEnvelope.MessageType != AgentControlMessageTypes.Response
                 || responseEnvelope.CorrelationId != request.CorrelationId.Value)
             {
@@ -344,6 +393,14 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 or InvalidDataException
                 or JsonException
                 or NotSupportedException)
+        {
+            await DisposeStreamAsync();
+            return Failure<AgentResponse>(
+                ApplicationStatus.RequiresEnvironment,
+                request.CorrelationId,
+                "agent.request.connection_lost");
+        }
+        catch (OperationCanceledException) when (IsDisposing)
         {
             await DisposeStreamAsync();
             return Failure<AgentResponse>(
@@ -560,7 +617,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
         if (!disconnectedUnexpectedly
             || cancellationToken.IsCancellationRequested
-            || disposed)
+            || IsDisposing)
         {
             return;
         }
@@ -575,7 +632,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
         try
         {
-            if (!ReferenceEquals(eventStream, client) || disposed)
+            if (!ReferenceEquals(eventStream, client) || IsDisposing)
             {
                 return;
             }
@@ -597,8 +654,14 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             }
 
             var delay = TimeSpan.FromMilliseconds(100);
-            while (!disposed)
+            while (!IsDisposing)
             {
+                if (beforeEventRecoveryConnectAsync is not null)
+                {
+                    await beforeEventRecoveryConnectAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 using var attempt = new CancellationTokenSource(TimeSpan.FromSeconds(12));
                 var connected = await ConnectAsync(attempt.Token).ConfigureAwait(false);
                 if (connected.IsSuccess)
@@ -637,7 +700,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 "The Agent event reader cannot start without its current stream.");
         }
 
-        eventCancellation = new CancellationTokenSource();
+        eventCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            lifetimeCancellation.Token);
         eventReaderTask = SuperviseEventStreamAsync(
             client,
             eventCancellation.Token);
@@ -926,7 +990,69 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
     private void ThrowIfDisposed()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(IsDisposing, this);
+    }
+
+    private bool IsDisposing => Volatile.Read(ref disposeStarted) != 0;
+
+    private OperationLease EnterOperation(CancellationToken cancellationToken)
+    {
+        lock (lifetimeSync)
+        {
+            ThrowIfDisposed();
+            activeOperations++;
+        }
+
+        try
+        {
+            return new OperationLease(this, cancellationToken);
+        }
+        catch
+        {
+            ExitOperation();
+            throw;
+        }
+    }
+
+    private void ExitOperation()
+    {
+        lock (lifetimeSync)
+        {
+            if (--activeOperations == 0 && IsDisposing)
+            {
+                activeOperationsDrained.TrySetResult();
+            }
+        }
+    }
+
+    private sealed class OperationLease : IDisposable
+    {
+        private readonly NamedPipeAgentConnection owner;
+        private readonly CancellationTokenSource linkedCancellation;
+        private int disposed;
+
+        public OperationLease(
+            NamedPipeAgentConnection owner,
+            CancellationToken callerCancellation)
+        {
+            this.owner = owner;
+            linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                callerCancellation,
+                owner.lifetimeCancellation.Token);
+        }
+
+        public CancellationToken Token => linkedCancellation.Token;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) != 0)
+            {
+                return;
+            }
+
+            linkedCancellation.Dispose();
+            owner.ExitOperation();
+        }
     }
 
     private sealed record AgentResponseWirePayload(

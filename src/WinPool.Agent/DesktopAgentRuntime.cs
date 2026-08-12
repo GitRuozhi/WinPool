@@ -211,7 +211,7 @@ internal sealed class DesktopAgentRuntime :
                                 now,
                                 SupervisedProcessState.Starting,
                                 OwnsJobObject: false,
-                                ShutdownDeadlineUtc: now.AddMinutes(1))) ||
+                                ShutdownDeadlineUtc: null)) ||
                         !processRegistry.TryMarkRunning(
                             brokerProcessInstanceId.Value,
                             processId,

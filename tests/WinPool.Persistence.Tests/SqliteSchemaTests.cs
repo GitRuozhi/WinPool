@@ -256,6 +256,52 @@ public sealed class SqliteSchemaTests
             "monitor_devices.foreign_keys");
     }
 
+    [Theory]
+    [InlineData(
+        """
+        DROP TABLE schema_info;
+        CREATE TABLE schema_info(
+            singleton INTEGER PRIMARY KEY,
+            schema_version INTEGER NOT NULL,
+            applied_at_utc_ms INTEGER NOT NULL
+        );
+        INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
+        VALUES(1, 12, 0);
+        """,
+        "schema_info.checks")]
+    [InlineData(
+        """
+        PRAGMA foreign_keys=OFF;
+        DROP TABLE local_inventory_document;
+        CREATE TABLE local_inventory_document(
+            singleton INTEGER PRIMARY KEY,
+            snapshot_id TEXT NOT NULL REFERENCES inventory_snapshots(snapshot_id),
+            document_id TEXT NOT NULL,
+            document_schema_version INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            sanitized_json TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            captured_at_utc_ms INTEGER NOT NULL
+        );
+        """,
+        "local_inventory_document.checks")]
+    public async Task CurrentSchemaConstraintMismatchIsRejectedWithoutChangingItsFiles(
+        string mutation,
+        string expectedMismatch)
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = mutation;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await AssertCurrentCorruptDatabaseIsUnchangedAsync(
+            database.Store,
+            expectedMismatch);
+    }
+
     [Fact]
     public async Task BatchWriterFlushesSamplesWithoutPersistingProviderIdentity()
     {

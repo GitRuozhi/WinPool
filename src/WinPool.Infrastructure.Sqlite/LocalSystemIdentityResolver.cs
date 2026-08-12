@@ -52,17 +52,27 @@ public sealed class LocalSystemIdentityResolver
             await using var transaction = connection.BeginTransaction(
                 IsolationLevel.Serializable,
                 deferred: false);
+            var preferred = preferredSystemId is { } preferredSystem
+                ? await ReadPreferredCandidateAsync(
+                    connection,
+                    transaction,
+                    preferredSystem,
+                    authorityBinding,
+                    cancellationToken)
+                : null;
             var candidates = await ReadCandidatesAsync(
                 connection,
                 transaction,
                 authorityBinding,
                 normalizedName,
                 cancellationToken);
-            var selected = Select(candidates, preferredSystemId);
+            var selected = preferred ?? Select(candidates);
             if (selected is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
-                return new(selected.SystemId, candidates.Count > 1);
+                return new(
+                    selected.SystemId,
+                    candidates.Any(candidate => candidate.SystemId != selected.SystemId));
             }
 
             var created = SystemId.New();
@@ -125,19 +135,38 @@ public sealed class LocalSystemIdentityResolver
         return candidates;
     }
 
-    private static Candidate? Select(
-        IReadOnlyList<Candidate> candidates,
-        SystemId? preferredSystemId)
+    private static async Task<Candidate?> ReadPreferredCandidateAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SystemId preferredSystemId,
+        string authorityBinding,
+        CancellationToken cancellationToken)
     {
-        if (preferredSystemId is { } preferred)
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT system_id, machine_binding_hash, created_at_utc_ms
+            FROM systems
+            WHERE system_id = $system AND kind = $kind;
+            """;
+        command.Parameters.AddWithValue("$system", preferredSystemId.Value.ToString("N"));
+        command.Parameters.AddWithValue("$kind", (int)PersistedSystemKind.Local);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
         {
-            var matched = candidates.FirstOrDefault(candidate => candidate.SystemId == preferred);
-            if (matched is not null)
-            {
-                return matched;
-            }
+            return null;
         }
 
+        return new(
+            new SystemId(Guid.ParseExact(reader.GetString(0), "N")),
+            !reader.IsDBNull(1)
+                && StringComparer.Ordinal.Equals(reader.GetString(1), authorityBinding),
+            reader.GetInt64(2));
+    }
+
+    private static Candidate? Select(
+        IReadOnlyList<Candidate> candidates)
+    {
         return candidates
             .OrderByDescending(candidate => candidate.HasAuthorityBinding)
             .ThenBy(candidate => candidate.CreatedAtUtcMs)

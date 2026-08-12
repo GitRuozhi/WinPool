@@ -98,15 +98,18 @@ public sealed class AgentProcessRegistry
         TryUpdate(
             processInstanceId,
             expectedProcessId,
-            current => current.State is not (
-                    SupervisedProcessState.Exited or SupervisedProcessState.Failed)
-                && shutdownDeadlineUtc >= current.StartedAtUtc
+            current => shutdownDeadlineUtc < current.StartedAtUtc
+                ? null
+                : current.State == SupervisedProcessState.Running
                     ? current with
                     {
                         State = SupervisedProcessState.Stopping,
                         ShutdownDeadlineUtc = shutdownDeadlineUtc
                     }
-                    : null);
+                    : current.State == SupervisedProcessState.Stopping
+                      && current.ShutdownDeadlineUtc == shutdownDeadlineUtc
+                        ? current
+                        : null);
 
     public bool TryMarkExited(
         ProcessInstanceId processInstanceId,

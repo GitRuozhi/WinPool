@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Principal;
 using System.Text.Json;
 using WinPool.Agent;
@@ -482,6 +483,229 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.Equal(ApplicationStatus.Cancelled, result.Status);
     }
 
+    [Fact]
+    public async Task DisposeDuringConnectCancelsTheInFlightLaunchAndIsIdempotent()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        var launcher = new BlockingLauncher();
+        var connection = new NamedPipeAgentConnection(
+            Path.Combine(directory, "missing.json"),
+            launcher);
+        var connect = connection.ConnectAsync(CancellationToken.None);
+        await launcher.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var firstDispose = connection.DisposeAsync().AsTask();
+        var secondDispose = connection.DisposeAsync().AsTask();
+
+        await Task.WhenAll(firstDispose, secondDispose).WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(launcher.Cancelled);
+        Assert.Equal(ApplicationStatus.RequiresEnvironment, result.Status);
+    }
+
+    [Fact]
+    public async Task DisposeDuringSendCancelsTheOutstandingRequest()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var operations = new BlockingDiagnosticsOperations(sessionId);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            operations,
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator);
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        await File.WriteAllTextAsync(
+            endpointPath,
+            JsonSerializer.Serialize(
+                new AgentEndpoint(
+                    IpcProtocol.CurrentVersion,
+                    pipeName,
+                    nonce,
+                    sessionId,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow)));
+        var connection = new NamedPipeAgentConnection(endpointPath, new RecordingLauncher());
+
+        Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
+        var send = connection.SendAsync(
+            new GetDevelopmentDiagnosticsRequest(10, CorrelationId.New()),
+            CancellationToken.None);
+        await operations.DiagnosticsStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var dispose = connection.DisposeAsync().AsTask();
+        var result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(ApplicationStatus.RequiresEnvironment, result.Status);
+        Assert.Contains(
+            result.Messages,
+            message => message.Code == "agent.request.connection_lost");
+
+        operations.ReleaseDiagnostics.TrySetResult();
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task DisposeDuringEventRecoveryDoesNotCreateAnotherTransport()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator);
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        await File.WriteAllTextAsync(
+            endpointPath,
+            JsonSerializer.Serialize(
+                new AgentEndpoint(
+                    IpcProtocol.CurrentVersion,
+                    pipeName,
+                    nonce,
+                    sessionId,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow)));
+        var recoveryStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var launcher = new RecordingLauncher();
+        var connection = new NamedPipeAgentConnection(
+            endpointPath,
+            launcher,
+            null,
+            async cancellationToken =>
+            {
+                recoveryStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+            });
+
+        Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
+
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        await recoveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await connection.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(launcher.WasCalled);
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => connection.ConnectAsync(CancellationToken.None));
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task MalformedHandshakeJsonReturnsConnectFailure()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(
+            IpcIdentity.HashUserSid(sid),
+            nonce);
+        await File.WriteAllTextAsync(
+            endpointPath,
+            JsonSerializer.Serialize(
+                new AgentEndpoint(
+                    IpcProtocol.CurrentVersion,
+                    pipeName,
+                    nonce,
+                    sessionId,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow)));
+
+        using var server = CurrentUserPipeFactory.CreateServer(pipeName);
+        var serverTask = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync();
+            await IpcFrameCodec.ReadAsync(server);
+            var payload = "{not-json"u8.ToArray();
+            var header = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
+            await server.WriteAsync(header);
+            await server.WriteAsync(payload);
+            await server.FlushAsync();
+        });
+        await using var connection = new NamedPipeAgentConnection(
+            endpointPath,
+            new RecordingLauncher());
+
+        var result = await connection.ConnectAsync(CancellationToken.None);
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(ApplicationStatus.RequiresEnvironment, result.Status);
+        Assert.Contains(result.Messages, message => message.Code == "agent.connect.failed");
+        Directory.Delete(directory, recursive: true);
+    }
+
     private sealed class RecordingLauncher : IAgentProcessLauncher
     {
         public bool WasCalled { get; private set; }
@@ -493,7 +717,29 @@ public sealed class NamedPipeAgentConnectionTests
         }
     }
 
-    private sealed class SnapshotOperations(Guid sessionId)
+    private sealed class BlockingLauncher : IAgentProcessLauncher
+    {
+        public TaskCompletionSource Started { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool Cancelled { get; private set; }
+
+        public async Task EnsureStartedAsync(CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Cancelled = true;
+                throw;
+            }
+        }
+    }
+
+    private class SnapshotOperations(Guid sessionId)
         : IAgentRequestOperations
     {
         private ElevatedBrokerOperationKind reviewedOperation;
@@ -524,7 +770,7 @@ public sealed class NamedPipeAgentConnectionTests
                     request.CorrelationId));
         }
 
-        public Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
+        public virtual Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
             GetDevelopmentDiagnosticsRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
@@ -756,6 +1002,25 @@ public sealed class NamedPipeAgentConnectionTests
                 ApplicationResult<AgentResponse>.Succeeded(
                     new AgentAcknowledgement(),
                     request.CorrelationId));
+    }
+
+    private sealed class BlockingDiagnosticsOperations(Guid sessionId)
+        : SnapshotOperations(sessionId)
+    {
+        public TaskCompletionSource DiagnosticsStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseDiagnostics { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
+            GetDevelopmentDiagnosticsRequest request,
+            CancellationToken cancellationToken)
+        {
+            DiagnosticsStarted.TrySetResult();
+            await ReleaseDiagnostics.Task;
+            return await base.GetDevelopmentDiagnosticsAsync(request, cancellationToken);
+        }
     }
 
     private sealed class NoOpShutdownActions : IAgentShutdownActions

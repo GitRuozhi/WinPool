@@ -410,7 +410,8 @@ public sealed class ExternalToolStateRepository
 public enum WorkerProcessSaveResult
 {
     Applied,
-    IgnoredStale
+    IgnoredStale,
+    RejectedIdentityMismatch
 }
 
 public sealed class WorkerProcessRepository
@@ -458,6 +459,23 @@ public sealed class WorkerProcessRepository
                 nameof(registration),
                 "Worker process state is invalid.");
         }
+        if (registration.State == SupervisedProcessState.Stopping
+            && registration.ShutdownDeadlineUtc is null)
+        {
+            throw new ArgumentException(
+                "A stopping worker process requires a shutdown deadline.",
+                nameof(registration));
+        }
+        if (registration.State is not (
+                SupervisedProcessState.Stopping
+                or SupervisedProcessState.Exited
+                or SupervisedProcessState.Failed)
+            && registration.ShutdownDeadlineUtc is not null)
+        {
+            throw new ArgumentException(
+                "Only stopping or terminal worker processes may carry a shutdown deadline.",
+                nameof(registration));
+        }
         AssertWriteOwnership();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -470,26 +488,48 @@ public sealed class WorkerProcessRepository
                 $instance, $process, $session, $kind, $correlation, $started,
                 $heartbeat, $state, $ownsJob, $deadline)
             ON CONFLICT(process_instance_id) DO UPDATE SET
-                process_id = excluded.process_id,
-                agent_session_id = excluded.agent_session_id,
-                process_kind = excluded.process_kind,
-                correlation_id = excluded.correlation_id,
-                started_at_utc_ms = excluded.started_at_utc_ms,
-                last_heartbeat_utc_ms = excluded.last_heartbeat_utc_ms,
+                last_heartbeat_utc_ms = MAX(
+                    worker_processes.last_heartbeat_utc_ms,
+                    excluded.last_heartbeat_utc_ms),
                 state = excluded.state,
-                owns_job_object = excluded.owns_job_object,
-                shutdown_deadline_utc_ms = excluded.shutdown_deadline_utc_ms
+                shutdown_deadline_utc_ms = CASE
+                    WHEN worker_processes.state = $running
+                         AND excluded.state = $stopping
+                    THEN excluded.shutdown_deadline_utc_ms
+                    ELSE worker_processes.shutdown_deadline_utc_ms
+                END
             WHERE
-                (worker_processes.state = excluded.state
-                    AND worker_processes.state NOT IN ($exited, $failed))
-                OR (worker_processes.state = $starting
-                    AND excluded.state IN ($running, $failed))
+                worker_processes.process_id = excluded.process_id
+                AND worker_processes.agent_session_id = excluded.agent_session_id
+                AND worker_processes.process_kind = excluded.process_kind
+                AND worker_processes.correlation_id = excluded.correlation_id
+                AND worker_processes.started_at_utc_ms = excluded.started_at_utc_ms
+                AND worker_processes.owns_job_object = excluded.owns_job_object
+                AND (
+                    (worker_processes.state = excluded.state
+                        AND worker_processes.state NOT IN ($exited, $failed)
+                        AND (
+                            (worker_processes.state = $stopping
+                                AND worker_processes.shutdown_deadline_utc_ms
+                                    = excluded.shutdown_deadline_utc_ms)
+                            OR (worker_processes.state <> $stopping
+                                AND excluded.shutdown_deadline_utc_ms IS NULL)))
+                    OR (worker_processes.state = $starting
+                        AND excluded.state IN ($running, $failed)
+                        AND excluded.shutdown_deadline_utc_ms IS NULL)
                 OR (worker_processes.state = $running
-                    AND excluded.state IN ($stopping, $exited, $unresponsive, $failed))
+                    AND excluded.state = $stopping
+                    AND excluded.shutdown_deadline_utc_ms IS NOT NULL)
+                OR (worker_processes.state = $running
+                    AND excluded.state IN ($exited, $unresponsive, $failed)
+                    AND excluded.shutdown_deadline_utc_ms IS NULL)
                 OR (worker_processes.state = $stopping
-                    AND excluded.state IN ($exited, $failed))
+                    AND excluded.state IN ($exited, $failed)
+                    AND worker_processes.shutdown_deadline_utc_ms
+                        = excluded.shutdown_deadline_utc_ms)
                 OR (worker_processes.state = $unresponsive
-                    AND excluded.state IN ($running, $exited, $failed));
+                    AND excluded.state IN ($running, $exited, $failed)
+                    AND excluded.shutdown_deadline_utc_ms IS NULL));
             """;
         command.Parameters.AddWithValue(
             "$instance",
@@ -523,9 +563,39 @@ public sealed class WorkerProcessRepository
             registration.ShutdownDeadlineUtc is null
                 ? DBNull.Value
                 : registration.ShutdownDeadlineUtc.Value.ToUnixTimeMilliseconds());
-        return await command.ExecuteNonQueryAsync(cancellationToken) == 0
-            ? WorkerProcessSaveResult.IgnoredStale
-            : WorkerProcessSaveResult.Applied;
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 0)
+        {
+            return WorkerProcessSaveResult.Applied;
+        }
+
+        await using var existing = connection.CreateCommand();
+        existing.CommandText = """
+            SELECT process_id, agent_session_id, process_kind, correlation_id,
+                   started_at_utc_ms, owns_job_object
+            FROM worker_processes
+            WHERE process_instance_id = $instance;
+            """;
+        existing.Parameters.AddWithValue(
+            "$instance",
+            registration.ProcessInstanceId.Value.ToString("N"));
+        await using var reader = await existing.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return WorkerProcessSaveResult.IgnoredStale;
+        }
+
+        return reader.GetInt32(0) != registration.ProcessId
+               || !StringComparer.Ordinal.Equals(
+                   reader.GetString(1),
+                   agentSessionId.Value.ToString("N"))
+               || reader.GetInt32(2) != (int)registration.Kind
+               || !StringComparer.Ordinal.Equals(
+                   reader.GetString(3),
+                   registration.CorrelationId.Value.ToString("N"))
+               || reader.GetInt64(4) != registration.StartedAtUtc.ToUnixTimeMilliseconds()
+               || (reader.GetInt32(5) != 0) != registration.OwnsJobObject
+            ? WorkerProcessSaveResult.RejectedIdentityMismatch
+            : WorkerProcessSaveResult.IgnoredStale;
     }
 
     public async Task<IReadOnlyList<ProcessRegistration>> ListAsync(

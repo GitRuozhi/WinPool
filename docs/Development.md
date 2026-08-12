@@ -87,8 +87,18 @@ mode is never persisted.
 
 ## Execution and external-tool boundaries
 
-Real storage-structure mutation is denied by policy and executor behavior.
-Simulation editing and read-only discovery are normal capabilities.
+V0.3 policy and executor behavior deny real storage-structure mutation.
+Simulation editing and read-only discovery are normal capabilities. V0.5 is the
+earliest implementation stage permitted to add typed real mutations. Each must
+validate its exact targets, show a reviewed preview, record an audit entry, and
+remain deny-by-default until authorized.
+
+During development, an Agent must obtain the developer's specific approval
+immediately before each real mutation; an earlier, general approval cannot be
+reused. In the product, the user's explicit current-session selection of the
+local real-mutation option authorizes V0.5 controlled real operations. UAC
+elevation or Real mode alone is insufficient, and consent cannot be preselected
+or persisted.
 
 File testing requires an explicitly registered directory and run-owned files.
 DiskSpd, fio, Dite, RoboCopy, and RAMMap remain external installations. Adapters
@@ -183,8 +193,8 @@ authorized actions.
 ## Contribution boundaries
 
 - Preserve the deny-by-default execution and process ownership model.
-- Do not add real storage mutation without a separately confirmed plan and
-  disposable environment.
+- Do not add real storage mutation before a confirmed V0.5-or-later Plan defines
+  the typed operation and the required explicit authorization flow.
 - Keep software-consumed resources in tracked `assets`.
 - Do not make tracked code depend on ignored `OriginArtWork` or `local-assets`.
 - Do not couple WinPool to another repository through relative paths, copied live

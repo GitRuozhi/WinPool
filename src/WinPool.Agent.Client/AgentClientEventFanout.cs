@@ -14,10 +14,13 @@ internal sealed class AgentClientEventFanout : IDisposable
     private readonly int capacity;
     private readonly object syncRoot = new();
     private readonly Dictionary<Guid, Channel<AgentEvent>> subscribers = [];
+    private readonly Action? beforeTargetWrite;
     private AgentSnapshot? latestSnapshot;
     private bool disposed;
 
-    public AgentClientEventFanout(int capacity = DefaultCapacity)
+    internal AgentClientEventFanout(
+        int capacity = DefaultCapacity,
+        Action? beforeTargetWrite = null)
     {
         if (capacity <= 0)
         {
@@ -25,6 +28,7 @@ internal sealed class AgentClientEventFanout : IDisposable
         }
 
         this.capacity = capacity;
+        this.beforeTargetWrite = beforeTargetWrite;
     }
 
     public AgentClientEventSubscription Subscribe()
@@ -92,14 +96,14 @@ internal sealed class AgentClientEventFanout : IDisposable
         var overflowed = 0;
         foreach (var target in targets)
         {
+            beforeTargetWrite?.Invoke();
             if (target.Value.Writer.TryWrite(agentEvent))
             {
                 delivered++;
             }
-            else
+            else if (Remove(target.Key, target.Value))
             {
                 overflowed++;
-                Remove(target.Key, target.Value);
             }
         }
 
@@ -129,7 +133,7 @@ internal sealed class AgentClientEventFanout : IDisposable
 
     private void Remove(Guid id) => Remove(id, null);
 
-    private void Remove(Guid id, Channel<AgentEvent>? expected)
+    private bool Remove(Guid id, Channel<AgentEvent>? expected)
     {
         Channel<AgentEvent>? channel = null;
         lock (syncRoot)
@@ -143,6 +147,7 @@ internal sealed class AgentClientEventFanout : IDisposable
         }
 
         channel?.Writer.TryComplete();
+        return channel is not null;
     }
 }
 

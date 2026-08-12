@@ -10,22 +10,20 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.35 是用户确认的当前版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并完成 Local
-identity、event-watcher 隔离、worker 终态、bounded shutdown、schema-12 验证以及 Main App
-process-incarnation 缺陷收口。IPC 协议保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
+V0.36 是当前本地实施版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并收口 schema-12
+约束验证、连接释放、watcher 退订计数、worker 单调持久化、历史 Local identity 和异常连接处理。
+IPC 协议保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
 
-用户于 2026-08-12 在 507 项 Release 自动测试、零警告 Release 构建、依赖审计和可复现四进程
-staging 通过后确认 V0.35。原生 UI、托盘、UAC、设备、外部工具、数据位置和 V0.35 M01--M04
-用例继续保持 `unverified`；确认版本不代表伪造这些结果。该确认授权对应的文档归档、本地 Git
-checkpoint、`main` 推送和本机 portable 部署，但不授权 tag、二进制上传或 GitHub Release。
+V0.36 的 Release 自动门、依赖审计和四进程 staging 结果记录在变更记录中。原生 UI、托盘、UAC、
+设备、外部工具和数据位置用例继续保持 `unverified`，不得将其写为通过。用户本次只授权本地 Git
+checkpoint，不授权推送、tag、二进制上传、GitHub Release 或部署。
 
 ## 安全边界
 
-WinPool 未实现也未授权真实存储结构修改。不得创建、初始化、格式化、调整、修复或删除真实磁盘、
-分区、卷、存储池、存储层或虚拟磁盘。
+当前 V0.3 产品线未实现也未授权真实存储结构修改。在此产品线中，不得创建、初始化、格式化、调整、
+修复或删除真实磁盘、分区、卷、存储池、存储层或虚拟磁盘。
 
-存储结构编辑只支持模拟系统。文件测试只能操作明确登记目录内、由本次运行登记的文件。DiskSpd、
-fio、Dite、RoboCopy 和 RAMMap 始终是单独安装的外部工具。
+V0.5 是首个可增加受控真实存储操作的计划阶段。开发期间，Agent 每次执行准确操作前必须立即获得开发者批准。产品中，用户在当前会话显式选择“本机真实修改”选项，即授权执行受控真实操作；仅有提权或 Real 模式不足够。模拟仍是默认路径。文件测试只能操作明确登记目录内、由本次运行登记的文件。DiskSpd、fio、Dite、RoboCopy 和 RAMMap 始终是单独安装的外部工具。
 
 ## 构建
 
@@ -45,8 +43,8 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
-- [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已验收的
-  V0.35 Plan。
+- [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已实施的
+  V0.36 Plan。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
 - [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 

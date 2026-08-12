@@ -160,7 +160,7 @@ public sealed class WinPoolSqliteStore
     /// Validates a current-version database without opening it for write. The
     /// contract is the complete schema definition below, materialized only in
     /// an isolated in-memory connection and compared as tables, columns,
-    /// indexes, and foreign keys.
+    /// indexes, foreign keys, and CHECK constraints.
     /// </summary>
     private static class CurrentSchemaVerifier
     {
@@ -216,6 +216,13 @@ public sealed class WinPoolSqliteStore
             var tablesByName = new Dictionary<string, TableContract>(StringComparer.Ordinal);
             foreach (var tableName in tableNames)
             {
+                var definition = await ReadSchemaDefinitionAsync(
+                    connection,
+                    "table",
+                    tableName,
+                    cancellationToken)
+                    ?? throw new InvalidDataException(
+                        $"SQLite did not return a definition for table {tableName}.");
                 var columns = await ReadRowsAsync(
                     connection,
                     $"PRAGMA table_info({QuoteIdentifier(tableName)});",
@@ -243,12 +250,18 @@ public sealed class WinPoolSqliteStore
                         reader.GetString(6),
                         reader.GetString(7)),
                     cancellationToken);
+                var checks = await ReadCheckConstraintsAsync(
+                    connection,
+                    tableName,
+                    cancellationToken);
                 tablesByName.Add(
                     tableName,
                     new(
                         columns.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
                         indexes.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
-                        foreignKeys.OrderBy(value => value, StringComparer.Ordinal).ToArray()));
+                        foreignKeys.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+                        checks.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+                        NormalizeSql(definition)));
             }
 
             return new(tablesByName);
@@ -275,13 +288,140 @@ public sealed class WinPoolSqliteStore
                 var name = index.Split('|', 2)[0];
                 var columns = await ReadRowsAsync(
                     connection,
-                    $"PRAGMA index_info({QuoteIdentifier(name)});",
-                    reader => string.Join('|', reader.GetInt32(0), reader.GetInt32(1), reader.GetString(2)),
+                    $"PRAGMA index_xinfo({QuoteIdentifier(name)});",
+                    reader => string.Join(
+                        '|',
+                        reader.GetInt32(0),
+                        reader.GetInt32(1),
+                        reader.IsDBNull(2) ? "<null>" : reader.GetString(2),
+                        reader.GetInt32(3),
+                        reader.IsDBNull(4) ? "<null>" : reader.GetString(4),
+                        reader.GetInt32(5)),
                     cancellationToken);
-                indexes.Add($"{index}|{string.Join(',', columns.OrderBy(value => value, StringComparer.Ordinal))}");
+                var definition = await ReadSchemaDefinitionAsync(
+                    connection,
+                    "index",
+                    name,
+                    cancellationToken,
+                    required: false);
+                indexes.Add(
+                    $"{index}|{NormalizeSql(definition ?? "<implicit>")}|"
+                    + string.Join(',', columns));
             }
 
             return indexes;
+        }
+
+        private static async Task<IReadOnlyList<string>> ReadCheckConstraintsAsync(
+            SqliteConnection connection,
+            string tableName,
+            CancellationToken cancellationToken)
+        {
+            var definition = await ReadSchemaDefinitionAsync(
+                connection,
+                "table",
+                tableName,
+                cancellationToken)
+                ?? throw new InvalidDataException(
+                    $"SQLite did not return a definition for table {tableName}.");
+            return ExtractCheckConstraints(definition);
+        }
+
+        private static async Task<string?> ReadSchemaDefinitionAsync(
+            SqliteConnection connection,
+            string type,
+            string name,
+            CancellationToken cancellationToken,
+            bool required = true)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT sql
+                FROM sqlite_schema
+                WHERE type = $type AND name = $name;
+                """;
+            command.Parameters.AddWithValue("$type", type);
+            command.Parameters.AddWithValue("$name", name);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            if (result is null || result == DBNull.Value)
+            {
+                if (required)
+                {
+                    throw new InvalidDataException(
+                        $"SQLite did not return a definition for {type} {name}.");
+                }
+
+                return null;
+            }
+
+            return Convert.ToString(
+                result,
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static string NormalizeSql(string definition) =>
+            string.Concat(definition.Where(character => !char.IsWhiteSpace(character)));
+
+        private static IReadOnlyList<string> ExtractCheckConstraints(string definition)
+        {
+            var checks = new List<string>();
+            var searchOffset = 0;
+            while (searchOffset < definition.Length)
+            {
+                var checkOffset = definition.IndexOf(
+                    "CHECK",
+                    searchOffset,
+                    StringComparison.OrdinalIgnoreCase);
+                if (checkOffset < 0)
+                {
+                    break;
+                }
+
+                var before = checkOffset == 0 ? '\0' : definition[checkOffset - 1];
+                var afterOffset = checkOffset + "CHECK".Length;
+                var after = afterOffset >= definition.Length ? '\0' : definition[afterOffset];
+                if ((char.IsLetterOrDigit(before) || before == '_')
+                    || (char.IsLetterOrDigit(after) || after == '_'))
+                {
+                    searchOffset = afterOffset;
+                    continue;
+                }
+
+                var openingOffset = afterOffset;
+                while (openingOffset < definition.Length
+                       && char.IsWhiteSpace(definition[openingOffset]))
+                {
+                    openingOffset++;
+                }
+                if (openingOffset >= definition.Length || definition[openingOffset] != '(')
+                {
+                    throw new InvalidDataException("SQLite returned an invalid CHECK constraint.");
+                }
+
+                var depth = 0;
+                var closingOffset = openingOffset;
+                for (; closingOffset < definition.Length; closingOffset++)
+                {
+                    if (definition[closingOffset] == '(')
+                    {
+                        depth++;
+                    }
+                    else if (definition[closingOffset] == ')' && --depth == 0)
+                    {
+                        break;
+                    }
+                }
+                if (depth != 0 || closingOffset >= definition.Length)
+                {
+                    throw new InvalidDataException("SQLite returned an unterminated CHECK constraint.");
+                }
+
+                var expression = definition[(openingOffset + 1)..closingOffset];
+                checks.Add(string.Concat(expression.Where(character => !char.IsWhiteSpace(character))));
+                searchOffset = closingOffset + 1;
+            }
+
+            return checks;
         }
 
         private static async Task<IReadOnlyList<string>> ReadRowsAsync(
@@ -329,6 +469,16 @@ public sealed class WinPoolSqliteStore
                 {
                     return $"{tableName}.foreign_keys";
                 }
+                if (!expectedTable.Checks.SequenceEqual(actualTable.Checks, StringComparer.Ordinal))
+                {
+                    return $"{tableName}.checks";
+                }
+                if (!StringComparer.Ordinal.Equals(
+                        expectedTable.Definition,
+                        actualTable.Definition))
+                {
+                    return $"{tableName}.definition";
+                }
             }
 
             return null;
@@ -343,7 +493,9 @@ public sealed class WinPoolSqliteStore
         private sealed record TableContract(
             IReadOnlyList<string> Columns,
             IReadOnlyList<string> Indexes,
-            IReadOnlyList<string> ForeignKeys);
+            IReadOnlyList<string> ForeignKeys,
+            IReadOnlyList<string> Checks,
+            string Definition);
     }
 
     private const string SchemaV1 = """

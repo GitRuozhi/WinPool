@@ -57,4 +57,29 @@ public sealed class AgentClientEventFanoutTests
             await watcher.Reader.ReadAsync());
         Assert.Same(snapshot, reseed.Snapshot);
     }
+
+    [Fact]
+    public void WatcherDisposedBetweenPublishSnapshotAndWriteIsNotAnOverflow()
+    {
+        AgentClientEventSubscription? subscription = null;
+        var disposeOnce = 0;
+        using var fanout = new AgentClientEventFanout(
+            capacity: 1,
+            beforeTargetWrite: () =>
+            {
+                if (Interlocked.Exchange(ref disposeOnce, 1) == 0)
+                {
+                    subscription!.Dispose();
+                }
+            });
+        subscription = fanout.Subscribe();
+
+        var result = fanout.Publish(
+            new AgentShutdownEvent(ShutdownReason.TrayExit, DateTimeOffset.UtcNow));
+
+        Assert.Equal(0, result.DeliveredSubscriberCount);
+        Assert.Equal(0, result.OverflowedSubscriberCount);
+        Assert.False(result.HasEventGap);
+        subscription.Dispose();
+    }
 }

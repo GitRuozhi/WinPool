@@ -238,6 +238,55 @@ public sealed class InventoryRepositoryTests
         Assert.True(repeated.HasFragmentedHistory);
     }
 
+    [Fact]
+    public async Task LocalIdentityResolverHonorsPreferredLocalIdWithStaleMetadata()
+    {
+        await using var database = await InventoryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var snapshots = new InventorySnapshotRepository(database.Store, lease);
+        var resolver = new LocalSystemIdentityResolver(database.Store, lease);
+        var preferred = SystemId.New();
+        await snapshots.SaveAsync(
+            CreateSnapshot("preferred", DateTimeOffset.FromUnixTimeMilliseconds(1), preferred),
+            PersistedSystemKind.Local,
+            "LOCALHOST",
+            canonicalLocalSystemBinding:
+                LocalSystemIdentityResolver.CreateAuthorityBinding("LOCALHOST"));
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE systems
+                SET display_name = 'old-host', machine_binding_hash = 'old-binding'
+                WHERE system_id = $system;
+                """;
+            command.Parameters.AddWithValue("$system", preferred.Value.ToString("N"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var resolved = await resolver.ResolveAsync("LOCALHOST", preferred);
+
+        Assert.Equal(preferred, resolved.SystemId);
+    }
+
+    [Fact]
+    public async Task LocalIdentityResolverRejectsPreferredNonLocalId()
+    {
+        await using var database = await InventoryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var snapshots = new InventorySnapshotRepository(database.Store, lease);
+        var resolver = new LocalSystemIdentityResolver(database.Store, lease);
+        var simulation = SystemId.New();
+        await snapshots.SaveAsync(
+            CreateSnapshot("simulation", DateTimeOffset.FromUnixTimeMilliseconds(1), simulation),
+            PersistedSystemKind.Simulation,
+            "Simulation");
+
+        var resolved = await resolver.ResolveAsync("LOCALHOST", simulation);
+
+        Assert.NotEqual(simulation, resolved.SystemId);
+    }
+
     private static InventorySnapshot CreateSnapshot(
         string version,
         DateTimeOffset capturedAt,

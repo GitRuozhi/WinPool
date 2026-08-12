@@ -62,6 +62,14 @@ public sealed class AgentProcessRegistryTests
             registration.ProcessInstanceId,
             registration.ProcessId,
             deadline));
+        Assert.True(registry.TryBeginStopping(
+            registration.ProcessInstanceId,
+            registration.ProcessId,
+            deadline));
+        Assert.False(registry.TryBeginStopping(
+            registration.ProcessInstanceId,
+            registration.ProcessId,
+            deadline.AddSeconds(1)));
         Assert.Equal(deadline, registry.Snapshot().Single().ShutdownDeadlineUtc);
         Assert.Equal([201], registry.GetLiveProcessIds());
 

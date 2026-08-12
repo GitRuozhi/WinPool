@@ -7,27 +7,31 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.35 is the current user-confirmed version. It retains the multi-process
-App/Agent/TestWorker/Broker architecture and closes the Local identity,
-event-watcher isolation, worker terminal-state, bounded shutdown, schema-12
-verification, and Main App process-incarnation defects. IPC remains protocol 3
-and the Agent-owned SQLite contract remains schema 12.
+V0.36 is the current local implementation version. It retains the multi-process
+App/Agent/TestWorker/Broker architecture while closing schema-12 constraint
+verification, connection disposal, watcher unsubscribe accounting, monotonic
+worker persistence, historical Local identity, and malformed-connect handling.
+IPC remains protocol 3 and the Agent-owned SQLite contract remains schema 12.
 
-The user accepted V0.35 on 2026-08-12 after 507 automatic Release tests, a
-warning-free Release build, dependency audit, and reproducible four-process
-staging passed. Native UI, tray, UAC, device, external-tool, data-location,
-and V0.35 M01--M04 cases remain `unverified`; acceptance does not fabricate
-those results. This confirmation authorizes the associated documentation
-archive, local Git checkpoint, `main` push, and local portable deployment, but
-not a tag, binary upload, or GitHub Release.
+The V0.36 automatic Release, dependency-audit, and four-process staging results
+are recorded in the changelog. Native UI, tray, UAC, device, external-tool, and
+data-location cases remain `unverified`; no documentation treats them as passed.
+The user authorized a local Git checkpoint only—not a push, tag, binary upload,
+GitHub Release, or deployment.
 
 ## Safety boundary
 
-Real storage-structure mutation is not implemented or authorized. WinPool must
-not create, initialize, format, resize, repair, or remove real disks, partitions,
-volumes, Storage Pools, Storage Tiers, or Virtual Disks.
+The current V0.3 line does not implement or authorize real storage-structure
+mutation. WinPool must not create, initialize, format, resize, repair, or remove
+real disks, partitions, volumes, Storage Pools, Storage Tiers, or Virtual Disks
+in this line.
 
-Simulation is the supported path for storage-structure editing. File tests are
+V0.5 is the first planned phase that may add controlled real storage operations.
+During development, the Agent must obtain the developer's approval immediately
+before each exact operation. In the product, the user's explicit current-session
+selection of the local real-mutation option authorizes controlled real
+operations; elevation or Real mode alone is insufficient. Simulation remains the
+default. File tests are
 limited to run-owned files in an explicitly registered directory. DiskSpd, fio,
 Dite, RoboCopy, and RAMMap remain separately installed external tools.
 
@@ -52,7 +56,7 @@ The reproducible self-contained staging command is documented in
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
-  including the accepted V0.35 Plan.
+  including the implemented V0.36 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

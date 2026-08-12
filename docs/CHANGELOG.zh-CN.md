@@ -7,7 +7,16 @@
 
 本文件只记录已经实际发生的结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
 
-## Unreleased
+## V0.36 — 2026-08-12
+
+- 在 `Product.md` 记录用户确认的 V0.1--V1.0 开发路线，并说明 V0.5 是首个可增加受控真实存储结构修改的阶段。开发 Agent 需要开发者对每次操作的批准；产品用户在当前会话显式选择“本机真实修改”即授权执行 V0.5 的受控真实操作。这不改变当前 V0.3 边界，也不授权发布。
+- schema-12 验证新增表约束/定义和索引元数据/定义比较，覆盖 singleton `CHECK` 约束；损坏的 current 数据库仍不会进入修改路径。
+- `NamedPipeAgentConnection` 在释放共享资源前会取消并等待活动连接/请求；畸形 handshake JSON 统一返回 `agent.connect.failed`。
+- 正常 watcher 退订不再被误记为有界通道溢出，从而避免错误的全局 event-gap recovery。
+- worker process 的 identity 字段不可变，heartbeat 单调，Stopping deadline 只建立一次并在终态持久化中保留。
+- 即使历史 Local 行的名称或 binding metadata 已过期，经验证的 Local document ID 仍是权威选择。
+
+V0.36 已通过 511 项 Release 自动测试（无 skipped）、零警告 Release 构建、依赖审计和全新四进程 self-contained staging。原生/人工用例继续保持 `unverified`。用户本次只授权本地 Git checkpoint；未授权推送、tag、二进制上传、GitHub Release 或部署。
 
 ## V0.35 — 2026-08-12
 

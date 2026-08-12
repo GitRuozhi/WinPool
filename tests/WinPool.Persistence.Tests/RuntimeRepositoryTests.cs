@@ -214,6 +214,118 @@ public sealed class RuntimeRepositoryTests
     }
 
     [Fact]
+    public async Task WorkerProcessSameStateWritesKeepHeartbeatMonotonic()
+    {
+        await using var database = await RuntimeDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var sessionId = new AgentInstanceId(Guid.NewGuid());
+        var started = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
+        await new AgentSessionRepository(database.Store, lease)
+            .StartAsync(sessionId, 10, started);
+        var running = CreateRunningRegistration(started);
+        var repository = new WorkerProcessRepository(database.Store, lease);
+
+        Assert.Equal(WorkerProcessSaveResult.Applied, await repository.SaveAsync(sessionId, running));
+        Assert.Equal(
+            WorkerProcessSaveResult.Applied,
+            await repository.SaveAsync(
+                sessionId,
+                running with { LastHeartbeatUtc = started.AddSeconds(10) }));
+        Assert.Equal(
+            WorkerProcessSaveResult.Applied,
+            await repository.SaveAsync(
+                sessionId,
+                running with { LastHeartbeatUtc = started.AddSeconds(5) }));
+
+        var stored = Assert.Single(await new WorkerProcessRepository(database.Store)
+            .ListAsync(sessionId));
+        Assert.Equal(started.AddSeconds(10), stored.LastHeartbeatUtc);
+    }
+
+    [Fact]
+    public async Task WorkerProcessRejectsIdentityMutationWithoutChangingStoredProcess()
+    {
+        await using var database = await RuntimeDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var sessionId = new AgentInstanceId(Guid.NewGuid());
+        var started = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
+        await new AgentSessionRepository(database.Store, lease)
+            .StartAsync(sessionId, 10, started);
+        var running = CreateRunningRegistration(started);
+        var repository = new WorkerProcessRepository(database.Store, lease);
+        Assert.Equal(WorkerProcessSaveResult.Applied, await repository.SaveAsync(sessionId, running));
+
+        var otherSessionId = new AgentInstanceId(Guid.NewGuid());
+        foreach (var mutation in new[]
+                 {
+                     (Session: sessionId, Registration: running with { ProcessId = running.ProcessId + 1 }),
+                     (Session: otherSessionId, Registration: running),
+                     (Session: sessionId, Registration: running with { Kind = WorkerKind.Inventory }),
+                     (Session: sessionId, Registration: running with { CorrelationId = CorrelationId.New() }),
+                     (Session: sessionId, Registration: running with
+                     {
+                         StartedAtUtc = started.AddSeconds(1),
+                         LastHeartbeatUtc = started.AddSeconds(6)
+                     }),
+                     (Session: sessionId, Registration: running with { OwnsJobObject = false })
+                 })
+        {
+            Assert.Equal(
+                WorkerProcessSaveResult.RejectedIdentityMismatch,
+                await repository.SaveAsync(mutation.Session, mutation.Registration));
+        }
+
+        var stored = Assert.Single(await new WorkerProcessRepository(database.Store)
+            .ListAsync(sessionId));
+        Assert.Equal(running, stored);
+    }
+
+    [Fact]
+    public async Task WorkerProcessStoppingDeadlineIsEstablishedOnceAndCannotBeOverwritten()
+    {
+        await using var database = await RuntimeDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var sessionId = new AgentInstanceId(Guid.NewGuid());
+        var started = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
+        await new AgentSessionRepository(database.Store, lease)
+            .StartAsync(sessionId, 10, started);
+        var running = CreateRunningRegistration(started);
+        var repository = new WorkerProcessRepository(database.Store, lease);
+        Assert.Equal(WorkerProcessSaveResult.Applied, await repository.SaveAsync(sessionId, running));
+        var deadline = started.AddMinutes(1);
+        var stopping = running with
+        {
+            State = SupervisedProcessState.Stopping,
+            LastHeartbeatUtc = started.AddSeconds(10),
+            ShutdownDeadlineUtc = deadline
+        };
+        Assert.Equal(WorkerProcessSaveResult.Applied, await repository.SaveAsync(sessionId, stopping));
+
+        Assert.Equal(
+            WorkerProcessSaveResult.IgnoredStale,
+            await repository.SaveAsync(
+                sessionId,
+                stopping with { ShutdownDeadlineUtc = deadline.AddMinutes(1) }));
+        Assert.Equal(
+            WorkerProcessSaveResult.IgnoredStale,
+            await repository.SaveAsync(sessionId, running with { LastHeartbeatUtc = started.AddMinutes(2) }));
+        Assert.Equal(
+            WorkerProcessSaveResult.Applied,
+            await repository.SaveAsync(
+                sessionId,
+                stopping with
+                {
+                    State = SupervisedProcessState.Exited,
+                    LastHeartbeatUtc = started.AddSeconds(20)
+                }));
+
+        var stored = Assert.Single(await new WorkerProcessRepository(database.Store)
+            .ListAsync(sessionId));
+        Assert.Equal(SupervisedProcessState.Exited, stored.State);
+        Assert.Equal(deadline, stored.ShutdownDeadlineUtc);
+    }
+
+    [Fact]
     public async Task StorageHealthEventsPersistDeduplicateAndReturnInTimeOrder()
     {
         await using var database = await RuntimeDatabase.CreateAsync();
@@ -277,4 +389,16 @@ public sealed class RuntimeRepositoryTests
             return ValueTask.CompletedTask;
         }
     }
+
+    private static ProcessRegistration CreateRunningRegistration(DateTimeOffset started) =>
+        new(
+            ProcessInstanceId.New(),
+            42,
+            WorkerKind.Test,
+            CorrelationId.New(),
+            started,
+            started.AddSeconds(5),
+            SupervisedProcessState.Running,
+            OwnsJobObject: true,
+            ShutdownDeadlineUtc: null);
 }

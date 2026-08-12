@@ -5,7 +5,33 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
-## Unreleased
+## V0.36 — 2026-08-12
+
+- Recorded the user-confirmed V0.1--V1.0 development route in `Product.md`,
+  including the clarification that V0.5 is the first phase permitted to add
+  controlled real storage-structure mutation. A development Agent requires the
+  developer's per-operation approval; a product user's explicit current-session
+  selection of the local real-mutation option authorizes V0.5 controlled real
+  operations. This does not alter the current V0.3 boundary or authorize a
+  release.
+- Expanded schema-12 verification to compare table constraints/definitions and
+  index metadata/definitions, including the singleton `CHECK` constraints,
+  without opening a mutation path for corrupt current databases.
+- Made `NamedPipeAgentConnection` lifetime-safe: disposal cancels and drains
+  active connection/request operations before disposing shared resources;
+  malformed handshake JSON is normalized as `agent.connect.failed`.
+- Distinguished normal watcher disposal from actual bounded-channel overflow,
+  avoiding false global event-gap recovery.
+- Made worker-process identity fields immutable, heartbeats monotonic, and the
+  stopping deadline establish-once and preserved through terminal persistence.
+- Made a validated Local document ID authoritative even if the corresponding
+  historical Local row has stale name or binding metadata.
+
+V0.36 passed 511 automatic Release tests with no skipped tests, a warning-free
+Release build, dependency audit, and a fresh four-process self-contained staging
+tree. Native/manual cases remain `unverified`. The user authorized the local Git
+checkpoint only; no push, tag, binary upload, GitHub Release, or deployment is
+authorized.
 
 ## V0.35 — 2026-08-12
 
