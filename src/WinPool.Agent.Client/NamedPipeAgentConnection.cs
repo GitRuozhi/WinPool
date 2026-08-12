@@ -68,6 +68,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly TimeProvider timeProvider;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
     private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly SemaphoreSlim eventRecoveryGate = new(1, 1);
     private readonly Guid clientProcessInstanceId = Guid.NewGuid();
     private readonly AgentClientEventFanout eventFanout = new();
     private NamedPipeClientStream? stream;
@@ -193,11 +194,9 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                         "The Agent did not provide a recovery snapshot after event subscription.");
                 }
 
-                await eventFanout.PublishReseedAsync(
-                        snapshot.Snapshot,
-                        "agent.events.connected_snapshot",
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                eventFanout.PublishReseed(
+                    snapshot.Snapshot,
+                    "agent.events.connected_snapshot");
                 StartEventReader(eventStream!);
                 return ApplicationResult<AgentHandshake>.Succeeded(
                     handshake,
@@ -297,6 +296,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         await DisposeStreamAsync();
         connectionGate.Dispose();
         requestGate.Dispose();
+        eventRecoveryGate.Dispose();
     }
 
     private async Task<ApplicationResult<AgentResponse>> SendConnectedAsync(
@@ -516,10 +516,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 var payload = envelope.Payload.Deserialize<AgentEventWirePayload>(JsonOptions)
                     ?? throw new InvalidDataException("The Agent event payload is empty.");
                 var item = DeserializeEvent(payload);
-                if (item is not null)
+                if (item is not null && eventFanout.Publish(item).HasEventGap)
                 {
-                    await eventFanout.PublishAsync(item, cancellationToken)
-                        .ConfigureAwait(false);
+                    disconnectedUnexpectedly = true;
+                    break;
                 }
             }
         }
@@ -565,52 +565,66 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             return;
         }
 
-        await PublishTransportStateAsync(
-                AgentEventTransportState.Disconnected,
-                "agent.events.disconnected",
-                cancellationToken)
-            .ConfigureAwait(false);
-        await PublishTransportStateAsync(
-                AgentEventTransportState.Reconnecting,
-                "agent.events.reconnecting",
-                cancellationToken)
-            .ConfigureAwait(false);
         try
         {
-            await DisconnectFailedEventTransportAsync(client, cancellationToken)
-                .ConfigureAwait(false);
+            await eventRecoveryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return;
         }
-
-        var delay = TimeSpan.FromMilliseconds(100);
-        while (!disposed)
+        try
         {
-            using var attempt = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-            var connected = await ConnectAsync(attempt.Token).ConfigureAwait(false);
-            if (connected.IsSuccess)
+            if (!ReferenceEquals(eventStream, client) || disposed)
             {
-                await PublishTransportStateAsync(
-                        AgentEventTransportState.Reconnected,
-                        "agent.events.reconnected_with_snapshot",
-                        attempt.Token)
-                    .ConfigureAwait(false);
                 return;
             }
 
+            PublishTransportState(
+                AgentEventTransportState.Disconnected,
+                "agent.events.disconnected");
+            PublishTransportState(
+                AgentEventTransportState.Reconnecting,
+                "agent.events.reconnecting");
             try
             {
-                await Task.Delay(delay).ConfigureAwait(false);
+                await DisconnectFailedEventTransportAsync(client, cancellationToken)
+                    .ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
 
-            delay = TimeSpan.FromMilliseconds(
-                Math.Min(delay.TotalMilliseconds * 2, 2_000));
+            var delay = TimeSpan.FromMilliseconds(100);
+            while (!disposed)
+            {
+                using var attempt = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                var connected = await ConnectAsync(attempt.Token).ConfigureAwait(false);
+                if (connected.IsSuccess)
+                {
+                    PublishTransportState(
+                        AgentEventTransportState.Reconnected,
+                        "agent.events.reconnected_with_snapshot");
+                    return;
+                }
+
+                try
+                {
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                delay = TimeSpan.FromMilliseconds(
+                    Math.Min(delay.TotalMilliseconds * 2, 2_000));
+            }
+        }
+        finally
+        {
+            eventRecoveryGate.Release();
         }
     }
 
@@ -629,17 +643,15 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             eventCancellation.Token);
     }
 
-    private Task PublishTransportStateAsync(
+    private void PublishTransportState(
         AgentEventTransportState state,
-        string diagnosticCode,
-        CancellationToken cancellationToken) =>
-        eventFanout.PublishAsync(
+        string diagnosticCode) =>
+        eventFanout.Publish(
             new AgentEventTransportStateEvent(
                 state,
                 HasEventGap: true,
                 diagnosticCode,
-                timeProvider.GetUtcNow()),
-            cancellationToken);
+                timeProvider.GetUtcNow()));
 
     private async Task DisconnectFailedEventTransportAsync(
         NamedPipeClientStream failedEventStream,

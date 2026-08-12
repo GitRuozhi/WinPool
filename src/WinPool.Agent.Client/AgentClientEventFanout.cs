@@ -4,22 +4,34 @@ using WinPool.Application;
 namespace WinPool.Agent.Client;
 
 /// <summary>
-/// Fans each transport event out to every active watcher. A slow watcher applies
-/// backpressure to the event reader instead of silently discarding history.
+/// Fans each transport event out to every active watcher. A watcher that cannot
+/// keep up is explicitly completed so the transport reader can recover from an
+/// observable event gap without blocking every other watcher.
 /// </summary>
 internal sealed class AgentClientEventFanout : IDisposable
 {
     private const int DefaultCapacity = 1_024;
+    private readonly int capacity;
     private readonly object syncRoot = new();
     private readonly Dictionary<Guid, Channel<AgentEvent>> subscribers = [];
     private AgentSnapshot? latestSnapshot;
     private bool disposed;
 
+    public AgentClientEventFanout(int capacity = DefaultCapacity)
+    {
+        if (capacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        }
+
+        this.capacity = capacity;
+    }
+
     public AgentClientEventSubscription Subscribe()
     {
         var id = Guid.NewGuid();
         var channel = Channel.CreateBounded<AgentEvent>(
-            new BoundedChannelOptions(DefaultCapacity)
+            new BoundedChannelOptions(capacity)
             {
                 SingleReader = true,
                 SingleWriter = false,
@@ -54,21 +66,15 @@ internal sealed class AgentClientEventFanout : IDisposable
         }
     }
 
-    public async Task PublishReseedAsync(
+    public AgentClientEventFanoutPublishResult PublishReseed(
         AgentSnapshot snapshot,
-        string reason,
-        CancellationToken cancellationToken)
+        string reason)
     {
         CacheSnapshot(snapshot);
-        await PublishAsync(
-                new AgentStateReseedEvent(snapshot, reason, DateTimeOffset.UtcNow),
-                cancellationToken)
-            .ConfigureAwait(false);
+        return Publish(new AgentStateReseedEvent(snapshot, reason, DateTimeOffset.UtcNow));
     }
 
-    public async Task PublishAsync(
-        AgentEvent agentEvent,
-        CancellationToken cancellationToken)
+    public AgentClientEventFanoutPublishResult Publish(AgentEvent agentEvent)
     {
         ArgumentNullException.ThrowIfNull(agentEvent);
         KeyValuePair<Guid, Channel<AgentEvent>>[] targets;
@@ -76,24 +82,28 @@ internal sealed class AgentClientEventFanout : IDisposable
         {
             if (disposed)
             {
-                return;
+                return AgentClientEventFanoutPublishResult.None;
             }
 
             targets = subscribers.ToArray();
         }
 
+        var delivered = 0;
+        var overflowed = 0;
         foreach (var target in targets)
         {
-            try
+            if (target.Value.Writer.TryWrite(agentEvent))
             {
-                await target.Value.Writer.WriteAsync(agentEvent, cancellationToken)
-                    .ConfigureAwait(false);
+                delivered++;
             }
-            catch (ChannelClosedException)
+            else
             {
+                overflowed++;
                 Remove(target.Key, target.Value);
             }
         }
+
+        return new(delivered, overflowed);
     }
 
     public void Dispose()
@@ -134,6 +144,15 @@ internal sealed class AgentClientEventFanout : IDisposable
 
         channel?.Writer.TryComplete();
     }
+}
+
+internal sealed record AgentClientEventFanoutPublishResult(
+    int DeliveredSubscriberCount,
+    int OverflowedSubscriberCount)
+{
+    public static AgentClientEventFanoutPublishResult None { get; } = new(0, 0);
+
+    public bool HasEventGap => OverflowedSubscriberCount > 0;
 }
 
 internal sealed class AgentClientEventSubscription(
