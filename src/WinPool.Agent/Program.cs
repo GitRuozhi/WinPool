@@ -251,7 +251,8 @@ internal static class Program
                 eventHub: agentEvents,
                 processIncarnationVerifier: processIncarnationVerifier,
                 expectedClientExecutablePath: mainApplicationExecutablePath);
-            var serverTask = server.RunAsync(pipeCancellation.Token);
+            var serverTask = Task.Run(
+                () => server.RunAsync(pipeCancellation.Token));
 
             try
             {

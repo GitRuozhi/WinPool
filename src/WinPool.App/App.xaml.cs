@@ -26,6 +26,8 @@ public partial class App : Application
     private static EventWaitHandle? s_exitSignal;
     private static CancellationTokenSource? s_activationChannelCts;
 
+    internal static bool InitialAgentWarningPublished { get; private set; }
+
     /// <summary>
     /// The main application window. Use <c>App.Window</c> from any class that needs
     /// the window reference (for dialogs, pickers, interop, etc.).
@@ -164,6 +166,7 @@ public partial class App : Application
             var result = await connection.ConnectAsync(timeout.Token);
             if (!result.IsSuccess && Window is MainWindow mainWindow)
             {
+                InitialAgentWarningPublished = true;
                 DispatcherQueue.TryEnqueue(
                     () => mainWindow.NotificationService.PublishWarning(
                         "WinPool Agent",
@@ -179,6 +182,7 @@ public partial class App : Application
         {
             if (Window is MainWindow mainWindow)
             {
+                InitialAgentWarningPublished = true;
                 DispatcherQueue.TryEnqueue(
                     () => mainWindow.NotificationService.PublishWarning(
                         "WinPool Agent",

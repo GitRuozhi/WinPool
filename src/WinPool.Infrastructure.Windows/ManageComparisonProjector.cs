@@ -21,9 +21,7 @@ public sealed class ManageComparisonProjector
         var expectedSystem = document.SystemId;
         if (objectId.System != expectedSystem)
         {
-            throw new ArgumentException(
-                "The comparison object does not belong to the supplied document.",
-                nameof(objectId));
+            return new ManageObjectComparisonView(objectId, []);
         }
 
         var snapshot = document.Snapshot;

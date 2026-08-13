@@ -1020,7 +1020,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                      .Where(candidate => candidate.Category == requestedCategory)
                      .OrderBy(candidate => candidate.SortOrder))
         {
-            yield return CreateWorkspaceItem(item, activeProjection);
+            yield return CreateWorkspaceItem(item, activeProjection, ActiveDocument.Id);
         }
     }
 
@@ -1217,6 +1217,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveSnapshot));
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         RebuildTopology();
+        RebuildObjects(SelectedStableId);
         return true;
     }
 

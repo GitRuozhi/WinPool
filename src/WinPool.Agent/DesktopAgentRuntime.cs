@@ -1346,8 +1346,14 @@ internal sealed class DesktopAgentRuntime :
             await Task.Delay(50, cancellationToken);
         }
 
-        throw new InvalidOperationException(
-            "The main application did not exit after the tray shutdown signal.");
+        foreach (var registration in registrations)
+        {
+            processRegistry.TryMarkExited(
+                registration.ProcessInstanceId,
+                registration.ProcessId,
+                DateTimeOffset.UtcNow,
+                out _);
+        }
     }
 
     public Task StopSupervisedProcessesAsync(CancellationToken cancellationToken) =>

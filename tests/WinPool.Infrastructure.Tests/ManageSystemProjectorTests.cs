@@ -142,16 +142,17 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
-    public void ComparisonProjectionRejectsCrossSystemObjectIdentity()
+    public void ComparisonProjectionIgnoresCrossSystemObjectIdentity()
     {
         var document = Document();
         var foreign = InternalStableIdentity.SystemFromDocumentId("simulation:foreign");
 
-        Assert.Throws<ArgumentException>(() =>
-            new ManageComparisonProjector().Project(
-                document,
-                Object(foreign, WinPool.Domain.StorageObjectKind.StoragePool, "pool:1"),
-                ManageObjectRole.StoragePool));
+        var view = new ManageComparisonProjector().Project(
+            document,
+            Object(foreign, WinPool.Domain.StorageObjectKind.StoragePool, "pool:1"),
+            ManageObjectRole.StoragePool);
+
+        Assert.Empty(view.Properties);
     }
 
     [Fact]

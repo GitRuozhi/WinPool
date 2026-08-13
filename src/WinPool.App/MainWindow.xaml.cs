@@ -151,11 +151,14 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            ViewModel.NotificationService.PublishError(
-                "WinPool",
-                $"工作区初始化失败：{exception.Message}",
-                "startup",
-                "startup-initialize-failed");
+            if (!App.InitialAgentWarningPublished)
+            {
+                ViewModel.NotificationService.PublishError(
+                    "WinPool",
+                    $"工作区初始化失败：{exception.Message}",
+                    "startup",
+                    "startup-initialize-failed");
+            }
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
