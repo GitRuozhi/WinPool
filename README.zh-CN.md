@@ -10,11 +10,11 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.37 是当前本地实施版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并收口 UI 事件重入、
-未观察任务异常、关键 async void 生命周期、无效分区输入、未确认的模拟池创建、事件流恢复、
-单实例重定向挂起和 RoboCopy 输出解析。IPC 协议保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
+V0.38 是当前本地实施版本。它保留 App、Agent、TestWorker、Broker 四进程架构，并新增陈旧 Agent
+端点身份验证，避免 Windows PID 被无关进程复用后，App 继续等待旧的 named pipe。IPC 协议保持为 3，
+Agent 持有的 SQLite 合同保持为 schema 12。
 
-V0.37 的 Release 自动门、依赖审计和构建结果记录在变更记录中。原生 UI、托盘、UAC、
+V0.38 的 Release 自动门、依赖审计和构建结果记录在变更记录中。原生 UI、托盘、UAC、
 设备、外部工具和数据位置用例继续保持 `unverified`，不得将其写为通过。用户本次只授权本地 Git
 提交，不授权推送、tag、二进制上传、GitHub Release 或部署。
 
@@ -44,7 +44,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已实施的
-  V0.37 Plan。
+  V0.38 Plan。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
 - [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 

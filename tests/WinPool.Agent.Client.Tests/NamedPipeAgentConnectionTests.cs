@@ -54,7 +54,10 @@ public sealed class NamedPipeAgentConnectionTests
         var firstTask = firstServer.RunAsync(firstCancellation.Token);
         await using var connection = new NamedPipeAgentConnection(
             endpointPath,
-            new RecordingLauncher());
+            new RecordingLauncher(),
+            null,
+            null,
+            new TrueAgentProcessLiveness());
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
         using var watchTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         await using var events = connection.WatchAsync(watchTimeout.Token)
@@ -167,7 +170,10 @@ public sealed class NamedPipeAgentConnectionTests
                     DateTimeOffset.UtcNow)));
         await using var connection = new NamedPipeAgentConnection(
             endpointPath,
-            new RecordingLauncher());
+            new RecordingLauncher(),
+            null,
+            null,
+            new TrueAgentProcessLiveness());
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var connected = await connection.ConnectAsync(timeout.Token);
@@ -248,7 +254,10 @@ public sealed class NamedPipeAgentConnectionTests
 
         await using var connection = new NamedPipeAgentConnection(
             endpointPath,
-            launcher);
+            launcher,
+            null,
+            null,
+            new TrueAgentProcessLiveness());
         var connected = await connection.ConnectAsync(CancellationToken.None);
         using var eventTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await using var eventEnumerator = connection
@@ -473,7 +482,9 @@ public sealed class NamedPipeAgentConnectionTests
         await using var connection = new NamedPipeAgentConnection(
             Path.Combine(directory, "missing.json"),
             launcher,
-            new FastForwardTimeProvider());
+            new FastForwardTimeProvider(),
+            null,
+            new TrueAgentProcessLiveness());
         using var cancellation = new CancellationTokenSource(
             TimeSpan.FromMilliseconds(100));
 
@@ -493,7 +504,10 @@ public sealed class NamedPipeAgentConnectionTests
         var launcher = new BlockingLauncher();
         var connection = new NamedPipeAgentConnection(
             Path.Combine(directory, "missing.json"),
-            launcher);
+            launcher,
+            null,
+            null,
+            new TrueAgentProcessLiveness());
         var connect = connection.ConnectAsync(CancellationToken.None);
         await launcher.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -547,7 +561,12 @@ public sealed class NamedPipeAgentConnectionTests
                     sessionId,
                     Environment.ProcessId,
                     DateTimeOffset.UtcNow)));
-        var connection = new NamedPipeAgentConnection(endpointPath, new RecordingLauncher());
+        var connection = new NamedPipeAgentConnection(
+            endpointPath,
+            new RecordingLauncher(),
+            null,
+            null,
+            new TrueAgentProcessLiveness());
 
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
         var send = connection.SendAsync(
@@ -633,7 +652,8 @@ public sealed class NamedPipeAgentConnectionTests
                 {
                     throw;
                 }
-            });
+            },
+            new TrueAgentProcessLiveness());
 
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
 
@@ -696,7 +716,10 @@ public sealed class NamedPipeAgentConnectionTests
         });
         await using var connection = new NamedPipeAgentConnection(
             endpointPath,
-            new RecordingLauncher());
+            new RecordingLauncher(),
+            null,
+            null,
+            new TrueAgentProcessLiveness());
 
         var result = await connection.ConnectAsync(CancellationToken.None);
         await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -704,6 +727,61 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.Equal(ApplicationStatus.RequiresEnvironment, result.Status);
         Assert.Contains(result.Messages, message => message.Code == "agent.connect.failed");
         Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task StaleEndpointProcessIdentityInvokesReplacementLauncher()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(
+            IpcIdentity.HashUserSid(sid),
+            nonce);
+        await File.WriteAllTextAsync(
+            endpointPath,
+            JsonSerializer.Serialize(
+                new AgentEndpoint(
+                    IpcProtocol.CurrentVersion,
+                    pipeName,
+                    nonce,
+                    sessionId,
+                    Environment.ProcessId,
+                    DateTimeOffset.UtcNow)));
+
+        var launcher = new BlockingLauncher();
+        await using var connection = new NamedPipeAgentConnection(
+            endpointPath,
+            launcher,
+            null,
+            null,
+            new FalseAgentProcessLiveness());
+        using var cancellation = new CancellationTokenSource();
+        var connect = connection.ConnectAsync(cancellation.Token);
+        await launcher.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        var result = await connect.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(launcher.Cancelled);
+        Assert.Equal(ApplicationStatus.Cancelled, result.Status);
+        Directory.Delete(directory, recursive: true);
+    }
+
+    private sealed class TrueAgentProcessLiveness : IAgentProcessLiveness
+    {
+        public bool IsExpectedAgentProcess(AgentEndpoint endpoint) => true;
+    }
+
+    private sealed class FalseAgentProcessLiveness : IAgentProcessLiveness
+    {
+        public bool IsExpectedAgentProcess(AgentEndpoint endpoint) => false;
     }
 
     private sealed class RecordingLauncher : IAgentProcessLauncher

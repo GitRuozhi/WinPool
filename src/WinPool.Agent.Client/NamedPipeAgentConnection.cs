@@ -21,6 +21,48 @@ public interface IAgentProcessLauncher
     Task EnsureStartedAsync(CancellationToken cancellationToken);
 }
 
+internal interface IAgentProcessLiveness
+{
+    bool IsExpectedAgentProcess(AgentEndpoint endpoint);
+}
+
+internal sealed class WindowsAgentProcessLiveness : IAgentProcessLiveness
+{
+    public bool IsExpectedAgentProcess(AgentEndpoint endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        try
+        {
+            using var process = Process.GetProcessById(endpoint.ProcessId);
+            if (process.HasExited)
+            {
+                return false;
+            }
+
+            if (!string.Equals(
+                    process.ProcessName,
+                    "WinPool.Agent",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var startedAt = process.StartTime.ToUniversalTime();
+            var tolerance = TimeSpan.FromSeconds(5);
+            return Math.Abs(
+                (startedAt - endpoint.StartedAtUtc).TotalSeconds)
+                <= tolerance.TotalSeconds;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or InvalidOperationException
+                or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+}
+
 public sealed class AgentProcessLauncher(string agentExecutablePath)
     : IAgentProcessLauncher
 {
@@ -65,6 +107,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
     private readonly string endpointPath;
     private readonly IAgentProcessLauncher launcher;
+    private readonly IAgentProcessLiveness agentProcessLiveness;
     private readonly TimeProvider timeProvider;
     private readonly Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
@@ -90,7 +133,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         string endpointPath,
         IAgentProcessLauncher launcher,
         TimeProvider? timeProvider = null)
-        : this(endpointPath, launcher, timeProvider, null)
+        : this(endpointPath, launcher, timeProvider, null, null)
     {
     }
 
@@ -98,11 +141,14 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         string endpointPath,
         IAgentProcessLauncher launcher,
         TimeProvider? timeProvider,
-        Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync)
+        Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync,
+        IAgentProcessLiveness? agentProcessLiveness = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpointPath);
         this.endpointPath = Path.GetFullPath(endpointPath);
         this.launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
+        this.agentProcessLiveness =
+            agentProcessLiveness ?? new WindowsAgentProcessLiveness();
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.beforeEventRecoveryConnectAsync = beforeEventRecoveryConnectAsync;
     }
@@ -443,7 +489,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             return null;
         }
 
-        return endpoint is not null && IsProcessLive(endpoint.ProcessId)
+        return endpoint is not null && agentProcessLiveness.IsExpectedAgentProcess(endpoint)
             ? endpoint
             : null;
     }
@@ -772,24 +818,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 payload.Event.Deserialize<AgentStateReseedEvent>(JsonOptions),
             _ => null
         };
-
-    private static bool IsProcessLive(int processId)
-    {
-        if (processId <= 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
 
     private static string RequestMessageType(AgentRequest request) =>
         request switch

@@ -7,6 +7,14 @@
 
 本文件只记录已经实际发生的结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
 
+## V0.38 — 2026-08-13
+
+- 新增 Agent endpoint 进程身份验证。`agent-endpoint.json` 的 PID 被无关 Windows 进程复用后，会被视为陈旧端点。
+- `ConnectAsync` 会通过现有 launcher 启动替代 Agent，而不是继续等待已经失效的 named pipe。
+- 新增陈旧端点身份恢复的回归测试。
+
+V0.38 已通过 520 项 Release 自动测试（无 skipped）、零警告 Release 构建和依赖审计。原生/人工用例继续保持 `unverified`。用户本次仅授权本地 Git 提交；未授权推送、tag、二进制上传、GitHub Release 或部署。
+
 ## V0.37 — 2026-08-13
 
 - 关闭 Settings 语言 SelectionChanged 的重入路径，并为主题、强调色、语言、MSR 与硬件 ID 偏好保存增加失败恢复。

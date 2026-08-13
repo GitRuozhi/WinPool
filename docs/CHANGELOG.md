@@ -5,6 +5,20 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
+## V0.38 — 2026-08-13
+
+- Added Agent endpoint process-identity verification so a stale
+  `agent-endpoint.json` whose PID has been reused by an unrelated Windows process
+  is treated as absent.
+- `ConnectAsync` now starts a replacement Agent through the existing launcher
+  instead of waiting on an obsolete named pipe.
+- Added regression coverage for stale endpoint identity recovery.
+
+V0.38 passed 520 automatic Release tests with no skipped tests, a warning-free
+Release build, and the dependency audit. Native/manual cases remain
+`unverified`. The user authorized this local Git commit only; no push, tag,
+binary upload, GitHub Release, or deployment is authorized.
+
 ## V0.37 — 2026-08-13
 
 - Closed the Settings language SelectionChanged reentrancy path and added

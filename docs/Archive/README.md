@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-There is no active Plan; V0.37 is the latest implemented record.
+There is no active Plan; V0.38 is the latest implemented record.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
@@ -15,6 +15,7 @@ There is no active Plan; V0.37 is the latest implemented record.
 | [`V0.35/`](V0.35/) | accepted; native/manual cases unverified | 2026-08-12 | V0.35; implementation `ab83458`…`5338603`; candidate `a2ab8ae`; acceptance checkpoint | Local identity authority, watcher isolation, terminal persistence, bounded shutdown, schema verification, and process-incarnation closure |
 | [`V0.36/`](V0.36/) | implemented; automatic gates passed; native/manual cases unverified | 2026-08-12 | V0.36; local Git checkpoint | Schema constraints, connection disposal, watcher accounting, monotonic worker persistence, historical Local identity, and protocol-error closure |
 | [`V0.37/`](V0.37/) | implemented; automatic gates passed; native/manual cases unverified | 2026-08-13 | V0.37; local Git commit | UI reentrancy, unobserved-task handling, async void recovery, partition input validation, simulated pool preview, event recovery, redirect timeout, and RoboCopy output normalization |
+| [`V0.38/`](V0.38/) | implemented; automatic gates passed; native/manual cases unverified | 2026-08-13 | V0.38; local Git commit | Stale Agent endpoint identity verification and recovery |
 | [`V0.33重构.md`](V0.33重构.md) and [`V0.33重构补充.md`](V0.33重构补充.md) | archived source records | 2026-08-11 | V0.33 | Original V0.33 reconstruction and supplement records, preserved unchanged after relocation from `docs/` |
 
 The forward correction is recorded by commit `236eb3f`, which is present on
