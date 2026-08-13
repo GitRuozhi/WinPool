@@ -9,7 +9,8 @@ Version: V0.39
 
 Contents: final minimal V0.3 correction for Agent control-pipe isolation after
 caller cancellation or timeout, Test-page Start/Cancel unknown-outcome handling,
-RunId reconciliation, and the corresponding deterministic tests.
+RunId reconciliation, submitted-request transport-failure classification, and
+the corresponding deterministic tests.
 
 Evidence recorded in the frozen Plan and changelog:
 

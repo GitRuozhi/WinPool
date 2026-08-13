@@ -173,6 +173,8 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 
 - Agent.Client 在请求写入或响应读取阶段取消时关闭当前控制连接，并返回
   `OutcomeUnknown`；等待请求门时取消不会破坏现有连接。
+- 请求已经提交后发生响应帧丢失或畸形时同样返回 `OutcomeUnknown`，不把结果错误地
+  解释为确定的环境失败。
 - TestPage 的 Start/Cancel 使用页面生命周期 cancellation 和集中 timeout；可能已经
   提交的请求不自动重试，并通过 Agent snapshot、RunId 结果查询进行对账。
 - 抽取 `TestRunReconciliation` 纯状态决策并增加 Application 测试。

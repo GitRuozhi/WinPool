@@ -476,6 +476,19 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 or NotSupportedException)
         {
             await DisposeStreamAsync();
+            if (transportStarted)
+            {
+                return ApplicationResult<AgentResponse>.FromStatus(
+                    ApplicationStatus.OutcomeUnknown,
+                    request.CorrelationId,
+                    new ApplicationMessage(
+                        "agent.request.outcome_unknown",
+                        "agent.request.outcome_unknown",
+                        string.Empty,
+                        ApplicationMessageSeverity.Warning,
+                        []));
+            }
+
             return Failure<AgentResponse>(
                 ApplicationStatus.RequiresEnvironment,
                 request.CorrelationId,

@@ -13,6 +13,8 @@ This file records results that actually occurred. Planned work belongs in
   development refresh path.
 - Added control-pipe isolation after request cancellation or timeout so a late
   response cannot be consumed by the next request.
+- Classified a submitted request whose response frame is lost or malformed as
+  `OutcomeUnknown` instead of a definite environment failure.
 - Added `OutcomeUnknown` handling, RunId reconciliation, and no-auto-retry
   behavior for Test-page Start/Cancel requests.
 - Completed the final minimal V0.3 correction before the V0.4 visual phase.
