@@ -19,6 +19,12 @@ cases remain `unverified`; no documentation treats them as passed. The user
 authorized a local Git commit only, not a push, tag, binary upload, GitHub
 Release, or deployment.
 
+One final minimal V0.3 correction checkpoint is planned at the same V0.39 product
+version. It is limited to Agent control-pipe timeout isolation and Test-page
+Start/Cancel reconciliation. Implementation is not yet authorized. After this
+checkpoint, normal development advances to V0.40; broader asynchronous and
+diagnostic cleanup is deferred to the V0.8–V0.9 technical-debt reference.
+
 ## Safety boundary
 
 The current V0.3 line does not implement or authorize real storage-structure
@@ -54,11 +60,15 @@ The reproducible self-contained staging command is documented in
 - [Development](docs/Development.md): architecture, environment, build, staging,
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
+- [V0.39 final-correction archive](docs/Archive/V0.39-final-correction/README.md):
+  the implemented final minimal V0.3 correction and its evidence.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
   including the implemented V0.39 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
+- [V0.8–V0.9 technical-debt reference](docs/Reference/V0.8-V0.9-技术债务参考.md):
+  deferred observations that are not current requirements.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.
 
 ## Research background

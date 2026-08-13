@@ -12,6 +12,7 @@ public enum ApplicationStatus
     Succeeded,
     Rejected,
     Cancelled,
+    OutcomeUnknown,
     Failed,
     PartiallyCompleted,
     RequiresAuthorization,

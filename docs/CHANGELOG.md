@@ -11,12 +11,19 @@ This file records results that actually occurred. Planned work belongs in
   refresh protection.
 - Added explicit exception messages and control-state recovery for the
   development refresh path.
-- Completed V0.3 stability cleanup before the V0.4 visual phase.
+- Added control-pipe isolation after request cancellation or timeout so a late
+  response cannot be consumed by the next request.
+- Added `OutcomeUnknown` handling, RunId reconciliation, and no-auto-retry
+  behavior for Test-page Start/Cancel requests.
+- Completed the final minimal V0.3 correction before the V0.4 visual phase.
 
-V0.39 passed 520 automatic Release tests with no skipped tests, a warning-free
-Release build, and the dependency audit. Native/manual cases remain
-`unverified`. The user authorized this local Git commit only; no push, tag,
-binary upload, GitHub Release, or deployment is authorized.
+V0.39 passed 562 automatic Release tests with no skipped tests, a warning-free
+Release build, the dependency audit, and a verified four-process self-contained
+staging tree. Targeted WinUI launch, navigation, and Test-page control checks
+passed; delayed-response Start/Cancel behavior is covered by automatic tests and
+was not manually forced. The inherited native, device, UAC, and long-duration
+matrix remains `unverified`. The user authorized the local commit, GitHub push,
+V0.39 tag, and GitHub Release.
 
 ## V0.38 — 2026-08-13
 

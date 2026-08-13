@@ -17,6 +17,9 @@ namespace WinPool_App;
 
 public sealed partial class TestPage : Page
 {
+    private static readonly TimeSpan StartCancelTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan StatusQueryTimeout = TimeSpan.FromSeconds(10);
+
     private static readonly ToolChoice[] Tools =
     [
         new("DiskSpd", new ToolId("microsoft.diskspd")),
@@ -80,12 +83,17 @@ public sealed partial class TestPage : Page
     private TestPlan? preparedPlan;
     private DispatcherTimer? statusTimer;
     private bool testWasRunning;
+    private bool testOutcomeUnknown;
+    private bool testCancelPending;
+    private bool testRequestInProgress;
     private int comparisonGeneration;
     private bool statusPollInProgress;
     private IReadOnlyList<WindowsPowerPlanDescriptor> availablePowerPlans = [];
     private IReadOnlyList<UserTestPreset> customPresets = [];
     private CancellationTokenSource? eventWatchCancellation;
     private Task? eventWatchTask;
+    private CancellationTokenSource? pageLifetimeCancellation;
+    private bool pageActive;
 
     public TestPage()
     {
@@ -95,6 +103,10 @@ public sealed partial class TestPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        pageLifetimeCancellation?.Cancel();
+        pageLifetimeCancellation?.Dispose();
+        pageLifetimeCancellation = new CancellationTokenSource();
+        pageActive = true;
         viewModel = (WorkspaceViewModel)e.Parameter;
         ScenarioOptions.ItemsSource = Scenarios.Select(item => item.DisplayName).ToArray();
         ScenarioOptions.SelectedIndex = 0;
@@ -136,12 +148,16 @@ public sealed partial class TestPage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        pageActive = false;
+        pageLifetimeCancellation?.Cancel();
         statusTimer?.Stop();
         statusTimer = null;
         eventWatchCancellation?.Cancel();
         eventWatchCancellation?.Dispose();
         eventWatchCancellation = null;
         eventWatchTask = null;
+        pageLifetimeCancellation?.Dispose();
+        pageLifetimeCancellation = null;
         base.OnNavigatedFrom(e);
     }
 
@@ -871,13 +887,31 @@ public sealed partial class TestPage : Page
         }
 
         StartButton.IsEnabled = false;
+        testRequestInProgress = true;
+        using var requestTimeout = CreateTestRequestTimeout(StartCancelTimeout);
         var response = await viewModel.AgentConnection.SendAsync(
             new StartAgentTestRequest(
                 preparedDefinition,
                 preparedPlan,
                 UserConfirmedWrite: true,
                 CorrelationId.New()),
-            CancellationToken.None);
+            requestTimeout.Token);
+        if (!pageActive)
+        {
+            return;
+        }
+
+        testRequestInProgress = false;
+        if (response.Status == ApplicationStatus.OutcomeUnknown)
+        {
+            testWasRunning = true;
+            testOutcomeUnknown = true;
+            testCancelPending = false;
+            ShowUnknownTestOutcome(zh, "start");
+            StartStatusTimer();
+            return;
+        }
+
         if (!response.IsSuccess)
         {
             StartButton.IsEnabled = true;
@@ -889,6 +923,8 @@ public sealed partial class TestPage : Page
         }
 
         testWasRunning = true;
+        testOutcomeUnknown = false;
+        testCancelPending = false;
         LiveMetricsDetails.Text = string.Empty;
         NativeProgressBar.Value = 0;
         NativeProgressText.Text = zh
@@ -912,8 +948,14 @@ public sealed partial class TestPage : Page
         }
         finally
         {
-            StartButton.IsEnabled = !testWasRunning && preparedPlan is not null;
-            CancelButton.IsEnabled = testWasRunning;
+            testRequestInProgress = false;
+            if (pageActive)
+            {
+                StartButton.IsEnabled = !testWasRunning && preparedPlan is not null;
+                CancelButton.IsEnabled = testWasRunning
+                && !testOutcomeUnknown
+                && !testCancelPending;
+            }
         }
     }
 
@@ -1258,16 +1300,40 @@ public sealed partial class TestPage : Page
             return;
         }
 
+        if (testRequestInProgress || testOutcomeUnknown)
+        {
+            return;
+        }
+
         CancelButton.IsEnabled = false;
+        testRequestInProgress = true;
+        testCancelPending = true;
         try
         {
+            using var requestTimeout = CreateTestRequestTimeout(StartCancelTimeout);
             var response = await viewModel.AgentConnection.SendAsync(
                 new CancelAgentTestRequest(
                     preparedPlan.RunId,
                     CorrelationId.New()),
-                CancellationToken.None);
+                requestTimeout.Token);
+            if (!pageActive)
+            {
+                return;
+            }
+
+            if (response.Status == ApplicationStatus.OutcomeUnknown)
+            {
+                testOutcomeUnknown = true;
+                ShowUnknownTestOutcome(
+                    viewModel.Localization.EffectiveLanguage == CoreLanguagePreference.ZhCn,
+                    "cancel");
+                StartStatusTimer();
+                return;
+            }
+
             if (!response.IsSuccess)
             {
+                testCancelPending = false;
                 ShowPlanFailure(
                     response.Messages.FirstOrDefault()?.DiagnosticText
                     ?? response.Messages.FirstOrDefault()?.Code
@@ -1287,7 +1353,13 @@ public sealed partial class TestPage : Page
         }
         finally
         {
-            CancelButton.IsEnabled = testWasRunning;
+            testRequestInProgress = false;
+            if (pageActive)
+            {
+                CancelButton.IsEnabled = testWasRunning
+                    && !testOutcomeUnknown
+                    && !testCancelPending;
+            }
         }
     }
 
@@ -1305,6 +1377,8 @@ public sealed partial class TestPage : Page
     private async void StatusTimer_Tick(object? sender, object e)
     {
         if (statusPollInProgress
+            || !pageActive
+            || testRequestInProgress
             || viewModel.AgentConnection is null
             || preparedPlan is null)
         {
@@ -1314,32 +1388,83 @@ public sealed partial class TestPage : Page
         statusPollInProgress = true;
         try
         {
+            using var snapshotTimeout = CreateTestRequestTimeout(StatusQueryTimeout);
             var response = await viewModel.AgentConnection.SendAsync(
                 new GetAgentSnapshotRequest(CorrelationId.New()),
-                CancellationToken.None);
-            var snapshot = (response.Value as AgentSnapshotResponse)?.Snapshot;
-            var active = snapshot?.ActiveTestRunId;
-            if (active == preparedPlan.RunId)
+                snapshotTimeout.Token);
+            if (!pageActive)
             {
-                await UpdateLiveMetricsAsync(snapshot!);
                 return;
             }
 
-            if (testWasRunning)
+            if (!response.IsSuccess || response.Value is not AgentSnapshotResponse snapshotResponse)
             {
-                statusTimer?.Stop();
-                testWasRunning = false;
-                CancelButton.IsEnabled = false;
-                StartButton.IsEnabled = true;
+                if (testOutcomeUnknown || testCancelPending)
+                {
+                    ShowUnknownTestOutcome(
+                        viewModel.Localization.EffectiveLanguage == CoreLanguagePreference.ZhCn,
+                        "status");
+                    return;
+                }
+
+                ShowPlanFailure(
+                    response.Messages.FirstOrDefault()?.DiagnosticText
+                    ?? response.Messages.FirstOrDefault()?.Code
+                    ?? "Agent status query failed.");
+                return;
+            }
+
+            var snapshot = snapshotResponse.Snapshot;
+            var active = snapshot.ActiveTestRunId;
+            if (active == preparedPlan.RunId)
+            {
+                ApplyReconciliationDecision(
+                    TestRunReconciliation.Decide(TestRunReconciliationState.Active));
+                await UpdateLiveMetricsAsync(snapshot!, pageLifetimeCancellation!.Token);
+                return;
+            }
+
+            if (testWasRunning || testOutcomeUnknown || testCancelPending)
+            {
                 var zh =
                     viewModel.Localization.EffectiveLanguage == CoreLanguagePreference.ZhCn;
+                using var resultTimeout = CreateTestRequestTimeout(StatusQueryTimeout);
                 var resultResponse = await viewModel.AgentConnection.SendAsync(
                     new GetAgentTestResultRequest(
                         preparedPlan.RunId,
                         CorrelationId.New()),
-                    CancellationToken.None);
-                var result = (resultResponse.Value as TestRunResultResponse)?.Result;
-                RenderCompletedResult(result, zh);
+                    resultTimeout.Token);
+                if (!pageActive)
+                {
+                    return;
+                }
+
+                if (!resultResponse.IsSuccess
+                    || resultResponse.Value is not TestRunResultResponse resultEnvelope)
+                {
+                    if (resultResponse.Status == ApplicationStatus.RequiresEnvironment
+                        && resultResponse.Messages.Any(message =>
+                            message.Code == "agent.testing.result_not_found"))
+                    {
+                        ApplyReconciliationDecision(
+                            TestRunReconciliation.Decide(TestRunReconciliationState.NotFound));
+                        statusTimer?.Stop();
+                        PlanStatus.Severity = InfoBarSeverity.Informational;
+                        PlanStatus.Title = zh ? "没有找到测试运行" : "No test run found";
+                        PlanStatus.Message = zh
+                            ? "Agent 已确认该 RunId 不存在，可以重新生成计划并开始测试。"
+                            : "The Agent confirmed that this RunId does not exist. Build a new plan before starting again.";
+                        return;
+                    }
+
+                    ShowUnknownTestOutcome(zh, "status");
+                    return;
+                }
+
+                ApplyReconciliationDecision(
+                    TestRunReconciliation.Decide(TestRunReconciliationState.Terminal));
+                statusTimer?.Stop();
+                RenderCompletedResult(resultEnvelope.Result, zh);
 
                 await LoadHistoryAsync();
             }
@@ -1358,7 +1483,19 @@ public sealed partial class TestPage : Page
         }
     }
 
-    private async Task UpdateLiveMetricsAsync(AgentSnapshot snapshot)
+    private void ApplyReconciliationDecision(
+        TestRunReconciliationDecision decision)
+    {
+        testWasRunning = decision.IsRunning;
+        testOutcomeUnknown = decision.KeepUnknown;
+        testCancelPending = false;
+        StartButton.IsEnabled = decision.CanStart && preparedPlan is not null;
+        CancelButton.IsEnabled = decision.CanCancel;
+    }
+
+    private async Task UpdateLiveMetricsAsync(
+        AgentSnapshot snapshot,
+        CancellationToken cancellationToken)
     {
         if (preparedPlan is null || viewModel.AgentConnection is null)
         {
@@ -1369,7 +1506,11 @@ public sealed partial class TestPage : Page
             new GetAgentTestResultRequest(
                 preparedPlan.RunId,
                 CorrelationId.New()),
-            CancellationToken.None);
+            cancellationToken);
+        if (!pageActive)
+        {
+            return;
+        }
         var result = (resultResponse.Value as TestRunResultResponse)?.Result;
         var lines = new List<string>
         {
@@ -2421,6 +2562,35 @@ public sealed partial class TestPage : Page
                 ? "无法生成计划"
                 : "Plan could not be built";
         PlanStatus.Message = message;
+    }
+
+    private void ShowUnknownTestOutcome(bool zh, string operation)
+    {
+        PlanStatus.Severity = InfoBarSeverity.Warning;
+        PlanStatus.Title = zh ? "测试状态待确认" : "Test outcome needs confirmation";
+        PlanStatus.Message = operation switch
+        {
+            "start" => zh
+                ? "启动请求可能已经提交，但响应超时。不会自动重试，正在查询 Agent 的真实运行状态。"
+                : "The start request may have been submitted, but its response timed out. It will not be retried automatically; the Agent state is being reconciled.",
+            "cancel" => zh
+                ? "取消请求可能已经提交，但响应超时。不会重复取消，正在查询 Agent 的真实运行状态。"
+                : "The cancel request may have been submitted, but its response timed out. It will not be repeated; the Agent state is being reconciled.",
+            _ => zh
+                ? "Agent 状态暂时无法确认。不会自动重试，请稍后重新查询。"
+                : "The Agent state could not be confirmed yet. No automatic retry will be made; query again later."
+        };
+        StartButton.IsEnabled = false;
+        CancelButton.IsEnabled = false;
+    }
+
+    private CancellationTokenSource CreateTestRequestTimeout(TimeSpan timeout)
+    {
+        var lifetimeToken = pageLifetimeCancellation?.Token
+            ?? new CancellationToken(canceled: true);
+        var source = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+        source.CancelAfter(timeout);
+        return source;
     }
 
     private void InvalidatePreparedPlan()

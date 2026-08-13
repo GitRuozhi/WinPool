@@ -79,8 +79,8 @@ implementation version is V0.39, an iteration in the V0.3 line.
 | --- | --- | --- |
 | V0.1 | Deliver the minimum prototype and establish the basic front-end visual direction. | Historical foundation. |
 | V0.2 | Completely restructure the codebase; establish the baseline architecture and development rules. | Historical foundation. |
-| V0.3 | Correct code defects and establish normal operation. | Current product line. Version confirmation and automatic checks do not replace remaining native, manual, or platform evidence. |
-| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. | Future phase; preserve accessibility and the accepted structural baseline. |
+| V0.3 | Correct code defects and establish normal operation. | Completed at V0.39 after the final minimal correction checkpoint. Remaining native, manual, and platform evidence is recorded honestly and does not become passed through version confirmation. |
+| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. | Next normal phase beginning at V0.40; preserve accessibility and the accepted structural baseline. |
 | V0.5 | Complete management and editing workflows to provide a modern functional alternative to the legacy Windows storage GUIs. | First phase permitted to introduce controlled real storage-structure operations under the explicit developer- and product-user authorization model. |
 | V0.6 | Complete testing and monitoring functions. | External tools remain typed adapters with explicit target validation. |
 | V0.7 | Complete development-facing and AI Agent functions. | Do not freeze a public SDK, plug-in API, database contract, or wire protocol until internal models are stable. |

@@ -17,6 +17,10 @@ V0.39 的 Release 自动门、依赖审计和构建结果记录在变更记录�
 设备、外部工具和数据位置用例继续保持 `unverified`，不得将其写为通过。用户本次只授权本地 Git
 提交，不授权推送、tag、二进制上传、GitHub Release 或部署。
 
+当前计划在同一 V0.39 产品版本内进行一次 V0.3 最终最小修正检查点，只处理 Agent
+控制管道 timeout 隔离和测试页 Start/Cancel 对账，目前尚未授权实施。该检查点完成后，
+正常开发进入 V0.40；更广泛的异步和诊断清理延期到 V0.8–V0.9 技术债务参考。
+
 ## 安全边界
 
 当前 V0.3 产品线未实现也未授权真实存储结构修改。在此产品线中，不得创建、初始化、格式化、调整、
@@ -41,10 +45,14 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [产品方向](docs/Product.zh-CN.md)：长期定位、产品边界和路线图。
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
+- [V0.39 最终修正归档](docs/Archive/V0.39-final-correction/README.zh-CN.md)：
+  已实施的 V0.3 最终最小修正及其证据。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已实施的
   V0.39 Plan。
 - [参考资料](docs/Reference/AI-Agent-Harness-项目管理架构参考.md)：非权威项目管理参考。
+- [V0.8–V0.9 技术债务参考](docs/Reference/V0.8-V0.9-技术债务参考.md)：
+  已延期且不构成当前要求的技术观察。
 - [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
 
 ## 研究背景

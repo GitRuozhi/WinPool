@@ -114,9 +114,12 @@ protected paths before editing.
 - V0.39 is the current local implementation version. Its automatic quality and
   build gates are recorded in `CHANGELOG.md`; inherited native/manual cases
   remain `unverified` and no result may represent them as passing.
-- The implemented V0.39 Plan is archived under `docs/Archive/V0.39`; there is
-  no active `docs/Plan.md`. The user authorized this local Git commit only;
-  push, tag, GitHub Release, binary upload, and deployment remain unauthorized.
+- The implemented V0.39 Plans are archived under `docs/Archive/V0.39` and
+  `docs/Archive/V0.39-final-correction`; there is no active `docs/Plan.md`.
+  The final V0.3 correction is complete, and normal development advances to
+  V0.40. The user authorized the V0.39 local commit, GitHub push, tag, and
+  GitHub Release; binary upload and deployment remain separately unauthorized
+  unless explicitly requested.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate

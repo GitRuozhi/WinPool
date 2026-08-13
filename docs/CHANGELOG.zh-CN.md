@@ -11,9 +11,11 @@
 
 - 开发页诊断刷新增加超时、可见状态和重复刷新保护。
 - 开发页刷新异常时显示明确信息并恢复控件。
-- 完成 V0.4 视觉阶段前的 V0.3 稳定性收口。
+- 请求取消或超时后隔离控制管道，避免迟到响应被下一请求消费。
+- 测试页 Start/Cancel 增加 `OutcomeUnknown`、RunId 对账和禁止自动重试。
+- 完成 V0.4 视觉阶段前 V0.3 的最终最小修正。
 
-V0.39 已通过 520 项 Release 自动测试（无 skipped）、零警告 Release 构建和依赖审计。原生/人工用例继续保持 `unverified`。用户本次仅授权本地 Git 提交；未授权推送、tag、二进制上传、GitHub Release 或部署。
+V0.39 已通过 562 项 Release 自动测试（无 skipped）、零警告 Release 构建、依赖审计和四进程自包含 staging 验证。目标 WinUI 启动、导航和测试页控件检查通过；延迟响应下的 Start/Cancel 行为由自动测试覆盖，未在人工界面中强行制造。继承的原生、设备、UAC 和长期运行矩阵继续保持 `unverified`。用户已授权本地提交、GitHub 推送、V0.39 tag 和 GitHub Release。
 
 ## V0.38 — 2026-08-13
 

@@ -398,11 +398,23 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         CancellationToken cancellationToken)
     {
         using var operation = EnterOperation(cancellationToken);
-        await requestGate.WaitAsync(operation.Token).ConfigureAwait(false);
+        var requestGateAcquired = false;
+        var transportStarted = false;
         try
         {
+            await requestGate.WaitAsync(operation.Token).ConfigureAwait(false);
+            requestGateAcquired = true;
             ThrowIfDisposed();
+            if (stream?.IsConnected != true || handshake is null)
+            {
+                return Failure<AgentResponse>(
+                    ApplicationStatus.RequiresEnvironment,
+                    request.CorrelationId,
+                    "agent.request.not_connected");
+            }
+
             var messageType = RequestMessageType(request);
+            transportStarted = true;
             await IpcFrameCodec.WriteAsync(
                 stream!,
                 Envelope(
@@ -434,6 +446,29 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 payload.Messages,
                 payload.CorrelationId);
         }
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested
+                && !IsDisposing)
+        {
+            if (transportStarted)
+            {
+                await DisposeStreamAsync().ConfigureAwait(false);
+                return ApplicationResult<AgentResponse>.FromStatus(
+                    ApplicationStatus.OutcomeUnknown,
+                    request.CorrelationId,
+                    new ApplicationMessage(
+                        "agent.request.outcome_unknown",
+                        "agent.request.outcome_unknown",
+                        string.Empty,
+                        ApplicationMessageSeverity.Warning,
+                        []));
+            }
+
+            return Failure<AgentResponse>(
+                ApplicationStatus.Cancelled,
+                request.CorrelationId,
+                "agent.request.cancelled");
+        }
         catch (Exception exception) when (
             exception is IOException
                 or InvalidDataException
@@ -456,7 +491,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
         finally
         {
-            requestGate.Release();
+            if (requestGateAcquired)
+            {
+                requestGate.Release();
+            }
         }
     }
 
