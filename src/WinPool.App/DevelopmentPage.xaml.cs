@@ -19,6 +19,7 @@ public sealed partial class DevelopmentPage : Page
     private readonly ObservableCollection<string> _algorithmLines = [];
     private readonly ObservableCollection<string> _eventLines = [];
     private CancellationTokenSource? _eventCancellation;
+    private bool _refreshInProgress;
 
     public DevelopmentPage()
     {
@@ -96,10 +97,17 @@ public sealed partial class DevelopmentPage : Page
 
     private async Task RefreshDiagnosticsAsync(CancellationToken cancellationToken)
     {
+        if (_refreshInProgress)
+        {
+            return;
+        }
+
         var zh = ViewModel.Localization.EffectiveLanguage
                  == CoreLanguagePreference.ZhCn;
         if (ViewModel.AgentConnection is null)
         {
+            RefreshDiagnosticsStatus.Text =
+                zh ? "Agent 连接不可用。" : "Agent connection unavailable.";
             _runtimeLines.Clear();
             _runtimeLines.Add(zh ? "Agent 连接不可用。" : "Agent connection unavailable.");
             _planLines.Clear();
@@ -107,14 +115,22 @@ public sealed partial class DevelopmentPage : Page
             return;
         }
 
+        _refreshInProgress = true;
         RefreshDiagnosticsButton.IsEnabled = false;
+        RefreshDiagnosticsStatus.Text = zh ? "正在刷新诊断…" : "Refreshing diagnostics…";
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
         try
         {
             var result = await ViewModel.AgentConnection.SendAsync(
                 new GetDevelopmentDiagnosticsRequest(10, CorrelationId.New()),
-                cancellationToken);
+                timeout.Token);
             if (result.Value is not DevelopmentDiagnosticsResponse response)
             {
+                RefreshDiagnosticsStatus.Text =
+                    result.Messages.FirstOrDefault()?.Code
+                    ?? (zh ? "无法读取开发诊断。" : "Development diagnostics unavailable.");
                 _runtimeLines.Clear();
                 _runtimeLines.Add(
                     result.Messages.FirstOrDefault()?.Code
@@ -123,17 +139,29 @@ public sealed partial class DevelopmentPage : Page
             }
 
             RenderDiagnostics(response.Diagnostics, zh);
+            RefreshDiagnosticsStatus.Text =
+                zh ? "诊断已刷新。" : "Diagnostics refreshed.";
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
+            RefreshDiagnosticsStatus.Text =
+                zh ? "刷新诊断超时。" : "Diagnostics refresh timed out.";
+            _runtimeLines.Clear();
+            _runtimeLines.Add(
+                zh ? "刷新诊断超时。" : "Diagnostics refresh timed out.");
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            RefreshDiagnosticsStatus.Text =
+                zh
+                    ? $"读取开发诊断失败：{exception.Message}"
+                    : $"Development diagnostics failed: {exception.Message}";
             _runtimeLines.Clear();
             _runtimeLines.Add(zh ? "读取开发诊断失败。" : "Development diagnostics failed.");
         }
         finally
         {
+            _refreshInProgress = false;
             RefreshDiagnosticsButton.IsEnabled = true;
         }
     }

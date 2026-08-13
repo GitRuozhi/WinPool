@@ -111,10 +111,10 @@ protected paths before editing.
   `c=10`; reduce scope, combine work, or advance the minor version.
 - A normal `c` iteration requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.38 is the current local implementation version. Its automatic quality and
+- V0.39 is the current local implementation version. Its automatic quality and
   build gates are recorded in `CHANGELOG.md`; inherited native/manual cases
   remain `unverified` and no result may represent them as passing.
-- The implemented V0.38 Plan is archived under `docs/Archive/V0.38`; there is
+- The implemented V0.39 Plan is archived under `docs/Archive/V0.39`; there is
   no active `docs/Plan.md`. The user authorized this local Git commit only;
   push, tag, GitHub Release, binary upload, and deployment remain unauthorized.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,

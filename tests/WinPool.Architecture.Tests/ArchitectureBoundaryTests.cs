@@ -500,7 +500,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>3</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>8</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>9</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)$(WinPoolVersionIteration)</WinPoolVersion>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);

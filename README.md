@@ -7,13 +7,13 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.38 is the current local implementation version. It retains the multi-process
-App/Agent/TestWorker/Broker architecture while adding stale Agent endpoint
-identity verification so PID reuse by an unrelated Windows process cannot make
-the App wait on an obsolete named pipe. IPC remains protocol 3 and the
-Agent-owned SQLite contract remains schema 12.
+V0.39 is the current local implementation version. It completes V0.3 stability
+work before V0.4 by adding development-diagnostics timeout/status handling,
+safer UI event recovery, key cancellation boundaries, and clearer startup
+diagnostics. IPC remains protocol 3 and the Agent-owned SQLite contract remains
+schema 12.
 
-The V0.38 automatic Release, dependency-audit, and build results are recorded in
+The V0.39 automatic Release, dependency-audit, and build results are recorded in
 the changelog. Native UI, tray, UAC, device, external-tool, and data-location
 cases remain `unverified`; no documentation treats them as passed. The user
 authorized a local Git commit only, not a push, tag, binary upload, GitHub
@@ -56,7 +56,7 @@ The reproducible self-contained staging command is documented in
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
-  including the implemented V0.38 Plan.
+  including the implemented V0.39 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

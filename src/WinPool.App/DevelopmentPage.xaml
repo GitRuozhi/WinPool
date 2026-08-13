@@ -42,6 +42,10 @@
                 FontFamily="Consolas"
                 FontSize="12"
                 TextWrapping="Wrap" />
+            <TextBlock
+                x:Name="RefreshDiagnosticsStatus"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
         </StackPanel>
         <TabView Grid.Row="2" IsAddTabButtonVisible="False">
             <TabViewItem x:Name="RuntimeTab" Header="运行时">

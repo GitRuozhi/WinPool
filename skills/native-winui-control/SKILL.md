@@ -16,7 +16,7 @@ Playwright is not applicable.
 - `System.Drawing` for screen capture.
 - `user32.dll` P/Invoke for foreground, cursor, and mouse events.
 
-Verified against WinPool V0.38:
+Verified against WinPool V0.39:
 
 - Main window class: `WinUIDesktopWin32WindowClass`.
 - Main window title: `WinPool`.

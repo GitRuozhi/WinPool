@@ -5,6 +5,19 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
+## V0.39 — 2026-08-13
+
+- Added development-diagnostics refresh timeout, visible status, and duplicate
+  refresh protection.
+- Added explicit exception messages and control-state recovery for the
+  development refresh path.
+- Completed V0.3 stability cleanup before the V0.4 visual phase.
+
+V0.39 passed 520 automatic Release tests with no skipped tests, a warning-free
+Release build, and the dependency audit. Native/manual cases remain
+`unverified`. The user authorized this local Git commit only; no push, tag,
+binary upload, GitHub Release, or deployment is authorized.
+
 ## V0.38 — 2026-08-13
 
 - Added Agent endpoint process-identity verification so a stale

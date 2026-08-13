@@ -73,7 +73,7 @@ identifiers are internal contracts and do not form additional project versions.
 The user confirmed the following product route on 2026-08-12. It defines phase
 objectives, not permission to bypass the product boundary, a substitute for an
 active Plan, or evidence that a phase is complete. The current local
-implementation version is V0.38, an iteration in the V0.3 line.
+implementation version is V0.39, an iteration in the V0.3 line.
 
 | Phase | Objective | Status or governing constraint |
 | --- | --- | --- |

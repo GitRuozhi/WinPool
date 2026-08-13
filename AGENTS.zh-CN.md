@@ -71,8 +71,8 @@
 - 架构与路线图通常只写到 `Va.b`。
 - `c=8` 或 `c=9` 时提醒开发者控制范围；不得创建 `c=10`。
 - 普通 `c` 迭代需要本地提交；除非明确授权，不推送、不打 tag、不发布。
-- V0.38 是当前本地实施版本；自动质量门和构建结果记录在 `CHANGELOG.md`，继承的原生/人工用例继续保持 `unverified`，不得将其写为通过。
-- 已实施的 V0.38 Plan 归档在 `docs/Archive/V0.38`；当前不存在活动 `docs/Plan.md`。用户本次仅授权本地 Git 提交；推送、tag、GitHub Release、二进制上传和部署仍未授权。
+- V0.39 是当前本地实施版本；自动质量门和构建结果记录在 `CHANGELOG.md`，继承的原生/人工用例继续保持 `unverified`，不得将其写为通过。
+- 已实施的 V0.39 Plan 归档在 `docs/Archive/V0.39`；当前不存在活动 `docs/Plan.md`。用户本次仅授权本地 Git 提交；推送、tag、GitHub Release、二进制上传和部署仍未授权。
 - 推送前必须 fetch，确认远端目标是本地 HEAD 的祖先，并检查待推提交；拒绝分叉和 force push。
 - tag、GitHub Release、二进制上传或部署始终需要单独明确授权。
 
