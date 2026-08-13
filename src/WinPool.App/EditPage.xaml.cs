@@ -382,13 +382,28 @@ public sealed partial class EditPage : Page
 
     private async Task FormatAsync(PartitionInfo partition)
     {
-        var fileSystem = await PromptAsync(
-            Text("模拟格式化：NTFS / ReFS / exFAT", "Simulated format: NTFS / ReFS / exFAT"),
-            "NTFS");
-        if (fileSystem is null)
+        var fileSystemBox = new ComboBox
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            SelectedIndex = 0
+        };
+        fileSystemBox.Items.Add("NTFS");
+        fileSystemBox.Items.Add("ReFS");
+        fileSystemBox.Items.Add("exFAT");
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = Text("模拟格式化", "Simulated format"),
+            Content = fileSystemBox,
+            PrimaryButtonText = Text("确定", "OK"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
             return;
         }
+        var fileSystem = fileSystemBox.SelectedItem as string ?? "NTFS";
         await ApplyAsync(new SimulationOperationRequest(
             SimulationOperationKind.FormatPartition,
             partition.StableId,
@@ -412,11 +427,19 @@ public sealed partial class EditPage : Page
             return;
         }
         long? bytes = null;
-        if (!string.IsNullOrWhiteSpace(size)
-            && double.TryParse(size, out var gb)
-            && gb > 0)
+        if (!string.IsNullOrWhiteSpace(size))
         {
-            bytes = (long)(gb * 1024 * 1024 * 1024);
+            if (!TryParseGigabytes(size, out var gb))
+            {
+                await ShowMessageAsync(
+                    Text("输入无效", "Invalid input"),
+                    Text(
+                        "请输入大于 0 的 GB 数值，或留空使用全部剩余空间。",
+                        "Enter a size in GB greater than zero, or leave the field blank to use all free space."));
+                return;
+            }
+
+            bytes = checked((long)(gb * 1024L * 1024L * 1024L));
         }
         await ApplyAsync(new SimulationOperationRequest(
             SimulationOperationKind.CreatePartition,
@@ -614,6 +637,36 @@ public sealed partial class EditPage : Page
             vdiskSize = (long)(gb * 1024 * 1024 * 1024);
         }
 
+        var confirmDialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = Text("创建模拟存储池", "Create simulated storage pool"),
+            Content = Text(
+                $"池名称：{poolName}\n" +
+                $"虚拟磁盘：{virtualName}\n" +
+                $"成员磁盘：{_stagedDiskIds.Count}\n" +
+                $"弹性：{ResiliencyBox.SelectedItem as string ?? "Simple"}\n" +
+                $"条带大小：{InterleaveBox.SelectedItem as string ?? "64K"}\n" +
+                $"簇大小：{ClusterSizeBox.SelectedItem as string ?? "64K"}\n" +
+                $"虚拟磁盘大小：{(vdiskSize is null ? "全部可用空间" : $"{vdiskSize / 1024 / 1024 / 1024} GB")}\n\n" +
+                "确认后还会自动创建一个分区并格式化为 NTFS。",
+                $"Pool name: {poolName}\n" +
+                $"Virtual disk: {virtualName}\n" +
+                $"Member disks: {_stagedDiskIds.Count}\n" +
+                $"Resiliency: {ResiliencyBox.SelectedItem as string ?? "Simple"}\n" +
+                $"Interleave: {InterleaveBox.SelectedItem as string ?? "64K"}\n" +
+                $"Cluster: {ClusterSizeBox.SelectedItem as string ?? "64K"}\n" +
+                $"Virtual disk size: {(vdiskSize is null ? "all available space" : $"{vdiskSize / 1024 / 1024 / 1024} GB")}\n\n" +
+                "A partition will also be created and formatted as NTFS."),
+            PrimaryButtonText = Text("创建", "Create"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await confirmDialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
         var result = await ApplyAsync(new SimulationOperationRequest(
             SimulationOperationKind.CreateStoragePool,
             "primordial",
@@ -686,7 +739,21 @@ public sealed partial class EditPage : Page
         {
             return;
         }
-        await ViewModel.ResetActiveSimulationAsync();
+        try
+        {
+            await ViewModel.ResetActiveSimulationAsync();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            await ShowMessageAsync(
+                Text("重置失败", "Reset failed"),
+                exception.Message);
+            return;
+        }
         _selectedPartitionId = null;
         _stagedDiskIds.Clear();
         RefreshAll();
@@ -697,9 +764,50 @@ public sealed partial class EditPage : Page
             ? value * 1024
             : 65536;
 
+    private static bool TryParseGigabytes(string text, out double gigabytes)
+    {
+        gigabytes = 0;
+        if (!double.TryParse(
+                text,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsed)
+            || !double.IsFinite(parsed)
+            || parsed <= 0)
+        {
+            return false;
+        }
+
+        var maximumGigabytes =
+            (double)(long.MaxValue / (1024L * 1024L * 1024L));
+        if (parsed > maximumGigabytes)
+        {
+            return false;
+        }
+
+        gigabytes = parsed;
+        return true;
+    }
+
     private async Task<SimulationOperationResult?> ApplyAsync(SimulationOperationRequest request)
     {
-        var result = await ViewModel.ApplySimulationOperationAsync(request);
+        WinPool.Application.ApplicationResult<SimulationOperationResult> result;
+        try
+        {
+            result = await ViewModel.ApplySimulationOperationAsync(request);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            await ShowMessageAsync(
+                Text("操作失败", "Operation failed"),
+                exception.Message);
+            return null;
+        }
+
         if (!result.IsSuccess || result.Value is null)
         {
             await ShowMessageAsync(

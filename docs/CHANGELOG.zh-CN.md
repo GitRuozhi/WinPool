@@ -7,6 +7,20 @@
 
 本文件只记录已经实际发生的结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
 
+## V0.37 — 2026-08-13
+
+- 关闭 Settings 语言 SelectionChanged 的重入路径，并为主题、强调色、语言、MSR 与硬件 ID 偏好保存增加失败恢复。
+- 在写入崩溃证据后将未观察任务异常标记为已观察。
+- 为测试页 prepare/start/cancel/status 轮询和编辑页模拟变更补齐异常恢复与控件状态恢复。
+- 非空但无效的分区大小输入会被拒绝，不再静默使用全部剩余空间。
+- 模拟创建存储池前增加参数预览和确认。
+- Development 事件流和采集对照在传输异常时会显示结果并恢复控件。
+- 单实例激活重定向等待改为有限时间，不再无限等待。
+- 畸形 RoboCopy 输出会归一化为失败工具事件。
+- 格式化文件系统由自由文本改为固定 NTFS/ReFS/exFAT 选择，分区路径缺失时给出提示。
+
+V0.37 已通过 519 项 Release 自动测试（无 skipped）、零警告 Release 构建和依赖审计。原生/人工用例继续保持 `unverified`。用户本次仅授权本地 Git 提交；未授权推送、tag、二进制上传、GitHub Release 或部署。
+
 ## V0.36 — 2026-08-12
 
 - 在 `Product.md` 记录用户确认的 V0.1--V1.0 开发路线，并说明 V0.5 是首个可增加受控真实存储结构修改的阶段。开发 Agent 需要开发者对每次操作的批准；产品用户在当前会话显式选择“本机真实修改”即授权执行 V0.5 的受控真实操作。这不改变当前 V0.3 边界，也不授权发布。
@@ -16,7 +30,7 @@
 - worker process 的 identity 字段不可变，heartbeat 单调，Stopping deadline 只建立一次并在终态持久化中保留。
 - 即使历史 Local 行的名称或 binding metadata 已过期，经验证的 Local document ID 仍是权威选择。
 
-V0.36 已通过 511 项 Release 自动测试（无 skipped）、零警告 Release 构建、依赖审计和全新四进程 self-contained staging。原生/人工用例继续保持 `unverified`。用户本次只授权本地 Git checkpoint；未授权推送、tag、二进制上传、GitHub Release 或部署。
+V0.36 已通过 519 项 Release 自动测试（无 skipped）、零警告 Release 构建、依赖审计和全新四进程 self-contained staging。原生/人工用例继续保持 `unverified`。用户本次只授权本地 Git checkpoint；未授权推送、tag、二进制上传、GitHub Release 或部署。
 
 ## V0.35 — 2026-08-12
 

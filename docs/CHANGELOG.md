@@ -5,6 +5,30 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
+## V0.37 — 2026-08-13
+
+- Closed the Settings language SelectionChanged reentrancy path and added
+  preference-save failure recovery for theme, accent, language, MSR, and
+  hardware-ID settings.
+- Marked unobserved task exceptions as observed after writing crash evidence.
+- Added exception recovery and control-state restoration to Test-page
+  prepare/start/cancel/status-polling paths and Edit-page simulation mutations.
+- Rejected invalid non-empty partition size input instead of silently using all
+  remaining free space.
+- Added a confirmation and parameter preview before simulated pool creation.
+- Made the Development event stream and inventory comparison report failures and
+  restore controls after transport errors.
+- Bounded the single-instance activation redirect wait instead of waiting
+  indefinitely.
+- Normalized malformed RoboCopy output as a failed tool event.
+- Replaced the format file-system text prompt with a fixed NTFS/ReFS/exFAT
+  selector and made missing partition paths report a target-missing notice.
+
+V0.37 passed 519 automatic Release tests with no skipped tests, a warning-free
+Release build, and the dependency audit. Native/manual cases remain
+`unverified`. The user authorized this local Git commit only; no push, tag,
+binary upload, GitHub Release, or deployment is authorized.
+
 ## V0.36 — 2026-08-12
 
 - Recorded the user-confirmed V0.1--V1.0 development route in `Product.md`,
@@ -27,7 +51,7 @@ This file records results that actually occurred. Planned work belongs in
 - Made a validated Local document ID authoritative even if the corresponding
   historical Local row has stale name or binding metadata.
 
-V0.36 passed 511 automatic Release tests with no skipped tests, a warning-free
+V0.36 passed 519 automatic Release tests with no skipped tests, a warning-free
 Release build, dependency audit, and a fresh four-process self-contained staging
 tree. Native/manual cases remain `unverified`. The user authorized the local Git
 checkpoint only; no push, tag, binary upload, GitHub Release, or deployment is

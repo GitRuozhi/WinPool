@@ -654,6 +654,8 @@ public sealed partial class TestPage : Page
         var zh = viewModel.Localization.EffectiveLanguage == CoreLanguagePreference.ZhCn;
         StartButton.IsEnabled = false;
         PlanDetails.Text = string.Empty;
+        try
+        {
         if (string.IsNullOrWhiteSpace(TargetPath.Text)
             || availableBytes <= 0
             || ToolOptions.SelectedIndex < 0
@@ -819,6 +821,19 @@ public sealed partial class TestPage : Page
                 $"Algorithm: {plan.PlannerAlgorithm.Id} {plan.PlannerAlgorithm.Version} ({plan.PlannerAlgorithm.Confidence})",
                 $"PlanHash: {plan.PlanHash}"
             ]);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            ShowPlanFailure(exception.Message);
+        }
+        finally
+        {
+            StartButton.IsEnabled = preparedPlan is not null;
+        }
     }
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
@@ -835,6 +850,8 @@ public sealed partial class TestPage : Page
             return;
         }
 
+        try
+        {
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
@@ -884,6 +901,20 @@ public sealed partial class TestPage : Page
             ? "关闭主界面不会停止测试；可从本页取消，托盘退出会执行完整清理。"
             : "Closing the main window will not stop the test. Cancel here, or use tray Exit for complete cleanup.";
         StartStatusTimer();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            ShowPlanFailure(exception.Message);
+        }
+        finally
+        {
+            StartButton.IsEnabled = !testWasRunning && preparedPlan is not null;
+            CancelButton.IsEnabled = testWasRunning;
+        }
     }
 
     private void StartAgentEventWatch()
@@ -1228,11 +1259,36 @@ public sealed partial class TestPage : Page
         }
 
         CancelButton.IsEnabled = false;
-        await viewModel.AgentConnection.SendAsync(
-            new CancelAgentTestRequest(
-                preparedPlan.RunId,
-                CorrelationId.New()),
-            CancellationToken.None);
+        try
+        {
+            var response = await viewModel.AgentConnection.SendAsync(
+                new CancelAgentTestRequest(
+                    preparedPlan.RunId,
+                    CorrelationId.New()),
+                CancellationToken.None);
+            if (!response.IsSuccess)
+            {
+                ShowPlanFailure(
+                    response.Messages.FirstOrDefault()?.DiagnosticText
+                    ?? response.Messages.FirstOrDefault()?.Code
+                    ?? (viewModel.Localization.EffectiveLanguage
+                        == CoreLanguagePreference.ZhCn
+                            ? "Agent 未能取消测试。"
+                            : "The Agent could not cancel the test."));
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            ShowPlanFailure(exception.Message);
+        }
+        finally
+        {
+            CancelButton.IsEnabled = testWasRunning;
+        }
     }
 
     private void StartStatusTimer()
@@ -1287,6 +1343,14 @@ public sealed partial class TestPage : Page
 
                 await LoadHistoryAsync();
             }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            ShowPlanFailure(exception.Message);
         }
         finally
         {

@@ -24,6 +24,7 @@ public sealed partial class SettingsPage : Page
     private bool _ready;
     private bool _updatingMode;
     private bool _updatingDataLocation;
+    private bool _updatingLanguage;
     private readonly ToolCatalog _toolCatalog = new();
     private readonly AgentStartupRegistration _agentStartup = new();
     private readonly Dictionary<ToolId, TextBlock> _toolStatuses = [];
@@ -328,6 +329,16 @@ public sealed partial class SettingsPage : Page
             $"datalocation:{DateTimeOffset.UtcNow.Ticks}");
     }
 
+    private void PublishPreferenceFailure(Exception exception)
+    {
+        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        ViewModel.NotificationService.PublishError(
+            zh ? "设置保存失败" : "Settings save failed",
+            exception.Message,
+            "settings",
+            $"preference:{DateTimeOffset.UtcNow.Ticks}");
+    }
+
     private static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -383,9 +394,20 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        var theme = (ThemePreference)ThemeOptions.SelectedIndex;
-        await ViewModel.SetThemeAsync(theme);
-        ((MainWindow)App.Window).ApplyTheme(theme);
+        try
+        {
+            var theme = (ThemePreference)ThemeOptions.SelectedIndex;
+            await ViewModel.SetThemeAsync(theme);
+            ((MainWindow)App.Window).ApplyTheme(theme);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
+            PublishPreferenceFailure(exception);
+        }
     }
 
     private async void AccentOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -395,28 +417,55 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        var accent = (AccentColorPreference)AccentOptions.SelectedIndex;
-        await ViewModel.SetAccentColorAsync(accent);
-        ((MainWindow)App.Window).ApplyAccentColor(accent);
+        try
+        {
+            var accent = (AccentColorPreference)AccentOptions.SelectedIndex;
+            await ViewModel.SetAccentColorAsync(accent);
+            ((MainWindow)App.Window).ApplyAccentColor(accent);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
+            PublishPreferenceFailure(exception);
+        }
     }
 
     private async void LanguageOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_ready || LanguageOptions.SelectedIndex < 0)
+        if (!_ready || _updatingLanguage || LanguageOptions.SelectedIndex < 0)
         {
             return;
         }
 
-        var language = (LanguagePreference)LanguageOptions.SelectedIndex;
-        await ViewModel.SetLanguageAsync(language);
-        PopulateComboBoxes();
-        ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
-        AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
-        LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
-        UpdateText();
-        BuildExternalToolRows();
-        _ = RefreshExternalToolsAsync();
-        ((MainWindow)App.Window).RefreshChrome();
+        _updatingLanguage = true;
+        try
+        {
+            var language = (LanguagePreference)LanguageOptions.SelectedIndex;
+            await ViewModel.SetLanguageAsync(language);
+            PopulateComboBoxes();
+            ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
+            AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
+            LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
+            UpdateText();
+            BuildExternalToolRows();
+            _ = RefreshExternalToolsAsync();
+            ((MainWindow)App.Window).RefreshChrome();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
+            PublishPreferenceFailure(exception);
+        }
+        finally
+        {
+            _updatingLanguage = false;
+        }
     }
 
     private async void SettingsExecutionModeSwitch_Click(object sender, RoutedEventArgs e)
@@ -440,7 +489,19 @@ public sealed partial class SettingsPage : Page
         {
             return;
         }
-        await ViewModel.SetCreateMsrOnInitializeAsync(MsrCheckBox.IsChecked == true);
+
+        try
+        {
+            await ViewModel.SetCreateMsrOnInitializeAsync(MsrCheckBox.IsChecked == true);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
+            PublishPreferenceFailure(exception);
+        }
     }
 
     private async void ShowHardwareIdsCheckBox_Click(object sender, RoutedEventArgs e)
@@ -470,7 +531,18 @@ public sealed partial class SettingsPage : Page
             }
         }
 
-        await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsCheckBox.IsChecked == true);
+        try
+        {
+            await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsCheckBox.IsChecked == true);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
+            PublishPreferenceFailure(exception);
+        }
     }
 
     private void WelcomeButton_Click(object sender, RoutedEventArgs e)
@@ -671,35 +743,48 @@ public sealed partial class SettingsPage : Page
 
         var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         status.Text = zh ? "正在检测…" : "Detecting…";
-        ApplicationResult<ToolState> result;
-        if (ViewModel.AgentConnection is not null)
+        try
         {
-            var response = await ViewModel.AgentConnection.SendAsync(
-                new DetectAgentToolRequest(toolId, CorrelationId.New()),
-                CancellationToken.None);
-            result = response.Value is ToolStateResponse value
-                ? new ApplicationResult<ToolState>(
-                    response.Status,
-                    value.ToolState,
-                    response.Messages,
-                    response.CorrelationId)
-                : new ApplicationResult<ToolState>(
-                    response.Status,
-                    null,
-                    response.Messages,
-                    response.CorrelationId);
-        }
-        else
-        {
-            var registry = new ExternalToolRegistry(
-                _toolCatalog,
-                new ToolPathDiscovery(_toolPaths, new EnvironmentToolSearchPath()),
-                new WindowsToolVersionProbe(),
-                new Sha256ToolFileHasher());
-            result = await registry.DetectAsync(toolId, CancellationToken.None);
-        }
+            ApplicationResult<ToolState> result;
+            if (ViewModel.AgentConnection is not null)
+            {
+                var response = await ViewModel.AgentConnection.SendAsync(
+                    new DetectAgentToolRequest(toolId, CorrelationId.New()),
+                    CancellationToken.None);
+                result = response.Value is ToolStateResponse value
+                    ? new ApplicationResult<ToolState>(
+                        response.Status,
+                        value.ToolState,
+                        response.Messages,
+                        response.CorrelationId)
+                    : new ApplicationResult<ToolState>(
+                        response.Status,
+                        null,
+                        response.Messages,
+                        response.CorrelationId);
+            }
+            else
+            {
+                var registry = new ExternalToolRegistry(
+                    _toolCatalog,
+                    new ToolPathDiscovery(_toolPaths, new EnvironmentToolSearchPath()),
+                    new WindowsToolVersionProbe(),
+                    new Sha256ToolFileHasher());
+                result = await registry.DetectAsync(toolId, CancellationToken.None);
+            }
 
-        status.Text = FormatToolState(result.Value, result.Status, zh);
+            status.Text = FormatToolState(result.Value, result.Status, zh);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            status.Text = zh
+                ? $"检测失败：{exception.Message}"
+                : $"Detection failed: {exception.Message}";
+        }
     }
 
     private async void SelectToolPath_Click(object sender, RoutedEventArgs e)

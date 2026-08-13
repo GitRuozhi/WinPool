@@ -7,17 +7,18 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.36 is the current local implementation version. It retains the multi-process
-App/Agent/TestWorker/Broker architecture while closing schema-12 constraint
-verification, connection disposal, watcher unsubscribe accounting, monotonic
-worker persistence, historical Local identity, and malformed-connect handling.
-IPC remains protocol 3 and the Agent-owned SQLite contract remains schema 12.
+V0.37 is the current local implementation version. It retains the multi-process
+App/Agent/TestWorker/Broker architecture while closing UI event reentrancy,
+unobserved-task exceptions, key async void lifecycle gaps, invalid partition
+input, unconfirmed simulated pool creation, event-stream recovery, single-instance
+redirect hangs, and RoboCopy output parsing. IPC remains protocol 3 and the
+Agent-owned SQLite contract remains schema 12.
 
-The V0.36 automatic Release, dependency-audit, and four-process staging results
-are recorded in the changelog. Native UI, tray, UAC, device, external-tool, and
-data-location cases remain `unverified`; no documentation treats them as passed.
-The user authorized a local Git checkpoint only—not a push, tag, binary upload,
-GitHub Release, or deployment.
+The V0.37 automatic Release, dependency-audit, and build results are recorded in
+the changelog. Native UI, tray, UAC, device, external-tool, and data-location
+cases remain `unverified`; no documentation treats them as passed. The user
+authorized a local Git commit only, not a push, tag, binary upload, GitHub
+Release, or deployment.
 
 ## Safety boundary
 
@@ -56,7 +57,7 @@ The reproducible self-contained staging command is documented in
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
-  including the implemented V0.36 Plan.
+  including the implemented V0.37 Plan.
 - [Reference](docs/Reference/AI-Agent-Harness-项目管理架构参考.md):
   non-authoritative project-management reference.
 - [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.

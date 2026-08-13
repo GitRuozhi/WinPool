@@ -61,8 +61,13 @@ public partial class App : Application
     private static void CurrentDomain_UnhandledException(object sender, System.UnhandledExceptionEventArgs e) =>
         WriteCrashLog("AppDomain", e.ExceptionObject as Exception);
 
-    private static void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e) =>
+    private static void TaskScheduler_UnobservedTaskException(
+        object? sender,
+        UnobservedTaskExceptionEventArgs e)
+    {
         WriteCrashLog("UnobservedTask", e.Exception);
+        e.SetObserved();
+    }
 
     private static void WriteCrashLog(string source, Exception? exception)
     {

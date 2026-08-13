@@ -305,7 +305,34 @@ public sealed class RoboCopyAdapter : IExternalToolAdapter
         }
 
         var now = DateTimeOffset.UtcNow;
-        var parsed = RoboCopyOutputParser.Parse(process.StandardOutput);
+        RoboCopyParsedOutput parsed = null!;
+        var parseFailureCode = string.Empty;
+        var parseFailureMessage = string.Empty;
+        try
+        {
+            parsed = RoboCopyOutputParser.Parse(process.StandardOutput);
+        }
+        catch (Exception exception) when (
+            exception is FormatException
+                or OverflowException
+                or InvalidDataException)
+        {
+            parseFailureCode = "robocopy.output.invalid";
+            parseFailureMessage =
+                $"The RoboCopy output could not be parsed: {exception.GetType().Name}.";
+        }
+
+        if (parseFailureCode.Length > 0)
+        {
+            yield return new ToolEvent(
+                ToolId,
+                ToolEventKind.Failed,
+                now,
+                parseFailureCode,
+                parseFailureMessage);
+            yield break;
+        }
+
         foreach (var metric in RoboCopyOutputParser.ToMetrics(parsed))
         {
             yield return new ToolEvent(

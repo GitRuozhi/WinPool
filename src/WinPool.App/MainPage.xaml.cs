@@ -678,6 +678,7 @@ public sealed partial class MainPage : Page
         }
         if (!Directory.Exists(target.PartitionPath))
         {
+            NotifyTargetMissing();
             return;
         }
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo

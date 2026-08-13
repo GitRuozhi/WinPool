@@ -234,6 +234,22 @@ public sealed partial class DevelopmentPage : Page
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidDataException
+                or System.Text.Json.JsonException
+                or InvalidOperationException)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _eventLines.Add($"Event stream stopped: {exception.Message}");
+                EventScrollViewer.ChangeView(
+                    null,
+                    EventScrollViewer.ScrollableHeight,
+                    null,
+                    disableAnimation: true);
+            });
+        }
     }
 
     private static string? FormatEvent(AgentEvent agentEvent)
@@ -286,26 +302,40 @@ public sealed partial class DevelopmentPage : Page
         }
 
         CompareInventoryButton.IsEnabled = false;
-        InventoryComparisonStatus.Text = zh
-            ? "正在执行只读原生采集和固定脚本采集…"
-            : "Running the read-only native and fixed-script collectors…";
-        var response = await ViewModel.AgentConnection.SendAsync(
-            new CaptureAgentInventoryRequest(
-                IncludeLegacyComparison: true,
-                CorrelationId.New()),
-            CancellationToken.None);
-        CompareInventoryButton.IsEnabled = true;
-        if (response.Value is not InventoryCaptureResponse capture)
+        try
         {
-            InventoryComparisonStatus.Text =
-                response.Messages.FirstOrDefault()?.DiagnosticText
-                ?? (zh ? "采集对照失败。" : "Inventory comparison failed.");
-            return;
-        }
+            InventoryComparisonStatus.Text = zh
+                ? "正在执行只读原生采集和固定脚本采集…"
+                : "Running the read-only native and fixed-script collectors…";
+            var response = await ViewModel.AgentConnection.SendAsync(
+                new CaptureAgentInventoryRequest(
+                    IncludeLegacyComparison: true,
+                    CorrelationId.New()),
+                CancellationToken.None);
+            if (response.Value is not InventoryCaptureResponse capture)
+            {
+                InventoryComparisonStatus.Text =
+                    response.Messages.FirstOrDefault()?.DiagnosticText
+                    ?? (zh ? "采集对照失败。" : "Inventory comparison failed.");
+                return;
+            }
 
-        var differenceCount = capture.Comparison?.Differences.Count ?? 0;
-        InventoryComparisonStatus.Text = zh
-            ? $"原生对象 {capture.NativeSnapshot.Objects.Count}；脚本对象 {capture.LegacySnapshot?.Objects.Count ?? 0}；字段/关系差异 {differenceCount}。快照和脱敏差异已写入 SQLite。"
-            : $"Native objects: {capture.NativeSnapshot.Objects.Count}; script objects: {capture.LegacySnapshot?.Objects.Count ?? 0}; field/relationship differences: {differenceCount}. Snapshots and sanitized differences were saved to SQLite.";
+            var differenceCount = capture.Comparison?.Differences.Count ?? 0;
+            InventoryComparisonStatus.Text = zh
+                ? $"原生对象 {capture.NativeSnapshot.Objects.Count}；脚本对象 {capture.LegacySnapshot?.Objects.Count ?? 0}；字段/关系差异 {differenceCount}。快照和脱敏差异已写入 SQLite。"
+                : $"Native objects: {capture.NativeSnapshot.Objects.Count}; script objects: {capture.LegacySnapshot?.Objects.Count ?? 0}; field/relationship differences: {differenceCount}. Snapshots and sanitized differences were saved to SQLite.";
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidDataException
+                or System.Text.Json.JsonException
+                or InvalidOperationException)
+        {
+            InventoryComparisonStatus.Text = exception.Message;
+        }
+        finally
+        {
+            CompareInventoryButton.IsEnabled = true;
+        }
     }
 }

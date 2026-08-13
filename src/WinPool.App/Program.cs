@@ -77,7 +77,7 @@ public static class Program
 
         _ = CoWaitForMultipleObjects(
             0,
-            uint.MaxValue,
+            10_000,
             1,
             [s_redirectEventHandle],
             out _);
