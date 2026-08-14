@@ -6,7 +6,6 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:WinPool_App"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:core="using:WinPool.Core"
     Title="WinPool"
     mc:Ignorable="d">
     <Window.SystemBackdrop>
@@ -40,7 +39,7 @@
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
                 Spacing="10">
-                <Image Width="22" Height="22" Source="Assets/AppIcon.ico" />
+                <Image Width="22" Height="22" Source="Assets/CAppIcon.ico" />
                 <TextBlock
                     x:Name="WindowTitleText"
                     VerticalAlignment="Center"
@@ -80,14 +79,19 @@
                             MinWidth="42"
                             Padding="10,0"
                             HorizontalAlignment="Center"
+                            Background="{Binding Background}"
                             ToolTipService.ToolTip="{Binding Title}">
                             <StackPanel
                                 HorizontalAlignment="Center"
                                 Orientation="Horizontal"
                                 Spacing="6">
-                                <FontIcon FontSize="14" Glyph="{Binding Glyph}" />
+                                <FontIcon
+                                    FontSize="14"
+                                    Foreground="{Binding Foreground}"
+                                    Glyph="{Binding Glyph}" />
                                 <TextBlock
                                     VerticalAlignment="Center"
+                                    Foreground="{Binding Foreground}"
                                     Text="{Binding Title}"
                                     Visibility="{Binding TextVisibility}" />
                             </StackPanel>

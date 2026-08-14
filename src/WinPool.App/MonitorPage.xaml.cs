@@ -87,13 +87,14 @@ public sealed partial class MonitorPage : Page
     private DateTimeOffset _storageEventCutoff = DateTimeOffset.UtcNow;
     private WorkspaceViewModel _viewModel = null!;
     private DispatcherQueueTimer? _pollTimer;
+    private DispatcherQueueTimer? _preferenceSyncTimer;
     private bool _ready;
+    private bool _updatingContinuousMonitoring;
 
     public MonitorPage()
     {
         InitializeComponent();
         DiskRows.ItemsSource = _rows;
-        StorageEventRows.ItemsSource = _storageEventRows;
         Unloaded += MonitorPage_Unloaded;
     }
 
@@ -102,10 +103,8 @@ public sealed partial class MonitorPage : Page
         _ready = false;
         _pollTimer?.Stop();
         _pollTimer = null;
-        if (_viewModel is not null && !Monitoring.BackgroundEnabled && Monitoring.IsRunning)
-        {
-            _ = Monitoring.StopAsync();
-        }
+        _preferenceSyncTimer?.Stop();
+        _preferenceSyncTimer = null;
     }
 
     private MonitoringService Monitoring => _viewModel.Monitoring;
@@ -115,11 +114,25 @@ public sealed partial class MonitorPage : Page
         base.OnNavigatedTo(e);
         _viewModel = (WorkspaceViewModel)e.Parameter;
         MonitorRoot.Loaded += MonitorRoot_Loaded;
+        try
+        {
+            await _viewModel.RefreshPreferencesAsync(refreshLocalizedContent: false);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            LogMonitorFailure("PreferenceRefresh", exception);
+        }
         Guard("UpdateText", UpdateText);
-        Guard("PopulateRateOptions", PopulateRateOptions);
         Guard("BuildRows", BuildRows);
-        BackgroundCheckBox.IsChecked = Monitoring.BackgroundEnabled;
-        if (!Monitoring.IsRunning)
+        RestoreExistingGraphSeries();
+        Monitoring.SetRate(_viewModel.CurrentPreferences.MonitoringSampleRateHz);
+        Guard("PopulateRateOptions", PopulateRateOptions);
+        ContinuousMonitoringCheckBox.IsChecked =
+            _viewModel.CurrentPreferences.ContinuousMonitoringEnabled;
+        if (_viewModel.CurrentPreferences.ContinuousMonitoringEnabled)
         {
             try
             {
@@ -143,13 +156,42 @@ public sealed partial class MonitorPage : Page
                     "monitor-start-exception");
             }
         }
-        UpdateRunningState();
         _pollTimer = DispatcherQueue.CreateTimer();
         ApplyPollInterval();
         _pollTimer.Tick += (_, _) => Poll();
         _pollTimer.Start();
+        _preferenceSyncTimer = DispatcherQueue.CreateTimer();
+        _preferenceSyncTimer.Interval = TimeSpan.FromMilliseconds(500);
+        _preferenceSyncTimer.Tick += PreferenceSyncTimer_Tick;
+        _preferenceSyncTimer.Start();
         Poll();
         _ready = true;
+    }
+
+    private void RestoreExistingGraphSeries()
+    {
+        var windows = Monitoring.GetWindows();
+        var series = new List<DiskGraphSeries>();
+        foreach (var (instance, points) in windows)
+        {
+            var row = ResolveRow(instance);
+            row.InstanceName = instance;
+            _rowsByInstance[instance] = row;
+            if (points.Length < 2)
+            {
+                continue;
+            }
+
+            series.Add(new DiskGraphSeries
+            {
+                InstanceName = instance,
+                DisplayName = row.Name,
+                Color = row.SeriesColor,
+                Points = points
+            });
+        }
+
+        ActivityGraph.SetSeries(series);
     }
 
     private void ApplyPollInterval()
@@ -166,11 +208,42 @@ public sealed partial class MonitorPage : Page
         _ready = false;
         _pollTimer?.Stop();
         _pollTimer = null;
-        if (!Monitoring.BackgroundEnabled)
-        {
-            _ = Monitoring.StopAsync();
-        }
+        _preferenceSyncTimer?.Stop();
+        _preferenceSyncTimer = null;
         base.OnNavigatedFrom(e);
+    }
+
+    private async void PreferenceSyncTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        if (!_ready || _updatingContinuousMonitoring)
+        {
+            return;
+        }
+
+        try
+        {
+            await _viewModel.RefreshPreferencesAsync(refreshLocalizedContent: false);
+            var enabled = _viewModel.CurrentPreferences.ContinuousMonitoringEnabled;
+            ContinuousMonitoringCheckBox.IsChecked = enabled;
+            if (enabled && !Monitoring.IsRunning)
+            {
+                await Monitoring.StartAsync(SelectedRate());
+            }
+            else if (!enabled && Monitoring.IsRunning)
+            {
+                await Monitoring.StopAsync();
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or OperationCanceledException)
+        {
+            LogMonitorFailure("PreferenceSync", exception);
+        }
     }
 
     private void UpdateText()
@@ -185,17 +258,12 @@ public sealed partial class MonitorPage : Page
         HeaderActivity.Text = l["Activity"];
         HeaderRead.Text = l["ReadSpeed"];
         HeaderWrite.Text = l["WriteSpeed"];
-        BackgroundCheckBox.Content = l["BackgroundMonitoring"];
+        ContinuousMonitoringCheckBox.Content = l["ContinuousMonitoring"];
         SamplingRateLabel.Text = l["SamplingRate"];
         ((TextBlock)((StackPanel)AutoColorsButton.Content).Children[1]).Text = l["AutoColor"];
-        ((TextBlock)((StackPanel)StartButton.Content).Children[1]).Text = l["StartMonitoring"];
-        ((TextBlock)((StackPanel)StopButton.Content).Children[1]).Text = l["StopMonitoring"];
         ((TextBlock)((StackPanel)ExportButton.Content).Children[1]).Text = l["ExportData"];
         ToolTipService.SetToolTip(RateOptions, l["RefreshRate"]);
-        HealthEventsExpander.Header =
-            l.EffectiveLanguage == LanguagePreference.ZhCn
-                ? "采样诊断与存储健康事件"
-                : "Sampling diagnostics and storage health events";
+        EventsButtonText.Text = l["MonitoringEvents"];
     }
 
     private void ColorSwatch_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -381,13 +449,13 @@ public sealed partial class MonitorPage : Page
             .Select(x => $"{x:0.#} Hz")
             .ToArray();
         var index = Array.IndexOf(MonitoringService.RateOptions, Monitoring.SampleRateHz);
-        RateOptions.SelectedIndex = index >= 0 ? index : 2;
+        RateOptions.SelectedIndex = index >= 0 ? index : 4;
     }
 
     private double SelectedRate() =>
         RateOptions.SelectedIndex >= 0 && RateOptions.SelectedIndex < MonitoringService.RateOptions.Length
             ? MonitoringService.RateOptions[RateOptions.SelectedIndex]
-            : 1;
+            : 5;
 
     private void BuildRows()
     {
@@ -469,11 +537,11 @@ public sealed partial class MonitorPage : Page
     {
         try
         {
-            var directory = WinPool.Infrastructure.Windows.StorageDataLocations.CurrentRoot;
-            Directory.CreateDirectory(directory);
-            File.AppendAllText(
-                Path.Combine(directory, "monitor-debug.log"),
-                $"{DateTime.Now:O} [{source}] {ex}\n\n");
+            DiagnosticLog.AppendFailure(
+                WinPool.Infrastructure.Windows.StorageDataLocations.CurrentRoot,
+                "monitor.jsonl",
+                source,
+                ex);
         }
         catch
         {
@@ -550,7 +618,7 @@ public sealed partial class MonitorPage : Page
             : (zh ? "未运行" : "stopped");
         if (!Monitoring.IsRunning && !string.IsNullOrWhiteSpace(Monitoring.LastError))
         {
-            SamplingDiagnosticsText.Text = zh
+            MonitorStatusText.Text = zh
                 ? $"监控状态：{runningState}；原因：{Monitoring.LastError}"
                 : $"Monitoring: {runningState}; reason: {Monitoring.LastError}";
         }
@@ -562,7 +630,7 @@ public sealed partial class MonitorPage : Page
         var dropDetails = zh
             ? $"窗口 {diagnostics.WindowDroppedSamples}、持久化 {diagnostics.PersistenceDroppedSamples}、订阅 {diagnostics.SubscriberDroppedSamples}、拒绝源 {diagnostics.RejectedSourceSamples}；订阅队列 {queue}（{diagnostics.ActiveSubscribers} 个）"
             : $"window {diagnostics.WindowDroppedSamples}, persistence {diagnostics.PersistenceDroppedSamples}, subscriber {diagnostics.SubscriberDroppedSamples}, rejected source {diagnostics.RejectedSourceSamples}; subscriber queue {queue} ({diagnostics.ActiveSubscribers})";
-        SamplingDiagnosticsText.Text = diagnostics.ConsecutiveFailures > 0
+        MonitorStatusText.Text = diagnostics.ConsecutiveFailures > 0
             ? zh
                 ? $"采样异常：连续失败 {diagnostics.ConsecutiveFailures} 次；代码 {diagnostics.LastFailureCode ?? "unknown"}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
                 : $"Sampling warning: {diagnostics.ConsecutiveFailures} consecutive failures; code {diagnostics.LastFailureCode ?? "unknown"}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})"
@@ -652,12 +720,6 @@ public sealed partial class MonitorPage : Page
         return row;
     }
 
-    private void UpdateRunningState()
-    {
-        StartButton.IsEnabled = !Monitoring.IsRunning;
-        StopButton.IsEnabled = Monitoring.IsRunning;
-    }
-
     private void Guard(string name, Action action)
     {
         try
@@ -670,32 +732,36 @@ public sealed partial class MonitorPage : Page
         }
     }
 
-    private void BackgroundCheckBox_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private async void ContinuousMonitoringCheckBox_Click(
+        object sender,
+        Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         if (!_ready)
         {
             return;
         }
-        Guard("BackgroundClick", () => Monitoring.BackgroundEnabled = BackgroundCheckBox.IsChecked == true);
-    }
 
-    private void RateOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_ready)
-        {
-            return;
-        }
-        Guard("RateChanged", () => { Monitoring.SetRate(SelectedRate()); });
-        ApplyPollInterval();
-    }
-
-    private async void StartButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
-    {
+        var enabled = ContinuousMonitoringCheckBox.IsChecked == true;
+        _updatingContinuousMonitoring = true;
         try
         {
-            var started = await Monitoring.StartAsync(SelectedRate());
-            if (!started)
+            await _viewModel.SetContinuousMonitoringAsync(enabled);
+            if (!enabled)
             {
+                await Monitoring.StopAsync();
+                return;
+            }
+
+            if (!await Monitoring.StartAsync(SelectedRate()))
+            {
+                LogMonitorFailure(
+                    "ContinuousMonitoringStart",
+                    new InvalidOperationException(
+                        $"LastError={Monitoring.LastError ?? "<null>"}; "
+                            + $"IsRunning={Monitoring.IsRunning}; "
+                            + $"SessionFilePath={Monitoring.SessionFilePath ?? "<null>"}"));
+                await _viewModel.SetContinuousMonitoringAsync(false);
+                ContinuousMonitoringCheckBox.IsChecked = false;
                 _viewModel.NotificationService.PublishWarning(
                     _viewModel.Localization["MonitorIntro"],
                     Monitoring.LastError ?? "监控 Agent 未能启动。",
@@ -703,27 +769,77 @@ public sealed partial class MonitorPage : Page
                     "monitor-start-failed");
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            LogMonitorFailure("StartClick", ex);
+            LogMonitorFailure("ContinuousMonitoringClick", exception);
         }
         finally
         {
-            UpdateRunningState();
+            _updatingContinuousMonitoring = false;
         }
     }
 
-    private async void StopButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private async void RateOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!_ready)
+        {
+            return;
+        }
         try
         {
-            await Monitoring.StopAsync();
-            UpdateRunningState();
+            var rate = SelectedRate();
+            await _viewModel.SetMonitoringSampleRateAsync(rate);
+            Monitoring.SetRate(rate);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            LogMonitorFailure("StopClick", ex);
+            LogMonitorFailure("RateChanged", exception);
         }
+        ApplyPollInterval();
+    }
+
+    private async void EventsButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (MonitorRoot.XamlRoot is null)
+        {
+            return;
+        }
+
+        var events = Monitoring.GetRecentStorageHealthEvents()
+            .OrderByDescending(item => item.OccurredAtUtc)
+            .ToArray();
+        var rows = new StackPanel { Spacing = 10 };
+        if (events.Length == 0)
+        {
+            rows.Children.Add(new TextBlock
+            {
+                Text = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                    ? "当前没有可显示的监控事件。"
+                    : "There are no monitoring events to display.",
+                TextWrapping = TextWrapping.Wrap
+            });
+        }
+        else
+        {
+            foreach (var item in events)
+            {
+                rows.Children.Add(new TextBlock
+                {
+                    Text = $"{item.OccurredAtUtc.LocalDateTime:yyyy-MM-dd HH:mm:ss} · {item.Severity} · {item.Provider}\n{item.Message}",
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = MonitorRoot.XamlRoot,
+            Title = _viewModel.Localization["MonitoringEvents"],
+            CloseButtonText = _viewModel.Localization["Close"],
+            DefaultButton = ContentDialogButton.Close,
+            Content = new ScrollViewer { Content = rows, MaxHeight = 360 }
+        };
+        await dialog.ShowAsync();
     }
 
     private async void ExportButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

@@ -240,10 +240,13 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         }
     }
 
-    public void RequestContextMenu(Microsoft.UI.Xaml.FrameworkElement target) =>
+    public void RequestContextMenu(
+        Microsoft.UI.Xaml.FrameworkElement target,
+        Windows.Foundation.Point pointerPosition) =>
         _owner.NodeContextMenuRequested?.Invoke(
             new ManageObjectTarget(ObjectId, Role),
-            target);
+            target,
+            pointerPosition);
 
     public void RefreshSelection()
     {

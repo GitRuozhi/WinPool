@@ -17,10 +17,10 @@ public sealed class SqliteMigrationAuditorTests
         {
             await using var insert = connection.CreateCommand();
             insert.CommandText = """
-                INSERT INTO preferences(key, json, updated_at_utc_ms)
+                INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
                 VALUES
-                    ('migration-a', '{"value":1}', 100),
-                    ('migration-b', '{"value":2}', 200);
+                    ('migration-a', '{"value":1}', 100, 100),
+                    ('migration-b', '{"value":2}', 200, 200);
                 PRAGMA wal_checkpoint(TRUNCATE);
                 """;
             await insert.ExecuteNonQueryAsync();
@@ -34,10 +34,10 @@ public sealed class SqliteMigrationAuditorTests
         Assert.True(source.IsHealthy);
         Assert.Equal(WinPoolSqliteStore.CurrentSchemaVersion, source.SchemaVersion);
         Assert.True(source.HasSameLogicalIdentity(destination));
-        var preferences = source.Tables.Single(item => item.TableName == "preferences");
-        Assert.Equal(2, preferences.RowCount);
-        Assert.Equal(["key"], preferences.PrimaryKeyColumns);
-        Assert.Equal(64, preferences.PrimaryKeySha256.Length);
+        var presets = source.Tables.Single(item => item.TableName == "test_presets");
+        Assert.Equal(2, presets.RowCount);
+        Assert.Equal(["preset_id"], presets.PrimaryKeyColumns);
+        Assert.Equal(64, presets.PrimaryKeySha256.Length);
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public sealed class SqliteMigrationAuditorTests
         using var directory = TemporaryDirectory.Create();
         var firstPath = Path.Combine(directory.Path, "first.db");
         var secondPath = Path.Combine(directory.Path, "second.db");
-        await CreateWithPreferenceAsync(firstPath, "alpha");
-        await CreateWithPreferenceAsync(secondPath, "bravo");
+        await CreateWithPresetAsync(firstPath, "alpha");
+        await CreateWithPresetAsync(secondPath, "bravo");
         var auditor = new SqliteMigrationAuditor();
 
         var first = await auditor.CaptureAsync(firstPath);
@@ -59,18 +59,18 @@ public sealed class SqliteMigrationAuditorTests
             second.Tables.Select(item => item.RowCount));
     }
 
-    private static async Task CreateWithPreferenceAsync(string path, string key)
+    private static async Task CreateWithPresetAsync(string path, string presetId)
     {
         var store = new WinPoolSqliteStore(path);
         await store.InitializeAsync();
         await using var connection = await store.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO preferences(key, json, updated_at_utc_ms)
-            VALUES($key, '{}', 1);
+            INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
+            VALUES($presetId, '{}', 1, 1);
             PRAGMA wal_checkpoint(TRUNCATE);
             """;
-        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$presetId", presetId);
         await command.ExecuteNonQueryAsync();
     }
 

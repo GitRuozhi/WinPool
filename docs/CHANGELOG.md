@@ -5,6 +5,49 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
+## V0.41 — 2026-08-14
+
+- Implemented the approved V0.41 startup, welcome, monitoring, persistence,
+  tray, and basic-interaction plan.
+- Fixed the preference-load hang that kept the Agent in `Recovering`, restored
+  continuous-monitoring start/close/reopen/reattach behavior, and completed the
+  language, external-tool, data-location, and Edit/Settings layout changes.
+
+The full Release gate passed 549 tests with 0 failed and 0 skipped, a
+warning-free Release build, no known vulnerable packages, and a verified
+four-process staging tree. Native welcome size, Edit layout, Settings layout,
+monitor default, continuous-monitor reattach, Ctrl+1 tooltip absence, and
+tray-menu language synchronization were checked. Cyan/System accent switching
+and Settings external-tool cache display were also checked. Inherited
+topology-context positioning, device, UAC, DPI, external-tool execution, and
+long-duration cases remain `unverified`. No commit, push, tag, release, binary
+upload, or deployment was created.
+
+## V0.4 — 2026-08-14
+
+- Defined V0.4 as the current product version, with mechanical .NET version
+  metadata `0.4.0`.
+- Deployed the verified self-contained four-process package locally.
+- Pushed the V0.4 version definition to GitHub; no tag, GitHub Release, or
+  binary upload was created.
+
+## V0.39 architecture hardening — 2026-08-14
+
+- Removed confirmed unused contracts and obsolete UI residue; test-only monotonic
+  time helpers now live with their Monitoring tests.
+- Split Agent test startup, run lifecycle, TestWorker supervision, CopyBatch
+  recovery, and CopyBatch execution into focused internal components.
+- Moved closed I/O, Copy, and Mixed Directory definition graphs to
+  `WinPool.Testing`; isolated Settings data-location handoff primitives; and
+  strengthened architecture regression guards.
+
+The final governance gate passed 530 Release tests with 0 failed and 0 skipped,
+a warning-free Release build, and no known vulnerable packages. App launch,
+welcome dismissal, six title-bar tabs, and Test-to-Settings navigation passed.
+Other native, device, UAC, installer, migration, and long-duration cases remain
+`unverified`; no real storage mutation, installation, migration, or test write
+was performed. This is a V0.39 maintenance record, not a product release.
+
 ## V0.39 — 2026-08-13
 
 - Added development-diagnostics refresh timeout, visible status, and duplicate
@@ -19,13 +62,19 @@ This file records results that actually occurred. Planned work belongs in
   behavior for Test-page Start/Cancel requests.
 - Completed the final minimal V0.3 correction before the V0.4 visual phase.
 
-V0.39 passed 562 automatic Release tests with no skipped tests, a warning-free
-Release build, the dependency audit, and a verified four-process self-contained
-staging tree. Targeted WinUI launch, navigation, and Test-page control checks
-passed; delayed-response Start/Cancel behavior is covered by automatic tests and
-was not manually forced. The inherited native, device, UAC, and long-duration
-matrix remains `unverified`. The user authorized the local commit, GitHub push,
-V0.39 tag, and GitHub Release.
+V0.39 has a currently reproducible baseline of 526 automatic Release tests
+passed, with no failed or skipped tests, a warning-free Release build, the
+dependency audit, and a verified four-process self-contained staging tree.
+Targeted WinUI launch, navigation, and Test-page control checks passed;
+delayed-response Start/Cancel behavior is covered by automatic tests and was not
+manually forced. The inherited native, device, UAC, and long-duration matrix
+remains `unverified`. The user authorized the local commit, GitHub push, V0.39
+tag, and GitHub Release.
+
+2026-08-14 correction: the earlier 562-test statement is not reproducible from
+the V0.39 solution. The full Release command reports 526 passed, 0 failed, and
+0 skipped; 526 is the governing V0.39 automatic-test count. Frozen archive text
+is preserved as historical evidence rather than rewritten.
 
 ## V0.38 — 2026-08-13
 

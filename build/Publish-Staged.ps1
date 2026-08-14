@@ -17,7 +17,13 @@ $stageRoot = [System.IO.Path]::GetFullPath($OutputPath)
 $versionGroup = @($versionProps.Project.PropertyGroup) |
     Where-Object { $null -ne $_.WinPoolVersionMajor } |
     Select-Object -First 1
-$expectedProductVersion = "V$($versionGroup.WinPoolVersionMajor).$($versionGroup.WinPoolVersionMinor)$($versionGroup.WinPoolVersionIteration)"
+$iteration = [int]$versionGroup.WinPoolVersionIteration
+$expectedProductVersion = if ($iteration -eq 0) {
+    "V$($versionGroup.WinPoolVersionMajor).$($versionGroup.WinPoolVersionMinor)"
+}
+else {
+    "V$($versionGroup.WinPoolVersionMajor).$($versionGroup.WinPoolVersionMinor)$iteration"
+}
 
 if (Test-Path -LiteralPath $stageRoot) {
     throw "Staging path already exists and will not be overwritten: $stageRoot"

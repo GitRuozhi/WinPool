@@ -118,7 +118,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public IAgentConnection? AgentConnection => _agentConnection;
 
-    public Action<WinPool.Application.ManageObjectTarget, object>? NodeContextMenuRequested { get; set; }
+    public Action<WinPool.Application.ManageObjectTarget, Microsoft.UI.Xaml.FrameworkElement, Windows.Foundation.Point>?
+        NodeContextMenuRequested { get; set; }
 
     public ICommandLogService CommandLog { get; }
 
@@ -430,6 +431,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _preferencesInitialized = true;
     }
 
+    public async Task RefreshPreferencesAsync(bool refreshLocalizedContent = true)
+    {
+        var preferences = await _preferencesService.LoadAsync();
+        CurrentPreferences = preferences;
+        Localization.Language = preferences.Language;
+        if (refreshLocalizedContent)
+        {
+            RefreshLocalizedContent();
+        }
+    }
+
     public WorkspaceUiState? RestoredUiState { get; private set; }
 
     public WorkspaceUiState CaptureUiState(string shellPage) =>
@@ -468,6 +480,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
+    public async Task SetLastActivePageAsync(string page)
+    {
+        if (string.IsNullOrWhiteSpace(page))
+        {
+            return;
+        }
+
+        CurrentPreferences = CurrentPreferences with
+        {
+            LastActivePage = page
+        };
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
     public async Task SetShowHardwareIdsAsync(bool show)
     {
         CurrentPreferences = CurrentPreferences with { ShowHardwareIds = show };
@@ -479,6 +505,32 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public async Task SetCreateMsrOnInitializeAsync(bool create)
     {
         CurrentPreferences = CurrentPreferences with { CreateMsrOnInitialize = create };
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
+    public async Task SetContinuousMonitoringAsync(bool enabled)
+    {
+        CurrentPreferences = CurrentPreferences with
+        {
+            ContinuousMonitoringEnabled = enabled
+        };
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
+    public async Task SetMonitoringSampleRateAsync(double rateHz)
+    {
+        if (!double.IsFinite(rateHz) || rateHz is < 0.2 or > 20)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rateHz));
+        }
+
+        CurrentPreferences = CurrentPreferences with { MonitoringSampleRateHz = rateHz };
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
+    public async Task SetStartAgentAtLoginAsync(bool enabled)
+    {
+        CurrentPreferences = CurrentPreferences with { StartAgentAtLogin = enabled };
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 

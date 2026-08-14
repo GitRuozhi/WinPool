@@ -35,6 +35,7 @@ public sealed class LocalizationService : ObservableObject
             ["ElevationMessage"] = ("真实执行需要管理员权限。是否以管理员身份重新启动 WinPool？", "Real execution requires administrator privileges. Restart WinPool as administrator?"),
             ["RestartAsAdministrator"] = ("以管理员身份重启", "Restart as administrator"),
             ["Cancel"] = ("取消", "Cancel"),
+            ["Close"] = ("关闭", "Close"),
             ["ElevationFailed"] = ("无法以管理员身份重新启动 WinPool。", "WinPool could not restart as administrator."),
             ["Warning"] = ("警告", "Warning"),
             ["Error"] = ("错误", "Error"),
@@ -204,10 +205,6 @@ public sealed class LocalizationService : ObservableObject
             ["Optimize"] = ("优化", "Optimize"),
             ["Trim"] = ("剪裁", "Trim"),
             ["Defragment"] = ("碎片整理", "Defragment"),
-            ["EditOnlySimulated"] = (
-                "编辑操作当前只对模拟系统生效。真实本机的写操作尚未开放。",
-                "Edit operations currently apply to simulated systems only. Local writes are not available yet."),
-            ["ResetSimulation"] = ("重置模拟数据", "Reset simulation data"),
             ["TestPageIntro"] = (
                 "测试板块将复刻本项目 Dite、RealSoak、WEmxx 的磁盘测试能力：DiskSpd 基准、真实负载、增量填充与哈希校验。功能开发中。",
                 "The Test area will reproduce this project's Dite, RealSoak, and WEmxx capabilities: DiskSpd benchmarks, realistic workloads, incremental fill, and hash verification. Under development."),
@@ -230,6 +227,8 @@ public sealed class LocalizationService : ObservableObject
             ["DataLocationFailed"] = ("无法切换数据存储位置：目标目录不可写。", "The data location could not be changed: the target folder is not writable."),
             ["ExternalTools"] = ("外部工具", "External tools"),
             ["BackgroundMonitoring"] = ("后台持续监控", "Keep monitoring in background"),
+            ["ContinuousMonitoring"] = ("持续监控", "Continuous monitoring"),
+            ["MonitoringEvents"] = ("事件", "Events"),
             ["SamplingRate"] = ("采样频率", "Sampling rate"),
             ["RefreshRate"] = ("刷新率", "Refresh rate"),
             ["StartMonitoring"] = ("开始监控", "Start monitoring"),

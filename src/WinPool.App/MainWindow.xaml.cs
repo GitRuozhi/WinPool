@@ -36,12 +36,14 @@ public sealed partial class MainWindow : Window
     private bool _requestingElevation;
     private bool _realWarningDismissed;
     private readonly ApplicationStartupTarget _startupTarget;
+    private string _preferredShellPage = "Manage";
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
     private readonly IElevationRestartService _elevationRestartService;
     private readonly IWorkspaceStateService _workspaceStateService;
     private readonly DispatcherTimer _notificationDismissTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
+    private WelcomeWindow? _welcomeWindow;
 
     public WorkspaceViewModel ViewModel { get; }
 
@@ -58,7 +60,7 @@ public sealed partial class MainWindow : Window
         NotificationService = new GlobalNotificationService();
         _elevationRestartService = new WindowsElevationRestartService();
         _workspaceStateService = agentConnection is null
-            ? new LocalWorkspaceStateService()
+            ? new EphemeralWorkspaceStateService()
             : new AgentBackedWorkspaceStateService(agentConnection);
         _startupTarget = startupOptions.Target;
         var importExportService = new DesktopExportService();
@@ -75,7 +77,7 @@ public sealed partial class MainWindow : Window
             new SimulationOperationService(),
             NotificationService,
             agentConnection is null
-                ? new LocalMachineRecordService()
+                ? new EphemeralMachineRecordService()
                 : new AgentBackedMachineRecordService(agentConnection),
             new GlobalCommandLogService(),
             _workspaceStateService,
@@ -94,9 +96,9 @@ public sealed partial class MainWindow : Window
         _notificationDismissTimer.Start();
 
         ExtendsContentIntoTitleBar = true;
-        AppWindow.SetIcon("Assets/AppIcon.ico");
+        AppWindow.SetIcon("Assets/CAppIcon.ico");
         AppWindow.Resize(new SizeInt32(1440, 900));
-        AppWindow.Changed += MainWindow_AppWindowChanged;
+        RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         RootGrid.Loaded += RootGrid_Loaded;
         RootGrid.SizeChanged += RootGrid_SizeChanged;
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
@@ -105,16 +107,6 @@ public sealed partial class MainWindow : Window
         _uiSettings.ColorValuesChanged += UiSettings_ColorValuesChanged;
         BuildShellNavigation();
         RegisterShellKeyboardAccelerators();
-    }
-
-    private void MainWindow_AppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
-    {
-        if (args.DidPresenterChange)
-        {
-            ViewModel.Monitoring.WindowMinimized =
-                sender.Presenter is OverlappedPresenter presenter
-                && presenter.State == OverlappedPresenterState.Minimized;
-        }
     }
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
@@ -128,6 +120,7 @@ public sealed partial class MainWindow : Window
         try
         {
             await ViewModel.InitializePreferencesAsync();
+            _preferredShellPage = ViewModel.CurrentPreferences.LastActivePage;
         }
         catch (Exception exception)
         {
@@ -139,12 +132,6 @@ public sealed partial class MainWindow : Window
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
-        if (_startupTarget is ApplicationStartupTarget.None
-            or ApplicationStartupTarget.Welcome)
-        {
-            await ShowWelcomeDialogAsync();
-        }
-
         try
         {
             await ViewModel.InitializeAsync();
@@ -168,6 +155,11 @@ public sealed partial class MainWindow : Window
         if (_startupTarget is not (ApplicationStartupTarget.None or ApplicationStartupTarget.Welcome))
         {
             ActivateTarget(_startupTarget);
+        }
+        else if (Enum.TryParse<ShellPageKind>(_preferredShellPage, out var preferredPage)
+            && preferredPage != ShellPageKind.Manage)
+        {
+            SelectShellPage(preferredPage);
         }
         else if (Enum.TryParse<ShellPageKind>(ViewModel.RestoredUiState?.ShellPage, out var restoredPage)
             && restoredPage != ShellPageKind.Manage)
@@ -196,70 +188,37 @@ public sealed partial class MainWindow : Window
             ViewModel.Monitoring.Dispose();
             await _workspaceStateService.SaveAsync(
                 ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+            await ViewModel.SetLastActivePageAsync(
+                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
         }
     }
 
-    private async Task ShowWelcomeDialogAsync()
+    private void ShowWelcomeWindow()
     {
-        if (RootGrid.XamlRoot is null)
+        if (_welcomeWindow is not null)
         {
+            _welcomeWindow.Activate();
             return;
         }
 
-        var localization = ViewModel.Localization;
-        var dialog = new ContentDialog
+        _welcomeWindow = new WelcomeWindow(ViewModel.Localization);
+        _welcomeWindow.Closed += (_, _) => _welcomeWindow = null;
+        _welcomeWindow.Activate();
+    }
+
+    internal void ShowStartupWelcome()
+    {
+        if (_startupTarget is ApplicationStartupTarget.None
+            or ApplicationStartupTarget.Welcome)
         {
-            XamlRoot = RootGrid.XamlRoot,
-            RequestedTheme = RootGrid.RequestedTheme,
-            Title = localization["WelcomeTitle"],
-            PrimaryButtonText = localization["WelcomeConfirm"],
-            DefaultButton = ContentDialogButton.Primary
-        };
-        dialog.Content = new StackPanel
-        {
-            Width = 480,
-            Spacing = 20,
-            Children =
-            {
-                new Border
-                {
-                    Width = 112,
-                    Height = 112,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["WinPoolAccentHoverBrush"],
-                    CornerRadius = new CornerRadius(26),
-                    Child = new FontIcon
-                    {
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        FontSize = 52,
-                        Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["WinPoolAccentBrush"],
-                        Glyph = "\uEDA2"
-                    }
-                },
-                new TextBlock
-                {
-                    FontSize = 15,
-                    Text = localization["WelcomeMessage"],
-                    TextWrapping = TextWrapping.Wrap
-                }
-            }
-        };
-        try
-        {
-            await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            return;
+            ShowWelcomeWindow();
         }
     }
 
-    internal void ShowWelcome() =>
-        RootGrid.DispatcherQueue.TryEnqueue(async () => await ShowWelcomeDialogAsync());
+    internal void ShowWelcome() => RootGrid.DispatcherQueue.TryEnqueue(ShowWelcomeWindow);
 
     internal void ActivateTarget(ApplicationStartupTarget target)
     {
@@ -484,6 +443,7 @@ public sealed partial class MainWindow : Window
         SetBrushColor("ToggleSwitchFillOnPointerOver", Blend(color, 0.08));
         SetBrushColor("ToggleSwitchFillOnPressed", Blend(color, -0.10));
         SetBrushColor("ToggleSwitchStrokeOn", color);
+        UpdateShellNavigationAccent();
     }
 
     private void BuildShellNavigation()
@@ -550,6 +510,7 @@ public sealed partial class MainWindow : Window
         SelectedShellItem = item;
         ShellNavigationList.SelectedItem = item;
         _updatingNavigation = false;
+        UpdateShellNavigationAccent();
 
         if (page == ShellPageKind.Manage)
         {
@@ -626,8 +587,11 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void RootGrid_ActualThemeChanged(FrameworkElement sender, object args) =>
+    private void RootGrid_ActualThemeChanged(FrameworkElement sender, object args)
+    {
         UpdateCaptionButtonColors();
+        UpdateShellNavigationAccent();
+    }
 
     private void UpdateCaptionButtonColors()
     {
@@ -683,6 +647,30 @@ public sealed partial class MainWindow : Window
         ShellNavigationList.InvalidateMeasure();
         ShellNavigationList.ItemsPanelRoot?.InvalidateMeasure();
         UpdateTitleBarPassthroughRegions();
+    }
+
+    private void UpdateShellNavigationAccent()
+    {
+        if (Application.Current.Resources["WinPoolAccentBrush"] is not Brush accent
+            || Application.Current.Resources["WinPoolAccentForegroundBrush"] is not Brush accentForeground)
+        {
+            return;
+        }
+
+        var normalForeground = new SolidColorBrush(
+            RootGrid.ActualTheme == ElementTheme.Light
+                ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A)
+                : Color.FromArgb(255, 0xFF, 0xFF, 0xFF));
+        WindowTitleText.Foreground = normalForeground;
+        LocalRealOperationsCheckBox.Foreground = normalForeground;
+        foreach (var item in ShellNavigationItems)
+        {
+            var selected = item == SelectedShellItem;
+            item.Background = selected
+                ? accent
+                : new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+            item.Foreground = selected ? accentForeground : normalForeground;
+        }
     }
 
     private void CustomTitleBar_Loaded(object sender, RoutedEventArgs e) =>

@@ -40,13 +40,70 @@ internal static class Program
 
         try
         {
-            using var context = new TrayApplicationContext();
             var startedAtUtc = DateTimeOffset.UtcNow;
             var agentSessionId = Guid.NewGuid();
             var instanceId = new AgentInstanceId(agentSessionId);
             var processRegistry = new AgentProcessRegistry();
+            var lifecycle = new AgentLifecycleStateStore(
+                processRegistry,
+                AgentLifecycleState.Starting);
+            lifecycle.MarkRecovering();
             var productRoot = ResolveProductRoot();
             var dataRoot = StorageDataLocations.ResolveCurrentRoot(productRoot);
+            var preferencesService = new LocalUserPreferencesService(dataRoot);
+            using var context = new TrayApplicationContext(preferencesService);
+            WorkerProcessRepository workerProcesses = null!;
+            var agentEvents = new AgentEventHub();
+            var processIncarnationVerifier = new WindowsProcessIncarnationVerifier();
+            var mainApplicationExecutablePath = Path.GetFullPath(
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "..",
+                    "WinPool.App.exe"));
+            var coordinator = new AgentSessionCoordinator(
+                processRegistry,
+                lifecycle,
+                () => new AgentSnapshot(
+                    instanceId,
+                    context.IsTrayVisible,
+                    ActiveMonitoringSession: null,
+                    ActiveTestRunId: null,
+                    ShutdownStatus: lifecycle.Snapshot(),
+                    Processes: [],
+                    LatestMonitorSamples: [],
+                    RecentStorageHealthEvents: [],
+                    MonitorDiagnostics: new MonitorRuntimeDiagnostics(0, 0),
+                    CurrentToolStates: []));
+            context.AttachCoordinator(coordinator);
+            var nonce = Guid.NewGuid();
+            var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+            var endpoint = new AgentEndpointRecord(
+                IpcProtocol.CurrentVersion,
+                pipeName,
+                nonce,
+                agentSessionId,
+                Environment.ProcessId,
+                startedAtUtc);
+            var endpointPath = PublishEndpoint(endpoint, dataRoot);
+            using var pipeCancellation = new CancellationTokenSource();
+            var server = new CurrentUserAgentControlServer(
+                pipeName,
+                nonce,
+                userHash,
+                agentSessionId,
+                Environment.ProcessId,
+                coordinator,
+                persistProcess: (registration, cancellationToken) => workerProcesses is null
+                    ? Task.CompletedTask
+                    : workerProcesses.SaveAsync(
+                        instanceId,
+                        registration,
+                        cancellationToken),
+                eventHub: agentEvents,
+                processIncarnationVerifier: processIncarnationVerifier,
+                expectedClientExecutablePath: mainApplicationExecutablePath);
+            var serverTask = Task.Run(() => server.RunAsync(pipeCancellation.Token));
+
             var store = new WinPoolSqliteStore(Path.Combine(dataRoot, "winpool.db"));
             store.InitializeAsync().GetAwaiter().GetResult();
             using var writeOwner = AgentWriteOwnerLease.Acquire(
@@ -65,8 +122,10 @@ internal static class Program
             var monitoring = new MonitoringSessionCoordinator(
                 new PdhDiskMonitorSource(),
                 new SqliteMonitorSessionPersistenceFactory(store, writeOwner));
-            var toolPathConfiguration = new JsonToolPathConfiguration(
-                Path.Combine(dataRoot, "tool-paths.json"));
+            var toolPathConfiguration = PreferencesToolPathConfiguration
+                .CreateAsync(preferencesService)
+                .GetAwaiter()
+                .GetResult();
             var toolCatalog = new ToolCatalog();
             var toolRegistry = new ExternalToolRegistry(
                 toolCatalog,
@@ -75,7 +134,7 @@ internal static class Program
                     new EnvironmentToolSearchPath()),
                 new WindowsToolVersionProbe(),
                 new Sha256ToolFileHasher());
-            var workerProcesses = new WorkerProcessRepository(store, writeOwner);
+            workerProcesses = new WorkerProcessRepository(store, writeOwner);
             var testRuns = new TestRunRepository(store, writeOwner);
             var copyBatches = new CopyBatchRepository(store, writeOwner);
             var interruptedTestRuns = testRuns
@@ -163,14 +222,6 @@ internal static class Program
                 Environment.ProcessId,
                 agentSessionId,
                 dataRoot);
-            var agentEvents = new AgentEventHub();
-            var lifecycle = new AgentLifecycleStateStore(processRegistry);
-            var processIncarnationVerifier = new WindowsProcessIncarnationVerifier();
-            var mainApplicationExecutablePath = Path.GetFullPath(
-                Path.Combine(
-                    AppContext.BaseDirectory,
-                    "..",
-                    "WinPool.App.exe"));
             var runtime = new DesktopAgentRuntime(
                 context,
                 instanceId,
@@ -216,43 +267,31 @@ internal static class Program
                 storageHealthEvents,
                 initialStorageHealthEvents,
                 agentEvents,
-                lifecycle);
+                lifecycle,
+                preferencesService);
             var shutdown = new AgentShutdownWorkflow(runtime, processRegistry);
-            var coordinator = new AgentSessionCoordinator(
-                runtime,
-                shutdown,
-                processRegistry,
-                lifecycle);
+            coordinator.AttachRuntime(runtime, shutdown);
             context.AttachCoordinator(coordinator);
-
-            var nonce = Guid.NewGuid();
-            var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
-            var endpoint = new AgentEndpointRecord(
-                IpcProtocol.CurrentVersion,
-                pipeName,
-                nonce,
-                agentSessionId,
-                Environment.ProcessId,
-                startedAtUtc);
-            var endpointPath = PublishEndpoint(endpoint);
-            using var pipeCancellation = new CancellationTokenSource();
-            var server = new CurrentUserAgentControlServer(
-                pipeName,
-                nonce,
-                userHash,
-                agentSessionId,
-                Environment.ProcessId,
-                coordinator,
-                persistProcess: (registration, cancellationToken) =>
-                    workerProcesses.SaveAsync(
-                        instanceId,
-                        registration,
-                        cancellationToken),
-                eventHub: agentEvents,
-                processIncarnationVerifier: processIncarnationVerifier,
-                expectedClientExecutablePath: mainApplicationExecutablePath);
-            var serverTask = Task.Run(
-                () => server.RunAsync(pipeCancellation.Token));
+            using var recoveryCancellation = new CancellationTokenSource();
+            var recoveryTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await runtime.RestoreContinuousMonitoringAsync(
+                        recoveryCancellation.Token).ConfigureAwait(false);
+                    lifecycle.MarkReady();
+                    context.AttachCoordinator(coordinator);
+                }
+                catch (OperationCanceledException) when (recoveryCancellation.IsCancellationRequested)
+                {
+                    // Shutdown won the race with non-critical monitoring recovery.
+                }
+                catch
+                {
+                    lifecycle.MarkFailed("agent.monitoring.restore_failed");
+                    context.AttachCoordinator(coordinator);
+                }
+            });
 
             try
             {
@@ -260,6 +299,10 @@ internal static class Program
             }
             finally
             {
+                recoveryCancellation.Cancel();
+                recoveryTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
+                    .GetAwaiter()
+                    .GetResult();
                 pipeCancellation.Cancel();
                 serverTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
                     .GetAwaiter()
@@ -335,13 +378,10 @@ internal static class Program
         }
     }
 
-    private static string PublishEndpoint(AgentEndpointRecord endpoint)
+    private static string PublishEndpoint(AgentEndpointRecord endpoint, string dataRoot)
     {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinPool");
-        Directory.CreateDirectory(root);
-        var path = Path.Combine(root, "agent-endpoint.json");
+        var path = DataRootLayout.AgentEndpointPath(dataRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporaryPath = path + $".{Guid.NewGuid():N}.tmp";
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(endpoint));
         File.Move(temporaryPath, path, overwrite: true);

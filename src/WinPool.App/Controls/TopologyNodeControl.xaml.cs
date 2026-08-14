@@ -168,9 +168,9 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void NodeBorder_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
     {
-        if (ViewModel?.IsSelectable == true)
+        if (ViewModel?.IsSelectable == true && sender is FrameworkElement element)
         {
-            ViewModel.RequestContextMenu(this);
+            ViewModel.RequestContextMenu(element, e.GetPosition(element));
         }
         e.Handled = true;
     }

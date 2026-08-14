@@ -31,12 +31,12 @@ public sealed class TestSupportActionValidationTests
                     true,
                     true)));
 
-        Assert.Null(DesktopAgentRuntime.ValidateTestSupportActions(valid));
+        Assert.Null(TestExecutionRules.ValidateSupportActions(valid));
         Assert.Equal(
             "agent.testing.support_actions_require_orchestration",
-            DesktopAgentRuntime.ValidateTestSupportActions(arbitraryPid));
-        Assert.Null(DesktopAgentRuntime.ValidateTestSupportActions(oneShot));
-        Assert.Null(DesktopAgentRuntime.ValidateTestSupportActions(ramMap));
+            TestExecutionRules.ValidateSupportActions(arbitraryPid));
+        Assert.Null(TestExecutionRules.ValidateSupportActions(oneShot));
+        Assert.Null(TestExecutionRules.ValidateSupportActions(ramMap));
     }
 
     [Fact]
@@ -67,16 +67,16 @@ public sealed class TestSupportActionValidationTests
 
         Assert.Equal(
             "agent.testing.scheduling_policy_invalid",
-            DesktopAgentRuntime.ValidateTestSupportActions(outOfRange));
+            TestExecutionRules.ValidateSupportActions(outOfRange));
         Assert.Equal(
             "agent.testing.support_actions_require_orchestration",
-            DesktopAgentRuntime.ValidateTestSupportActions(downgraded));
+            TestExecutionRules.ValidateSupportActions(downgraded));
         Assert.Equal(
             "agent.testing.power_plan_invalid",
-            DesktopAgentRuntime.ValidateTestSupportActions(invalidPower));
+            TestExecutionRules.ValidateSupportActions(invalidPower));
         Assert.Equal(
             "agent.testing.rammap_action_invalid",
-            DesktopAgentRuntime.ValidateTestSupportActions(invalidRamMap));
+            TestExecutionRules.ValidateSupportActions(invalidRamMap));
     }
 
     [Fact]
@@ -119,13 +119,13 @@ public sealed class TestSupportActionValidationTests
         };
         var noCopy = valid with { Steps = [] };
 
-        Assert.Null(DesktopAgentRuntime.ValidateTestSupportActions(valid));
+        Assert.Null(TestExecutionRules.ValidateSupportActions(valid));
         Assert.Equal(
             "agent.testing.flush_action_invalid",
-            DesktopAgentRuntime.ValidateTestSupportActions(missingSnapshot));
+            TestExecutionRules.ValidateSupportActions(missingSnapshot));
         Assert.Equal(
             "agent.testing.flush_action_invalid",
-            DesktopAgentRuntime.ValidateTestSupportActions(noCopy));
+            TestExecutionRules.ValidateSupportActions(noCopy));
     }
 
     private static TestPlan Plan(SystemSupportAction supportAction)

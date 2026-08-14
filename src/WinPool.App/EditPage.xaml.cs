@@ -39,10 +39,6 @@ public sealed partial class EditPage : Page
         {
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
-        SimulationOnlyInfoBar.Title = Text("仅模拟", "Simulation only");
-        SimulationOnlyInfoBar.Message = ViewModel.Localization["EditOnlySimulated"];
-        SimulationOnlyInfoBar.IsOpen = !ViewModel.IsUsingSimulatedInventory;
-        ResetSimulationButton.Content = ViewModel.Localization["ResetSimulation"];
         ResearchNote.Text = Text(
             "本项目测试结论：64K 交织 + 64K NTFS 簇为当前安全推荐配置。",
             "Tested recommendation: 64K interleave + 64K NTFS cluster.");
@@ -72,34 +68,103 @@ public sealed partial class EditPage : Page
 
     private void RefreshAll()
     {
-        RefreshDiskSelector();
+        RefreshDiskRows();
         RefreshPartitionBar();
         RefreshPoolTiles();
         UpdateButtonState();
     }
 
-    private void RefreshDiskSelector()
+    private void RefreshDiskRows()
     {
         var snapshot = ViewModel.ActiveSnapshot;
-        DiskSelector.Items.Clear();
-        foreach (var disk in snapshot.OsDisks.OrderBy(x => x.Number))
+        var disks = snapshot.OsDisks
+            .Where(PartitionableDiskPolicy.IsEligible)
+            .OrderBy(x => x.Number)
+            .ToArray();
+        if (!disks.Any(x => x.StableId == _selectedDiskId))
         {
-            var item = new ComboBoxItem
+            _selectedDiskId = disks.FirstOrDefault()?.StableId;
+            _selectedPartitionId = null;
+        }
+
+        DiskRowsPanel.Children.Clear();
+        foreach (var disk in disks)
+        {
+            var partitions = snapshot.Partitions
+                .Where(partition => partition.OsDiskStableId == disk.StableId)
+                .OrderBy(partition => partition.Offset)
+                .ToArray();
+            var free = Math.Max(0, disk.Size - partitions.Sum(partition => partition.Size));
+            var button = new Button
             {
-                Content = $"{Text("磁盘", "Disk")} {disk.Number} - {disk.FriendlyName} ({disk.PartitionStyle}, {TopologyProjector.FormatBytes(disk.Size)})",
-                Tag = disk.StableId
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(12, 10, 12, 10),
+                Tag = disk.StableId,
+                Content = new StackPanel
+                {
+                    Spacing = 4,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            FontWeight = FontWeights.SemiBold,
+                            Text = $"{Text("磁盘", "Disk")} {disk.Number} · {disk.FriendlyName}"
+                        },
+                        new TextBlock
+                        {
+                            FontSize = 12,
+                            Opacity = 0.75,
+                            Text = $"{disk.PartitionStyle} · {TopologyProjector.FormatBytes(disk.Size)} · {Text("未分配", "Unallocated")} {TopologyProjector.FormatBytes(free)}"
+                        },
+                        BuildDiskPartitionSummaryBar(disk, partitions, free)
+                    }
+                }
             };
-            DiskSelector.Items.Add(item);
             if (disk.StableId == _selectedDiskId)
             {
-                DiskSelector.SelectedItem = item;
+                button.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
             }
+            button.Click += DiskRow_Click;
+            DiskRowsPanel.Children.Add(button);
         }
-        if (DiskSelector.SelectedItem is null && DiskSelector.Items.Count > 0)
+    }
+
+    private StackPanel BuildDiskPartitionSummaryBar(
+        OsDiskInfo disk,
+        IReadOnlyList<PartitionInfo> partitions,
+        long free)
+    {
+        const double totalWidth = 340;
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        var total = Math.Max(1, disk.Size);
+        foreach (var partition in partitions)
         {
-            DiskSelector.SelectedIndex = 0;
+            var segment = new Border
+            {
+                Width = Math.Clamp((double)partition.Size / total * totalWidth, 12, totalWidth),
+                Height = 8,
+                Background = (Brush)Application.Current.Resources["WinPoolAccentBrush"],
+                CornerRadius = new CornerRadius(2)
+            };
+            ToolTipService.SetToolTip(
+                segment,
+                $"{TopologyProjector.PartitionDisplayName(partition)} · {TopologyProjector.FormatBytes(partition.Size)}");
+            panel.Children.Add(segment);
         }
-        _selectedDiskId = (DiskSelector.SelectedItem as ComboBoxItem)?.Tag as string;
+        if (free > 0)
+        {
+            var segment = new Border
+            {
+                Width = Math.Clamp((double)free / total * totalWidth, 12, totalWidth),
+                Height = 8,
+                Background = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+                CornerRadius = new CornerRadius(2)
+            };
+            ToolTipService.SetToolTip(segment, $"{Text("未分配", "Unallocated")} · {TopologyProjector.FormatBytes(free)}");
+            panel.Children.Add(segment);
+        }
+        return panel;
     }
 
     private void RefreshPartitionBar()
@@ -277,14 +342,13 @@ public sealed partial class EditPage : Page
         InitializeButton.IsEnabled = diskEditable;
         OfflineButton.IsEnabled = simulated && disk is not null;
         CreatePoolButton.IsEnabled = simulated && _stagedDiskIds.Count > 0;
-        ResetSimulationButton.IsEnabled = ViewModel.SelectedSystem.Id.StartsWith(
-            "simulation:builtin", StringComparison.Ordinal);
     }
 
-    private void DiskSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void DiskRow_Click(object sender, RoutedEventArgs e)
     {
-        _selectedDiskId = (DiskSelector.SelectedItem as ComboBoxItem)?.Tag as string;
+        _selectedDiskId = ((FrameworkElement)sender).Tag as string;
         _selectedPartitionId = null;
+        RefreshDiskRows();
         RefreshPartitionBar();
         UpdateButtonState();
     }
@@ -726,35 +790,6 @@ public sealed partial class EditPage : Page
                 AllocationUnitSize: cluster));
         }
 
-        _stagedDiskIds.Clear();
-        RefreshAll();
-    }
-
-    private async void ResetSimulation_Click(object sender, RoutedEventArgs e)
-    {
-        if (!await ConfirmAsync(
-                Text("重置模拟数据", "Reset simulation data"),
-                Text("恢复当前模拟系统到初始状态？全部模拟修改都会丢失。",
-                     "Restore the current simulation to its initial state? All simulated changes are lost.")))
-        {
-            return;
-        }
-        try
-        {
-            await ViewModel.ResetActiveSimulationAsync();
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or ArgumentException)
-        {
-            await ShowMessageAsync(
-                Text("重置失败", "Reset failed"),
-                exception.Message);
-            return;
-        }
-        _selectedPartitionId = null;
         _stagedDiskIds.Clear();
         RefreshAll();
     }

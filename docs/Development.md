@@ -9,6 +9,24 @@ where already justified, and an unpackaged self-contained Windows x64 deployment
 The SDK is pinned in `global.json`; the single project version is defined in
 `Directory.Build.props`.
 
+Portable delivery is the only implemented mode through V0.7. Signed MSIX work
+is scheduled for V0.8–V0.9, and Microsoft Store submission is post-V1.0 work.
+These roadmap entries do not authorize packaging work in an earlier Plan.
+
+The current portable artifact must be kept as one complete directory. Run
+`WinPool.App.exe` with its `Agent`, `TestWorker`, `Broker`, framework, and
+resource files in their staged relative locations. WinPool installs no Windows
+service and opening the application does not itself require elevation. Exit all
+WinPool processes before replacing program files; partially overwriting a live
+directory is not a supported upgrade method.
+
+V0.8–V0.9 MSIX acceptance must cover signing and package identity, clean install,
+first launch, update, downgrade rejection, uninstall, repair, startup,
+App/Agent activation, data locations, retention, and interrupted-update recovery
+on the named Windows matrix. Post-V1.0 Store work additionally requires approved
+privacy, support, certification, listing, and update-path material. Packaging,
+account creation, upload, and publication each remain separately authorized.
+
 The product consists of four processes:
 
 - `WinPool.App`: WinUI shell, pages, presentation adapters, and user interaction.
@@ -64,21 +82,45 @@ The dependency direction is presentation and ports → Application → Domain.
 - App consumes Application contracts and presentation models.
 - Agent owns the database write lease and supervises Worker and Broker children.
 
-These contracts are internal. V0.3 does not freeze a public API, plug-in contract,
+These contracts are internal. V0.41 does not freeze a public API, plug-in contract,
 IPC wire protocol, or C#/Python interoperability format.
 
 ## Persistence and process lifecycle
 
 The standard data root is `%LocalAppData%\WinPool`. Portable mode uses a
 writable `Data` directory beside the executable. The standard-root
-`storage-location.json` pointer selects the mode; migrations retain the old copy
-and verify the destination.
+`storage-location.json` pointer selects the mode; a location switch verifies the
+destination before making it active.
 
-Normal launches use Agent-owned SQLite schema 12 for inventory, workspace state,
-simulation documents, monitoring, test history, evidence, and recovery. V0.35
-creates or reopens only schema 12 data; older schemas are rejected without being
-migrated or changed. JSON stores remain only for explicitly supported no-Agent
-development fallbacks.
+Normal launches use Agent-owned SQLite schema 13 for inventory, workspace state,
+simulation documents, monitoring, test history, evidence, and recovery. V0.41
+creates or reopens only schema 13 data; schema 12 and older databases are
+rejected without migration or modification. User preferences do not live in
+SQLite: `settings.json` is their sole durable authority. JSON stores remain only
+for explicitly supported no-Agent development fallbacks.
+
+The persistence ownership policy has two durable authorities:
+
+- `settings.json` owns user preferences, including visual and language choices,
+  startup intent, monitoring preferences, and user-selected external-tool paths.
+- `winpool.db` owns inventory and workspace cache, simulation documents,
+  external-tool detection results, monitoring, tests, audit, recovery, and
+  process/session history. The Agent remains its only normal writer.
+
+V0.41 eliminates the `preferences` table and uses dedicated `workspace_state`
+and `test_presets` tables. It also stops formal builds from generating
+`tool-paths.json`, no-Agent `workspace.json`/`machine.json`, and automatic
+monitor CSV files. For V0.41, the user explicitly permits the local
+development-machine state to be fully reset and regenerated; no V0.4-to-V0.41
+preference or database compatibility is required. The old root must be moved to
+a recoverable project-root `Rubbish\YYYYMMDD_v041_local_state_reset` location
+only after every WinPool process has stopped, then the new version creates clean
+authorities. Product code must not silently erase an unknown data root.
+`storage-location.json` is the one durable bootstrap exception because WinPool
+must locate the active data root before opening either authority. IPC endpoint
+files are rebuildable runtime state; diagnostics and managed-tool payloads are
+auxiliary files with fixed directories and retention rules, not additional
+state authorities.
 
 WinPool is single-instance through Windows App SDK application lifecycle. Normal
 relaunch activates the existing window. An approved elevation handoff waits for
@@ -87,7 +129,7 @@ mode is never persisted.
 
 ## Execution and external-tool boundaries
 
-V0.3 policy and executor behavior deny real storage-structure mutation.
+V0.41 policy and executor behavior deny real storage-structure mutation.
 Simulation editing and read-only discovery are normal capabilities. V0.5 is the
 earliest implementation stage permitted to add typed real mutations. Each must
 validate its exact targets, show a reviewed preview, record an audit entry, and
@@ -144,18 +186,19 @@ included. Generated output is evidence only and is never committed.
 
 ## Version progression
 
-Product versions use `Va.bc`:
+Product versions use `Va.b` for a new product line and may use `Va.bc` for a
+nonzero iteration within that line:
 
 - `a`: major version;
 - `b`: minor architecture/product line;
-- `c`: one-digit iteration within the minor version.
+- `c`: one-digit nonzero iteration within the minor version.
 
-Architecture and roadmap documents normally stop at `Va.b`. Iteration values are
-assigned from actual work and cannot exceed 9. A normal iteration is committed
-locally; remote pushes, tags, and releases require the authorization rules in
-`AGENTS.md` and the active Plan.
+Architecture and roadmap documents use `Va.b`. Iteration values are assigned
+from actual work and cannot exceed 9. A normal iteration is committed locally;
+remote pushes, tags, and releases require the authorization rules in `AGENTS.md`
+and the active Plan.
 
-`Va.bc` is the only project-version system. `Directory.Build.props` derives the
+`Va.b` / `Va.bc` is the only project-version system. `Directory.Build.props` derives the
 numeric fields required by .NET and Windows mechanically from `a`, `b`, and `c`;
 those fields are build metadata with no independent version meaning. Database
 schema revisions, algorithm IDs, and IPC compatibility identifiers do not

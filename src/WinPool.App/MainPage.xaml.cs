@@ -105,7 +105,7 @@ public sealed partial class MainPage : Page
         if (!ViewModel.AutoScanAttempted && !ViewModel.IsScanning)
         {
             ViewModel.AutoScanAttempted = true;
-            await ViewModel.ScanAsync();
+            _ = RefreshLocalInventoryAsync();
         }
         DispatcherQueue.TryEnqueue(() =>
             TopologyScrollViewer.ChangeView(
@@ -115,6 +115,16 @@ public sealed partial class MainPage : Page
                 disableAnimation: true));
         RebuildComparisonTable();
         BuildCommandButtons();
+    }
+
+    private async Task RefreshLocalInventoryAsync()
+    {
+        await ViewModel.ScanAsync();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            RebuildComparisonTable();
+            BuildCommandButtons();
+        });
     }
 
     private void RebuildComparisonTable()
@@ -492,13 +502,11 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void ShowNodeContextMenu(ManageObjectTarget node, object target)
+    private void ShowNodeContextMenu(
+        ManageObjectTarget node,
+        FrameworkElement element,
+        Windows.Foundation.Point pointerPosition)
     {
-        if (target is not FrameworkElement element)
-        {
-            return;
-        }
-
         var selected = ViewModel.SelectedWorkspaceItem;
         if (selected?.Projection is null
             || selected.Projection.Id != node.Id
@@ -526,13 +534,7 @@ public sealed partial class MainPage : Page
             flyout.Items.Add(item);
         }
 
-        var bounds = element.TransformToVisual(null).TransformBounds(
-            new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
-        var windowWidth = App.Window.AppWindow.Size.Width;
-        var placement = bounds.Right + 260 > windowWidth
-            ? FlyoutPlacementMode.LeftEdgeAlignedTop
-            : FlyoutPlacementMode.RightEdgeAlignedTop;
-        flyout.ShowAt(element, new FlyoutShowOptions { Placement = placement });
+        flyout.ShowAt(element, new FlyoutShowOptions { Position = pointerPosition });
     }
 
     private void AddCommand(CommandSpec spec) => AddCommand(spec.Text, spec.Glyph, spec.Enabled, spec.Action);

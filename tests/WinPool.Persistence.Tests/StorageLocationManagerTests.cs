@@ -15,6 +15,9 @@ public sealed class StorageLocationManagerTests
         locations.WriteStandard(
             Path.Combine("Artifacts", "run-1", "result.json"),
             """{"iops":42}""");
+        locations.WriteStandard(
+            Path.Combine(StorageLocationManager.RuntimeDirectoryName, "agent-endpoint.json"),
+            """{"pipeName":"ephemeral"}""");
 
         var coordinator = new RecordingCoordinator();
         var committer = new ObservingCommitter(coordinator);
@@ -79,6 +82,10 @@ public sealed class StorageLocationManagerTests
         Assert.False(File.Exists(Path.Combine(
             locations.PortableRoot,
             StorageLocationManager.PointerFileName)));
+        Assert.False(File.Exists(Path.Combine(
+            locations.PortableRoot,
+            StorageLocationManager.RuntimeDirectoryName,
+            "agent-endpoint.json")));
         Assert.Equal(["quiesce", "commit", "resume"], coordinator.Events);
         Assert.False(coordinator.IsQuiesced);
 
@@ -140,8 +147,8 @@ public sealed class StorageLocationManagerTests
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                INSERT INTO preferences(key, json, updated_at_utc_ms)
-                VALUES('migration-rehearsal', '{"enabled":true}', 1);
+                INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
+                VALUES('migration-rehearsal', '{"enabled":true}', 1, 1);
                 PRAGMA wal_checkpoint(TRUNCATE);
                 """;
             await command.ExecuteNonQueryAsync();
@@ -741,33 +748,40 @@ public sealed class StorageLocationManagerTests
         using var locations = TemporaryLocations.Create();
         await CreateRealDatabaseAsync(locations.StandardRoot);
         var unrelatedPath = Path.Combine(locations.BaseDirectory, "unrelated.db");
-        await using var unrelated = new SqliteConnection(
+        var unrelated = new SqliteConnection(
             new SqliteConnectionStringBuilder
             {
                 DataSource = unrelatedPath,
                 Pooling = true
             }.ToString());
-        await unrelated.OpenAsync();
-        await using (var command = unrelated.CreateCommand())
+        await using (unrelated)
         {
-            command.CommandText = "CREATE TABLE marker(value INTEGER); INSERT INTO marker VALUES(7);";
-            await command.ExecuteNonQueryAsync();
+            await unrelated.OpenAsync();
+            await using (var command = unrelated.CreateCommand())
+            {
+                command.CommandText = "CREATE TABLE marker(value INTEGER); INSERT INTO marker VALUES(7);";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var manager = locations.CreateManager(new RecordingCoordinator());
+            var plan = Assert.IsType<StorageLocationSwitchPlan>(
+                (await manager.PlanSwitchAsync(
+                    StorageLocationMode.Portable,
+                    CorrelationId.New(),
+                    CancellationToken.None)).Value);
+
+            Assert.True((await manager.ApplySwitchAsync(
+                plan,
+                CorrelationId.New(),
+                CancellationToken.None)).IsSuccess);
+            await using var verify = unrelated.CreateCommand();
+            verify.CommandText = "SELECT value FROM marker;";
+            Assert.Equal(7L, Convert.ToInt64(await verify.ExecuteScalarAsync()));
         }
 
-        var manager = locations.CreateManager(new RecordingCoordinator());
-        var plan = Assert.IsType<StorageLocationSwitchPlan>(
-            (await manager.PlanSwitchAsync(
-                StorageLocationMode.Portable,
-                CorrelationId.New(),
-                CancellationToken.None)).Value);
-
-        Assert.True((await manager.ApplySwitchAsync(
-            plan,
-            CorrelationId.New(),
-            CancellationToken.None)).IsSuccess);
-        await using var verify = unrelated.CreateCommand();
-        verify.CommandText = "SELECT value FROM marker;";
-        Assert.Equal(7L, Convert.ToInt64(await verify.ExecuteScalarAsync()));
+        // Release only this test's deliberately pooled, unrelated connection
+        // before the temporary fixture removes its own directory.
+        SqliteConnection.ClearPool(unrelated);
     }
 
     private static async Task CreateRealDatabaseAsync(string root)

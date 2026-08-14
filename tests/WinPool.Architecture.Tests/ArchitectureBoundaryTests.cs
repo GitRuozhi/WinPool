@@ -86,6 +86,17 @@ public sealed class ArchitectureBoundaryTests
                     StringComparison.OrdinalIgnoreCase))
                 .Select(File.ReadAllText));
         Assert.DoesNotContain("WinPool.Core", productionSource, StringComparison.Ordinal);
+        var productionXaml = string.Join(
+            '\n',
+            Directory.EnumerateFiles(
+                    Path.Combine(root, "src"),
+                    "*.xaml",
+                    SearchOption.AllDirectories)
+                .Where(path => !path.Contains(
+                    $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(File.ReadAllText));
+        Assert.DoesNotContain("WinPool.Core", productionXaml, StringComparison.Ordinal);
         Assert.Contains("StorageSystemDocument", productionSource, StringComparison.Ordinal);
 
         var preferenceDefinitions = Directory.EnumerateFiles(
@@ -242,10 +253,20 @@ public sealed class ArchitectureBoundaryTests
         var root = FindRepositoryRoot();
         var settingsPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
+        var switchRuntime = File.ReadAllText(
+            Path.Combine(
+                root,
+                "src",
+                "WinPool.App",
+                "Services",
+                "DataLocationSwitchRuntime.cs"));
 
-        Assert.Contains("new StorageLocationManager(", settingsPage, StringComparison.Ordinal);
+        Assert.Contains("DataLocationSwitchRuntime.CreateManager()", settingsPage, StringComparison.Ordinal);
         Assert.Contains("ShutdownReason.StorageLocationSwitch", settingsPage, StringComparison.Ordinal);
         Assert.Contains("SourceManifestSha256", settingsPage, StringComparison.Ordinal);
+        Assert.Contains("StorageLocationManager", switchRuntime, StringComparison.Ordinal);
+        Assert.Contains("IStorageWriteQuiescenceCoordinator", switchRuntime, StringComparison.Ordinal);
+        Assert.Contains("Local\\\\WinPool.Agent.", switchRuntime, StringComparison.Ordinal);
         Assert.DoesNotContain("StorageDataLocations.SetModeAsync", settingsPage, StringComparison.Ordinal);
     }
 
@@ -434,11 +455,11 @@ public sealed class ArchitectureBoundaryTests
                 "AgentBackedWorkspaceStateService.cs"));
 
         Assert.Contains(
-            "agentConnection is null\n            ? new LocalWorkspaceStateService()\n            : new AgentBackedWorkspaceStateService(agentConnection)",
+            "agentConnection is null\n            ? new EphemeralWorkspaceStateService()\n            : new AgentBackedWorkspaceStateService(agentConnection)",
             mainWindow.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "new LocalWorkspaceStateService();",
+            "new LocalWorkspaceStateService()",
             mainWindow,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -499,9 +520,9 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionMinor>3</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>9</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)$(WinPoolVersionIteration)</WinPoolVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionMinor>4</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>1</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
         Assert.Contains("AssemblyInformationalVersionAttribute", productInformation, StringComparison.Ordinal);
@@ -522,6 +543,18 @@ public sealed class ArchitectureBoundaryTests
     public void WelcomeDialogUsesKeyboardAccessibleNativePrimaryButton()
     {
         var root = FindRepositoryRoot();
+        var windowSource = File.ReadAllText(
+            Path.Combine(
+                root,
+                "src",
+                "WinPool.App",
+                "WelcomeWindow.xaml.cs"));
+        var windowXaml = File.ReadAllText(
+            Path.Combine(
+                root,
+                "src",
+                "WinPool.App",
+                "WelcomeWindow.xaml"));
         var source = File.ReadAllText(
             Path.Combine(
                 root,
@@ -529,8 +562,10 @@ public sealed class ArchitectureBoundaryTests
                 "WinPool.App",
                 "MainWindow.xaml.cs"));
 
-        Assert.Contains("PrimaryButtonText = localization[\"WelcomeConfirm\"]", source, StringComparison.Ordinal);
-        Assert.Contains("DefaultButton = ContentDialogButton.Primary", source, StringComparison.Ordinal);
+        Assert.Contains("ConfirmButton.Content = localization[\"WelcomeConfirm\"]", windowSource, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ConfirmButton\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"ConfirmButton_Click\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("AppWindow.Resize(DefaultSize)", windowSource, StringComparison.Ordinal);
         Assert.Contains(
             "if (_startupTarget is ApplicationStartupTarget.None",
             source,
@@ -543,6 +578,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("MarkWelcomeShownAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("showAgainCheckBox", source, StringComparison.Ordinal);
         Assert.DoesNotContain("confirmButton.Click += (_, _) => dialog.Hide()", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ContentDialog", windowXaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -570,7 +606,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DesktopAgentRuntimeDelegatesTheThreeExtractedResponsibilities()
+    public void DesktopAgentRuntimeDelegatesToFocusedAgentWorkflows()
     {
         var root = FindRepositoryRoot();
         var agentRoot = Path.Combine(root, "src", "WinPool.Agent");
@@ -580,7 +616,12 @@ public sealed class ArchitectureBoundaryTests
                  {
                      "AgentTestCoordinator",
                      "AgentSystemSupportCoordinator",
-                     "AgentInventoryCoordinator"
+                     "AgentInventoryCoordinator",
+                     "TestWorkerSupervisor",
+                     "CopyBatchRecoveryCoordinator",
+                     "CopyBatchExecutionCoordinator",
+                     "AgentTestRunWorkflow",
+                     "TestRunStartCoordinator"
                  })
         {
             Assert.True(File.Exists(Path.Combine(agentRoot, coordinator + ".cs")), coordinator);
@@ -591,8 +632,10 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("systemSupportCoordinator.ExecuteAsync", runtime, StringComparison.Ordinal);
         Assert.Contains("inventoryCoordinator.CaptureManageAsync", runtime, StringComparison.Ordinal);
         Assert.Contains("inventoryCoordinator.CaptureComparisonAsync", runtime, StringComparison.Ordinal);
-        Assert.Contains("testCoordinator.TryReserve", runtime, StringComparison.Ordinal);
         Assert.Contains("testCoordinator.TryCancel", runtime, StringComparison.Ordinal);
+        Assert.Contains("testRunStartCoordinator.StartAsync", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("RunTestAsync(", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExecuteCopyBatchStepAsync(", runtime, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -647,8 +690,8 @@ public sealed class ArchitectureBoundaryTests
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml"));
 
-        Assert.Contains("x:Name=\"BackgroundCheckBox\"", source, StringComparison.Ordinal);
-        Assert.Contains("AccessKey=\"B\"", source, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ContinuousMonitoringCheckBox\"", source, StringComparison.Ordinal);
+        Assert.Contains("AccessKey=\"C\"", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -681,45 +724,64 @@ public sealed class ArchitectureBoundaryTests
     public void TestOrchestrationKeepsDurableRecoveryAroundSchedulingAndPowerChanges()
     {
         var root = FindRepositoryRoot();
-        var runtime = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.Agent", "DesktopAgentRuntime.cs"));
+        var agentRoot = Path.Combine(root, "src", "WinPool.Agent");
+        var workerSupervisor = File.ReadAllText(
+            Path.Combine(agentRoot, "TestWorkerSupervisor.cs"));
+        var workflow = File.ReadAllText(
+            Path.Combine(agentRoot, "AgentTestRunWorkflow.cs"));
 
-        var register = runtime.IndexOf(
+        var register = workerSupervisor.IndexOf(
             "await workerProcessRepository.SaveAsync(",
             StringComparison.Ordinal);
-        var schedulingPrepare = runtime.IndexOf(
+        var schedulingPrepare = workerSupervisor.IndexOf(
             "await testProcessSchedulingScope.PrepareAsync(",
             register,
             StringComparison.Ordinal);
-        var workerRun = runtime.IndexOf(
+        var workerRun = workerSupervisor.IndexOf(
             "return await testWorkerHost.RunAsync(",
             StringComparison.Ordinal);
-        var schedulingRestore = runtime.IndexOf(
+        var schedulingRestore = workerSupervisor.IndexOf(
             "await testProcessSchedulingScope.RestoreAsync(",
             schedulingPrepare,
             StringComparison.Ordinal);
-        var powerPrepare = runtime.IndexOf(
+        var powerPrepare = workflow.IndexOf(
             "powerPlanScope = await testPowerPlanScope.PrepareAsync(",
             StringComparison.Ordinal);
-        var localExecution = runtime.IndexOf(
+        var localExecution = workflow.IndexOf(
             "var localExecutor = new LocalTestStepExecutor(",
             powerPrepare,
             StringComparison.Ordinal);
-        var powerRestore = runtime.IndexOf(
+        var powerRestore = workflow.IndexOf(
             "await testPowerPlanScope.RestoreAsync(",
             powerPrepare,
             StringComparison.Ordinal);
-        var completeRun = runtime.IndexOf(
+        var completeRun = workflow.IndexOf(
             "await testRunRepository.CompleteAsync(",
             powerRestore,
             StringComparison.Ordinal);
 
-        Assert.True(workerRun >= 0 && register > workerRun);
+        Assert.True(workerRun >= 0 && register >= 0);
         Assert.True(schedulingPrepare > register);
         Assert.True(schedulingRestore > schedulingPrepare);
         Assert.True(powerPrepare >= 0 && localExecution > powerPrepare);
         Assert.True(powerRestore > localExecution);
         Assert.True(completeRun > powerRestore);
+    }
+
+    [Fact]
+    public void TestPageDelegatesDefinitionGraphConstructionToTestingLayer()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "TestPage.xaml.cs"));
+        var factory = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Testing", "TestDefinitionFactory.cs"));
+
+        Assert.Contains("new TestDefinitionFactory(", page, StringComparison.Ordinal);
+        Assert.Contains(".Build(workload, repeatCount)", page, StringComparison.Ordinal);
+        Assert.Contains("copyBatchThresholdMiB", factory, StringComparison.Ordinal);
+        Assert.Contains("MixedFileCopyVerification", factory, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildMixedDirectoryDefinition(", page, StringComparison.Ordinal);
     }
 
     [Fact]

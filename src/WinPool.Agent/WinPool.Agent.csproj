@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <ApplicationIcon>..\WinPool.App\Assets\AppIcon.ico</ApplicationIcon>
+    <ApplicationIcon>..\WinPool.App\Assets\CAppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
@@ -20,7 +20,7 @@
     <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\WinPool.App\Assets\AppIcon.ico" Link="Assets\AppIcon.ico" />
+    <Content Include="..\WinPool.App\Assets\CAppIcon.ico" Link="Assets\CAppIcon.ico" />
   </ItemGroup>
   <Target Name="CopyTestWorkerRuntime" AfterTargets="Build">
     <MSBuild Projects="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"

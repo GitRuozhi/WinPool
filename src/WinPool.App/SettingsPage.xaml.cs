@@ -28,12 +28,12 @@ public sealed partial class SettingsPage : Page
     private readonly ToolCatalog _toolCatalog = new();
     private readonly AgentStartupRegistration _agentStartup = new();
     private readonly Dictionary<ToolId, TextBlock> _toolStatuses = [];
-    private readonly JsonToolPathConfiguration _toolPaths = new(
-        Path.Combine(StorageDataLocations.CurrentRoot, "tool-paths.json"));
+    private readonly IMutableToolPathConfiguration _toolPaths;
 
     public SettingsPage()
     {
         InitializeComponent();
+        _toolPaths = new PreferencesToolPathConfiguration(new LocalUserPreferencesService());
     }
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
@@ -48,16 +48,16 @@ public sealed partial class SettingsPage : Page
         LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
         MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
         ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
-        StartupAgentCheckBox.IsChecked = _agentStartup.IsEnabled();
+        StartupAgentCheckBox.IsChecked = ViewModel.CurrentPreferences.StartAgentAtLogin;
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         BuildExternalToolRows();
+        _ = LoadCachedToolStatesAsync();
         UpdateText();
         SyncExecutionMode();
         _ready = true;
-        _ = RefreshExternalToolsAsync();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -156,13 +156,13 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        if (!await WaitForAgentExitAsync(shutdownTimeout.Token))
+        if (!await DataLocationSwitchRuntime.WaitForAgentExitAsync(shutdownTimeout.Token))
         {
             PublishDataLocationFailure(zh, "agent-exit-timeout");
             return;
         }
 
-        using var agentExclusion = TryAcquireAgentMigrationExclusion();
+        using var agentExclusion = DataLocationSwitchRuntime.TryAcquireAgentMigrationExclusion();
         if (agentExclusion is null)
         {
             PublishDataLocationFailure(zh, "agent-restarted-during-handoff");
@@ -170,10 +170,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var migrationTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-        var manager = new StorageLocationManager(
-            StorageDataLocations.StandardRoot,
-            StorageDataLocations.PortableRoot,
-            new StoppedAgentWriteCoordinator());
+        var manager = DataLocationSwitchRuntime.CreateManager();
         var planResult = await manager.PlanSwitchAsync(
             requestedMode,
             CorrelationId.New(),
@@ -219,7 +216,7 @@ public sealed partial class SettingsPage : Page
         }
 
         agentExclusion.Release();
-        if (!StartReplacementApplication())
+        if (!DataLocationSwitchRuntime.StartReplacementApplication())
         {
             await RestartAgentAfterAbortedSwitchAsync();
             ViewModel.NotificationService.PublishError(
@@ -233,23 +230,6 @@ public sealed partial class SettingsPage : Page
         }
 
         App.Window.Close();
-    }
-
-    private static async Task<bool> WaitForAgentExitAsync(CancellationToken cancellationToken)
-    {
-        while (File.Exists(NamedPipeAgentConnection.DefaultEndpointPath))
-        {
-            try
-            {
-                await Task.Delay(100, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private async Task RestartAgentAfterAbortedSwitchAsync()
@@ -274,48 +254,6 @@ public sealed partial class SettingsPage : Page
         catch (OperationCanceledException)
         {
         }
-    }
-
-    private static bool StartReplacementApplication()
-    {
-        var executable = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
-        {
-            return false;
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            UseShellExecute = true
-        };
-        startInfo.ArgumentList.Add(ApplicationStartupOptions.StorageLocationHandoffArgument);
-        startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForProcessArgument);
-        startInfo.ArgumentList.Add(Environment.ProcessId.ToString(
-            System.Globalization.CultureInfo.InvariantCulture));
-        using var process = Process.Start(startInfo);
-        return process is not null;
-    }
-
-    private static AgentMigrationExclusion? TryAcquireAgentMigrationExclusion()
-    {
-        var sid = WindowsIdentity.GetCurrent().User?.Value;
-        if (string.IsNullOrWhiteSpace(sid))
-        {
-            return null;
-        }
-
-        var mutex = new Mutex(
-            initiallyOwned: true,
-            $"Local\\WinPool.Agent.{IpcIdentity.HashUserSid(sid)[..24]}",
-            out var ownsMutex);
-        if (!ownsMutex)
-        {
-            mutex.Dispose();
-            return null;
-        }
-
-        return new AgentMigrationExclusion(mutex);
     }
 
     private void PublishDataLocationFailure(bool zh, string detail)
@@ -353,40 +291,6 @@ public sealed partial class SettingsPage : Page
         return $"{value:0.##} {units[index]}";
     }
 
-    private sealed class StoppedAgentWriteCoordinator : IStorageWriteQuiescenceCoordinator
-    {
-        public Task<IAsyncDisposable> QuiesceAndFlushAsync(
-            CorrelationId correlationId,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<IAsyncDisposable>(new NoOpAsyncDisposable());
-        }
-    }
-
-    private sealed class NoOpAsyncDisposable : IAsyncDisposable
-    {
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class AgentMigrationExclusion(Mutex mutex) : IDisposable
-    {
-        private Mutex? _mutex = mutex;
-
-        public void Release()
-        {
-            var owned = Interlocked.Exchange(ref _mutex, null);
-            if (owned is null)
-            {
-                return;
-            }
-
-            owned.ReleaseMutex();
-            owned.Dispose();
-        }
-
-        public void Dispose() => Release();
-    }
     private async void ThemeOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_ready || ThemeOptions.SelectedIndex < 0)
@@ -451,7 +355,6 @@ public sealed partial class SettingsPage : Page
             LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
             UpdateText();
             BuildExternalToolRows();
-            _ = RefreshExternalToolsAsync();
             ((MainWindow)App.Window).RefreshChrome();
         }
         catch (Exception exception) when (
@@ -553,6 +456,24 @@ public sealed partial class SettingsPage : Page
         }
     }
 
+    private async void CommunityButton_Click(object sender, RoutedEventArgs e)
+    {
+        const string groupUrl =
+            "https://qm.qq.com/cgi-bin/qm/qr?k=iw0LxnFaHE8JdUr5z937pFuagFxOtFOo&jump_from=webapi&authKey=JvkcK/IIaFg5e1ymzhP41yxcAiTVURjvhrNtDziZZSGj3ZD2byZhqX2lj48L9jkT";
+        try
+        {
+            Process.Start(new ProcessStartInfo(groupUrl) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
+            or InvalidOperationException)
+        {
+            await ShowToolDialogAsync(
+                ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                    ? $"无法打开 QQ 群链接。群号：732019606\n{exception.Message}"
+                    : $"Could not open the QQ group link. Group: 732019606\n{exception.Message}");
+        }
+    }
+
     private async void StartupAgentCheckBox_Click(
         object sender,
         RoutedEventArgs e)
@@ -564,14 +485,16 @@ public sealed partial class SettingsPage : Page
 
         try
         {
-            _agentStartup.SetEnabled(StartupAgentCheckBox.IsChecked == true);
+            var enabled = StartupAgentCheckBox.IsChecked == true;
+            _agentStartup.SetEnabled(enabled);
+            await ViewModel.SetStartAgentAtLoginAsync(enabled);
         }
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
                 or System.Security.SecurityException)
         {
-            StartupAgentCheckBox.IsChecked = _agentStartup.IsEnabled();
+            StartupAgentCheckBox.IsChecked = ViewModel.CurrentPreferences.StartAgentAtLogin;
             await ShowToolDialogAsync(exception.Message);
         }
     }
@@ -613,24 +536,18 @@ public sealed partial class SettingsPage : Page
         WelcomeTitle.Text = l["Welcome"];
         WelcomeButton.Content = l["OpenWelcome"];
         StartupAgentTitle.Text = l.EffectiveLanguage == LanguagePreference.ZhCn
-            ? "登录启动"
-            : "Windows sign-in";
+            ? "开机启动"
+            : "Startup";
         StartupAgentCheckBox.Content =
             l.EffectiveLanguage == LanguagePreference.ZhCn
-                ? "登录 Windows 时启动托盘 Agent（默认关闭）"
-                : "Start the tray Agent at Windows sign-in (off by default)";
+                ? "登录 Windows 时启动 WinPool 托盘（默认关闭）"
+                : "Start the WinPool tray Agent when signing in to Windows (off by default)";
         DataLocationTitle.Text = l["DataLocation"];
         DataLocationPath.Text = StorageDataLocations.CurrentRoot;
         _updatingDataLocation = true;
         DataLocationOptions.ItemsSource = new[] { l["StandardLocation"], l["PortableLocation"] };
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
-        ExternalToolsTitle.Text = l["ExternalTools"];
-        ExternalToolsDescription.Text =
-            l.EffectiveLanguage == LanguagePreference.ZhCn
-                ? "DiskSpd、fio、Dite FileGen 与 RAMMap 不随 WinPool 发布；RoboCopy 由 Windows 提供。可检测状态、设置自定义路径；已登记的便携压缩包可在下载、哈希、签名和二次确认后安装，其他工具打开官方来源。"
-                : "DiskSpd, fio, Dite FileGen, and RAMMap are not bundled with WinPool; RoboCopy is provided by Windows. Detect or configure them; registered portable archives can be installed after download, hashing, signature verification, and a second confirmation, while other tools open their official source.";
-        AboutTitle.Text = l["About"];
         AboutProductNameLabel.Text = l["Product"];
         AboutProductNameValue.Text = ProductInformation.Name;
         AboutVersionLabel.Text = l["Version"];
@@ -640,7 +557,9 @@ public sealed partial class SettingsPage : Page
         AboutUpdateLabel.Text = l["Update"];
         AboutFeedbackLabel.Text = l["Feedback"];
         AboutCommunityLabel.Text = l["Community"];
-        AboutCommunityValue.Text = l["CommunityPending"];
+        CommunityButtonText.Text = l.EffectiveLanguage == LanguagePreference.ZhCn
+            ? "加入 QQ 群"
+            : "Join QQ group";
         WebsiteButtonText.Text = l["VisitWebsite"];
         UpdateButtonText.Text = l["ViewUpdates"];
         FeedbackButtonText.Text = l["SendFeedback"];
@@ -656,7 +575,7 @@ public sealed partial class SettingsPage : Page
         {
             var status = new TextBlock
             {
-                Text = zh ? "正在检测…" : "Detecting…",
+                Text = zh ? "尚未检测" : "Not checked yet",
                 TextWrapping = TextWrapping.Wrap
             };
             _toolStatuses[descriptor.Id] = status;
@@ -683,25 +602,49 @@ public sealed partial class SettingsPage : Page
                 descriptor.Id,
                 InstallTool_Click));
 
-            var content = new StackPanel { Spacing = 5 };
-            content.Children.Add(
+            var left = new StackPanel { Spacing = 5 };
+            left.Children.Add(
                 new TextBlock
                 {
                     Text = descriptor.DisplayName,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
                 });
-            content.Children.Add(
+            left.Children.Add(
                 new TextBlock
                 {
-                    Text = descriptor.Purpose,
+                    Text = LocalizedToolPurpose(descriptor, zh),
                     Opacity = 0.72,
                     TextWrapping = TextWrapping.Wrap
                 });
-            content.Children.Add(status);
-            content.Children.Add(actions);
-            ExternalToolRows.Children.Add(content);
+            left.Children.Add(status);
+
+            var row = new Grid { ColumnSpacing = 16 };
+            row.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            row.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto
+            });
+            Grid.SetColumn(left, 0);
+            Grid.SetColumn(actions, 1);
+            row.Children.Add(left);
+            row.Children.Add(actions);
+            ExternalToolRows.Children.Add(row);
         }
     }
+
+    private static string LocalizedToolPurpose(ToolDescriptor descriptor, bool zh) =>
+        zh ? descriptor.Purpose : descriptor.Id.Value switch
+        {
+            "microsoft.diskspd" => "File-based sequential, random, and mixed I/O benchmark.",
+            "fio" => "Configurable file I/O workload and JSON results.",
+            "dite.filegen" => "External generator for oversized or mixed files.",
+            "windows.robocopy" => "Windows file copy, metadata copy, and resume semantics.",
+            "microsoft.sysinternals.rammap" => "System file-cache and standby-list cleanup utility.",
+            _ => descriptor.Purpose
+        };
 
     private static Button ActionButton(
         string text,
@@ -716,14 +659,6 @@ public sealed partial class SettingsPage : Page
         };
         button.Click += handler;
         return button;
-    }
-
-    private async Task RefreshExternalToolsAsync()
-    {
-        foreach (var descriptor in _toolCatalog.List())
-        {
-            await DetectToolAsync(descriptor.Id);
-        }
     }
 
     private async void DetectTool_Click(object sender, RoutedEventArgs e)
@@ -784,6 +719,42 @@ public sealed partial class SettingsPage : Page
             status.Text = zh
                 ? $"检测失败：{exception.Message}"
                 : $"Detection failed: {exception.Message}";
+        }
+    }
+
+    private async Task LoadCachedToolStatesAsync()
+    {
+        if (ViewModel.AgentConnection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var response = await ViewModel.AgentConnection.SendAsync(
+                new GetAgentSnapshotRequest(CorrelationId.New()),
+                CancellationToken.None);
+            if (response.Value is not AgentSnapshotResponse snapshot)
+            {
+                return;
+            }
+
+            var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+            foreach (var state in snapshot.Snapshot.CurrentToolStates ?? [])
+            {
+                if (_toolStatuses.TryGetValue(state.ToolId, out var status))
+                {
+                    status.Text = FormatToolState(state, ApplicationStatus.Succeeded, zh);
+                }
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            // Cached status is optional presentation data. Do not turn a
+            // background cache read into a settings-page failure.
         }
     }
 

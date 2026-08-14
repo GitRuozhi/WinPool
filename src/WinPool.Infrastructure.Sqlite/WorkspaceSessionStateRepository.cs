@@ -6,7 +6,6 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WorkspaceSessionStateRepository
 {
-    private const string PreferenceKey = "workspace.session.v1";
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
@@ -34,8 +33,7 @@ public sealed class WorkspaceSessionStateRepository
     {
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT json FROM preferences WHERE key=$key;";
-        command.Parameters.AddWithValue("$key", PreferenceKey);
+        command.CommandText = "SELECT json FROM workspace_state WHERE singleton=1;";
         var json = await command.ExecuteScalarAsync(cancellationToken) as string;
         if (json is null)
         {
@@ -75,13 +73,12 @@ public sealed class WorkspaceSessionStateRepository
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO preferences(key, json, updated_at_utc_ms)
-            VALUES($key, $json, $updated)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO workspace_state(singleton, json, updated_at_utc_ms)
+            VALUES(1, $json, $updated)
+            ON CONFLICT(singleton) DO UPDATE SET
                 json=excluded.json,
                 updated_at_utc_ms=excluded.updated_at_utc_ms;
             """;
-        command.Parameters.AddWithValue("$key", PreferenceKey);
         command.Parameters.Add("$json", SqliteType.Text).Value =
             JsonSerializer.Serialize(normalized, JsonOptions);
         command.Parameters.AddWithValue(

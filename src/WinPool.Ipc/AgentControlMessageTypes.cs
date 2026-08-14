@@ -14,6 +14,8 @@ public static class AgentControlMessageTypes
     public const string StopMonitoring = "agent.request.stop_monitoring";
     public const string StartTest = "agent.request.start_test";
     public const string CancelTest = "agent.request.cancel_test";
+    public const string PauseTest = "agent.request.pause_test";
+    public const string ResumeTest = "agent.request.resume_test";
     public const string GetTestResult = "agent.request.get_test_result";
     public const string ListTestRuns = "agent.request.list_test_runs";
     public const string ListUserTestPresets =

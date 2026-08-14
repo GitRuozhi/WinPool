@@ -1064,6 +1064,16 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken cancellationToken) =>
             Acknowledge(request);
 
+        public Task<ApplicationResult<AgentResponse>> PauseTestAsync(
+            PauseAgentTestRequest request,
+            CancellationToken cancellationToken) =>
+            Acknowledge(request);
+
+        public Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
+            ResumeAgentTestRequest request,
+            CancellationToken cancellationToken) =>
+            Acknowledge(request);
+
         public Task<ApplicationResult<AgentResponse>> GetTestResultAsync(
             GetAgentTestResultRequest request,
             CancellationToken cancellationToken) =>

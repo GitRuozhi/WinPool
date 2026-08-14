@@ -48,4 +48,42 @@ public sealed class AgentTestCoordinatorTests
             new TestRunId(Guid.NewGuid()),
             secondCancellation));
     }
+
+    [Fact]
+    public async Task PauseWaitsForBoundaryAndResumeContinuesTheSameRun()
+    {
+        var coordinator = new AgentTestCoordinator();
+        var run = new TestRunId(Guid.NewGuid());
+        using var cancellation = new CancellationTokenSource();
+        var active = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Assert.True(coordinator.TryReserve(run, cancellation));
+        coordinator.Attach(active.Task);
+
+        Assert.True(coordinator.TryRequestPause(run));
+        var boundary = coordinator.WaitForSafePauseBoundaryAsync(run, cancellation.Token);
+        await Task.Yield();
+        Assert.Equal(TestPauseState.Paused, coordinator.PauseState);
+        Assert.False(boundary.IsCompleted);
+
+        Assert.True(coordinator.TryResume(run));
+        await boundary;
+        Assert.Equal(TestPauseState.Running, coordinator.PauseState);
+    }
+
+    [Fact]
+    public async Task CancellationReleasesAWorkflowWaitingAtPauseBoundary()
+    {
+        var coordinator = new AgentTestCoordinator();
+        var run = new TestRunId(Guid.NewGuid());
+        using var cancellation = new CancellationTokenSource();
+        var active = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Assert.True(coordinator.TryReserve(run, cancellation));
+        coordinator.Attach(active.Task);
+        Assert.True(coordinator.TryRequestPause(run));
+        var boundary = coordinator.WaitForSafePauseBoundaryAsync(run, cancellation.Token);
+        await Task.Yield();
+
+        Assert.True(coordinator.TryCancel(run));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await boundary);
+    }
 }

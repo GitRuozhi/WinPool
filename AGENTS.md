@@ -41,7 +41,7 @@ protected paths before editing.
 
 ## Safety and data boundaries
 
-- Through V0.3, do not implement or enable real disk, partition, volume, Storage
+- Through V0.4, do not implement or enable real disk, partition, volume, Storage
   Pool, Storage Tier, or Virtual Disk creation, removal, initialization,
   formatting, resizing, repair, or equivalent mutation.
 - V0.5 is the earliest stage permitted to add a real storage-structure mutation
@@ -101,25 +101,29 @@ protected paths before editing.
 
 ## Version and Git rules
 
-- Product versions use `Va.bc`: `a` is major, `b` is minor, and `c` is the
-  one-digit iteration inside that minor version.
-- `Va.bc` is the only project-version system. Required numeric .NET/Windows
+- Product versions use `Va.b` for a new product line and may use `Va.bc` for a
+  nonzero one-digit iteration within that line: `a` is major and `b` is minor.
+- `Va.b` / `Va.bc` is the only project-version system. Required numeric .NET/Windows
   fields are mechanically derived build metadata and must never be named or
   documented as another project version.
 - Architecture and roadmap documents normally specify only `Va.b`.
 - At `c=8` or `c=9`, remind the developer to control scope. Never create
   `c=10`; reduce scope, combine work, or advance the minor version.
-- A normal `c` iteration requires a local commit but no push, tag, or release
+- A normal nonzero `c` iteration requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.39 is the current local implementation version. Its automatic quality and
+- V0.41 is the current local implementation version. Its automatic quality and
   build gates are recorded in `CHANGELOG.md`; inherited native/manual cases
   remain `unverified` and no result may represent them as passing.
 - The implemented V0.39 Plans are archived under `docs/Archive/V0.39` and
-  `docs/Archive/V0.39-final-correction`; there is no active `docs/Plan.md`.
-  The final V0.3 correction is complete, and normal development advances to
-  V0.40. The user authorized the V0.39 local commit, GitHub push, tag, and
-  GitHub Release; binary upload and deployment remain separately unauthorized
-  unless explicitly requested.
+  `docs/Archive/V0.39-final-correction`. The approved V0.41 plan is archived
+  under `docs/Archive/V0.41`. Implementation is complete. V0.39 remains the historical tag and
+  GitHub Release record; any commit, push, tag, release, binary upload, or
+  deployment requires separate authorization.
+- The user permits V0.41 to reset and regenerate this development machine's
+  existing WinPool preferences and database; V0.4-to-V0.41 data compatibility
+  is not required. Do not perform that reset before the user asks to begin
+  implementation. When authorized, stop every WinPool process, verify exact roots,
+  and move old state to the project-root `Rubbish` tree instead of deleting it.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate
@@ -131,5 +135,5 @@ protected paths before editing.
 - Automatic checks do not substitute for UAC, tray, native-picker, visual, device,
   or long-duration human evidence.
 - Never report an unavailable or unrun gate as passed.
-- Real hardware mutation is not a V0.3 verification method. V0.5-or-later
+- Real hardware mutation is not a V0.41 verification method. V0.5-or-later
   controlled verification must follow the real-mutation authorization rules.

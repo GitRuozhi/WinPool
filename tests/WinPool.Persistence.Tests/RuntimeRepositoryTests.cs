@@ -126,6 +126,10 @@ public sealed class RuntimeRepositoryTests
         Assert.Equal(@"D:\Tools\fio.exe", state.ConfiguredPath);
         Assert.Equal("4.1", state.DetectedVersion);
         Assert.Equal(detectedAt, state.DetectedAtUtc);
+
+        var listed = await new ExternalToolStateRepository(database.Store).ListAsync();
+        var listedState = Assert.Single(listed);
+        Assert.Equal(state, listedState);
     }
 
     [Fact]

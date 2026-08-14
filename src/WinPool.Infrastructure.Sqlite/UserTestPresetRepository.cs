@@ -6,7 +6,6 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class UserTestPresetRepository : IUserTestPresetRepository
 {
-    private const string KeyPrefix = "test-preset:";
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
     private readonly WinPoolSqliteStore store;
@@ -35,9 +34,8 @@ public sealed class UserTestPresetRepository : IUserTestPresetRepository
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT json
-            FROM preferences
-            WHERE key LIKE 'test-preset:%'
-            ORDER BY updated_at_utc_ms DESC, key;
+            FROM test_presets
+            ORDER BY updated_at_utc_ms DESC, preset_id;
             """;
         var results = new List<UserTestPreset>();
         await using var reader = await command.ExecuteReaderAsync(
@@ -76,18 +74,21 @@ public sealed class UserTestPresetRepository : IUserTestPresetRepository
             cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO preferences(key, json, updated_at_utc_ms)
-            VALUES($key, $json, $updated)
-            ON CONFLICT(key) DO UPDATE SET
+            INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
+            VALUES($presetId, $json, $created, $updated)
+            ON CONFLICT(preset_id) DO UPDATE SET
                 json=excluded.json,
                 updated_at_utc_ms=excluded.updated_at_utc_ms;
             """;
         command.Parameters.AddWithValue(
-            "$key",
-            KeyPrefix + normalized.PresetId.ToString("N"));
+            "$presetId",
+            normalized.PresetId.ToString("N"));
         command.Parameters.AddWithValue(
             "$json",
             JsonSerializer.Serialize(normalized, JsonOptions));
+        command.Parameters.AddWithValue(
+            "$created",
+            normalized.CreatedAtUtc.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue(
             "$updated",
             normalized.UpdatedAtUtc.ToUnixTimeMilliseconds());
@@ -108,10 +109,10 @@ public sealed class UserTestPresetRepository : IUserTestPresetRepository
         await using var connection = await store.OpenConnectionAsync(
             cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM preferences WHERE key=$key;";
+        command.CommandText = "DELETE FROM test_presets WHERE preset_id=$presetId;";
         command.Parameters.AddWithValue(
-            "$key",
-            KeyPrefix + presetId.ToString("N"));
+            "$presetId",
+            presetId.ToString("N"));
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 

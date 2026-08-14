@@ -42,15 +42,15 @@ public sealed class WorkspaceSessionStateRepositoryTests
     }
 
     [Fact]
-    public async Task CorruptPreferenceIsIgnored()
+    public async Task CorruptWorkspaceStateIsIgnored()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
         await using (var connection = await database.Store.OpenConnectionAsync())
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                INSERT INTO preferences(key, json, updated_at_utc_ms)
-                VALUES('workspace.session.v1', '{', 1);
+                INSERT INTO workspace_state(singleton, json, updated_at_utc_ms)
+                VALUES(1, '{', 1);
                 """;
             await command.ExecuteNonQueryAsync();
         }

@@ -40,4 +40,9 @@ public sealed record UserPreferences(
     bool ShowWelcomeAtStart = true,
     bool StartAgentAtLogin = false,
     bool ContinueMonitoringWhenUiCloses = false,
-    bool HasShownWelcome = false);
+    bool HasShownWelcome = false,
+    bool ContinuousMonitoringEnabled = false,
+    double MonitoringSampleRateHz = 5,
+    string LastActivePage = "Manage",
+    int FormatVersion = 1,
+    IReadOnlyDictionary<string, string>? CustomToolPaths = null);

@@ -230,6 +230,36 @@ public sealed class AgentControlProtocolCodecTests
     }
 
     [Fact]
+    public void CodecDecodesTypedTestPauseAndResumeRequests()
+    {
+        AgentRequest[] requests =
+        [
+            new PauseAgentTestRequest(TestRunId.New(), CorrelationId.New()),
+            new ResumeAgentTestRequest(TestRunId.New(), CorrelationId.New())
+        ];
+        var messageTypes = new[]
+        {
+            AgentControlMessageTypes.PauseTest,
+            AgentControlMessageTypes.ResumeTest
+        };
+
+        for (var index = 0; index < requests.Length; index++)
+        {
+            var decoded = new AgentControlProtocolCodec().DecodeRequest(
+                Envelope(
+                    messageTypes[index],
+                    requests[index].CorrelationId,
+                    JsonSerializer.SerializeToElement(
+                        requests[index],
+                        requests[index].GetType(),
+                        SerializerOptions)));
+
+            Assert.True(decoded.IsAccepted);
+            Assert.Equal(requests[index], decoded.Request);
+        }
+    }
+
+    [Fact]
     public void CodecDecodesClosedUserPresetRequests()
     {
         var now = DateTimeOffset.UtcNow;

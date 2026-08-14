@@ -94,19 +94,6 @@ public interface IMonitoringCoordinator
         CancellationToken cancellationToken);
 }
 
-public interface IMonitoringQuery
-{
-    Task<ApplicationResult<MonitoringSession>> GetSessionAsync(
-        SessionId sessionId,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<IReadOnlyList<MonitorSample>>> ReadSamplesAsync(
-        SessionId sessionId,
-        DateTimeOffset fromUtc,
-        DateTimeOffset toUtc,
-        CancellationToken cancellationToken);
-}
-
 public enum StorageHealthEventSeverity
 {
     Information,

@@ -1,5 +1,6 @@
 using WinPool.Agent;
 using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.Agent.Tests;
 
@@ -113,6 +114,111 @@ public sealed class AgentSessionCoordinatorTests
 
         actions.ContinueNotification.SetResult();
         await shutdown;
+    }
+
+    [Fact]
+    public async Task RecoveringAgentAllowsSnapshotButRejectsWorkWithoutFailureSemantics()
+    {
+        var actions = new RecordingShutdownActions();
+        var operations = new RecordingRequestOperations();
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(
+            registry,
+            AgentLifecycleState.Starting);
+        lifecycle.MarkRecovering();
+        var coordinator = new AgentSessionCoordinator(
+            operations,
+            new AgentShutdownWorkflow(actions, registry),
+            registry,
+            lifecycle);
+
+        var snapshot = await coordinator.HandleAsync(
+            new GetAgentSnapshotRequest(CorrelationId.New()));
+        var work = await coordinator.HandleAsync(
+            new StartAgentMonitoringRequest(
+                new MonitorRequest(
+                    SessionId.New(),
+                    SystemId.New(),
+                    [],
+                    [],
+                    TimeSpan.FromSeconds(1),
+                    true),
+                CorrelationId.New()));
+
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(ApplicationStatus.Rejected, work.Status);
+        Assert.Equal("agent.request.recovering", Assert.Single(work.Messages).Code);
+        Assert.Equal(1, operations.RequestCount);
+    }
+
+    [Fact]
+    public async Task BootstrapCoordinatorPublishesRecoveringSnapshotBeforeRuntimeAttachment()
+    {
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(
+            registry,
+            AgentLifecycleState.Starting);
+        lifecycle.MarkRecovering();
+        var instanceId = new AgentInstanceId(Guid.NewGuid());
+        var coordinator = new AgentSessionCoordinator(
+            registry,
+            lifecycle,
+            () => new AgentSnapshot(
+                instanceId,
+                IsTrayVisible: false,
+                ActiveMonitoringSession: null,
+                ActiveTestRunId: null,
+                lifecycle.Snapshot(),
+                [],
+                [],
+                [],
+                new MonitorRuntimeDiagnostics(0, 0),
+                []));
+
+        var snapshot = await coordinator.HandleAsync(
+            new GetAgentSnapshotRequest(CorrelationId.New()));
+        var rejected = await coordinator.HandleAsync(
+            new OpenMainWindowRequest(null, CorrelationId.New()));
+
+        var response = Assert.IsType<AgentSnapshotResponse>(snapshot.Value);
+        Assert.Equal(instanceId, response.Snapshot.AgentInstanceId);
+        Assert.Equal(AgentLifecycleState.Recovering, response.Snapshot.ShutdownStatus.State);
+        Assert.Equal(ApplicationStatus.Rejected, rejected.Status);
+        Assert.Equal("agent.request.recovering", Assert.Single(rejected.Messages).Code);
+
+        var operations = new RecordingRequestOperations();
+        coordinator.AttachRuntime(
+            operations,
+            new AgentShutdownWorkflow(new RecordingShutdownActions(), registry));
+        lifecycle.MarkReady();
+        Assert.True((await coordinator.HandleAsync(
+            new OpenMainWindowRequest(null, CorrelationId.New()))).IsSuccess);
+        Assert.Equal(1, operations.RequestCount);
+    }
+
+    [Fact]
+    public async Task ReadyTransitionAdmitsRequestsAfterRecovery()
+    {
+        var actions = new RecordingShutdownActions();
+        var operations = new RecordingRequestOperations();
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(
+            registry,
+            AgentLifecycleState.Starting);
+        lifecycle.MarkRecovering();
+        lifecycle.MarkReady();
+        var coordinator = new AgentSessionCoordinator(
+            operations,
+            new AgentShutdownWorkflow(actions, registry),
+            registry,
+            lifecycle);
+
+        var result = await coordinator.HandleAsync(
+            new OpenMainWindowRequest(null, CorrelationId.New()));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AgentLifecycleState.Running, coordinator.State);
+        Assert.Equal(1, operations.RequestCount);
     }
 
     [Fact]
@@ -392,6 +498,16 @@ public sealed class AgentSessionCoordinatorTests
 
         public Task<ApplicationResult<AgentResponse>> CancelTestAsync(
             CancelAgentTestRequest request,
+            CancellationToken cancellationToken) =>
+            Succeed(request);
+
+        public Task<ApplicationResult<AgentResponse>> PauseTestAsync(
+            PauseAgentTestRequest request,
+            CancellationToken cancellationToken) =>
+            Succeed(request);
+
+        public Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
+            ResumeAgentTestRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 

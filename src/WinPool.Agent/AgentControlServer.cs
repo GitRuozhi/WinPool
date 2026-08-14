@@ -75,6 +75,10 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<StartAgentTestRequest>(envelope),
                 AgentControlMessageTypes.CancelTest =>
                     Deserialize<CancelAgentTestRequest>(envelope),
+                AgentControlMessageTypes.PauseTest =>
+                    Deserialize<PauseAgentTestRequest>(envelope),
+                AgentControlMessageTypes.ResumeTest =>
+                    Deserialize<ResumeAgentTestRequest>(envelope),
                 AgentControlMessageTypes.GetTestResult =>
                     Deserialize<GetAgentTestResultRequest>(envelope),
                 AgentControlMessageTypes.ListTestRuns =>

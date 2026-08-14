@@ -7,27 +7,36 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.39 is the current local implementation version. It completes V0.3 stability
-work before V0.4 by adding development-diagnostics timeout/status handling,
-safer UI event recovery, key cancellation boundaries, and clearer startup
-diagnostics. IPC remains protocol 3 and the Agent-owned SQLite contract remains
-schema 12.
+V0.41 is the current product version and begins the visual-polish and basic-
+interaction phase on the completed V0.3 foundation. IPC remains protocol 3 and
+the Agent-owned SQLite contract is schema 13.
 
-The V0.39 automatic Release, dependency-audit, and build results are recorded in
-the changelog. Native UI, tray, UAC, device, external-tool, and data-location
-cases remain `unverified`; no documentation treats them as passed. The user
-authorized a local Git commit only, not a push, tag, binary upload, GitHub
-Release, or deployment.
+V0.41 is the current local implementation version. Its reproducible automatic
+baseline is 549 Release tests passed, with no failed or skipped tests, a
+warning-free Release build, and no known vulnerable packages. Native UI, tray,
+UAC, device, external-tool, and data-location cases remain `unverified`; no
+documentation treats them as passed. V0.39 remains the tagged and released V0.3
+record.
 
-One final minimal V0.3 correction checkpoint is planned at the same V0.39 product
-version. It is limited to Agent control-pipe timeout isolation and Test-page
-Start/Cancel reconciliation. Implementation is not yet authorized. After this
-checkpoint, normal development advances to V0.40; broader asynchronous and
-diagnostic cleanup is deferred to the V0.8–V0.9 technical-debt reference.
+Portable, unpackaged Windows x64 delivery is the only currently implemented
+installation mode. The MSIX and Microsoft Store route is part of
+[Product](docs/Product.md), not a separate installation document.
+
+The [V0.41 Plan](docs/Archive/V0.41/Plan.md) is approved and implemented. It is not
+released, deployed, committed, or pushed by that approval.
+
+The V0.39 architecture-hardening pass ran before V0.4. It removed
+confirmed dead code and separates concentrated Agent and page responsibilities
+without adding product functions, changing IPC/schema contracts, or weakening
+safety boundaries. It is now frozen in the
+[V0.39 architecture-hardening archive](docs/Archive/V0.39-architecture-hardening/README.md).
+That pass increased the current full automatic gate to 530 passed, 0 failed, and
+0 skipped; its targeted native navigation result is recorded separately from
+the still-`unverified` device and side-effect cases.
 
 ## Safety boundary
 
-The current V0.3 line does not implement or authorize real storage-structure
+The current V0.4 line does not implement or authorize real storage-structure
 mutation. WinPool must not create, initialize, format, resize, repair, or remove
 real disks, partitions, volumes, Storage Pools, Storage Tiers, or Virtual Disks
 in this line.
@@ -60,8 +69,12 @@ The reproducible self-contained staging command is documented in
 - [Development](docs/Development.md): architecture, environment, build, staging,
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
+- [V0.41 Plan](docs/Archive/V0.41/Plan.md): approved startup, welcome, monitoring, persistence,
+  tray, and basic-interaction plan; implementation is complete.
 - [V0.39 final-correction archive](docs/Archive/V0.39-final-correction/README.md):
   the implemented final minimal V0.3 correction and its evidence.
+- [V0.39 architecture-hardening archive](docs/Archive/V0.39-architecture-hardening/README.md):
+  the completed pre-V0.4 cleanup and boundary-hardening pass.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
   including the implemented V0.39 Plan.

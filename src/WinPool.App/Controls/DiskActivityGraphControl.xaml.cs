@@ -68,7 +68,13 @@ public sealed partial class DiskActivityGraphControl : UserControl
         }
 
         var now = DateTimeOffset.Now;
-        var windowStart = now - TimeSpan.FromSeconds(60);
+        var latestSample = _series
+            .SelectMany(series => series.Points)
+            .Select(point => (DateTimeOffset?)point.Timestamp)
+            .DefaultIfEmpty(now)
+            .Max()!.Value;
+        var windowEnd = latestSample > now ? now : latestSample;
+        var windowStart = windowEnd - TimeSpan.FromSeconds(60);
         var speedMax = MinSpeedScale;
         foreach (var series in _series)
         {
@@ -107,9 +113,9 @@ public sealed partial class DiskActivityGraphControl : UserControl
 
             var brush = new SolidColorBrush(series.Color);
             var fillBrush = new SolidColorBrush(Color.FromArgb(0x2E, series.Color.R, series.Color.G, series.Color.B));
-            var writePoints = BuildPoints(series.Points, windowStart, now, plotWidth, height, speedMax, x => x.WriteBytesPerSecond);
-            var readPoints = BuildPoints(series.Points, windowStart, now, plotWidth, height, speedMax, x => x.ReadBytesPerSecond);
-            var activityPoints = BuildPoints(series.Points, windowStart, now, plotWidth, height, 100.0, x => x.ActivityPercent);
+            var writePoints = BuildPoints(series.Points, windowStart, windowEnd, plotWidth, height, speedMax, x => x.WriteBytesPerSecond);
+            var readPoints = BuildPoints(series.Points, windowStart, windowEnd, plotWidth, height, speedMax, x => x.ReadBytesPerSecond);
+            var activityPoints = BuildPoints(series.Points, windowStart, windowEnd, plotWidth, height, 100.0, x => x.ActivityPercent);
 
             var fill = new Polygon
             {

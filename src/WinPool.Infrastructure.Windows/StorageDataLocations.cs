@@ -125,7 +125,6 @@ public static class StorageDataLocations
         }
 
         return File.Exists(Path.Combine(portableRoot, "settings.json"))
-               || File.Exists(Path.Combine(portableRoot, "machine.json"))
             ? StorageLocationMode.Portable
             : StorageLocationMode.Standard;
     }

@@ -59,8 +59,8 @@ themes, DPI, high contrast, keyboard use, tray lifecycle, UAC, native folder
 pickers, registered D: tool execution, long-running monitoring, cancellation,
 recovery, and data-location round trips.
 
-The fixed manual root for the current V0.3 matrix is
-`D:\WinPool-V03-Manual-Test`. Manual checks must not select another drive root,
+The fixed manual root for the current V0.41 matrix is
+`D:\WinPool-V041-Manual-Test`. Manual checks must not select another drive root,
 the source tree, a network share, or an unregistered directory.
 
 For V0.5-or-later controlled real-mutation verification, automatic tests and CI
@@ -78,6 +78,6 @@ context, selection state, and result.
 - Approved exceptions record reason, scope, approver, date, risk, and expiry.
 - Test counts belong in the active Plan or CHANGELOG evidence, not in this long-term
   policy.
-- Real hardware mutation is never an accepted verification technique for V0.3.
+- Real hardware mutation is never an accepted verification technique for V0.41.
   V0.5-or-later controlled real-mutation cases use the documented explicit
   authorization flow and never convert an unrun case into a passing result.

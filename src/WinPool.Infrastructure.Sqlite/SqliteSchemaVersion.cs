@@ -43,7 +43,7 @@ public sealed class CurrentSqliteSchemaCorruptException : InvalidOperationExcept
     public const string StableCode = "storage.schema.current_corrupt";
 
     public CurrentSqliteSchemaCorruptException(string mismatch) : base(
-        $"{StableCode}: the schema-12 database does not match the required contract ({mismatch}).")
+        $"{StableCode}: the current database does not match the required contract ({mismatch}).")
     {
         Mismatch = mismatch;
     }
