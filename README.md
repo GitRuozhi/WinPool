@@ -7,21 +7,18 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.39 is the completed V0.3 implementation version. It added development-
-diagnostics timeout/status handling, safer UI event recovery, key cancellation
-boundaries, and the final Agent control-pipe/Test-page Start/Cancel reconciliation.
-IPC remains protocol 3 and the Agent-owned SQLite contract remains schema 12.
+V0.4 is the current product version and begins the visual-polish and basic-
+interaction phase on the completed V0.3 foundation. IPC remains protocol 3 and
+the Agent-owned SQLite contract remains schema 12.
 
-V0.39 is on `main`, tagged, and published as a GitHub Release. The current
-reproducible automatic baseline is 526 Release tests passed, with no failed or
-skipped tests, a warning-free Release build, and no known vulnerable packages.
-Native UI, tray, UAC, device, external-tool, and data-location cases remain
-`unverified`; no documentation treats them as passed. The published Release has
-an uploaded binary asset; the historical record does not separately identify its
-asset-upload authorization, and this evidence gap is recorded without changing
-the Release.
+V0.4 is deployed locally from the current branch. Its reproducible automatic
+baseline is 530 Release tests passed, with no failed or skipped tests, a
+warning-free Release build, and no known vulnerable packages. Native UI, tray,
+UAC, device, external-tool, and data-location cases remain `unverified`; no
+documentation treats them as passed. V0.39 remains the tagged and released V0.3
+record.
 
-The V0.39 architecture-hardening pass ran before V0.40. It removed
+The V0.39 architecture-hardening pass ran before V0.4. It removed
 confirmed dead code and separates concentrated Agent and page responsibilities
 without adding product functions, changing IPC/schema contracts, or weakening
 safety boundaries. It is now frozen in the
@@ -32,7 +29,7 @@ the still-`unverified` device and side-effect cases.
 
 ## Safety boundary
 
-The current V0.3 line does not implement or authorize real storage-structure
+The current V0.4 line does not implement or authorize real storage-structure
 mutation. WinPool must not create, initialize, format, resize, repair, or remove
 real disks, partitions, volumes, Storage Pools, Storage Tiers, or Virtual Disks
 in this line.
@@ -68,7 +65,7 @@ The reproducible self-contained staging command is documented in
 - [V0.39 final-correction archive](docs/Archive/V0.39-final-correction/README.md):
   the implemented final minimal V0.3 correction and its evidence.
 - [V0.39 architecture-hardening archive](docs/Archive/V0.39-architecture-hardening/README.md):
-  the completed pre-V0.40 cleanup and boundary-hardening pass.
+  the completed pre-V0.4 cleanup and boundary-hardening pass.
 - [Changelog](docs/CHANGELOG.md): results that have actually occurred.
 - [Archive](docs/Archive/README.md): frozen completed or superseded history,
   including the implemented V0.39 Plan.

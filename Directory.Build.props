@@ -1,11 +1,11 @@
 <Project>
   <PropertyGroup>
-    <!-- Va.bc: a=major, b=minor, c=one-digit iteration. V0.39 is the current project version. -->
+    <!-- Va.b: a=major, b=product line. V0.4 is the current project version. -->
     <WinPoolVersionMajor>0</WinPoolVersionMajor>
-    <WinPoolVersionMinor>3</WinPoolVersionMinor>
-    <WinPoolVersionIteration>9</WinPoolVersionIteration>
+    <WinPoolVersionMinor>4</WinPoolVersionMinor>
+    <WinPoolVersionIteration>0</WinPoolVersionIteration>
     <WinPoolArchitectureVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)</WinPoolArchitectureVersion>
-    <WinPoolVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)$(WinPoolVersionIteration)</WinPoolVersion>
+    <WinPoolVersion>$(WinPoolArchitectureVersion)</WinPoolVersion>
 
     <!-- Required numeric .NET/Windows fields are mechanical build metadata, not separate project versions. -->
     <Version>$(WinPoolVersionMajor).$(WinPoolVersionMinor).$(WinPoolVersionIteration)</Version>

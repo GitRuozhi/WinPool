@@ -5,6 +5,14 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
+## V0.4 — 2026-08-14
+
+- Defined V0.4 as the current product version, with mechanical .NET version
+  metadata `0.4.0`.
+- Deployed the verified self-contained four-process package locally.
+- Pushed the V0.4 version definition to GitHub; no tag, GitHub Release, or
+  binary upload was created.
+
 ## V0.39 architecture hardening — 2026-08-14
 
 - Removed confirmed unused contracts and obsolete UI residue; test-only monotonic

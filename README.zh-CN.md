@@ -10,17 +10,15 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.39 是已完成的 V0.3 实施版本。它增加开发页诊断超时和状态、UI 事件恢复、关键取消
-边界，以及最终的 Agent 控制管道/测试页 Start/Cancel 对账。IPC 协议保持为 3，Agent
-持有的 SQLite 合同保持为 schema 12。
+V0.4 是当前产品版本，在已完成的 V0.3 基础上进入视觉打磨和基础交互完善阶段。IPC 协议
+保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
 
-V0.39 已在 `main`、tag 和 GitHub Release 中发布。当前可复现自动基线为 526 项
-Release 测试通过、0 failed、0 skipped、零警告 Release 构建，并且没有已知易受攻击依赖。
-原生 UI、托盘、UAC、设备、外部工具和数据位置用例继续保持 `unverified`，不得将其写为
-通过。已发布 Release 包含二进制资产；历史记录没有单独定位其上传授权，已如实记录该
-证据缺口，未改变 Release。
+V0.4 已从当前分支部署到本机。当前可复现自动基线为 530 项 Release 测试通过、0 failed、
+0 skipped、零警告 Release 构建，并且没有已知易受攻击依赖。原生 UI、托盘、UAC、设备、
+外部工具和数据位置用例继续保持 `unverified`，不得将其写为通过。V0.39 保留为已 tag 和
+发布的 V0.3 历史记录。
 
-进入 V0.40 前的 V0.39 架构治理已清除已确认的无用代码，并拆分过度集中的 Agent 和页面职责；
+进入 V0.4 前的 V0.39 架构治理已清除已确认的无用代码，并拆分过度集中的 Agent 和页面职责；
 未新增产品功能、未改变 IPC/schema 合同，也未降低安全边界。该阶段现已冻结在
 [V0.39 架构治理归档](docs/Archive/V0.39-architecture-hardening/README.zh-CN.md)。治理后的完整
 自动门为 530 passed、0 failed、0 skipped；目标原生导航结果与仍为 `unverified` 的设备和副作用
@@ -28,7 +26,7 @@ Release 测试通过、0 failed、0 skipped、零警告 Release 构建，并且�
 
 ## 安全边界
 
-当前 V0.3 产品线未实现也未授权真实存储结构修改。在此产品线中，不得创建、初始化、格式化、调整、
+当前 V0.4 产品线未实现也未授权真实存储结构修改。在此产品线中，不得创建、初始化、格式化、调整、
 修复或删除真实磁盘、分区、卷、存储池、存储层或虚拟磁盘。
 
 V0.5 是首个可增加受控真实存储操作的计划阶段。开发期间，Agent 每次执行准确操作前必须立即获得开发者批准。产品中，用户在当前会话显式选择“本机真实修改”选项，即授权执行受控真实操作；仅有提权或 Real 模式不足够。模拟仍是默认路径。文件测试只能操作明确登记目录内、由本次运行登记的文件。DiskSpd、fio、Dite、RoboCopy 和 RAMMap 始终是单独安装的外部工具。
@@ -53,7 +51,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [V0.39 最终修正归档](docs/Archive/V0.39-final-correction/README.zh-CN.md)：
   已实施的 V0.3 最终最小修正及其证据。
 - [V0.39 架构治理归档](docs/Archive/V0.39-architecture-hardening/README.zh-CN.md)：
-  已完成的 V0.40 前清理与边界硬化阶段。
+  已完成的 V0.4 前清理与边界硬化阶段。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已实施的
   V0.39 Plan。

@@ -144,18 +144,19 @@ included. Generated output is evidence only and is never committed.
 
 ## Version progression
 
-Product versions use `Va.bc`:
+Product versions use `Va.b` for a new product line and may use `Va.bc` for a
+nonzero iteration within that line:
 
 - `a`: major version;
 - `b`: minor architecture/product line;
-- `c`: one-digit iteration within the minor version.
+- `c`: one-digit nonzero iteration within the minor version.
 
-Architecture and roadmap documents normally stop at `Va.b`. Iteration values are
-assigned from actual work and cannot exceed 9. A normal iteration is committed
-locally; remote pushes, tags, and releases require the authorization rules in
-`AGENTS.md` and the active Plan.
+Architecture and roadmap documents use `Va.b`. Iteration values are assigned
+from actual work and cannot exceed 9. A normal iteration is committed locally;
+remote pushes, tags, and releases require the authorization rules in `AGENTS.md`
+and the active Plan.
 
-`Va.bc` is the only project-version system. `Directory.Build.props` derives the
+`Va.b` / `Va.bc` is the only project-version system. `Directory.Build.props` derives the
 numeric fields required by .NET and Windows mechanically from `a`, `b`, and `c`;
 those fields are build metadata with no independent version meaning. Database
 schema revisions, algorithm IDs, and IPC compatibility identifiers do not
