@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using WinPool.Application;
 
 namespace WinPool.App.ViewModels;
@@ -55,4 +56,10 @@ public sealed partial class ShellNavigationItem : ObservableObject
 
     [ObservableProperty]
     private double _itemWidth = double.NaN;
+
+    [ObservableProperty]
+    private Brush? _background;
+
+    [ObservableProperty]
+    private Brush? _foreground;
 }

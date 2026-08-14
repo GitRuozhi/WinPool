@@ -18,12 +18,29 @@
     <Nullable>enable</Nullable>
     <!-- The app is not NativeAOT. C# partial properties require a newer language version than the approved .NET 10 target. -->
     <NoWarn>$(NoWarn);MVVMTK0045</NoWarn>
+    <ApplicationIcon>Assets\CAppIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="Assets\AppIcon.ico"
+    <Content Include="Assets\CAppIcon.ico"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\00-随机切换.png" Link="Assets\Welcome\00.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\01-气笑了.png" Link="Assets\Welcome\01.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\02-心作痛.png" Link="Assets\Welcome\02.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\03-苦酒入喉.png" Link="Assets\Welcome\03.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\04-早点毁灭吧.png" Link="Assets\Welcome\04.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\05-这世界还能不能好了.png" Link="Assets\Welcome\05.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\06-哈哈哈哈哈哈哈嗝.png" Link="Assets\Welcome\06.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\welcome\07-绷不住了.png" Link="Assets\Welcome\07.png"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

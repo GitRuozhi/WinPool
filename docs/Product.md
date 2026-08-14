@@ -56,7 +56,7 @@ does not bundle their engines.
 
 ## Current architecture line
 
-V0.3 retains the accepted V0.13 visual baseline and the V0.2 multi-process rewrite:
+V0.4 retains the accepted V0.13 visual baseline and the V0.2 multi-process rewrite:
 
 - one unpackaged WinUI 3 App;
 - one visible per-user tray Agent and SQLite writer;
@@ -64,16 +64,17 @@ V0.3 retains the accepted V0.13 visual baseline and the V0.2 multi-process rewri
 - one one-shot elevated Broker;
 - typed named-pipe IPC and deny-by-default execution policy.
 
-The project version follows `Va.bc` exclusively. Architecture milestones stop at
-`Va.b`; database schema revisions, algorithm IDs, and IPC compatibility
-identifiers are internal contracts and do not form additional project versions.
+The project version uses `Va.b` for a new product line and may use `Va.bc` for a
+nonzero iteration. Architecture milestones stop at `Va.b`; database schema
+revisions, algorithm IDs, and IPC compatibility identifiers are internal
+contracts and do not form additional project versions.
 
 ## Confirmed development route
 
 The user confirmed the following product route on 2026-08-12. It defines phase
 objectives, not permission to bypass the product boundary, a substitute for an
 active Plan, or evidence that a phase is complete. The current local
-implementation version is V0.4, beginning the V0.4 line.
+implementation version is V0.41, beginning the V0.4 line.
 
 | Phase | Objective | Status or governing constraint |
 | --- | --- | --- |
@@ -84,12 +85,30 @@ implementation version is V0.4, beginning the V0.4 line.
 | V0.5 | Complete management and editing workflows to provide a modern functional alternative to the legacy Windows storage GUIs. | First phase permitted to introduce controlled real storage-structure operations under the explicit developer- and product-user authorization model. |
 | V0.6 | Complete testing and monitoring functions. | External tools remain typed adapters with explicit target validation. |
 | V0.7 | Complete development-facing and AI Agent functions. | Do not freeze a public SDK, plug-in API, database contract, or wire protocol until internal models are stable. |
-| V0.8 | Complete the remaining approved functions and close known release-blocking defects and quality gaps. | Unknown future defects cannot be pre-declared resolved; acceptance must use recorded evidence. |
-| V0.9 | Enter internal testing across the defined supported Windows platform matrix and correct findings. | The matrix must name supported Windows versions, editions, architectures, hardware/device coverage, and required human evidence. |
-| V1.0 | Publish the formal release. | Requires the approved V0.9 release-readiness gate; a tag, binary upload, and GitHub Release each still require explicit authorization. |
+| V0.8 | Complete the remaining approved functions and close known release-blocking defects and quality gaps. | Begin the signed MSIX packaging path while retaining portable delivery; unknown future defects cannot be pre-declared resolved. |
+| V0.9 | Enter internal testing across the defined supported Windows platform matrix and correct findings. | Validate portable and MSIX install, upgrade, uninstall, startup, and data-location behavior across the named matrix. |
+| V1.0 | Publish the formal release. | Requires the approved V0.9 release-readiness gate; Microsoft Store submission begins only after V1.0 is complete. A tag, binary upload, and GitHub Release each still require explicit authorization. |
 
 Every implementation phase requires its own confirmed `docs/Plan.md`. The
 deny-by-default executor, simulation-first storage editing, read-only inventory,
 data-redaction, and external-tool boundaries remain in force throughout this
 route; V0.5 real mutation is the defined, explicitly authorized exception to the
 simulation-only rule.
+
+## Installation route
+
+WinPool currently ships only as an unpackaged, self-contained Windows x64
+portable application. There is no released MSIX package and no Microsoft Store
+listing. A future route in this document does not imply that its package exists.
+
+| Mode | Availability | Intended behavior |
+| --- | --- | --- |
+| Portable | Implemented now and retained | The user controls the complete self-contained program directory. Data defaults to `%LocalAppData%\WinPool`; an explicitly selected writable `Data` directory beside the executable remains available. |
+| Signed MSIX | Planned for V0.8–V0.9 | Develop and validate signing, identity, install, upgrade, uninstall, startup registration, data paths, recovery, and the supported Windows matrix. Portable delivery remains available. |
+| Microsoft Store | Planned after V1.0 is complete | Prepare identity, privacy, support, certification, package, and listing material only after the formal V1.0 product and its release evidence exist. Store publication is not a V1.0 prerequisite. |
+
+All modes must expose the same safety boundary. Packaging must not grant extra
+storage-mutation authority, turn the Agent into a Windows service, bundle the
+external DiskSpd/fio/Dite/RoboCopy/RAMMap engines, or bypass explicit target
+validation. Creating an account, reserving a product name, uploading a package,
+or publishing a listing each requires explicit authorization at that time.

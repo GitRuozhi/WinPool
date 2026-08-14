@@ -395,6 +395,32 @@ public sealed class ExternalToolStateRepository
             DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)));
     }
 
+    public async Task<IReadOnlyList<PersistedExternalToolState>> ListAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT tool_id, configured_path, detected_version, sha256,
+                   signature_state, detected_at_utc_ms
+            FROM external_tools
+            ORDER BY tool_id;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var states = new List<PersistedExternalToolState>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            states.Add(new PersistedExternalToolState(
+                new ToolId(reader.GetString(0)),
+                (ToolAvailability)reader.GetInt32(4),
+                reader.IsDBNull(1) ? null : reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(5))));
+        }
+        return states;
+    }
+
     private void AssertWriteOwnership()
     {
         if (writeOwner is null)

@@ -68,6 +68,12 @@ public sealed record CancelAgentTestRequest(
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
+public sealed record PauseAgentTestRequest(TestRunId RunId, CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
+public sealed record ResumeAgentTestRequest(TestRunId RunId, CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
 public sealed record GetAgentTestResultRequest(
     TestRunId RunId,
     CorrelationId CorrelationId)
@@ -422,7 +428,10 @@ public sealed record ShutdownResponse(ShutdownResult Result) : AgentResponse;
 
 public enum AgentLifecycleState
 {
+    Starting,
+    Recovering,
     Running,
+    Failed,
     ShuttingDown,
     ShutdownPending,
     Stopped

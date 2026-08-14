@@ -23,7 +23,7 @@ internal static class DataLocationSwitchRuntime
     public static async Task<bool> WaitForAgentExitAsync(
         CancellationToken cancellationToken)
     {
-        while (File.Exists(NamedPipeAgentConnection.DefaultEndpointPath))
+        while (File.Exists(DataRootLayout.AgentEndpointPath(StorageDataLocations.CurrentRoot)))
         {
             try
             {

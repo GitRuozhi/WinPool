@@ -41,6 +41,14 @@ public interface IAgentRequestOperations
         CancelAgentTestRequest request,
         CancellationToken cancellationToken);
 
+    Task<ApplicationResult<AgentResponse>> PauseTestAsync(
+        PauseAgentTestRequest request,
+        CancellationToken cancellationToken);
+
+    Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
+        ResumeAgentTestRequest request,
+        CancellationToken cancellationToken);
+
     Task<ApplicationResult<AgentResponse>> GetTestResultAsync(
         GetAgentTestResultRequest request,
         CancellationToken cancellationToken);
@@ -164,9 +172,10 @@ public sealed class AgentSessionCoordinator
 {
     private readonly object stateLock = new();
     private readonly SemaphoreSlim shutdownGate = new(1, 1);
-    private readonly IAgentRequestOperations operations;
-    private readonly AgentShutdownWorkflow shutdownWorkflow;
+    private IAgentRequestOperations operations = null!;
+    private AgentShutdownWorkflow shutdownWorkflow = null!;
     private readonly AgentLifecycleStateStore lifecycle;
+    private readonly Func<AgentSnapshot>? recoveringSnapshotFactory;
     private AgentShutdownExecution? shutdownExecution;
 
     public AgentSessionCoordinator(
@@ -181,6 +190,19 @@ public sealed class AgentSessionCoordinator
         ProcessRegistry = processRegistry
             ?? throw new ArgumentNullException(nameof(processRegistry));
         this.lifecycle = lifecycle ?? new AgentLifecycleStateStore(ProcessRegistry);
+    }
+
+    public AgentSessionCoordinator(
+        AgentProcessRegistry processRegistry,
+        AgentLifecycleStateStore lifecycle,
+        Func<AgentSnapshot> recoveringSnapshotFactory)
+    {
+        ProcessRegistry = processRegistry
+            ?? throw new ArgumentNullException(nameof(processRegistry));
+        this.lifecycle = lifecycle
+            ?? throw new ArgumentNullException(nameof(lifecycle));
+        this.recoveringSnapshotFactory = recoveringSnapshotFactory
+            ?? throw new ArgumentNullException(nameof(recoveringSnapshotFactory));
     }
 
     public AgentProcessRegistry ProcessRegistry { get; }
@@ -226,10 +248,14 @@ public sealed class AgentSessionCoordinator
             {
                 if (request is GetAgentSnapshotRequest snapshotRequest)
                 {
-                    return operations.GetSnapshotAsync(snapshotRequest, cancellationToken);
+                    return recoveringSnapshotFactory is not null
+                        ? RecoveringSnapshotAsync(snapshotRequest)
+                        : operations.GetSnapshotAsync(snapshotRequest, cancellationToken);
                 }
 
-                return Task.FromResult(RejectNewRequest(request.CorrelationId));
+                return Task.FromResult(RejectUnavailableRequest(
+                    request.CorrelationId,
+                    lifecycle.State));
             }
         }
 
@@ -251,6 +277,10 @@ public sealed class AgentSessionCoordinator
                 operations.StartTestAsync(typed, cancellationToken),
             CancelAgentTestRequest typed =>
                 operations.CancelTestAsync(typed, cancellationToken),
+            PauseAgentTestRequest typed =>
+                operations.PauseTestAsync(typed, cancellationToken),
+            ResumeAgentTestRequest typed =>
+                operations.ResumeTestAsync(typed, cancellationToken),
             GetAgentTestResultRequest typed =>
                 operations.GetTestResultAsync(typed, cancellationToken),
             ListAgentTestRunsRequest typed =>
@@ -308,6 +338,12 @@ public sealed class AgentSessionCoordinator
     private async Task<ApplicationResult<AgentResponse>> BeginShutdownAsync(
         RequestAgentShutdownRequest request)
     {
+        if (recoveringSnapshotFactory is not null
+            && lifecycle.State is AgentLifecycleState.Starting or AgentLifecycleState.Recovering)
+        {
+            return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+        }
+
         await shutdownGate.WaitAsync(CancellationToken.None);
         try
         {
@@ -345,6 +381,32 @@ public sealed class AgentSessionCoordinator
         }
     }
 
+    private Task<ApplicationResult<AgentResponse>> RecoveringSnapshotAsync(
+        GetAgentSnapshotRequest request)
+    {
+        var snapshot = recoveringSnapshotFactory!();
+        return Task.FromResult(ApplicationResult<AgentResponse>.Succeeded(
+            new AgentSnapshotResponse(snapshot),
+            request.CorrelationId));
+    }
+
+    /// <summary>
+    /// Attaches runtime work after the endpoint is already available. Lifecycle
+    /// admission still keeps it unavailable until recovery reaches Ready.
+    /// </summary>
+    public void AttachRuntime(
+        IAgentRequestOperations runtimeOperations,
+        AgentShutdownWorkflow runtimeShutdownWorkflow)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeOperations);
+        ArgumentNullException.ThrowIfNull(runtimeShutdownWorkflow);
+        lock (stateLock)
+        {
+            operations = runtimeOperations;
+            shutdownWorkflow = runtimeShutdownWorkflow;
+        }
+    }
+
     private static ApplicationResult<AgentResponse> ResultForExecution(
         AgentShutdownExecution execution,
         CorrelationId correlationId)
@@ -359,13 +421,16 @@ public sealed class AgentSessionCoordinator
                 correlationId);
     }
 
-    private static ApplicationResult<AgentResponse> RejectNewRequest(
-        CorrelationId correlationId) =>
+    private static ApplicationResult<AgentResponse> RejectUnavailableRequest(
+        CorrelationId correlationId,
+        AgentLifecycleState state) =>
         ApplicationResult<AgentResponse>.FromStatus(
             ApplicationStatus.Rejected,
             correlationId,
             Message(
-                "agent.request.rejected_shutting_down",
+                state is AgentLifecycleState.Starting or AgentLifecycleState.Recovering
+                    ? "agent.request.recovering"
+                    : "agent.request.rejected_shutting_down",
                 ApplicationMessageSeverity.Warning));
 
     private static ApplicationResult<AgentResponse> RejectUnsupportedRequest(

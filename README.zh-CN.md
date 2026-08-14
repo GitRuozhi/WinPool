@@ -10,13 +10,18 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.4 是当前产品版本，在已完成的 V0.3 基础上进入视觉打磨和基础交互完善阶段。IPC 协议
-保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
+V0.41 是当前产品版本，在已完成的 V0.3 基础上进入视觉打磨和基础交互完善阶段。IPC 协议
+保持为 3，Agent 持有的 SQLite 合同为 schema 13。
 
-V0.4 已从当前分支部署到本机。当前可复现自动基线为 530 项 Release 测试通过、0 failed、
+V0.41 是当前本地实施版本。当前可复现自动基线为 549 项 Release 测试通过、0 failed、
 0 skipped、零警告 Release 构建，并且没有已知易受攻击依赖。原生 UI、托盘、UAC、设备、
 外部工具和数据位置用例继续保持 `unverified`，不得将其写为通过。V0.39 保留为已 tag 和
 发布的 V0.3 历史记录。
+
+当前只实现无打包 Windows x64 便携式交付。MSIX 和 Microsoft Store 路线直接记录在
+[产品方向](docs/Product.zh-CN.md)，不再单独建立安装文档。
+
+当前 [V0.41 计划](docs/Archive/V0.41/Plan.md) 已经确认并实施完成；该授权不等于发布、部署、提交或推送。
 
 进入 V0.4 前的 V0.39 架构治理已清除已确认的无用代码，并拆分过度集中的 Agent 和页面职责；
 未新增产品功能、未改变 IPC/schema 合同，也未降低安全边界。该阶段现已冻结在
@@ -48,6 +53,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [产品方向](docs/Product.zh-CN.md)：长期定位、产品边界和路线图。
 - [开发文档](docs/Development.zh-CN.md)：架构、环境、构建、staging、版本和文档流程。
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
+- [V0.41 计划](docs/Archive/V0.41/Plan.md)：已经实施完成的启动、欢迎、监控、持久化、托盘和基础交互计划。
 - [V0.39 最终修正归档](docs/Archive/V0.39-final-correction/README.zh-CN.md)：
   已实施的 V0.3 最终最小修正及其证据。
 - [V0.39 架构治理归档](docs/Archive/V0.39-architecture-hardening/README.zh-CN.md)：

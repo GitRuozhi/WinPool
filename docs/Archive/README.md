@@ -3,8 +3,8 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-V0.39 is the latest implemented record. The V0.39 architecture hardening is
-archived under `V0.39-architecture-hardening`; there is no active Plan.
+V0.41 is the latest implemented record. The V0.41 plan is archived under
+`V0.41`; there is no active Plan.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
@@ -21,6 +21,7 @@ archived under `V0.39-architecture-hardening`; there is no active Plan.
 | [`V0.39/`](V0.39/) | implemented; automatic gates passed; native/manual cases unverified | 2026-08-13 | V0.39; local Git commit | V0.3 stability closure before V0.4 |
 | [`V0.39-final-correction/`](V0.39-final-correction/) | implemented; automatic gates passed; target WinUI cases passed; inherited native/manual cases unverified | 2026-08-13 | V0.39; final local correction commit | Agent control-pipe isolation, Test-page unknown-outcome reconciliation, and final V0.3 correction evidence |
 | [`V0.39-architecture-hardening/`](V0.39-architecture-hardening/) | implemented; automatic gates passed; targeted native navigation passed; remaining native/manual cases unverified | 2026-08-14 | V0.39; architecture-governance branch | Pre-V0.40 unused-code cleanup, Agent responsibility split, definition-graph relocation, data-location handoff isolation, and architecture guards |
+| [`V0.41/`](V0.41/) | implemented; automatic gates passed; targeted native checks passed; inherited native/manual cases unverified | 2026-08-14 | V0.41; no Git commit, push, tag, release, or deployment authorized | Startup, welcome, monitoring, persistence, tray, and basic-interaction plan with the final V0.41 product version |
 | [`V0.39a-draft/`](V0.39a-draft/) | superseded; never approved or implemented | 2026-08-13 | invalid draft label, not a product version | Original broad correction proposal preserved as historical input; reusable observations moved to the V0.8–V0.9 technical-debt reference |
 | [`V0.33重构.md`](V0.33重构.md) and [`V0.33重构补充.md`](V0.33重构补充.md) | archived source records | 2026-08-11 | V0.33 | Original V0.33 reconstruction and supplement records, preserved unchanged after relocation from `docs/` |
 

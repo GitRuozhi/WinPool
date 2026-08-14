@@ -35,6 +35,11 @@ public static class Program
 
     private static bool DecideRedirection(IReadOnlyList<string> args)
     {
+        if (ApplicationStartupOptions.ParseTarget(args) == ApplicationStartupTarget.Welcome)
+        {
+            return false;
+        }
+
         var activationArguments = AppInstance.GetCurrent().GetActivatedEventArgs();
         var keyInstance = AppInstance.FindOrRegisterForKey(SingleInstanceKey);
         if (keyInstance.IsCurrent)
@@ -47,7 +52,10 @@ public static class Program
         if (target != ApplicationStartupTarget.None
             && ApplicationActivationChannel.TrySend(target))
         {
-            BringExistingProcessToForeground(keyInstance);
+            if (target != ApplicationStartupTarget.Welcome)
+            {
+                BringExistingProcessToForeground(keyInstance);
+            }
             return true;
         }
 

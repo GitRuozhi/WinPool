@@ -148,8 +148,11 @@ internal static class Program
             return new MissingRamMapPort();
         }
 
+        var preferences = new LocalUserPreferencesService(dataRoot);
         var discovery = new ToolPathDiscovery(
-            new JsonToolPathConfiguration(Path.Combine(dataRoot, "tool-paths.json")),
+            PreferencesToolPathConfiguration.CreateAsync(preferences)
+                .GetAwaiter()
+                .GetResult(),
             new EnvironmentToolSearchPath());
         var result = discovery.Find(descriptor);
         return result.Found && result.ExecutablePath is not null

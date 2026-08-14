@@ -9,7 +9,7 @@ public sealed class SqliteSchemaTests
 {
     private static readonly string[] RequiredTables =
     [
-        "schema_info", "preferences", "workspace_state", "systems",
+        "schema_info", "workspace_state", "test_presets", "systems",
         "inventory_snapshots", "local_inventory_document", "storage_objects", "storage_relationships",
         "operation_plans", "operation_steps", "execution_events",
         "simulation_documents", "simulation_edit_commits", "system_support_audit_events",
@@ -266,7 +266,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 12, 0);
+        VALUES(1, 13, 0);
         """,
         "schema_info.checks")]
     [InlineData(

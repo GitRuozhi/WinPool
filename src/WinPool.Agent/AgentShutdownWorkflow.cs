@@ -195,8 +195,14 @@ public sealed class AgentShutdownWorkflow
             failed,
             attempt);
 
-        var remainingProcessIds = processRegistry.GetLiveProcessIds();
-        if (remainingProcessIds.Count == 0 && failed.Count == 0)
+        var remainingProcessIds = processRegistry.Snapshot()
+            .Where(process =>
+                reason != ShutdownReason.StorageLocationSwitch
+                || process.Kind != AgentManagedProcessKind.MainApplication)
+            .Select(process => process.ProcessId)
+            .Order()
+            .ToArray();
+        if (remainingProcessIds.Length == 0 && failed.Count == 0)
         {
             await RunBoundedShutdownStepAsync(
                 AgentShutdownStep.CloseNamedPipes,
@@ -206,7 +212,7 @@ public sealed class AgentShutdownWorkflow
                 attempt);
         }
 
-        if (remainingProcessIds.Count == 0 && failed.Count == 0)
+        if (remainingProcessIds.Length == 0 && failed.Count == 0)
         {
             await RunBoundedShutdownStepAsync(
                 AgentShutdownStep.RemoveTrayIcon,
@@ -216,7 +222,7 @@ public sealed class AgentShutdownWorkflow
                 attempt);
         }
 
-        if (remainingProcessIds.Count == 0 && failed.Count == 0)
+        if (remainingProcessIds.Length == 0 && failed.Count == 0)
         {
             await RunBoundedShutdownStepAsync(
                 AgentShutdownStep.ExitAgent,
@@ -227,7 +233,7 @@ public sealed class AgentShutdownWorkflow
         }
 
         var result = new ShutdownResult(
-            failed.Count == 0 && remainingProcessIds.Count == 0,
+            failed.Count == 0 && remainingProcessIds.Length == 0,
             remainingProcessIds,
             flushedCount,
             restored);

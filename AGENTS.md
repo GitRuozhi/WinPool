@@ -111,14 +111,19 @@ protected paths before editing.
   `c=10`; reduce scope, combine work, or advance the minor version.
 - A normal nonzero `c` iteration requires a local commit but no push, tag, or release
   unless explicitly authorized.
-- V0.4 is the current local implementation version. Its automatic quality and
+- V0.41 is the current local implementation version. Its automatic quality and
   build gates are recorded in `CHANGELOG.md`; inherited native/manual cases
   remain `unverified` and no result may represent them as passing.
 - The implemented V0.39 Plans are archived under `docs/Archive/V0.39` and
-  `docs/Archive/V0.39-final-correction`; there is no active `docs/Plan.md`.
-  The final V0.3 correction is complete, and normal development advances to
-  V0.4. V0.39 remains the historical tag and GitHub Release record; any new
-  tag, release, binary upload, or deployment requires separate authorization.
+  `docs/Archive/V0.39-final-correction`. The approved V0.41 plan is archived
+  under `docs/Archive/V0.41`. Implementation is complete. V0.39 remains the historical tag and
+  GitHub Release record; any commit, push, tag, release, binary upload, or
+  deployment requires separate authorization.
+- The user permits V0.41 to reset and regenerate this development machine's
+  existing WinPool preferences and database; V0.4-to-V0.41 data compatibility
+  is not required. Do not perform that reset before the user asks to begin
+  implementation. When authorized, stop every WinPool process, verify exact roots,
+  and move old state to the project-root `Rubbish` tree instead of deleting it.
 - Before pushing, fetch, verify the remote target is an ancestor of local HEAD,
   inspect outgoing commits, and refuse divergence or force push.
 - A tag, GitHub Release, binary upload, or deployment always requires separate
@@ -130,5 +135,5 @@ protected paths before editing.
 - Automatic checks do not substitute for UAC, tray, native-picker, visual, device,
   or long-duration human evidence.
 - Never report an unavailable or unrun gate as passed.
-- Real hardware mutation is not a V0.4 verification method. V0.5-or-later
+- Real hardware mutation is not a V0.41 verification method. V0.5-or-later
   controlled verification must follow the real-mutation authorization rules.

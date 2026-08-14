@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.Application;
+using WinPool.App.Services;
 using WinPool.Infrastructure.Windows;
 using WinPool.Agent.Client;
 using WinPool.Ipc;
@@ -75,11 +76,11 @@ public partial class App : Application
     {
         try
         {
-            var directory = StorageDataLocations.CurrentRoot;
-            Directory.CreateDirectory(directory);
-            File.AppendAllText(
-                Path.Combine(directory, "last-crash.txt"),
-                $"{DateTime.Now:O} [{source}] {exception}\n\n");
+            DiagnosticLog.AppendFailure(
+                StorageDataLocations.CurrentRoot,
+                "app-crash.jsonl",
+                source,
+                exception);
         }
         catch
         {
@@ -90,9 +91,11 @@ public partial class App : Application
     {
         try
         {
-            var directory = StorageDataLocations.CurrentRoot;
-            Directory.CreateDirectory(directory);
-            File.WriteAllText(Path.Combine(directory, "last-crash.txt"), e.Exception.ToString());
+            DiagnosticLog.AppendFailure(
+                StorageDataLocations.CurrentRoot,
+                "app-crash.jsonl",
+                "XamlUnhandled",
+                e.Exception);
         }
         catch
         {
@@ -105,15 +108,28 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        InitialAgentWarningPublished = false;
         var privilegeState = new WindowsPrivilegeService().Current;
         var startupOptions = ApplicationStartupOptions.Parse(
             Environment.GetCommandLineArgs().Skip(1),
             privilegeState);
+        DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        if (startupOptions.Target == ApplicationStartupTarget.Welcome)
+        {
+            Window = new WelcomeWindow(new LocalizationService());
+            Window.Activate();
+            return;
+        }
+
         var agentConnection = EnsureAgentConnection();
         StartExitSignalListener();
         Window = new MainWindow(startupOptions, agentConnection);
-        DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Window.Activate();
+        if (startupOptions.Target == ApplicationStartupTarget.None
+            && !IsTrayAgentRunning())
+        {
+            ((MainWindow)Window).ShowStartupWelcome();
+        }
         StartActivationChannel();
         _ = ConnectAgentAsync();
         if (s_activationTarget is not null)
@@ -159,38 +175,62 @@ public partial class App : Application
 
     private static async Task ConnectAgentAsync()
     {
+        const int attemptSeconds = 12;
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(45);
         try
         {
             var connection = EnsureAgentConnection();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
-            var result = await connection.ConnectAsync(timeout.Token);
-            if (!result.IsSuccess && Window is MainWindow mainWindow)
+            while (DateTimeOffset.UtcNow < deadline)
             {
-                InitialAgentWarningPublished = true;
-                DispatcherQueue.TryEnqueue(
-                    () => mainWindow.NotificationService.PublishWarning(
-                        "WinPool Agent",
-                        "托盘 Agent 未连接；后台监控暂不可用。",
-                        "agent",
-                        "agent-connect-failed"));
+                using var timeout = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(attemptSeconds));
+                var result = await connection.ConnectAsync(timeout.Token);
+                if (result.IsSuccess)
+                {
+                    return;
+                }
+
+                var remaining = deadline - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+
+                await Task.Delay(
+                    remaining < TimeSpan.FromMilliseconds(500)
+                        ? remaining
+                        : TimeSpan.FromMilliseconds(500));
             }
+
+            PublishInitialAgentWarning(
+                "托盘 Agent 在启动恢复期后仍未连接；后台监控暂不可用。",
+                "agent-connect-failed");
         }
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
                 or InvalidOperationException)
         {
-            if (Window is MainWindow mainWindow)
-            {
-                InitialAgentWarningPublished = true;
-                DispatcherQueue.TryEnqueue(
-                    () => mainWindow.NotificationService.PublishWarning(
-                        "WinPool Agent",
-                        "托盘 Agent 启动失败；后台监控暂不可用。",
-                        "agent",
-                        "agent-start-failed"));
-            }
+            PublishInitialAgentWarning(
+                "托盘 Agent 启动失败；后台监控暂不可用。",
+                "agent-start-failed");
         }
+    }
+
+    private static void PublishInitialAgentWarning(string message, string occurrenceKey)
+    {
+        if (InitialAgentWarningPublished || Window is not MainWindow mainWindow)
+        {
+            return;
+        }
+
+        InitialAgentWarningPublished = true;
+        DispatcherQueue.TryEnqueue(
+            () => mainWindow.NotificationService.PublishWarning(
+                "WinPool Agent",
+                message,
+                "agent",
+                occurrenceKey));
     }
 
     private static void StartActivationChannel()
@@ -231,9 +271,25 @@ public partial class App : Application
             "Agent",
             "WinPool.Agent.exe");
         s_agentConnection = new NamedPipeAgentConnection(
-            NamedPipeAgentConnection.DefaultEndpointPath,
+            DataRootLayout.AgentEndpointPath(StorageDataLocations.CurrentRoot),
             new AgentProcessLauncher(executable));
         return s_agentConnection;
+    }
+
+    private static bool IsTrayAgentRunning()
+    {
+        try
+        {
+            return File.Exists(
+                DataRootLayout.AgentEndpointPath(
+                    StorageDataLocations.CurrentRoot))
+                || System.Diagnostics.Process.GetProcessesByName(
+                    "WinPool.Agent").Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void StartExitSignalListener()
@@ -275,6 +331,12 @@ public partial class App : Application
         {
             if (target is not null && Window is MainWindow mainWindow)
             {
+                if (target == ApplicationStartupTarget.Welcome)
+                {
+                    mainWindow.ShowWelcome();
+                    return;
+                }
+
                 mainWindow.ActivateTarget(target.Value);
             }
             Window.Activate();

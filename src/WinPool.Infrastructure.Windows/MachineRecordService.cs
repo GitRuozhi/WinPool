@@ -102,3 +102,19 @@ public sealed class AgentBackedMachineRecordService(IAgentConnection connection)
             : LocalInventoryDocumentCodec.Decode(response.Document);
     }
 }
+
+/// <summary>
+/// Explicit no-Agent runtime fallback for the product build. It deliberately
+/// keeps transient data in memory instead of recreating legacy machine.json.
+/// </summary>
+public sealed class EphemeralMachineRecordService : IMachineRecordService
+{
+    public Task RecordLocalScanAsync(
+        StorageSystemDocument localDocument,
+        CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task<StorageSystemDocument?> LoadLocalScanAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<StorageSystemDocument?>(null);
+}

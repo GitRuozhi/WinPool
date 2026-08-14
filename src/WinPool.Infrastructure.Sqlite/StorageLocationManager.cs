@@ -103,6 +103,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
 {
     public const string DatabaseFileName = "winpool.db";
     public const string PointerFileName = "storage-location.json";
+    public const string RuntimeDirectoryName = "Runtime";
 
     private static readonly JsonSerializerOptions JsonOptions =
         AtomicStorageLocationPointerCommitter.CreateJsonOptions();
@@ -591,7 +592,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
         foreach (var file in EnumerateFilesWithoutReparsePoints(sourceRoot))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsControlOrTransientFile(file, sourceRoot))
+            if (IsControlOrTransientFile(file, sourceRoot)
+                || IsRuntimeFile(file, sourceRoot))
             {
                 continue;
             }
@@ -923,6 +925,18 @@ public sealed class StorageLocationManager : IStorageLocationManager
             || string.Equals(name, DatabaseFileName + "-wal", StringComparison.OrdinalIgnoreCase)
             || string.Equals(name, DatabaseFileName + "-shm", StringComparison.OrdinalIgnoreCase)
             || string.Equals(name, DatabaseFileName + "-journal", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRuntimeFile(string file, string root)
+    {
+        var relativePath = Path.GetRelativePath(root, file);
+        var firstSegment = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries)[0];
+        return string.Equals(
+            firstSegment,
+            RuntimeDirectoryName,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> EnumerateFilesWithoutReparsePoints(string root)

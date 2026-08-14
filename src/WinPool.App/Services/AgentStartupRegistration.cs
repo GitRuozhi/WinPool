@@ -6,13 +6,11 @@ internal sealed class AgentStartupRegistration
 {
     private const string RunKey =
         @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "WinPool.Agent";
+    private const string ValueName = "WinPool";
+    private const string LegacyAgentValueName = "WinPool.Agent";
 
     public string AgentExecutablePath => Path.GetFullPath(
-        Path.Combine(
-            AppContext.BaseDirectory,
-            "Agent",
-            "WinPool.Agent.exe"));
+        Path.Combine(AppContext.BaseDirectory, "Agent", "WinPool.Agent.exe"));
 
     public bool IsEnabled()
     {
@@ -29,7 +27,7 @@ internal sealed class AgentStartupRegistration
         if (enabled && !File.Exists(AgentExecutablePath))
         {
             throw new FileNotFoundException(
-                "The WinPool Agent executable is unavailable.",
+                "The WinPool tray Agent executable is unavailable.",
                 AgentExecutablePath);
         }
 
@@ -44,13 +42,15 @@ internal sealed class AgentStartupRegistration
                 ValueName,
                 CommandValue(),
                 RegistryValueKind.String);
+            key.DeleteValue(LegacyAgentValueName, throwOnMissingValue: false);
         }
         else
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
+            key.DeleteValue(LegacyAgentValueName, throwOnMissingValue: false);
         }
     }
 
     private string CommandValue() =>
-        $"\"{AgentExecutablePath}\" --windows-login";
+        $"\"{AgentExecutablePath}\"";
 }

@@ -61,13 +61,9 @@ public sealed class MonitoringService : IDisposable
 
     public string? LastError { get; private set; }
 
-    public bool BackgroundEnabled { get; set; }
-
-    public double SampleRateHz { get; private set; } = 1;
+    public double SampleRateHz { get; private set; } = 5;
 
     public string? SessionFilePath { get; private set; }
-
-    public volatile bool WindowMinimized;
 
     public static int? ParseDiskNumber(string instanceName)
     {
@@ -136,6 +132,11 @@ public sealed class MonitoringService : IDisposable
 
     public void SetRate(double rateHz)
     {
+        if (Math.Abs(SampleRateHz - rateHz) < 0.001)
+        {
+            return;
+        }
+
         SampleRateHz = rateHz;
         if (_agentConnection is not null && IsRunning)
         {
@@ -305,11 +306,11 @@ public sealed class MonitoringService : IDisposable
         {
             try
             {
-                var directory = StorageDataLocations.CurrentRoot;
-                Directory.CreateDirectory(directory);
-                File.AppendAllText(
-                    Path.Combine(directory, "monitor-debug.log"),
-                    $"{DateTime.Now:O} [MonitorLoop] {ex}\n\n");
+                DiagnosticLog.AppendFailure(
+                    StorageDataLocations.CurrentRoot,
+                    "monitor.jsonl",
+                    "MonitorLoop",
+                    ex);
             }
             catch
             {
@@ -386,9 +387,15 @@ public sealed class MonitoringService : IDisposable
             if (!response.IsSuccess)
             {
                 IsRunning = false;
-                LastError = response.Messages.FirstOrDefault()?.DiagnosticText
-                    ?? response.Messages.FirstOrDefault()?.Code
-                    ?? "agent.monitor-start-failed";
+                var details = string.Join(
+                    " | ",
+                    response.Messages.Select(message =>
+                        string.IsNullOrWhiteSpace(message.DiagnosticText)
+                            ? message.Code
+                            : $"{message.Code}: {message.DiagnosticText}"));
+                LastError = string.IsNullOrWhiteSpace(details)
+                    ? $"agent.monitor-start-failed ({response.Status})"
+                    : $"{response.Status}: {details}";
                 ready.TrySetResult(false);
                 return;
             }
@@ -548,11 +555,6 @@ public sealed class MonitoringService : IDisposable
             catch (TaskCanceledException)
             {
                 break;
-            }
-
-            if (!BackgroundEnabled && WindowMinimized)
-            {
-                continue;
             }
 
             IReadOnlyList<DiskPerformanceSample> samples;

@@ -5,6 +5,24 @@
 This file records results that actually occurred. Planned work belongs in
 `Plan.md` while a stage is active; historical plans remain in `Archive`.
 
+## V0.41 — 2026-08-14
+
+- Implemented the approved V0.41 startup, welcome, monitoring, persistence,
+  tray, and basic-interaction plan.
+- Fixed the preference-load hang that kept the Agent in `Recovering`, restored
+  continuous-monitoring start/close/reopen/reattach behavior, and completed the
+  language, external-tool, data-location, and Edit/Settings layout changes.
+
+The full Release gate passed 549 tests with 0 failed and 0 skipped, a
+warning-free Release build, no known vulnerable packages, and a verified
+four-process staging tree. Native welcome size, Edit layout, Settings layout,
+monitor default, continuous-monitor reattach, Ctrl+1 tooltip absence, and
+tray-menu language synchronization were checked. Cyan/System accent switching
+and Settings external-tool cache display were also checked. Inherited
+topology-context positioning, device, UAC, DPI, external-tool execution, and
+long-duration cases remain `unverified`. No commit, push, tag, release, binary
+upload, or deployment was created.
+
 ## V0.4 — 2026-08-14
 
 - Defined V0.4 as the current product version, with mechanical .NET version

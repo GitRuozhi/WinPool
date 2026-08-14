@@ -10,14 +10,17 @@ public sealed class AgentLifecycleStateStore
 {
     private readonly object syncRoot = new();
     private readonly AgentProcessRegistry processRegistry;
-    private AgentLifecycleState state = AgentLifecycleState.Running;
+    private AgentLifecycleState state;
     private DateTimeOffset? attemptedAtUtc;
     private IReadOnlyList<string> failedStepCodes = [];
 
-    public AgentLifecycleStateStore(AgentProcessRegistry processRegistry)
+    public AgentLifecycleStateStore(
+        AgentProcessRegistry processRegistry,
+        AgentLifecycleState initialState = AgentLifecycleState.Running)
     {
         this.processRegistry = processRegistry
             ?? throw new ArgumentNullException(nameof(processRegistry));
+        state = initialState;
     }
 
     public AgentLifecycleState State
@@ -51,6 +54,38 @@ public sealed class AgentLifecycleStateStore
             state = AgentLifecycleState.ShuttingDown;
             this.attemptedAtUtc = attemptedAtUtc;
             failedStepCodes = [];
+        }
+    }
+
+    public void MarkRecovering()
+    {
+        lock (syncRoot)
+        {
+            if (state is AgentLifecycleState.Starting or AgentLifecycleState.Recovering)
+            {
+                state = AgentLifecycleState.Recovering;
+            }
+        }
+    }
+
+    public void MarkReady()
+    {
+        lock (syncRoot)
+        {
+            if (state is AgentLifecycleState.Starting or AgentLifecycleState.Recovering)
+            {
+                state = AgentLifecycleState.Running;
+            }
+        }
+    }
+
+    public void MarkFailed(string failureCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
+        lock (syncRoot)
+        {
+            state = AgentLifecycleState.Failed;
+            failedStepCodes = [failureCode];
         }
     }
 

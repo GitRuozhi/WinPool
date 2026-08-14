@@ -154,10 +154,9 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     }
 
     public static string DefaultEndpointPath =>
-        Path.Combine(
+        DataRootLayout.AgentEndpointPath(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinPool",
-            "agent-endpoint.json");
+            "WinPool"));
 
     public async Task<ApplicationResult<AgentHandshake>> ConnectAsync(
         CancellationToken cancellationToken)
@@ -882,6 +881,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             StopAgentMonitoringRequest => AgentControlMessageTypes.StopMonitoring,
             StartAgentTestRequest => AgentControlMessageTypes.StartTest,
             CancelAgentTestRequest => AgentControlMessageTypes.CancelTest,
+            PauseAgentTestRequest => AgentControlMessageTypes.PauseTest,
+            ResumeAgentTestRequest => AgentControlMessageTypes.ResumeTest,
             GetAgentTestResultRequest => AgentControlMessageTypes.GetTestResult,
             ListAgentTestRunsRequest => AgentControlMessageTypes.ListTestRuns,
             ListUserTestPresetsRequest =>

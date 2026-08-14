@@ -90,6 +90,9 @@ internal sealed class AgentTestRunWorkflow
             while (index < preparedSteps.Count)
             {
                 runCancellation.Token.ThrowIfCancellationRequested();
+                await testCoordinator.WaitForSafePauseBoundaryAsync(
+                    runId,
+                    runCancellation.Token);
                 var current = preparedSteps[index];
                 if (current.Request is null)
                 {

@@ -78,36 +78,6 @@
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="4">
-                <Grid ColumnSpacing="20">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Spacing="4">
-                        <TextBlock
-                            x:Name="ExternalToolsTitle"
-                            FontSize="16"
-                            FontWeight="SemiBold"
-                            Text="外部工具" />
-                        <TextBlock
-                            x:Name="ExternalToolsDescription"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="工具不随 WinPool 发布。"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-                    <StackPanel
-                        x:Name="ExternalToolRows"
-                        Grid.Column="1"
-                        Spacing="12" />
-                </Grid>
-            </Border>
-
-            <Border
-                Padding="20"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="4">
                 <Grid RowSpacing="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -196,7 +166,11 @@
                         FontSize="16"
                         FontWeight="SemiBold"
                         Text="数据存储位置" />
-                    <StackPanel Grid.Row="5" Grid.Column="1" Spacing="4">
+                    <Grid Grid.Row="5" Grid.Column="1" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                         <ComboBox
                             x:Name="DataLocationOptions"
                             MinWidth="220"
@@ -204,10 +178,13 @@
                             SelectionChanged="DataLocationOptions_SelectionChanged" />
                         <TextBlock
                             x:Name="DataLocationPath"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
                             FontSize="12"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -219,18 +196,24 @@
                 CornerRadius="4">
                 <Grid ColumnSpacing="20">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="AboutTitle"
-                        FontSize="16"
-                        FontWeight="SemiBold"
-                        Text="关于" />
-                    <StackPanel Grid.Column="1" Spacing="10">
+                    <StackPanel x:Name="ExternalToolRows" Spacing="12" />
+                </Grid>
+            </Border>
+
+            <Border
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid>
+                    <StackPanel Spacing="10">
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutProductNameLabel" Text="产品" />
@@ -242,7 +225,7 @@
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutVersionLabel" Text="版本" />
@@ -254,7 +237,7 @@
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutProviderLabel" Text="提供方" />
@@ -265,7 +248,7 @@
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutWebsiteLabel" Text="官网" />
@@ -278,7 +261,7 @@
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutUpdateLabel" Text="更新" />
@@ -291,7 +274,7 @@
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutFeedbackLabel" Text="反馈" />
@@ -304,15 +287,23 @@
                         </Grid>
                         <Grid ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="220" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="AboutCommunityLabel" Text="轻松交流" />
-                            <TextBlock
-                                x:Name="AboutCommunityValue"
+                            <Button
+                                x:Name="AboutCommunityButton"
                                 Grid.Column="1"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="QQ 群（暂未开放）" />
+                                Padding="8,4"
+                                Click="CommunityButton_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="13" Glyph="&#xE8F2;" />
+                                    <TextBlock
+                                        x:Name="CommunityButtonText"
+                                        VerticalAlignment="Center"
+                                        Text="加入 QQ 群" />
+                                </StackPanel>
+                            </Button>
                         </Grid>
                     </StackPanel>
                 </Grid>

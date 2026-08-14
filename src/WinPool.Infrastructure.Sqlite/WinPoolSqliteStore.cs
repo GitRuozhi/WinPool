@@ -4,7 +4,10 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WinPoolSqliteStore
 {
-    public const int CurrentSchemaVersion = 12;
+    // V0.41 starts from a deliberately clean data root. Do not add a
+    // migration from schema 12: its generic preferences table mixed distinct
+    // ownership domains and is intentionally rejected by InitializeAsync.
+    public const int CurrentSchemaVersion = 13;
 
     private readonly string connectionString;
 
@@ -504,14 +507,15 @@ public sealed class WinPoolSqliteStore
             schema_version INTEGER NOT NULL,
             applied_at_utc_ms INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS preferences(
-            key TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS workspace_state(
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
             json TEXT NOT NULL,
             updated_at_utc_ms INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS workspace_state(
-            key TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS test_presets(
+            preset_id TEXT PRIMARY KEY,
             json TEXT NOT NULL,
+            created_at_utc_ms INTEGER NOT NULL,
             updated_at_utc_ms INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS systems(

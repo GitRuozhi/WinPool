@@ -455,11 +455,11 @@ public sealed class ArchitectureBoundaryTests
                 "AgentBackedWorkspaceStateService.cs"));
 
         Assert.Contains(
-            "agentConnection is null\n            ? new LocalWorkspaceStateService()\n            : new AgentBackedWorkspaceStateService(agentConnection)",
+            "agentConnection is null\n            ? new EphemeralWorkspaceStateService()\n            : new AgentBackedWorkspaceStateService(agentConnection)",
             mainWindow.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "new LocalWorkspaceStateService();",
+            "new LocalWorkspaceStateService()",
             mainWindow,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -521,8 +521,8 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>4</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>0</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersion>$(WinPoolArchitectureVersion)</WinPoolVersion>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>1</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
         Assert.Contains("AssemblyInformationalVersionAttribute", productInformation, StringComparison.Ordinal);
@@ -543,6 +543,18 @@ public sealed class ArchitectureBoundaryTests
     public void WelcomeDialogUsesKeyboardAccessibleNativePrimaryButton()
     {
         var root = FindRepositoryRoot();
+        var windowSource = File.ReadAllText(
+            Path.Combine(
+                root,
+                "src",
+                "WinPool.App",
+                "WelcomeWindow.xaml.cs"));
+        var windowXaml = File.ReadAllText(
+            Path.Combine(
+                root,
+                "src",
+                "WinPool.App",
+                "WelcomeWindow.xaml"));
         var source = File.ReadAllText(
             Path.Combine(
                 root,
@@ -550,8 +562,10 @@ public sealed class ArchitectureBoundaryTests
                 "WinPool.App",
                 "MainWindow.xaml.cs"));
 
-        Assert.Contains("PrimaryButtonText = localization[\"WelcomeConfirm\"]", source, StringComparison.Ordinal);
-        Assert.Contains("DefaultButton = ContentDialogButton.Primary", source, StringComparison.Ordinal);
+        Assert.Contains("ConfirmButton.Content = localization[\"WelcomeConfirm\"]", windowSource, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ConfirmButton\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"ConfirmButton_Click\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("AppWindow.Resize(DefaultSize)", windowSource, StringComparison.Ordinal);
         Assert.Contains(
             "if (_startupTarget is ApplicationStartupTarget.None",
             source,
@@ -564,6 +578,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("MarkWelcomeShownAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("showAgainCheckBox", source, StringComparison.Ordinal);
         Assert.DoesNotContain("confirmButton.Click += (_, _) => dialog.Hide()", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ContentDialog", windowXaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -675,8 +690,8 @@ public sealed class ArchitectureBoundaryTests
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml"));
 
-        Assert.Contains("x:Name=\"BackgroundCheckBox\"", source, StringComparison.Ordinal);
-        Assert.Contains("AccessKey=\"B\"", source, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ContinuousMonitoringCheckBox\"", source, StringComparison.Ordinal);
+        Assert.Contains("AccessKey=\"C\"", source, StringComparison.Ordinal);
     }
 
     [Fact]

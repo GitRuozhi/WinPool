@@ -2,18 +2,6 @@ using WinPool.Domain;
 
 namespace WinPool.Application;
 
-public interface IUserPreferencesRepository
-{
-    Task<ApplicationResult<UserPreferences>> LoadAsync(
-        CorrelationId correlationId,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult> SaveAsync(
-        UserPreferences preferences,
-        CorrelationId correlationId,
-        CancellationToken cancellationToken);
-}
-
 public sealed record StorageLocationState(
     StorageLocationMode Mode,
     string DataRoot,

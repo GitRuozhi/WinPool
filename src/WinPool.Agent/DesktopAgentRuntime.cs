@@ -50,6 +50,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly StorageHealthEventRepository storageHealthEventRepository;
     private readonly AgentEventHub agentEvents;
     private readonly AgentLifecycleStateStore lifecycle;
+    private readonly IUserPreferencesService preferencesService;
     private readonly IProcessIncarnationVerifier processIncarnationVerifier;
     private readonly string mainApplicationExecutablePath;
     private readonly CancellationTokenSource storageHealthEventCancellation = new();
@@ -98,6 +99,7 @@ internal sealed class DesktopAgentRuntime :
         IReadOnlyList<StorageHealthEvent> initialStorageHealthEvents,
         AgentEventHub agentEvents,
         AgentLifecycleStateStore lifecycle,
+        IUserPreferencesService preferencesService,
         IPhysicalDiskDeviceResolver? physicalDiskDeviceResolver = null)
     {
         this.tray = tray ?? throw new ArgumentNullException(nameof(tray));
@@ -176,6 +178,17 @@ internal sealed class DesktopAgentRuntime :
             ?? throw new ArgumentNullException(nameof(storageHealthEventRepository));
         this.agentEvents = agentEvents ?? throw new ArgumentNullException(nameof(agentEvents));
         this.lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
+        this.preferencesService = preferencesService
+            ?? throw new ArgumentNullException(nameof(preferencesService));
+        testCoordinator.PauseStateChanged += (runId, state) => tray.SetTestRun(
+            runId,
+            state switch
+            {
+                TestPauseState.Pausing => "pausing",
+                TestPauseState.Paused => "paused",
+                TestPauseState.Running => "running",
+                _ => "none"
+            });
         testWorkerSupervisor = new(
             instanceId,
             testWorkerHost,
@@ -284,7 +297,7 @@ internal sealed class DesktopAgentRuntime :
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var toolStates = await toolRegistry.ListAsync(cancellationToken)
+        var toolStates = await LoadCachedToolStatesAsync(cancellationToken)
             .ConfigureAwait(false);
         var snapshot = new AgentSnapshot(
             instanceId,
@@ -298,8 +311,30 @@ internal sealed class DesktopAgentRuntime :
             LatestMonitorSamples: monitoring.CurrentSamples,
             RecentStorageHealthEvents: GetRecentStorageHealthEvents(),
             MonitorDiagnostics: monitoring.CurrentDiagnostics,
-            CurrentToolStates: toolStates.Value ?? []);
+            CurrentToolStates: toolStates);
         return await SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
+    }
+
+    private async Task<IReadOnlyList<ToolState>> LoadCachedToolStatesAsync(
+        CancellationToken cancellationToken)
+    {
+        var persisted = await toolStateRepository.ListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var catalog = new ToolCatalog();
+        return persisted.Select(state =>
+        {
+            catalog.TryGet(state.ToolId, out var descriptor);
+            return new ToolState(
+                state.ToolId,
+                state.Availability,
+                state.ConfiguredPath,
+                string.IsNullOrWhiteSpace(state.ConfiguredPath) ? null : ToolPathSource.CustomPath,
+                state.DetectedVersion,
+                state.Sha256,
+                Publisher: null,
+                descriptor?.Capabilities ?? ToolCapabilities.None,
+                descriptor?.RequiresElevationForUse ?? false);
+        }).ToArray();
     }
 
     public async Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
@@ -438,6 +473,26 @@ internal sealed class DesktopAgentRuntime :
         CancellationToken cancellationToken) =>
         StartMonitoringCoreAsync(request, cancellationToken);
 
+    public async Task RestoreContinuousMonitoringAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var preferences = await preferencesService.LoadAsync(cancellationToken);
+        if (!preferences.ContinuousMonitoringEnabled)
+        {
+            return;
+        }
+
+        var result = await StartMonitoringCoreAsync(
+            new StartAgentMonitoringRequest(
+                CreateDefaultMonitorRequest(preferences.MonitoringSampleRateHz),
+                CorrelationId.New()),
+            cancellationToken);
+        if (!result.IsSuccess)
+        {
+            tray.SetMonitoringSession(null);
+        }
+    }
+
     public Task<ApplicationResult<AgentResponse>> StopMonitoringAsync(
         StopAgentMonitoringRequest request,
         CancellationToken cancellationToken) =>
@@ -460,6 +515,34 @@ internal sealed class DesktopAgentRuntime :
         }
 
         tray.SetTestRun(request.RunId, "cancelling");
+        return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
+    }
+
+    public Task<ApplicationResult<AgentResponse>> PauseTestAsync(
+        PauseAgentTestRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!testCoordinator.TryRequestPause(request.RunId))
+        {
+            return RejectAsync(request.CorrelationId, "agent.testing.pause_not_available");
+        }
+
+        tray.SetTestRun(request.RunId, "pausing");
+        return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
+    }
+
+    public Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
+        ResumeAgentTestRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!testCoordinator.TryResume(request.RunId))
+        {
+            return RejectAsync(request.CorrelationId, "agent.testing.resume_not_available");
+        }
+
+        tray.SetTestRun(request.RunId, "running");
         return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
     }
 
@@ -1473,6 +1556,42 @@ internal sealed class DesktopAgentRuntime :
                 CancellationToken.None).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static MonitorRequest CreateDefaultMonitorRequest(double rateHz)
+    {
+        var systemId = SystemId.New();
+        return new MonitorRequest(
+            SessionId.New(),
+            systemId,
+            [
+                new MonitorTarget(
+                    new StorageObjectId(
+                        systemId,
+                        StorageObjectKind.PhysicalDisk,
+                        "pdh-wildcard"),
+                    "*"),
+                new MonitorTarget(
+                    new StorageObjectId(
+                        systemId,
+                        StorageObjectKind.VirtualDisk,
+                        "pdh-storage-spaces-wildcard"),
+                    "*")
+            ],
+            [
+                MonitorMetricKind.ActiveTimePercent,
+                MonitorMetricKind.ReadBytesPerSecond,
+                MonitorMetricKind.WriteBytesPerSecond,
+                MonitorMetricKind.AverageQueueLength,
+                MonitorMetricKind.VirtualDiskActiveBytes,
+                MonitorMetricKind.VirtualDiskMissingBytes,
+                MonitorMetricKind.VirtualDiskStaleBytes,
+                MonitorMetricKind.VirtualDiskNeedRegenerationBytes,
+                MonitorMetricKind.VirtualDiskRegeneratingBytes,
+                MonitorMetricKind.VirtualDiskPendingDeletionBytes
+            ],
+            TimeSpan.FromSeconds(1 / Math.Clamp(rateHz, 0.2, 20)),
+            ContinueWhenUiCloses: true);
     }
 
     private async Task ExecuteRamMapBeforeBatchAsync(

@@ -7,16 +7,23 @@ monitoring, and safely planning operations across Windows storage systems.
 
 ## Current version
 
-V0.4 is the current product version and begins the visual-polish and basic-
+V0.41 is the current product version and begins the visual-polish and basic-
 interaction phase on the completed V0.3 foundation. IPC remains protocol 3 and
-the Agent-owned SQLite contract remains schema 12.
+the Agent-owned SQLite contract is schema 13.
 
-V0.4 is deployed locally from the current branch. Its reproducible automatic
-baseline is 530 Release tests passed, with no failed or skipped tests, a
+V0.41 is the current local implementation version. Its reproducible automatic
+baseline is 549 Release tests passed, with no failed or skipped tests, a
 warning-free Release build, and no known vulnerable packages. Native UI, tray,
 UAC, device, external-tool, and data-location cases remain `unverified`; no
 documentation treats them as passed. V0.39 remains the tagged and released V0.3
 record.
+
+Portable, unpackaged Windows x64 delivery is the only currently implemented
+installation mode. The MSIX and Microsoft Store route is part of
+[Product](docs/Product.md), not a separate installation document.
+
+The [V0.41 Plan](docs/Archive/V0.41/Plan.md) is approved and implemented. It is not
+released, deployed, committed, or pushed by that approval.
 
 The V0.39 architecture-hardening pass ran before V0.4. It removed
 confirmed dead code and separates concentrated Agent and page responsibilities
@@ -62,6 +69,8 @@ The reproducible self-contained staging command is documented in
 - [Development](docs/Development.md): architecture, environment, build, staging,
   version, and documentation workflow.
 - [Quality](docs/Quality.md): automatic, native, and human acceptance gates.
+- [V0.41 Plan](docs/Archive/V0.41/Plan.md): approved startup, welcome, monitoring, persistence,
+  tray, and basic-interaction plan; implementation is complete.
 - [V0.39 final-correction archive](docs/Archive/V0.39-final-correction/README.md):
   the implemented final minimal V0.3 correction and its evidence.
 - [V0.39 architecture-hardening archive](docs/Archive/V0.39-architecture-hardening/README.md):
