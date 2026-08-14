@@ -384,10 +384,3 @@ public interface ITestRunAuthorizationCoordinator
         TestPlan plan,
         CancellationToken cancellationToken);
 }
-
-public interface ITestRunner
-{
-    IAsyncEnumerable<TestEvent> RunAsync(
-        AuthorizedTestRun run,
-        CancellationToken cancellationToken);
-}

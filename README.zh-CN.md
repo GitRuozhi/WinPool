@@ -10,16 +10,21 @@ WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于
 
 ## 当前版本
 
-V0.39 是当前本地实施版本。它在进入 V0.4 前完成 V0.3 稳定性收口，增加开发页诊断超时和状态、
-UI 事件恢复、关键取消边界和启动诊断。IPC 协议保持为 3，Agent 持有的 SQLite 合同保持为 schema 12。
+V0.39 是已完成的 V0.3 实施版本。它增加开发页诊断超时和状态、UI 事件恢复、关键取消
+边界，以及最终的 Agent 控制管道/测试页 Start/Cancel 对账。IPC 协议保持为 3，Agent
+持有的 SQLite 合同保持为 schema 12。
 
-V0.39 的 Release 自动门、依赖审计和构建结果记录在变更记录中。原生 UI、托盘、UAC、
-设备、外部工具和数据位置用例继续保持 `unverified`，不得将其写为通过。用户本次只授权本地 Git
-提交，不授权推送、tag、二进制上传、GitHub Release 或部署。
+V0.39 已在 `main`、tag 和 GitHub Release 中发布。当前可复现自动基线为 526 项
+Release 测试通过、0 failed、0 skipped、零警告 Release 构建，并且没有已知易受攻击依赖。
+原生 UI、托盘、UAC、设备、外部工具和数据位置用例继续保持 `unverified`，不得将其写为
+通过。已发布 Release 包含二进制资产；历史记录没有单独定位其上传授权，已如实记录该
+证据缺口，未改变 Release。
 
-当前计划在同一 V0.39 产品版本内进行一次 V0.3 最终最小修正检查点，只处理 Agent
-控制管道 timeout 隔离和测试页 Start/Cancel 对账，目前尚未授权实施。该检查点完成后，
-正常开发进入 V0.40；更广泛的异步和诊断清理延期到 V0.8–V0.9 技术债务参考。
+进入 V0.40 前的 V0.39 架构治理已清除已确认的无用代码，并拆分过度集中的 Agent 和页面职责；
+未新增产品功能、未改变 IPC/schema 合同，也未降低安全边界。该阶段现已冻结在
+[V0.39 架构治理归档](docs/Archive/V0.39-architecture-hardening/README.zh-CN.md)。治理后的完整
+自动门为 530 passed、0 failed、0 skipped；目标原生导航结果与仍为 `unverified` 的设备和副作用
+用例分别记录。
 
 ## 安全边界
 
@@ -47,6 +52,8 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 - [质量规则](docs/Quality.zh-CN.md)：自动门、原生集成门和人工验收门。
 - [V0.39 最终修正归档](docs/Archive/V0.39-final-correction/README.zh-CN.md)：
   已实施的 V0.3 最终最小修正及其证据。
+- [V0.39 架构治理归档](docs/Archive/V0.39-architecture-hardening/README.zh-CN.md)：
+  已完成的 V0.40 前清理与边界硬化阶段。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：已经实际发生的结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的已完成或已失效历史，包括已实施的
   V0.39 Plan。

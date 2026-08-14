@@ -519,36 +519,6 @@ public enum WorkerKind
     ExternalTool
 }
 
-public abstract record WorkerRequest(
-    WorkerKind Kind,
-    CorrelationId CorrelationId);
-
-public sealed record TestWorkerRequest(
-    AuthorizedTestRun TestRun,
-    CorrelationId CorrelationId)
-    : WorkerRequest(WorkerKind.Test, CorrelationId);
-
-public sealed record InventoryWorkerRequest(
-    InventoryRequest InventoryRequest,
-    CorrelationId CorrelationId)
-    : WorkerRequest(WorkerKind.Inventory, CorrelationId);
-
-public abstract record BrokerAction;
-
-public sealed record BrokerSystemSupportAction(AuthorizedSystemSupportAction Action)
-    : BrokerAction;
-
-public sealed record BrokerToolInstallAction(AuthorizedToolInstall Install)
-    : BrokerAction;
-
-public sealed record ElevatedBrokerRequest(
-    BrokerAction Action,
-    Guid Nonce,
-    string PlanHash,
-    DateTimeOffset ExpiresAtUtc,
-    CorrelationId CorrelationId)
-    : WorkerRequest(WorkerKind.ElevatedBroker, CorrelationId);
-
 public enum SupervisedProcessState
 {
     Starting,
@@ -558,12 +528,6 @@ public enum SupervisedProcessState
     Unresponsive,
     Failed
 }
-
-public sealed record WorkerHandle(
-    Guid WorkerId,
-    WorkerKind Kind,
-    int ProcessId,
-    DateTimeOffset StartedAtUtc);
 
 public readonly record struct ProcessInstanceId(Guid Value)
 {
@@ -596,14 +560,3 @@ public sealed record ShutdownResult(
     IReadOnlyList<int> RemainingProcessIds,
     int FlushedEventCount,
     bool TemporarySystemStateRestored);
-
-public interface IProcessSupervisor
-{
-    Task<ApplicationResult<WorkerHandle>> StartWorkerAsync(
-        WorkerRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<ShutdownResult>> ShutdownAllAsync(
-        ShutdownReason reason,
-        CancellationToken cancellationToken);
-}

@@ -49,21 +49,3 @@ public sealed record ApplicationTaskEvent(
     double? ProgressFraction = null,
     OperationId? OperationId = null,
     SessionId? SessionId = null);
-
-public interface IApplicationTaskEventSink
-{
-    ValueTask WriteAsync(
-        ApplicationTaskEvent taskEvent,
-        CancellationToken cancellationToken);
-}
-
-public interface IApplicationTaskEventQuery
-{
-    IAsyncEnumerable<ApplicationTaskEvent> WatchAsync(
-        ApplicationTaskId taskId,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<IReadOnlyList<ApplicationTaskEvent>>> GetHistoryAsync(
-        ApplicationTaskId taskId,
-        CancellationToken cancellationToken);
-}

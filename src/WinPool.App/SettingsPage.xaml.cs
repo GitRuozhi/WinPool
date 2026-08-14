@@ -156,13 +156,13 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        if (!await WaitForAgentExitAsync(shutdownTimeout.Token))
+        if (!await DataLocationSwitchRuntime.WaitForAgentExitAsync(shutdownTimeout.Token))
         {
             PublishDataLocationFailure(zh, "agent-exit-timeout");
             return;
         }
 
-        using var agentExclusion = TryAcquireAgentMigrationExclusion();
+        using var agentExclusion = DataLocationSwitchRuntime.TryAcquireAgentMigrationExclusion();
         if (agentExclusion is null)
         {
             PublishDataLocationFailure(zh, "agent-restarted-during-handoff");
@@ -170,10 +170,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var migrationTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-        var manager = new StorageLocationManager(
-            StorageDataLocations.StandardRoot,
-            StorageDataLocations.PortableRoot,
-            new StoppedAgentWriteCoordinator());
+        var manager = DataLocationSwitchRuntime.CreateManager();
         var planResult = await manager.PlanSwitchAsync(
             requestedMode,
             CorrelationId.New(),
@@ -219,7 +216,7 @@ public sealed partial class SettingsPage : Page
         }
 
         agentExclusion.Release();
-        if (!StartReplacementApplication())
+        if (!DataLocationSwitchRuntime.StartReplacementApplication())
         {
             await RestartAgentAfterAbortedSwitchAsync();
             ViewModel.NotificationService.PublishError(
@@ -233,23 +230,6 @@ public sealed partial class SettingsPage : Page
         }
 
         App.Window.Close();
-    }
-
-    private static async Task<bool> WaitForAgentExitAsync(CancellationToken cancellationToken)
-    {
-        while (File.Exists(NamedPipeAgentConnection.DefaultEndpointPath))
-        {
-            try
-            {
-                await Task.Delay(100, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private async Task RestartAgentAfterAbortedSwitchAsync()
@@ -274,48 +254,6 @@ public sealed partial class SettingsPage : Page
         catch (OperationCanceledException)
         {
         }
-    }
-
-    private static bool StartReplacementApplication()
-    {
-        var executable = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
-        {
-            return false;
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            UseShellExecute = true
-        };
-        startInfo.ArgumentList.Add(ApplicationStartupOptions.StorageLocationHandoffArgument);
-        startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForProcessArgument);
-        startInfo.ArgumentList.Add(Environment.ProcessId.ToString(
-            System.Globalization.CultureInfo.InvariantCulture));
-        using var process = Process.Start(startInfo);
-        return process is not null;
-    }
-
-    private static AgentMigrationExclusion? TryAcquireAgentMigrationExclusion()
-    {
-        var sid = WindowsIdentity.GetCurrent().User?.Value;
-        if (string.IsNullOrWhiteSpace(sid))
-        {
-            return null;
-        }
-
-        var mutex = new Mutex(
-            initiallyOwned: true,
-            $"Local\\WinPool.Agent.{IpcIdentity.HashUserSid(sid)[..24]}",
-            out var ownsMutex);
-        if (!ownsMutex)
-        {
-            mutex.Dispose();
-            return null;
-        }
-
-        return new AgentMigrationExclusion(mutex);
     }
 
     private void PublishDataLocationFailure(bool zh, string detail)
@@ -353,40 +291,6 @@ public sealed partial class SettingsPage : Page
         return $"{value:0.##} {units[index]}";
     }
 
-    private sealed class StoppedAgentWriteCoordinator : IStorageWriteQuiescenceCoordinator
-    {
-        public Task<IAsyncDisposable> QuiesceAndFlushAsync(
-            CorrelationId correlationId,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<IAsyncDisposable>(new NoOpAsyncDisposable());
-        }
-    }
-
-    private sealed class NoOpAsyncDisposable : IAsyncDisposable
-    {
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class AgentMigrationExclusion(Mutex mutex) : IDisposable
-    {
-        private Mutex? _mutex = mutex;
-
-        public void Release()
-        {
-            var owned = Interlocked.Exchange(ref _mutex, null);
-            if (owned is null)
-            {
-                return;
-            }
-
-            owned.ReleaseMutex();
-            owned.Dispose();
-        }
-
-        public void Dispose() => Release();
-    }
     private async void ThemeOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_ready || ThemeOptions.SelectedIndex < 0)

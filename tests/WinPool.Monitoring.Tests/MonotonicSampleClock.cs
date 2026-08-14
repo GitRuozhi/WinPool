@@ -2,14 +2,14 @@ using System.Diagnostics;
 
 namespace WinPool.Monitoring;
 
-public interface IMonotonicClock
+internal interface IMonotonicClock
 {
     long Timestamp { get; }
     long Frequency { get; }
     DateTimeOffset UtcNow { get; }
 }
 
-public sealed class SystemMonotonicClock : IMonotonicClock
+internal sealed class SystemMonotonicClock : IMonotonicClock
 {
     public long Timestamp => Stopwatch.GetTimestamp();
     public long Frequency => Stopwatch.Frequency;
@@ -20,7 +20,7 @@ public sealed class SystemMonotonicClock : IMonotonicClock
 /// ALG-MON-001: elapsed time comes only from a monotonic clock. UTC is retained
 /// for persistence and may move backwards without producing a negative interval.
 /// </summary>
-public sealed class MonotonicSampleClock
+internal sealed class MonotonicSampleClock
 {
     private readonly IMonotonicClock clock;
     private long? previousTimestamp;
@@ -48,7 +48,7 @@ public sealed class MonotonicSampleClock
     }
 }
 
-public readonly record struct NormalizedSampleTime(
+internal readonly record struct NormalizedSampleTime(
     long MonotonicTimestamp,
     DateTimeOffset PersistedUtc,
     TimeSpan ElapsedSincePrevious);

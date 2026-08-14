@@ -2,7 +2,7 @@
 
 ## 0. 状态、授权与基线
 
-- **计划状态**：prepared / awaiting implementation approval
+- **计划状态**：completed / frozen for archive on 2026-08-14
 - **创建日期**：2026-08-14
 - **基线提交**：`e9f799f5c70b109aea9549b7a7299da7b13e557e`
 - **工作分支**：`refactor/v039-architecture-hardening`
@@ -11,9 +11,9 @@
 - **阶段编号**：`V039-ARCH-HARDENING`，仅用于工作识别，不是产品版本
 - **阶段性质**：进入 V0.40 前的限界架构治理；不新增产品功能
 
-用户已授权本地 `main` 吸收最终 V0.39 提交、建立治理分支和编写本计划。编写
-本计划本身不授权实施代码重构、提交 Git、推送、打 tag、创建 GitHub Release、
-上传二进制或部署。实施必须由用户另行明确批准。
+用户已授权本地 `main` 吸收最终 V0.39 提交、建立治理分支、编写本计划、将当前
+Plan 提交并推送到 GitHub，以及完成本计划的全部 WP1–WP6 工作。tag、GitHub Release、
+二进制上传和部署仍需另行明确授权。
 
 本阶段保持 V0.39，不创建 `V0.39a`、`V0.399`、`V0.3.10` 或其他产品版本。
 治理完成并归档后，下一正常产品计划才推进到 V0.40。
@@ -98,6 +98,109 @@ V0.39 的产品行为、安全边界和内部兼容性。
 `Rubbish/20260814_winpool_architecture_hardening/Program/WinPool/` 下并保留相对路径。
 混合文件中的无用声明可以在确认后精确移除；不得顺手清理未列入审计记录的相邻代码。
 每个候选族作为独立变更验证，不能一次性大批删除后再修编译错误。
+
+#### WP2 清理前评价记录（2026-08-14）
+
+统一评价方法：对 `src`、`workers`、`tests` 进行精确符号引用扫描；对项目根级其余代码和
+配置进行外部引用扫描；检查 closed Agent IPC decoder、JSON/源生成特性、DI/反射入口和
+SQLite/持久化路径；并以本计划 WP1 的 526 项自动测试基线作为回归起点。以下结论均未实施，
+每项都等待用户逐项批准。
+
+1. **`DiskDetailFormatter.cs`**
+   - 证据：`DiskDetailFormatter` 只出现在其自身声明文件，未在 XAML、C#、测试、配置或
+     项目外代码中出现；没有 DI、JSON 或 IPC 接线。
+   - 风险：低。它只是未调用的展示字符串格式器，不持有数据、文件或进程副作用。
+   - 建议：将完整文件移动到规定的根级 Rubbish 路径；不需要替代实现。
+   - 决定：**待用户批准清理点 A**。
+
+2. **`Commands.cs` 的预留命令总线**
+   - 范围：`IApplicationCommand`、`IApplicationCommandHandler` 和
+     `RefreshInventoryCommand`、`SaveWorkspaceCommand`、`RequestOperationPlanCommand`、
+     `StartTestCommand`、`CancelTestCommand`、`StartMonitoringCommand`、
+     `StopMonitoringCommand`、`DetectExternalToolCommand`、`PlanExternalToolInstallCommand`。
+   - 证据：每个符号只在 `Commands.cs` 内出现；当前调用链使用 closed `AgentRequest`、
+     专用协调器和 typed contract，而不是这套通用命令。
+   - 风险：低。无 JSON discriminator、IPC message type、SQLite 表或外部项目引用；项目也
+     不承诺公共 SDK/插件命令 API。
+   - 建议：将完整 `Commands.cs` 移到 Rubbish，避免未来为无消费者命令建立处理器。
+   - 决定：**待用户批准清理点 B**。
+
+3. **`ExecutionContracts.cs` 的重复 Application 抽象**
+   - 范围：`AuthorizationReceipt`、`AuthorizedOperation`、`IOperationPlanner`、
+     `IOperationPolicyEvaluator`、`IOperationAuthorizationCoordinator` 和
+     `IOperationExecutor`。
+   - 证据：这些 Application 符号均只在该文件内出现。现有执行实现使用
+     `WinPool.Execution` 命名空间内的独立 `AuthorizedOperation`、planner、policy 和
+     executor；两者没有接线。
+   - 风险：中低。名称相近，清理前必须保持 `WinPool.Execution` 版本不变，并确认编译后
+     没有因 `using WinPool.Application` 隐藏的歧义；未发现序列化或外部消费者。
+   - 建议：将完整 `ExecutionContracts.cs` 移到 Rubbish；这是去除重复抽象，不改变执行
+     安全模型。
+   - 决定：**待用户批准清理点 C**。
+
+4. **`IMonitoringQuery`**
+   - 证据：接口只在 `MonitoringContracts.cs` 声明，无实现、调用、DI、IPC 或测试替身；
+     `IMonitoringCoordinator` 和监控模型仍有实际消费者。
+   - 风险：低。只删除未接线的未来查询面，不触及监控采样、会话或持久化。
+   - 建议：仅移除该接口声明，保留同文件其余有效契约。
+   - 决定：**待用户批准清理点 D**。
+
+5. **`Queries.cs` 的未消费者子图**
+   - 范围：`StorageSystemView`、`StorageChangeKind`、`StorageChange`、
+     `ObjectComparisonValue`、`ObjectComparisonRow`、`IStorageSystemQuery`、
+     `IWorkspaceQuery`。
+   - 证据：上述符号只在 `Queries.cs` 内出现。不得移除
+     `StorageSystemSourceKind`、`IdentityStability`、`StorageObjectView`、`WorkspacePage` 或
+     `WorkspaceState`：它们被 Manage、Inventory、App、Infrastructure 和测试实际使用。
+   - 风险：中低。需要精确删除该子图而不是删除整个文件；保留的共享基础类型不能重命名或
+     移位为不必要的重构。
+   - 建议：精确移除未消费者子图，保留仍被使用的类型及其命名空间位置。
+   - 决定：**待用户批准清理点 E**。
+
+6. **`IApplicationTaskEventSink` 与 `IApplicationTaskEventQuery`**
+   - 证据：两个接口只在 `TaskEvents.cs` 声明；`ApplicationTaskEvent` 本身由 Agent、Worker
+     和测试使用，不能移除。
+   - 风险：低。移除不会改变现有任务事件封装、Agent 事件投影或 IPC。
+   - 建议：仅移除这两个未接线接口。
+   - 决定：**待用户批准清理点 F**。
+
+7. **`ITestRunner`**
+   - 证据：接口只在 `TestingContracts.cs` 声明；`ITestPlanner` 和
+     `ITestRunAuthorizationCoordinator` 有明确实现与消费者，必须保留。
+   - 风险：低。当前运行由 Agent/TestWorker 路径承担，不使用这个抽象。
+   - 建议：仅移除 `ITestRunner`，不重组相邻测试合同。
+   - 决定：**待用户批准清理点 G**。
+
+8. **旧通用 Worker/Broker 请求层**
+   - 范围：`WorkerRequest`、`TestWorkerRequest`、`InventoryWorkerRequest`、`BrokerAction`、
+     `BrokerSystemSupportAction`、`BrokerToolInstallAction`、`ElevatedBrokerRequest`、
+     `WorkerHandle` 和 `IProcessSupervisor`。
+   - 证据：这些符号只在 `ProcessCoordinationContracts.cs` 内自引用。实际进程追踪使用
+     `WorkerKind`、`ProcessRegistration`、Agent 的专用 hosts/coordinators 和 closed IPC；
+     后三者有生产和测试消费者，必须保留。
+   - 风险：中低。需要精确删除该旧层，不能删除 `WorkerKind`、`ProcessRegistration`、
+     `ProcessInstanceId`、`ShutdownReason` 或 `ShutdownResult`。
+   - 建议：精确移除旧通用层，防止它与当前专用进程所有权并存并诱导错误抽象。
+   - 决定：**待用户批准清理点 H**。
+
+9. **生产项目中的测试专用单调时钟**
+   - 范围：`IMonotonicClock`、`SystemMonotonicClock`、`MonotonicSampleClock` 和
+     `NormalizedSampleTime`。
+   - 证据：无生产调用；`MonotonicSampleClock`、`IMonotonicClock` 及其返回类型仅由
+     `WinPool.Monitoring.Tests` 的算法测试使用。它们不属于死代码，但当前放在生产程序集
+     中扩大了公开面。
+   - 风险：低。应保持同一算法测试，改为将完整实现移至测试项目的内部 helper；不能简单
+     丢弃，因为它覆盖单调时间与 UTC 回退语义。
+   - 建议：移动而非删除；移动后运行 Monitoring 测试和完整自动门。
+   - 决定：**待用户批准清理点 I**。
+
+10. **`MainWindow.xaml` 的退役 `WinPool.Core` 命名空间**
+    - 证据：只存在 `xmlns:core="using:WinPool.Core"` 声明，没有任何 `core:` XAML 用法；
+      其余出现仅是架构测试中的退役名称文本。
+    - 风险：低。删除该行不改变控件、绑定、运行时类型或 IPC；当前架构测试未扫描 XAML，
+      这是它漏报残留的证据。
+    - 建议：移除该单行，并在 WP6 增加对 C# 与 XAML 的退役命名空间检查。
+    - 决定：**待用户批准清理点 J**。
 
 ### WP3：拆分 DesktopAgentRuntime
 
@@ -251,8 +354,81 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 
 ## 9. 实施记录
 
-尚未开始。当前仅完成：
+已完成：
 
 - 本地 `main` 已快进到最终 V0.39 提交 `e9f799f`；
 - 已从该基线创建 `refactor/v039-architecture-hardening`；
-- 已编写本活动计划，等待用户明确批准实施。
+- 初始 Plan 已由 `90bb801` 提交并推送到
+  `origin/refactor/v039-architecture-hardening`；`origin/main` 已快进到 `e9f799f`。
+- 2026-08-14 的 WP1 自动基线：restore `passed`；Release tests 为 526 passed、0 failed、
+  0 skipped；Release build 为 0 warning、0 error；依赖漏洞审计未发现已知漏洞。
+- GitHub Release `V0.39` 是正式发布、指向 `e9f799f`，并包含
+  `WinPool-V0.39-final-win-x64.zip`（242,873,406 bytes，SHA-256
+  `782caa4af10cd781edc524a4d035d88309110967b242ffaea6cf47a429a1bfba`）。现有授权记录
+  明确记载 commit、push、tag 和 Release，但未单独定位到二进制资产上传授权；该历史
+  证据缺口已记录，未对远端 Release 或资产做任何改变。
+
+已完成的 WP3：
+
+- `DesktopAgentRuntime` 已从约 3,090 行收敛为进程级组合与薄请求路由；测试启动授权、
+  完整运行生命周期、TestWorker 监管、CopyBatch 恢复和执行分别归属
+  `TestRunStartCoordinator`、`AgentTestRunWorkflow`、`TestWorkerSupervisor`、
+  `CopyBatchRecoveryCoordinator` 和 `CopyBatchExecutionCoordinator`。
+- `TestExecutionRules` 承担步骤排序、受控系统辅助动作和工具退出码的纯规则；
+  `AgentProcessProjection` 承担受监管进程的安全投影。没有改变 IPC protocol 3、schema 12、
+  四进程模型或真实 mutation 边界。
+
+已完成的 WP4：
+
+- `TestDefinitionFactory` 已移入 `WinPool.Testing`，拥有 I/O、Copy 与 Mixed Directory
+  三种闭合测试定义图及 CopyBatch 边界；`TestPage` 只收集原生控件输入并调用工厂。
+- 为避免以 presenter 或平行页面状态模型制造新的技术债，Prepare/Start/Cancel 的确认对话框、
+  picker、Dispatcher、事件流订阅、未知结果对账、历史选择和 System Support 结果呈现保持在
+  WinUI 页面适配层。它们没有新增领域规则、SQLite 写入或自由命令入口。
+- `WinPool.Testing.Tests` 已增加三项工厂回归测试，锁定重复 I/O 步骤、CopyBatch 上限和
+  Mixed Directory manifest 上限。
+
+已完成的 WP5：
+
+- 数据位置切换的非 UI 原语已移至 `DataLocationSwitchRuntime`：已停止 Agent 的写入协调、
+  命名管道退出等待、每用户迁移互斥、经验证的 `StorageLocationManager` 组合和替代应用启动。
+  `SettingsPage` 保留两次原生确认、Agent 重连和用户提示。
+- 外部工具检测、路径配置及 portable/MSI 安装仍由现有 typed Agent contract、受控安装器和
+  原生确认对话框组成；本次未引入新的安装状态机或查询协议。TD-803 未出现需要 IPC/schema
+  升级的 timeout、UAC continuation 或部分安装证据，因此保持原有受控语义。
+
+已完成的 WP6：
+
+- 架构测试现在验证 Runtime 对专责 workflow 的委派、测试定义图的跨层归属和数据位置切换
+  的互斥/受控迁移原语；不再要求 Runtime 保留已抽取的私有实现文本。
+- 退役 `WinPool.Core` 扫描同时覆盖生产 C# 与 XAML；新增的防回退测试确保 `TestPage`
+  不会重新承载定义图和 CopyBatch 边界。
+- 2026-08-14 最终自动门：restore `passed`；Release 单进程测试 530 passed、0 failed、
+  0 skipped；Release 单进程 build 0 warning、0 error；依赖漏洞审计未发现已知漏洞。
+- 原生最小验证：`passed` App 启动、欢迎对话框关闭、六个标题栏标签发现、Test→Settings
+  导航；`unverified` Test Prepare/Start/Cancel/历史、Dite 导入/导出、System Support、
+  主题/语言/执行模式/工具检测及数据位置迁移。Settings 自动扫描曾显示失败并保留上次结果，
+  未把该环境诊断记为通过，也没有执行真实操作。
+
+已完成的 WP1 文档勘误：
+
+- `README` 已反映 V0.39 最终修正、`main`/tag/Release 现状、526 自动测试基线和当前
+  架构治理阶段；中文阅读副本已同步。
+- `CHANGELOG` 已将 526 记录为 V0.39 的控制测试计数，并保留 562 表述的前向勘误；
+  中文阅读副本已同步。
+
+已完成的 WP2 清理：
+
+- A、B、C 的完整废弃文件已移动到项目根级
+  `Rubbish/20260814_winpool_architecture_hardening/Program/WinPool/`，保留原相对路径。
+- D、E、F、G、H 的已批准无消费者合同已精确移除，同时保留仍有消费者的共享类型。
+- I 的单调时钟实现已移到 `WinPool.Monitoring.Tests` 并改为内部测试 helper；测试覆盖保留。
+- J 的退役 `WinPool.Core` XAML 命名空间已移除。
+- WP2 后完整 Release 自动测试仍为 526 passed、0 failed、0 skipped。
+
+进行中的 WP3：
+
+- 已抽取 `TestExecutionRules` 和 `TestWorkerSupervisor`；后者拥有 TestWorker 注册、心跳、
+  调度恢复和终态持久化。Agent 测试已通过。
+- 已抽取 `CopyBatchRecoveryCoordinator`，拥有 manifest 创建、恢复校验和终态验证；Agent
+  测试已通过。剩余 CopyBatch 执行与运行工作流继续在 WP3 中拆分。

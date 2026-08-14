@@ -18,7 +18,7 @@ public sealed class TestStepOrderingTests
     {
         Assert.Equal(
             expected,
-            DesktopAgentRuntime.IsAcceptedToolExit(
+            TestExecutionRules.IsAcceptedToolExit(
                 new ToolId(toolId),
                 exitCode));
     }
@@ -30,7 +30,7 @@ public sealed class TestStepOrderingTests
         var second = Step("second", ["first"]);
         var independent = Step("independent", []);
 
-        var ordered = DesktopAgentRuntime.OrderStepsForExecution(
+        var ordered = TestExecutionRules.OrderStepsForExecution(
             [second, independent, first]);
 
         Assert.NotNull(ordered);
@@ -43,10 +43,10 @@ public sealed class TestStepOrderingTests
     public void InvalidOrCyclicGraphIsRejected()
     {
         Assert.Null(
-            DesktopAgentRuntime.OrderStepsForExecution(
+            TestExecutionRules.OrderStepsForExecution(
                 [Step("a", ["b"]), Step("b", ["a"])]));
         Assert.Null(
-            DesktopAgentRuntime.OrderStepsForExecution(
+            TestExecutionRules.OrderStepsForExecution(
                 [Step("a", ["missing"])]));
     }
 

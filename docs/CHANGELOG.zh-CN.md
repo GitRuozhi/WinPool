@@ -7,6 +7,18 @@
 
 本文件只记录已经实际发生的结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
 
+## V0.39 架构治理 — 2026-08-14
+
+- 移除已确认无消费者合同与退役 UI 残留；测试专用单调时间 helper 已随 Monitoring 测试迁移。
+- 将 Agent 测试启动、运行生命周期、TestWorker 监管、CopyBatch 恢复和执行拆分为聚焦的内部组件。
+- 将 I/O、Copy、Mixed Directory 的闭合定义图移至 `WinPool.Testing`，隔离 Settings 数据位置
+  交接原语，并强化架构防回退测试。
+
+最终治理门通过 530 项 Release 测试（0 failed、0 skipped）、零警告 Release 构建和依赖漏洞
+审计。App 启动、欢迎关闭、六个标题栏标签及 Test→Settings 导航通过。其他原生、设备、UAC、
+安装器、迁移和长期用例保持 `unverified`；未执行真实存储修改、安装、迁移或测试写入。这是 V0.39
+维护记录，不是产品发布。
+
 ## V0.39 — 2026-08-13
 
 - 开发页诊断刷新增加超时、可见状态和重复刷新保护。
@@ -16,7 +28,15 @@
 - 测试页 Start/Cancel 增加 `OutcomeUnknown`、RunId 对账和禁止自动重试。
 - 完成 V0.4 视觉阶段前 V0.3 的最终最小修正。
 
-V0.39 已通过 562 项 Release 自动测试（无 skipped）、零警告 Release 构建、依赖审计和四进程自包含 staging 验证。目标 WinUI 启动、导航和测试页控件检查通过；延迟响应下的 Start/Cancel 行为由自动测试覆盖，未在人工界面中强行制造。继承的原生、设备、UAC 和长期运行矩阵继续保持 `unverified`。用户已授权本地提交、GitHub 推送、V0.39 tag 和 GitHub Release。
+V0.39 当前可复现自动基线为 526 项 Release 测试通过、0 failed、0 skipped、零警告 Release
+构建、依赖审计和四进程自包含 staging 验证。目标 WinUI 启动、导航和测试页控件检查通过；
+延迟响应下的 Start/Cancel 行为由自动测试覆盖，未在人工界面中强行制造。继承的原生、设备、
+UAC 和长期运行矩阵继续保持 `unverified`。用户已授权本地提交、GitHub 推送、V0.39 tag 和
+GitHub Release。
+
+2026-08-14 勘误：先前的 562 项测试表述无法由 V0.39 解决方案复现。完整 Release 命令输出
+526 passed、0 failed、0 skipped；526 是当前 V0.39 自动测试的控制计数。冻结归档原文作为
+历史证据保留，不改写。
 
 ## V0.38 — 2026-08-13
 
