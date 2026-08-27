@@ -5,53 +5,62 @@
 > 本文件仅为中文阅读副本；实际变更历史以无 `.zh-CN` 后缀的
 > [CHANGELOG.md](CHANGELOG.md) 为准。
 
-本文件只记录已经实际发生的结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在 `Archive`。
+本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
+`Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
 ## V0.41 — 2026-08-14
 
-- 实施已确认的 V0.41 启动、欢迎、监控、持久化、托盘和基础交互计划。
-- 修复偏好加载卡住导致 Agent 一直处于 `Recovering` 的问题，恢复持续监控的
-  启动、关闭主窗、重开接回、取消恢复默认行为，并完成语言、外部工具、数据位置和
-  Edit/Settings 布局调整。
+### Added
+- 已确认 V0.41 计划中的启动欢迎、持续监控、持久化、托盘和基础交互。
 
-完整 Release 门通过 549 项测试（0 failed、0 skipped）、零警告 Release 构建、无已知易受攻击
-包，并验证四进程 staging 树。原生欢迎尺寸、Edit 布局、Settings 布局、监控默认值、持续监控
-重接、Ctrl+1 提示缺失和托盘菜单语言同步均已检查。青色/系统强调色切换和 Settings 外部工具
-缓存显示也已检查。继承的拓扑右键定位、设备、UAC、DPI、外部工具执行和长期用例仍为
-`unverified`。未创建 commit、push、tag、Release、二进制上传或部署。
+### Changed
+- 语言、外部工具、数据位置以及 Edit/Settings 布局。
+
+### Fixed
+- 偏好加载卡住导致 Agent 一直处于 `Recovering` 的问题。
+- 持续监控的启动、关闭主窗、重开和接回。
+
+### Compatibility
+- Agent 持有的 SQLite 为 schema 13。更旧 schema 会被拒绝且不迁移。
+- IPC 仍为协议 3。
+- 用户偏好只保存在 `settings.json`；SQLite 不再保存用户偏好。
+
+### Known Limitations
+- 继承的拓扑右键定位、设备、UAC、DPI、外部工具执行和长期用例仍为 `unverified`。
+- 未创建 commit、push、tag、Release、二进制上传或部署。
 
 ## V0.4 — 2026-08-14
 
-- 定义 V0.4 为当前产品版本；机械 .NET 版本元数据为 `0.4.0`。
-- 已将经过验证的四进程自包含包部署到本机。
-- 已将 V0.4 版本定义推送到 GitHub；未创建 tag、GitHub Release 或二进制上传。
+### Changed
+- 打开 V0.4 产品线。机械 .NET 版本元数据为 `0.4.0`。
+
+### Known Limitations
+- V0.4 版本定义已推送到 GitHub。未创建 tag、GitHub Release 或二进制上传。
 
 ## V0.39 架构治理 — 2026-08-14
 
-- 移除已确认无消费者合同与退役 UI 残留；测试专用单调时间 helper 已随 Monitoring 测试迁移。
-- 将 Agent 测试启动、运行生命周期、TestWorker 监管、CopyBatch 恢复和执行拆分为聚焦的内部组件。
-- 将 I/O、Copy、Mixed Directory 的闭合定义图移至 `WinPool.Testing`，隔离 Settings 数据位置
-  交接原语，并强化架构防回退测试。
+### Changed
+- 移除已确认无消费者合同与退役 UI 残留。
+- 拆分过度集中的 Agent 和页面职责。
+- 将 I/O、Copy、Mixed Directory 的闭合定义图移至 `WinPool.Testing`。
 
-最终治理门通过 530 项 Release 测试（0 failed、0 skipped）、零警告 Release 构建和依赖漏洞
-审计。App 启动、欢迎关闭、六个标题栏标签及 Test→Settings 导航通过。其他原生、设备、UAC、
-安装器、迁移和长期用例保持 `unverified`；未执行真实存储修改、安装、迁移或测试写入。这是 V0.39
-维护记录，不是产品发布。
+### Known Limitations
+- 这是 V0.39 维护记录，不是产品发布。
+- 其余原生、设备、UAC、安装器、迁移和长期用例保持 `unverified`。
 
 ## V0.39 — 2026-08-13
 
+### Fixed
 - 开发页诊断刷新增加超时、可见状态和重复刷新保护。
-- 开发页刷新异常时显示明确信息并恢复控件。
 - 请求取消或超时后隔离控制管道，避免迟到响应被下一请求消费。
-- 已提交请求在响应帧丢失或畸形时归类为 `OutcomeUnknown`，不再错误地当作确定环境失败。
-- 测试页 Start/Cancel 增加 `OutcomeUnknown`、RunId 对账和禁止自动重试。
+- 测试页 Start/Cancel 对丢失或畸形响应使用 `OutcomeUnknown`，并做 RunId 对账且禁止自动重试。
+
+### Changed
 - 完成 V0.4 视觉阶段前 V0.3 的最终最小修正。
 
-V0.39 当前可复现自动基线为 526 项 Release 测试通过、0 failed、0 skipped、零警告 Release
-构建、依赖审计和四进程自包含 staging 验证。目标 WinUI 启动、导航和测试页控件检查通过；
-延迟响应下的 Start/Cancel 行为由自动测试覆盖，未在人工界面中强行制造。继承的原生、设备、
-UAC 和长期运行矩阵继续保持 `unverified`。用户已授权本地提交、GitHub 推送、V0.39 tag 和
-GitHub Release。
+### Known Limitations
+- 继承的原生、设备、UAC 和长期运行矩阵继续保持 `unverified`。
+- 用户已授权本地提交、GitHub 推送、V0.39 tag 和 GitHub Release。
 
 2026-08-14 勘误：先前的 562 项测试表述无法由 V0.39 解决方案复现。完整 Release 命令输出
 526 passed、0 failed、0 skipped；526 是当前 V0.39 自动测试的控制计数。冻结归档原文作为

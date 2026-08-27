@@ -14,5 +14,31 @@
     <FileVersion>$(WinPoolVersionMajor).$(WinPoolVersionMinor).$(WinPoolVersionIteration).0</FileVersion>
     <InformationalVersion>$(WinPoolVersion)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+    <!-- Generated output stays under artifacts. Source trees remain source. -->
+    <WinPoolLocalOutputRoot>$(MSBuildThisFileDirectory)artifacts\$(Configuration)\</WinPoolLocalOutputRoot>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\build\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'
+                         Or '$(MSBuildProjectName)' == 'WinPool.Agent'
+                         Or '$(MSBuildProjectName)' == 'WinPool.TestWorker'
+                         Or '$(MSBuildProjectName)' == 'WinPool.ElevatedBroker'">
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
+    <OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
+    <OutputPath>$(WinPoolLocalOutputRoot)Agent\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.TestWorker'">
+    <OutputPath>$(WinPoolLocalOutputRoot)Agent\TestWorker\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.ElevatedBroker'">
+    <OutputPath>$(WinPoolLocalOutputRoot)Agent\Broker\</OutputPath>
   </PropertyGroup>
 </Project>

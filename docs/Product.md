@@ -31,11 +31,11 @@ WinPool may inspect the local machine through read-only collectors, edit persist
 simulated systems, run registered-directory file tests, monitor supported devices,
 and execute explicitly reviewed support actions.
 
-Real storage-structure mutation is not part of the V0.3 product boundary. WinPool
-must not initialize, clear, format, create, remove, repair, or resize real disks,
-partitions, volumes, Storage Pools, Storage Tiers, or Virtual Disks during this
-line. V0.5 is the earliest stage permitted to introduce those operations through
-reviewed typed plans; it is not a permanent simulation-only product.
+Real storage-structure mutation is outside the product boundary until V0.5. Until
+then, WinPool must not initialize, clear, format, create, remove, repair, or
+resize real disks, partitions, volumes, Storage Pools, Storage Tiers, or Virtual
+Disks. V0.5 is the earliest stage permitted to introduce those operations through
+reviewed typed plans; the product is not permanently simulation-only.
 
 From V0.5 onward, each real mutation has two explicit authorization contexts:
 
@@ -54,9 +54,10 @@ External DiskSpd, fio, Dite, RoboCopy, and RAMMap installations remain separate.
 WinPool discovers or invokes them through typed adapters and validated targets; it
 does not bundle their engines.
 
-## Current architecture line
+## Architecture line
 
-V0.4 retains the accepted V0.13 visual baseline and the V0.2 multi-process rewrite:
+The V0.4 product line retains the accepted V0.13 visual baseline and the V0.2
+multi-process rewrite:
 
 - one unpackaged WinUI 3 App;
 - one visible per-user tray Agent and SQLite writer;
@@ -73,15 +74,14 @@ contracts and do not form additional project versions.
 
 The user confirmed the following product route on 2026-08-12. It defines phase
 objectives, not permission to bypass the product boundary, a substitute for an
-active Plan, or evidence that a phase is complete. The current local
-implementation version is V0.41, beginning the V0.4 line.
+active Plan, or evidence that a phase is complete.
 
-| Phase | Objective | Status or governing constraint |
+| Phase | Objective | Governing constraint |
 | --- | --- | --- |
 | V0.1 | Deliver the minimum prototype and establish the basic front-end visual direction. | Historical foundation. |
 | V0.2 | Completely restructure the codebase; establish the baseline architecture and development rules. | Historical foundation. |
-| V0.3 | Correct code defects and establish normal operation. | Completed at V0.39 after the final minimal correction checkpoint. Remaining native, manual, and platform evidence is recorded honestly and does not become passed through version confirmation. |
-| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. | Current phase; preserve accessibility and the accepted structural baseline. |
+| V0.3 | Correct code defects and establish normal operation. | Historical foundation. Version confirmation does not mark remaining native or manual evidence as passed. |
+| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. | Preserve accessibility and the accepted structural baseline. |
 | V0.5 | Complete management and editing workflows to provide a modern functional alternative to the legacy Windows storage GUIs. | First phase permitted to introduce controlled real storage-structure operations under the explicit developer- and product-user authorization model. |
 | V0.6 | Complete testing and monitoring functions. | External tools remain typed adapters with explicit target validation. |
 | V0.7 | Complete development-facing and AI Agent functions. | Do not freeze a public SDK, plug-in API, database contract, or wire protocol until internal models are stable. |

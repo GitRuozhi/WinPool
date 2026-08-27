@@ -22,29 +22,17 @@
   <ItemGroup>
     <Content Include="..\WinPool.App\Assets\CAppIcon.ico" Link="Assets\CAppIcon.ico" />
   </ItemGroup>
-  <Target Name="CopyTestWorkerRuntime" AfterTargets="Build">
+  <Target Name="BuildTestWorkerRuntime" AfterTargets="Build">
     <MSBuild Projects="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"
              Targets="Build"
-             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
-    <ItemGroup>
-      <TestWorkerRuntimeFiles Include="..\..\workers\WinPool.TestWorker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
-                              Exclude="..\..\workers\WinPool.TestWorker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
-    </ItemGroup>
-    <Copy SourceFiles="@(TestWorkerRuntimeFiles)"
-          DestinationFiles="@(TestWorkerRuntimeFiles->'$(OutDir)TestWorker\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;Platform;PublishDir" />
   </Target>
-  <Target Name="CopyElevatedBrokerRuntime" AfterTargets="Build">
+  <Target Name="BuildElevatedBrokerRuntime" AfterTargets="Build">
     <MSBuild Projects="..\..\workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj"
              Targets="Build"
-             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
-    <ItemGroup>
-      <ElevatedBrokerRuntimeFiles Include="..\..\workers\WinPool.ElevatedBroker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
-                                  Exclude="..\..\workers\WinPool.ElevatedBroker\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
-    </ItemGroup>
-    <Copy SourceFiles="@(ElevatedBrokerRuntimeFiles)"
-          DestinationFiles="@(ElevatedBrokerRuntimeFiles->'$(OutDir)Broker\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;Platform;PublishDir" />
   </Target>
   <Target Name="PublishTestWorkerRuntime" AfterTargets="Publish">
     <MSBuild Projects="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj"

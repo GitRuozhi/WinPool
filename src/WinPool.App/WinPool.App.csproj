@@ -63,21 +63,11 @@
     <ProjectReference Include="..\WinPool.Testing\WinPool.Testing.csproj" />
   </ItemGroup>
 
-  <Target Name="CopyAgentRuntimeBesideApp" AfterTargets="Build">
+  <Target Name="BuildAgentRuntime" AfterTargets="Build">
     <MSBuild Projects="..\WinPool.Agent\WinPool.Agent.csproj"
              Targets="Build"
-             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
-    <ItemGroup>
-      <AgentRuntimeFiles Include="..\WinPool.Agent\bin\$(Platform)\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
-                         Condition="'$(Platform)' != ''"
-                         Exclude="..\WinPool.Agent\bin\$(Platform)\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
-      <AgentRuntimeFiles Include="..\WinPool.Agent\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*"
-                         Condition="'$(Platform)' == ''"
-                         Exclude="..\WinPool.Agent\bin\$(Configuration)\net10.0-windows10.0.19041.0\**\*.pdb" />
-    </ItemGroup>
-    <Copy SourceFiles="@(AgentRuntimeFiles)"
-          DestinationFiles="@(AgentRuntimeFiles->'$(OutDir)Agent\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;Platform;PublishDir" />
   </Target>
 
   <Target Name="PublishAgentRuntimeBesideApp" AfterTargets="Publish">

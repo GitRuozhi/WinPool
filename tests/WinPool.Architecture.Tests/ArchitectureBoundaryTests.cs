@@ -232,13 +232,29 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
         var appStartup = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "App.xaml.cs"));
+        var directoryBuildProps = File.ReadAllText(
+            Path.Combine(root, "Directory.Build.props"));
 
         Assert.Contains(
-            "$(OutDir)Agent\\%(RecursiveDir)",
-            appProject,
+            "artifacts\\$(Configuration)\\",
+            directoryBuildProps,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "$(WinPoolLocalOutputRoot)Agent\\",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "$(WinPoolLocalOutputRoot)Agent\\TestWorker\\",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "$(WinPoolLocalOutputRoot)Agent\\Broker\\",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "$(OutDir)%(RecursiveDir)%(Filename)%(Extension)",
+            "bin\\$(Platform)\\$(Configuration)\\net10.0-windows10.0.19041.0",
             appProject,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -650,13 +666,18 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "build", "Publish-Staged.ps1"));
 
         Assert.Contains("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
-        Assert.Contains("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
+        Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "<ProjectReference Include=\"..\\WinPool.Agent\\WinPool.Agent.csproj\"",
             appProject,
             StringComparison.Ordinal);
         Assert.Contains("PublishTestWorkerRuntime", agentProject, StringComparison.Ordinal);
         Assert.Contains("PublishElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.Contains("BuildTestWorkerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.Contains("BuildElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopyTestWorkerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopyElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
         Assert.Contains("System.IO.Path]::GetFullPath", appProject, StringComparison.Ordinal);
         Assert.Contains("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
         Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);

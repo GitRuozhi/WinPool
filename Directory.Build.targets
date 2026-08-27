@@ -1,0 +1,19 @@
+<Project>
+  <!-- Re-apply after the SDK so WinUI/RID evaluation cannot reintroduce tfm/rid folders. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
+    <OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>
+    <OutDir>$(WinPoolLocalOutputRoot)</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
+    <OutputPath>$(WinPoolLocalOutputRoot)Agent\</OutputPath>
+    <OutDir>$(WinPoolLocalOutputRoot)Agent\</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.TestWorker'">
+    <OutputPath>$(WinPoolLocalOutputRoot)Agent\TestWorker\</OutputPath>
+    <OutDir>$(WinPoolLocalOutputRoot)Agent\TestWorker\</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.ElevatedBroker'">
+    <OutputPath>$(WinPoolLocalOutputRoot)Agent\Broker\</OutputPath>
+    <OutDir>$(WinPoolLocalOutputRoot)Agent\Broker\</OutDir>
+  </PropertyGroup>
+</Project>

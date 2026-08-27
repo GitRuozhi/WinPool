@@ -8,6 +8,25 @@ Every gate or case must use one of: `passed`, `failed`, `unverified`,
 `not_required`, or `deferred_by_user`. A skipped or unavailable check is never
 reported as passed.
 
+## When to run gates
+
+Having a full test capability does not mean every change should run every gate.
+
+- Documentation-only changes do not run code, native, device, or visual tests.
+- Ordinary small edits and ordinary feature work do not run the full quality
+  gate.
+- If the developer names a test, run that scope.
+- If a change has an obvious local risk, the smallest directly related check is
+  allowed; do not escalate it into a full verification flow.
+- Completing a formal stage does not start full acceptance. Ask the developer
+  whether to enter formal testing.
+- A formal version or formal acceptance run uses the gates below after the
+  developer confirms that run.
+
+Stage-specific test directories, matrices, and results belong in the active Plan
+or in Archive, not in this long-term policy. Test counts belong in Plan or
+CHANGELOG evidence when they are important final results.
+
 ## Quality model
 
 WinPool is a native Windows, multi-process .NET application. Browser DOM tests,
@@ -21,7 +40,9 @@ applicable unless WinPool later introduces a separately approved web surface.
 - Every English authoritative Markdown document has a matching `.zh-CN.md`
   reading copy, and every copy identifies the unsuffixed document as controlling.
 - Markdown links and documented paths resolve.
-- Version sources, runtime display values, and tracked documentation agree.
+- The product version source is `Directory.Build.props`. Runtime display values
+  must match that source. Documents that mention a product version must not
+  contradict it.
 - Architecture boundaries, closed diagnostics, typed commands, and deny-by-default
   execution remain covered.
 - Git scope includes software-consumed `assets` and excludes `OriginArtWork`,
@@ -45,6 +66,7 @@ explanation or a user-approved exception.
 ### Windows native integration gate
 
 - The App, Agent, TestWorker, and Broker publish to their required nested paths.
+- Local `dotnet build` writes the same nested tree to `artifacts\$(Configuration)\`.
 - App runtime lookup paths match the staged tree.
 - Named-pipe identity and ACL behavior, Worker cleanup, SQLite ownership, and
   read-only inventory boundaries remain covered by automatic or controlled local
@@ -56,19 +78,19 @@ explanation or a user-approved exception.
 
 Manual evidence is required for native WinUI presentation, bilingual switching,
 themes, DPI, high contrast, keyboard use, tray lifecycle, UAC, native folder
-pickers, registered D: tool execution, long-running monitoring, cancellation,
+pickers, registered tool execution, long-running monitoring, cancellation,
 recovery, and data-location round trips.
 
-The fixed manual root for the current V0.41 matrix is
-`D:\WinPool-V041-Manual-Test`. Manual checks must not select another drive root,
-the source tree, a network share, or an unregistered directory.
+A formal manual matrix uses the directory named by the active Plan or the
+archived stage that defined it. Manual checks must not select the source tree,
+a network share, or an unregistered directory.
 
-For V0.5-or-later controlled real-mutation verification, automatic tests and CI
-remain simulation-only. A manual case may perform one real operation only after
-the development Agent has obtained the developer's per-operation approval, or
-the product user has explicitly selected the local real-mutation option in the
-current session. The evidence must record the operation, targets, authorization
-context, selection state, and result.
+For controlled real-mutation verification in a Product-permitted stage,
+automatic tests and CI remain simulation-only. A manual case may perform one
+real operation only after the development Agent has obtained the developer's
+per-operation approval, or the product user has explicitly selected the local
+real-mutation option in the current session. The evidence must record the
+operation, targets, authorization context, selection state, and result.
 
 ## Acceptance policy
 
@@ -76,8 +98,6 @@ context, selection state, and result.
   visual intent or physical-device behavior.
 - The Agent cannot mark a human gate passed without user evidence.
 - Approved exceptions record reason, scope, approver, date, risk, and expiry.
-- Test counts belong in the active Plan or CHANGELOG evidence, not in this long-term
-  policy.
-- Real hardware mutation is never an accepted verification technique for V0.41.
-  V0.5-or-later controlled real-mutation cases use the documented explicit
-  authorization flow and never convert an unrun case into a passing result.
+- Real hardware mutation is never an accepted verification technique unless a
+  confirmed Plan for a permitted mutation stage requires it. Unrun cases stay
+  `unverified`.

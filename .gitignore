@@ -55,3 +55,4 @@ Generated\ Files/
 # Developer-local resources.
 /local-assets/
 /OriginArtWork/
+*.lnk

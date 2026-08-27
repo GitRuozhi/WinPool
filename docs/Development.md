@@ -13,7 +13,7 @@ Portable delivery is the only implemented mode through V0.7. Signed MSIX work
 is scheduled for V0.8–V0.9, and Microsoft Store submission is post-V1.0 work.
 These roadmap entries do not authorize packaging work in an earlier Plan.
 
-The current portable artifact must be kept as one complete directory. Run
+The portable artifact must be kept as one complete directory. Run
 `WinPool.App.exe` with its `Agent`, `TestWorker`, `Broker`, framework, and
 resource files in their staged relative locations. WinPool installs no Windows
 service and opening the application does not itself require elevation. Exit all
@@ -41,7 +41,9 @@ The product consists of four processes:
 README.md
 README.zh-CN.md
 AGENTS.md
+AGENTS.zh-CN.md
 Directory.Build.props
+Directory.Build.targets
 global.json
 WinPool.slnx
 docs/
@@ -54,9 +56,11 @@ docs/
   Archive/
 build/
   Publish-Staged.ps1
+  Rebuild-WinPool.ps1
 assets/                           tracked software-consumed resources
 OriginArtWork/                    ignored user-managed source artwork
 local-assets/                     ignored developer-local resources
+artifacts/                        ignored local build output
 src/
 workers/
 tests/
@@ -82,8 +86,8 @@ The dependency direction is presentation and ports → Application → Domain.
 - App consumes Application contracts and presentation models.
 - Agent owns the database write lease and supervises Worker and Broker children.
 
-These contracts are internal. V0.41 does not freeze a public API, plug-in contract,
-IPC wire protocol, or C#/Python interoperability format.
+These contracts are internal. Do not freeze a public API, plug-in contract, IPC
+wire protocol, or C#/Python interoperability format until Product permits it.
 
 ## Persistence and process lifecycle
 
@@ -92,12 +96,15 @@ writable `Data` directory beside the executable. The standard-root
 `storage-location.json` pointer selects the mode; a location switch verifies the
 destination before making it active.
 
-Normal launches use Agent-owned SQLite schema 13 for inventory, workspace state,
-simulation documents, monitoring, test history, evidence, and recovery. V0.41
-creates or reopens only schema 13 data; schema 12 and older databases are
-rejected without migration or modification. User preferences do not live in
-SQLite: `settings.json` is their sole durable authority. JSON stores remain only
-for explicitly supported no-Agent development fallbacks.
+Normal launches use Agent-owned SQLite for inventory, workspace state, simulation
+documents, monitoring, test history, evidence, and recovery. Only the current
+schema is created or reopened. Older schemas are rejected without migration or
+modification. The current schema revision and IPC protocol number are recorded
+in [CHANGELOG](CHANGELOG.md) Compatibility notes, not as extra project versions.
+
+User preferences do not live in SQLite: `settings.json` is their sole durable
+authority. JSON stores remain only for explicitly supported no-Agent development
+fallbacks.
 
 The persistence ownership policy has two durable authorities:
 
@@ -107,15 +114,7 @@ The persistence ownership policy has two durable authorities:
   external-tool detection results, monitoring, tests, audit, recovery, and
   process/session history. The Agent remains its only normal writer.
 
-V0.41 eliminates the `preferences` table and uses dedicated `workspace_state`
-and `test_presets` tables. It also stops formal builds from generating
-`tool-paths.json`, no-Agent `workspace.json`/`machine.json`, and automatic
-monitor CSV files. For V0.41, the user explicitly permits the local
-development-machine state to be fully reset and regenerated; no V0.4-to-V0.41
-preference or database compatibility is required. The old root must be moved to
-a recoverable project-root `Rubbish\YYYYMMDD_v041_local_state_reset` location
-only after every WinPool process has stopped, then the new version creates clean
-authorities. Product code must not silently erase an unknown data root.
+Product code must not silently erase an unknown data root.
 `storage-location.json` is the one durable bootstrap exception because WinPool
 must locate the active data root before opening either authority. IPC endpoint
 files are rebuildable runtime state; diagnostics and managed-tool payloads are
@@ -129,18 +128,12 @@ mode is never persisted.
 
 ## Execution and external-tool boundaries
 
-V0.41 policy and executor behavior deny real storage-structure mutation.
-Simulation editing and read-only discovery are normal capabilities. V0.5 is the
-earliest implementation stage permitted to add typed real mutations. Each must
-validate its exact targets, show a reviewed preview, record an audit entry, and
-remain deny-by-default until authorized.
-
-During development, an Agent must obtain the developer's specific approval
-immediately before each real mutation; an earlier, general approval cannot be
-reused. In the product, the user's explicit current-session selection of the
-local real-mutation option authorizes V0.5 controlled real operations. UAC
-elevation or Real mode alone is insufficient, and consent cannot be preselected
-or persisted.
+Executor policy denies real storage-structure mutation until Product and a
+confirmed Plan permit a typed path. Simulation editing and read-only discovery
+are normal capabilities. Each permitted mutation must validate its exact
+targets, show a reviewed preview, record an audit entry, and remain
+deny-by-default until authorized. Authorization rules live in
+[AGENTS](../AGENTS.md) and [Product](Product.md).
 
 File testing requires an explicitly registered directory and run-owned files.
 DiskSpd, fio, Dite, RoboCopy, and RAMMap remain external installations. Adapters
@@ -150,16 +143,35 @@ free-form command surface is allowed.
 The embedded PowerShell inventory is fixed and read-only. It remains until a
 native collector has equivalent field, identity, and degradation evidence.
 
-## Build, test, and staging
+## Build and staging
 
 From the repository root:
 
 ```powershell
-dotnet restore WinPool.slnx
-dotnet test WinPool.slnx -c Release --no-restore --maxcpucount:1 -m:1
-dotnet build WinPool.slnx -c Release --no-restore -m:1
-dotnet list WinPool.slnx package --vulnerable --include-transitive
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 ```
+
+The rebuild script stops running WinPool processes, removes regenerable `artifacts` output and leftover project `bin`/`obj` folders, rebuilds the four-process tree, and writes `WinPool.lnk` in the repository root and on the current-user Desktop. It does not touch Tests evidence, Research material, `%LocalAppData%\WinPool` data, `Old`, or `Rubbish`.
+
+A manual build is:
+
+```powershell
+dotnet restore WinPool.slnx
+dotnet build WinPool.slnx -c Release --no-restore -m:1
+.\artifacts\Release\WinPool.App.exe
+```
+
+`dotnet build` writes generated files only under `artifacts`:
+
+```text
+artifacts\$(Configuration)\     four-process run tree
+artifacts\obj\                  compiler intermediates
+artifacts\build\                class-library and test outputs
+```
+
+`src`, `workers`, and `tests` stay source. The App/Agent/Worker/Broker projects do not copy one another after build.
+
+Test commands and when to run them are defined in [Quality](Quality.md).
 
 The reproducible self-contained staging command requires a new path outside the
 repository and refuses to overwrite an existing path:
@@ -194,33 +206,33 @@ nonzero iteration within that line:
 - `c`: one-digit nonzero iteration within the minor version.
 
 Architecture and roadmap documents use `Va.b`. Iteration values are assigned
-from actual work and cannot exceed 9. A normal iteration is committed locally;
-remote pushes, tags, and releases require the authorization rules in `AGENTS.md`
-and the active Plan.
+from actual work and cannot exceed 9. A nonzero iteration is recorded with a
+local commit only when the user authorizes that commit; remote pushes, tags,
+and releases follow [AGENTS](../AGENTS.md).
 
-`Va.b` / `Va.bc` is the only project-version system. `Directory.Build.props` derives the
-numeric fields required by .NET and Windows mechanically from `a`, `b`, and `c`;
-those fields are build metadata with no independent version meaning. Database
-schema revisions, algorithm IDs, and IPC compatibility identifiers do not
-redefine the project version.
+`Va.b` / `Va.bc` is the only project-version system. `Directory.Build.props`
+derives the numeric fields required by .NET and Windows mechanically from `a`,
+`b`, and `c`; those fields are build metadata with no independent version
+meaning. Database schema revisions, algorithm IDs, and IPC compatibility
+identifiers do not redefine the project version.
 
 ## Documentation lifecycle
 
 Each fact has one owner:
 
 - Product: long-term purpose, non-goals, boundaries, and roadmap.
-- Development: architecture, module ownership, environment, build, version, Git,
+- Development: architecture, module ownership, environment, build, version,
   and document workflow.
-- Quality: stable gates, result vocabulary, acceptance classes, and exceptions.
-- Plan: the only active stage, current decisions, work, evidence, and completion
-  criteria.
-- CHANGELOG: results that actually occurred.
+- Quality: stable gates, result vocabulary, acceptance classes, and when to
+  run them.
+- Plan: the only active formal stage, when one exists.
+- CHANGELOG: important final results and compatibility changes.
 - Archive: completed, superseded, or invalidated historical state.
 - Reference: non-authoritative external or cross-project methods.
+- AGENTS: operational, safety, authorization, reading, and Git rules.
 
 A current user decision outranks a generic project-management reference. Archive
-content is read-only history and cannot become a current requirement merely
-because it is detailed.
+and Reference are never current requirements.
 
 An unsuffixed Markdown file is authoritative. A matching `.zh-CN.md` file is a
 Chinese reading copy only and must identify its unsuffixed authority. Documents
@@ -228,16 +240,16 @@ already written in Chinese do not need a duplicate Chinese copy. When an
 authoritative document changes, update its reading copy in the same work item;
 the reading copy never controls behavior, acceptance, status, or history.
 
-When a stage is user-confirmed complete, update the CHANGELOG, freeze the Plan
-under Archive with its real final state, update the Archive index, and remove the
-active Plan if no next stage exists. Tags and releases remain separately
-authorized actions.
+When a stage is user-confirmed complete, record important final results in the
+CHANGELOG, freeze the Plan under Archive with its real final state, update the
+Archive index, and remove the active Plan if no next stage exists. Tags and
+releases remain separately authorized.
 
 ## Contribution boundaries
 
 - Preserve the deny-by-default execution and process ownership model.
-- Do not add real storage mutation before a confirmed V0.5-or-later Plan defines
-  the typed operation and the required explicit authorization flow.
+- Do not add real storage mutation before a confirmed Plan in a Product-permitted
+  phase defines the typed operation and the required explicit authorization flow.
 - Keep software-consumed resources in tracked `assets`.
 - Do not make tracked code depend on ignored `OriginArtWork` or `local-assets`.
 - Do not couple WinPool to another repository through relative paths, copied live
