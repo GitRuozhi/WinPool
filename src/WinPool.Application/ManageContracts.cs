@@ -15,6 +15,7 @@ public enum ManageObjectRole
     NetworkDisk,
     OsDisk,
     Partition,
+    Volume,
     NetworkGroup,
     OtherGroup,
     DirectDiskGroup,
@@ -34,7 +35,8 @@ public enum ManageWorkspaceCategory
     Pool,
     Tier,
     Disk,
-    Partition
+    Partition,
+    Volume
 }
 
 public sealed record ManageObjectListItemView(
@@ -232,6 +234,7 @@ public static class ManageSelectionRules
                 ManageWorkspaceCategory.Disk,
             ManageObjectRole.Partition or ManageObjectRole.NetworkDisk =>
                 ManageWorkspaceCategory.Partition,
+            ManageObjectRole.Volume => ManageWorkspaceCategory.Volume,
             _ => throw new ArgumentOutOfRangeException(nameof(role))
         };
 }

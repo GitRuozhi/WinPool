@@ -3,6 +3,7 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 using WinPool.App.Services;
@@ -27,7 +28,7 @@ public sealed partial class WelcomeWindow : Window
 
         Title = localization["WelcomeTitle"];
         WelcomeTitleText.Text = localization["WelcomeTitle"];
-        WelcomeMessageText.Text = localization["WelcomeMessage"];
+        SetMessageText(WelcomeMessageText, localization["WelcomeMessage"]);
         ConfirmButton.Content = localization["WelcomeConfirm"];
         ApplyMascot((mascotSelector ?? new WelcomeMascotSelector()).SelectAssetKey());
 
@@ -144,6 +145,25 @@ public sealed partial class WelcomeWindow : Window
         ApplyMascot(WelcomeMascotCatalog.NextKey(_mascotKey));
         CycleButton.UpdateLayout();
         UpdateNonClientRegions();
+    }
+
+    private static void SetMessageText(TextBlock target, string text)
+    {
+        var segments = (text ?? string.Empty).Split("**");
+        for (var i = 0; i < segments.Length; i++)
+        {
+            if (segments[i].Length == 0)
+            {
+                continue;
+            }
+            target.Inlines.Add(new Run
+            {
+                Text = segments[i],
+                FontWeight = i % 2 == 1
+                    ? Microsoft.UI.Text.FontWeights.SemiBold
+                    : Microsoft.UI.Text.FontWeights.Normal
+            });
+        }
     }
 
     private static RectInt32 GetPhysicalRect(FrameworkElement element, double scale)

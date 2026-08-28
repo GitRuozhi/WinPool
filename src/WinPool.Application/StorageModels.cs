@@ -9,7 +9,8 @@ public enum WorkspaceCategory
     Pool,
     Tier,
     Disk,
-    Partition
+    Partition,
+    Volume
 }
 
 public enum StorageUnitKind

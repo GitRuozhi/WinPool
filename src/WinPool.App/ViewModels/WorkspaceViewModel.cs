@@ -247,7 +247,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool CanOpenSelectedPartition =>
         IsSelectedSystemLocalConsistent
-        && SelectedWorkspaceItem?.Projection?.Role == WinPool.Application.ManageObjectRole.Partition
+        && SelectedWorkspaceItem?.Projection?.Role is WinPool.Application.ManageObjectRole.Partition
+            or WinPool.Application.ManageObjectRole.Volume
         && ActiveSnapshot.Partitions.Any(
             partition => partition.StableId == SelectedWorkspaceItem.Projection.Id.ProviderKey);
 
@@ -289,6 +290,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
             WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
             WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
+            WorkspaceCategory.Volume => WinPool.Application.ManageWorkspaceCategory.Volume,
             _ => throw new ArgumentOutOfRangeException(nameof(target))
         };
         var navigation = _manageNavigationProjector.Project(
@@ -848,6 +850,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole.VirtualDisk => WinPool.Domain.StorageObjectKind.VirtualDisk,
         WinPool.Application.ManageObjectRole.OsDisk => WinPool.Domain.StorageObjectKind.OsDisk,
         WinPool.Application.ManageObjectRole.Partition => WinPool.Domain.StorageObjectKind.Partition,
+        WinPool.Application.ManageObjectRole.Volume => WinPool.Domain.StorageObjectKind.Partition,
         WinPool.Application.ManageObjectRole.NetworkDisk => WinPool.Domain.StorageObjectKind.NetworkDisk,
         _ => throw new ArgumentOutOfRangeException(nameof(role))
     };
@@ -868,6 +871,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
             WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
             WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
+            WorkspaceCategory.Volume => WinPool.Application.ManageWorkspaceCategory.Volume,
             _ => throw new ArgumentOutOfRangeException()
         };
         var activeSystemId = ActiveDocument.SystemId;
@@ -951,6 +955,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Categories.Add(new CategoryItem(WorkspaceCategory.Tier, Localization["Tier"], "\uE8FD"));
         Categories.Add(new CategoryItem(WorkspaceCategory.Disk, Localization["Disk"], "\uEDA2"));
         Categories.Add(new CategoryItem(WorkspaceCategory.Partition, Localization["Partition"], "\uE7C3"));
+        Categories.Add(new CategoryItem(WorkspaceCategory.Volume, Localization["Volume"], "\uE7C3"));
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == category);
         OnPropertyChanged(nameof(SelectedCategoryTitle));
         RebuildObjects(_categorySelections.GetValueOrDefault(SelectedCategory) ?? SelectedStableId);
@@ -1078,6 +1083,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
             WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
             WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
+            WorkspaceCategory.Volume => WinPool.Application.ManageWorkspaceCategory.Volume,
             _ => throw new ArgumentOutOfRangeException(nameof(category))
         };
         var activeProjection = _manageProjector.Project(ActiveDocument);
@@ -1103,6 +1109,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WinPool.Application.ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
             WinPool.Application.ManageObjectRole.OsDisk => StorageUnitKind.OsDisk,
             WinPool.Application.ManageObjectRole.Partition => StorageUnitKind.Partition,
+            WinPool.Application.ManageObjectRole.Volume => StorageUnitKind.Partition,
             WinPool.Application.ManageObjectRole.NetworkDisk => StorageUnitKind.NetworkDisk,
             WinPool.Application.ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
             WinPool.Application.ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
@@ -1258,6 +1265,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole.NetworkGroup => Localization["NetworkStorageGroup"],
         WinPool.Application.ManageObjectRole.OtherGroup => Localization["OtherStorageGroup"],
         WinPool.Application.ManageObjectRole.Partition => Localization["Partition"],
+        WinPool.Application.ManageObjectRole.Volume => Localization["Volume"],
         _ => role.ToString()
     };
 

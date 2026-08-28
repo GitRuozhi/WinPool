@@ -137,6 +137,17 @@ public sealed class ManageSystemProjector
                 partition.IsStable, partition.OsDiskStableId, order++,
                 new Dictionary<string, string?> { ["partitionType"] = partition.Type }));
         }
+        order = 0;
+        foreach (var partition in OrderPartitions(snapshot)
+                     .Where(x => !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(x.DriveLetter))))
+        {
+            result.Add(Item(
+                systemId, partition.StableId, ManageObjectRole.Volume,
+                ManageWorkspaceCategory.Volume,
+                TopologyProjector.PartitionDisplayName(partition),
+                partition.IsStable, partition.OsDiskStableId, order++,
+                new Dictionary<string, string?> { ["partitionType"] = partition.Type }));
+        }
         foreach (var network in snapshot.NetworkDisks
                      .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
         {
@@ -311,6 +322,7 @@ public sealed class ManageSystemProjector
         ManageObjectRole.NetworkDisk => StorageObjectKind.NetworkDisk,
         ManageObjectRole.OsDisk => StorageObjectKind.OsDisk,
         ManageObjectRole.Partition => StorageObjectKind.Partition,
+        ManageObjectRole.Volume => StorageObjectKind.Partition,
         ManageObjectRole.NetworkGroup or ManageObjectRole.OtherGroup
             or ManageObjectRole.DirectDiskGroup
             or ManageObjectRole.VirtualDiskGroup => StorageObjectKind.LogicalGroup,

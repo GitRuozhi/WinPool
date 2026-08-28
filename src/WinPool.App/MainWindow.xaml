@@ -100,7 +100,19 @@
                 </ListView.ItemTemplate>
             </ListView>
 
-            <Border Grid.Column="2" Background="Transparent" />
+            <Grid Grid.Column="2">
+                <TextBlock
+                    x:Name="ActiveSystemNameText"
+                    Margin="14,0,16,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    MaxWidth="420"
+                    FontSize="13"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    IsHitTestVisible="False"
+                    TextTrimming="CharacterEllipsis"
+                    Visibility="Collapsed" />
+            </Grid>
 
             <StackPanel
                 x:Name="ModeControls"

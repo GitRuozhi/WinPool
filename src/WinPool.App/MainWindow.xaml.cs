@@ -97,6 +97,11 @@ public sealed partial class MainWindow : Window
 
         ExtendsContentIntoTitleBar = true;
         AppWindow.SetIcon("Assets/CAppIcon.ico");
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.PreferredMinimumWidth = 960;
+            presenter.PreferredMinimumHeight = 600;
+        }
         AppWindow.Resize(new SizeInt32(1440, 900));
         AppWindowPlacement.CenterOnWorkArea(AppWindow);
         RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
@@ -289,7 +294,15 @@ public sealed partial class MainWindow : Window
         LocalRealOperationsWarning.Message = ViewModel.Localization["PreviewWarningMessage"];
         RefreshShellNavigationText();
         UpdateShellNavigationTextVisibility();
+        UpdateActiveSystemName();
         SyncModeSwitch();
+    }
+
+    private void UpdateActiveSystemName()
+    {
+        var show = SelectedShellItem?.Page == ShellPageKind.Manage;
+        ActiveSystemNameText.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        ActiveSystemNameText.Text = ViewModel.SelectedSystem?.DisplayName ?? string.Empty;
     }
 
     private void UpdateCaptionInset()
@@ -556,6 +569,7 @@ public sealed partial class MainWindow : Window
         ShellNavigationList.SelectedItem = item;
         _updatingNavigation = false;
         UpdateShellNavigationAccent();
+        UpdateActiveSystemName();
 
         if (page == ShellPageKind.Manage)
         {
@@ -617,6 +631,10 @@ public sealed partial class MainWindow : Window
         if (e.PropertyName == nameof(WorkspaceViewModel.IsRealMode))
         {
             SyncModeSwitch();
+        }
+        else if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSystem))
+        {
+            UpdateActiveSystemName();
         }
     }
 

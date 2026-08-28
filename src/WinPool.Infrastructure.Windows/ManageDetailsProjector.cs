@@ -96,6 +96,7 @@ public sealed class ManageDetailsProjector
                 break;
             }
             case ManageObjectRole.Partition:
+            case ManageObjectRole.Volume:
             {
                 var partition = snapshot.Partitions.First(x => x.StableId == objectId.ProviderKey);
                 title = TopologyProjector.PartitionDisplayName(partition);

@@ -27,7 +27,8 @@ public sealed class ManageSystemProjectorTests
         Assert.Equal(
             [ManageObjectRole.System, ManageObjectRole.StoragePool,
              ManageObjectRole.StorageTier, ManageObjectRole.PhysicalDisk,
-             ManageObjectRole.VirtualDisk, ManageObjectRole.Partition],
+             ManageObjectRole.VirtualDisk, ManageObjectRole.Partition,
+             ManageObjectRole.Volume],
             projection.WorkspaceObjects.Select(item => item.Role));
     }
 
@@ -265,6 +266,121 @@ public sealed class ManageSystemProjectorTests
         Assert.All(
             localPool.Commands.Where(command => command.Kind != ManageCommandKind.ExportCategory),
             command => Assert.False(command.IsEnabled));
+    }
+
+    [Fact]
+    public void VolumeWorkspaceObjectsIncludeOnlyDriveLetterPartitions()
+    {
+        var source = Document();
+        var letterless = new PartitionInfo(
+            "partition:2", true, 3, 2, "WindowsRecovery", 2_000_000, 100_000,
+            false, false, "", "Recovery", "", null, 0,
+            "Healthy", "OK", "", "osdisk:3");
+        var document = source with
+        {
+            Snapshot = source.Snapshot with
+            {
+                Partitions = source.Snapshot.Partitions.Append(letterless).ToArray()
+            }
+        };
+
+        var volumes = new ManageSystemProjector().Project(document).WorkspaceObjects
+            .Where(item => item.Role == ManageObjectRole.Volume)
+            .ToList();
+
+        var volume = Assert.Single(volumes);
+        Assert.Equal(ManageWorkspaceCategory.Volume, volume.Category);
+        Assert.Equal("partition:1", volume.Id.ProviderKey);
+        Assert.Equal("C: Data", volume.DisplayName);
+        Assert.Equal(WinPool.Domain.StorageObjectKind.Partition, volume.Id.Kind);
+    }
+
+    [Fact]
+    public void VolumeProjectionMatchesPartitionAcrossComparisonDetailsAndNavigation()
+    {
+        var document = Document();
+        var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
+        var id = Object(system, WinPool.Domain.StorageObjectKind.Partition, "partition:1");
+
+        var comparison = new ManageComparisonProjector().Project(document, id, ManageObjectRole.Volume);
+        Assert.Equal(
+            ["OwningDisk", "Type", "FileSystem", "AllocationUnit", "Capacity",
+             "Available", "SystemPartition", "PartitionStatus", "StartOffset",
+             "DriveLetter", "VolumeLabel", "Path"],
+            comparison.Properties.Select(property => property.PropertyTextKey));
+
+        var details = new ManageDetailsProjector().Project(document, id, ManageObjectRole.Volume, "fallback");
+        Assert.Equal("C: Data", details.DisplayName);
+        Assert.Equal(
+            ["Type", "FileSystem", "AllocationUnit", "Capacity", "Available", "Health", "Path", "LastScan"],
+            details.Properties.Select(property => property.PropertyTextKey));
+
+        var navigation = new ManageNavigationProjector().Project(document, id, ManageObjectRole.Volume);
+        Assert.Equal(
+            "partition:1",
+            navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Id.ProviderKey);
+        Assert.Equal(
+            "partition:1",
+            navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Id.ProviderKey);
+
+        var local = document with
+        {
+            Id = "local:volume-test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("local:volume-test"),
+            Kind = StorageSystemKind.Local,
+            DisplayName = "Local"
+        };
+        var commands = new ManageCommandProjector().Project(
+            document,
+            local,
+            id,
+            ManageObjectRole.Volume,
+            ManageWorkspaceCategory.Volume);
+        Assert.True(commands.Commands.Single(command =>
+            command.Kind == ManageCommandKind.EditPartition).IsEnabled);
+        Assert.True(commands.SystemDialogTarget.HasResolvedPartition);
+    }
+
+    [Fact]
+    public void PoolMemberGroupsKeepNamedLayersInsteadOfHeadlessNodes()
+    {
+        var source = Document();
+        var extra = new PhysicalDiskInfo(
+            "physical:2", true, "Spare One", "Model", "masked", "SATA", "HDD",
+            2_000_000, 512, 4096, "Healthy", "OK", false, "In a pool", 2,
+            false, false, false, false, "pool:1");
+        var secondVirtual = source.Snapshot.VirtualDisks[0] with
+        {
+            StableId = "virtual:2",
+            FriendlyName = "Virtual02",
+            TierStableIds = [],
+            OsDiskNumbers = [4]
+        };
+        var document = source with
+        {
+            Snapshot = source.Snapshot with
+            {
+                PhysicalDisks = source.Snapshot.PhysicalDisks.Append(extra).ToArray(),
+                StoragePools = [source.Snapshot.StoragePools[0] with
+                {
+                    MemberPhysicalDiskIds = ["physical:1", "physical:2"]
+                }],
+                VirtualDisks = source.Snapshot.VirtualDisks.Append(secondVirtual).ToArray()
+            }
+        };
+
+        var nodes = Flatten(new ManageSystemProjector().Project(document).Root).ToArray();
+        var directGroup = Assert.Single(
+            nodes,
+            node => node.Role == ManageObjectRole.DirectDiskGroup);
+        var virtualGroup = Assert.Single(
+            nodes,
+            node => node.Role == ManageObjectRole.VirtualDiskGroup);
+
+        Assert.Equal("Unallocated", directGroup.DisplayName);
+        Assert.Contains("physical disks", directGroup.Summary, StringComparison.Ordinal);
+        Assert.Equal("Virtual disks", virtualGroup.DisplayName);
+        Assert.Contains("virtual disks", virtualGroup.Summary, StringComparison.Ordinal);
     }
 
     private static WinPool.Domain.StorageObjectId Object(

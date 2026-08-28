@@ -703,7 +703,7 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        if (role == ManageObjectRole.Partition)
+        if (role is ManageObjectRole.Partition or ManageObjectRole.Volume)
         {
             if (!target.HasResolvedPartition)
             {

@@ -213,6 +213,7 @@ public sealed class ManageComparisonProjector
                 break;
             }
             case ManageObjectRole.Partition:
+            case ManageObjectRole.Volume:
             {
                 var partition = snapshot.Partitions.First(x => x.StableId == objectId.ProviderKey);
                 rows.Add(P("OwningDisk", PartitionOwnerName(snapshot, partition)));

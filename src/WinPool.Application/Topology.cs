@@ -271,8 +271,8 @@ public static class TopologyProjector
                 new StorageUnitRef(
                     $"group:vdisk:{pool.StableId}",
                     StorageUnitKind.VirtualDiskGroup,
-                    string.Empty),
-                string.Empty,
+                    "Virtual disks"),
+                JoinSummary($"{virtualNodes.Count} virtual disks"),
                 isSelectable: false,
                 childrenLayout: TopologyChildrenLayout.Flow,
                 layoutWeight: virtualNodes.Count);
@@ -303,8 +303,10 @@ public static class TopologyProjector
                 new StorageUnitRef(
                     $"group:direct:{pool.StableId}",
                     StorageUnitKind.DirectDiskGroup,
-                    string.Empty),
-                string.Empty,
+                    "Unallocated"),
+                JoinSummary(
+                    $"{directMembers.Count} physical disks",
+                    FormatBytes(directMembers.Sum(x => x.Size))),
                 isSelectable: false,
                 childrenLayout: TopologyChildrenLayout.Flow);
             foreach (var member in directMembers)

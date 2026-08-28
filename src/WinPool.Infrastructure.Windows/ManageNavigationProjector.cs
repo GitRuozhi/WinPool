@@ -35,7 +35,8 @@ public sealed class ManageNavigationProjector
             [ManageWorkspaceCategory.Pool] = RelatedPool(snapshot, systemId, origin),
             [ManageWorkspaceCategory.Tier] = RelatedTier(snapshot, systemId, origin),
             [ManageWorkspaceCategory.Disk] = RelatedDisk(snapshot, systemId, origin),
-            [ManageWorkspaceCategory.Partition] = RelatedPartition(snapshot, systemId, origin)
+            [ManageWorkspaceCategory.Partition] = RelatedPartition(snapshot, systemId, origin),
+            [ManageWorkspaceCategory.Volume] = RelatedVolume(snapshot, systemId, origin)
         };
         return new ManageObjectNavigationView(
             objectId,
@@ -85,6 +86,7 @@ public sealed class ManageNavigationProjector
                 return backing is null ? null : RelatedPool(snapshot, systemId, backing);
             }
             case ManageObjectRole.Partition:
+            case ManageObjectRole.Volume:
             {
                 var backing = PartitionBacking(
                     snapshot,
@@ -118,6 +120,7 @@ public sealed class ManageNavigationProjector
                 return Target(snapshot, systemId,
                     snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == key)?.TierStableIds.FirstOrDefault());
             case ManageObjectRole.Partition:
+            case ManageObjectRole.Volume:
             {
                 var disk = RelatedDisk(snapshot, systemId, origin);
                 return disk is null ? null : RelatedTier(snapshot, systemId, disk);
@@ -141,6 +144,7 @@ public sealed class ManageNavigationProjector
             case ManageObjectRole.OsDisk:
                 return origin;
             case ManageObjectRole.Partition:
+            case ManageObjectRole.Volume:
                 return PartitionBacking(
                     snapshot,
                     systemId,
@@ -175,6 +179,7 @@ public sealed class ManageNavigationProjector
         switch (origin.Role)
         {
             case ManageObjectRole.Partition:
+            case ManageObjectRole.Volume:
             case ManageObjectRole.NetworkDisk:
                 return origin;
             case ManageObjectRole.PhysicalDisk:
@@ -205,6 +210,23 @@ public sealed class ManageNavigationProjector
         }
     }
 
+    private static ManageObjectTarget? RelatedVolume(
+        StorageSnapshot snapshot,
+        SystemId systemId,
+        ManageObjectTarget origin)
+    {
+        var target = RelatedPartition(snapshot, systemId, origin);
+        if (target is null)
+        {
+            return null;
+        }
+        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == target.Id.ProviderKey);
+        return partition is not null
+            && !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(partition.DriveLetter))
+                ? target
+                : null;
+    }
+
     private static ManageObjectTarget? Primary(
         StorageSnapshot snapshot,
         SystemId systemId,
@@ -228,7 +250,7 @@ public sealed class ManageNavigationProjector
                 snapshot.Partitions.FirstOrDefault(x => x.OsDiskStableId == key)?.StableId,
             _ => null
         };
-        if (origin.Role == ManageObjectRole.Partition)
+        if (origin.Role is ManageObjectRole.Partition or ManageObjectRole.Volume)
         {
             return PartitionBacking(
                 snapshot,

@@ -91,6 +91,7 @@ public sealed class ManageCommandProjector
                 break;
             }
             case ManageWorkspaceCategory.Partition:
+            case ManageWorkspaceCategory.Volume:
             {
                 var partition = activeDocument.Snapshot.Partitions.FirstOrDefault(
                     item => item.StableId == objectId.ProviderKey);
@@ -132,7 +133,7 @@ public sealed class ManageCommandProjector
     {
         var activeSnapshot = activeDocument.Snapshot;
         var localSnapshot = localDocument.Snapshot;
-        var activePartition = role == ManageObjectRole.Partition
+        var activePartition = role is ManageObjectRole.Partition or ManageObjectRole.Volume
             ? activeSnapshot.Partitions.FirstOrDefault(x => x.StableId == providerKey)
             : null;
         var localPartition = activePartition is null

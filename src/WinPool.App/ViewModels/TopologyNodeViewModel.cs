@@ -209,10 +209,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         _ => "\uEDA2"
     };
 
-    public Visibility HeaderVisibility =>
-        Unit.Kind is StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+    public Visibility HeaderVisibility => Visibility.Visible;
 
     public Visibility FlowChildrenVisibility =>
         IsExpanded && ChildrenLayout == TopologyChildrenLayout.Flow ? Visibility.Visible : Visibility.Collapsed;
@@ -325,6 +322,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         {
             _ when unit.Kind == StorageUnitKind.NetworkDiskGroup => owner.Localization["Network"],
             _ when unit.Kind == StorageUnitKind.OtherDiskGroup => owner.Localization["Other"],
+            _ when unit.Kind == StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],
+            _ when unit.Kind == StorageUnitKind.VirtualDiskGroup => owner.Localization["VirtualDisks"],
             _ => unit.DisplayName
         };
 
@@ -417,6 +416,39 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(otherDisks.Sum(x => x.Size)));
         }
 
+        if (unit.Kind == StorageUnitKind.DirectDiskGroup)
+        {
+            var pool = snapshot.StoragePools.FirstOrDefault(
+                x => $"group:direct:{x.StableId}".Equals(unit.StableId, StringComparison.OrdinalIgnoreCase));
+            if (pool is null)
+            {
+                return string.Empty;
+            }
+            var tierMemberIds = snapshot.StorageTiers
+                .Where(x => x.PoolStableId == pool.StableId)
+                .SelectMany(x => x.MemberPhysicalDiskIds)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var direct = snapshot.PhysicalDisks
+                .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
+                    && !tierMemberIds.Contains(x.StableId))
+                .ToList();
+            return TopologyProjector.JoinSummary(
+                $"{direct.Count} {owner.Localization["PhysicalDisk"]}",
+                TopologyProjector.FormatBytes(direct.Sum(x => x.Size)));
+        }
+
+        if (unit.Kind == StorageUnitKind.VirtualDiskGroup)
+        {
+            var pool = snapshot.StoragePools.FirstOrDefault(
+                x => $"group:vdisk:{x.StableId}".Equals(unit.StableId, StringComparison.OrdinalIgnoreCase));
+            if (pool is null)
+            {
+                return string.Empty;
+            }
+            var count = snapshot.VirtualDisks.Count(x => x.PoolStableId == pool.StableId);
+            return TopologyProjector.JoinSummary($"{count} {owner.Localization["VirtualDisk"]}");
+        }
+
         if (unit.Kind == StorageUnitKind.Partition)
         {
             var partition = snapshot.Partitions.First(x => x.StableId == unit.StableId);
@@ -467,6 +499,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             StorageUnitKind.OsDisk => owner.Localization["OtherDisk"],
             StorageUnitKind.NetworkDiskGroup => owner.Localization["NetworkStorageGroup"],
             StorageUnitKind.OtherDiskGroup => owner.Localization["OtherStorageGroup"],
+            StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],
+            StorageUnitKind.VirtualDiskGroup => owner.Localization["VirtualDisks"],
             _ => unit.Kind.ToString()
         };
 

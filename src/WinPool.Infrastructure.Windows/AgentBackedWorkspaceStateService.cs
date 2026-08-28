@@ -96,6 +96,7 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
             WorkspaceCategory.Tier => ManageWorkspaceCategory.Tier,
             WorkspaceCategory.Disk => ManageWorkspaceCategory.Disk,
             WorkspaceCategory.Partition => ManageWorkspaceCategory.Partition,
+            WorkspaceCategory.Volume => ManageWorkspaceCategory.Volume,
             _ => throw new ArgumentOutOfRangeException(nameof(category))
         };
 
@@ -107,6 +108,7 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
             ManageWorkspaceCategory.Tier => WorkspaceCategory.Tier,
             ManageWorkspaceCategory.Disk => WorkspaceCategory.Disk,
             ManageWorkspaceCategory.Partition => WorkspaceCategory.Partition,
+            ManageWorkspaceCategory.Volume => WorkspaceCategory.Volume,
             _ => throw new ArgumentOutOfRangeException(nameof(category))
         };
 }

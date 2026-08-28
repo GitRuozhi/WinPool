@@ -45,6 +45,10 @@ public static class WorkspaceSelectionState
                     .Concat(snapshot.NetworkDisks.Select(x => snapshot.FindUnit(x.StableId)))
                     .FirstOrDefault(x => x is not null),
             WorkspaceCategory.Partition => snapshot.Partitions.Select(x => snapshot.FindUnit(x.StableId)).FirstOrDefault(x => x is not null),
+            WorkspaceCategory.Volume => snapshot.Partitions
+                .Where(x => !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(x.DriveLetter)))
+                .Select(x => snapshot.FindUnit(x.StableId))
+                .FirstOrDefault(x => x is not null),
             _ => null
         };
 
