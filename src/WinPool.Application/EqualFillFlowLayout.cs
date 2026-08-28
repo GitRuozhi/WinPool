@@ -29,4 +29,28 @@ public static class EqualFillFlowLayout
 
         return rows;
     }
+
+    public static IReadOnlyList<EqualFillFlowRow> CreateRowsForColumnCount(
+        int itemCount,
+        int columns,
+        double availableWidth,
+        double spacing = 6)
+    {
+        if (itemCount <= 0)
+        {
+            return [];
+        }
+
+        var width = Math.Max(1, availableWidth);
+        var itemsPerRow = Math.Max(1, columns);
+        var rows = new List<EqualFillFlowRow>();
+        for (var start = 0; start < itemCount; start += itemsPerRow)
+        {
+            var count = Math.Min(itemsPerRow, itemCount - start);
+            var usableWidth = Math.Max(1, width - (Math.Max(0, count - 1) * spacing));
+            rows.Add(new EqualFillFlowRow(start, count, usableWidth / count));
+        }
+
+        return rows;
+    }
 }

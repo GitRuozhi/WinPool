@@ -152,6 +152,36 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public int LayoutWeight { get; }
 
+    public int LayoutUnitWidth { get; private set; } = 1;
+
+    public int LayoutUnitHeight { get; private set; } = 1;
+
+    public int LayoutFlowColumns { get; private set; }
+
+    public double LayoutPixelWidth { get; private set; }
+
+    public IReadOnlyList<IReadOnlyList<int>> LayoutRows { get; private set; } = [];
+
+    public double HostViewportWidth => _owner.TopologyViewportWidth;
+
+    public void ApplyLayout(TopologyLayoutResult result)
+    {
+        LayoutUnitWidth = result.UnitWidth;
+        LayoutUnitHeight = result.UnitHeight;
+        LayoutFlowColumns = result.FlowColumns;
+        LayoutPixelWidth = result.PixelWidth;
+        LayoutRows = result.Rows;
+        if (!IsExpanded)
+        {
+            return;
+        }
+
+        for (var i = 0; i < Children.Count && i < result.Children.Count; i++)
+        {
+            Children[i].ApplyLayout(result.Children[i]);
+        }
+    }
+
     public bool IsSelected =>
         ReferenceEquals(_owner.ActiveSnapshot, _snapshot)
         && _owner.SelectedTopologyStableId == Unit.StableId;

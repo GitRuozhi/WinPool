@@ -32,8 +32,8 @@
             <ScrollViewer
                 x:Name="TopologyScrollViewer"
                 Padding="8"
-                HorizontalScrollBarVisibility="Disabled"
-                HorizontalScrollMode="Disabled"
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Enabled"
                 SizeChanged="TopologyScrollViewer_SizeChanged"
                 VerticalScrollBarVisibility="Auto"
                 VerticalScrollMode="Auto">

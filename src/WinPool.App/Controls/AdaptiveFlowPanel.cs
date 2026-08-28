@@ -5,26 +5,19 @@ using WinPool.Application;
 
 namespace WinPool_App.Controls;
 
-/// <summary>
-/// A wrapping storage-card panel that expands every row to the container width.
-/// </summary>
 public sealed class AdaptiveFlowPanel : Panel
 {
-    public double MinimumItemWidth { get; set; } = 150;
+    public double MinimumItemWidth { get; set; } = TopologyLayoutEngine.LeafMinWidth;
 
-    public double HorizontalSpacing { get; set; } = 6;
+    public double HorizontalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
 
-    public double VerticalSpacing { get; set; } = 6;
+    public double VerticalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
 
     protected override Size MeasureOverride(Size availableSize)
     {
         var width = double.IsInfinity(availableSize.Width) ? 1200 : Math.Max(0, availableSize.Width);
+        var rows = CreateRows(width);
         var desiredHeight = 0d;
-        var rows = EqualFillFlowLayout.CreateRows(
-            Children.Count,
-            width,
-            MinimumItemWidth,
-            HorizontalSpacing);
         foreach (var row in rows)
         {
             var rowHeight = 0d;
@@ -34,6 +27,7 @@ public sealed class AdaptiveFlowPanel : Panel
                 child.Measure(new Size(row.ItemWidth, double.PositiveInfinity));
                 rowHeight = Math.Max(rowHeight, child.DesiredSize.Height);
             }
+
             desiredHeight += rowHeight + VerticalSpacing;
         }
 
@@ -41,18 +35,14 @@ public sealed class AdaptiveFlowPanel : Panel
         {
             desiredHeight -= VerticalSpacing;
         }
+
         return new Size(width, desiredHeight);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         var width = Math.Max(0, finalSize.Width);
-        var rows = EqualFillFlowLayout.CreateRows(
-            Children.Count,
-            width,
-            MinimumItemWidth,
-            HorizontalSpacing);
-
+        var rows = CreateRows(width);
         var y = 0d;
         foreach (var row in rows)
         {
@@ -62,6 +52,7 @@ public sealed class AdaptiveFlowPanel : Panel
             {
                 lineHeight = Math.Max(lineHeight, Children[index].DesiredSize.Height);
             }
+
             for (var index = row.StartIndex; index < row.StartIndex + row.Count; index++)
             {
                 var isLastInRow = index == row.StartIndex + row.Count - 1;
@@ -76,5 +67,18 @@ public sealed class AdaptiveFlowPanel : Panel
         }
 
         return finalSize;
+    }
+
+    private IReadOnlyList<EqualFillFlowRow> CreateRows(double width)
+    {
+        var owner = TopologyVisualTree.FindOwnerViewModel(this);
+        var columns = owner is { LayoutFlowColumns: > 0 }
+            ? owner.LayoutFlowColumns
+            : Math.Max(1, Children.Count);
+        return EqualFillFlowLayout.CreateRowsForColumnCount(
+            Children.Count,
+            columns,
+            width,
+            HorizontalSpacing);
     }
 }

@@ -324,6 +324,17 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
+    public void EqualFillFlowLayoutHonorsExplicitColumnCount()
+    {
+        var rows = WinPool.Application.EqualFillFlowLayout.CreateRowsForColumnCount(5, 2, 400);
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(2, rows[0].Count);
+        Assert.Equal(1, rows[2].Count);
+        Assert.Equal((400d - 6d) / 2d, rows[0].ItemWidth, 6);
+        Assert.Equal(400d, rows[2].ItemWidth, 6);
+    }
+
+    [Fact]
     public void SummariesUseExactlyTwoSpacesBetweenFields()
     {
         var summary = WinPool.Application.TopologyProjector.JoinSummary("one", "two", "three");
