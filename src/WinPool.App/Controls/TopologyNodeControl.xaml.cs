@@ -71,11 +71,21 @@ public sealed partial class TopologyNodeControl : UserControl
             {
                 AnimationDesired = true,
                 HorizontalAlignmentRatio = 0.5,
-                VerticalAlignmentRatio = 0.5
+                // A system root spans the whole system, so centering it would
+                // push its header out of the viewport; align it to the top.
+                VerticalAlignmentRatio =
+                    ViewModel.Unit.Kind == WinPool.Application.StorageUnitKind.System ? 0 : 0.5
             });
         }
 
         _wasSelected = ViewModel.IsSelected;
+        if (!IsLoaded)
+        {
+            // The control was created before it entered the tree (for example
+            // after a system switch rebuilds the topology), so the
+            // bring-into-view above cannot scroll yet. Retry on Loaded.
+            _wasSelected = false;
+        }
     }
 
     private void ApplyInteractionAppearance()
