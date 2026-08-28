@@ -5,17 +5,42 @@ public sealed class TopologyLayoutEngineTests
     private const double Wide = 100_000;
 
     [Fact]
-    public void NetworkThreeDisksTightensToOneColumnWhenRowHeightIsSeven()
+    public void NetworkThreeDisksStopsAtTwoColumnsWhenSharingARow()
     {
         var system = System(Primordial(), Pool01(1, 4), Network(3));
         var result = TopologyLayoutEngine.Layout(system, Wide);
 
         Assert.Equal(new[] { 0, 1, 2 }, Assert.Single(result.Rows));
         var network = result.Children[2];
-        Assert.Equal(1, network.UnitWidth);
-        Assert.Equal(4, network.UnitHeight);
+        Assert.Equal(2, network.UnitWidth);
+        Assert.Equal(3, network.UnitHeight);
         Assert.Equal(7, result.Children[0].UnitHeight);
         Assert.Equal(7, result.Children[1].UnitHeight);
+    }
+
+    [Fact]
+    public void LonePoolMayShrinkBelowTwoColumns()
+    {
+        var pool = FlowHeader(Leaf(), Leaf(), Leaf());
+        var oneColumn = TopologyLayoutEngine.AncestorChrome + TopologyLayoutEngine.LeafMinWidth;
+        var result = TopologyLayoutEngine.Layout(System(pool), oneColumn + 8);
+        Assert.Equal(new[] { 0 }, Assert.Single(result.Rows));
+        Assert.Equal(1, result.Children[0].UnitWidth);
+        Assert.Equal(4, result.Children[0].UnitHeight);
+    }
+
+    [Fact]
+    public void SharedRowWrapsInsteadOfSqueezingAPoolToOneColumn()
+    {
+        var system = System(ShortPrimordial(), Network(3));
+        var together = TopologyLayoutEngine.Layout(system, Wide);
+        Assert.Equal(2, together.Children[1].UnitWidth);
+        var pixel = together.Children.Sum(child => child.PixelWidth)
+            + TopologyLayoutEngine.SiblingSpacing;
+        var result = TopologyLayoutEngine.Layout(system, pixel - 1);
+        Assert.Equal(2, result.Rows.Count);
+        Assert.Equal(new[] { 0 }, result.Rows[0]);
+        Assert.Equal(new[] { 1 }, result.Rows[1]);
     }
 
     [Fact]

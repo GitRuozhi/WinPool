@@ -19,6 +19,7 @@ public static class TopologyLayoutEngine
     public const int LeafMinWidth = 112;
     public const int AncestorChrome = 26;
     public const int SiblingSpacing = 6;
+    public const int MinimumSiblingUnitWidth = 2;
 
     public static int RelaxedRowHeightCap(int rowHeight)
     {
@@ -168,6 +169,7 @@ public static class TopologyLayoutEngine
         double availableWidth)
     {
         var cap = RelaxedRowHeightCap(equalized.Max(node => node.UnitHeight));
+        var naturals = inputs.Select(input => MeasureSubtree(input, int.MaxValue)).ToList();
         var budgets = equalized.Select(node => Math.Max(1, node.UnitWidth)).ToArray();
         var nodes = equalized.ToList();
 
@@ -176,7 +178,7 @@ public static class TopologyLayoutEngine
             var best = -1;
             for (var i = 0; i < inputs.Count; i++)
             {
-                if (budgets[i] <= 1)
+                if (budgets[i] <= MinimumBudget(naturals[i].UnitWidth, inputs.Count))
                 {
                     continue;
                 }
@@ -222,7 +224,8 @@ public static class TopologyLayoutEngine
         {
             var chosen = naturals[i];
             var maxWidth = Math.Max(1, naturals[i].UnitWidth);
-            for (var budget = 1; budget <= maxWidth; budget++)
+            var minBudget = MinimumBudget(maxWidth, inputs.Count);
+            for (var budget = minBudget; budget <= maxWidth; budget++)
             {
                 var candidate = MeasureSubtree(inputs[i], budget);
                 if (candidate.UnitHeight <= rowHeight)
@@ -236,6 +239,16 @@ public static class TopologyLayoutEngine
         }
 
         return results;
+    }
+
+    private static int MinimumBudget(int naturalWidth, int siblingCount)
+    {
+        if (siblingCount <= 1)
+        {
+            return 1;
+        }
+
+        return Math.Min(MinimumSiblingUnitWidth, Math.Max(1, naturalWidth));
     }
 
     private static Node ShrinkToFit(TopologyLayoutInput input, double availableWidth)
