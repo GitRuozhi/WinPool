@@ -80,5 +80,34 @@
             Foreground="White"
             BorderThickness="0"
             Click="ConfirmButton_Click" />
+
+        <Rectangle
+            x:Name="StrokeTop"
+            Height="1"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Top"
+            Fill="#66FFFFFF"
+            IsHitTestVisible="False" />
+        <Rectangle
+            x:Name="StrokeRight"
+            Width="1"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Stretch"
+            Fill="#66FFFFFF"
+            IsHitTestVisible="False" />
+        <Rectangle
+            x:Name="StrokeBottom"
+            Height="1"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Bottom"
+            Fill="#66FFFFFF"
+            IsHitTestVisible="False" />
+        <Rectangle
+            x:Name="StrokeLeft"
+            Width="1"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Stretch"
+            Fill="#66FFFFFF"
+            IsHitTestVisible="False" />
     </Grid>
 </Window>

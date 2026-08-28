@@ -596,6 +596,10 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("SendMessage", windowSource, StringComparison.Ordinal);
         Assert.DoesNotContain("PointerPressed", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"#B3000000\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"StrokeTop\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"StrokeRight\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"StrokeBottom\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"StrokeLeft\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ConfirmButton\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Stretch=\"Uniform\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Left\"", windowXaml, StringComparison.Ordinal);
