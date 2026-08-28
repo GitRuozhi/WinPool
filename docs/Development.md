@@ -206,9 +206,9 @@ nonzero iteration within that line:
 - `c`: one-digit nonzero iteration within the minor version.
 
 Architecture and roadmap documents use `Va.b`. Iteration values are assigned
-from actual work and cannot exceed 9. A nonzero iteration is recorded with a
-local commit only when the user authorizes that commit; remote pushes, tags,
-and releases follow [AGENTS](../AGENTS.md).
+from actual work and cannot exceed 9. Local iteration commits follow
+[AGENTS](../AGENTS.md) (default local commit). Remote pushes, tags, and
+releases follow [AGENTS](../AGENTS.md) and remain separately authorized.
 
 `Va.b` / `Va.bc` is the only project-version system. `Directory.Build.props`
 derives the numeric fields required by .NET and Windows mechanically from `a`,

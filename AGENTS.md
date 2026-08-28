@@ -37,19 +37,33 @@ Read other documents only when the task needs them:
 
 | Need | Read |
 | --- | --- |
-| Project entry, build/run entry, user-facing limits | `README.md` |
+| How to run, current version, current capability, user-facing limits | `README.md` |
 | Product goals, boundary, roadmap, whether a request is in scope | `docs/Product.md` |
 | Architecture, module ownership, persistence, IPC, staging, version scheme | `docs/Development.md` |
 | Tests, acceptance vocabulary, whether a quality gate applies | `docs/Quality.md` |
 | Execute, continue, inspect, accept, or edit the current formal stage | `docs/Plan.md` |
-| A version's final result or an important compatibility change | `docs/CHANGELOG.md` |
+| Confirmed completed results or an important compatibility change | `docs/CHANGELOG.md` |
 | A named historical design, version, or superseded decision | the specific `docs/Archive` file |
 | A named method, study, or deferred observation | the specific `docs/Reference` file |
+
+How to run and current capability are in `README.md`. Long-term product
+rules are in `docs/Product.md`. Architecture is in `docs/Development.md`.
+Tests and formal acceptance are in `docs/Quality.md`. Confirmed results are
+in `docs/CHANGELOG.md`. Project progress is not answered from Git status
+alone; read README, Product, and CHANGELOG when the question is progress.
 
 `docs/Plan.md` is read only when the developer explicitly asks to execute,
 continue, inspect, accept, or change the current formal plan. Its presence is
 not a reason to read it. Archive and Reference are never default context; do
 not read either tree in bulk. Reference is not a current project requirement.
+
+The developer's current decision outranks Plan, CHANGELOG, Archive, and old
+test assertions. If a document conflicts with a current decision or the
+confirmed implementation, treat the document as possibly stale; do not use
+old documents or old tests to reverse the current implementation.
+`docs/Plan.md` records only the confirmed current plan. It is not a permanent
+product contract. When no plan is active, do not invent the next stage from
+history.
 
 ## Environment and scope
 
@@ -126,14 +140,31 @@ Which product phase may add a typed real-mutation path is defined by
   document controls. Update a reading copy in the same work item as its
   authority. Ordinary tasks read the authoritative file only.
 
-## Git and release authorization
+## Agent workflow and Git
 
-Do not commit, push, tag, create a GitHub Release, upload binaries, or deploy
-unless the user explicitly authorizes that action.
-
-Before a push, fetch, verify the remote target is an ancestor of local HEAD,
-inspect outgoing commits, and refuse divergence or force push. Never force
-push.
+- Implement only the confirmed minimum closed loop. Do not add framework,
+  schema, API, task, or deployment machinery because it might be needed later.
+- Changing product behavior, data boundaries, or stage scope requires
+  confirmation. Already-decided items are not re-litigated by old documents.
+- Do not write discussion drafts or unconfirmed schemes into long-term
+  documents. Do not create extra planning documents unless the developer
+  explicitly asks.
+- Split commits: documentation, refactor, feature, and visual or asset
+  changes go in separate commits. Equivalent refactors stay separate from
+  visual adjustments.
+- This is a solo repository. Commit directly on `main`. Do not create
+  feature branches and do not open pull requests.
+- After a completed in-scope change, create a local Git commit by default.
+  Do not ask. Follow existing commit-message habits. Do not commit
+  generated `artifacts/`, `Ref/`, `temp/`, discussion drafts, or unrelated
+  user files.
+- Do not push unless the developer explicitly asks. When five unpushed
+  commits have accumulated, remind the developer to push.
+- Before a push, fetch, verify `origin/main` is an ancestor of local HEAD,
+  inspect outgoing commits, and refuse divergence or force push. Never
+  force push.
+- Do not tag, create a GitHub Release, upload binaries, or deploy unless
+  the developer explicitly authorizes that action.
 
 The project version is defined in `Directory.Build.props`. Do not invent a
 second version system. Architecture and roadmap documents normally specify only

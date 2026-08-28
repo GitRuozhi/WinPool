@@ -37,7 +37,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 - [质量规则](docs/Quality.zh-CN.md)：测试与验收规则。
 - [变更记录](docs/CHANGELOG.zh-CN.md)：重要最终结果。
 - [历史归档](docs/Archive/README.zh-CN.md)：冻结的历史计划和状态。
-- [Agent 规则](AGENTS.zh-CN.md)：操作、安全、授权和 Git 规则。
+- [Agent 规则](AGENTS.zh-CN.md)：操作、安全、Git 和发布规则。
 
 `docs/Reference` 下的参考资料不是当前项目要求。
 

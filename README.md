@@ -38,7 +38,7 @@ That command cleans regenerable local output, rebuilds, and writes a `WinPool.ln
 - [Quality](docs/Quality.md): test and acceptance rules.
 - [Changelog](docs/CHANGELOG.md): important final results.
 - [Archive](docs/Archive/README.md): frozen historical plans and state.
-- [Agent rules](AGENTS.md): operational, safety, authorization, and Git rules.
+- [Agent rules](AGENTS.md): operational, safety, Git, and release rules.
 
 Reference files under `docs/Reference` are not current requirements.
 

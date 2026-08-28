@@ -160,7 +160,7 @@ Staging 不得包含重复子进程可执行文件、脚本、艺术源文件、
 - `b`：小版本架构/产品线；
 - `c`：小版本内的一位非零迭代编号。
 
-架构和路线图使用 `Va.b`。迭代编号根据实际工作分配且不能超过 9。非零迭代只有在用户授权该提交时才做本地 commit；远端推送、tag 和 release 遵循 [AGENTS](../AGENTS.zh-CN.md)。
+架构和路线图使用 `Va.b`。迭代编号根据实际工作分配且不能超过 9。本地迭代提交遵循 [AGENTS](../AGENTS.zh-CN.md)（默认本地 commit）。远端推送、tag 和 release 遵循 [AGENTS](../AGENTS.zh-CN.md)，并仍需单独授权。
 
 `Va.b` / `Va.bc` 是唯一项目版本体系。`Directory.Build.props` 根据 `a`、`b`、`c` 机械生成 .NET 和 Windows 必需的数字字段；这些字段只是编译元数据，不具有独立版本含义。数据库 schema 修订号、算法 ID 和 IPC 兼容标识不会重新定义项目版本。
 
