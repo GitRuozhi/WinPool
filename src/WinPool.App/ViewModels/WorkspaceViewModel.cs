@@ -1291,7 +1291,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveSnapshot));
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         RebuildTopology();
-        RebuildObjects(SelectedStableId);
+        RebuildObjects(system.Id);
         return true;
     }
 
