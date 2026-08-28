@@ -202,6 +202,13 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             ? Visibility.Visible
             : Visibility.Collapsed;
 
+    /// <summary>
+    /// Layout-only container: the node keeps its tree slot so its children
+    /// flow in a row, but it renders no card, padding, header, or hover.
+    /// </summary>
+    public bool IsInvisibleLayoutContainer =>
+        Unit.Kind is StorageUnitKind.VirtualDiskGroup;
+
     public string TypeGlyph => Unit.Kind switch
     {
         StorageUnitKind.System => "\uE7F8",

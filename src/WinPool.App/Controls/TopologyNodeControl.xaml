@@ -199,6 +199,7 @@
             </ItemsControl>
 
                 <ItemsControl
+                    x:Name="WeightedChildren"
                     Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
                     Margin="6,5,6,0"
                     ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"
@@ -222,6 +223,7 @@
             </ItemsControl>
 
                 <ItemsControl
+                    x:Name="StackChildren"
                     Grid.Row="{x:Bind ViewModel.ChildrenRow, Mode=OneWay}"
                     Margin="6,5,6,0"
                     ItemsSource="{x:Bind ViewModel.Children, Mode=OneWay}"

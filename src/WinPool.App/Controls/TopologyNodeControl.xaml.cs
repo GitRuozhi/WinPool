@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -63,6 +64,12 @@ public sealed partial class TopologyNodeControl : UserControl
             return;
         }
 
+        var isContainer = ViewModel.IsInvisibleLayoutContainer;
+        var childrenMargin = isContainer ? new Thickness(0) : new Thickness(6, 5, 6, 0);
+        FlowChildren.Margin = childrenMargin;
+        WeightedChildren.Margin = childrenMargin;
+        StackChildren.Margin = childrenMargin;
+
         ApplyInteractionAppearance();
 
         if (ViewModel.IsSelected && !_wasSelected)
@@ -90,6 +97,17 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void ApplyInteractionAppearance()
     {
+        if (ViewModel.IsInvisibleLayoutContainer)
+        {
+            NodeBorder.Background = new SolidColorBrush(Colors.Transparent);
+            NodeBorder.BorderBrush = new SolidColorBrush(Colors.Transparent);
+            NodeBorder.BorderThickness = new Thickness(0);
+            NodeBorder.Padding = new Thickness(0);
+            NodeBorder.CornerRadius = new CornerRadius(0);
+            InteractionBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         if (ViewModel.IsSelected)
         {
             NodeBorder.Background = Brush("WinPoolAccentBrush");
@@ -143,12 +161,20 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void TopologyNodeControl_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
+        if (ViewModel?.IsInvisibleLayoutContainer == true)
+        {
+            return;
+        }
         SetAsHovered();
         e.Handled = true;
     }
 
     private void TopologyNodeControl_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        if (ViewModel?.IsInvisibleLayoutContainer == true)
+        {
+            return;
+        }
         if (ReferenceEquals(s_hoveredControl, this))
         {
             s_hoveredControl = null;
@@ -162,6 +188,10 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void SetAsHovered()
     {
+        if (ViewModel?.IsInvisibleLayoutContainer == true)
+        {
+            return;
+        }
         if (s_hoveredControl is not null && !ReferenceEquals(s_hoveredControl, this))
         {
             s_hoveredControl._isPointerOver = false;
