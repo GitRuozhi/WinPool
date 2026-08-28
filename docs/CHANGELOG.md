@@ -7,6 +7,25 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.42 — 2026-08-28
+
+### Added
+- Unit-based topology layout engine: topology rows now pack by integer H/W
+  units instead of the previous pixel-greedy wrap.
+- Built-in simulation systems for verifying topology layout across
+  representative storage configurations.
+
+### Changed
+- Rows fill the aligned height first, then move a whole pool to the next row,
+  and only then wrap disks inside a single pool.
+- While a row keeps multiple pools side by side, a pool may exceed the aligned
+  height up to `max(H+1, 1.3H)` before the row breaks.
+- Shrinking reduces unpartitioned disks before partitioned ones; a shared-row
+  pool keeps a minimum width of 2 units for layered pools and
+  pool → disk → partition structures, while simple two-level pools and a pool
+  alone on its row are exempt.
+- Topology area horizontal scrolling is automatic.
+
 ## V0.41 — 2026-08-14
 
 ### Added

@@ -5,7 +5,7 @@
 WinPool is a third-party WinUI 3 desktop application for understanding, testing,
 monitoring, and safely planning operations across Windows storage systems.
 
-The current product version is **V0.41**. The version source is
+The current product version is **V0.42**. The version source is
 `Directory.Build.props`. Final results are in the [changelog](docs/CHANGELOG.md).
 
 ## Capabilities
