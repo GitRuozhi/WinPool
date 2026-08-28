@@ -182,7 +182,7 @@ public partial class App : Application
     private static async Task ConnectAgentAsync()
     {
         const int attemptSeconds = 12;
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(45);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
         try
         {
             var connection = EnsureAgentConnection();
@@ -193,7 +193,8 @@ public partial class App : Application
                     using var timeout = new CancellationTokenSource(
                         TimeSpan.FromSeconds(attemptSeconds));
                     var result = await connection.ConnectAsync(timeout.Token);
-                    if (result.IsSuccess)
+                    if (result.IsSuccess
+                        && await IsAgentReadyAsync(connection, timeout.Token))
                     {
                         return;
                     }
@@ -221,7 +222,7 @@ public partial class App : Application
             }
 
             PublishInitialAgentWarning(
-                "托盘 Agent 在启动恢复期后仍未连接；后台监控暂不可用。",
+                "托盘 Agent 在启动恢复期后仍未就绪；后台监控暂不可用。",
                 "agent-connect-failed");
         }
         catch (Exception exception) when (
@@ -232,6 +233,39 @@ public partial class App : Application
             PublishInitialAgentWarning(
                 "托盘 Agent 启动失败；后台监控暂不可用。",
                 "agent-start-failed");
+        }
+    }
+
+    /// <summary>
+    /// The Agent accepts connections while it is still recovering from its
+    /// own startup; manage-data requests are only served once it is Running.
+    /// Poll its snapshot so the workspace does not initialize too early.
+    /// </summary>
+    private static async Task<bool> IsAgentReadyAsync(
+        IAgentConnection connection,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var requestTimeout = new CancellationTokenSource(
+                TimeSpan.FromSeconds(5));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                requestTimeout.Token);
+            var result = await connection.SendAsync(
+                new GetAgentSnapshotRequest(CorrelationId.New()),
+                linked.Token);
+            return result.IsSuccess
+                && result.Value is AgentSnapshotResponse response
+                && response.Snapshot.ShutdownStatus.State == AgentLifecycleState.Running;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or OperationCanceledException)
+        {
+            return false;
         }
     }
 
