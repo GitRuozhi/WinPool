@@ -5,15 +5,15 @@ public sealed class TopologyLayoutEngineTests
     private const double Wide = 100_000;
 
     [Fact]
-    public void NetworkThreeDisksStopsAtTwoColumnsWhenSharingARow()
+    public void NetworkThreeDisksTightensToOneColumnWhenRowHeightIsSeven()
     {
         var system = System(Primordial(), Pool01(1, 4), Network(3));
         var result = TopologyLayoutEngine.Layout(system, Wide);
 
         Assert.Equal(new[] { 0, 1, 2 }, Assert.Single(result.Rows));
         var network = result.Children[2];
-        Assert.Equal(2, network.UnitWidth);
-        Assert.Equal(3, network.UnitHeight);
+        Assert.Equal(1, network.UnitWidth);
+        Assert.Equal(4, network.UnitHeight);
         Assert.Equal(7, result.Children[0].UnitHeight);
         Assert.Equal(7, result.Children[1].UnitHeight);
     }
@@ -30,17 +30,38 @@ public sealed class TopologyLayoutEngineTests
     }
 
     [Fact]
-    public void SharedRowWrapsInsteadOfSqueezingAPoolToOneColumn()
+    public void SharedRowWrapsInsteadOfSqueezingATieredPoolToOneColumn()
     {
-        var system = System(ShortPrimordial(), Network(3));
+        var system = System(Pool01(1, 4), Pool01(1, 4));
         var together = TopologyLayoutEngine.Layout(system, Wide);
-        Assert.Equal(2, together.Children[1].UnitWidth);
-        var pixel = together.Children.Sum(child => child.PixelWidth)
-            + TopologyLayoutEngine.SiblingSpacing;
-        var result = TopologyLayoutEngine.Layout(system, pixel - 1);
+        Assert.Equal(4, together.Children[0].UnitWidth);
+        var twoColumns = TopologyLayoutEngine.Layout(
+            Pool01(1, 4),
+            TopologyLayoutEngine.AncestorChrome
+            + TopologyLayoutEngine.AncestorChrome
+            + (2 * TopologyLayoutEngine.LeafMinWidth)
+            + TopologyLayoutEngine.SiblingSpacing
+            + 40);
+        var twoPlusTwo = (2 * twoColumns.PixelWidth) + TopologyLayoutEngine.SiblingSpacing;
+        var result = TopologyLayoutEngine.Layout(system, twoPlusTwo - 1);
         Assert.Equal(2, result.Rows.Count);
         Assert.Equal(new[] { 0 }, result.Rows[0]);
         Assert.Equal(new[] { 1 }, result.Rows[1]);
+    }
+
+    [Fact]
+    public void NarrowingShrinksUnpartitionedPoolBeforePartitionedPool()
+    {
+        var system = System(Primordial(), Pool01(1, 4));
+        var wide = TopologyLayoutEngine.Layout(system, Wide);
+        Assert.Equal(4, wide.Children[0].UnitWidth);
+        Assert.Equal(4, wide.Children[1].UnitWidth);
+        var pixel = wide.Children.Sum(child => child.PixelWidth)
+            + TopologyLayoutEngine.SiblingSpacing;
+        var result = TopologyLayoutEngine.Layout(system, pixel - 1);
+        Assert.Equal(new[] { 0, 1 }, Assert.Single(result.Rows));
+        Assert.Equal(4, result.Children[0].UnitWidth);
+        Assert.True(result.Children[1].UnitWidth < 4);
     }
 
     [Fact]
@@ -74,11 +95,11 @@ public sealed class TopologyLayoutEngineTests
     }
 
     [Fact]
-    public void RelaxedHeightCapTakesTheLargerOfPlusTwoAndOnePointFive()
+    public void RelaxedHeightCapTakesTheLargerOfPlusOneAndOnePointThree()
     {
         Assert.Equal(6, TopologyLayoutEngine.RelaxedRowHeightCap(4));
-        Assert.Equal(11, TopologyLayoutEngine.RelaxedRowHeightCap(7));
-        Assert.Equal(3, TopologyLayoutEngine.RelaxedRowHeightCap(1));
+        Assert.Equal(10, TopologyLayoutEngine.RelaxedRowHeightCap(7));
+        Assert.Equal(2, TopologyLayoutEngine.RelaxedRowHeightCap(1));
     }
 
     [Fact]

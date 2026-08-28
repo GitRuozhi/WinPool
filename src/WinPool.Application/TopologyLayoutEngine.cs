@@ -24,7 +24,7 @@ public static class TopologyLayoutEngine
     public static int RelaxedRowHeightCap(int rowHeight)
     {
         var height = Math.Max(1, rowHeight);
-        return Math.Max(height + 2, (int)Math.Ceiling(height * 1.5));
+        return Math.Max(height + 1, (int)Math.Ceiling(height * 1.3));
     }
 
     public static TopologyLayoutResult Layout(TopologyLayoutInput root, double availableWidth)
@@ -178,7 +178,7 @@ public static class TopologyLayoutEngine
             var best = -1;
             for (var i = 0; i < inputs.Count; i++)
             {
-                if (budgets[i] <= MinimumBudget(naturals[i].UnitWidth, inputs.Count))
+                if (budgets[i] <= MinimumBudget(inputs[i], naturals[i].UnitWidth, inputs.Count))
                 {
                     continue;
                 }
@@ -189,10 +189,7 @@ public static class TopologyLayoutEngine
                     continue;
                 }
 
-                if (best < 0
-                    || nodes[i].UnitWidth > nodes[best].UnitWidth
-                    || (nodes[i].UnitWidth == nodes[best].UnitWidth
-                        && nodes[i].PixelWidth > nodes[best].PixelWidth))
+                if (best < 0 || PreferShrink(inputs, nodes, i, best))
                 {
                     best = i;
                 }
@@ -224,7 +221,7 @@ public static class TopologyLayoutEngine
         {
             var chosen = naturals[i];
             var maxWidth = Math.Max(1, naturals[i].UnitWidth);
-            var minBudget = MinimumBudget(maxWidth, inputs.Count);
+            var minBudget = MinimumBudget(inputs[i], maxWidth, inputs.Count);
             for (var budget = minBudget; budget <= maxWidth; budget++)
             {
                 var candidate = MeasureSubtree(inputs[i], budget);
@@ -241,14 +238,83 @@ public static class TopologyLayoutEngine
         return results;
     }
 
-    private static int MinimumBudget(int naturalWidth, int siblingCount)
+    private static int MinimumBudget(
+        TopologyLayoutInput input,
+        int naturalWidth,
+        int siblingCount)
     {
-        if (siblingCount <= 1)
+        if (siblingCount <= 1 || !RequiresMinimumSiblingWidth(input))
         {
             return 1;
         }
 
         return Math.Min(MinimumSiblingUnitWidth, Math.Max(1, naturalWidth));
+    }
+
+    private static bool PreferShrink(
+        IReadOnlyList<TopologyLayoutInput> inputs,
+        IReadOnlyList<Node> nodes,
+        int candidate,
+        int current)
+    {
+        var candidatePartitioned = InnerFlowsWrapPartitionedDisks(inputs[candidate]);
+        var currentPartitioned = InnerFlowsWrapPartitionedDisks(inputs[current]);
+        if (candidatePartitioned != currentPartitioned)
+        {
+            return !candidatePartitioned;
+        }
+
+        if (nodes[candidate].UnitWidth != nodes[current].UnitWidth)
+        {
+            return nodes[candidate].UnitWidth > nodes[current].UnitWidth;
+        }
+
+        return nodes[candidate].PixelWidth > nodes[current].PixelWidth;
+    }
+
+    private static bool RequiresMinimumSiblingWidth(TopologyLayoutInput input) =>
+        HasHeaderedFlowChild(input) || InnerFlowsWrapPartitionedDisks(input);
+
+    private static bool HasHeaderedFlowChild(TopologyLayoutInput input) =>
+        input.Children.Any(child =>
+            child.ShowHeader
+            && child.IsExpanded
+            && child.ChildrenLayout is TopologyChildrenLayout.Flow
+                or TopologyChildrenLayout.WeightedFlow
+            && child.Children.Count > 0);
+
+    private static bool InnerFlowsWrapPartitionedDisks(TopologyLayoutInput input)
+    {
+        if (!input.IsExpanded || input.Children.Count == 0)
+        {
+            return false;
+        }
+
+        if (input.ChildrenLayout is TopologyChildrenLayout.Flow
+            or TopologyChildrenLayout.WeightedFlow)
+        {
+            return EnumerateFlowItems(input).Any(item => item.Children.Count > 0);
+        }
+
+        return input.Children.Any(InnerFlowsWrapPartitionedDisks);
+    }
+
+    private static IEnumerable<TopologyLayoutInput> EnumerateFlowItems(TopologyLayoutInput flow)
+    {
+        foreach (var child in flow.Children)
+        {
+            if (!child.ShowHeader)
+            {
+                foreach (var nested in child.Children)
+                {
+                    yield return nested;
+                }
+
+                continue;
+            }
+
+            yield return child;
+        }
     }
 
     private static Node ShrinkToFit(TopologyLayoutInput input, double availableWidth)
