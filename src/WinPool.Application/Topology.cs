@@ -53,7 +53,8 @@ public static class WorkspaceMapper
             StorageUnitKind.StorageTier =>
                 new WorkspaceSelection(WorkspaceCategory.Tier, unit.StableId),
             StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk
-                or StorageUnitKind.OsDisk =>
+                or StorageUnitKind.OsDisk or StorageUnitKind.DirectDiskGroup
+                or StorageUnitKind.VirtualDiskGroup =>
                 new WorkspaceSelection(WorkspaceCategory.Disk, unit.StableId),
             StorageUnitKind.NetworkDisk or StorageUnitKind.Partition =>
                 new WorkspaceSelection(WorkspaceCategory.Partition, unit.StableId),
@@ -259,16 +260,24 @@ public static class TopologyProjector
             return poolNode;
         }
 
-        foreach (var virtualDisk in virtualDisks)
+        var virtualNodes = virtualDisks.Select(disk => CreateVirtualDiskNode(disk, snapshot)).ToList();
+        if (virtualNodes.Count == 1)
         {
-            var virtualNode = new TopologyNode(
-                new StorageUnitRef(virtualDisk.StableId, StorageUnitKind.VirtualDisk, virtualDisk.FriendlyName, virtualDisk.IsStable, pool.StableId),
-                JoinSummary(virtualDisk.TierStableIds.Count > 0 ? "Tiered" : "Virtual", FormatBytes(virtualDisk.Size)));
-            foreach (var osDisk in snapshot.OsDisks.Where(x => x.VirtualDiskStableId == virtualDisk.StableId))
-            {
-                AddPartitions(virtualNode, osDisk, snapshot);
-            }
-            poolNode.Children.Add(virtualNode);
+            poolNode.Children.Add(virtualNodes[0]);
+        }
+        else if (virtualNodes.Count > 1)
+        {
+            var virtualGroup = new TopologyNode(
+                new StorageUnitRef(
+                    $"group:vdisk:{pool.StableId}",
+                    StorageUnitKind.VirtualDiskGroup,
+                    string.Empty),
+                string.Empty,
+                isSelectable: false,
+                childrenLayout: TopologyChildrenLayout.Flow,
+                layoutWeight: virtualNodes.Count);
+            virtualGroup.Children.AddRange(virtualNodes);
+            poolNode.Children.Add(virtualGroup);
         }
 
         foreach (var tier in poolTiers.OrderBy(x => TierSortOrder(x.MediaType)))
@@ -306,6 +315,18 @@ public static class TopologyProjector
         }
 
         return poolNode;
+    }
+
+    private static TopologyNode CreateVirtualDiskNode(VirtualDiskInfo disk, StorageSnapshot snapshot)
+    {
+        var node = new TopologyNode(
+            new StorageUnitRef(disk.StableId, StorageUnitKind.VirtualDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
+            JoinSummary(disk.TierStableIds.Count > 0 ? "Tiered" : "Virtual", FormatBytes(disk.Size)));
+        foreach (var osDisk in snapshot.OsDisks.Where(x => x.VirtualDiskStableId == disk.StableId))
+        {
+            AddPartitions(node, osDisk, snapshot);
+        }
+        return node;
     }
 
     private static TopologyNode CreatePhysicalDiskNode(

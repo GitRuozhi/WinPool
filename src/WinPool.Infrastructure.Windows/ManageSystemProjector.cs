@@ -296,6 +296,7 @@ public sealed class ManageSystemProjector
         StorageUnitKind.NetworkDiskGroup => ManageObjectRole.NetworkGroup,
         StorageUnitKind.OtherDiskGroup => ManageObjectRole.OtherGroup,
         StorageUnitKind.DirectDiskGroup => ManageObjectRole.DirectDiskGroup,
+        StorageUnitKind.VirtualDiskGroup => ManageObjectRole.VirtualDiskGroup,
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
@@ -311,7 +312,8 @@ public sealed class ManageSystemProjector
         ManageObjectRole.OsDisk => StorageObjectKind.OsDisk,
         ManageObjectRole.Partition => StorageObjectKind.Partition,
         ManageObjectRole.NetworkGroup or ManageObjectRole.OtherGroup
-            or ManageObjectRole.DirectDiskGroup => StorageObjectKind.LogicalGroup,
+            or ManageObjectRole.DirectDiskGroup
+            or ManageObjectRole.VirtualDiskGroup => StorageObjectKind.LogicalGroup,
         _ => throw new ArgumentOutOfRangeException(nameof(role))
     };
 }

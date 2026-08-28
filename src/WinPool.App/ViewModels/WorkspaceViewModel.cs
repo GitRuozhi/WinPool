@@ -764,6 +764,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             StorageUnitKind.NetworkDiskGroup => WinPool.Application.ManageObjectRole.NetworkGroup,
             StorageUnitKind.OtherDiskGroup => WinPool.Application.ManageObjectRole.OtherGroup,
             StorageUnitKind.DirectDiskGroup => WinPool.Application.ManageObjectRole.DirectDiskGroup,
+            StorageUnitKind.VirtualDiskGroup => WinPool.Application.ManageObjectRole.VirtualDiskGroup,
             _ => throw new ArgumentOutOfRangeException(nameof(unit))
         };
         SelectManageTopologyNode(
@@ -772,6 +773,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 role is WinPool.Application.ManageObjectRole.NetworkGroup
                     or WinPool.Application.ManageObjectRole.OtherGroup
                     or WinPool.Application.ManageObjectRole.DirectDiskGroup
+                    or WinPool.Application.ManageObjectRole.VirtualDiskGroup
                     ? WinPool.Domain.StorageObjectKind.LogicalGroup
                     : MapDomainKind(role),
                 unit.StableId),
@@ -1105,6 +1107,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WinPool.Application.ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
             WinPool.Application.ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
             WinPool.Application.ManageObjectRole.DirectDiskGroup => StorageUnitKind.DirectDiskGroup,
+            WinPool.Application.ManageObjectRole.VirtualDiskGroup => StorageUnitKind.VirtualDiskGroup,
             _ => throw new ArgumentOutOfRangeException(nameof(item))
         };
         var title = item.Role switch

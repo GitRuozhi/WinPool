@@ -17,7 +17,8 @@ public enum ManageObjectRole
     Partition,
     NetworkGroup,
     OtherGroup,
-    DirectDiskGroup
+    DirectDiskGroup,
+    VirtualDiskGroup
 }
 
 public enum ManageTopologyLayout
@@ -226,7 +227,8 @@ public static class ManageSelectionRules
                 or ManageObjectRole.OtherGroup => ManageWorkspaceCategory.Pool,
             ManageObjectRole.StorageTier => ManageWorkspaceCategory.Tier,
             ManageObjectRole.PhysicalDisk or ManageObjectRole.VirtualDisk
-                or ManageObjectRole.OsDisk or ManageObjectRole.DirectDiskGroup =>
+                or ManageObjectRole.OsDisk or ManageObjectRole.DirectDiskGroup
+                or ManageObjectRole.VirtualDiskGroup =>
                 ManageWorkspaceCategory.Disk,
             ManageObjectRole.Partition or ManageObjectRole.NetworkDisk =>
                 ManageWorkspaceCategory.Partition,

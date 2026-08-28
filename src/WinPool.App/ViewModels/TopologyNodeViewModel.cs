@@ -180,7 +180,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     };
 
     public Visibility HeaderVisibility =>
-        Unit.Kind == StorageUnitKind.DirectDiskGroup ? Visibility.Collapsed : Visibility.Visible;
+        Unit.Kind is StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
     public Visibility FlowChildrenVisibility =>
         IsExpanded && ChildrenLayout == TopologyChildrenLayout.Flow ? Visibility.Visible : Visibility.Collapsed;
@@ -197,7 +199,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         StorageUnitKind.StoragePool => double.NaN,
         StorageUnitKind.StorageTier => double.NaN,
         StorageUnitKind.VirtualDisk => double.NaN,
-        StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup or StorageUnitKind.DirectDiskGroup => double.NaN,
+        StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup
+            or StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup => double.NaN,
         StorageUnitKind.PhysicalDisk => double.NaN,
         StorageUnitKind.NetworkDisk => double.NaN,
         StorageUnitKind.OsDisk => double.NaN,
@@ -412,6 +415,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
                 ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
                 ManageObjectRole.DirectDiskGroup => StorageUnitKind.DirectDiskGroup,
+                ManageObjectRole.VirtualDiskGroup => StorageUnitKind.VirtualDiskGroup,
                 _ => throw new ArgumentOutOfRangeException(nameof(node))
             },
             node.DisplayName,

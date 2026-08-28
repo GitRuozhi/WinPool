@@ -316,7 +316,8 @@ public sealed class SimulationEditCoordinator(
         StorageUnitKind.OsDisk => StorageObjectKind.OsDisk,
         StorageUnitKind.Partition => StorageObjectKind.Partition,
         StorageUnitKind.NetworkDisk => StorageObjectKind.NetworkDisk,
-        StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup or StorageUnitKind.DirectDiskGroup =>
+        StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup
+            or StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup =>
             StorageObjectKind.LogicalGroup,
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };

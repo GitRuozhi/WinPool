@@ -25,7 +25,8 @@ public enum StorageUnitKind
     Partition,
     NetworkDiskGroup,
     OtherDiskGroup,
-    DirectDiskGroup
+    DirectDiskGroup,
+    VirtualDiskGroup
 }
 
 public sealed record StorageUnitRef(
@@ -235,6 +236,14 @@ public sealed record StorageSnapshot(
         if (NetworkDisks.Count > 0 && TopologyProjector.NetworkGroupStableId(this) == stableId)
         {
             return new StorageUnitRef(stableId, StorageUnitKind.NetworkDiskGroup, "Network");
+        }
+
+        var virtualDiskGroupPool = StoragePools.FirstOrDefault(
+            candidate => stableId == $"group:vdisk:{candidate.StableId}"
+                && VirtualDisks.Count(disk => disk.PoolStableId == candidate.StableId) > 1);
+        if (virtualDiskGroupPool is not null)
+        {
+            return new StorageUnitRef(stableId, StorageUnitKind.VirtualDiskGroup, string.Empty, true, virtualDiskGroupPool.StableId);
         }
 
         if (TopologyProjector.GetOtherOsDisks(this).Count > 0

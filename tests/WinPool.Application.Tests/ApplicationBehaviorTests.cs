@@ -137,6 +137,28 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
+    public void MultipleVirtualDisksInAPoolUseAHorizontalFlowGroup()
+    {
+        var source = TestSnapshotFactory.Create();
+        var second = source.VirtualDisks[0] with
+        {
+            StableId = "virtual:2",
+            FriendlyName = "Virtual02",
+            OsDiskNumbers = [4]
+        };
+        var snapshot = source with { VirtualDisks = [source.VirtualDisks[0], second] };
+        var pool = Assert.Single(WinPool.Application.TopologyProjector.Project(snapshot).Children);
+        var group = Assert.Single(
+            pool.Children,
+            x => x.Unit.Kind == WinPool.Application.StorageUnitKind.VirtualDiskGroup);
+        Assert.Equal(WinPool.Application.TopologyChildrenLayout.Flow, group.ChildrenLayout);
+        Assert.Equal(2, group.Children.Count);
+        Assert.All(group.Children, child => Assert.Equal(WinPool.Application.StorageUnitKind.VirtualDisk, child.Unit.Kind));
+        Assert.Equal(WinPool.Application.TopologyChildrenLayout.Stack, pool.ChildrenLayout);
+        Assert.Contains(pool.Children, child => child.Unit.Kind == WinPool.Application.StorageUnitKind.StorageTier);
+    }
+
+    [Fact]
     public void PartitionDisplayNamePreservesUnicodeAndCleansDriveLetter()
     {
         var source = TestSnapshotFactory.Create().Partitions.Single();
