@@ -934,7 +934,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var preserveTopologySelection = Categories.Count > 0;
         Categories.Clear();
         Categories.Add(new CategoryItem(WorkspaceCategory.System, Localization["System"], "\uE7F8"));
-        Categories.Add(new CategoryItem(WorkspaceCategory.Pool, Localization["Pool"], "\uEDA2"));
+        Categories.Add(new CategoryItem(WorkspaceCategory.Pool, Localization["Pool"], "\uE8F1"));
         Categories.Add(new CategoryItem(WorkspaceCategory.Tier, Localization["Tier"], "\uE8FD"));
         Categories.Add(new CategoryItem(WorkspaceCategory.Disk, Localization["Disk"], "\uEDA2"));
         Categories.Add(new CategoryItem(WorkspaceCategory.Partition, Localization["Partition"], "\uE7C3"));

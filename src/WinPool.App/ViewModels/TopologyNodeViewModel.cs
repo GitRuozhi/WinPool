@@ -171,7 +171,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public string TypeGlyph => Unit.Kind switch
     {
         StorageUnitKind.System => "\uE7F8",
-        StorageUnitKind.StoragePool => "\uEDA2",
+        StorageUnitKind.StoragePool => "\uE8F1",
         StorageUnitKind.StorageTier => "\uE8FD",
         StorageUnitKind.NetworkDisk or StorageUnitKind.NetworkDiskGroup => "\uE774",
         StorageUnitKind.OtherDiskGroup => "\uE8B7",

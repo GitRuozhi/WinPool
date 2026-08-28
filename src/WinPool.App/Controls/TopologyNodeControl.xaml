@@ -14,7 +14,6 @@
                     <Setter Target="NodeBorder.Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
                     <Setter Target="NodeBorder.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
                     <Setter Target="InteractionBorder.Visibility" Value="Collapsed" />
-                    <Setter Target="SelectionIndicator.Visibility" Value="Collapsed" />
                     <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
                     <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
                     <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -25,7 +24,6 @@
                     <Setter Target="NodeBorder.Background" Value="{StaticResource WinPoolAccentHoverBrush}" />
                     <Setter Target="InteractionBorder.BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
                     <Setter Target="InteractionBorder.Visibility" Value="Visible" />
-                    <Setter Target="SelectionIndicator.Visibility" Value="Collapsed" />
                     <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
                     <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
                     <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
@@ -36,7 +34,6 @@
                     <Setter Target="NodeBorder.Background" Value="{StaticResource WinPoolAccentBrush}" />
                     <Setter Target="InteractionBorder.BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
                     <Setter Target="InteractionBorder.Visibility" Value="Visible" />
-                    <Setter Target="SelectionIndicator.Visibility" Value="Visible" />
                     <Setter Target="DisplayNameText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
                     <Setter Target="TypeLabelText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
                     <Setter Target="SummaryText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
@@ -66,17 +63,11 @@
                 Grid.Row="{x:Bind ViewModel.HeaderRow, Mode=OneWay}"
                 Visibility="{x:Bind ViewModel.HeaderVisibility, Mode=OneWay}">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="4" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border
-                    x:Name="SelectionIndicator"
-                    Margin="-6,-6,5,-6"
-                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                    Visibility="Collapsed" />
                 <Button
-                    Grid.Column="1"
+                    Grid.Column="0"
                     Width="30"
                     Height="30"
                     Padding="0"
@@ -91,7 +82,7 @@
                     <FontIcon x:Name="ExpandIcon" FontSize="12" Glyph="{x:Bind ViewModel.ExpandGlyph, Mode=OneWay}" />
                 </Button>
                 <Grid
-                    Grid.Column="2"
+                    Grid.Column="1"
                     MinHeight="42"
                     Padding="8,4">
                     <StackPanel IsHitTestVisible="False">

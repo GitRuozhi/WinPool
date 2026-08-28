@@ -86,7 +86,6 @@ public sealed partial class TopologyNodeControl : UserControl
             NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
             InteractionBorder.BorderBrush = Brush("WinPoolAccentBorderBrush");
             InteractionBorder.Visibility = Visibility.Visible;
-            SelectionIndicator.Visibility = Visibility.Visible;
             SetTextBrush(Brush("WinPoolAccentForegroundBrush"));
             return;
         }
@@ -97,7 +96,6 @@ public sealed partial class TopologyNodeControl : UserControl
             NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
             InteractionBorder.BorderBrush = Brush("WinPoolAccentBorderBrush");
             InteractionBorder.Visibility = Visibility.Visible;
-            SelectionIndicator.Visibility = Visibility.Collapsed;
             SetTextBrush(Brush("TextFillColorPrimaryBrush"));
             return;
         }
@@ -105,7 +103,6 @@ public sealed partial class TopologyNodeControl : UserControl
         NodeBorder.Background = Brush("LayerFillColorDefaultBrush");
         NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
         InteractionBorder.Visibility = Visibility.Collapsed;
-        SelectionIndicator.Visibility = Visibility.Collapsed;
         DisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
         TypeLabelText.Foreground = Brush("TextFillColorSecondaryBrush");
         SummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
