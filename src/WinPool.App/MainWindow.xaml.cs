@@ -304,14 +304,15 @@ public sealed partial class MainWindow : Window
 
     private void UpdateActiveSystemName()
     {
-        var show = SelectedShellItem?.Page == ShellPageKind.Manage;
+        // The field is always visible in the title bar, independent of the
+        // currently selected shell page.
         var system = ViewModel.SelectedSystem;
         var prefix = system is null
             ? string.Empty
             : system.IsLocal
                 ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
                 : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-        ActiveSystemNameText.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        ActiveSystemNameText.Visibility = Visibility.Visible;
         ActiveSystemNameText.Text = system is null ? string.Empty : $"{prefix} {system.DisplayName}";
     }
 

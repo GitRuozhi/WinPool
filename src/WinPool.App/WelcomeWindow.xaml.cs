@@ -149,19 +149,36 @@ public sealed partial class WelcomeWindow : Window
 
     private static void SetMessageText(TextBlock target, string text)
     {
-        var segments = (text ?? string.Empty).Split("**");
-        for (var i = 0; i < segments.Length; i++)
+        var parts = System.Text.RegularExpressions.Regex.Split(
+            text ?? string.Empty,
+            @"(\*\*|~~)");
+        var bold = false;
+        var strike = false;
+        foreach (var part in parts)
         {
-            if (segments[i].Length == 0)
+            if (part == "**")
+            {
+                bold = !bold;
+                continue;
+            }
+            if (part == "~~")
+            {
+                strike = !strike;
+                continue;
+            }
+            if (part.Length == 0)
             {
                 continue;
             }
             target.Inlines.Add(new Run
             {
-                Text = segments[i],
-                FontWeight = i % 2 == 1
+                Text = part,
+                FontWeight = bold
                     ? Microsoft.UI.Text.FontWeights.SemiBold
-                    : Microsoft.UI.Text.FontWeights.Normal
+                    : Microsoft.UI.Text.FontWeights.Normal,
+                TextDecorations = strike
+                    ? Windows.UI.Text.TextDecorations.Strikethrough
+                    : Windows.UI.Text.TextDecorations.None
             });
         }
     }

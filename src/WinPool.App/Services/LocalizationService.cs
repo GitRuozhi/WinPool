@@ -215,10 +215,10 @@ public sealed class LocalizationService : ObservableObject
             ["DevelopmentIntro"] = ("此处实时显示程序执行的命令和系统返回（只读日志）。", "Shows the commands executed by WinPool and their output in real time (read-only log)."),
             ["SystemDisk"] = ("系统盘", "System disk"),
             ["Welcome"] = ("欢迎页面", "Welcome page"),
-            ["WelcomeTitle"] = ("欢迎使用 WinPool !", "Welcome to WinPool!"),
+            ["WelcomeTitle"] = ("欢迎使用 WinPool ！", "Welcome to WinPool!"),
             ["WelcomeMessage"] = (
-                "我要做 **最好** 的 Windows 系统软 Raid 开源免费工具！\nWinPool 是一款现代化的原生 Windows 存储管理应用程序。\n它的设计目标是作为 Windows 系统原生传统磁盘管理（ Disk Management ）和存储空间界面（ Storage Spaces interfaces ）的高级替代方案。",
-                "I am building the **best** free open-source software RAID tool for Windows!\nWinPool is a modern native Windows storage management application.\nIt is designed as an advanced replacement for the native Windows Disk Management and Storage Spaces interfaces."),
+                "~~最好的~~ 开源免费的 Win 平台存储系统工具。\n原生 WinUI 应用，旨在替代 Windows 老旧的磁盘管理和存储空间的图形界面，支持win 原生软 Raid 和高性能分层存储池。",
+                "~~The best~~ free and open-source storage system tool for the Win platform.\nA native WinUI application that aims to replace Windows' dated Disk Management and Storage Spaces graphical interfaces, supporting native Windows software RAID and high-performance tiered storage pools."),
             ["ShowWelcomeAtStart"] = ("启动时显示欢迎页面", "Show the welcome page at startup"),
             ["OpenWelcome"] = ("打开欢迎内容", "Open welcome"),
             ["WelcomeConfirm"] = ("我知道啦", "Got it"),
