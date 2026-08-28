@@ -30,6 +30,12 @@ public partial class App : Application
     internal static bool InitialAgentWarningPublished { get; private set; }
 
     /// <summary>
+    /// The initial agent connection attempt. The workspace initialization
+    /// awaits this so a slow cold-boot agent does not fail startup.
+    /// </summary>
+    internal static Task InitialAgentConnectionTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
     /// The main application window. Use <c>App.Window</c> from any class that needs
     /// the window reference (for dialogs, pickers, interop, etc.).
     /// </summary>
@@ -131,7 +137,7 @@ public partial class App : Application
             ((MainWindow)Window).ShowStartupWelcome();
         }
         StartActivationChannel();
-        _ = ConnectAgentAsync();
+        InitialAgentConnectionTask = ConnectAgentAsync();
         if (s_activationTarget is not null)
         {
             RequestMainWindowActivation(s_activationTarget);
@@ -182,12 +188,24 @@ public partial class App : Application
             var connection = EnsureAgentConnection();
             while (DateTimeOffset.UtcNow < deadline)
             {
-                using var timeout = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(attemptSeconds));
-                var result = await connection.ConnectAsync(timeout.Token);
-                if (result.IsSuccess)
+                try
                 {
-                    return;
+                    using var timeout = new CancellationTokenSource(
+                        TimeSpan.FromSeconds(attemptSeconds));
+                    var result = await connection.ConnectAsync(timeout.Token);
+                    if (result.IsSuccess)
+                    {
+                        return;
+                    }
+                }
+                catch (Exception exception) when (
+                    exception is IOException
+                        or UnauthorizedAccessException
+                        or InvalidOperationException
+                        or OperationCanceledException)
+                {
+                    // The Agent is still starting (for example after a cold
+                    // boot); keep retrying until the recovery window closes.
                 }
 
                 var remaining = deadline - DateTimeOffset.UtcNow;
@@ -280,11 +298,10 @@ public partial class App : Application
     {
         try
         {
-            return File.Exists(
-                DataRootLayout.AgentEndpointPath(
-                    StorageDataLocations.CurrentRoot))
-                || System.Diagnostics.Process.GetProcessesByName(
-                    "WinPool.Agent").Length > 0;
+            // The endpoint file may be stale after a reboot or a killed
+            // process, so only a live Agent process suppresses startup.
+            return System.Diagnostics.Process.GetProcessesByName(
+                "WinPool.Agent").Length > 0;
         }
         catch
         {

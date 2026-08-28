@@ -140,6 +140,10 @@ public sealed partial class MainWindow : Window
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
         try
         {
+            // On a cold boot the tray Agent can take a while to become ready;
+            // wait for the initial connection so workspace initialization does
+            // not fail against a not-yet-started Agent.
+            await App.InitialAgentConnectionTask;
             await ViewModel.InitializeAsync();
         }
         catch (Exception exception)
