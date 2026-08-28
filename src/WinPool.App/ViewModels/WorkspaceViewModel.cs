@@ -87,19 +87,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             HardwareInventoryReport.Empty(DateTimeOffset.MinValue),
             [],
             DateTimeOffset.MinValue);
-        var simulatedSnapshot = SimulationStorageSnapshotFactory.Create();
-        var simulation = new StorageSystemDocument(
-            StorageSystemDocument.CurrentSchemaVersion,
-            "simulation:builtin:desktop-pl96ukd-20260727-114130",
-            StorageSystemKind.Simulation,
-            "DESKTOP-PL96UKD",
-            simulatedSnapshot,
-            KsReferenceReportFactory.Create(),
-            [],
-            simulatedSnapshot.ScannedAt);
         SystemCatalog.ReplaceLocal(local);
-        SystemCatalog.AddSimulation(simulation);
-        SelectedSystem = simulation;
+        foreach (var simulation in SimulationCatalog.CreateDocuments())
+        {
+            SystemCatalog.AddSimulation(simulation);
+        }
+        SelectedSystem = SystemCatalog.Systems.First(system => !system.IsLocal);
         Localization = new LocalizationService();
         _selectedCategory = WorkspaceCategory.System;
         RefreshLocalizedContent();
@@ -366,35 +359,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             OnPropertyChanged(nameof(Snapshot));
         }
         var persisted = (await _systemRepository.LoadSimulationsAsync()).ToList();
-        var builtinIndex = persisted.FindIndex(
-            x => x.Id.StartsWith("simulation:builtin:", StringComparison.Ordinal));
-        if (builtinIndex >= 0
-            && (persisted[builtinIndex].Snapshot.Computer.Name != SimulationStorageSnapshotFactory.SimulatedComputerName
-                || persisted[builtinIndex].Snapshot.SnapshotVersion != SimulationStorageSnapshotFactory.SimulatedSnapshotVersion))
-        {
-            persisted[builtinIndex] = persisted[builtinIndex] with
-            {
-                Snapshot = SimulationStorageSnapshotFactory.Create(),
-                HardwareReport = KsReferenceReportFactory.Create(),
-                Jobs = [],
-                Revision = checked(persisted[builtinIndex].Revision + 1),
-                UpdatedAt = DateTimeOffset.Now
-            };
-            await _systemRepository.SaveSimulationAsync(persisted[builtinIndex]);
-        }
-        if (persisted.Count > 0)
-        {
-            var selectedId = SelectedSystem.Id;
-            SystemCatalog.ReplaceSimulations(persisted);
-            SelectedSystem = SystemCatalog.Find(selectedId)
-                ?? SystemCatalog.Systems.First(x => !x.IsLocal);
-        }
-        else
-        {
-            var builtinSimulation = SystemCatalog.Systems
-                .First(x => x.Kind == StorageSystemKind.Simulation);
-            await _systemRepository.SaveSimulationAsync(builtinSimulation);
-        }
+        var merged = await MergeBuiltInSimulationsAsync(persisted);
+        var selectedId = SelectedSystem.Id;
+        SystemCatalog.ReplaceSimulations(merged);
+        SelectedSystem = SystemCatalog.Find(selectedId)
+            ?? SystemCatalog.Systems.First(x => !x.IsLocal);
         RestoredUiState = await _workspaceStateService.LoadAsync();
         if (RestoredUiState is not null)
         {
@@ -618,22 +587,64 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 ActiveSnapshot.Computer.StableId));
     }
 
+    private async Task<List<StorageSystemDocument>> MergeBuiltInSimulationsAsync(
+        List<StorageSystemDocument> persisted)
+    {
+        var builtins = SimulationCatalog.CreateDocuments();
+        var persistedById = persisted.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+        var merged = new List<StorageSystemDocument>();
+        foreach (var builtin in builtins)
+        {
+            if (!persistedById.TryGetValue(builtin.Id, out var existing)
+                || existing.Snapshot.Computer.Name != builtin.Snapshot.Computer.Name
+                || existing.Snapshot.SnapshotVersion != builtin.Snapshot.SnapshotVersion)
+            {
+                var updated = existing is null
+                    ? builtin
+                    : existing with
+                    {
+                        DisplayName = builtin.DisplayName,
+                        Snapshot = builtin.Snapshot,
+                        HardwareReport = builtin.HardwareReport,
+                        Jobs = [],
+                        Revision = checked(existing.Revision + 1),
+                        UpdatedAt = DateTimeOffset.Now
+                    };
+                await _systemRepository.SaveSimulationAsync(updated);
+                merged.Add(updated);
+                continue;
+            }
+
+            merged.Add(existing);
+        }
+
+        foreach (var extra in persisted.Where(
+                     item => !item.Id.StartsWith("simulation:builtin:", StringComparison.Ordinal)))
+        {
+            merged.Add(extra);
+        }
+
+        return merged;
+    }
+
     private static SimulationOperationResult ResetBuiltInSimulation(
         StorageSystemDocument document)
     {
-        if (!document.Id.StartsWith("simulation:builtin", StringComparison.Ordinal))
+        var builtin = SimulationCatalog.TryCreateDocument(document.Id);
+        if (builtin is null)
         {
             return SimulationOperationResult.Failure(
                 document,
-                "Only the built-in simulation document can be reset.");
+                "Only a built-in simulation document can be reset.");
         }
 
         return new SimulationOperationResult(
             true,
             document with
             {
-                Snapshot = SimulationStorageSnapshotFactory.Create(),
-                HardwareReport = KsReferenceReportFactory.Create(),
+                DisplayName = builtin.DisplayName,
+                Snapshot = builtin.Snapshot,
+                HardwareReport = builtin.HardwareReport,
                 Jobs = [],
                 UpdatedAt = DateTimeOffset.Now
             },
