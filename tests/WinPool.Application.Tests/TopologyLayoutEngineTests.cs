@@ -49,23 +49,57 @@ public sealed class TopologyLayoutEngineTests
     }
 
     [Fact]
-    public void PacksPoolsToTheNextRowBeforeWrappingInnerDisks()
+    public void RelaxedHeightCapTakesTheLargerOfPlusTwoAndOnePointFive()
     {
-        var network = Network(3);
-        var primordial = Primordial();
-        var pool = Pool01(1, 4);
-        var together = TopologyLayoutEngine.Layout(System(primordial, pool, network), Wide);
-        var threePixel = together.Children.Sum(child => child.PixelWidth)
+        Assert.Equal(6, TopologyLayoutEngine.RelaxedRowHeightCap(4));
+        Assert.Equal(11, TopologyLayoutEngine.RelaxedRowHeightCap(7));
+        Assert.Equal(3, TopologyLayoutEngine.RelaxedRowHeightCap(1));
+    }
+
+    [Fact]
+    public void SixteenDiskPoolStaysBesidePrimordialWhenSlightlyTallerThanRowHeight()
+    {
+        var system = System(ShortPrimordial(), FlatPool(16));
+        var capped = TopologyLayoutEngine.Layout(system, Wide);
+        Assert.Equal(new[] { 0, 1 }, Assert.Single(capped.Rows));
+        Assert.Equal(4, capped.Children[0].UnitHeight);
+        Assert.Equal(6, capped.Children[1].UnitWidth);
+        Assert.Equal(4, capped.Children[1].UnitHeight);
+
+        var sixPixel = capped.Children.Sum(child => child.PixelWidth)
+            + TopologyLayoutEngine.SiblingSpacing;
+        var result = TopologyLayoutEngine.Layout(system, sixPixel - 1);
+        Assert.Equal(new[] { 0, 1 }, Assert.Single(result.Rows));
+        Assert.Equal(5, result.Children[1].UnitWidth);
+        Assert.Equal(5, result.Children[1].UnitHeight);
+    }
+
+    [Fact]
+    public void SixteenDiskPoolWrapsWhenRelaxedHeightCapWouldBeExceeded()
+    {
+        var system = System(ShortPrimordial(), FlatPool(16));
+        var fourColumns = TopologyLayoutEngine.AncestorChrome
+            + TopologyLayoutEngine.AncestorChrome
+            + (4 * TopologyLayoutEngine.LeafMinWidth)
+            + (3 * TopologyLayoutEngine.SiblingSpacing);
+        var primordialPixel = TopologyLayoutEngine.Layout(ShortPrimordial(), Wide).PixelWidth;
+        var togetherAtFour = primordialPixel
+            + TopologyLayoutEngine.SiblingSpacing
+            + fourColumns;
+        var threeColumns = TopologyLayoutEngine.AncestorChrome
+            + TopologyLayoutEngine.AncestorChrome
+            + (3 * TopologyLayoutEngine.LeafMinWidth)
             + (2 * TopologyLayoutEngine.SiblingSpacing);
+        var togetherAtThree = primordialPixel
+            + TopologyLayoutEngine.SiblingSpacing
+            + threeColumns;
         var result = TopologyLayoutEngine.Layout(
-            System(primordial, pool, network),
-            threePixel - 1);
+            system,
+            (togetherAtThree + togetherAtFour) / 2);
 
         Assert.Equal(2, result.Rows.Count);
-        Assert.Equal(new[] { 0, 1 }, result.Rows[0]);
-        Assert.Equal(new[] { 2 }, result.Rows[1]);
-        Assert.Equal(4, result.Children[1].Children[2].FlowColumns);
-        Assert.Equal(4, result.Children[1].Children[2].Children.Count);
+        Assert.Equal(new[] { 0 }, result.Rows[0]);
+        Assert.Equal(new[] { 1 }, result.Rows[1]);
     }
 
     [Fact]
@@ -136,6 +170,22 @@ public sealed class TopologyLayoutEngineTests
 
     private static TopologyLayoutInput Primordial() =>
         FlowHeader(Partitioned(5), Partitioned(2), Partitioned(2), Partitioned(2));
+
+    private static TopologyLayoutInput ShortPrimordial() =>
+        FlowHeader(Partitioned(2));
+
+    private static TopologyLayoutInput FlatPool(int disks) =>
+        new(
+            true,
+            true,
+            TopologyChildrenLayout.Stack,
+            [
+                new TopologyLayoutInput(
+                    false,
+                    true,
+                    TopologyChildrenLayout.Flow,
+                    Enumerable.Range(0, disks).Select(_ => Leaf()).ToList())
+            ]);
 
     private static TopologyLayoutInput Pool01(int performanceDisks, int capacityDisks) =>
         new(

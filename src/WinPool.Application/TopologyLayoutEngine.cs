@@ -20,6 +20,12 @@ public static class TopologyLayoutEngine
     public const int AncestorChrome = 26;
     public const int SiblingSpacing = 6;
 
+    public static int RelaxedRowHeightCap(int rowHeight)
+    {
+        var height = Math.Max(1, rowHeight);
+        return Math.Max(height + 2, (int)Math.Ceiling(height * 1.5));
+    }
+
     public static TopologyLayoutResult Layout(TopologyLayoutInput root, double availableWidth)
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -65,8 +71,7 @@ public static class TopologyLayoutEngine
                     .Select(item => item.Input)
                     .Append(remaining[0])
                     .ToList();
-                var equalized = Equalize(trial);
-                if (RowPixelWidth(equalized) > availableWidth)
+                if (TryPlace(trial, availableWidth) is null)
                 {
                     break;
                 }
@@ -76,11 +81,10 @@ public static class TopologyLayoutEngine
                 nextIndex++;
             }
 
-            var rowNodes = Equalize(rowInputs.Select(item => item.Input).ToList());
-            if (rowNodes.Count == 1 && rowNodes[0].PixelWidth > availableWidth)
-            {
-                rowNodes[0] = ShrinkToFit(rowInputs[0].Input, availableWidth);
-            }
+            var rowNodes = TryPlace(
+                rowInputs.Select(item => item.Input).ToList(),
+                availableWidth)
+                ?? Equalize(rowInputs.Select(item => item.Input).ToList());
 
             var row = new List<int>();
             for (var i = 0; i < rowInputs.Count; i++)
@@ -127,6 +131,81 @@ public static class TopologyLayoutEngine
             Rows = rows,
             Children = children
         };
+    }
+
+    private static List<Node>? TryPlace(
+        IReadOnlyList<TopologyLayoutInput> inputs,
+        double availableWidth)
+    {
+        if (inputs.Count == 0)
+        {
+            return [];
+        }
+
+        if (inputs.Count == 1)
+        {
+            var single = Equalize(inputs);
+            if (single[0].PixelWidth > availableWidth)
+            {
+                return [ShrinkToFit(inputs[0], availableWidth)];
+            }
+
+            return single;
+        }
+
+        var equalized = Equalize(inputs);
+        if (RowPixelWidth(equalized) <= availableWidth)
+        {
+            return equalized;
+        }
+
+        return TryRelaxToFit(inputs, equalized, availableWidth);
+    }
+
+    private static List<Node>? TryRelaxToFit(
+        IReadOnlyList<TopologyLayoutInput> inputs,
+        IReadOnlyList<Node> equalized,
+        double availableWidth)
+    {
+        var cap = RelaxedRowHeightCap(equalized.Max(node => node.UnitHeight));
+        var budgets = equalized.Select(node => Math.Max(1, node.UnitWidth)).ToArray();
+        var nodes = equalized.ToList();
+
+        while (RowPixelWidth(nodes) > availableWidth)
+        {
+            var best = -1;
+            for (var i = 0; i < inputs.Count; i++)
+            {
+                if (budgets[i] <= 1)
+                {
+                    continue;
+                }
+
+                var candidate = MeasureSubtree(inputs[i], budgets[i] - 1);
+                if (candidate.UnitHeight > cap)
+                {
+                    continue;
+                }
+
+                if (best < 0
+                    || nodes[i].UnitWidth > nodes[best].UnitWidth
+                    || (nodes[i].UnitWidth == nodes[best].UnitWidth
+                        && nodes[i].PixelWidth > nodes[best].PixelWidth))
+                {
+                    best = i;
+                }
+            }
+
+            if (best < 0)
+            {
+                return null;
+            }
+
+            budgets[best]--;
+            nodes[best] = MeasureSubtree(inputs[best], budgets[best]);
+        }
+
+        return nodes;
     }
 
     private static List<Node> Equalize(IReadOnlyList<TopologyLayoutInput> inputs)
