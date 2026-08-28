@@ -7,13 +7,15 @@
     <Grid
         x:Name="RootLayout"
         Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
-        PointerPressed="RootLayout_PointerPressed"
+        Loaded="RootLayout_Loaded"
         SizeChanged="RootLayout_SizeChanged">
         <Image
             x:Name="MascotImage"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Center"
             AutomationProperties.Name="Welcome mascot"
             IsHitTestVisible="False"
-            Stretch="UniformToFill" />
+            Stretch="Uniform" />
 
         <Button
             x:Name="CloseButton"
@@ -24,9 +26,10 @@
             HorizontalAlignment="Right"
             VerticalAlignment="Top"
             Background="#B3000000"
+            Foreground="White"
             BorderThickness="0"
             Click="CloseButton_Click">
-            <FontIcon FontSize="13" Glyph="&#xE711;" />
+            <FontIcon FontSize="13" Foreground="White" Glyph="&#xE711;" />
         </Button>
 
         <Border
@@ -54,11 +57,28 @@
         </Border>
 
         <Button
+            x:Name="CycleButton"
+            MinHeight="32"
+            Margin="28,0,0,28"
+            Padding="16,0"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Bottom"
+            Background="#B3000000"
+            Foreground="White"
+            BorderThickness="0"
+            Click="CycleButton_Click" />
+
+        <Button
             x:Name="ConfirmButton"
             MinWidth="120"
+            Height="32"
             Margin="0,0,30,28"
+            Padding="16,0"
             HorizontalAlignment="Right"
             VerticalAlignment="Bottom"
+            Background="#B3000000"
+            Foreground="White"
+            BorderThickness="0"
             Click="ConfirmButton_Click" />
     </Grid>
 </Window>

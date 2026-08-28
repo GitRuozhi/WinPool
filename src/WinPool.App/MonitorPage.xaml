@@ -12,9 +12,9 @@
         x:Name="MonitorRoot"
         Padding="24,16,24,16">
         <Grid.RowDefinitions>
-            <RowDefinition x:Name="GraphRow" Height="3*" MinHeight="160" />
+            <RowDefinition x:Name="GraphRow" Height="*" MinHeight="160" />
             <RowDefinition Height="8" />
-            <RowDefinition x:Name="TableRow" Height="2*" MinHeight="140" />
+            <RowDefinition x:Name="TableRow" Height="220" MinHeight="140" />
             <RowDefinition Height="8" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -55,6 +55,8 @@
         <Border
             Grid.Row="2"
             Padding="8"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
@@ -72,27 +74,65 @@
                         <ColumnDefinition Width="1.2*" />
                         <ColumnDefinition Width="1*" />
                         <ColumnDefinition Width="0.7*" />
-                        <ColumnDefinition Width="0.8*" />
-                        <ColumnDefinition Width="0.9*" />
-                        <ColumnDefinition Width="1*" />
-                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="80" MinWidth="72" />
+                        <ColumnDefinition Width="72" MinWidth="56" />
+                        <ColumnDefinition Width="100" MinWidth="88" />
+                        <ColumnDefinition Width="100" MinWidth="88" />
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="HeaderColor" Grid.Column="1" FontWeight="SemiBold" Text="颜色" />
                     <TextBlock x:Name="HeaderName" Grid.Column="2" FontWeight="SemiBold" Text="名称" />
                     <TextBlock x:Name="HeaderPool" Grid.Column="3" FontWeight="SemiBold" Text="池" />
                     <TextBlock x:Name="HeaderVolumes" Grid.Column="4" FontWeight="SemiBold" Text="卷" />
                     <TextBlock x:Name="HeaderMedia" Grid.Column="5" FontWeight="SemiBold" Text="介质" />
-                    <TextBlock x:Name="HeaderCapacity" Grid.Column="6" FontWeight="SemiBold" Text="容量" />
-                    <TextBlock x:Name="HeaderActivity" Grid.Column="7" FontWeight="SemiBold" Text="活动" />
-                    <TextBlock x:Name="HeaderRead" Grid.Column="8" FontWeight="SemiBold" Text="读取速度" />
-                    <TextBlock x:Name="HeaderWrite" Grid.Column="9" FontWeight="SemiBold" Text="写入速度" />
+                    <TextBlock
+                        x:Name="HeaderCapacity"
+                        Grid.Column="6"
+                        HorizontalAlignment="Stretch"
+                        FontWeight="SemiBold"
+                        Text="容量"
+                        TextAlignment="Right" />
+                    <TextBlock
+                        x:Name="HeaderActivity"
+                        Grid.Column="7"
+                        HorizontalAlignment="Stretch"
+                        FontWeight="SemiBold"
+                        Text="活动"
+                        TextAlignment="Right" />
+                    <TextBlock
+                        x:Name="HeaderRead"
+                        Grid.Column="8"
+                        HorizontalAlignment="Stretch"
+                        FontWeight="SemiBold"
+                        Text="读取速度"
+                        TextAlignment="Right" />
+                    <TextBlock
+                        x:Name="HeaderWrite"
+                        Grid.Column="9"
+                        HorizontalAlignment="Stretch"
+                        FontWeight="SemiBold"
+                        Text="写入速度"
+                        TextAlignment="Right" />
                 </Grid>
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="DiskRows">
+                <ScrollViewer
+                    x:Name="TableScroll"
+                    Grid.Row="1"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto"
+                    SizeChanged="TableScroll_SizeChanged">
+                    <ItemsControl x:Name="DiskRows" HorizontalAlignment="Stretch">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Grid
                                     Padding="0,4"
+                                    HorizontalAlignment="Stretch"
                                     ColumnSpacing="8"
                                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                     BorderThickness="0,0,0,1">
@@ -103,10 +143,10 @@
                                         <ColumnDefinition Width="1.2*" />
                                         <ColumnDefinition Width="1*" />
                                         <ColumnDefinition Width="0.7*" />
-                                        <ColumnDefinition Width="0.8*" />
-                                        <ColumnDefinition Width="0.9*" />
-                                        <ColumnDefinition Width="1*" />
-                                        <ColumnDefinition Width="1*" />
+                                        <ColumnDefinition Width="80" MinWidth="72" />
+                                        <ColumnDefinition Width="72" MinWidth="56" />
+                                        <ColumnDefinition Width="100" MinWidth="88" />
+                                        <ColumnDefinition Width="100" MinWidth="88" />
                                     </Grid.ColumnDefinitions>
                                     <CheckBox
                                         VerticalAlignment="Center"
@@ -144,20 +184,28 @@
                                         Text="{Binding Media}" />
                                     <TextBlock
                                         Grid.Column="6"
+                                        HorizontalAlignment="Stretch"
                                         VerticalAlignment="Center"
-                                        Text="{Binding Capacity}" />
+                                        Text="{Binding Capacity}"
+                                        TextAlignment="Right" />
                                     <TextBlock
                                         Grid.Column="7"
+                                        HorizontalAlignment="Stretch"
                                         VerticalAlignment="Center"
-                                        Text="{Binding ActivityText}" />
+                                        Text="{Binding ActivityText}"
+                                        TextAlignment="Right" />
                                     <TextBlock
                                         Grid.Column="8"
+                                        HorizontalAlignment="Stretch"
                                         VerticalAlignment="Center"
-                                        Text="{Binding ReadText}" />
+                                        Text="{Binding ReadText}"
+                                        TextAlignment="Right" />
                                     <TextBlock
                                         Grid.Column="9"
+                                        HorizontalAlignment="Stretch"
                                         VerticalAlignment="Center"
-                                        Text="{Binding WriteText}" />
+                                        Text="{Binding WriteText}"
+                                        TextAlignment="Right" />
                                 </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -190,6 +238,7 @@
                         x:Name="RateOptions"
                         MinWidth="100"
                         VerticalAlignment="Center"
+                        DropDownClosed="RateOptions_DropDownClosed"
                         SelectionChanged="RateOptions_SelectionChanged" />
                     <Button x:Name="AutoColorsButton" Click="AutoColors_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">

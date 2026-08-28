@@ -581,7 +581,26 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("ConfirmButton.Content = localization[\"WelcomeConfirm\"]", windowSource, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ConfirmButton\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"ConfirmButton_Click\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CycleButton\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"CycleButton_Click\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("WelcomeMascotCatalog.NextKey", windowSource, StringComparison.Ordinal);
         Assert.Contains("AppWindow.Resize(DefaultSize)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("AppWindowPlacement.CenterOnWorkArea(AppWindow)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("AppWindowPlacement.CenterOnWorkArea(AppWindow)", source, StringComparison.Ordinal);
+        Assert.Contains("presenter.IsResizable = false", windowSource, StringComparison.Ordinal);
+        Assert.Contains("SetBorderAndTitleBar(false, false)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("NonClientRegionKind.Caption", windowSource, StringComparison.Ordinal);
+        Assert.Contains("NonClientRegionKind.Passthrough", windowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExtendsContentIntoTitleBar = true", windowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetTitleBar(RootLayout)", windowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("SendMessage", windowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("PointerPressed", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"#B3000000\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ConfirmButton\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Stretch=\"Uniform\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Left\"", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UniformToFill", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DecodePixelHeight", windowSource, StringComparison.Ordinal);
         Assert.Contains(
             "if (_startupTarget is ApplicationStartupTarget.None",
             source,
@@ -713,6 +732,37 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("x:Name=\"ContinuousMonitoringCheckBox\"", source, StringComparison.Ordinal);
         Assert.Contains("AccessKey=\"C\"", source, StringComparison.Ordinal);
+        Assert.Contains("TextAlignment=\"Right\"", source, StringComparison.Ordinal);
+        Assert.Contains("HorizontalContentAlignment", source, StringComparison.Ordinal);
+        Assert.Contains("ItemContainerStyle", source, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TableScroll\"", source, StringComparison.Ordinal);
+
+        var code = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml.cs"));
+        Assert.Contains("GridUnitType.Pixel", code, StringComparison.Ordinal);
+        Assert.Contains("TableScroll_SizeChanged", code, StringComparison.Ordinal);
+        Assert.Contains("SetRateAsync", code, StringComparison.Ordinal);
+
+        var monitoring = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "Services", "MonitoringService.cs"));
+        Assert.Contains("existingRate - rateHz", monitoring, StringComparison.Ordinal);
+        Assert.Contains("RestartRemoteAsync", monitoring, StringComparison.Ordinal);
+        Assert.DoesNotContain("await StopAsync();\r\n        Start(rateHz);", monitoring, StringComparison.Ordinal);
+        Assert.DoesNotContain("await StopAsync();\n        Start(rateHz);", monitoring, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CustomAccentColorUpdatesThemeDictionaries()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+        Assert.Contains("WalkResourceDictionaries", source, StringComparison.Ordinal);
+        Assert.Contains("SystemAccentColorLight2", source, StringComparison.Ordinal);
+        Assert.Contains("ThemeDictionaries", source, StringComparison.Ordinal);
+        Assert.Contains("HighContrast", source, StringComparison.Ordinal);
+        Assert.Contains("AccentFillColorDefaultBrush", source, StringComparison.Ordinal);
+        Assert.Contains("UIColorType.AccentLight2", source, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -90,6 +90,7 @@ public sealed partial class MonitorPage : Page
     private DispatcherQueueTimer? _preferenceSyncTimer;
     private bool _ready;
     private bool _updatingContinuousMonitoring;
+    private bool _applyingSampleRate;
 
     public MonitorPage()
     {
@@ -217,7 +218,7 @@ public sealed partial class MonitorPage : Page
         DispatcherQueueTimer sender,
         object args)
     {
-        if (!_ready || _updatingContinuousMonitoring)
+        if (!_ready || _updatingContinuousMonitoring || _applyingSampleRate)
         {
             return;
         }
@@ -437,10 +438,22 @@ public sealed partial class MonitorPage : Page
             var desiredTable = 40 + (_rows.Count * 34) + 28;
             var table = Math.Min(desiredTable, available * 0.4);
             table = Math.Clamp(table, 140, available - 160);
-            GraphRow.Height = new Microsoft.UI.Xaml.GridLength(available - table, Microsoft.UI.Xaml.GridUnitType.Star);
-            TableRow.Height = new Microsoft.UI.Xaml.GridLength(table, Microsoft.UI.Xaml.GridUnitType.Star);
+            GraphRow.Height = new GridLength(1, GridUnitType.Star);
+            TableRow.Height = new GridLength(table, GridUnitType.Pixel);
             _splitApplied = true;
         });
+    }
+
+    private void TableScroll_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var width = TableScroll.ActualWidth;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        TableHeader.Width = width;
+        DiskRows.Width = width;
     }
 
     private void PopulateRateOptions()
@@ -448,8 +461,24 @@ public sealed partial class MonitorPage : Page
         RateOptions.ItemsSource = MonitoringService.RateOptions
             .Select(x => $"{x:0.#} Hz")
             .ToArray();
-        var index = Array.IndexOf(MonitoringService.RateOptions, Monitoring.SampleRateHz);
-        RateOptions.SelectedIndex = index >= 0 ? index : 4;
+        RateOptions.SelectedIndex = IndexOfRate(Monitoring.SampleRateHz);
+    }
+
+    private static int IndexOfRate(double rateHz)
+    {
+        var best = 4;
+        var bestDiff = double.MaxValue;
+        for (var i = 0; i < MonitoringService.RateOptions.Length; i++)
+        {
+            var diff = Math.Abs(MonitoringService.RateOptions[i] - rateHz);
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                best = i;
+            }
+        }
+
+        return best;
     }
 
     private double SelectedRate() =>
@@ -781,21 +810,42 @@ public sealed partial class MonitorPage : Page
 
     private async void RateOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_ready)
+        await ApplySelectedRateAsync();
+    }
+
+    private async void RateOptions_DropDownClosed(object sender, object e)
+    {
+        await ApplySelectedRateAsync();
+    }
+
+    private async Task ApplySelectedRateAsync()
+    {
+        if (!_ready || _applyingSampleRate)
         {
             return;
         }
+
+        var rate = SelectedRate();
+        if (Math.Abs(Monitoring.SampleRateHz - rate) < 0.001)
+        {
+            return;
+        }
+
+        _applyingSampleRate = true;
         try
         {
-            var rate = SelectedRate();
             await _viewModel.SetMonitoringSampleRateAsync(rate);
-            Monitoring.SetRate(rate);
+            await Monitoring.SetRateAsync(rate);
         }
         catch (Exception exception)
         {
             LogMonitorFailure("RateChanged", exception);
         }
-        ApplyPollInterval();
+        finally
+        {
+            _applyingSampleRate = false;
+            ApplyPollInterval();
+        }
     }
 
     private async void EventsButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

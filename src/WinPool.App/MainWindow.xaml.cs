@@ -98,6 +98,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         AppWindow.SetIcon("Assets/CAppIcon.ico");
         AppWindow.Resize(new SizeInt32(1440, 900));
+        AppWindowPlacement.CenterOnWorkArea(AppWindow);
         RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         RootGrid.Loaded += RootGrid_Loaded;
         RootGrid.SizeChanged += RootGrid_SizeChanged;
@@ -396,7 +397,9 @@ public sealed partial class MainWindow : Window
 
     public void ApplyAccentColor(AccentColorPreference preference)
     {
-        var color = _accessibilitySettings.HighContrast
+        var useSystemAccent = _accessibilitySettings.HighContrast
+            || preference == AccentColorPreference.System;
+        var color = useSystemAccent
             ? _uiSettings.GetColorValue(UIColorType.Accent)
             : preference switch
         {
@@ -409,40 +412,82 @@ public sealed partial class MainWindow : Window
             _ => _uiSettings.GetColorValue(UIColorType.Accent)
         };
 
+        var light1 = useSystemAccent
+            ? _uiSettings.GetColorValue(UIColorType.AccentLight1)
+            : Blend(color, 0.18);
+        var light2 = useSystemAccent
+            ? _uiSettings.GetColorValue(UIColorType.AccentLight2)
+            : Blend(color, 0.35);
+        var light3 = useSystemAccent
+            ? _uiSettings.GetColorValue(UIColorType.AccentLight3)
+            : Blend(color, 0.52);
+        var dark1 = useSystemAccent
+            ? _uiSettings.GetColorValue(UIColorType.AccentDark1)
+            : Blend(color, -0.16);
+        var dark2 = useSystemAccent
+            ? _uiSettings.GetColorValue(UIColorType.AccentDark2)
+            : Blend(color, -0.30);
+        var dark3 = useSystemAccent
+            ? _uiSettings.GetColorValue(UIColorType.AccentDark3)
+            : Blend(color, -0.44);
         var foreground = RelativeLuminance(color) > 0.48
             ? Color.FromArgb(255, 0, 0, 0)
             : Color.FromArgb(255, 255, 255, 255);
         var hover = Color.FromArgb(0x36, color.R, color.G, color.B);
         var pressed = Color.FromArgb(0x58, color.R, color.G, color.B);
-        var border = Blend(color, 0.35);
+        var border = light2;
+        var currentIsLight = RootGrid.ActualTheme == ElementTheme.Light;
 
-        SetColorResource("WinPoolAccentColor", color);
-        SetColorResource("WinPoolAccentHoverColor", hover);
-        SetColorResource("WinPoolAccentPressedColor", pressed);
-        SetColorResource("WinPoolAccentBorderColor", border);
-        SetColorResource("WinPoolAccentForegroundColor", foreground);
-        SetColorResource("SystemAccentColor", color);
-        SetColorResource("SystemAccentColorLight1", Blend(color, 0.18));
-        SetColorResource("SystemAccentColorLight2", Blend(color, 0.35));
-        SetColorResource("SystemAccentColorLight3", Blend(color, 0.52));
-        SetColorResource("SystemAccentColorDark1", Blend(color, -0.16));
-        SetColorResource("SystemAccentColorDark2", Blend(color, -0.30));
-        SetColorResource("SystemAccentColorDark3", Blend(color, -0.44));
-        SetBrushColor("WinPoolAccentBrush", color);
-        SetBrushColor("WinPoolAccentHoverBrush", hover);
-        SetBrushColor("WinPoolAccentPressedBrush", pressed);
-        SetBrushColor("WinPoolAccentBorderBrush", border);
-        SetBrushColor("WinPoolAccentForegroundBrush", foreground);
-        SetBrushColor("AccentFillColorDefaultBrush", color);
-        SetBrushColor("AccentFillColorSecondaryBrush", Blend(color, -0.08));
-        SetBrushColor("AccentFillColorTertiaryBrush", Blend(color, -0.16));
-        SetBrushColor("AccentTextFillColorPrimaryBrush", color);
-        SetBrushColor("FocusStrokeColorOuterBrush", color);
-        SetBrushColor("ListViewItemSelectionIndicatorBrush", color);
-        SetBrushColor("ToggleSwitchFillOn", color);
-        SetBrushColor("ToggleSwitchFillOnPointerOver", Blend(color, 0.08));
-        SetBrushColor("ToggleSwitchFillOnPressed", Blend(color, -0.10));
-        SetBrushColor("ToggleSwitchStrokeOn", color);
+        WalkResourceDictionaries(
+            Application.Current.Resources,
+            themeKey: null,
+            (dictionary, themeKey) =>
+            {
+                var lightTheme = themeKey is null
+                    ? currentIsLight
+                    : string.Equals(themeKey, "Light", StringComparison.OrdinalIgnoreCase);
+                var fill = lightTheme ? dark1 : light2;
+                var text = lightTheme ? dark2 : light3;
+
+                SetDictionaryColor(dictionary, "WinPoolAccentColor", color);
+                SetDictionaryColor(dictionary, "WinPoolAccentHoverColor", hover);
+                SetDictionaryColor(dictionary, "WinPoolAccentPressedColor", pressed);
+                SetDictionaryColor(dictionary, "WinPoolAccentBorderColor", border);
+                SetDictionaryColor(dictionary, "WinPoolAccentForegroundColor", foreground);
+                SetDictionaryColor(dictionary, "SystemAccentColor", color);
+                SetDictionaryColor(dictionary, "SystemAccentColorLight1", light1);
+                SetDictionaryColor(dictionary, "SystemAccentColorLight2", light2);
+                SetDictionaryColor(dictionary, "SystemAccentColorLight3", light3);
+                SetDictionaryColor(dictionary, "SystemAccentColorDark1", dark1);
+                SetDictionaryColor(dictionary, "SystemAccentColorDark2", dark2);
+                SetDictionaryColor(dictionary, "SystemAccentColorDark3", dark3);
+                SetDictionaryBrush(dictionary, "WinPoolAccentBrush", color);
+                SetDictionaryBrush(dictionary, "WinPoolAccentHoverBrush", hover);
+                SetDictionaryBrush(dictionary, "WinPoolAccentPressedBrush", pressed);
+                SetDictionaryBrush(dictionary, "WinPoolAccentBorderBrush", border);
+                SetDictionaryBrush(dictionary, "WinPoolAccentForegroundBrush", foreground);
+                SetDictionaryBrush(dictionary, "AccentFillColorDefaultBrush", fill);
+                SetDictionaryBrush(dictionary, "AccentFillColorSecondaryBrush", fill);
+                SetDictionaryBrush(dictionary, "AccentFillColorTertiaryBrush", fill);
+                SetDictionaryBrush(dictionary, "AccentFillColorSelectedTextBackgroundBrush", color);
+                SetDictionaryBrush(dictionary, "AccentTextFillColorPrimaryBrush", text);
+                SetDictionaryBrush(dictionary, "AccentTextFillColorSecondaryBrush", text);
+                SetDictionaryBrush(dictionary, "AccentTextFillColorTertiaryBrush", fill);
+                SetDictionaryBrush(dictionary, "TextOnAccentFillColorPrimaryBrush", foreground);
+                SetDictionaryBrush(dictionary, "TextOnAccentFillColorDefaultBrush", foreground);
+                SetDictionaryBrush(dictionary, "FocusStrokeColorOuterBrush", fill);
+                SetDictionaryBrush(dictionary, "ListViewItemSelectionIndicatorBrush", fill);
+                SetDictionaryBrush(dictionary, "ToggleSwitchFillOn", fill);
+                SetDictionaryBrush(dictionary, "ToggleSwitchFillOnPointerOver", fill);
+                SetDictionaryBrush(dictionary, "ToggleSwitchFillOnPressed", fill);
+                SetDictionaryBrush(dictionary, "ToggleSwitchStrokeOn", fill);
+                SetDictionaryBrush(dictionary, "SystemFillColorAttentionBrush", fill);
+                SetDictionaryBrush(dictionary, "SystemControlForegroundAccentBrush", color);
+                SetDictionaryBrush(dictionary, "SystemControlHighlightAccentBrush", color);
+                SetDictionaryBrush(dictionary, "SystemControlBackgroundAccentBrush", color);
+                SetDictionaryBrush(dictionary, "SystemControlHyperlinkTextBrush", text);
+                SetDictionaryBrush(dictionary, "AccentButtonBackground", fill);
+            });
         UpdateShellNavigationAccent();
     }
 
@@ -618,20 +663,88 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.ButtonPressedBackgroundColor = pressedBackground;
     }
 
-    private static void SetColorResource(string key, Color color)
+    private static void WalkResourceDictionaries(
+        ResourceDictionary root,
+        string? themeKey,
+        Action<ResourceDictionary, string?> visit)
     {
-        Application.Current.Resources[key] = color;
+        var seen = new List<ResourceDictionary>();
+        WalkResourceDictionariesCore(root, themeKey, visit, seen);
     }
 
-    private static void SetBrushColor(string key, Color color)
+    private static void WalkResourceDictionariesCore(
+        ResourceDictionary root,
+        string? themeKey,
+        Action<ResourceDictionary, string?> visit,
+        List<ResourceDictionary> seen)
     {
-        if (Application.Current.Resources[key] is SolidColorBrush brush)
+        if (seen.Exists(candidate => ReferenceEquals(candidate, root)))
         {
-            brush.Color = color;
+            return;
         }
-        else
+
+        seen.Add(root);
+        visit(root, themeKey);
+        foreach (var merged in root.MergedDictionaries)
         {
-            Application.Current.Resources[key] = new SolidColorBrush(color);
+            WalkResourceDictionariesCore(merged, themeKey, visit, seen);
+        }
+
+        foreach (var key in root.ThemeDictionaries.Keys)
+        {
+            var name = key as string;
+            if (name is not null
+                && name.Contains("HighContrast", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (root.ThemeDictionaries[key] is ResourceDictionary theme)
+            {
+                WalkResourceDictionariesCore(theme, name ?? themeKey, visit, seen);
+            }
+        }
+    }
+
+    private static void SetDictionaryColor(ResourceDictionary dictionary, string key, Color color)
+    {
+        if (dictionary.Source is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (ReferenceEquals(dictionary, Application.Current.Resources)
+                || dictionary.ContainsKey(key)
+                || key.StartsWith("SystemAccentColor", StringComparison.Ordinal))
+            {
+                dictionary[key] = color;
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or InvalidOperationException
+                or UnauthorizedAccessException
+                or System.Runtime.InteropServices.COMException)
+        {
+        }
+    }
+
+    private static void SetDictionaryBrush(ResourceDictionary dictionary, string key, Color color)
+    {
+        try
+        {
+            if (dictionary.TryGetValue(key, out var value) && value is SolidColorBrush brush)
+            {
+                brush.Color = color;
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or InvalidOperationException
+                or System.Runtime.InteropServices.COMException)
+        {
         }
     }
 

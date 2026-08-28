@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using WinPool.App.ViewModels;
 
@@ -133,28 +134,77 @@ public sealed partial class TopologyNodeControl : UserControl
         WindowsMarkerSquare4.Fill = brush;
     }
 
-    private void TopologyNodeControl_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    private void TopologyNodeControl_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        if (s_hoveredControl is not null && !ReferenceEquals(s_hoveredControl, this))
-        {
-            s_hoveredControl._isPointerOver = false;
-            s_hoveredControl.UpdateSelectionVisual();
-        }
-        s_hoveredControl = this;
-        _isPointerOver = true;
-        UpdateSelectionVisual();
+        SetAsHovered();
         e.Handled = true;
     }
 
-    private void TopologyNodeControl_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    private void TopologyNodeControl_PointerExited(object sender, PointerRoutedEventArgs e)
     {
         if (ReferenceEquals(s_hoveredControl, this))
         {
             s_hoveredControl = null;
             _isPointerOver = false;
             UpdateSelectionVisual();
+            TransferHoverToAncestor(e);
         }
+
         e.Handled = true;
+    }
+
+    private void SetAsHovered()
+    {
+        if (s_hoveredControl is not null && !ReferenceEquals(s_hoveredControl, this))
+        {
+            s_hoveredControl._isPointerOver = false;
+            s_hoveredControl.UpdateSelectionVisual();
+        }
+
+        s_hoveredControl = this;
+        _isPointerOver = true;
+        UpdateSelectionVisual();
+    }
+
+    private void TransferHoverToAncestor(PointerRoutedEventArgs e)
+    {
+        // PointerEntered does not fire again on an ancestor that already contains
+        // the pointer, so leaving a child would otherwise leave no node hovered.
+        for (var ancestor = FindParentTopologyNode();
+             ancestor is not null;
+             ancestor = ancestor.FindParentTopologyNode())
+        {
+            if (IsPointerInside(ancestor, e))
+            {
+                ancestor.SetAsHovered();
+                return;
+            }
+        }
+    }
+
+    private TopologyNodeControl? FindParentTopologyNode()
+    {
+        DependencyObject? current = VisualTreeHelper.GetParent(this);
+        while (current is not null)
+        {
+            if (current is TopologyNodeControl parent)
+            {
+                return parent;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private static bool IsPointerInside(TopologyNodeControl control, PointerRoutedEventArgs e)
+    {
+        var position = e.GetCurrentPoint(control).Position;
+        return position.X >= 0
+            && position.Y >= 0
+            && position.X < control.ActualWidth
+            && position.Y < control.ActualHeight;
     }
 
     private void NodeBorder_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)

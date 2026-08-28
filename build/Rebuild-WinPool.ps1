@@ -32,20 +32,33 @@ function Invoke-Native([string]$fileName, [string[]]$arguments) {
 function Stop-WinPoolProcesses {
     $names = @('WinPool.App', 'WinPool.Agent', 'WinPool.TestWorker', 'WinPool.ElevatedBroker')
     $running = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-    if ($running.Count -eq 0) {
+    $propertiesHosts = @(Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
+        Where-Object { $_.CommandLine -like '*DeviceProperties_RunDLL*' })
+    if ($running.Count -eq 0 -and $propertiesHosts.Count -eq 0) {
         return
     }
 
-    Write-Output "Stopping $($running.Count) WinPool process(es)."
-    $running | Stop-Process -Force
+    if ($running.Count -gt 0) {
+        Write-Output "Stopping $($running.Count) WinPool process(es)."
+        $running | Stop-Process -Force
+    }
+    if ($propertiesHosts.Count -gt 0) {
+        Write-Output "Stopping $($propertiesHosts.Count) leftover device-properties host(s)."
+        $propertiesHosts | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    }
     $deadline = [datetime]::UtcNow.AddSeconds(10)
     do {
         Start-Sleep -Milliseconds 200
         $running = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-    } while ($running.Count -gt 0 -and [datetime]::UtcNow -lt $deadline)
+        $propertiesHosts = @(Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
+            Where-Object { $_.CommandLine -like '*DeviceProperties_RunDLL*' })
+    } while (($running.Count -gt 0 -or $propertiesHosts.Count -gt 0) -and [datetime]::UtcNow -lt $deadline)
 
     if ($running.Count -gt 0) {
         throw "WinPool processes are still running: $($running.ProcessName -join ', ')."
+    }
+    if ($propertiesHosts.Count -gt 0) {
+        throw "Device-properties hosts are still running: $($propertiesHosts.ProcessId -join ', ')."
     }
 }
 

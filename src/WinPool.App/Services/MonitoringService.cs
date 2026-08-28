@@ -49,6 +49,7 @@ public sealed class MonitoringService : IDisposable
     private IReadOnlyList<StorageHealthEvent> _recentStorageHealthEvents = [];
     private readonly SamplingDiagnosticsTracker _diagnostics = new();
     private MonitorRuntimeDiagnostics _agentDiagnostics = new(0, 0);
+    private int _restartGeneration;
 
     public MonitoringService(IAgentConnection? agentConnection = null)
     {
@@ -130,17 +131,15 @@ public sealed class MonitoringService : IDisposable
 
     public void Start(double rateHz) => _ = StartAsync(rateHz);
 
-    public void SetRate(double rateHz)
-    {
-        if (Math.Abs(SampleRateHz - rateHz) < 0.001)
-        {
-            return;
-        }
+    public void SetRate(double rateHz) => _ = SetRateAsync(rateHz);
 
+    public async Task SetRateAsync(double rateHz)
+    {
+        rateHz = Math.Clamp(rateHz, 0.2, 20);
         SampleRateHz = rateHz;
         if (_agentConnection is not null && IsRunning)
         {
-            _ = RestartRemoteAsync(rateHz);
+            await RestartRemoteAsync(rateHz);
         }
     }
 
@@ -339,13 +338,23 @@ public sealed class MonitoringService : IDisposable
                 && existing.Value is AgentSnapshotResponse existingSnapshot
                 && existingSnapshot.Snapshot.ActiveMonitoringSession is { } active)
             {
-                _remoteSessionId = active.SessionId;
-                SampleRateHz = 1 / active.Request.SamplingInterval.TotalSeconds;
-                await RefreshRemoteSnapshotAsync(cancellationToken);
-                signaled = true;
-                ready.TrySetResult(true);
-                await RunRemotePollLoopAsync(cancellationToken);
-                return;
+                var existingRate = 1 / Math.Max(active.Request.SamplingInterval.TotalSeconds, 0.001);
+                if (Math.Abs(existingRate - rateHz) < 0.05)
+                {
+                    _remoteSessionId = active.SessionId;
+                    SampleRateHz = existingRate;
+                    await RefreshRemoteSnapshotAsync(cancellationToken);
+                    signaled = true;
+                    ready.TrySetResult(true);
+                    await RunRemotePollLoopAsync(cancellationToken);
+                    return;
+                }
+
+                await _agentConnection.SendAsync(
+                    new StopAgentMonitoringRequest(
+                        active.SessionId,
+                        CorrelationId.New()),
+                    cancellationToken);
             }
 
             var systemId = SystemId.New();
@@ -409,7 +418,11 @@ public sealed class MonitoringService : IDisposable
         {
             if (!signaled)
             {
-                IsRunning = false;
+                if (_loopCts is null || cancellationToken == _loopCts.Token)
+                {
+                    IsRunning = false;
+                }
+
                 LastError = "agent.monitor-start-cancelled";
                 ready.TrySetResult(false);
             }
@@ -427,8 +440,47 @@ public sealed class MonitoringService : IDisposable
 
     private async Task RestartRemoteAsync(double rateHz)
     {
-        await StopAsync();
-        Start(rateHz);
+        var generation = Interlocked.Increment(ref _restartGeneration);
+        _loopCts?.Cancel();
+        var previousSession = _remoteSessionId;
+        _remoteSessionId = null;
+        if (previousSession is { } sessionId && _agentConnection is not null)
+        {
+            await _agentConnection.SendAsync(
+                new StopAgentMonitoringRequest(
+                    sessionId,
+                    CorrelationId.New()),
+                CancellationToken.None);
+        }
+
+        if (generation != Volatile.Read(ref _restartGeneration))
+        {
+            return;
+        }
+
+        _loopCts = new CancellationTokenSource();
+        var ready = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = StartRemoteAsync(rateHz, _loopCts.Token, ready);
+        try
+        {
+            var started = await ready.Task;
+            if (!started && generation == Volatile.Read(ref _restartGeneration))
+            {
+                LastError ??= "agent.monitor-restart-failed";
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidOperationException
+                or UnauthorizedAccessException
+                or OperationCanceledException)
+        {
+            if (generation == Volatile.Read(ref _restartGeneration))
+            {
+                LastError = $"agent.monitor-restart-{exception.GetType().Name}";
+            }
+        }
     }
 
     private async Task RunRemotePollLoopAsync(CancellationToken cancellationToken)

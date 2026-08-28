@@ -35,6 +35,18 @@ public sealed class WelcomeMascotSelectionTests
         Assert.Equal(expected, selector.SelectAssetKey());
     }
 
+    [Fact]
+    public void MascotTitleComesFromTheSourceFileNameAfterTheKeyPrefix()
+    {
+        var asset = WelcomeMascotCatalog.FromFileName("03-苦酒入喉.png");
+
+        Assert.Equal("03", asset.Key);
+        Assert.Equal("苦酒入喉", asset.Title);
+        Assert.Equal("苦酒入喉", WelcomeMascotCatalog.ByKey("03").Title);
+        Assert.Equal("04", WelcomeMascotCatalog.NextKey("03"));
+        Assert.Equal("00", WelcomeMascotCatalog.NextKey("07"));
+    }
+
     private sealed class SequenceRandomSource(params int[] values) : IWelcomeRandomSource
     {
         private readonly Queue<int> values = new(values);

@@ -444,8 +444,9 @@ internal sealed class DesktopAgentRuntime :
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName = "rundll32.exe",
-                UseShellExecute = true
+                FileName = Path.Combine(Environment.SystemDirectory, "rundll32.exe"),
+                WorkingDirectory = Environment.SystemDirectory,
+                UseShellExecute = false
             };
             startInfo.ArgumentList.Add("devmgr.dll,DeviceProperties_RunDLL");
             startInfo.ArgumentList.Add("/DeviceID");
