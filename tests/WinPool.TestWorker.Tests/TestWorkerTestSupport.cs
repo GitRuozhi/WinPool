@@ -17,8 +17,7 @@ internal static class TestWorkerTestSupport
                 "..",
                 "..",
                 "..",
-                "Helper",
-                "bin",
+                "WinPool.TestWorker.ProcessHelper",
                 configuration,
                 "net10.0",
                 "WinPool.TestWorker.ProcessHelper.exe"));
