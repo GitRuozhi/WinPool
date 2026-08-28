@@ -227,10 +227,10 @@ public static class ManageSelectionRules
                 ManageWorkspaceCategory.System,
             ManageObjectRole.StoragePool or ManageObjectRole.NetworkGroup
                 or ManageObjectRole.OtherGroup => ManageWorkspaceCategory.Pool,
-            ManageObjectRole.StorageTier => ManageWorkspaceCategory.Tier,
+            ManageObjectRole.StorageTier or ManageObjectRole.DirectDiskGroup =>
+                ManageWorkspaceCategory.Tier,
             ManageObjectRole.PhysicalDisk or ManageObjectRole.VirtualDisk
-                or ManageObjectRole.OsDisk or ManageObjectRole.DirectDiskGroup
-                or ManageObjectRole.VirtualDiskGroup =>
+                or ManageObjectRole.OsDisk or ManageObjectRole.VirtualDiskGroup =>
                 ManageWorkspaceCategory.Disk,
             ManageObjectRole.Partition or ManageObjectRole.NetworkDisk =>
                 ManageWorkspaceCategory.Partition,

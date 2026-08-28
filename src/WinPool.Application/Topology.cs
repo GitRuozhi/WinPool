@@ -50,11 +50,10 @@ public static class WorkspaceMapper
                 new WorkspaceSelection(WorkspaceCategory.Pool, unit.StableId),
             StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup =>
                 new WorkspaceSelection(WorkspaceCategory.Pool, unit.StableId),
-            StorageUnitKind.StorageTier =>
+            StorageUnitKind.StorageTier or StorageUnitKind.DirectDiskGroup =>
                 new WorkspaceSelection(WorkspaceCategory.Tier, unit.StableId),
             StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk
-                or StorageUnitKind.OsDisk or StorageUnitKind.DirectDiskGroup
-                or StorageUnitKind.VirtualDiskGroup =>
+                or StorageUnitKind.OsDisk or StorageUnitKind.VirtualDiskGroup =>
                 new WorkspaceSelection(WorkspaceCategory.Disk, unit.StableId),
             StorageUnitKind.NetworkDisk or StorageUnitKind.Partition =>
                 new WorkspaceSelection(WorkspaceCategory.Partition, unit.StableId),

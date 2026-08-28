@@ -99,8 +99,8 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon("Assets/CAppIcon.ico");
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.PreferredMinimumWidth = 960;
-            presenter.PreferredMinimumHeight = 600;
+            presenter.PreferredMinimumWidth = 480;
+            presenter.PreferredMinimumHeight = 300;
         }
         AppWindow.Resize(new SizeInt32(1440, 900));
         AppWindowPlacement.CenterOnWorkArea(AppWindow);
@@ -301,8 +301,14 @@ public sealed partial class MainWindow : Window
     private void UpdateActiveSystemName()
     {
         var show = SelectedShellItem?.Page == ShellPageKind.Manage;
+        var system = ViewModel.SelectedSystem;
+        var prefix = system is null
+            ? string.Empty
+            : system.IsLocal
+                ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
+                : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
         ActiveSystemNameText.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        ActiveSystemNameText.Text = ViewModel.SelectedSystem?.DisplayName ?? string.Empty;
+        ActiveSystemNameText.Text = system is null ? string.Empty : $"{prefix} {system.DisplayName}";
     }
 
     private void UpdateCaptionInset()

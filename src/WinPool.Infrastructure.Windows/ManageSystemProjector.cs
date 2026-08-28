@@ -102,6 +102,30 @@ public sealed class ManageSystemProjector
                 ManageWorkspaceCategory.Tier, tier.FriendlyName,
                 tier.IsStable, tier.PoolStableId, order++));
         }
+        foreach (var pool in snapshot.StoragePools.Where(x => !x.IsPrimordial))
+        {
+            var tierMemberIds = snapshot.StorageTiers
+                .Where(x => x.PoolStableId == pool.StableId)
+                .SelectMany(x => x.MemberPhysicalDiskIds)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var direct = snapshot.PhysicalDisks
+                .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
+                    && !tierMemberIds.Contains(x.StableId))
+                .ToList();
+            if (direct.Count == 0)
+            {
+                continue;
+            }
+            result.Add(Item(
+                systemId,
+                $"group:direct:{pool.StableId}",
+                ManageObjectRole.DirectDiskGroup,
+                ManageWorkspaceCategory.Tier,
+                "Unallocated",
+                true,
+                pool.StableId,
+                order++));
+        }
 
         order = 0;
         foreach (var disk in OrderPhysicalDisks(snapshot))
@@ -147,6 +171,15 @@ public sealed class ManageSystemProjector
                 TopologyProjector.PartitionDisplayName(partition),
                 partition.IsStable, partition.OsDiskStableId, order++,
                 new Dictionary<string, string?> { ["partitionType"] = partition.Type }));
+        }
+        foreach (var network in snapshot.NetworkDisks
+                     .Where(x => !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(x.DriveLetter)))
+                     .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            result.Add(Item(
+                systemId, network.StableId, ManageObjectRole.NetworkDisk,
+                ManageWorkspaceCategory.Volume, network.Name,
+                network.IsStable, null, order++));
         }
         foreach (var network in snapshot.NetworkDisks
                      .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))

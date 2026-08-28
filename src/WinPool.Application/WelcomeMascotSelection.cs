@@ -48,6 +48,14 @@ public static class WelcomeMascotCatalog
 
         return Assets[(index + 1) % Assets.Count].Key;
     }
+
+    public static string RandomKey(string currentKey)
+    {
+        var candidates = Assets.Where(asset => asset.Key != currentKey).ToList();
+        return candidates.Count == 0
+            ? currentKey
+            : candidates[Random.Shared.Next(candidates.Count)].Key;
+    }
 }
 
 /// <summary>

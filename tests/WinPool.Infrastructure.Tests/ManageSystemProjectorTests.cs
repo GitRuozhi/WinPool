@@ -381,6 +381,101 @@ public sealed class ManageSystemProjectorTests
         Assert.Contains("physical disks", directGroup.Summary, StringComparison.Ordinal);
         Assert.Equal("Virtual disks", virtualGroup.DisplayName);
         Assert.Contains("virtual disks", virtualGroup.Summary, StringComparison.Ordinal);
+
+        // The unallocated members are surfaced as a tier-category object.
+        var projection = new ManageSystemProjector().Project(document);
+        var unallocatedItem = Assert.Single(
+            projection.WorkspaceObjects,
+            item => item.Role == ManageObjectRole.DirectDiskGroup);
+        Assert.Equal(ManageWorkspaceCategory.Tier, unallocatedItem.Category);
+        Assert.Equal("group:direct:pool:1", unallocatedItem.Id.ProviderKey);
+    }
+
+    [Fact]
+    public void NetworkDisksWithDriveLettersAppearInTheVolumeCategory()
+    {
+        var source = Document();
+        var lettered = new NetworkDiskInfo(
+            "network:r", true, "R: Network", "R", "\\\\server\\share",
+            "NTFS", 4_000_000, 1_000_000);
+        var letterless = new NetworkDiskInfo(
+            "network:s", true, "S: Share", "S", "\\\\server\\share2",
+            "NTFS", 4_000_000, 1_000_000);
+        var document = source with
+        {
+            Snapshot = source.Snapshot with
+            {
+                NetworkDisks = [lettered, letterless with { DriveLetter = "" }]
+            }
+        };
+
+        var volumes = new ManageSystemProjector().Project(document).WorkspaceObjects
+            .Where(item => item.Category == ManageWorkspaceCategory.Volume)
+            .ToList();
+
+        Assert.Equal(ManageObjectRole.Volume, volumes[0].Role);
+        Assert.Equal("partition:1", volumes[0].Id.ProviderKey);
+        var networkVolume = Assert.Single(
+            volumes,
+            item => item.Role == ManageObjectRole.NetworkDisk);
+        Assert.Equal("network:r", networkVolume.Id.ProviderKey);
+        Assert.DoesNotContain(volumes, item => item.Id.ProviderKey == "network:s");
+    }
+
+    [Fact]
+    public void UnallocatedGroupProjectsLikeATierAcrossDetailsAndComparison()
+    {
+        var source = Document();
+        var extra = new PhysicalDiskInfo(
+            "physical:2", true, "Spare One", "Model", "masked", "SATA", "HDD",
+            2_000_000, 512, 4096, "Healthy", "OK", false, "In a pool", 2,
+            false, false, false, false, "pool:1");
+        var document = source with
+        {
+            Snapshot = source.Snapshot with
+            {
+                PhysicalDisks = source.Snapshot.PhysicalDisks.Append(extra).ToArray(),
+                StoragePools = [source.Snapshot.StoragePools[0] with
+                {
+                    MemberPhysicalDiskIds = ["physical:1", "physical:2"]
+                }],
+                StorageTiers = [source.Snapshot.StorageTiers[0] with
+                {
+                    MemberPhysicalDiskIds = ["physical:1"]
+                }]
+            }
+        };
+        var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
+        var id = Object(system, WinPool.Domain.StorageObjectKind.LogicalGroup, "group:direct:pool:1");
+
+        var comparison = new ManageComparisonProjector().Project(
+            document, id, ManageObjectRole.DirectDiskGroup);
+        Assert.Contains(
+            comparison.Properties,
+            property => property.PropertyTextKey == "Type" && property.RawValue == "UnallocatedLayer");
+        Assert.Contains(
+            comparison.Properties,
+            property => property.PropertyTextKey == "PhysicalDisk" && property.RawValue == "1");
+        Assert.Contains(
+            comparison.Properties,
+            property => property.PropertyTextKey == "Capacity"
+                && property.RawValue == TopologyProjector.FormatBytes(2_000_000));
+
+        var details = new ManageDetailsProjector().Project(
+            document, id, ManageObjectRole.DirectDiskGroup, "Unallocated");
+        Assert.Equal("Unallocated", details.DisplayName);
+        Assert.Contains(
+            details.Properties,
+            property => property.PropertyTextKey == "Members" && property.RawValue == "1");
+
+        var navigation = new ManageNavigationProjector().Project(
+            document, id, ManageObjectRole.DirectDiskGroup);
+        Assert.Equal(
+            "pool:1",
+            navigation.RelatedSelections[ManageWorkspaceCategory.Pool]!.Id.ProviderKey);
+        Assert.Equal(
+            "group:direct:pool:1",
+            navigation.RelatedSelections[ManageWorkspaceCategory.Tier]!.Id.ProviderKey);
     }
 
     private static WinPool.Domain.StorageObjectId Object(

@@ -422,6 +422,9 @@ public sealed class ArchitectureBoundaryTests
             ManageWorkspaceCategory.Tier,
             ManageSelectionRules.CategoryFor(ManageObjectRole.StorageTier));
         Assert.Equal(
+            ManageWorkspaceCategory.Tier,
+            ManageSelectionRules.CategoryFor(ManageObjectRole.DirectDiskGroup));
+        Assert.Equal(
             ManageWorkspaceCategory.Disk,
             ManageSelectionRules.CategoryFor(ManageObjectRole.VirtualDisk));
         Assert.Equal(
@@ -586,7 +589,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("Click=\"ConfirmButton_Click\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"CycleButton\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"CycleButton_Click\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("WelcomeMascotCatalog.NextKey", windowSource, StringComparison.Ordinal);
+        Assert.Contains("WelcomeMascotCatalog.RandomKey", windowSource, StringComparison.Ordinal);
         Assert.Contains("AppWindow.Resize(DefaultSize)", windowSource, StringComparison.Ordinal);
         Assert.Contains("AppWindowPlacement.CenterOnWorkArea(AppWindow)", windowSource, StringComparison.Ordinal);
         Assert.Contains("AppWindowPlacement.CenterOnWorkArea(AppWindow)", source, StringComparison.Ordinal);

@@ -47,6 +47,23 @@ public sealed class WelcomeMascotSelectionTests
         Assert.Equal("00", WelcomeMascotCatalog.NextKey("07"));
     }
 
+    [Theory]
+    [InlineData("00")]
+    [InlineData("03")]
+    [InlineData("07")]
+    public void RandomKeyNeverReturnsTheCurrentAsset(string currentKey)
+    {
+        for (var i = 0; i < 50; i++)
+        {
+            var next = WelcomeMascotCatalog.RandomKey(currentKey);
+
+            Assert.NotEqual(currentKey, next);
+            Assert.Contains(
+                WelcomeMascotCatalog.Assets,
+                asset => asset.Key == next);
+        }
+    }
+
     private sealed class SequenceRandomSource(params int[] values) : IWelcomeRandomSource
     {
         private readonly Queue<int> values = new(values);

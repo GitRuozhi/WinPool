@@ -137,6 +137,43 @@ public sealed class ManageComparisonProjector
                 rows.Add(P("AllocationUnit", string.Empty));
                 break;
             }
+            case ManageObjectRole.DirectDiskGroup:
+            {
+                var pool = snapshot.StoragePools.FirstOrDefault(
+                    x => $"group:direct:{x.StableId}".Equals(
+                        objectId.ProviderKey,
+                        StringComparison.OrdinalIgnoreCase));
+                var direct = pool is null
+                    ? []
+                    : snapshot.PhysicalDisks
+                        .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+                var tierMemberIds = snapshot.StorageTiers
+                    .Where(x => x.PoolStableId == pool?.StableId)
+                    .SelectMany(x => x.MemberPhysicalDiskIds)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (pool is not null)
+                {
+                    direct = direct
+                        .Where(x => !tierMemberIds.Contains(x.StableId))
+                        .ToList();
+                }
+                rows.Add(P(
+                    "PoolOwner",
+                    pool?.FriendlyName ?? string.Empty));
+                rows.Add(P("Media", string.Empty));
+                rows.Add(P("Type", "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Capacity", TopologyProjector.FormatBytes(direct.Sum(x => x.Size))));
+                rows.Add(P("PhysicalDisk", direct.Count.ToString()));
+                rows.Add(P(
+                    "Health",
+                    direct.Count == 0
+                        ? string.Empty
+                        : string.Join(", ", direct.Select(x => x.HealthStatus)
+                            .Distinct(StringComparer.OrdinalIgnoreCase))));
+                rows.Add(P("RunningStatus", string.Empty));
+                break;
+            }
             case ManageObjectRole.PhysicalDisk:
             {
                 var physical = snapshot.PhysicalDisks.First(x => x.StableId == objectId.ProviderKey);

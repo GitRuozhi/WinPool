@@ -37,7 +37,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             _ => throw new ArgumentOutOfRangeException(nameof(node))
         };
         LayoutWeight = node.LayoutWeight;
-        _isExpanded = owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
+        _isExpanded = unit.Kind == StorageUnitKind.VirtualDiskGroup
+            ? true
+            : owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
         Children = node.Children
             .Select(child => new TopologyNodeViewModel(child, owner, snapshot))
             .ToList();
@@ -196,20 +198,23 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         IsExpanded ? $"Collapse {Unit.DisplayName}" : $"Expand {Unit.DisplayName}";
 
     public Visibility ExpandButtonVisibility =>
-        HasChildren ? Visibility.Visible : Visibility.Collapsed;
+        HasChildren && Unit.Kind is not StorageUnitKind.VirtualDiskGroup
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
     public string TypeGlyph => Unit.Kind switch
     {
         StorageUnitKind.System => "\uE7F8",
         StorageUnitKind.StoragePool => "\uE8F1",
-        StorageUnitKind.StorageTier => "\uE8FD",
+        StorageUnitKind.StorageTier or StorageUnitKind.DirectDiskGroup => "\uE8FD",
         StorageUnitKind.NetworkDisk or StorageUnitKind.NetworkDiskGroup => "\uE774",
         StorageUnitKind.OtherDiskGroup => "\uE8B7",
         StorageUnitKind.Partition => "\uE7C3",
         _ => "\uEDA2"
     };
 
-    public Visibility HeaderVisibility => Visibility.Visible;
+    public Visibility HeaderVisibility =>
+        Unit.Kind is StorageUnitKind.VirtualDiskGroup ? Visibility.Collapsed : Visibility.Visible;
 
     public Visibility FlowChildrenVisibility =>
         IsExpanded && ChildrenLayout == TopologyChildrenLayout.Flow ? Visibility.Visible : Visibility.Collapsed;
@@ -264,7 +269,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     [RelayCommand]
     private void ToggleExpanded()
     {
-        if (HasChildren)
+        if (HasChildren && Unit.Kind is not StorageUnitKind.VirtualDiskGroup)
         {
             IsExpanded = !IsExpanded;
         }

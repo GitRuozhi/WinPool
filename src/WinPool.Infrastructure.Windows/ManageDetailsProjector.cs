@@ -62,6 +62,33 @@ public sealed class ManageDetailsProjector
                 rows.Add(P("Members", tier.MemberPhysicalDiskIds.Count.ToString()));
                 break;
             }
+            case ManageObjectRole.DirectDiskGroup:
+            {
+                var pool = snapshot.StoragePools.FirstOrDefault(
+                    x => $"group:direct:{x.StableId}".Equals(
+                        objectId.ProviderKey,
+                        StringComparison.OrdinalIgnoreCase));
+                if (pool is null)
+                {
+                    break;
+                }
+                var tierMemberIds = snapshot.StorageTiers
+                    .Where(x => x.PoolStableId == pool.StableId)
+                    .SelectMany(x => x.MemberPhysicalDiskIds)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var direct = snapshot.PhysicalDisks
+                    .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
+                        && !tierMemberIds.Contains(x.StableId))
+                    .ToList();
+                rows.Add(P("Type", "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Capacity", TopologyProjector.FormatBytes(direct.Sum(x => x.Size))));
+                rows.Add(P("Members", direct.Count.ToString()));
+                rows.Add(P("Health", TopologyProjector.JoinSummary(
+                    direct.Select(x => x.HealthStatus)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray())));
+                break;
+            }
             case ManageObjectRole.PhysicalDisk:
             {
                 var disk = snapshot.PhysicalDisks.First(x => x.StableId == objectId.ProviderKey);

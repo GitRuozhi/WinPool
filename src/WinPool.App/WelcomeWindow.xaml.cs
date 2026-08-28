@@ -142,7 +142,7 @@ public sealed partial class WelcomeWindow : Window
 
     private void CycleButton_Click(object sender, RoutedEventArgs e)
     {
-        ApplyMascot(WelcomeMascotCatalog.NextKey(_mascotKey));
+        ApplyMascot(WelcomeMascotCatalog.RandomKey(_mascotKey));
         CycleButton.UpdateLayout();
         UpdateNonClientRegions();
     }

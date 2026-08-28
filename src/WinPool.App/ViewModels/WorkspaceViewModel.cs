@@ -1125,6 +1125,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     : Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]")} {item.DisplayName}",
             WinPool.Application.ManageObjectRole.NetworkGroup => Localization["Network"],
             WinPool.Application.ManageObjectRole.OtherGroup => Localization["Other"],
+            WinPool.Application.ManageObjectRole.DirectDiskGroup => Localization["UnallocatedLayer"],
             WinPool.Application.ManageObjectRole.Partition when string.IsNullOrWhiteSpace(item.DisplayName) =>
                 PartitionTypeName(item.Metadata.GetValueOrDefault("partitionType") ?? "Unknown"),
             _ => item.DisplayName
@@ -1264,6 +1265,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole.OsDisk => Localization["OtherDisk"],
         WinPool.Application.ManageObjectRole.NetworkGroup => Localization["NetworkStorageGroup"],
         WinPool.Application.ManageObjectRole.OtherGroup => Localization["OtherStorageGroup"],
+        WinPool.Application.ManageObjectRole.DirectDiskGroup => Localization["UnallocatedLayer"],
         WinPool.Application.ManageObjectRole.Partition => Localization["Partition"],
         WinPool.Application.ManageObjectRole.Volume => Localization["Volume"],
         _ => role.ToString()

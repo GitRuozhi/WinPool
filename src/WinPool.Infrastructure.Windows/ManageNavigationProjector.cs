@@ -59,6 +59,8 @@ public sealed class ManageNavigationProjector
             case ManageObjectRole.StorageTier:
                 return Target(snapshot, systemId,
                     snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.PoolStableId);
+            case ManageObjectRole.DirectDiskGroup:
+                return Target(snapshot, systemId, DirectGroupPoolStableId(snapshot, key));
             case ManageObjectRole.PhysicalDisk:
                 return Target(snapshot, systemId,
                     snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == key)?.PoolStableId
@@ -108,6 +110,7 @@ public sealed class ManageNavigationProjector
         switch (origin.Role)
         {
             case ManageObjectRole.StorageTier:
+            case ManageObjectRole.DirectDiskGroup:
                 return origin;
             case ManageObjectRole.StoragePool:
                 return Target(snapshot, systemId,
@@ -152,6 +155,8 @@ public sealed class ManageNavigationProjector
             case ManageObjectRole.StorageTier:
                 return Target(snapshot, systemId,
                     snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.MemberPhysicalDiskIds.FirstOrDefault());
+            case ManageObjectRole.DirectDiskGroup:
+                return Target(snapshot, systemId, FirstDirectMember(snapshot, key));
             case ManageObjectRole.StoragePool:
             {
                 var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == key);
@@ -199,6 +204,7 @@ public sealed class ManageNavigationProjector
                     snapshot.Partitions.FirstOrDefault(x => x.OsDiskStableId == key)?.StableId);
             case ManageObjectRole.StoragePool:
             case ManageObjectRole.StorageTier:
+            case ManageObjectRole.DirectDiskGroup:
             case ManageObjectRole.NetworkGroup:
             case ManageObjectRole.OtherGroup:
             {
@@ -241,6 +247,8 @@ public sealed class ManageNavigationProjector
             ManageObjectRole.OtherGroup => TopologyProjector.GetOtherOsDisks(snapshot).FirstOrDefault()?.StableId,
             ManageObjectRole.StorageTier =>
                 snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.PoolStableId,
+            ManageObjectRole.DirectDiskGroup =>
+                DirectGroupPoolStableId(snapshot, key),
             ManageObjectRole.VirtualDisk =>
                 snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == key)?.PoolStableId,
             ManageObjectRole.PhysicalDisk =>
@@ -283,6 +291,28 @@ public sealed class ManageNavigationProjector
         return snapshot.Partitions
             .FirstOrDefault(x => x.OsDiskStableId is not null && osDiskIds.Contains(x.OsDiskStableId))
             ?.StableId;
+    }
+
+    private static string? DirectGroupPoolStableId(StorageSnapshot snapshot, string groupKey) =>
+        snapshot.StoragePools
+            .FirstOrDefault(x => $"group:direct:{x.StableId}".Equals(groupKey, StringComparison.OrdinalIgnoreCase))
+            ?.StableId;
+
+    private static string? FirstDirectMember(StorageSnapshot snapshot, string groupKey)
+    {
+        var poolStableId = DirectGroupPoolStableId(snapshot, groupKey);
+        if (poolStableId is null)
+        {
+            return null;
+        }
+        var tierMemberIds = snapshot.StorageTiers
+            .Where(x => x.PoolStableId == poolStableId)
+            .SelectMany(x => x.MemberPhysicalDiskIds)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return snapshot.PhysicalDisks
+            .Where(x => x.PoolStableId == poolStableId && !tierMemberIds.Contains(x.StableId))
+            .Select(x => x.StableId)
+            .FirstOrDefault();
     }
 
     private static ManageObjectTarget? Target(
