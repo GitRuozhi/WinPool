@@ -57,6 +57,7 @@ docs/
 build/
   Publish-Staged.ps1
   Rebuild-WinPool.ps1
+  Reset-WinPoolLocalData.ps1
 assets/                           tracked software-consumed resources
 OriginArtWork/                    ignored user-managed source artwork
 local-assets/                     ignored developer-local resources
@@ -152,6 +153,21 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 ```
 
 The rebuild script stops running WinPool processes, removes regenerable `artifacts` output and leftover project `bin`/`obj` folders, rebuilds the four-process tree, and writes `WinPool.lnk` in the repository root and on the current-user Desktop. It does not touch Tests evidence, Research material, `%LocalAppData%\WinPool` data, `Old`, or `Rubbish`.
+
+During development, preview or reset the current user's standard WinPool data
+root with:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Reset-WinPoolLocalData.ps1 -WhatIf
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Reset-WinPoolLocalData.ps1
+```
+
+The reset script stops WinPool processes and moves `%LocalAppData%\WinPool` to
+a timestamped, recoverable directory under the parent project's `Rubbish` tree.
+It verifies that the source is gone and that the archived file count and byte
+count match. It does not directly delete data or follow a selected custom data
+root; removing the standard-root location pointer makes the next launch create
+a fresh current-schema standard data root.
 
 A manual build is:
 
