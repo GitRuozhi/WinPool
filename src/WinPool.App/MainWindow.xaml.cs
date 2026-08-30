@@ -456,64 +456,43 @@ public sealed partial class MainWindow : Window
         var dark3 = useSystemAccent
             ? _uiSettings.GetColorValue(UIColorType.AccentDark3)
             : Blend(color, -0.44);
-        var foreground = RelativeLuminance(color) > 0.48
-            ? Color.FromArgb(255, 0, 0, 0)
-            : Color.FromArgb(255, 255, 255, 255);
+        var foreground = ContrastingText(color);
         var hover = Color.FromArgb(0x36, color.R, color.G, color.B);
         var pressed = Color.FromArgb(0x58, color.R, color.G, color.B);
-        var border = light2;
         var currentIsLight = RootGrid.ActualTheme == ElementTheme.Light;
+        var fill = currentIsLight ? dark1 : light2;
+        var text = currentIsLight ? dark2 : light3;
+        var fillSecondary = WithAlpha(fill, 0xE5);
+        var fillTertiary = WithAlpha(fill, 0xCC);
+        var textSecondary = WithAlpha(text, 0xE5);
+        var textTertiary = WithAlpha(text, 0xCC);
+        var textOnFill = ContrastingText(fill);
 
-        WalkResourceDictionaries(
-            Application.Current.Resources,
-            themeKey: null,
-            (dictionary, themeKey) =>
-            {
-                var lightTheme = themeKey is null
-                    ? currentIsLight
-                    : string.Equals(themeKey, "Light", StringComparison.OrdinalIgnoreCase);
-                var fill = lightTheme ? dark1 : light2;
-                var text = lightTheme ? dark2 : light3;
-
-                SetDictionaryColor(dictionary, "WinPoolAccentColor", color);
-                SetDictionaryColor(dictionary, "WinPoolAccentHoverColor", hover);
-                SetDictionaryColor(dictionary, "WinPoolAccentPressedColor", pressed);
-                SetDictionaryColor(dictionary, "WinPoolAccentBorderColor", border);
-                SetDictionaryColor(dictionary, "WinPoolAccentForegroundColor", foreground);
-                SetDictionaryColor(dictionary, "SystemAccentColor", color);
-                SetDictionaryColor(dictionary, "SystemAccentColorLight1", light1);
-                SetDictionaryColor(dictionary, "SystemAccentColorLight2", light2);
-                SetDictionaryColor(dictionary, "SystemAccentColorLight3", light3);
-                SetDictionaryColor(dictionary, "SystemAccentColorDark1", dark1);
-                SetDictionaryColor(dictionary, "SystemAccentColorDark2", dark2);
-                SetDictionaryColor(dictionary, "SystemAccentColorDark3", dark3);
-                SetDictionaryBrush(dictionary, "WinPoolAccentBrush", color);
-                SetDictionaryBrush(dictionary, "WinPoolAccentHoverBrush", hover);
-                SetDictionaryBrush(dictionary, "WinPoolAccentPressedBrush", pressed);
-                SetDictionaryBrush(dictionary, "WinPoolAccentBorderBrush", border);
-                SetDictionaryBrush(dictionary, "WinPoolAccentForegroundBrush", foreground);
-                SetDictionaryBrush(dictionary, "AccentFillColorDefaultBrush", fill);
-                SetDictionaryBrush(dictionary, "AccentFillColorSecondaryBrush", fill);
-                SetDictionaryBrush(dictionary, "AccentFillColorTertiaryBrush", fill);
-                SetDictionaryBrush(dictionary, "AccentFillColorSelectedTextBackgroundBrush", color);
-                SetDictionaryBrush(dictionary, "AccentTextFillColorPrimaryBrush", text);
-                SetDictionaryBrush(dictionary, "AccentTextFillColorSecondaryBrush", text);
-                SetDictionaryBrush(dictionary, "AccentTextFillColorTertiaryBrush", fill);
-                SetDictionaryBrush(dictionary, "TextOnAccentFillColorPrimaryBrush", foreground);
-                SetDictionaryBrush(dictionary, "TextOnAccentFillColorDefaultBrush", foreground);
-                SetDictionaryBrush(dictionary, "FocusStrokeColorOuterBrush", fill);
-                SetDictionaryBrush(dictionary, "ListViewItemSelectionIndicatorBrush", fill);
-                SetDictionaryBrush(dictionary, "ToggleSwitchFillOn", fill);
-                SetDictionaryBrush(dictionary, "ToggleSwitchFillOnPointerOver", fill);
-                SetDictionaryBrush(dictionary, "ToggleSwitchFillOnPressed", fill);
-                SetDictionaryBrush(dictionary, "ToggleSwitchStrokeOn", fill);
-                SetDictionaryBrush(dictionary, "SystemFillColorAttentionBrush", fill);
-                SetDictionaryBrush(dictionary, "SystemControlForegroundAccentBrush", color);
-                SetDictionaryBrush(dictionary, "SystemControlHighlightAccentBrush", color);
-                SetDictionaryBrush(dictionary, "SystemControlBackgroundAccentBrush", color);
-                SetDictionaryBrush(dictionary, "SystemControlHyperlinkTextBrush", text);
-                SetDictionaryBrush(dictionary, "AccentButtonBackground", fill);
-            });
+        SetOwnedColor("WinPoolAccentColor", color);
+        SetOwnedColor("WinPoolAccentHoverColor", hover);
+        SetOwnedColor("WinPoolAccentPressedColor", pressed);
+        SetOwnedColor("WinPoolAccentBorderColor", fill);
+        SetOwnedColor("WinPoolAccentForegroundColor", foreground);
+        SetOwnedBrushColor("WinPoolAccentBrush", color);
+        SetOwnedBrushColor("WinPoolAccentHoverBrush", hover);
+        SetOwnedBrushColor("WinPoolAccentPressedBrush", pressed);
+        SetOwnedBrushColor("WinPoolAccentBorderBrush", fill);
+        SetOwnedBrushColor("WinPoolAccentForegroundBrush", foreground);
+        SetOwnedBrushColor("AccentFillColorDefaultBrush", fill);
+        SetOwnedBrushColor("AccentFillColorSecondaryBrush", fillSecondary);
+        SetOwnedBrushColor("AccentFillColorTertiaryBrush", fillTertiary);
+        SetOwnedBrushColor("AccentFillColorSelectedTextBackgroundBrush", color);
+        SetOwnedBrushColor("AccentTextFillColorPrimaryBrush", text);
+        SetOwnedBrushColor("AccentTextFillColorSecondaryBrush", textSecondary);
+        SetOwnedBrushColor("AccentTextFillColorTertiaryBrush", textTertiary);
+        SetOwnedBrushColor("TextOnAccentFillColorPrimaryBrush", textOnFill);
+        SetOwnedBrushColor("TextOnAccentFillColorDefaultBrush", textOnFill);
+        SetOwnedBrushColor("FocusStrokeColorOuterBrush", fill);
+        SetOwnedBrushColor("ListViewItemSelectionIndicatorBrush", fill);
+        SetOwnedBrushColor("ToggleSwitchFillOn", fill);
+        SetOwnedBrushColor("ToggleSwitchFillOnPointerOver", fillSecondary);
+        SetOwnedBrushColor("ToggleSwitchFillOnPressed", fillTertiary);
+        SetOwnedBrushColor("ToggleSwitchStrokeOn", fill);
         UpdateShellNavigationAccent();
     }
 
@@ -665,8 +644,8 @@ public sealed partial class MainWindow : Window
 
     private void RootGrid_ActualThemeChanged(FrameworkElement sender, object args)
     {
+        ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
         UpdateCaptionButtonColors();
-        UpdateShellNavigationAccent();
     }
 
     private void UpdateCaptionButtonColors()
@@ -694,88 +673,22 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.ButtonPressedBackgroundColor = pressedBackground;
     }
 
-    private static void WalkResourceDictionaries(
-        ResourceDictionary root,
-        string? themeKey,
-        Action<ResourceDictionary, string?> visit)
+    private static void SetOwnedColor(string key, Color color)
     {
-        var seen = new List<ResourceDictionary>();
-        WalkResourceDictionariesCore(root, themeKey, visit, seen);
-    }
-
-    private static void WalkResourceDictionariesCore(
-        ResourceDictionary root,
-        string? themeKey,
-        Action<ResourceDictionary, string?> visit,
-        List<ResourceDictionary> seen)
-    {
-        if (seen.Exists(candidate => ReferenceEquals(candidate, root)))
+        var resources = Application.Current.Resources;
+        if (resources.ContainsKey(key))
         {
-            return;
-        }
-
-        seen.Add(root);
-        visit(root, themeKey);
-        foreach (var merged in root.MergedDictionaries)
-        {
-            WalkResourceDictionariesCore(merged, themeKey, visit, seen);
-        }
-
-        foreach (var key in root.ThemeDictionaries.Keys)
-        {
-            var name = key as string;
-            if (name is not null
-                && name.Contains("HighContrast", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (root.ThemeDictionaries[key] is ResourceDictionary theme)
-            {
-                WalkResourceDictionariesCore(theme, name ?? themeKey, visit, seen);
-            }
+            resources[key] = color;
         }
     }
 
-    private static void SetDictionaryColor(ResourceDictionary dictionary, string key, Color color)
+    private static void SetOwnedBrushColor(string key, Color color)
     {
-        if (dictionary.Source is not null)
+        var resources = Application.Current.Resources;
+        if (resources.ContainsKey(key)
+            && resources[key] is SolidColorBrush brush)
         {
-            return;
-        }
-
-        try
-        {
-            if (ReferenceEquals(dictionary, Application.Current.Resources)
-                || dictionary.ContainsKey(key)
-                || key.StartsWith("SystemAccentColor", StringComparison.Ordinal))
-            {
-                dictionary[key] = color;
-            }
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException
-                or InvalidOperationException
-                or UnauthorizedAccessException
-                or System.Runtime.InteropServices.COMException)
-        {
-        }
-    }
-
-    private static void SetDictionaryBrush(ResourceDictionary dictionary, string key, Color color)
-    {
-        try
-        {
-            if (dictionary.TryGetValue(key, out var value) && value is SolidColorBrush brush)
-            {
-                brush.Color = color;
-            }
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException
-                or InvalidOperationException
-                or System.Runtime.InteropServices.COMException)
-        {
+            brush.Color = color;
         }
     }
 
@@ -906,6 +819,14 @@ public sealed partial class MainWindow : Window
              + (0.7152 * Linearize(color.G))
              + (0.0722 * Linearize(color.B));
     }
+
+    private static Color ContrastingText(Color color) =>
+        RelativeLuminance(color) > 0.48
+            ? Color.FromArgb(255, 0, 0, 0)
+            : Color.FromArgb(255, 255, 255, 255);
+
+    private static Color WithAlpha(Color color, byte alpha) =>
+        Color.FromArgb(alpha, color.R, color.G, color.B);
 
     private static Color Blend(Color color, double factor)
     {

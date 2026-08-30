@@ -25,7 +25,12 @@
             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="AccentFillColorSelectedTextBackgroundBrush" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="AccentTextFillColorTertiaryBrush" Color="{StaticResource WinPoolAccentColor}" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="{StaticResource WinPoolAccentForegroundColor}" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorDefaultBrush" Color="{StaticResource WinPoolAccentForegroundColor}" />
             <SolidColorBrush x:Key="FocusStrokeColorOuterBrush" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="ListViewItemSelectionIndicatorBrush" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="{StaticResource WinPoolAccentColor}" />

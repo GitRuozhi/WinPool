@@ -783,17 +783,22 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void CustomAccentColorUpdatesThemeDictionaries()
+    public void CustomAccentColorDoesNotMutateWinUiThemeDictionaries()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
-        Assert.Contains("WalkResourceDictionaries", source, StringComparison.Ordinal);
-        Assert.Contains("SystemAccentColorLight2", source, StringComparison.Ordinal);
-        Assert.Contains("ThemeDictionaries", source, StringComparison.Ordinal);
-        Assert.Contains("HighContrast", source, StringComparison.Ordinal);
+        var resources = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "App.xaml"));
+
+        Assert.Contains("SetOwnedBrushColor", source, StringComparison.Ordinal);
         Assert.Contains("AccentFillColorDefaultBrush", source, StringComparison.Ordinal);
         Assert.Contains("UIColorType.AccentLight2", source, StringComparison.Ordinal);
+        Assert.Contains("TextOnAccentFillColorPrimaryBrush", resources, StringComparison.Ordinal);
+        Assert.Contains("ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("WalkResourceDictionaries", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemFillColorAttentionBrush", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemControlForegroundAccentBrush", source, StringComparison.Ordinal);
     }
 
     [Fact]
