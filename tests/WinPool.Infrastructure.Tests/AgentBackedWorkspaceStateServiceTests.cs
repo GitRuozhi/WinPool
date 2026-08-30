@@ -15,11 +15,11 @@ public sealed class AgentBackedWorkspaceStateServiceTests
 
         Assert.Equal("Test", loaded.ShellPage);
         Assert.Equal("simulation:test", loaded.ActiveSystemId);
-        Assert.Equal(WorkspaceCategory.Partition, loaded.Category);
+        Assert.Equal(ManageWorkspaceCategory.Partition, loaded.Category);
         Assert.Equal("partition:selected", loaded.HighlightedTopologyStableId);
         Assert.Equal(
             "partition:remembered",
-            loaded.CategorySelections![WorkspaceCategory.Partition]);
+            loaded.CategorySelections![ManageWorkspaceCategory.Partition]);
         Assert.IsType<LoadAgentWorkspaceStateRequest>(connection.Requests[0]);
     }
 
@@ -31,10 +31,10 @@ public sealed class AgentBackedWorkspaceStateServiceTests
         var state = new WorkspaceUiState(
             "Monitor",
             "simulation:test",
-            WorkspaceCategory.Pool,
-            new Dictionary<WorkspaceCategory, string>
+            ManageWorkspaceCategory.Pool,
+            new Dictionary<ManageWorkspaceCategory, string>
             {
-                [WorkspaceCategory.Pool] = "pool:test"
+                [ManageWorkspaceCategory.Pool] = "pool:test"
             },
             "pool:highlighted");
 

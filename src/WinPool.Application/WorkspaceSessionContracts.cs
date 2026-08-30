@@ -21,7 +21,7 @@ public static class WorkspaceSessionStateValidator
             && IsBounded(state.ActiveDocumentId, 512, allowEmpty: true)
             && IsBounded(state.HighlightedTopologyProviderKey, 1024, allowEmpty: true)
             && state.RememberedProviderKeys is not null
-            && state.RememberedProviderKeys.Count <= 5
+            && state.RememberedProviderKeys.Count <= Enum.GetValues<ManageWorkspaceCategory>().Length
             && state.RememberedProviderKeys.All(pair =>
                 Enum.IsDefined(pair.Key)
                 && IsBounded(pair.Value, 1024, allowEmpty: false))

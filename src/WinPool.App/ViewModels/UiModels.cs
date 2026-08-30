@@ -5,7 +5,7 @@ using WinPool.Application;
 
 namespace WinPool.App.ViewModels;
 
-public sealed record CategoryItem(WorkspaceCategory Category, string Title, string Glyph);
+public sealed record CategoryItem(ManageWorkspaceCategory Category, string Title, string Glyph);
 
 public sealed record WorkspaceItem(
     string Key,

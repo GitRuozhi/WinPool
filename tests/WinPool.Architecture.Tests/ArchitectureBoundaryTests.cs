@@ -353,6 +353,18 @@ public sealed class ArchitectureBoundaryTests
             workspace,
             StringComparison.Ordinal);
         Assert.Contains(
+            "ManageSelectionKey? _selectedSelection",
+            workspace,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SelectedTopologyStableId",
+            workspace,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "private WorkspaceCategory _selectedCategory",
+            workspace,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "_manageComparisonProjector.Project(",
             workspace,
             StringComparison.Ordinal);

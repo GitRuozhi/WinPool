@@ -320,8 +320,14 @@ public sealed class ManageSystemProjectorTests
             "partition:1",
             navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Id.ProviderKey);
         Assert.Equal(
+            ManageObjectRole.Partition,
+            navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Role);
+        Assert.Equal(
             "partition:1",
             navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Id.ProviderKey);
+        Assert.Equal(
+            ManageObjectRole.Volume,
+            navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Role);
 
         var local = document with
         {
@@ -378,6 +384,7 @@ public sealed class ManageSystemProjectorTests
             node => node.Role == ManageObjectRole.VirtualDiskGroup);
 
         Assert.Equal("Unallocated", directGroup.DisplayName);
+        Assert.True(directGroup.IsSelectable);
         Assert.Contains("physical disks", directGroup.Summary, StringComparison.Ordinal);
         Assert.Equal("Virtual disks", virtualGroup.DisplayName);
         Assert.Contains("virtual disks", virtualGroup.Summary, StringComparison.Ordinal);
@@ -420,6 +427,20 @@ public sealed class ManageSystemProjectorTests
             item => item.Role == ManageObjectRole.NetworkDisk);
         Assert.Equal("network:r", networkVolume.Id.ProviderKey);
         Assert.DoesNotContain(volumes, item => item.Id.ProviderKey == "network:s");
+
+        var navigation = new ManageNavigationProjector().Project(
+            document,
+            networkVolume.Id,
+            ManageObjectRole.NetworkDisk);
+        Assert.Equal(
+            "network:r",
+            navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Id.ProviderKey);
+        Assert.Equal(
+            "network:r",
+            navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Id.ProviderKey);
+        Assert.Equal(
+            ManageObjectRole.NetworkDisk,
+            navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Role);
     }
 
     [Fact]

@@ -67,6 +67,21 @@ public static class TopologyProjector
 
     public static TopologyNode Project(StorageSnapshot snapshot)
     {
+        var root = ProjectCore(snapshot);
+        RemoveDuplicateOccurrences(root, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        return root;
+    }
+
+    public static IReadOnlyList<StorageUnitRef> FindConflictingTopologyObjects(
+        StorageSnapshot snapshot) =>
+        Flatten(ProjectCore(snapshot))
+            .GroupBy(ObjectKey, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.First().Unit)
+            .ToArray();
+
+    private static TopologyNode ProjectCore(StorageSnapshot snapshot)
+    {
         var uniquePhysical = snapshot.PhysicalDisks
             .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -134,6 +149,28 @@ public static class TopologyProjector
 
         return root;
     }
+
+    private static void RemoveDuplicateOccurrences(
+        TopologyNode node,
+        HashSet<string> seen)
+    {
+        seen.Add(ObjectKey(node));
+        for (var index = 0; index < node.Children.Count;)
+        {
+            var child = node.Children[index];
+            if (!seen.Add(ObjectKey(child)))
+            {
+                node.Children.RemoveAt(index);
+                continue;
+            }
+
+            RemoveDuplicateOccurrences(child, seen);
+            index++;
+        }
+    }
+
+    private static string ObjectKey(TopologyNode node) =>
+        $"{(int)node.Unit.Kind}:{node.Unit.StableId}";
 
     public static string NetworkGroupStableId(StorageSnapshot snapshot) =>
         $"group:network:{snapshot.Computer.StableId}";
@@ -306,7 +343,6 @@ public static class TopologyProjector
                 JoinSummary(
                     $"{directMembers.Count} physical disks",
                     FormatBytes(directMembers.Sum(x => x.Size))),
-                isSelectable: false,
                 childrenLayout: TopologyChildrenLayout.Flow);
             foreach (var member in directMembers)
             {

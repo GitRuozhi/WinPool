@@ -28,10 +28,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly WinPool.Application.IManageCommandProjector<StorageSystemDocument> _manageCommandProjector;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly Dictionary<string, bool> _expandedStates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<WorkspaceCategory, string> _categorySelections = [];
+    private readonly Dictionary<(SystemId System, ManageWorkspaceCategory Category), ManageSelectionKey>
+        _categorySelections = [];
     private bool _updatingComparisonSelection;
     private bool _suppressRelatedSelection;
     private StorageUnitRef? _contextUnit;
+    private ManageSelectionKey? _selectedSelection;
+    private ManageObjectTarget? _selectedTopologyTarget;
     private readonly HashSet<string> _shownFindings = new(StringComparer.Ordinal);
     public const string AddStorageSystemKey = "action:add-storage-system";
     private const string ScanningNotificationKey = "inventory:scanning";
@@ -94,7 +97,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
         SelectedSystem = SystemCatalog.Systems.First(system => !system.IsLocal);
         Localization = new LocalizationService();
-        _selectedCategory = WorkspaceCategory.System;
+        _selectedCategory = ManageWorkspaceCategory.System;
         RefreshLocalizedContent();
     }
 
@@ -170,7 +173,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSelectedSystemLocalConsistent));
         OnPropertyChanged(nameof(IsUsingSimulatedInventory));
         RebuildTopology();
-        RebuildObjects(SelectedSystem.Id);
+        RebuildObjects(RememberedSelection(SelectedCategory));
     }
 
     public async Task ConvertLocalToSimulationAsync(CancellationToken cancellationToken = default)
@@ -195,7 +198,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(IsUsingSimulatedInventory));
         OnPropertyChanged(nameof(IsSelectedSystemLocalConsistent));
         RebuildTopology();
-        RebuildObjects(copy.Id);
+        RebuildObjects(RememberedSelection(SelectedCategory));
     }
 
     public ObservableCollection<CategoryItem> Categories { get; } = [];
@@ -210,7 +213,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private ComparisonColumn? _selectedComparisonColumn;
 
     [ObservableProperty]
-    private WorkspaceCategory _selectedCategory;
+    private ManageWorkspaceCategory _selectedCategory;
 
     [ObservableProperty]
     private CategoryItem? _selectedCategoryItem;
@@ -219,12 +222,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private WorkspaceItem? _selectedWorkspaceItem;
 
     public ObservableCollection<TopologyNodeViewModel> TopologySystems { get; } = [];
-
-    [ObservableProperty]
-    private string? _selectedStableId;
-
-    [ObservableProperty]
-    private string? _selectedTopologyStableId;
 
     [ObservableProperty]
     private string _detailTitle = string.Empty;
@@ -267,15 +264,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedCategoryChanged(WorkspaceCategory value)
+    partial void OnSelectedCategoryChanged(ManageWorkspaceCategory value)
     {
-        var related = _suppressRelatedSelection ? null : FindRelatedStableIdForCategory(value);
-        RebuildObjects(related ?? _categorySelections.GetValueOrDefault(value));
+        var related = _suppressRelatedSelection ? null : FindRelatedSelectionForCategory(value);
+        RebuildObjects(related ?? RememberedSelection(value));
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == value);
         OnPropertyChanged(nameof(SelectedCategoryTitle));
     }
 
-    private string? FindRelatedStableIdForCategory(WorkspaceCategory target)
+    private ManageSelectionKey? FindRelatedSelectionForCategory(ManageWorkspaceCategory target)
     {
         var current = SelectedWorkspaceItem;
         if (current?.Projection is null || current.IsAction)
@@ -283,21 +280,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return null;
         }
 
-        var contractCategory = target switch
-        {
-            WorkspaceCategory.System => WinPool.Application.ManageWorkspaceCategory.System,
-            WorkspaceCategory.Pool => WinPool.Application.ManageWorkspaceCategory.Pool,
-            WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
-            WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
-            WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
-            WorkspaceCategory.Volume => WinPool.Application.ManageWorkspaceCategory.Volume,
-            _ => throw new ArgumentOutOfRangeException(nameof(target))
-        };
         var navigation = _manageNavigationProjector.Project(
             ActiveDocument,
             current.Projection.Id,
             current.Projection.Role);
-        return navigation.RelatedSelections.GetValueOrDefault(contractCategory)?.Id.ProviderKey;
+        var related = navigation.RelatedSelections.GetValueOrDefault(target);
+        return related is null
+            ? null
+            : new ManageSelectionKey(related.Id, related.Role, target);
     }
 
     partial void OnSelectedWorkspaceItemChanged(WorkspaceItem? value)
@@ -305,9 +295,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _contextUnit = null;
         if (value?.IsAction == true)
         {
-            SelectedStableId = null;
-            SelectedTopologyStableId = null;
-            _categorySelections[SelectedCategory] = value.Key;
+            SetSelectionState(null, null);
             BuildDetails();
             RebuildComparisonColumns();
             RefreshTopologySelection();
@@ -316,16 +304,26 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
-        if (SelectedCategory == WorkspaceCategory.System && value?.Unit?.Kind == StorageUnitKind.System)
+        if (value?.Projection is null)
         {
-            SwitchSystem(value.StorageSystemId);
+            SetSelectionState(null, null);
+            BuildDetails();
+            RebuildComparisonColumns();
+            RefreshTopologySelection();
+            NotifySelectionState();
+            WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
+            return;
         }
-        SelectedStableId = value?.Unit?.StableId;
-        SelectedTopologyStableId = SelectedStableId;
-        if (value?.Unit is not null)
+
+        var selection = SelectionFor(value.Projection);
+        if (SelectedCategory == ManageWorkspaceCategory.System
+            && value.Unit?.Kind == StorageUnitKind.System
+            && SwitchSystem(value.StorageSystemId, selection))
         {
-            _categorySelections[SelectedCategory] = value.Key;
+            return;
         }
+        SetSelectionState(selection, ManageSelectionRules.TopologyTargetFor(selection));
+        _categorySelections[(selection.Id.System, selection.Category)] = selection;
         BuildDetails();
         RebuildComparisonColumns();
         RefreshTopologySelection();
@@ -346,8 +344,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             SelectedWorkspaceItem = item;
         }
     }
-
-    partial void OnSelectedTopologyStableIdChanged(string? value) => RefreshTopologySelection();
 
     partial void OnScanErrorChanged(string value) => OnPropertyChanged(nameof(HasScanError));
 
@@ -377,14 +373,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             {
                 foreach (var pair in RestoredUiState.CategorySelections)
                 {
-                    _categorySelections[pair.Key] = pair.Value;
+                    var restored = ResolveSelection(
+                        SelectedSystem,
+                        pair.Key,
+                        pair.Value);
+                    if (restored is not null)
+                    {
+                        _categorySelections[(restored.Id.System, restored.Category)] = restored;
+                    }
                 }
             }
             SelectedCategory = RestoredUiState.Category;
-            SelectedTopologyStableId = string.IsNullOrWhiteSpace(
-                RestoredUiState.HighlightedTopologyStableId)
-                ? null
-                : RestoredUiState.HighlightedTopologyStableId;
+            _selectedTopologyTarget = ResolveTopologyTarget(
+                SelectedSystem,
+                RestoredUiState.HighlightedTopologyStableId);
         }
         RefreshLocalizedContent();
     }
@@ -420,8 +422,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             shellPage,
             SelectedSystem.Id,
             SelectedCategory,
-            new Dictionary<WorkspaceCategory, string>(_categorySelections),
-            SelectedTopologyStableId ?? string.Empty);
+            _categorySelections
+                .Where(pair => pair.Key.System == ActiveDocument.SystemId)
+                .ToDictionary(
+                    pair => pair.Key.Category,
+                    pair => pair.Value.Id.ProviderKey),
+            _selectedTopologyTarget?.Id.ProviderKey ?? string.Empty);
 
     public UserPreferences CurrentPreferences { get; private set; } = new();
 
@@ -531,7 +537,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSelectedSystemLocalConsistent));
         OnPropertyChanged(nameof(IsUsingSimulatedInventory));
         RebuildTopology();
-        RebuildObjects(imported.Id);
+        RebuildObjects(RememberedSelection(SelectedCategory));
         return true;
     }
 
@@ -576,7 +582,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveDocument));
         OnPropertyChanged(nameof(ActiveSnapshot));
         RebuildTopology();
-        RebuildObjects(SelectedStableId);
+        RebuildObjects(_selectedSelection);
         BuildDetails();
         RebuildComparisonColumns();
     }
@@ -675,8 +681,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         StatusMessage = Localization["Scanning"];
         _notificationService.DismissByKey(ScanningNotificationKey);
         PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted());
-        var previous = new WorkspaceSelection(SelectedCategory, SelectedStableId, _contextUnit?.Kind, _contextUnit?.StableId);
-        var previousTopologyStableId = SelectedTopologyStableId;
+        var previous = _selectedSelection;
         try
         {
             var localDocument = await _hardwareInventoryProvider.CollectLocalAsync(CancellationToken.None);
@@ -704,13 +709,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             else
             {
                 SelectedSystem = localDocument;
-                var restored = WorkspaceSelectionState.Restore(snapshot, previous);
-                SelectedCategory = restored.Category;
+                if (previous is not null)
+                {
+                    SelectedCategory = previous.Category;
+                }
                 RebuildTopology();
-                RebuildObjects(restored.StableId);
-                SelectedTopologyStableId = snapshot.FindUnit(previousTopologyStableId ?? string.Empty) is null
-                    ? null
-                    : previousTopologyStableId;
+                RebuildObjects(previous);
             }
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
             _notificationService.DismissByKey(ScanningNotificationKey);
@@ -788,11 +792,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole role,
         StorageSnapshot sourceSnapshot)
     {
-        if (SelectedTopologyStableId?.Equals(
-                objectId.ProviderKey,
-                StringComparison.OrdinalIgnoreCase) == true)
+        var category = WinPool.Application.ManageSelectionRules.CategoryFor(role);
+        var selection = new ManageSelectionKey(objectId, role, category);
+        var topologyTarget = new ManageObjectTarget(objectId, role);
+        if (ManageSelectionRules.SameSelection(_selectedSelection, selection)
+            && ManageSelectionRules.SameTarget(_selectedTopologyTarget, topologyTarget))
         {
-            SelectedTopologyStableId = null;
             return;
         }
 
@@ -802,39 +807,27 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             x => ReferenceEquals(x.Snapshot, sourceSnapshot))
             ?? SystemCatalog.Systems.FirstOrDefault(
                 x => x.Snapshot.SnapshotVersion == sourceSnapshot.SnapshotVersion);
-        var switchedInventory = SwitchSystem(sourceDocument?.Id);
+        SwitchSystem(sourceDocument?.Id, selection);
         _contextUnit = null;
-        var contractCategory = WinPool.Application.ManageSelectionRules.CategoryFor(role);
-        var category = contractCategory switch
-        {
-            WinPool.Application.ManageWorkspaceCategory.System => WorkspaceCategory.System,
-            WinPool.Application.ManageWorkspaceCategory.Pool => WorkspaceCategory.Pool,
-            WinPool.Application.ManageWorkspaceCategory.Tier => WorkspaceCategory.Tier,
-            WinPool.Application.ManageWorkspaceCategory.Disk => WorkspaceCategory.Disk,
-            WinPool.Application.ManageWorkspaceCategory.Partition => WorkspaceCategory.Partition,
-            _ => throw new ArgumentOutOfRangeException(nameof(role))
-        };
-        var stableId = role == WinPool.Application.ManageObjectRole.System
-            && sourceDocument is not null
-                ? sourceDocument.Id
-                : objectId.ProviderKey;
-        _categorySelections[category] = stableId;
+        _categorySelections[(objectId.System, category)] = selection;
         if (SelectedCategory != category)
         {
             _suppressRelatedSelection = true;
             SelectedCategory = category;
             _suppressRelatedSelection = false;
         }
-        else if (switchedInventory)
+        else
         {
-            RebuildObjects(stableId);
+            RebuildObjects(selection);
         }
 
-        var item = Objects.FirstOrDefault(x => x.Unit?.StableId == stableId);
+        var item = Objects.FirstOrDefault(x =>
+            x.Projection is not null
+            && ManageSelectionRules.SameSelection(SelectionFor(x.Projection), selection));
         if (item is not null)
         {
             SelectedWorkspaceItem = item;
-            SelectedTopologyStableId = objectId.ProviderKey;
+            SetSelectionState(selection, topologyTarget);
             ExpandSelectedTopologyPath();
         }
     }
@@ -864,16 +857,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             return null;
         }
-        var category = SelectedCategory switch
-        {
-            WorkspaceCategory.System => WinPool.Application.ManageWorkspaceCategory.System,
-            WorkspaceCategory.Pool => WinPool.Application.ManageWorkspaceCategory.Pool,
-            WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
-            WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
-            WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
-            WorkspaceCategory.Volume => WinPool.Application.ManageWorkspaceCategory.Volume,
-            _ => throw new ArgumentOutOfRangeException()
-        };
         var activeSystemId = ActiveDocument.SystemId;
         if (item.Projection.Id.System != activeSystemId)
         {
@@ -887,7 +870,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             SystemCatalog.Systems.First(document => document.IsLocal),
             item.Projection.Id,
             item.Projection.Role,
-            category);
+            SelectedCategory);
     }
 
     public bool GetExpandedState(string stableId, bool defaultValue) =>
@@ -947,28 +930,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public void RefreshLocalizedContent()
     {
         var category = SelectedCategory;
-        var topologyStableId = SelectedTopologyStableId;
-        var preserveTopologySelection = Categories.Count > 0;
         Categories.Clear();
-        Categories.Add(new CategoryItem(WorkspaceCategory.System, Localization["System"], "\uE7F8"));
-        Categories.Add(new CategoryItem(WorkspaceCategory.Pool, Localization["Pool"], "\uE8F1"));
-        Categories.Add(new CategoryItem(WorkspaceCategory.Tier, Localization["Tier"], "\uE8FD"));
-        Categories.Add(new CategoryItem(WorkspaceCategory.Disk, Localization["Disk"], "\uEDA2"));
-        Categories.Add(new CategoryItem(WorkspaceCategory.Partition, Localization["Partition"], "\uE7C3"));
-        Categories.Add(new CategoryItem(WorkspaceCategory.Volume, Localization["Volume"], "\uE7C3"));
+        Categories.Add(new CategoryItem(ManageWorkspaceCategory.System, Localization["System"], "\uE7F8"));
+        Categories.Add(new CategoryItem(ManageWorkspaceCategory.Pool, Localization["Pool"], "\uE8F1"));
+        Categories.Add(new CategoryItem(ManageWorkspaceCategory.Tier, Localization["Tier"], "\uE8FD"));
+        Categories.Add(new CategoryItem(ManageWorkspaceCategory.Disk, Localization["Disk"], "\uEDA2"));
+        Categories.Add(new CategoryItem(ManageWorkspaceCategory.Partition, Localization["Partition"], "\uE7C3"));
+        Categories.Add(new CategoryItem(ManageWorkspaceCategory.Volume, Localization["Volume"], "\uE7C3"));
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == category);
         OnPropertyChanged(nameof(SelectedCategoryTitle));
-        RebuildObjects(_categorySelections.GetValueOrDefault(SelectedCategory) ?? SelectedStableId);
+        RebuildObjects(RememberedSelection(SelectedCategory) ?? _selectedSelection);
         RebuildTopology();
-        if (preserveTopologySelection)
-        {
-            SelectedTopologyStableId = topologyStableId is not null
-                && SystemCatalog.Systems.Any(system =>
-                    system.Id == topologyStableId
-                    || system.Snapshot.FindUnit(topologyStableId) is not null)
-                    ? topologyStableId
-                    : null;
-        }
         BuildDetails();
     }
 
@@ -998,6 +970,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     zh
                         ? $"存储池 {finding.TargetName} 含有多个虚拟磁盘。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
                         : $"Pool {finding.TargetName} has more than one virtual disk. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                StorageFindingKind.ConflictingTopologyRelationship => (
+                    zh ? "存储关系冲突" : "Storage relationship conflict",
+                    zh
+                        ? $"同一存储对象（{finding.TargetName}）被报告在多个拓扑位置。WinPool 已只显示一次；请刷新清单并检查存储关系。"
+                        : $"The same storage object ({finding.TargetName}) was reported in more than one topology location. WinPool shows it once; refresh inventory and inspect the storage relationships."),
                 StorageFindingKind.LegacyDynamicVolume => (
                     zh ? "老旧卷类型" : "Legacy volume type",
                     zh
@@ -1017,6 +994,70 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 $"storage-finding:{finding.Kind}:{finding.TargetStableId}");
         }
     }
+
+    private static ManageSelectionKey SelectionFor(ManageObjectListItemView item) =>
+        new(item.Id, item.Role, item.Category);
+
+    private ManageSelectionKey? RememberedSelection(ManageWorkspaceCategory category) =>
+        _categorySelections.GetValueOrDefault((ActiveDocument.SystemId, category));
+
+    private ManageSelectionKey? ResolveSelection(
+        StorageSystemDocument document,
+        ManageWorkspaceCategory category,
+        string? providerKey)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey))
+        {
+            return null;
+        }
+
+        var item = _manageProjector.Project(document).WorkspaceObjects.FirstOrDefault(candidate =>
+            candidate.Category == category
+            && candidate.Id.ProviderKey.Equals(providerKey, StringComparison.OrdinalIgnoreCase));
+        return item is null ? null : SelectionFor(item);
+    }
+
+    private ManageObjectTarget? ResolveTopologyTarget(
+        StorageSystemDocument document,
+        string? providerKey)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey))
+        {
+            return null;
+        }
+
+        var node = Flatten(_manageProjector.Project(document).Root).FirstOrDefault(candidate =>
+            candidate.Id.ProviderKey.Equals(providerKey, StringComparison.OrdinalIgnoreCase));
+        return node is null ? null : new ManageObjectTarget(node.Id, node.Role);
+    }
+
+    private static IEnumerable<ManageTopologyNodeView> Flatten(ManageTopologyNodeView root)
+    {
+        yield return root;
+        foreach (var child in root.Children.SelectMany(Flatten))
+        {
+            yield return child;
+        }
+    }
+
+    private void SetSelectionState(
+        ManageSelectionKey? selection,
+        ManageObjectTarget? topologyTarget)
+    {
+        var changed = !ManageSelectionRules.SameSelection(_selectedSelection, selection)
+            || !ManageSelectionRules.SameTarget(_selectedTopologyTarget, topologyTarget);
+        _selectedSelection = selection;
+        _selectedTopologyTarget = topologyTarget;
+        if (changed)
+        {
+            RefreshTopologySelection();
+        }
+    }
+
+    public bool IsTopologySelected(StorageObjectId objectId, ManageObjectRole role) =>
+        ManageSelectionRules.SameTarget(
+            _selectedTopologyTarget,
+            new ManageObjectTarget(objectId, role));
 
     private void RebuildTopology()
     {
@@ -1045,7 +1086,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             document.Snapshot);
     }
 
-    private void RebuildObjects(string? preferredStableId)
+    private void RebuildObjects(ManageSelectionKey? preferredSelection)
     {
         Objects.Clear();
         foreach (var item in CreateWorkspaceItems(SelectedCategory))
@@ -1054,13 +1095,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         SelectedWorkspaceItem =
-            Objects.FirstOrDefault(x => x.Key == preferredStableId)
+            Objects.FirstOrDefault(x =>
+                x.Projection is not null
+                && ManageSelectionRules.SameSelection(
+                    SelectionFor(x.Projection),
+                    preferredSelection))
             ?? Objects.FirstOrDefault();
     }
 
-    private IEnumerable<WorkspaceItem> CreateWorkspaceItems(WorkspaceCategory category)
+    private IEnumerable<WorkspaceItem> CreateWorkspaceItems(ManageWorkspaceCategory category)
     {
-        if (category == WorkspaceCategory.System)
+        if (category == ManageWorkspaceCategory.System)
         {
             foreach (var system in SystemCatalog.Systems)
             {
@@ -1077,18 +1122,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             yield break;
         }
 
-        var requestedCategory = category switch
-        {
-            WorkspaceCategory.Pool => WinPool.Application.ManageWorkspaceCategory.Pool,
-            WorkspaceCategory.Tier => WinPool.Application.ManageWorkspaceCategory.Tier,
-            WorkspaceCategory.Disk => WinPool.Application.ManageWorkspaceCategory.Disk,
-            WorkspaceCategory.Partition => WinPool.Application.ManageWorkspaceCategory.Partition,
-            WorkspaceCategory.Volume => WinPool.Application.ManageWorkspaceCategory.Volume,
-            _ => throw new ArgumentOutOfRangeException(nameof(category))
-        };
         var activeProjection = _manageProjector.Project(ActiveDocument);
         foreach (var item in activeProjection.WorkspaceObjects
-                     .Where(candidate => candidate.Category == requestedCategory)
+                     .Where(candidate => candidate.Category == category)
                      .OrderBy(candidate => candidate.SortOrder))
         {
             yield return CreateWorkspaceItem(item, activeProjection, ActiveDocument.Id);
@@ -1271,7 +1307,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _ => role.ToString()
     };
 
-    private bool SwitchSystem(string? systemId)
+    private bool SwitchSystem(string? systemId, ManageSelectionKey? preferredSelection = null)
     {
         if (string.IsNullOrWhiteSpace(systemId))
         {
@@ -1293,7 +1329,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveSnapshot));
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         RebuildTopology();
-        RebuildObjects(system.Id);
+        RebuildObjects(preferredSelection ?? RememberedSelection(SelectedCategory));
         return true;
     }
 
@@ -1330,15 +1366,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private void ExpandSelectedTopologyPath()
     {
-        if (string.IsNullOrWhiteSpace(SelectedStableId))
+        if (_selectedTopologyTarget is null)
         {
             return;
         }
 
         foreach (var root in TopologySystems.Where(
-                     x => x.Unit.StableId == ActiveDocument.Id))
+                     x => x.ObjectId.System == _selectedTopologyTarget.Id.System))
         {
-            if (root.ExpandPathTo(SelectedStableId))
+            if (root.ExpandPathTo(_selectedTopologyTarget))
             {
                 root.IsExpanded = true;
                 SystemRootExpanded(root);

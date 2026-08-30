@@ -50,10 +50,10 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
             WorkspaceSessionState.CurrentSchemaVersion,
             page,
             state.ActiveSystemId?.Trim() ?? string.Empty,
-            ToApplication(state.Category),
-            (state.CategorySelections ?? new Dictionary<WorkspaceCategory, string>())
+            state.Category,
+            (state.CategorySelections ?? new Dictionary<ManageWorkspaceCategory, string>())
                 .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
-                .ToDictionary(pair => ToApplication(pair.Key), pair => pair.Value.Trim()),
+                .ToDictionary(pair => pair.Key, pair => pair.Value.Trim()),
             state.HighlightedTopologyStableId?.Trim() ?? string.Empty,
             DateTimeOffset.UtcNow);
     }
@@ -67,9 +67,9 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
         return new WorkspaceUiState(
             state.ActivePage.ToString(),
             state.ActiveDocumentId,
-            ToWorkspaceCategory(state.ActiveCategory),
+            state.ActiveCategory,
             state.RememberedProviderKeys.ToDictionary(
-                pair => ToWorkspaceCategory(pair.Key),
+                pair => pair.Key,
                 pair => pair.Value),
             state.HighlightedTopologyProviderKey);
     }
@@ -88,27 +88,4 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
         return result.Value;
     }
 
-    private static ManageWorkspaceCategory ToApplication(WorkspaceCategory category) =>
-        category switch
-        {
-            WorkspaceCategory.System => ManageWorkspaceCategory.System,
-            WorkspaceCategory.Pool => ManageWorkspaceCategory.Pool,
-            WorkspaceCategory.Tier => ManageWorkspaceCategory.Tier,
-            WorkspaceCategory.Disk => ManageWorkspaceCategory.Disk,
-            WorkspaceCategory.Partition => ManageWorkspaceCategory.Partition,
-            WorkspaceCategory.Volume => ManageWorkspaceCategory.Volume,
-            _ => throw new ArgumentOutOfRangeException(nameof(category))
-        };
-
-    private static WorkspaceCategory ToWorkspaceCategory(ManageWorkspaceCategory category) =>
-        category switch
-        {
-            ManageWorkspaceCategory.System => WorkspaceCategory.System,
-            ManageWorkspaceCategory.Pool => WorkspaceCategory.Pool,
-            ManageWorkspaceCategory.Tier => WorkspaceCategory.Tier,
-            ManageWorkspaceCategory.Disk => WorkspaceCategory.Disk,
-            ManageWorkspaceCategory.Partition => WorkspaceCategory.Partition,
-            ManageWorkspaceCategory.Volume => WorkspaceCategory.Volume,
-            _ => throw new ArgumentOutOfRangeException(nameof(category))
-        };
 }

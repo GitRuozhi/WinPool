@@ -13,6 +13,7 @@ public sealed partial class TopologyNodeControl : UserControl
     private static TopologyNodeControl? s_hoveredControl;
     private bool _wasSelected;
     private bool _isPointerOver;
+    private bool _hasKeyboardFocus;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -118,7 +119,7 @@ public sealed partial class TopologyNodeControl : UserControl
             return;
         }
 
-        if (_isPointerOver)
+        if (_isPointerOver || _hasKeyboardFocus)
         {
             NodeBorder.Background = Brush("WinPoolAccentHoverBrush");
             NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
@@ -264,4 +265,28 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void ExpandButton_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
         e.Handled = true;
+
+    private void TopologyNodeControl_GotFocus(object sender, RoutedEventArgs e)
+    {
+        _hasKeyboardFocus = true;
+        UpdateSelectionVisual();
+    }
+
+    private void TopologyNodeControl_LostFocus(object sender, RoutedEventArgs e)
+    {
+        _hasKeyboardFocus = false;
+        UpdateSelectionVisual();
+    }
+
+    private void TopologyNodeControl_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (ViewModel?.IsSelectable != true
+            || e.Key is not (Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space))
+        {
+            return;
+        }
+
+        ViewModel.SelectCommand.Execute(null);
+        e.Handled = true;
+    }
 }

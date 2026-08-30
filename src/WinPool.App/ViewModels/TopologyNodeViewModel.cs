@@ -185,8 +185,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     }
 
     public bool IsSelected =>
-        ReferenceEquals(_owner.ActiveSnapshot, _snapshot)
-        && _owner.SelectedTopologyStableId == Unit.StableId;
+        _owner.IsTopologySelected(ObjectId, Role);
 
     public int HeaderRow => 0;
 
@@ -308,16 +307,18 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         }
     }
 
-    public bool ExpandPathTo(string stableId)
+    public bool ExpandPathTo(ManageObjectTarget target)
     {
-        if (Unit.StableId.Equals(stableId, StringComparison.OrdinalIgnoreCase))
+        if (ManageSelectionRules.SameTarget(
+                new ManageObjectTarget(ObjectId, Role),
+                target))
         {
             return true;
         }
 
         foreach (var child in Children)
         {
-            if (!child.ExpandPathTo(stableId))
+            if (!child.ExpandPathTo(target))
             {
                 continue;
             }

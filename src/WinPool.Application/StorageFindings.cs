@@ -5,6 +5,7 @@ public enum StorageFindingKind
     MultiplePerformanceTiers,
     MultipleCapacityTiers,
     MultipleVirtualDisks,
+    ConflictingTopologyRelationship,
     LegacyDynamicVolume,
     MbrDisk
 }
@@ -50,6 +51,14 @@ public static class StorageFindingInspector
                 findings.Add(new StorageFinding(
                     StorageFindingKind.MultipleVirtualDisks, pool.FriendlyName, pool.StableId));
             }
+        }
+
+        foreach (var unit in TopologyProjector.FindConflictingTopologyObjects(snapshot))
+        {
+            findings.Add(new StorageFinding(
+                StorageFindingKind.ConflictingTopologyRelationship,
+                unit.DisplayName,
+                unit.StableId));
         }
 
         foreach (var partition in snapshot.Partitions.Where(x => LegacyVolumeTypes.Contains(x.Type)))

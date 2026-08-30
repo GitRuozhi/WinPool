@@ -247,6 +247,25 @@ public sealed record StorageSnapshot(
             return new StorageUnitRef(stableId, StorageUnitKind.VirtualDiskGroup, string.Empty, true, virtualDiskGroupPool.StableId);
         }
 
+        var directDiskGroupPool = StoragePools.FirstOrDefault(pool =>
+            stableId.Equals($"group:direct:{pool.StableId}", StringComparison.OrdinalIgnoreCase)
+            && PhysicalDisks.Any(disk =>
+                pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)
+                && !StorageTiers.Any(tier =>
+                    tier.PoolStableId == pool.StableId
+                    && tier.MemberPhysicalDiskIds.Contains(
+                        disk.StableId,
+                        StringComparer.OrdinalIgnoreCase))));
+        if (directDiskGroupPool is not null)
+        {
+            return new StorageUnitRef(
+                stableId,
+                StorageUnitKind.DirectDiskGroup,
+                "Unallocated",
+                true,
+                directDiskGroupPool.StableId);
+        }
+
         if (TopologyProjector.GetOtherOsDisks(this).Count > 0
             && TopologyProjector.OtherGroupStableId(this) == stableId)
         {

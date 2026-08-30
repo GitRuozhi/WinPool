@@ -189,7 +189,11 @@ public sealed class ManageSystemProjector
                 ManageWorkspaceCategory.Partition, network.Name,
                 network.IsStable, null, order++));
         }
-        return result;
+        return result
+            .DistinctBy(
+                item => $"{(int)item.Id.Kind}:{item.Id.ProviderKey}:{(int)item.Role}:{(int)item.Category}",
+                StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static ManageObjectListItemView Item(

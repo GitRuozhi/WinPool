@@ -215,13 +215,31 @@ public sealed partial class MainPage : Page
                     Text = value,
                     TextWrapping = TextWrapping.WrapWholeWords
                 };
+                FrameworkElement content = text;
+                if (isNameRow)
+                {
+                    var selector = new Button
+                    {
+                        Padding = new Thickness(10, 5, 10, 5),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                        BorderThickness = new Thickness(0),
+                        Content = text,
+                        Tag = columns[i].Key
+                    };
+                    AutomationProperties.SetName(selector, columns[i].Name);
+                    selector.Click += ColumnHeader_Click;
+                    text.Padding = new Thickness(0);
+                    content = selector;
+                }
                 var cell = new Border
                 {
                     MinHeight = RowHeight,
                     Margin = new Thickness(i == 0 ? 0 : ColumnGap, 0, 0, 0),
                     BorderBrush = dividerBrush,
                     BorderThickness = new Thickness(0, 0, 0, 1),
-                    Child = text,
+                    Child = content,
                     Tag = columns[i].Key
                 };
                 cell.Tapped += ColumnCell_Tapped;
@@ -294,6 +312,9 @@ public sealed partial class MainPage : Page
     private void ColumnCell_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
         SelectColumn(((FrameworkElement)sender).Tag as string);
 
+    private void ColumnHeader_Click(object sender, RoutedEventArgs e) =>
+        SelectColumn(((FrameworkElement)sender).Tag as string);
+
     private void ColumnCell_PointerEntered(
         object sender,
         Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -349,7 +370,13 @@ public sealed partial class MainPage : Page
                 : cell.Tag is string hoveredKey && hoveredKey == _hoveredColumnKey
                     ? hover
                     : transparent;
-            if (cell.Child is TextBlock text)
+            var text = cell.Child switch
+            {
+                TextBlock direct => direct,
+                Button { Content: TextBlock nested } => nested,
+                _ => null
+            };
+            if (text is not null)
             {
                 if (isSelected)
                 {

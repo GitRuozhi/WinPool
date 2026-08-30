@@ -60,8 +60,8 @@ public interface IMachineRecordService
 public sealed record WorkspaceUiState(
     string ShellPage = "",
     string ActiveSystemId = "",
-    WorkspaceCategory Category = WorkspaceCategory.System,
-    IReadOnlyDictionary<WorkspaceCategory, string>? CategorySelections = null,
+    ManageWorkspaceCategory Category = ManageWorkspaceCategory.System,
+    IReadOnlyDictionary<ManageWorkspaceCategory, string>? CategorySelections = null,
     string HighlightedTopologyStableId = "");
 
 public interface IWorkspaceStateService

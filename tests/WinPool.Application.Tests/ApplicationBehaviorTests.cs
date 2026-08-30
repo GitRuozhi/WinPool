@@ -88,6 +88,111 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
+    public void ConflictingTierMembershipDisplaysPhysicalDiskOnceAndReportsFinding()
+    {
+        var source = TestSnapshotFactory.Create();
+        var duplicateTier = source.StorageTiers[0] with
+        {
+            StableId = "tier:2",
+            FriendlyName = "Capacity duplicate"
+        };
+        var snapshot = source with
+        {
+            StorageTiers = [source.StorageTiers[0], duplicateTier]
+        };
+
+        var occurrences = WinPool.Application.TopologyProjector.Flatten(
+                WinPool.Application.TopologyProjector.Project(snapshot))
+            .Where(node => node.Unit.StableId == "physical:1")
+            .ToArray();
+        var findings = WinPool.Application.StorageFindingInspector.Evaluate(snapshot);
+
+        Assert.Single(occurrences);
+        Assert.Contains(
+            findings,
+            finding => finding.Kind
+                == WinPool.Application.StorageFindingKind.ConflictingTopologyRelationship
+                && finding.TargetStableId == "physical:1");
+    }
+
+    [Fact]
+    public void DirectDiskGroupCanBeResolvedForSelectionRestore()
+    {
+        var source = TestSnapshotFactory.Create();
+        var direct = source.PhysicalDisks[0] with
+        {
+            StableId = "physical:direct",
+            FriendlyName = "Direct"
+        };
+        var snapshot = source with
+        {
+            PhysicalDisks = source.PhysicalDisks.Append(direct).ToArray(),
+            StoragePools =
+            [
+                source.StoragePools[0] with
+                {
+                    MemberPhysicalDiskIds = ["physical:1", "physical:direct"]
+                }
+            ]
+        };
+
+        var group = snapshot.FindUnit("group:direct:pool:1");
+
+        Assert.NotNull(group);
+        Assert.Equal(WinPool.Application.StorageUnitKind.DirectDiskGroup, group.Kind);
+        Assert.Equal("pool:1", group.ParentStableId);
+    }
+
+    [Fact]
+    public void ManageSelectionUsesSystemKindRoleAndCategoryInsteadOfProviderKeyAlone()
+    {
+        var firstSystem = WinPool.Domain.SystemId.New();
+        var secondSystem = WinPool.Domain.SystemId.New();
+        var first = new WinPool.Application.ManageSelectionKey(
+            new WinPool.Domain.StorageObjectId(
+                firstSystem,
+                WinPool.Domain.StorageObjectKind.Partition,
+                "partition:same"),
+            WinPool.Application.ManageObjectRole.Partition,
+            WinPool.Application.ManageWorkspaceCategory.Partition);
+        var otherSystem = first with
+        {
+            Id = new WinPool.Domain.StorageObjectId(
+                secondSystem,
+                WinPool.Domain.StorageObjectKind.Partition,
+                "partition:same")
+        };
+        var volume = first with
+        {
+            Role = WinPool.Application.ManageObjectRole.Volume,
+            Category = WinPool.Application.ManageWorkspaceCategory.Volume
+        };
+
+        Assert.False(WinPool.Application.ManageSelectionRules.SameSelection(first, otherSystem));
+        Assert.False(WinPool.Application.ManageSelectionRules.SameSelection(first, volume));
+        Assert.Equal(
+            WinPool.Application.ManageObjectRole.Partition,
+            WinPool.Application.ManageSelectionRules.TopologyTargetFor(volume).Role);
+    }
+
+    [Fact]
+    public void WorkspaceSessionValidatorAcceptsAllManageCategories()
+    {
+        var selections = Enum.GetValues<WinPool.Application.ManageWorkspaceCategory>()
+            .ToDictionary(category => category, category => $"object:{category}");
+        var state = new WinPool.Application.WorkspaceSessionState(
+            WinPool.Application.WorkspaceSessionState.CurrentSchemaVersion,
+            WinPool.Application.WorkspacePage.Manage,
+            "simulation:test",
+            WinPool.Application.ManageWorkspaceCategory.Volume,
+            selections,
+            "object:Volume",
+            DateTimeOffset.UtcNow);
+
+        Assert.True(WinPool.Application.WorkspaceSessionStateValidator.IsValid(state));
+    }
+
+    [Fact]
     public void PartitionIsTheOnlyLeafUnderItsDisk()
     {
         var snapshot = TestSnapshotFactory.Create();

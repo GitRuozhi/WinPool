@@ -50,9 +50,9 @@ public sealed record ManageObjectListItemView(
     IReadOnlyDictionary<string, string?> Metadata);
 
 /// <summary>
-/// One occurrence of an object in the Manage topology. Object identity and
-/// occurrence identity are intentionally separate because the same disk can
-/// appear as a reference below more than one relationship branch.
+/// One object in the Manage topology. Occurrence identity remains separate for
+/// stable tree expansion and layout state; one projected system must not emit
+/// the same object identity in more than one location.
 /// </summary>
 public sealed record ManageTopologyNodeView(
     string OccurrenceKey,
@@ -106,6 +106,11 @@ public sealed record ManageObjectDetailsView(
 public sealed record ManageObjectTarget(
     StorageObjectId Id,
     ManageObjectRole Role);
+
+public sealed record ManageSelectionKey(
+    StorageObjectId Id,
+    ManageObjectRole Role,
+    ManageWorkspaceCategory Category);
 
 public sealed record ManageObjectNavigationView(
     StorageObjectId ObjectId,
@@ -220,6 +225,28 @@ public static class InternalStableIdentity
 
 public static class ManageSelectionRules
 {
+    public static bool SameObject(StorageObjectId left, StorageObjectId right) =>
+        left.System == right.System
+        && left.Kind == right.Kind
+        && left.ProviderKey.Equals(right.ProviderKey, StringComparison.OrdinalIgnoreCase);
+
+    public static bool SameTarget(ManageObjectTarget? left, ManageObjectTarget? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : left.Role == right.Role && SameObject(left.Id, right.Id);
+
+    public static bool SameSelection(ManageSelectionKey? left, ManageSelectionKey? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : left.Role == right.Role
+                && left.Category == right.Category
+                && SameObject(left.Id, right.Id);
+
+    public static ManageObjectTarget TopologyTargetFor(ManageSelectionKey selection) =>
+        selection.Role == ManageObjectRole.Volume
+            ? new ManageObjectTarget(selection.Id, ManageObjectRole.Partition)
+            : new ManageObjectTarget(selection.Id, selection.Role);
+
     public static ManageWorkspaceCategory CategoryFor(ManageObjectRole role) =>
         role switch
         {
