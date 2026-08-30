@@ -590,7 +590,10 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("x:Name=\"CycleButton\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"CycleButton_Click\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("WelcomeMascotCatalog.RandomKey", windowSource, StringComparison.Ordinal);
-        Assert.Contains("AppWindow.Resize(DefaultSize)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("GetDpiForWindow", windowSource, StringComparison.Ordinal);
+        Assert.Contains("AppWindowPlacement.ScaleLogicalSize", windowSource, StringComparison.Ordinal);
+        Assert.Contains("_xamlRoot.Changed += XamlRoot_Changed", windowSource, StringComparison.Ordinal);
+        Assert.Contains("sender.RasterizationScale", windowSource, StringComparison.Ordinal);
         Assert.Contains("AppWindowPlacement.CenterOnWorkArea(AppWindow)", windowSource, StringComparison.Ordinal);
         Assert.Contains("AppWindowPlacement.CenterOnWorkArea(AppWindow)", source, StringComparison.Ordinal);
         Assert.Contains("presenter.IsResizable = false", windowSource, StringComparison.Ordinal);

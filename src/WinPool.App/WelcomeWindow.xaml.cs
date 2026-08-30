@@ -14,9 +14,14 @@ namespace WinPool_App;
 
 public sealed partial class WelcomeWindow : Window
 {
+    private const double DefaultDpi = 96.0;
+    private const double ScaleChangeTolerance = 0.001;
     public static readonly SizeInt32 DefaultSize = new(720, 480);
     public static readonly SizeInt32 MinimumSize = new(720, 480);
     private InputNonClientPointerSource? _nonClientPointerSource;
+    private XamlRoot? _xamlRoot;
+    private double _rasterizationScale = double.NaN;
+    private SizeInt32 _minimumPhysicalSize = MinimumSize;
     private string _mascotKey = "00";
 
     public WelcomeWindow(
@@ -33,8 +38,7 @@ public sealed partial class WelcomeWindow : Window
         ApplyMascot((mascotSelector ?? new WelcomeMascotSelector()).SelectAssetKey());
 
         AppWindow.SetIcon("Assets/CAppIcon.ico");
-        AppWindow.Resize(DefaultSize);
-        AppWindowPlacement.CenterOnWorkArea(AppWindow);
+        ApplyDpiAwareSize(GetWindowScale(), centerOnWorkArea: true);
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.IsResizable = false;
@@ -86,11 +90,12 @@ public sealed partial class WelcomeWindow : Window
         if (args.DidSizeChange)
         {
             var size = sender.Size;
-            if (size.Width < MinimumSize.Width || size.Height < MinimumSize.Height)
+            if (size.Width < _minimumPhysicalSize.Width
+                || size.Height < _minimumPhysicalSize.Height)
             {
                 sender.Resize(new SizeInt32(
-                    Math.Max(size.Width, MinimumSize.Width),
-                    Math.Max(size.Height, MinimumSize.Height)));
+                    Math.Max(size.Width, _minimumPhysicalSize.Width),
+                    Math.Max(size.Height, _minimumPhysicalSize.Height)));
             }
         }
 
@@ -99,8 +104,63 @@ public sealed partial class WelcomeWindow : Window
 
     private void RootLayout_Loaded(object sender, RoutedEventArgs e)
     {
+        if (!ReferenceEquals(_xamlRoot, RootLayout.XamlRoot))
+        {
+            if (_xamlRoot is not null)
+            {
+                _xamlRoot.Changed -= XamlRoot_Changed;
+            }
+
+            _xamlRoot = RootLayout.XamlRoot;
+            if (_xamlRoot is not null)
+            {
+                _xamlRoot.Changed += XamlRoot_Changed;
+            }
+        }
+
+        ApplyDpiAwareSize(
+            RootLayout.XamlRoot?.RasterizationScale ?? GetWindowScale(),
+            centerOnWorkArea: true);
         HideSystemWindowBorder();
         UpdateNonClientRegions();
+    }
+
+    private void XamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args)
+    {
+        ApplyDpiAwareSize(sender.RasterizationScale, centerOnWorkArea: false);
+        UpdateNonClientRegions();
+    }
+
+    private void ApplyDpiAwareSize(double rasterizationScale, bool centerOnWorkArea)
+    {
+        if (!double.IsFinite(rasterizationScale) || rasterizationScale <= 0)
+        {
+            rasterizationScale = 1;
+        }
+
+        var scaleChanged = double.IsNaN(_rasterizationScale)
+            || Math.Abs(_rasterizationScale - rasterizationScale) > ScaleChangeTolerance;
+        if (scaleChanged)
+        {
+            _rasterizationScale = rasterizationScale;
+            _minimumPhysicalSize = AppWindowPlacement.ScaleLogicalSize(
+                MinimumSize,
+                rasterizationScale);
+            AppWindow.Resize(AppWindowPlacement.ScaleLogicalSize(
+                DefaultSize,
+                rasterizationScale));
+        }
+
+        if (centerOnWorkArea)
+        {
+            AppWindowPlacement.CenterOnWorkArea(AppWindow);
+        }
+    }
+
+    private double GetWindowScale()
+    {
+        var dpi = GetDpiForWindow(WindowNative.GetWindowHandle(this));
+        return dpi == 0 ? 1 : dpi / DefaultDpi;
     }
 
     private void RootLayout_SizeChanged(object sender, SizeChangedEventArgs e) =>
@@ -207,6 +267,9 @@ public sealed partial class WelcomeWindow : Window
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint windowHandle, int index);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint windowHandle);
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern nint SetWindowLongPtr(nint windowHandle, int index, nint newValue);
