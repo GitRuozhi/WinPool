@@ -630,6 +630,24 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void TitleBarSeparatesTheActiveSystemFromNavigation()
+    {
+        var root = FindRepositoryRoot();
+        var windowXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml"));
+        var windowSource = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+
+        Assert.Contains("x:Name=\"ActiveSystemBadge\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("BorderThickness=\"1\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("CornerRadius=\"4\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("ActiveSystemBadge.BorderBrush = accent", windowSource, StringComparison.Ordinal);
+        Assert.Contains("ActiveSystemBadge.Visibility = system is null", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NativeDiskPropertiesDoesNotRunAFullInventoryScan()
     {
         var root = FindRepositoryRoot();

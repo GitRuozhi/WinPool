@@ -312,7 +312,9 @@ public sealed partial class MainWindow : Window
             : system.IsLocal
                 ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
                 : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-        ActiveSystemNameText.Visibility = Visibility.Visible;
+        ActiveSystemBadge.Visibility = system is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         ActiveSystemNameText.Text = system is null ? string.Empty : $"{prefix} {system.DisplayName}";
     }
 
@@ -804,6 +806,7 @@ public sealed partial class MainWindow : Window
                 ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A)
                 : Color.FromArgb(255, 0xFF, 0xFF, 0xFF));
         WindowTitleText.Foreground = normalForeground;
+        ActiveSystemBadge.BorderBrush = accent;
         LocalRealOperationsCheckBox.Foreground = normalForeground;
         foreach (var item in ShellNavigationItems)
         {
