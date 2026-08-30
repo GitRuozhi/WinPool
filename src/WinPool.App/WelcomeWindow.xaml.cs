@@ -17,11 +17,9 @@ public sealed partial class WelcomeWindow : Window
     private const double DefaultDpi = 96.0;
     private const double ScaleChangeTolerance = 0.001;
     public static readonly SizeInt32 DefaultSize = new(720, 480);
-    public static readonly SizeInt32 MinimumSize = new(720, 480);
     private InputNonClientPointerSource? _nonClientPointerSource;
     private XamlRoot? _xamlRoot;
     private double _rasterizationScale = double.NaN;
-    private SizeInt32 _minimumPhysicalSize = MinimumSize;
     private string _mascotKey = "00";
 
     public WelcomeWindow(
@@ -48,7 +46,7 @@ public sealed partial class WelcomeWindow : Window
         }
 
         HideSystemWindowBorder();
-        AppWindow.Changed += AppWindow_Changed;
+        AppWindow.Changed += (_, _) => UpdateNonClientRegions();
     }
 
     private void HideSystemWindowBorder()
@@ -85,23 +83,6 @@ public sealed partial class WelcomeWindow : Window
         _ = SetWindowPos(hwnd, nint.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020);
     }
 
-    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
-    {
-        if (args.DidSizeChange)
-        {
-            var size = sender.Size;
-            if (size.Width < _minimumPhysicalSize.Width
-                || size.Height < _minimumPhysicalSize.Height)
-            {
-                sender.Resize(new SizeInt32(
-                    Math.Max(size.Width, _minimumPhysicalSize.Width),
-                    Math.Max(size.Height, _minimumPhysicalSize.Height)));
-            }
-        }
-
-        UpdateNonClientRegions();
-    }
-
     private void RootLayout_Loaded(object sender, RoutedEventArgs e)
     {
         if (!ReferenceEquals(_xamlRoot, RootLayout.XamlRoot))
@@ -127,7 +108,6 @@ public sealed partial class WelcomeWindow : Window
 
     private void XamlRoot_Changed(XamlRoot sender, XamlRootChangedEventArgs args)
     {
-        ApplyDpiAwareSize(sender.RasterizationScale, centerOnWorkArea: false);
         UpdateNonClientRegions();
     }
 
@@ -143,9 +123,6 @@ public sealed partial class WelcomeWindow : Window
         if (scaleChanged)
         {
             _rasterizationScale = rasterizationScale;
-            _minimumPhysicalSize = AppWindowPlacement.ScaleLogicalSize(
-                MinimumSize,
-                rasterizationScale);
             AppWindow.Resize(AppWindowPlacement.ScaleLogicalSize(
                 DefaultSize,
                 rasterizationScale));

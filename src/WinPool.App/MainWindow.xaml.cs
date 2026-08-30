@@ -97,12 +97,18 @@ public sealed partial class MainWindow : Window
 
         ExtendsContentIntoTitleBar = true;
         AppWindow.SetIcon("Assets/CAppIcon.ico");
+        var windowScale = AppWindowPlacement.GetWindowScale(this);
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.PreferredMinimumWidth = 480;
-            presenter.PreferredMinimumHeight = 300;
+            var minimumSize = AppWindowPlacement.ScaleLogicalSize(
+                new SizeInt32(480, 300),
+                windowScale);
+            presenter.PreferredMinimumWidth = minimumSize.Width;
+            presenter.PreferredMinimumHeight = minimumSize.Height;
         }
-        AppWindow.Resize(new SizeInt32(1440, 900));
+        AppWindow.Resize(AppWindowPlacement.ScaleLogicalSize(
+            new SizeInt32(1440, 900),
+            windowScale));
         AppWindowPlacement.CenterOnWorkArea(AppWindow);
         RootGrid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         RootGrid.Loaded += RootGrid_Loaded;
