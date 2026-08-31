@@ -156,8 +156,7 @@ Which product phase may add a typed real-mutation path is defined by
   feature branches and do not open pull requests.
 - After a completed in-scope change, create a local Git commit by default.
   Do not ask. Follow existing commit-message habits. Do not commit
-  generated `artifacts/`, `Ref/`, `temp/`, discussion drafts, or unrelated
-  user files.
+  generated `artifacts/` or unrelated user files.
 - Do not push unless the developer explicitly asks. When five unpushed
   commits have accumulated, remind the developer to push.
 - Before a push, fetch, verify `origin/main` is an ancestor of local HEAD,
