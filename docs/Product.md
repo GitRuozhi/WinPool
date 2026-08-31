@@ -54,6 +54,20 @@ External DiskSpd, fio, Dite, RoboCopy, and RAMMap installations remain separate.
 WinPool discovers or invokes them through typed adapters and validated targets; it
 does not bundle their engines.
 
+## WinPool 1.x scope
+
+WinPool 1.0 and the complete 1.x product line focus on storage topology,
+management and editing, monitoring, settings, data safety, and release-quality
+delivery. The Test and Development tabs remain visible navigation destinations,
+but each contains only a short roadmap notice. Their complete user interfaces,
+registered-directory test workflows, developer workspace, and AI Agent features
+are outside every 1.x release and are planned as WinPool 2.0 features.
+
+Existing internal test, worker, persistence, or diagnostic foundations do not
+make those features part of the supported 1.x product surface. Retaining an
+internal foundation is permitted when removing it would add release risk; it
+must not re-expand the 1.x user interface or acceptance scope.
+
 ## Architecture line
 
 The V0.4 product line retains the accepted V0.13 visual baseline and the V0.2
@@ -82,12 +96,14 @@ active Plan, or evidence that a phase is complete.
 | V0.2 | Completely restructure the codebase; establish the baseline architecture and development rules. | Historical foundation. |
 | V0.3 | Correct code defects and establish normal operation. | Historical foundation. Version confirmation does not mark remaining native or manual evidence as passed. |
 | V0.4 | Complete visual/art polish and refine existing functions and basic interactions. | Preserve accessibility and the accepted structural baseline. |
-| V0.5 | Complete management and editing workflows to provide a modern functional alternative to the legacy Windows storage GUIs. | First phase permitted to introduce controlled real storage-structure operations under the explicit developer- and product-user authorization model. |
-| V0.6 | Complete testing and monitoring functions. | External tools remain typed adapters with explicit target validation. |
-| V0.7 | Complete development-facing and AI Agent functions. | Do not freeze a public SDK, plug-in API, database contract, or wire protocol until internal models are stable. |
-| V0.8 | Complete the remaining approved functions and close known release-blocking defects and quality gaps. | Begin the signed MSIX packaging path while retaining portable delivery; unknown future defects cannot be pre-declared resolved. |
+| V0.5 | Deliver the minimum closed set of management and editing workflows required for the 1.0 storage-management product. | First phase permitted to introduce selected controlled real storage-structure operations under the explicit developer- and product-user authorization model; broad operation coverage is not a 1.0 requirement. |
+| V0.6 | Complete the monitoring and storage-health experience required for 1.0. | Test execution and the full Test workspace are excluded; monitoring must retain explicit targets, bounded persistence, and truthful diagnostics. |
+| V0.7 | Freeze the 1.0 feature scope and close remaining integration gaps across management, monitoring, settings, and data handling. | Test, developer, and AI Agent workspaces remain placeholders; no new feature family is introduced. |
+| V0.8 | Close known release-blocking defects and quality gaps and begin the signed MSIX packaging path while retaining portable delivery. | Work is limited to the frozen 1.0 scope; unknown future defects cannot be pre-declared resolved. |
 | V0.9 | Enter internal testing across the defined supported Windows platform matrix and correct findings. | Validate portable and MSIX install, upgrade, uninstall, startup, and data-location behavior across the named matrix. |
 | V1.0 | Publish the formal release. | Requires the approved V0.9 release-readiness gate; Microsoft Store submission begins only after V1.0 is complete. A tag, binary upload, and GitHub Release each still require explicit authorization. |
+| V1.x | Maintain the 1.0 product line with compatibility, reliability, security, and narrowly approved management or monitoring corrections. | The Test and Development tabs remain roadmap placeholders throughout 1.x. |
+| V2.0 | Introduce the complete Test workspace and the complete developer and AI Agent workspace. | External engines remain separate typed adapters; public or automation contracts require a separately confirmed product design. |
 
 Every implementation phase requires its own confirmed `docs/Plan.md`. The
 deny-by-default executor, simulation-first storage editing, read-only inventory,

@@ -27,6 +27,13 @@ Stage-specific test directories, matrices, and results belong in the active Plan
 or in Archive, not in this long-term policy. Test counts belong in Plan or
 CHANGELOG evidence when they are important final results.
 
+WinPool 1.x exposes the Test and Development tabs as roadmap placeholders only.
+Formal 1.x acceptance verifies that those placeholders are present, simple,
+bilingual, and accessible. Test-workspace, external benchmark execution, and
+developer/AI-workspace cases are `not_required` for 1.x; retained internal code
+continues to receive automatic regression coverage where it remains in the
+solution.
+
 ## Quality model
 
 WinPool is a native Windows, multi-process .NET application. Browser DOM tests,
@@ -80,6 +87,10 @@ Manual evidence is required for native WinUI presentation, bilingual switching,
 themes, DPI, high contrast, keyboard use, tray lifecycle, UAC, native folder
 pickers, registered tool execution, long-running monitoring, cancellation,
 recovery, and data-location round trips.
+
+Registered test-tool execution and test-workspace cancellation are required only
+for a Product phase that includes the complete Test workspace. They are not part
+of the WinPool 1.x human/device gate.
 
 A formal manual matrix uses the directory named by the active Plan or the
 archived stage that defined it. Manual checks must not select the source tree,

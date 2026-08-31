@@ -7,6 +7,29 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.42 scope reduction — 2026-08-31
+
+### Changed
+- Reduced the entire WinPool 1.x product line to the shortest release path for
+  storage topology, management/editing, monitoring, settings, data safety, and
+  release-quality delivery.
+- Kept the Test and Development tabs discoverable, but replaced their full
+  workspaces with short bilingual notices. Their complete product interfaces
+  and workflows are now planned for V2.0 rather than any 1.x release.
+- Revised the V0.5 through V2.0 route and the quality boundary to match the
+  reduced 1.x scope.
+
+### Verification
+- Architecture boundary tests: 31 passed, 0 failed, 0 skipped.
+- Release solution build: 0 warnings, 0 errors.
+
+### Known Limitations
+- Existing internal testing, worker, persistence, and diagnostic foundations
+  remain in the codebase to avoid adding release risk; they are not supported
+  1.x product surfaces.
+- Native visual and manual acceptance of the two placeholder pages remains
+  `unverified` in this change.
+
 ## V0.42 — 2026-08-28
 
 ### Added
