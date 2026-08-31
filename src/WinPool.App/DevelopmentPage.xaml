@@ -1,108 +1,29 @@
-<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="WinPool_App.DevelopmentPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d">
-    <Grid Padding="24,20,24,24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-        <Grid>
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button
-                    x:Name="RefreshDiagnosticsButton"
-                    Click="RefreshDiagnosticsButton_Click"
-                    Content="刷新诊断" />
-                <Button
-                    x:Name="CompareInventoryButton"
-                    Click="CompareInventoryButton_Click"
-                    Content="对照原生与脚本采集" />
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <Grid Padding="32">
+            <StackPanel
+                MaxWidth="720"
+                HorizontalAlignment="Left"
+                Spacing="16">
+                <TextBlock
+                    FontSize="28"
+                    FontWeight="SemiBold"
+                    Text="开发者功能 / Developer features" />
+                <InfoBar
+                    IsClosable="False"
+                    IsOpen="True"
+                    Message="完整开发者与 AI Agent 工作区不属于 WinPool 1.x，计划作为 WinPool 2.0 功能推出。&#x0a;The complete developer and AI Agent workspace is outside WinPool 1.x and is planned for WinPool 2.0."
+                    Severity="Informational"
+                    Title="WinPool 2.0" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="WinPool 1.x 不提供开发诊断面板、自由命令界面或公共自动化契约。&#x0a;WinPool 1.x does not expose a developer diagnostics panel, a free-form command surface, or a public automation contract."
+                    TextWrapping="Wrap" />
             </StackPanel>
-            <Button
-                x:Name="ClearButton"
-                HorizontalAlignment="Right"
-                Click="ClearButton_Click"
-                Content="清空事件/旧日志" />
         </Grid>
-        <StackPanel
-            Grid.Row="1"
-            Margin="0,4,0,12"
-            Spacing="4">
-            <TextBlock
-                x:Name="DevelopmentIntro"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                TextWrapping="Wrap" />
-            <TextBlock
-                x:Name="InventoryComparisonStatus"
-                FontFamily="Consolas"
-                FontSize="12"
-                TextWrapping="Wrap" />
-            <TextBlock
-                x:Name="RefreshDiagnosticsStatus"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                TextWrapping="Wrap" />
-        </StackPanel>
-        <TabView Grid.Row="2" IsAddTabButtonVisible="False">
-            <TabViewItem x:Name="RuntimeTab" Header="运行时">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="RuntimeItems" Margin="12">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock FontFamily="Consolas" FontSize="12" Text="{Binding}" TextWrapping="Wrap" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </TabViewItem>
-            <TabViewItem x:Name="PlansTab" Header="计划与步骤">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="PlanItems" Margin="12">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock FontFamily="Consolas" FontSize="12" Text="{Binding}" TextWrapping="Wrap" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </TabViewItem>
-            <TabViewItem x:Name="AlgorithmsTab" Header="算法目录">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="AlgorithmItems" Margin="12">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock FontFamily="Consolas" FontSize="12" Text="{Binding}" TextWrapping="Wrap" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </TabViewItem>
-            <TabViewItem x:Name="EventsTab" Header="Application 事件">
-                <ScrollViewer x:Name="EventScrollViewer" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="EventItems" Margin="12">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock FontFamily="Consolas" FontSize="12" Text="{Binding}" TextWrapping="Wrap" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </TabViewItem>
-            <TabViewItem x:Name="LegacyLogTab" Header="旧命令日志">
-                <ScrollViewer x:Name="LogScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="LogItems" Margin="12">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock FontFamily="Consolas" FontSize="12" Text="{Binding}" TextWrapping="Wrap" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </TabViewItem>
-        </TabView>
-    </Grid>
+    </ScrollViewer>
 </Page>

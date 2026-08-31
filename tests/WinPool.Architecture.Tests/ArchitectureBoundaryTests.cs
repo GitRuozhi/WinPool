@@ -751,20 +751,20 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void TestPagePrimaryWorkflowHasStableKeyboardAccessKeys()
+    public void TestPageIsAWinPoolTwoRoadmapPlaceholder()
     {
         var root = FindRepositoryRoot();
-        var source = File.ReadAllText(
+        var view = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "TestPage.xaml"));
+        var page = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "TestPage.xaml.cs"));
 
-        Assert.Contains("x:Name=\"ChooseTargetButton\"", source, StringComparison.Ordinal);
-        Assert.Contains("AccessKey=\"D\"", source, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"PrepareButton\"", source, StringComparison.Ordinal);
-        Assert.Contains("AccessKey=\"P\"", source, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"StartButton\"", source, StringComparison.Ordinal);
-        Assert.Contains("AccessKey=\"R\"", source, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"CancelButton\"", source, StringComparison.Ordinal);
-        Assert.Contains("AccessKey=\"C\"", source, StringComparison.Ordinal);
+        Assert.Contains("WinPool 2.0", view, StringComparison.Ordinal);
+        Assert.Contains("outside WinPool 1.x", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("ChooseTargetButton", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("NumberBox", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("TestDefinitionFactory", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("IAgentConnection", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -889,7 +889,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void TestPageDelegatesDefinitionGraphConstructionToTestingLayer()
+    public void RetainedTestingFoundationDoesNotLeakIntoThePlaceholderPage()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
@@ -897,30 +897,25 @@ public sealed class ArchitectureBoundaryTests
         var factory = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Testing", "TestDefinitionFactory.cs"));
 
-        Assert.Contains("new TestDefinitionFactory(", page, StringComparison.Ordinal);
-        Assert.Contains(".Build(workload, repeatCount)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("TestDefinitionFactory", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("IAgentConnection", page, StringComparison.Ordinal);
         Assert.Contains("copyBatchThresholdMiB", factory, StringComparison.Ordinal);
         Assert.Contains("MixedFileCopyVerification", factory, StringComparison.Ordinal);
-        Assert.DoesNotContain("BuildMixedDirectoryDefinition(", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DevelopmentPageUsesClosedDiagnosticsAndHasNoFreeCommandInput()
+    public void DevelopmentPageIsAWinPoolTwoRoadmapPlaceholder()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml.cs"));
         var view = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml"));
-        var projection = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.Agent", "DevelopmentDiagnosticsProjection.cs"));
-
-        Assert.Contains("new GetDevelopmentDiagnosticsRequest(10", page, StringComparison.Ordinal);
-        Assert.Contains("WatchAsync(cancellationToken)", page, StringComparison.Ordinal);
-        Assert.Contains("MonitorQueue buffered=", page, StringComparison.Ordinal);
-        Assert.Contains("ParameterKeys", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("SerializedValue", projection, StringComparison.Ordinal);
+        Assert.Contains("WinPool 2.0", view, StringComparison.Ordinal);
+        Assert.Contains("outside WinPool 1.x", view, StringComparison.Ordinal);
         Assert.DoesNotContain("TextBox", view, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GetDevelopmentDiagnosticsRequest", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("IAgentConnection", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Process.Start", page, StringComparison.Ordinal);
     }
 
