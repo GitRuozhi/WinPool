@@ -921,8 +921,13 @@ public sealed class ArchitectureBoundaryTests
             "Microsoft.WindowsAppSDK\" Version=\"2.4.0\"",
             appProject,
             StringComparison.Ordinal);
+        Assert.Contains("Microsoft.WindowsAppSDK.AI", appProject, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.WindowsAppSDK.ML", appProject, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.WindowsAppSDK.Search", appProject, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.WindowsAppSDK.Widgets", appProject, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.Windows.AI.MachineLearning", appProject, StringComparison.Ordinal);
+        Assert.Contains("<ExcludeAssets>all</ExcludeAssets>", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("1.8.260416003", appProject, StringComparison.Ordinal);
-        Assert.DoesNotContain("Microsoft.WindowsAppSDK\" Version=\"1.", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("experimental", appProject, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("preview", appProject, StringComparison.OrdinalIgnoreCase);
     }

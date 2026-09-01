@@ -51,6 +51,26 @@
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.4.4">
+      <ExcludeAssets>all</ExcludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.ML" Version="2.1.74">
+      <ExcludeAssets>all</ExcludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.1.74">
+      <ExcludeAssets>all</ExcludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Search" Version="2.4.4">
+      <ExcludeAssets>all</ExcludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Widgets" Version="2.0.5">
+      <ExcludeAssets>all</ExcludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
   <ItemGroup>
