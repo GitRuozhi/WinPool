@@ -7,6 +7,20 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.45 — 2026-09-01
+
+### Changed
+- Product version is **V0.45**.
+- Portable App and Agent share one collision-checked runtime directory.
+- Settings uses ToggleSwitch rows, one phrase per switch, and icon buttons.
+
+### Verification
+- Architecture version-source test matches `Directory.Build.props`.
+- Inherited OS-matrix and full human UI cases remain `unverified`.
+
+### Known Limitations
+- No real storage mutation occurs.
+
 ## V0.44 Settings card layout — 2026-09-01
 
 ### Changed

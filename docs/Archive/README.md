@@ -3,10 +3,9 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-V0.44 is the latest implemented record. The original V0.44 platform plan is
-archived under `V0.44`. Shared-runtime staging is archived under
-`V0.44-shared-runtime-staging`. There is no active Plan. Product version
-remains V0.44.
+The current product version is V0.45. There is no active Plan. V0.44 remains
+the latest archived stage: the original platform plan under `V0.44`, and
+shared-runtime staging under `V0.44-shared-runtime-staging`.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
