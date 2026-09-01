@@ -912,6 +912,22 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void WindowsAppSdkIs24Stable()
+    {
+        var root = FindRepositoryRoot();
+        var appProject = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
+        Assert.Contains(
+            "Microsoft.WindowsAppSDK\" Version=\"2.4.0\"",
+            appProject,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("1.8.260416003", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("Microsoft.WindowsAppSDK\" Version=\"1.", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("experimental", appProject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("preview", appProject, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SolutionDoesNotContainRetiredProjects()
     {
         var root = FindRepositoryRoot();
