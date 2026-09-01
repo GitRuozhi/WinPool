@@ -875,6 +875,43 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void WindowsTargetedProjectsShareThe26100Tfm()
+    {
+        var root = FindRepositoryRoot();
+        const string expected = "net10.0-windows10.0.26100.0";
+        var projectFiles = Directory.GetFiles(root, "*.csproj", SearchOption.AllDirectories)
+            .Where(path =>
+            {
+                var relative = Path.GetRelativePath(root, path);
+                return relative.StartsWith("src" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                    || relative.StartsWith("tests" + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+            });
+
+        foreach (var projectFile in projectFiles)
+        {
+            var tfm = XDocument.Load(projectFile)
+                .Descendants("TargetFramework")
+                .Select(element => element.Value.Trim())
+                .FirstOrDefault();
+            if (tfm is null || !tfm.StartsWith("net10.0-windows", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            Assert.Equal(expected, tfm);
+        }
+
+        var appProject = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
+        Assert.Contains(
+            "Microsoft.Windows.SDK.BuildTools\" Version=\"10.0.28000.2705\"",
+            appProject,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("10.0.26100.7705", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("net10.0-windows10.0.28000.0", appProject, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SolutionDoesNotContainRetiredProjects()
     {
         var root = FindRepositoryRoot();
