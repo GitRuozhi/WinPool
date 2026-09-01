@@ -514,7 +514,10 @@ public sealed partial class SettingsPage : Page
     private void UpdateText()
     {
         var l = ViewModel.Localization;
-        ThemeTitle.Text = l["Appearance"];
+        AppearanceSectionTitle.Text = l["Appearance"];
+        ThemeTitle.Text = l["Theme"];
+        GeneralSectionTitle.Text = l["SettingsGeneral"];
+        AboutSectionTitle.Text = l["About"];
         AccentTitle.Text = l["AccentColor"];
         LanguageTitle.Text = l["Language"];
         ExecutionTitle.Text = l["ExecutionMode"];
