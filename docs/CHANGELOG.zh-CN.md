@@ -8,6 +8,20 @@
 本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
 `Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
+## V0.44 本地 Agent 自包含运行树 — 2026-09-01
+
+### Changed
+- 本地 Agent 以自包含 `win-x64` 写到共享运行树。从 `WinPool.lnk` /
+  `artifacts\Release` 启动时，App 拉起 Agent 不再弹出安装或升级 .NET 的对话框。
+
+### Verification
+- 本地 `WinPool.Agent.runtimeconfig.json` 使用 `includedFrameworks`。
+- 从 `artifacts\Release` 直接启动 Agent 不再要求机器上的 .NET Runtime。
+
+### Known Limitations
+- 产品版本仍为 V0.44。
+- 继承的操作系统矩阵与完整人工 UI 用例仍为 `unverified`。
+
 ## V0.44 共享运行时发行 — 2026-09-01
 
 ### Changed

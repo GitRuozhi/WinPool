@@ -7,6 +7,22 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.44 local Agent self-contained run tree — 2026-09-01
+
+### Changed
+- Local Agent builds as self-contained `win-x64` into the shared run tree.
+  `WinPool.lnk` / `artifacts\Release` no longer shows an install-or-update .NET
+  dialog when App launches Agent.
+
+### Verification
+- Local `WinPool.Agent.runtimeconfig.json` uses `includedFrameworks`.
+- Direct Agent start from `artifacts\Release` no longer requests a machine-wide
+  .NET Runtime.
+
+### Known Limitations
+- Product version remains V0.44.
+- Inherited OS-matrix and full human UI cases remain `unverified`.
+
 ## V0.44 shared runtime staging — 2026-09-01
 
 ### Changed

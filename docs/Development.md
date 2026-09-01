@@ -179,6 +179,8 @@ artifacts\build\                class-library and test outputs
 ```
 
 `src` and `tests` stay source. The App and Agent projects do not copy one another after build.
+Both local executables are self-contained in that shared root, so launching
+`WinPool.Agent.exe` beside App does not look for a machine-wide .NET Runtime.
 
 Test commands and when to run them are defined in [Quality](Quality.md).
 

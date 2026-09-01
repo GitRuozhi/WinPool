@@ -137,6 +137,8 @@ artifacts\build\                类库和测试输出
 ```
 
 `src` 和 `tests` 只保留源码。App 与 Agent 构建后不再互相复制。
+本地两个可执行文件都在该共享根目录中自包含，因此在 App 旁边启动
+`WinPool.Agent.exe` 不会去找机器上的 .NET Runtime。
 
 测试命令及何时运行由 [质量规则](Quality.zh-CN.md) 定义。
 
