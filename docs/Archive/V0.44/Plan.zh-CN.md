@@ -7,16 +7,36 @@
 
 ## 0. 状态、授权与基线
 
-- **计划状态：** 范围已确认，尚未开始实施
+- **计划状态：** 已实施；自动门通过；目标原生冒烟通过；继承的原生/人工矩阵未验证
 - **创建日期：** 2026-09-01
+- **实施日期：** 2026-09-01
 - **基线提交：** `407c1e92c1493dd41b608d0b5693715ffd22382e`
 - **工作分支：** `main`
-- **当前产品版本：** V0.43
+- **当前产品版本：** V0.44
 - **目标产品版本：** V0.44
 - **阶段性质：** 平台现代化与 portable 发行瘦身；不新增用户功能
 
+实施记录：
+
+- Windows SDK TFM 仍为 `net10.0-windows10.0.26100.0`。钉死的 .NET SDK `10.0.400`
+  以 NETSDK1140 拒绝 `10.0.28000.0`。BuildTools 为 `10.0.28000.2705`。面向
+  Windows 的工程已统一到 26100。
+- Windows App SDK 为 **2.4.0**。CommunityToolkit Sizers 仍需要元包做版本统一，
+  因此未使用的 AI、ML、Search、Widgets 载荷通过 `ExcludeAssets=all` 移除，而不是
+  丢掉元包。staging 中没有 ONNX/DirectML 文件。
+- App/Agent 扁平化已尝试并放弃：5 个同名文件内容不同
+  （`Microsoft.VisualBasic.dll`、`System.CodeDom.dll`、
+  `System.Diagnostics.EventLog.dll`、`System.Diagnostics.EventLog.Messages.dll`、
+  `System.Drawing.dll`）。保留 nested `Agent\` 布局。
+- 正式 staging 不含 PDB。构建产物仍有 PDB。
+- portable staging：779 个文件，**338.40 MiB**，相对 V0.43 基线 853 个文件 /
+  **380.44 MiB**。
+- 自动门：352 passed、0 failed、0 skipped；零警告 Release 构建；无已知易受攻击
+  包。App 与 Agent 能从干净 V0.44 staging 启动。Win10 22H2 / Win11 24H2 / 25H2
+  完整人工矩阵仍为 `unverified`。
+
 本计划之前的中文手写草案已冻结在
-[`Archive/V0.44-draft`](Archive/V0.44-draft/README.md)。它们只是历史输入。
+[`Archive/V0.44-draft`](../V0.44-draft/README.md)。它们只是历史输入。
 本文件是唯一的活动 Plan。
 
 开发者已经确认以下控制决定：
@@ -359,7 +379,7 @@ WP0–WP7 只有在开发者明确授权后才开始实施。
 任何升级之前：
 
 1. 记录基线提交。
-2. 从干净工作树执行 [Quality](Quality.md) 中的标准 restore/test/build。
+2. 从干净工作树执行 [Quality](../../Quality.md) 中的标准 restore/test/build。
 3. 用 `build/Publish-Staged.ps1` 把 V0.43 Release portable staging 生成到新路径。
 4. 记录总大小、文件数、App 大小、Agent 大小、App/Agent 重复文件大小、PDB 大小、
    Windows App SDK 相关大小、.NET runtime 大小、WinForms 大小和 WinPool 自有
@@ -464,7 +484,7 @@ docs: update Windows support and deployment docs
 
 ## 10. 自动质量门槛
 
-使用 [Quality](Quality.md) 中的项目标准：
+使用 [Quality](../../Quality.md) 中的项目标准：
 
 ```powershell
 dotnet restore WinPool.slnx

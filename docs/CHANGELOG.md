@@ -7,6 +7,34 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.44 platform upgrade and distribution slimming — 2026-09-01
+
+### Changed
+- Windows App SDK upgraded from 1.8 to **2.4.0**. Unused AI, ML, Search, and
+  Widgets payloads are excluded from publish assets; ONNX/DirectML files no
+  longer enter the portable tree.
+- Windows-targeted projects share TFM `net10.0-windows10.0.26100.0`. The pinned
+  .NET SDK rejected a 28000 TFM (NETSDK1140). `Microsoft.Windows.SDK.BuildTools`
+  is `10.0.28000.2705`.
+- Published minimum OS is Windows 10 22H2 x64. Compile SDK is not that floor.
+- Formal staging excludes PDB. Build outputs still keep symbols.
+- App/Agent flattening was attempted and retained the nested `Agent\` layout
+  after five same-name desktop assemblies differed.
+
+### Verification
+- Release solution build: 0 warnings, 0 errors.
+- Release automatic tests: 352 passed, 0 failed, 0 skipped.
+- No known vulnerable packages.
+- Portable staging: 779 files, 338.40 MiB, down from the V0.43 baseline of
+  853 files / 380.44 MiB.
+- Targeted native smoke: App and Agent launched from a clean staged tree.
+
+### Known Limitations
+- Shared App/Agent runtime files are still stored twice in the nested layout.
+- Win10 22H2, Win11 24H2/25H2 full manual matrices, and inherited device, UAC,
+  DPI, and long-duration cases remain `unverified`.
+- No real storage mutation occurs.
+
 ## V0.43 product slimming — 2026-08-31
 
 ### Changed

@@ -57,7 +57,7 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 - 本地 `dotnet build` 把同一棵嵌套树写到 `artifacts\$(Configuration)\`。
 - App 运行时查找路径与 staging 树一致。
 - 命名管道身份和 ACL、SQLite 所有权及只读采集边界由自动或受控本地集成检查覆盖。
-- Staging 不包含脚本、艺术源文件、数据库、测试结果或重复子进程可执行文件。
+- Staging 不包含脚本、PDB 文件、艺术源文件、数据库、测试结果或重复子进程可执行文件。构建产物仍可包含 PDB。
 
 ### 人工和设备门
 

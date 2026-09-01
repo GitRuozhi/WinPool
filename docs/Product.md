@@ -89,7 +89,7 @@ active Plan, or evidence that a phase is complete.
 | V0.1 | Deliver the minimum prototype and establish the basic front-end visual direction. | Historical foundation. |
 | V0.2 | Completely restructure the codebase; establish the baseline architecture and development rules. | Historical foundation. |
 | V0.3 | Correct code defects and establish normal operation. | Historical foundation. Version confirmation does not mark remaining native or manual evidence as passed. |
-| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. | Preserve accessibility and the accepted structural baseline. |
+| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. Later V0.4 iterations also cover platform and portable-distribution work. | Preserve accessibility and the accepted structural baseline. |
 | V0.5 | Deliver the minimum closed set of management and editing workflows required for the 1.0 storage-management product. | First phase permitted to introduce selected controlled real storage-structure operations under the explicit developer- and product-user authorization model; broad operation coverage is not a 1.0 requirement. |
 | V0.6 | Complete the monitoring and storage-health experience required for 1.0. | Test execution and the full Test workspace are excluded; monitoring must retain explicit targets, bounded persistence, and truthful diagnostics. |
 | V0.7 | Freeze the 1.0 feature scope and close remaining integration gaps across management, monitoring, settings, and data handling. | Test, developer, and AI Agent workspaces remain placeholders; no new feature family is introduced. |
@@ -104,6 +104,20 @@ deny-by-default executor, simulation-first storage editing, read-only inventory,
 and data-redaction boundaries remain in force throughout this route; V0.5 real
 mutation is the defined, explicitly authorized exception to the simulation-only
 rule.
+
+## Windows support
+
+Published support from V0.44:
+
+```text
+Minimum supported: Windows 10 22H2 x64
+Primary:           Windows 11 24H2 x64
+                   Windows 11 25H2 x64
+```
+
+The compile-time Windows SDK / TFM is not the published minimum OS. WinPool
+does not ship ARM64 or x86. Older Windows versions may still start and are not
+a published guarantee.
 
 ## Installation route
 

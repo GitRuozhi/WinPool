@@ -4,16 +4,38 @@
 
 ## 0. Status, authority, and baseline
 
-- **Plan status:** confirmed scope; implementation not started
+- **Plan status:** implemented; automatic gates passed; targeted native smoke passed; inherited native/manual matrix unverified
 - **Created:** 2026-09-01
+- **Implemented:** 2026-09-01
 - **Baseline commit:** `407c1e92c1493dd41b608d0b5693715ffd22382e`
 - **Working branch:** `main`
-- **Current product version:** V0.43
+- **Current product version:** V0.44
 - **Target product version:** V0.44
 - **Stage type:** platform modernization and portable-distribution slimming; no new user feature
 
+Implementation record:
+
+- Windows SDK TFM remains `net10.0-windows10.0.26100.0`. The pinned .NET SDK
+  `10.0.400` rejected `10.0.28000.0` with NETSDK1140. BuildTools is
+  `10.0.28000.2705`. Windows-targeted projects were unified onto 26100.
+- Windows App SDK is **2.4.0**. CommunityToolkit Sizers still requires the
+  metapackage for version unification, so unused AI, ML, Search, and Widgets
+  payloads were removed through `ExcludeAssets=all` rather than dropping the
+  metapackage. ONNX/DirectML files are absent from staging.
+- App/Agent flattening was attempted and rejected: five same-name files differ
+  (`Microsoft.VisualBasic.dll`, `System.CodeDom.dll`,
+  `System.Diagnostics.EventLog.dll`, `System.Diagnostics.EventLog.Messages.dll`,
+  `System.Drawing.dll`). The nested `Agent\` layout is retained.
+- Formal staging excludes PDB. Build outputs still contain PDB files.
+- Portable staging: 779 files, **338.40 MiB**, down from the V0.43 baseline of
+  853 files / **380.44 MiB**.
+- Automatic gate: 352 passed, 0 failed, 0 skipped; warning-free Release build;
+  no known vulnerable packages. App and Agent launched from a clean V0.44
+  staging tree. Win10 22H2 / Win11 24H2 / 25H2 full manual matrix remains
+  `unverified`.
+
 Handwritten Chinese drafts that preceded this Plan are frozen under
-[`Archive/V0.44-draft`](Archive/V0.44-draft/README.md). They are historical
+[`Archive/V0.44-draft`](../V0.44-draft/README.md). They are historical
 input. This file is the only active Plan.
 
 The developer has made the following controlling decisions:
@@ -400,7 +422,7 @@ Before any upgrade:
 
 1. Record the baseline commit.
 2. From a clean tree, run the standard restore/test/build commands in
-   [Quality](Quality.md).
+   [Quality](../../Quality.md).
 3. Produce V0.43 Release portable staging with `build/Publish-Staged.ps1` into
    a new path.
 4. Record total size, file count, App size, Agent size, duplicate App/Agent
@@ -518,7 +540,7 @@ remedy.
 
 ## 10. Automatic quality gates
 
-Use the project standard from [Quality](Quality.md):
+Use the project standard from [Quality](../../Quality.md):
 
 ```powershell
 dotnet restore WinPool.slnx

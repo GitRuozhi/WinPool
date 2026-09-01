@@ -7,7 +7,7 @@
 
 ## 技术与部署
 
-WinPool 使用 C#、WinUI 3、.NET 10、Windows App SDK，以及已有充分理由时使用的 CommunityToolkit 组件。部署目标为无打包、自包含的 Windows x64 应用。SDK 固定在 `global.json`；唯一项目版本定义在 `Directory.Build.props`。
+WinPool 使用 C#、WinUI 3、.NET 10、Windows App SDK 2.4，以及已有充分理由时使用的 CommunityToolkit 组件。部署目标为无打包、自包含的 Windows x64 应用。.NET SDK 固定在 `global.json`。面向 Windows 的工程统一为 TFM `net10.0-windows10.0.26100.0`；`Microsoft.Windows.SDK.BuildTools` 为 28000 系列。对外最低操作系统为 Windows 10 22H2 x64，不等于编译 TFM。唯一项目版本定义在 `Directory.Build.props`。
 
 V0.7 及以前仅实现便携式交付；签名 MSIX 安排在 V0.8～V0.9；Microsoft Store 上架属于
 V1.0 完成后的工作。这些路线记录不授权在更早计划中执行打包。
@@ -155,7 +155,10 @@ WinPool.App.exe
 Agent/WinPool.Agent.exe
 ```
 
-Staging 不得包含重复子进程可执行文件、脚本、艺术源文件、未引用的本地资源、SQLite 文件、测试结果或发布元数据。应用明确使用的软件资源可以进入 staging。生成输出只作证据，永不提交。
+V0.44 曾尝试把 App 和 Agent 放到同一目录；因 5 个同名桌面程序集内容不同，仍保留
+该 nested 布局。正式 staging 不含 `*.pdb`；本地构建产物仍可保留符号。
+
+Staging 不得包含重复子进程可执行文件、脚本、PDB 文件、艺术源文件、未引用的本地资源、SQLite 文件、测试结果或发布元数据。应用明确使用的软件资源可以进入 staging。生成输出只作证据，永不提交。
 
 ## 版本推进
 

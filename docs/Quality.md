@@ -77,8 +77,8 @@ explanation or a user-approved exception.
 - Named-pipe identity and ACL behavior, SQLite ownership, and read-only
   inventory boundaries remain covered by automatic or controlled local
   integration checks.
-- Staging contains no scripts, local assets, databases, test results, or
-  duplicate child executables.
+- Staging contains no scripts, PDB files, local assets, databases, test results, or
+  duplicate child executables. Build outputs may still contain PDB files.
 
 ### Human and device gate
 

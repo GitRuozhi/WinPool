@@ -4,9 +4,12 @@
 
 ## Technology and deployment
 
-WinPool uses C#, WinUI 3, .NET 10, Windows App SDK, CommunityToolkit components
-where already justified, and an unpackaged self-contained Windows x64 deployment.
-The SDK is pinned in `global.json`; the single project version is defined in
+WinPool uses C#, WinUI 3, .NET 10, Windows App SDK 2.4, CommunityToolkit
+components where already justified, and an unpackaged self-contained Windows x64
+deployment. The .NET SDK is pinned in `global.json`. Windows-targeted projects
+share TFM `net10.0-windows10.0.26100.0`; `Microsoft.Windows.SDK.BuildTools` is
+the 28000 series. The published minimum OS is Windows 10 22H2 x64 and is not
+the compile TFM. The single project version is defined in
 `Directory.Build.props`.
 
 Portable delivery is the only implemented mode through V0.7. Signed MSIX work
@@ -195,7 +198,11 @@ WinPool.App.exe
 Agent/WinPool.Agent.exe
 ```
 
-Staging must not contain duplicate child executables, scripts, source artwork,
+V0.44 attempted to flatten App and Agent into one directory and retained this
+nested layout after five same-name desktop assemblies differed. Formal staging
+excludes `*.pdb`; local build outputs may still contain symbols.
+
+Staging must not contain duplicate child executables, scripts, PDB files, source artwork,
 unreferenced local assets, SQLite files, test results, or release metadata.
 Software resources explicitly consumed by the application may be included.
 Generated output is evidence only and is never committed.

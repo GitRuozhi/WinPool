@@ -2,8 +2,8 @@
 
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
-Status: archived source records; superseded by the active
-[`docs/Plan.md`](../../Plan.md).
+Status: archived source records; superseded by
+[`../V0.44/Plan.md`](../V0.44/Plan.md).
 
 This directory preserves the developer's 2026-09-01 handwritten Chinese drafts
 for a V0.44 platform-upgrade and distribution-slimming stage. They were moved

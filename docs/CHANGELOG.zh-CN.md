@@ -8,6 +8,33 @@
 本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
 `Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
+## V0.44 平台升级与发行瘦身 — 2026-09-01
+
+### Changed
+- Windows App SDK 从 1.8 升级到 **2.4.0**。未使用的 AI、ML、Search、Widgets 载荷
+  已从 publish 排除；portable 树不再包含 ONNX/DirectML 文件。
+- 面向 Windows 的工程统一为 TFM `net10.0-windows10.0.26100.0`。钉死的 .NET SDK
+  拒绝 28000 TFM（NETSDK1140）。`Microsoft.Windows.SDK.BuildTools` 为
+  `10.0.28000.2705`。
+- 对外最低操作系统为 Windows 10 22H2 x64。编译 SDK 不是该下限。
+- 正式 staging 不含 PDB。构建产物仍保留符号。
+- 曾尝试扁平化 App/Agent，因 5 个同名桌面程序集内容不同，仍保留 nested
+  `Agent\` 布局。
+
+### Verification
+- Release 解决方案构建：0 warnings，0 errors。
+- Release 自动测试：352 passed，0 failed，0 skipped。
+- 无已知易受攻击包。
+- portable staging：779 个文件，338.40 MiB，相对 V0.43 基线 853 个文件 /
+  380.44 MiB。
+- 目标原生冒烟：App 与 Agent 能从干净 staging 树启动。
+
+### Known Limitations
+- nested 布局下 App/Agent 公共 runtime 文件仍保存两份。
+- Win10 22H2、Win11 24H2/25H2 完整人工矩阵，以及继承的设备、UAC、DPI 与长期
+  用例仍为 `unverified`。
+- 不会发生真实存储修改。
+
 ## V0.43 产品瘦身 — 2026-08-31
 
 ### Changed

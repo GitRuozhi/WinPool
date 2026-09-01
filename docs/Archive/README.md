@@ -3,9 +3,8 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-V0.43 is the latest implemented record. The V0.43 plan is archived under
-`V0.43`. The active Plan is [`docs/Plan.md`](../Plan.md) (V0.44; implementation
-not started).
+V0.44 is the latest implemented record. The V0.44 plan is archived under
+`V0.44`; there is no active Plan.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
@@ -24,7 +23,8 @@ not started).
 | [`V0.39-architecture-hardening/`](V0.39-architecture-hardening/) | implemented; automatic gates passed; targeted native navigation passed; remaining native/manual cases unverified | 2026-08-14 | V0.39; architecture-governance branch | Pre-V0.40 unused-code cleanup, Agent responsibility split, definition-graph relocation, data-location handoff isolation, and architecture guards |
 | [`V0.41/`](V0.41/) | implemented; automatic gates passed; targeted native checks passed; inherited native/manual cases unverified | 2026-08-14 | V0.41; no Git commit, push, tag, release, or deployment authorized | Startup, welcome, monitoring, persistence, tray, and basic-interaction plan with the final V0.41 product version |
 | [`V0.43/`](V0.43/) | implemented; automatic gates passed; targeted native checks passed; inherited native/manual cases unverified | 2026-09-01 | V0.43; local Git checkpoint | Product slimming: disk-test, external-tool, Development/AI diagnostics, TestWorker, and ElevatedBroker removed; App+Agent runtime; IPC protocol 4; SQLite schema 14 |
-| [`V0.44-draft/`](V0.44-draft/) | archived source records; superseded by the active Plan | 2026-09-01 | handwritten input for V0.44 | Developer handwritten Chinese drafts for platform upgrade and distribution slimming; superseded by `docs/Plan.md` |
+| [`V0.44/`](V0.44/) | implemented; automatic gates passed; targeted native smoke passed; inherited native/manual matrix unverified | 2026-09-01 | V0.44; local Git checkpoint | Platform upgrade to Windows App SDK 2.4; 26100 TFM with 28000 BuildTools; AI/ML publish exclusion; nested Agent layout retained; staging without PDB; 338.40 MiB |
+| [`V0.44-draft/`](V0.44-draft/) | archived source records; superseded by the V0.44 Plan | 2026-09-01 | handwritten input for V0.44 | Developer handwritten Chinese drafts for platform upgrade and distribution slimming; superseded by `V0.44/Plan.md` |
 | [`V0.39a-draft/`](V0.39a-draft/) | superseded; never approved or implemented | 2026-08-13 | invalid draft label, not a product version | Original broad correction proposal preserved as historical input; reusable observations moved to the V0.8–V0.9 technical-debt reference |
 | [`V0.33重构.md`](V0.33重构.md) and [`V0.33重构补充.md`](V0.33重构补充.md) | archived source records | 2026-08-11 | V0.33 | Original V0.33 reconstruction and supplement records, preserved unchanged after relocation from `docs/` |
 
