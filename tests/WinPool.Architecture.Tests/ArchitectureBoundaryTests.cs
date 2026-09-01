@@ -284,6 +284,11 @@ public sealed class ArchitectureBoundaryTests
             directoryBuildProps,
             StringComparison.Ordinal);
         Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
+        Assert.Contains("SelfContained=true", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "RemoveProperties=\"RuntimeIdentifier;SelfContained;Platform;PublishDir\"",
+            appProject,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -789,6 +794,8 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.DoesNotContain("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
+        Assert.Contains("<SelfContained>true</SelfContained>", agentProject, StringComparison.Ordinal);
+        Assert.Contains("<RuntimeIdentifier>win-x64</RuntimeIdentifier>", agentProject, StringComparison.Ordinal);
         Assert.DoesNotContain("BuildTestWorkerRuntime", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("BuildElevatedBrokerRuntime", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("PublishTestWorkerRuntime", appProject, StringComparison.Ordinal);

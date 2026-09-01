@@ -91,8 +91,8 @@
   <Target Name="BuildAgentRuntime" AfterTargets="Build">
     <MSBuild Projects="..\WinPool.Agent\WinPool.Agent.csproj"
              Targets="Build"
-             Properties="Configuration=$(Configuration)"
-             RemoveProperties="RuntimeIdentifier;SelfContained;Platform;PublishDir" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true"
+             RemoveProperties="Platform;PublishDir" />
   </Target>
 
   <!-- V0.1 favors reliable JSON serialization over trimmed output size. -->
