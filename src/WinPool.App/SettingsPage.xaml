@@ -15,14 +15,11 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="4" />
         </Style>
-        <Style x:Key="SettingsSectionTitle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="16" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
         <Style x:Key="SettingsFieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
         <Style x:Key="SettingsFieldValue" TargetType="TextBlock">
             <Setter Property="FontSize" Value="14" />
@@ -38,7 +35,6 @@
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
@@ -48,18 +44,11 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
-                        x:Name="AppearanceSectionTitle"
-                        Grid.ColumnSpan="2"
-                        Style="{StaticResource SettingsSectionTitle}"
-                        Text="外观" />
-                    <TextBlock
                         x:Name="ThemeTitle"
-                        Grid.Row="1"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="主题" />
                     <ComboBox
                         x:Name="ThemeOptions"
-                        Grid.Row="1"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
@@ -69,12 +58,12 @@
                         SelectionChanged="ThemeOptions_SelectionChanged" />
                     <TextBlock
                         x:Name="AccentTitle"
-                        Grid.Row="2"
+                        Grid.Row="1"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="主题色" />
                     <ComboBox
                         x:Name="AccentOptions"
-                        Grid.Row="2"
+                        Grid.Row="1"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
@@ -84,12 +73,12 @@
                         SelectionChanged="AccentOptions_SelectionChanged" />
                     <TextBlock
                         x:Name="LanguageTitle"
-                        Grid.Row="3"
+                        Grid.Row="2"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="语言" />
                     <ComboBox
                         x:Name="LanguageOptions"
-                        Grid.Row="3"
+                        Grid.Row="2"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
@@ -103,7 +92,6 @@
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
@@ -116,93 +104,94 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
-                        x:Name="GeneralSectionTitle"
-                        Grid.ColumnSpan="2"
-                        Style="{StaticResource SettingsSectionTitle}"
-                        Text="常规" />
-                    <TextBlock
-                        x:Name="ExecutionTitle"
-                        Grid.Row="1"
-                        Style="{StaticResource SettingsFieldLabel}"
-                        Text="执行模式" />
-                    <CheckBox
-                        x:Name="SettingsExecutionModeSwitch"
-                        Grid.Row="1"
-                        Grid.Column="1"
-                        MinHeight="32"
-                        FontSize="14"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Center"
-                        Click="SettingsExecutionModeSwitch_Click"
-                        Content="本机真实操作" />
-                    <TextBlock
-                        x:Name="MsrTitle"
-                        Grid.Row="2"
-                        Style="{StaticResource SettingsFieldLabel}"
-                        Text="初始化磁盘" />
-                    <CheckBox
-                        x:Name="MsrCheckBox"
-                        Grid.Row="2"
-                        Grid.Column="1"
-                        MinHeight="32"
-                        FontSize="14"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Center"
-                        Click="MsrCheckBox_Click"
-                        Content="初始化磁盘时创建微软保留分区（MSR）" />
-                    <TextBlock
-                        x:Name="PrivacyTitle"
-                        Grid.Row="3"
-                        Style="{StaticResource SettingsFieldLabel}"
-                        Text="隐私" />
-                    <CheckBox
-                        x:Name="ShowHardwareIdsCheckBox"
-                        Grid.Row="3"
-                        Grid.Column="1"
-                        MinHeight="32"
-                        FontSize="14"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Center"
-                        Click="ShowHardwareIdsCheckBox_Click"
-                        Content="显示硬件ID" />
-                    <TextBlock
                         x:Name="WelcomeTitle"
-                        Grid.Row="4"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="欢迎页面" />
                     <Button
                         x:Name="WelcomeButton"
-                        Grid.Row="4"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        Click="WelcomeButton_Click"
-                        Content="打开欢迎页面" />
+                        Click="WelcomeButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE8A7;" />
+                            <TextBlock
+                                x:Name="WelcomeButtonText"
+                                VerticalAlignment="Center"
+                                FontSize="14"
+                                Text="打开欢迎内容" />
+                        </StackPanel>
+                    </Button>
                     <TextBlock
                         x:Name="StartupAgentTitle"
-                        Grid.Row="5"
+                        Grid.Row="1"
                         Style="{StaticResource SettingsFieldLabel}"
-                        Text="登录启动" />
-                    <CheckBox
-                        x:Name="StartupAgentCheckBox"
-                        Grid.Row="5"
+                        Text="开机启动" />
+                    <ToggleSwitch
+                        x:Name="StartupAgentSwitch"
+                        Grid.Row="1"
                         Grid.Column="1"
                         MinHeight="32"
-                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        Click="StartupAgentCheckBox_Click"
-                        Content="登录 Windows 时启动托盘 Agent" />
+                        OffContent=""
+                        OnContent=""
+                        Toggled="StartupAgentSwitch_Toggled" />
+                    <TextBlock
+                        x:Name="ExecutionTitle"
+                        Grid.Row="2"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="本机真实操作" />
+                    <ToggleSwitch
+                        x:Name="SettingsExecutionModeSwitch"
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        MinHeight="32"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="SettingsExecutionModeSwitch_Toggled" />
+                    <TextBlock
+                        x:Name="PrivacyTitle"
+                        Grid.Row="3"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="显示硬件ID" />
+                    <ToggleSwitch
+                        x:Name="ShowHardwareIdsSwitch"
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        MinHeight="32"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="ShowHardwareIdsSwitch_Toggled" />
+                    <TextBlock
+                        x:Name="MsrTitle"
+                        Grid.Row="4"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="初始化磁盘时创建微软保留分区" />
+                    <ToggleSwitch
+                        x:Name="MsrSwitch"
+                        Grid.Row="4"
+                        Grid.Column="1"
+                        MinHeight="32"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="MsrSwitch_Toggled" />
                     <TextBlock
                         x:Name="DataLocationTitle"
-                        Grid.Row="6"
+                        Grid.Row="5"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="数据存储位置" />
                     <Grid
-                        Grid.Row="6"
+                        Grid.Row="5"
                         Grid.Column="1"
                         ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
@@ -232,7 +221,6 @@
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
@@ -246,49 +234,42 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
-                        x:Name="AboutSectionTitle"
-                        Grid.ColumnSpan="2"
-                        Style="{StaticResource SettingsSectionTitle}"
-                        Text="关于" />
-                    <TextBlock
                         x:Name="AboutProductNameLabel"
-                        Grid.Row="1"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="产品" />
                     <TextBlock
                         x:Name="AboutProductNameValue"
-                        Grid.Row="1"
                         Grid.Column="1"
                         Style="{StaticResource SettingsFieldValue}"
                         Text="WinPool" />
                     <TextBlock
                         x:Name="AboutVersionLabel"
-                        Grid.Row="2"
+                        Grid.Row="1"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="版本" />
                     <TextBlock
                         x:Name="AboutVersionValue"
-                        Grid.Row="2"
+                        Grid.Row="1"
                         Grid.Column="1"
                         Style="{StaticResource SettingsFieldValue}" />
                     <TextBlock
                         x:Name="AboutProviderLabel"
-                        Grid.Row="3"
+                        Grid.Row="2"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="提供方" />
                     <TextBlock
-                        Grid.Row="3"
+                        Grid.Row="2"
                         Grid.Column="1"
                         Style="{StaticResource SettingsFieldValue}"
                         Text="GitRuozhi" />
                     <TextBlock
                         x:Name="AboutWebsiteLabel"
-                        Grid.Row="4"
+                        Grid.Row="3"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="官网" />
                     <Button
                         x:Name="WebsiteButton"
-                        Grid.Row="4"
+                        Grid.Row="3"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
@@ -303,12 +284,12 @@
                     </Button>
                     <TextBlock
                         x:Name="AboutUpdateLabel"
-                        Grid.Row="5"
+                        Grid.Row="4"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="更新" />
                     <Button
                         x:Name="UpdateButton"
-                        Grid.Row="5"
+                        Grid.Row="4"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
@@ -323,12 +304,12 @@
                     </Button>
                     <TextBlock
                         x:Name="AboutFeedbackLabel"
-                        Grid.Row="6"
+                        Grid.Row="5"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="反馈" />
                     <Button
                         x:Name="FeedbackButton"
-                        Grid.Row="6"
+                        Grid.Row="5"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"
@@ -343,12 +324,12 @@
                     </Button>
                     <TextBlock
                         x:Name="AboutCommunityLabel"
-                        Grid.Row="7"
+                        Grid.Row="6"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="轻松交流" />
                     <Button
                         x:Name="AboutCommunityButton"
-                        Grid.Row="7"
+                        Grid.Row="6"
                         Grid.Column="1"
                         MinWidth="220"
                         MinHeight="32"

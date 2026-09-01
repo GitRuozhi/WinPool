@@ -131,8 +131,10 @@ public sealed partial class MonitorPage : Page
         RestoreExistingGraphSeries();
         Monitoring.SetRate(_viewModel.CurrentPreferences.MonitoringSampleRateHz);
         Guard("PopulateRateOptions", PopulateRateOptions);
-        ContinuousMonitoringCheckBox.IsChecked =
+        _updatingContinuousMonitoring = true;
+        ContinuousMonitoringSwitch.IsOn =
             _viewModel.CurrentPreferences.ContinuousMonitoringEnabled;
+        _updatingContinuousMonitoring = false;
         if (_viewModel.CurrentPreferences.ContinuousMonitoringEnabled)
         {
             try
@@ -227,7 +229,9 @@ public sealed partial class MonitorPage : Page
         {
             await _viewModel.RefreshPreferencesAsync(refreshLocalizedContent: false);
             var enabled = _viewModel.CurrentPreferences.ContinuousMonitoringEnabled;
-            ContinuousMonitoringCheckBox.IsChecked = enabled;
+            _updatingContinuousMonitoring = true;
+            ContinuousMonitoringSwitch.IsOn = enabled;
+            _updatingContinuousMonitoring = false;
             if (enabled && !Monitoring.IsRunning)
             {
                 await Monitoring.StartAsync(SelectedRate());
@@ -259,7 +263,7 @@ public sealed partial class MonitorPage : Page
         HeaderActivity.Text = l["Activity"];
         HeaderRead.Text = l["ReadSpeed"];
         HeaderWrite.Text = l["WriteSpeed"];
-        ContinuousMonitoringCheckBox.Content = l["ContinuousMonitoring"];
+        ContinuousMonitoringLabel.Text = l["ContinuousMonitoring"];
         SamplingRateLabel.Text = l["SamplingRate"];
         ((TextBlock)((StackPanel)AutoColorsButton.Content).Children[1]).Text = l["AutoColor"];
         ((TextBlock)((StackPanel)ExportButton.Content).Children[1]).Text = l["ExportData"];
@@ -761,16 +765,16 @@ public sealed partial class MonitorPage : Page
         }
     }
 
-    private async void ContinuousMonitoringCheckBox_Click(
+    private async void ContinuousMonitoringSwitch_Toggled(
         object sender,
         Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        if (!_ready)
+        if (!_ready || _updatingContinuousMonitoring)
         {
             return;
         }
 
-        var enabled = ContinuousMonitoringCheckBox.IsChecked == true;
+        var enabled = ContinuousMonitoringSwitch.IsOn;
         _updatingContinuousMonitoring = true;
         try
         {
@@ -790,7 +794,7 @@ public sealed partial class MonitorPage : Page
                             + $"IsRunning={Monitoring.IsRunning}; "
                             + $"SessionFilePath={Monitoring.SessionFilePath ?? "<null>"}"));
                 await _viewModel.SetContinuousMonitoringAsync(false);
-                ContinuousMonitoringCheckBox.IsChecked = false;
+                ContinuousMonitoringSwitch.IsOn = false;
                 _viewModel.NotificationService.PublishWarning(
                     _viewModel.Localization["MonitorIntro"],
                     Monitoring.LastError ?? "监控 Agent 未能启动。",

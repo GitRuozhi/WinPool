@@ -212,6 +212,7 @@ public sealed class LocalizationService : ObservableObject
             ["Defragment"] = ("碎片整理", "Defragment"),
             ["MonitorIntro"] = ("实时显示本机磁盘的活动时间与读写速度。", "Shows live disk activity and read/write throughput of this computer."),
             ["SystemDisk"] = ("系统盘", "System disk"),
+            ["Startup"] = ("开机启动", "Startup"),
             ["Welcome"] = ("欢迎页面", "Welcome page"),
             ["WelcomeTitle"] = ("欢迎使用 WinPool ！", "Welcome to WinPool!"),
             ["WelcomeMessage"] = (

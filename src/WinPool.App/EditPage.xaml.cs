@@ -524,10 +524,12 @@ public sealed partial class EditPage : Page
         var styleBox = new ComboBox { SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         styleBox.Items.Add("GPT");
         styleBox.Items.Add("MBR");
-        var msrBox = new CheckBox
+        var msrBox = new ToggleSwitch
         {
-            IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize,
-            Content = ViewModel.Localization["CreateMsrOnInitialize"]
+            IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize,
+            OnContent = string.Empty,
+            OffContent = string.Empty,
+            Header = ViewModel.Localization["CreateMsrOnInitialize"]
         };
         var preview = new TextBlock
         {
@@ -539,7 +541,7 @@ public sealed partial class EditPage : Page
         void UpdatePreview()
         {
             var lines = new List<string> { "clean", $"convert {(string)styleBox.SelectedItem}".ToLowerInvariant() };
-            if (msrBox.IsChecked == true && (string)styleBox.SelectedItem == "GPT")
+            if (msrBox.IsOn && (string)styleBox.SelectedItem == "GPT")
             {
                 lines.Add("create partition msr size=16");
             }
@@ -548,7 +550,7 @@ public sealed partial class EditPage : Page
             preview.Text = "DISKPART> " + string.Join("\nDISKPART> ", lines);
         }
         styleBox.SelectionChanged += (_, _) => UpdatePreview();
-        msrBox.Click += (_, _) => UpdatePreview();
+        msrBox.Toggled += (_, _) => UpdatePreview();
         UpdatePreview();
 
         var dialog = new ContentDialog
@@ -575,7 +577,7 @@ public sealed partial class EditPage : Page
             SimulationOperationKind.InitializeDisk,
             disk.StableId,
             Name: (string)styleBox.SelectedItem,
-            CreateMsr: msrBox.IsChecked == true && (string)styleBox.SelectedItem == "GPT"));
+            CreateMsr: msrBox.IsOn && (string)styleBox.SelectedItem == "GPT"));
     }
 
     private async void Offline_Click(object sender, RoutedEventArgs e)

@@ -224,12 +224,18 @@
             CornerRadius="4">
             <Grid>
                 <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
-                    <CheckBox
-                        x:Name="ContinuousMonitoringCheckBox"
-                        AccessKey="C"
+                    <TextBlock
+                        x:Name="ContinuousMonitoringLabel"
                         VerticalAlignment="Center"
-                        Click="ContinuousMonitoringCheckBox_Click"
-                        Content="持续监控" />
+                        Text="持续监控" />
+                    <ToggleSwitch
+                        x:Name="ContinuousMonitoringSwitch"
+                        AccessKey="C"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="ContinuousMonitoringSwitch_Toggled" />
                     <TextBlock
                         x:Name="SamplingRateLabel"
                         VerticalAlignment="Center"

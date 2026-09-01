@@ -23,6 +23,9 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMode;
     private bool _updatingDataLocation;
     private bool _updatingLanguage;
+    private bool _updatingMsr;
+    private bool _updatingHardwareIds;
+    private bool _updatingStartup;
     private readonly AgentStartupRegistration _agentStartup = new();
 
     public SettingsPage()
@@ -40,9 +43,15 @@ public sealed partial class SettingsPage : Page
         ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
         AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
         LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
-        MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
-        ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
-        StartupAgentCheckBox.IsChecked = ViewModel.CurrentPreferences.StartAgentAtLogin;
+        _updatingMsr = true;
+        MsrSwitch.IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
+        _updatingMsr = false;
+        _updatingHardwareIds = true;
+        ShowHardwareIdsSwitch.IsOn = ViewModel.CurrentPreferences.ShowHardwareIds;
+        _updatingHardwareIds = false;
+        _updatingStartup = true;
+        StartupAgentSwitch.IsOn = ViewModel.CurrentPreferences.StartAgentAtLogin;
+        _updatingStartup = false;
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
@@ -361,14 +370,14 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private async void SettingsExecutionModeSwitch_Click(object sender, RoutedEventArgs e)
+    private async void SettingsExecutionModeSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (!_ready || _updatingMode)
         {
             return;
         }
 
-        var requestedMode = SettingsExecutionModeSwitch.IsChecked == true
+        var requestedMode = SettingsExecutionModeSwitch.IsOn
             ? ExecutionMode.Real
             : ExecutionMode.Simulation;
         await ((MainWindow)App.Window).RequestExecutionModeAsync(requestedMode);
@@ -376,35 +385,37 @@ public sealed partial class SettingsPage : Page
         ((MainWindow)App.Window).RefreshChrome();
     }
 
-    private async void MsrCheckBox_Click(object sender, RoutedEventArgs e)
+    private async void MsrSwitch_Toggled(object sender, RoutedEventArgs e)
     {
-        if (!_ready)
+        if (!_ready || _updatingMsr)
         {
             return;
         }
 
         try
         {
-            await ViewModel.SetCreateMsrOnInitializeAsync(MsrCheckBox.IsChecked == true);
+            await ViewModel.SetCreateMsrOnInitializeAsync(MsrSwitch.IsOn);
         }
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
                 or InvalidOperationException)
         {
-            MsrCheckBox.IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
+            _updatingMsr = true;
+            MsrSwitch.IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
+            _updatingMsr = false;
             PublishPreferenceFailure(exception);
         }
     }
 
-    private async void ShowHardwareIdsCheckBox_Click(object sender, RoutedEventArgs e)
+    private async void ShowHardwareIdsSwitch_Toggled(object sender, RoutedEventArgs e)
     {
-        if (!_ready)
+        if (!_ready || _updatingHardwareIds)
         {
             return;
         }
 
-        if (ShowHardwareIdsCheckBox.IsChecked == true)
+        if (ShowHardwareIdsSwitch.IsOn)
         {
             var l = ViewModel.Localization;
             var dialog = new ContentDialog
@@ -419,21 +430,25 @@ public sealed partial class SettingsPage : Page
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             {
-                ShowHardwareIdsCheckBox.IsChecked = false;
+                _updatingHardwareIds = true;
+                ShowHardwareIdsSwitch.IsOn = false;
+                _updatingHardwareIds = false;
                 return;
             }
         }
 
         try
         {
-            await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsCheckBox.IsChecked == true);
+            await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsSwitch.IsOn);
         }
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
                 or InvalidOperationException)
         {
-            ShowHardwareIdsCheckBox.IsChecked = ViewModel.CurrentPreferences.ShowHardwareIds;
+            _updatingHardwareIds = true;
+            ShowHardwareIdsSwitch.IsOn = ViewModel.CurrentPreferences.ShowHardwareIds;
+            _updatingHardwareIds = false;
             PublishPreferenceFailure(exception);
         }
     }
@@ -464,18 +479,18 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private async void StartupAgentCheckBox_Click(
+    private async void StartupAgentSwitch_Toggled(
         object sender,
         RoutedEventArgs e)
     {
-        if (!_ready)
+        if (!_ready || _updatingStartup)
         {
             return;
         }
 
         try
         {
-            var enabled = StartupAgentCheckBox.IsChecked == true;
+            var enabled = StartupAgentSwitch.IsOn;
             _agentStartup.SetEnabled(enabled);
             await ViewModel.SetStartAgentAtLoginAsync(enabled);
         }
@@ -484,7 +499,9 @@ public sealed partial class SettingsPage : Page
                 or UnauthorizedAccessException
                 or System.Security.SecurityException)
         {
-            StartupAgentCheckBox.IsChecked = ViewModel.CurrentPreferences.StartAgentAtLogin;
+            _updatingStartup = true;
+            StartupAgentSwitch.IsOn = ViewModel.CurrentPreferences.StartAgentAtLogin;
+            _updatingStartup = false;
             await ShowMessageDialogAsync(exception.Message);
         }
     }
@@ -501,7 +518,7 @@ public sealed partial class SettingsPage : Page
     {
         _updatingMode = true;
         SettingsExecutionModeSwitch.IsEnabled = true;
-        SettingsExecutionModeSwitch.IsChecked = ViewModel.IsRealMode;
+        SettingsExecutionModeSwitch.IsOn = ViewModel.IsRealMode;
         ToolTipService.SetToolTip(
             SettingsExecutionModeSwitch,
             ViewModel.CanUseRealMode ? ViewModel.Localization["ExecutionMode"] : ViewModel.Localization["AdminRequired"]);
@@ -514,27 +531,15 @@ public sealed partial class SettingsPage : Page
     private void UpdateText()
     {
         var l = ViewModel.Localization;
-        AppearanceSectionTitle.Text = l["Appearance"];
         ThemeTitle.Text = l["Theme"];
-        GeneralSectionTitle.Text = l["SettingsGeneral"];
-        AboutSectionTitle.Text = l["About"];
         AccentTitle.Text = l["AccentColor"];
         LanguageTitle.Text = l["Language"];
-        ExecutionTitle.Text = l["ExecutionMode"];
-        SettingsExecutionModeSwitch.Content = l["LocalRealOperations"];
-        MsrTitle.Text = l["InitializeDisk"];
-        MsrCheckBox.Content = l["CreateMsrOnInitialize"];
-        PrivacyTitle.Text = l["Privacy"];
-        ShowHardwareIdsCheckBox.Content = l["ShowHardwareIds"];
+        ExecutionTitle.Text = l["LocalRealOperations"];
+        MsrTitle.Text = l["CreateMsrOnInitialize"];
+        PrivacyTitle.Text = l["ShowHardwareIds"];
         WelcomeTitle.Text = l["Welcome"];
-        WelcomeButton.Content = l["OpenWelcome"];
-        StartupAgentTitle.Text = l.EffectiveLanguage == LanguagePreference.ZhCn
-            ? "开机启动"
-            : "Startup";
-        StartupAgentCheckBox.Content =
-            l.EffectiveLanguage == LanguagePreference.ZhCn
-                ? "登录 Windows 时启动 WinPool 托盘（默认关闭）"
-                : "Start the WinPool tray Agent when signing in to Windows (off by default)";
+        WelcomeButtonText.Text = l["OpenWelcome"];
+        StartupAgentTitle.Text = l["Startup"];
         DataLocationTitle.Text = l["DataLocation"];
         DataLocationPath.Text = StorageDataLocations.CurrentRoot;
         _updatingDataLocation = true;

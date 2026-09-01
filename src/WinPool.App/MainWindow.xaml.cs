@@ -292,14 +292,14 @@ public sealed partial class MainWindow : Window
         WindowTitleText.Text = $"WinPool{suffix}";
         Title = WindowTitleText.Text;
         AppWindow.Title = WindowTitleText.Text;
-        LocalRealOperationsCheckBox.Content = ViewModel.Localization["LocalRealOperations"];
-        LocalRealOperationsCheckBox.SetValue(
+        LocalRealOperationsLabel.Text = ViewModel.Localization["LocalRealOperations"];
+        LocalRealOperationsSwitch.SetValue(
             AutomationProperties.NameProperty,
             ViewModel.Localization["LocalRealOperations"]);
         ToolTipService.SetToolTip(
-            LocalRealOperationsCheckBox,
+            LocalRealOperationsSwitch,
             ViewModel.CanUseRealMode ? ViewModel.Localization["ExecutionMode"] : ViewModel.Localization["AdminRequired"]);
-        LocalRealOperationsCheckBox.IsEnabled = true;
+        LocalRealOperationsSwitch.IsEnabled = true;
         LocalRealOperationsWarning.Title = ViewModel.Localization["PreviewWarningTitle"];
         LocalRealOperationsWarning.Message = ViewModel.Localization["PreviewWarningMessage"];
         RefreshShellNavigationText();
@@ -330,7 +330,7 @@ public sealed partial class MainWindow : Window
         ModeControls.Margin = new Thickness(8, 0, right, 0);
     }
 
-    private async void LocalRealOperationsCheckBox_Click(object sender, RoutedEventArgs e)
+    private async void LocalRealOperationsSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (_updatingMode)
         {
@@ -338,7 +338,7 @@ public sealed partial class MainWindow : Window
         }
 
         await RequestExecutionModeAsync(
-            LocalRealOperationsCheckBox.IsChecked == true
+            LocalRealOperationsSwitch.IsOn
                 ? ExecutionMode.Real
                 : ExecutionMode.Simulation);
     }
@@ -417,7 +417,7 @@ public sealed partial class MainWindow : Window
     private void SyncModeSwitch()
     {
         _updatingMode = true;
-        LocalRealOperationsCheckBox.IsChecked = ViewModel.IsRealMode;
+        LocalRealOperationsSwitch.IsOn = ViewModel.IsRealMode;
         if (ViewModel.IsRealMode
             && !_realWarningDismissed
             && !LocalRealOperationsWarning.IsOpen)
@@ -726,7 +726,7 @@ public sealed partial class MainWindow : Window
                 : Color.FromArgb(255, 0xFF, 0xFF, 0xFF));
         WindowTitleText.Foreground = normalForeground;
         ActiveSystemBadge.BorderBrush = accent;
-        LocalRealOperationsCheckBox.Foreground = normalForeground;
+        LocalRealOperationsLabel.Foreground = normalForeground;
         foreach (var item in ShellNavigationItems)
         {
             var selected = item == SelectedShellItem;

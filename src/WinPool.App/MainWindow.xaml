@@ -125,12 +125,20 @@
                 x:Name="ModeControls"
                 Grid.Column="3"
                 VerticalAlignment="Center"
-                Orientation="Horizontal">
-                <CheckBox
-                    x:Name="LocalRealOperationsCheckBox"
+                Orientation="Horizontal"
+                Spacing="8">
+                <TextBlock
+                    x:Name="LocalRealOperationsLabel"
                     VerticalAlignment="Center"
-                    Click="LocalRealOperationsCheckBox_Click"
-                    Content="本机真实操作"
+                    FontSize="13"
+                    Text="本机真实操作" />
+                <ToggleSwitch
+                    x:Name="LocalRealOperationsSwitch"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="LocalRealOperationsSwitch_Toggled"
                     AutomationProperties.Name="Local real operations" />
             </StackPanel>
         </Grid>
