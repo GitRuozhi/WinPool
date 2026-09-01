@@ -57,7 +57,6 @@ internal static class Program
             var mainApplicationExecutablePath = Path.GetFullPath(
                 Path.Combine(
                     AppContext.BaseDirectory,
-                    "..",
                     "WinPool.App.exe"));
             var coordinator = new AgentSessionCoordinator(
                 processRegistry,
@@ -219,16 +218,9 @@ internal static class Program
         }
     }
 
-    private static string ResolveProductRoot()
-    {
-        var agentRoot = Path.TrimEndingDirectorySeparator(
+    private static string ResolveProductRoot() =>
+        Path.TrimEndingDirectorySeparator(
             Path.GetFullPath(AppContext.BaseDirectory));
-        var parent = Directory.GetParent(agentRoot)?.FullName;
-        return parent is not null
-               && File.Exists(Path.Combine(parent, "WinPool.App.exe"))
-            ? parent
-            : agentRoot;
-    }
 
     private static string PublishEndpoint(AgentEndpointRecord endpoint, string dataRoot)
     {

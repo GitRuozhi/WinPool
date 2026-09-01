@@ -250,6 +250,10 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "App.xaml.cs"));
         var startupRegistration = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "Services", "AgentStartupRegistration.cs"));
+        var agentStartup = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Agent", "Program.cs"));
+        var tray = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Agent", "TrayApplicationContext.cs"));
         var directoryBuildProps = File.ReadAllText(
             Path.Combine(root, "Directory.Build.props"));
         var directoryBuildTargets = File.ReadAllText(
@@ -306,6 +310,18 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains(
             "Path.Combine(AppContext.BaseDirectory, \"WinPool.Agent.exe\")",
             startupRegistration,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Path.Combine(\n                    AppContext.BaseDirectory,\n                    \"WinPool.App.exe\")",
+            agentStartup.ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\"..\",\n                    \"WinPool.App.exe\"",
+            agentStartup.ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Path.Combine(AppContext.BaseDirectory, \"WinPool.App.exe\")",
+            tray,
             StringComparison.Ordinal);
     }
 

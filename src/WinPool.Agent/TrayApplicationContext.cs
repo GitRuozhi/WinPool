@@ -225,12 +225,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ShutdownReason.TrayExit, CorrelationId.New()));
     }
 
-    private static string ResolveMainApplicationPath()
-    {
-        var parent = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        var besideAgent = parent is null ? string.Empty : Path.Combine(parent.FullName, "WinPool.App.exe");
-        return File.Exists(besideAgent) ? besideAgent : Path.Combine(AppContext.BaseDirectory, "WinPool.App.exe");
-    }
+    private static string ResolveMainApplicationPath() =>
+        Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "WinPool.App.exe"));
 
     private static Icon LoadIcon() => Environment.ProcessPath is { } executablePath
         ? Icon.ExtractAssociatedIcon(executablePath) ?? (Icon)SystemIcons.Application.Clone()
