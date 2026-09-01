@@ -867,7 +867,7 @@ public sealed class ArchitectureBoundaryTests
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml"));
 
-        Assert.Contains("x:Name=\"ContinuousMonitoringCheckBox\"", source, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ContinuousMonitoringSwitch\"", source, StringComparison.Ordinal);
         Assert.Contains("AccessKey=\"C\"", source, StringComparison.Ordinal);
         Assert.Contains("TextAlignment=\"Right\"", source, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment", source, StringComparison.Ordinal);
