@@ -55,6 +55,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
 }
 
+Get-ChildItem -LiteralPath $stageRoot -Recurse -File -Filter '*.pdb' |
+    Remove-Item -Force
+
 $requiredExecutables = @{
     'WinPool.App.exe' = 'WinPool.App.exe'
     'WinPool.Agent.exe' = 'Agent/WinPool.Agent.exe'
@@ -78,7 +81,7 @@ foreach ($entry in $requiredExecutables.GetEnumerator()) {
     }
 }
 
-$forbiddenFilePatterns = @('*.ps1', '*.db', '*.db-wal', '*.db-shm', '*.trx', '*.log')
+$forbiddenFilePatterns = @('*.ps1', '*.pdb', '*.db', '*.db-wal', '*.db-shm', '*.trx', '*.log')
 $forbiddenFiles = @(
     $allFiles | Where-Object {
         $name = $_.Name

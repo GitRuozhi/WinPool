@@ -741,6 +741,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
         Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);
         Assert.Contains("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("*.pdb", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item", stagingScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Agent/TestWorker/WinPool.TestWorker.exe", stagingScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Agent/Broker/WinPool.ElevatedBroker.exe", stagingScript, StringComparison.Ordinal);
         Assert.Contains("duplicate", stagingScript, StringComparison.OrdinalIgnoreCase);
