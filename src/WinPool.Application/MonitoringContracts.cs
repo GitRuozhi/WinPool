@@ -40,8 +40,7 @@ public sealed record MonitorSample(
     SessionId SessionId,
     StorageObjectId TargetId,
     DateTimeOffset SampledAtUtc,
-    IReadOnlyList<MonitorMetricValue> Values,
-    bool MayBeAffectedByActiveTest);
+    IReadOnlyList<MonitorMetricValue> Values);
 
 public enum MonitoringSessionState
 {

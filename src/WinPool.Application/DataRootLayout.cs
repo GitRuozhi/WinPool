@@ -16,9 +16,6 @@ public static class DataRootLayout
     public static string DiagnosticsDirectory(string dataRoot) =>
         Path.Combine(NormalizeDataRoot(dataRoot), "Diagnostics");
 
-    public static string ManagedToolsDirectory(string dataRoot) =>
-        Path.Combine(NormalizeDataRoot(dataRoot), "ManagedTools");
-
     public static string StagingDirectory(string dataRoot) =>
         Path.Combine(NormalizeDataRoot(dataRoot), "Staging");
 

@@ -147,61 +147,6 @@ public sealed class IpcProtocolTests
     }
 
     [Fact]
-    public void BrokerHandshakeBindsSessionBothProcessesUserNonceAndExpiry()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var nonce = Guid.NewGuid();
-        var sessionId = Guid.NewGuid();
-        var userHash = IpcIdentity.HashUserSid("S-1-5-21-BROKER");
-        var request = new ElevatedBrokerHandshakeRequest(
-            IpcProtocol.CurrentVersion,
-            nonce,
-            sessionId,
-            userHash,
-            123,
-            456,
-            now.AddMinutes(1),
-            now);
-
-        Assert.True(
-            ElevatedBrokerHandshakeValidator.Validate(
-                request,
-                nonce,
-                sessionId,
-                userHash,
-                123,
-                456,
-                now).IsAccepted);
-        Assert.Equal(
-            HandshakeRejection.InvalidProcess,
-            ElevatedBrokerHandshakeValidator.Validate(
-                request,
-                nonce,
-                sessionId,
-                userHash,
-                123,
-                999,
-                now).Rejection);
-        Assert.Equal(
-            HandshakeRejection.Expired,
-            ElevatedBrokerHandshakeValidator.Validate(
-                request with { ExpiresAtUtc = now },
-                nonce,
-                sessionId,
-                userHash,
-                123,
-                456,
-                now).Rejection);
-
-        var pipeName = IpcIdentity.CreateElevatedBrokerPipeName(
-            userHash,
-            sessionId,
-            nonce);
-        Assert.StartsWith("WinPool.Broker.", pipeName, StringComparison.Ordinal);
-        Assert.DoesNotContain("S-1-5", pipeName, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public async Task CurrentUserOnlyPipeCarriesFramedEnvelope()
     {
         var hash = IpcIdentity.HashUserSid($"test-user-{Guid.NewGuid():N}");

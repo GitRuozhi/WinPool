@@ -298,10 +298,10 @@ public sealed class SqliteRepositoryTests
                 )
                 INSERT INTO monitor_samples(
                     session_id, device_id, timestamp_utc_ms, activity_pct,
-                    read_bytes_per_sec, write_bytes_per_sec, queue_length, sample_flags)
+                    read_bytes_per_sec, write_bytes_per_sec, queue_length)
                 SELECT
                     $session, $device, $start + value, value % 101,
-                    value * 2, value * 3, value % 17, value % 2
+                    value * 2, value * 3, value % 17
                 FROM sequence;
                 """;
             command.Parameters.AddWithValue("$last", sampleCount - 1);
@@ -436,8 +436,7 @@ public sealed class SqliteRepositoryTests
                 new MonitorMetricValue(MonitorMetricKind.ReadBytesPerSecond, activity * 100),
                 new MonitorMetricValue(MonitorMetricKind.WriteBytesPerSecond, activity * 200),
                 new MonitorMetricValue(MonitorMetricKind.AverageQueueLength, activity / 10)
-            ],
-            MayBeAffectedByActiveTest: false);
+            ]);
 
     private sealed class RepositoryTemporaryDatabase : IAsyncDisposable
     {

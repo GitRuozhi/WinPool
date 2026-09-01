@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.Storage.Pickers;
 using WinPool.Agent.Client;
 using WinPool.Application;
 using WinPool.App.Services;
@@ -14,7 +13,6 @@ using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
 using WinPool.Ipc;
-using WinPool.ToolManagement;
 using DomainStorageLocationMode = WinPool.Domain.StorageLocationMode;
 
 namespace WinPool_App;
@@ -25,15 +23,11 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMode;
     private bool _updatingDataLocation;
     private bool _updatingLanguage;
-    private readonly ToolCatalog _toolCatalog = new();
     private readonly AgentStartupRegistration _agentStartup = new();
-    private readonly Dictionary<ToolId, TextBlock> _toolStatuses = [];
-    private readonly IMutableToolPathConfiguration _toolPaths;
 
     public SettingsPage()
     {
         InitializeComponent();
-        _toolPaths = new PreferencesToolPathConfiguration(new LocalUserPreferencesService());
     }
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
@@ -53,8 +47,6 @@ public sealed partial class SettingsPage : Page
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
-        BuildExternalToolRows();
-        _ = LoadCachedToolStatesAsync();
         UpdateText();
         SyncExecutionMode();
         _ready = true;
@@ -126,8 +118,8 @@ public sealed partial class SettingsPage : Page
             RequestedTheme = RequestedTheme,
             Title = zh ? "切换数据存储位置" : "Switch data storage location",
             Content = zh
-                ? "切换会停止托盘 Agent、后台监控和正在运行的测试。源数据会保留；复制与 SQLite 逻辑校验成功后才提交位置指针，随后 WinPool 会重启。"
-                : "Switching stops the tray Agent, background monitoring, and any running test. Source data is retained; the location pointer is committed only after copy and SQLite logical verification, then WinPool restarts.",
+                ? "切换会停止托盘 Agent 和后台监控。源数据会保留；复制与 SQLite 逻辑校验成功后才提交位置指针，随后 WinPool 会重启。"
+                : "Switching stops the tray Agent and background monitoring. Source data is retained; the location pointer is committed only after copy and SQLite logical verification, then WinPool restarts.",
             PrimaryButtonText = zh ? "继续" : "Continue",
             CloseButtonText = zh ? "取消" : "Cancel",
             DefaultButton = ContentDialogButton.Close
@@ -147,7 +139,6 @@ public sealed partial class SettingsPage : Page
         var shutdown = await ViewModel.AgentConnection.SendAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.StorageLocationSwitch,
-                UserConfirmedActiveTestCancellation: true,
                 CorrelationId.New()),
             shutdownTimeout.Token);
         if (shutdown.Value is ShutdownResponse response && !response.Result.Completed)
@@ -354,7 +345,6 @@ public sealed partial class SettingsPage : Page
             AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
             LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
             UpdateText();
-            BuildExternalToolRows();
             ((MainWindow)App.Window).RefreshChrome();
         }
         catch (Exception exception) when (
@@ -467,7 +457,7 @@ public sealed partial class SettingsPage : Page
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
             or InvalidOperationException)
         {
-            await ShowToolDialogAsync(
+            await ShowMessageDialogAsync(
                 ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
                     ? $"无法打开 QQ 群链接。群号：732019606\n{exception.Message}"
                     : $"Could not open the QQ group link. Group: 732019606\n{exception.Message}");
@@ -495,7 +485,7 @@ public sealed partial class SettingsPage : Page
                 or System.Security.SecurityException)
         {
             StartupAgentCheckBox.IsChecked = ViewModel.CurrentPreferences.StartAgentAtLogin;
-            await ShowToolDialogAsync(exception.Message);
+            await ShowMessageDialogAsync(exception.Message);
         }
     }
 
@@ -566,607 +556,18 @@ public sealed partial class SettingsPage : Page
         SyncExecutionMode();
     }
 
-    private void BuildExternalToolRows()
-    {
-        ExternalToolRows.Children.Clear();
-        _toolStatuses.Clear();
-        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        foreach (var descriptor in _toolCatalog.List())
-        {
-            var status = new TextBlock
-            {
-                Text = zh ? "尚未检测" : "Not checked yet",
-                TextWrapping = TextWrapping.Wrap
-            };
-            _toolStatuses[descriptor.Id] = status;
-
-            var actions = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8
-            };
-            actions.Children.Add(ActionButton(
-                zh ? "检测" : "Detect",
-                descriptor.Id,
-                DetectTool_Click));
-            actions.Children.Add(ActionButton(
-                zh ? "自定义路径" : "Custom path",
-                descriptor.Id,
-                SelectToolPath_Click));
-            actions.Children.Add(ActionButton(
-                zh ? "清除路径" : "Clear path",
-                descriptor.Id,
-                ClearToolPath_Click));
-            actions.Children.Add(ActionButton(
-                zh ? "安装 / 获取" : "Install / Get",
-                descriptor.Id,
-                InstallTool_Click));
-
-            var left = new StackPanel { Spacing = 5 };
-            left.Children.Add(
-                new TextBlock
-                {
-                    Text = descriptor.DisplayName,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-                });
-            left.Children.Add(
-                new TextBlock
-                {
-                    Text = LocalizedToolPurpose(descriptor, zh),
-                    Opacity = 0.72,
-                    TextWrapping = TextWrapping.Wrap
-                });
-            left.Children.Add(status);
-
-            var row = new Grid { ColumnSpacing = 16 };
-            row.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star)
-            });
-            row.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = GridLength.Auto
-            });
-            Grid.SetColumn(left, 0);
-            Grid.SetColumn(actions, 1);
-            row.Children.Add(left);
-            row.Children.Add(actions);
-            ExternalToolRows.Children.Add(row);
-        }
-    }
-
-    private static string LocalizedToolPurpose(ToolDescriptor descriptor, bool zh) =>
-        zh ? descriptor.Purpose : descriptor.Id.Value switch
-        {
-            "microsoft.diskspd" => "File-based sequential, random, and mixed I/O benchmark.",
-            "fio" => "Configurable file I/O workload and JSON results.",
-            "dite.filegen" => "External generator for oversized or mixed files.",
-            "windows.robocopy" => "Windows file copy, metadata copy, and resume semantics.",
-            "microsoft.sysinternals.rammap" => "System file-cache and standby-list cleanup utility.",
-            _ => descriptor.Purpose
-        };
-
-    private static Button ActionButton(
-        string text,
-        ToolId toolId,
-        RoutedEventHandler handler)
-    {
-        var button = new Button
-        {
-            Content = text,
-            Padding = new Thickness(9, 4, 9, 4),
-            Tag = toolId.Value
-        };
-        button.Click += handler;
-        return button;
-    }
-
-    private async void DetectTool_Click(object sender, RoutedEventArgs e)
-    {
-        if (TryGetToolId(sender, out var toolId))
-        {
-            await DetectToolAsync(toolId);
-        }
-    }
-
-    private async Task DetectToolAsync(ToolId toolId)
-    {
-        if (!_toolStatuses.TryGetValue(toolId, out var status))
-        {
-            return;
-        }
-
-        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        status.Text = zh ? "正在检测…" : "Detecting…";
-        try
-        {
-            ApplicationResult<ToolState> result;
-            if (ViewModel.AgentConnection is not null)
-            {
-                var response = await ViewModel.AgentConnection.SendAsync(
-                    new DetectAgentToolRequest(toolId, CorrelationId.New()),
-                    CancellationToken.None);
-                result = response.Value is ToolStateResponse value
-                    ? new ApplicationResult<ToolState>(
-                        response.Status,
-                        value.ToolState,
-                        response.Messages,
-                        response.CorrelationId)
-                    : new ApplicationResult<ToolState>(
-                        response.Status,
-                        null,
-                        response.Messages,
-                        response.CorrelationId);
-            }
-            else
-            {
-                var registry = new ExternalToolRegistry(
-                    _toolCatalog,
-                    new ToolPathDiscovery(_toolPaths, new EnvironmentToolSearchPath()),
-                    new WindowsToolVersionProbe(),
-                    new Sha256ToolFileHasher());
-                result = await registry.DetectAsync(toolId, CancellationToken.None);
-            }
-
-            status.Text = FormatToolState(result.Value, result.Status, zh);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or ArgumentException)
-        {
-            status.Text = zh
-                ? $"检测失败：{exception.Message}"
-                : $"Detection failed: {exception.Message}";
-        }
-    }
-
-    private async Task LoadCachedToolStatesAsync()
-    {
-        if (ViewModel.AgentConnection is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var response = await ViewModel.AgentConnection.SendAsync(
-                new GetAgentSnapshotRequest(CorrelationId.New()),
-                CancellationToken.None);
-            if (response.Value is not AgentSnapshotResponse snapshot)
-            {
-                return;
-            }
-
-            var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-            foreach (var state in snapshot.Snapshot.CurrentToolStates ?? [])
-            {
-                if (_toolStatuses.TryGetValue(state.ToolId, out var status))
-                {
-                    status.Text = FormatToolState(state, ApplicationStatus.Succeeded, zh);
-                }
-            }
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException)
-        {
-            // Cached status is optional presentation data. Do not turn a
-            // background cache read into a settings-page failure.
-        }
-    }
-
-    private async void SelectToolPath_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetToolId(sender, out var toolId)
-            || !_toolCatalog.TryGet(toolId, out var descriptor))
-        {
-            return;
-        }
-
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".exe");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-        var file = await picker.PickSingleFileAsync();
-        if (file is null)
-        {
-            return;
-        }
-
-        if (!descriptor.ExecutableFileNames.Contains(
-                Path.GetFileName(file.Path),
-                StringComparer.OrdinalIgnoreCase))
-        {
-            await ShowToolDialogAsync(
-                ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
-                    ? "文件名不符合该工具的已登记可执行文件名。"
-                    : "The file name does not match a registered executable for this tool.");
-            return;
-        }
-
-        await ConfigureToolPathAsync(toolId, file.Path);
-    }
-
-    private async void ClearToolPath_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetToolId(sender, out var toolId))
-        {
-            return;
-        }
-
-        await ConfigureToolPathAsync(toolId, null);
-    }
-
-    private async Task ConfigureToolPathAsync(ToolId toolId, string? path)
-    {
-        if (ViewModel.AgentConnection is not null)
-        {
-            var response = await ViewModel.AgentConnection.SendAsync(
-                new ConfigureAgentToolPathRequest(
-                    toolId,
-                    path,
-                    CorrelationId.New()),
-                CancellationToken.None);
-            if (!response.IsSuccess)
-            {
-                await ShowToolDialogAsync(
-                    response.Messages.FirstOrDefault()?.Code
-                    ?? "agent.tool.configuration_failed");
-                return;
-            }
-        }
-        else
-        {
-            // Explicit no-Agent development fallback only. It still targets the
-            // currently active data root rather than a fixed Standard-mode copy.
-            await _toolPaths.SetCustomExecutablePathAsync(
-                toolId,
-                path,
-                CancellationToken.None);
-        }
-
-        await DetectToolAsync(toolId);
-    }
-
-    private async void InstallTool_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetToolId(sender, out var toolId)
-            || !_toolCatalog.TryGet(toolId, out var descriptor))
-        {
-            return;
-        }
-
-        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        if (descriptor.InstallerKind is null)
-        {
-            if (toolId == KnownToolIds.RoboCopy)
-            {
-                await ShowToolDialogAsync(
-                    zh
-                        ? $"{descriptor.DisplayName} 是 Windows 组件，WinPool 不会单独安装它。"
-                        : $"{descriptor.DisplayName} is a Windows component and is not installed separately by WinPool.");
-                return;
-            }
-
-            var sourceDialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-                Title = zh
-                    ? $"获取 {descriptor.DisplayName}"
-                    : $"Get {descriptor.DisplayName}",
-                Content = zh
-                    ? "该过渡工具不随 WinPool 发布。将打开登记的官方来源；下载或安装后，请返回并选择 Dite.exe 的自定义路径。"
-                    : "This transitional tool is not bundled with WinPool. Its registered official source will open; after download or installation, return and select the custom Dite.exe path.",
-                PrimaryButtonText = zh ? "打开官方来源" : "Open official source",
-                CloseButtonText = zh ? "取消" : "Cancel",
-                DefaultButton = ContentDialogButton.Close
-            };
-            if (await sourceDialog.ShowAsync() == ContentDialogResult.Primary)
-            {
-                await OpenAsync(descriptor.OfficialInstallSource);
-            }
-            return;
-        }
-
-        var planned = await new PlanningOnlyToolInstaller(_toolCatalog).PlanAsync(
-            toolId,
-            ToolInstallLocation.PerUserManagedDirectory,
-            CancellationToken.None);
-        if (planned.Value is null)
-        {
-            await ShowToolDialogAsync(
-                zh ? "无法生成官方安装计划。" : "The official install plan could not be created.");
-            return;
-        }
-
-        if (descriptor.InstallerKind == ToolInstallerKind.PortableArchive)
-        {
-            await InstallPortableToolAsync(descriptor, planned.Value, zh);
-            return;
-        }
-
-        if (descriptor.InstallerKind == ToolInstallerKind.Msi)
-        {
-            await InstallMsiToolAsync(descriptor, planned.Value, zh);
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-            Title = zh ? $"获取 {descriptor.DisplayName}" : $"Get {descriptor.DisplayName}",
-            Content = zh
-                ? "该工具不随 WinPool 发布。当前阶段将打开登记的官方安装源；不会静默下载或执行安装程序。安装后请返回并重新检测。"
-                : "This tool is not bundled with WinPool. The registered official source will open; WinPool will not silently download or run an installer. Return and detect again after installation.",
-            PrimaryButtonText = zh ? "打开官方来源" : "Open official source",
-            CloseButtonText = zh ? "取消" : "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            await OpenAsync(planned.Value.OfficialSource);
-        }
-    }
-
-    private async Task InstallPortableToolAsync(
-        ToolDescriptor descriptor,
-        ToolInstallPlan initialPlan,
-        bool zh)
-    {
-        var downloadDialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-            Title = zh
-                ? $"下载并检查 {descriptor.DisplayName}"
-                : $"Download and inspect {descriptor.DisplayName}",
-            Content = zh
-                ? $"WinPool 将仅从已登记的官方 HTTPS 来源下载压缩包：\n{descriptor.OfficialInstallSource}\n\n下载后会计算 SHA-256、检查压缩包结构并在安装前再次显示确认。工具不会随 WinPool 发布。"
-                : $"WinPool will download the archive only from the registered official HTTPS source:\n{descriptor.OfficialInstallSource}\n\nIt will calculate SHA-256, inspect the archive, and ask again before installation. The tool is not bundled with WinPool.",
-            PrimaryButtonText = zh ? "下载并检查" : "Download and inspect",
-            CloseButtonText = zh ? "取消" : "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        if (await downloadDialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        using var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromMinutes(5)
-        };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(ProductInformation.UserAgent);
-        var dataRoot = StorageDataLocations.CurrentRoot;
-        var installer = new ControlledPortableToolInstaller(
-            _toolCatalog,
-            new HttpToolPackageDownloader(httpClient),
-            new WindowsToolExecutableTrustVerifier(),
-            _toolPaths,
-            Path.Combine(dataRoot, "tool-downloads"),
-            Path.Combine(dataRoot, "tools"),
-            configurePath: false);
-        var prepared = await installer.PrepareAsync(
-            initialPlan,
-            CancellationToken.None);
-        if (!prepared.IsSuccess || prepared.Value is null)
-        {
-            await ShowToolDialogAsync(
-                prepared.Messages.FirstOrDefault()?.DiagnosticText
-                ?? (zh ? "下载或检查官方压缩包失败。" : "The official archive could not be downloaded or inspected."));
-            return;
-        }
-
-        var review = prepared.Value;
-        var confirmDialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-            Title = zh
-                ? $"确认安装 {descriptor.DisplayName}"
-                : $"Confirm {descriptor.DisplayName} installation",
-            Content = zh
-                ? $"来源：{review.FinalizedPlan.OfficialSource}\nSHA-256：{review.PackageSha256}\n压缩包条目：{review.SelectedArchiveEntry}\n目标：WinPool 当前用户工具目录\n\n安装时会再次校验包哈希，并拒绝没有受信任 Authenticode 签名的可执行文件。"
-                : $"Source: {review.FinalizedPlan.OfficialSource}\nSHA-256: {review.PackageSha256}\nArchive entry: {review.SelectedArchiveEntry}\nTarget: WinPool per-user tools directory\n\nInstallation will verify the package hash again and reject an executable without a trusted Authenticode signature.",
-            PrimaryButtonText = zh ? "确认安装" : "Install",
-            CloseButtonText = zh ? "取消" : "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        var confirmed = await confirmDialog.ShowAsync() == ContentDialogResult.Primary;
-        var authorization = ToolInstallAuthorization.Authorize(
-            review.FinalizedPlan,
-            confirmed,
-            DateTimeOffset.UtcNow,
-            CorrelationId.New());
-        if (!authorization.IsSuccess || authorization.Value is null)
-        {
-            return;
-        }
-
-        var installed = await installer.InstallAsync(
-            authorization.Value,
-            CancellationToken.None);
-        if (!installed.IsSuccess || installed.Value is null)
-        {
-            await ShowToolDialogAsync(
-                installed.Messages.FirstOrDefault()?.DiagnosticText
-                ?? (zh ? "安装失败。" : "Installation failed."));
-            return;
-        }
-
-        await ShowToolDialogAsync(
-            zh
-                ? $"{descriptor.DisplayName} 已安装到 WinPool 当前用户工具目录，并已配置自定义路径。"
-                : $"{descriptor.DisplayName} was installed into the WinPool per-user tools directory and its custom path was configured.");
-        await ConfigureToolPathAsync(
-            descriptor.Id,
-            installed.Value.State.ExecutablePath);
-    }
-
-    private async Task InstallMsiToolAsync(
-        ToolDescriptor descriptor,
-        ToolInstallPlan initialPlan,
-        bool zh)
-    {
-        if (ViewModel.AgentConnection is null)
-        {
-            await ShowToolDialogAsync(
-                zh ? "WinPool Agent 不可用，无法执行受控提权安装。" :
-                "WinPool Agent is unavailable, so the controlled elevated installation cannot run.");
-            return;
-        }
-
-        var downloadDialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-            Title = zh ? $"下载并检查 {descriptor.DisplayName}" : $"Download and inspect {descriptor.DisplayName}",
-            Content = zh
-                ? $"WinPool 将从固定的 fio 官方 GitHub 发布资产下载 MSI：\n{descriptor.OfficialInstallSource}\n\n包必须匹配目录中固定的 SHA-256，之后还会再次确认并显示 UAC。fio 不随 WinPool 发布。"
-                : $"WinPool will download the MSI from the pinned official fio GitHub release asset:\n{descriptor.OfficialInstallSource}\n\nThe package must match the catalog-pinned SHA-256. A second confirmation and UAC prompt follow. fio is not bundled with WinPool.",
-            PrimaryButtonText = zh ? "下载并校验" : "Download and verify",
-            CloseButtonText = zh ? "取消" : "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        if (await downloadDialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        if (_toolStatuses.TryGetValue(descriptor.Id, out var status))
-        {
-            status.Text = zh ? "正在下载并校验 MSI…" : "Downloading and verifying MSI…";
-        }
-
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(ProductInformation.UserAgent);
-        var installer = new ControlledMsiToolInstaller(
-            _toolCatalog,
-            new HttpToolPackageDownloader(httpClient),
-            StorageDataLocations.CurrentRoot);
-        var prepared = await installer.PrepareAsync(initialPlan, CancellationToken.None);
-        if (!prepared.IsSuccess || prepared.Value is null)
-        {
-            await ShowToolDialogAsync(
-                prepared.Messages.FirstOrDefault()?.DiagnosticText ??
-                (zh ? "MSI 下载或哈希校验失败。" : "The MSI download or hash verification failed."));
-            await DetectToolAsync(descriptor.Id);
-            return;
-        }
-
-        var review = prepared.Value;
-        var confirmDialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-            Title = zh ? $"确认安装 {descriptor.DisplayName}" : $"Confirm {descriptor.DisplayName} installation",
-            Content = zh
-                ? $"来源：{review.FinalizedPlan.OfficialSource}\nSHA-256：{review.PackageSha256}\n\n将启动一次性提权 Broker，并显示 Windows UAC。Broker 会重新校验暂存路径和哈希，再以可见进度、禁止自动重启的方式调用 Windows Installer。"
-                : $"Source: {review.FinalizedPlan.OfficialSource}\nSHA-256: {review.PackageSha256}\n\nA one-shot elevated Broker and Windows UAC prompt will start. The Broker rechecks the staging path and hash before invoking Windows Installer with visible progress and automatic restart disabled.",
-            PrimaryButtonText = zh ? "确认并请求 UAC" : "Confirm and request UAC",
-            CloseButtonText = zh ? "取消" : "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        if (await confirmDialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            await DetectToolAsync(descriptor.Id);
-            return;
-        }
-
-        if (_toolStatuses.TryGetValue(descriptor.Id, out status))
-        {
-            status.Text = zh ? "等待 UAC / Windows Installer…" : "Waiting for UAC / Windows Installer…";
-        }
-
-        var result = await ViewModel.AgentConnection.SendAsync(
-            new InstallAgentMsiToolRequest(
-                review.FinalizedPlan,
-                review.PackageRelativePath,
-                UserConfirmed: true,
-                CorrelationId.New()),
-            CancellationToken.None);
-        if (!result.IsSuccess || result.Value is not MsiToolInstallResponse response)
-        {
-            await ShowToolDialogAsync(
-                result.Messages.FirstOrDefault()?.DiagnosticText ??
-                (zh ? "fio MSI 安装失败或被取消。" : "The fio MSI installation failed or was cancelled."));
-            await DetectToolAsync(descriptor.Id);
-            return;
-        }
-
-        await ShowToolDialogAsync(
-            response.Result.MsiInstallEvidence?.RebootRequired == true
-                ? (zh ? "fio 已安装。Windows Installer 报告需要重启；WinPool 不会自动重启系统。" :
-                    "fio was installed. Windows Installer reports that a restart is required; WinPool will not restart automatically.")
-                : (zh ? "fio 已安装，WinPool 将重新检测工具路径。" :
-                    "fio was installed. WinPool will detect its executable path again."));
-        var installedFioPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "fio",
-            "fio.exe");
-        if (descriptor.Id == KnownToolIds.Fio && File.Exists(installedFioPath))
-        {
-            await ConfigureToolPathAsync(descriptor.Id, installedFioPath);
-            return;
-        }
-        await DetectToolAsync(descriptor.Id);
-    }
-
-    private async Task ShowToolDialogAsync(string content)
+    private async Task ShowMessageDialogAsync(string content)
     {
         var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-            Title = zh ? "外部工具" : "External tools",
+            Title = zh ? "WinPool" : "WinPool",
             Content = content,
             CloseButtonText = zh ? "关闭" : "Close"
         };
         await dialog.ShowAsync();
-    }
-
-    private static bool TryGetToolId(object sender, out ToolId toolId)
-    {
-        if (sender is Button { Tag: string value }
-            && !string.IsNullOrWhiteSpace(value))
-        {
-            toolId = new ToolId(value);
-            return true;
-        }
-
-        toolId = default;
-        return false;
-    }
-
-    private static string FormatToolState(
-        ToolState? state,
-        ApplicationStatus applicationStatus,
-        bool zh)
-    {
-        if (state is null)
-        {
-            return zh
-                ? $"检测失败：{applicationStatus}"
-                : $"Detection failed: {applicationStatus}";
-        }
-
-        var availability = state.Availability switch
-        {
-            ToolAvailability.Available => zh ? "可用" : "Available",
-            ToolAvailability.NotFound => zh ? "未安装或未发现" : "Not installed or not found",
-            ToolAvailability.UnsupportedVersion => zh ? "版本不受支持" : "Unsupported version",
-            ToolAvailability.IdentityChanged => zh ? "文件身份已变化" : "File identity changed",
-            ToolAvailability.InvalidSignature => zh ? "签名无效" : "Invalid signature",
-            _ => zh ? "配置有误" : "Misconfigured"
-        };
-        var details = new[] { state.Version, state.ExecutablePath }
-            .Where(value => !string.IsNullOrWhiteSpace(value));
-        return string.Join(" · ", new[] { availability }.Concat(details));
     }
 
     private async void WebsiteLink_Click(object sender, RoutedEventArgs e) =>

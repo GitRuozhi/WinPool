@@ -238,6 +238,7 @@ public sealed class NamedPipeAgentConnectionTests
 
                 return Task.CompletedTask;
             },
+            verifyClientProcess: _ => true,
             eventHub: eventHub);
         var serverTask = server.RunAsync(serverCancellation.Token);
         await File.WriteAllTextAsync(
@@ -272,34 +273,28 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.IsType<AgentStateReseedEvent>(secondEventEnumerator.Current);
         var occurredAt = DateTimeOffset.UtcNow;
         eventHub.Publish(
-            new AgentTestEvent(
-                new TestEvent(
-                    new TestRunId(Guid.NewGuid()),
-                    TestEventKind.Progress,
-                    new ApplicationTaskEvent(
-                        ApplicationTaskId.New(),
-                        CorrelationId.New(),
-                        ApplicationTaskEventKind.Progress,
-                        ApplicationTaskState.Running,
-                        occurredAt,
-                        "tool.progress.native",
-                        "tool.progress.native",
-                        string.Empty,
-                        "step-1",
-                        0.42))));
+            new AgentTaskEvent(
+                new ApplicationTaskEvent(
+                    ApplicationTaskId.New(),
+                    CorrelationId.New(),
+                    ApplicationTaskEventKind.Progress,
+                    ApplicationTaskState.Running,
+                    occurredAt,
+                    "tool.progress.native",
+                    "tool.progress.native",
+                    string.Empty,
+                    "step-1",
+                    0.42)));
         Assert.True(await eventEnumerator.MoveNextAsync());
-        var pushed = Assert.IsType<AgentTestEvent>(eventEnumerator.Current);
-        Assert.Equal(0.42, pushed.TestEvent.TaskEvent.ProgressFraction);
+        var pushed = Assert.IsType<AgentTaskEvent>(eventEnumerator.Current);
+        Assert.Equal(0.42, pushed.TaskEvent.ProgressFraction);
         Assert.True(await secondEventEnumerator.MoveNextAsync());
-        var pushedToSecondWatcher = Assert.IsType<AgentTestEvent>(
+        var pushedToSecondWatcher = Assert.IsType<AgentTaskEvent>(
             secondEventEnumerator.Current);
-        Assert.Equal(0.42, pushedToSecondWatcher.TestEvent.TaskEvent.ProgressFraction);
+        Assert.Equal(0.42, pushedToSecondWatcher.TaskEvent.ProgressFraction);
         var correlation = CorrelationId.New();
         var response = await connection.SendAsync(
             new GetAgentSnapshotRequest(correlation),
-            CancellationToken.None);
-        var diagnosticsResponse = await connection.SendAsync(
-            new GetDevelopmentDiagnosticsRequest(10, CorrelationId.New()),
             CancellationToken.None);
         var manageInventoryResponse = await connection.SendAsync(
             new CaptureAgentManageInventoryRequest(
@@ -314,96 +309,6 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.NotNull(
             Assert.IsType<ManageInventoryLoadedResponse>(cachedInventoryResponse.Value)
                 .Document);
-        var supportCorrelation = CorrelationId.New();
-        var supportRequest = new ElevatedBrokerExecutionRequest(
-            Guid.NewGuid(),
-            sessionId,
-            Environment.ProcessId,
-            userHash,
-            new string('a', 64),
-            DateTimeOffset.UtcNow.AddMinutes(1),
-            ElevatedBrokerOperationKind.SetActivePowerPlan,
-            PowerPlanId: Guid.NewGuid());
-        var reviewResponse = await connection.SendAsync(
-            new ReviewAgentSystemSupportRequest(
-                supportRequest,
-                supportCorrelation),
-            CancellationToken.None);
-        var review = Assert.IsType<SystemSupportReviewResponse>(
-            reviewResponse.Value);
-        var executeCorrelation = CorrelationId.New();
-        var supportResponse = await connection.SendAsync(
-            new ExecuteAgentSystemSupportRequest(
-                review.ReviewId,
-                true,
-                executeCorrelation),
-            CancellationToken.None);
-        var diteCorrelation = CorrelationId.New();
-        var diteResponse = await connection.SendAsync(
-            new PersistDiteLegacyImportRequest(
-                Path.Combine(Path.GetTempPath(), "dite-results.csv"),
-                new string('a', 64),
-                diteCorrelation),
-            CancellationToken.None);
-        var diteHistoryCorrelation = CorrelationId.New();
-        var diteHistoryResponse = await connection.SendAsync(
-            new ListDiteLegacyImportsRequest(10, diteHistoryCorrelation),
-            CancellationToken.None);
-        var diteSummaryCorrelation = CorrelationId.New();
-        var diteSummaryResponse = await connection.SendAsync(
-            new GetDiteLegacyImportSummaryRequest(
-                Guid.NewGuid(),
-                diteSummaryCorrelation),
-            CancellationToken.None);
-        var presetNow = DateTimeOffset.UtcNow;
-        var preset = new UserTestPreset(
-            Guid.NewGuid(),
-            "Pipe preset",
-            TestPresetScenario.IoBenchmark,
-            new ToolId("microsoft.diskspd"),
-            TestPresetVerificationMode.FullHash,
-            50_505,
-            IoAccessPattern.Random,
-            30,
-            1024L * 1024 * 1024,
-            4096,
-            4,
-            32,
-            60,
-            5,
-            2,
-            3,
-            true,
-            presetNow,
-            presetNow);
-        var savedPresetResponse = await connection.SendAsync(
-            new SaveUserTestPresetRequest(preset, CorrelationId.New()),
-            CancellationToken.None);
-        var listedPresetResponse = await connection.SendAsync(
-            new ListUserTestPresetsRequest(CorrelationId.New()),
-            CancellationToken.None);
-        var deletedPresetResponse = await connection.SendAsync(
-            new DeleteUserTestPresetRequest(
-                preset.PresetId,
-                CorrelationId.New()),
-            CancellationToken.None);
-        var installNow = DateTimeOffset.UtcNow;
-        var msiResponse = await connection.SendAsync(
-            new InstallAgentMsiToolRequest(
-                new ToolInstallPlan(
-                    new ToolId("fio"),
-                    new Uri("https://github.com/axboe/fio/releases/download/fio-3.42/fio-3.42-x64.msi"),
-                    new string('a', 64),
-                    ToolInstallerKind.Msi,
-                    ToolInstallLocation.PerUserManagedDirectory,
-                    true,
-                    installNow,
-                    installNow.AddMinutes(15),
-                    new string('b', 64)),
-                Path.Combine("tool-downloads", $"{new string('a', 64)}.msi"),
-                true,
-                CorrelationId.New()),
-            CancellationToken.None);
 
         Assert.True(connected.IsSuccess);
         Assert.Equal(sessionId, connected.Value!.AgentInstanceId.Value);
@@ -412,44 +317,8 @@ public sealed class NamedPipeAgentConnectionTests
         var snapshot = Assert.IsType<AgentSnapshotResponse>(response.Value);
         Assert.Equal(sessionId, snapshot.Snapshot.AgentInstanceId.Value);
         Assert.Equal(correlation, response.CorrelationId);
-        var diagnostics = Assert.IsType<DevelopmentDiagnosticsResponse>(
-            diagnosticsResponse.Value).Diagnostics;
-        Assert.Equal(sessionId, diagnostics.Agent.AgentInstanceId.Value);
-        Assert.Empty(diagnostics.RecentPlans);
-        Assert.Single(diagnostics.Algorithms);
-        Assert.True(supportResponse.IsSuccess);
-        var support = Assert.IsType<SystemSupportExecutionResponse>(
-            supportResponse.Value);
-        Assert.Equal(
-            ElevatedBrokerOperationKind.SetActivePowerPlan,
-            support.Result.Operation);
-        Assert.True(support.Result.Succeeded);
-        Assert.Equal(executeCorrelation, supportResponse.CorrelationId);
-        var dite = Assert.IsType<DiteLegacyImportPersistenceResponse>(
-            diteResponse.Value);
-        Assert.Equal(2, dite.RunCount);
-        Assert.Equal(3, dite.MetricCount);
-        Assert.Equal(diteCorrelation, diteResponse.CorrelationId);
-        Assert.Single(
-            Assert.IsType<DiteLegacyImportHistoryResponse>(
-                diteHistoryResponse.Value).Imports);
-        Assert.Single(
-            Assert.IsType<DiteLegacyImportSummaryResponse>(
-                diteSummaryResponse.Value).Summaries);
-        Assert.Equal(
-            preset,
-            Assert.IsType<UserTestPresetSavedResponse>(
-                savedPresetResponse.Value).Preset);
-        Assert.Empty(
-            Assert.IsType<UserTestPresetListResponse>(
-                listedPresetResponse.Value).Presets);
-        Assert.True(
-            Assert.IsType<UserTestPresetDeletedResponse>(
-                deletedPresetResponse.Value).Deleted);
-        Assert.True(msiResponse.IsSuccess);
-        Assert.Equal(
-            ElevatedBrokerOperationKind.InstallMsiTool,
-            Assert.IsType<MsiToolInstallResponse>(msiResponse.Value).Result.Operation);
+        Assert.True(manageInventoryResponse.IsSuccess);
+        Assert.True(cachedInventoryResponse.IsSuccess);
         lock (persistedProcesses)
         {
             Assert.True(persistedProcesses.Count >= 2);
@@ -536,7 +405,7 @@ public sealed class NamedPipeAgentConnectionTests
         var nonce = Guid.NewGuid();
         var sessionId = Guid.NewGuid();
         var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
-        var operations = new BlockingDiagnosticsOperations(sessionId);
+        var operations = new BlockingMainWindowOperations(sessionId);
         var registry = new AgentProcessRegistry();
         var coordinator = new AgentSessionCoordinator(
             operations,
@@ -549,7 +418,8 @@ public sealed class NamedPipeAgentConnectionTests
             userHash,
             sessionId,
             Environment.ProcessId,
-            coordinator);
+            coordinator,
+            verifyClientProcess: _ => true);
         var serverTask = server.RunAsync(serverCancellation.Token);
         await File.WriteAllTextAsync(
             endpointPath,
@@ -570,9 +440,9 @@ public sealed class NamedPipeAgentConnectionTests
 
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
         var send = connection.SendAsync(
-            new GetDevelopmentDiagnosticsRequest(10, CorrelationId.New()),
+            new OpenMainWindowRequest(null, CorrelationId.New()),
             CancellationToken.None);
-        await operations.DiagnosticsStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await operations.MainWindowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var dispose = connection.DisposeAsync().AsTask();
         var result = await send.WaitAsync(TimeSpan.FromSeconds(5));
@@ -583,11 +453,11 @@ public sealed class NamedPipeAgentConnectionTests
             result.Messages,
             message => message.Code == "agent.request.connection_lost");
 
-        operations.ReleaseDiagnostics.TrySetResult();
+        operations.ReleaseMainWindow.TrySetResult();
         serverCancellation.Cancel();
         try
         {
-            await serverTask;
+            await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (OperationCanceledException)
         {
@@ -610,7 +480,7 @@ public sealed class NamedPipeAgentConnectionTests
         var nonce = Guid.NewGuid();
         var sessionId = Guid.NewGuid();
         var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
-        var operations = new BlockingDiagnosticsOperations(sessionId);
+        var operations = new BlockingMainWindowOperations(sessionId);
         var registry = new AgentProcessRegistry();
         var coordinator = new AgentSessionCoordinator(
             operations,
@@ -623,7 +493,8 @@ public sealed class NamedPipeAgentConnectionTests
             userHash,
             sessionId,
             Environment.ProcessId,
-            coordinator);
+            coordinator,
+            verifyClientProcess: _ => true);
         var serverTask = server.RunAsync(serverCancellation.Token);
         await File.WriteAllTextAsync(
             endpointPath,
@@ -644,9 +515,9 @@ public sealed class NamedPipeAgentConnectionTests
 
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
         var first = connection.SendAsync(
-            new GetDevelopmentDiagnosticsRequest(10, CorrelationId.New()),
+            new OpenMainWindowRequest(null, CorrelationId.New()),
             CancellationToken.None);
-        await operations.DiagnosticsStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await operations.MainWindowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         using var waitingCancellation = new CancellationTokenSource(
             TimeSpan.FromMilliseconds(100));
@@ -655,7 +526,7 @@ public sealed class NamedPipeAgentConnectionTests
             waitingCancellation.Token);
 
         Assert.Equal(ApplicationStatus.Cancelled, waiting.Status);
-        operations.ReleaseDiagnostics.TrySetResult();
+        operations.ReleaseMainWindow.TrySetResult();
         Assert.True((await first.WaitAsync(TimeSpan.FromSeconds(5))).IsSuccess);
         Assert.True(
             (await connection.SendAsync(
@@ -688,7 +559,7 @@ public sealed class NamedPipeAgentConnectionTests
         var nonce = Guid.NewGuid();
         var sessionId = Guid.NewGuid();
         var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
-        var operations = new BlockingDiagnosticsOperations(sessionId);
+        var operations = new BlockingMainWindowOperations(sessionId);
         var registry = new AgentProcessRegistry();
         var coordinator = new AgentSessionCoordinator(
             operations,
@@ -701,7 +572,8 @@ public sealed class NamedPipeAgentConnectionTests
             userHash,
             sessionId,
             Environment.ProcessId,
-            coordinator);
+            coordinator,
+            verifyClientProcess: _ => true);
         var firstServerTask = firstServer.RunAsync(firstServerCancellation.Token);
         await File.WriteAllTextAsync(
             endpointPath,
@@ -724,13 +596,13 @@ public sealed class NamedPipeAgentConnectionTests
         using var requestCancellation = new CancellationTokenSource(
             TimeSpan.FromMilliseconds(100));
         var request = connection.SendAsync(
-            new GetDevelopmentDiagnosticsRequest(10, CorrelationId.New()),
+            new OpenMainWindowRequest(null, CorrelationId.New()),
             requestCancellation.Token);
-        await operations.DiagnosticsStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await operations.MainWindowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var unknown = await request.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(ApplicationStatus.OutcomeUnknown, unknown.Status);
-        operations.ReleaseDiagnostics.TrySetResult();
+        operations.ReleaseMainWindow.TrySetResult();
         firstServerCancellation.Cancel();
         await firstServerTask.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -984,12 +856,11 @@ public sealed class NamedPipeAgentConnectionTests
     private class SnapshotOperations(Guid sessionId)
         : IAgentRequestOperations
     {
-        private ElevatedBrokerOperationKind reviewedOperation;
         private int snapshotRequestCount;
 
         public int SnapshotRequestCount => Volatile.Read(ref snapshotRequestCount);
 
-        public Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
+        public virtual Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
             GetAgentSnapshotRequest request,
             CancellationToken cancellationToken)
         {
@@ -1001,7 +872,6 @@ public sealed class NamedPipeAgentConnectionTests
                             new AgentInstanceId(sessionId),
                             true,
                             null,
-                            null,
                             new AgentShutdownStatus(
                                 AgentLifecycleState.Running,
                                 null,
@@ -1012,35 +882,13 @@ public sealed class NamedPipeAgentConnectionTests
                     request.CorrelationId));
         }
 
-        public virtual Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
-            GetDevelopmentDiagnosticsRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(
-                ApplicationResult<AgentResponse>.Succeeded(
-                    new DevelopmentDiagnosticsResponse(
-                        new DevelopmentDiagnostics(
-                            new AgentSnapshot(
-                                new AgentInstanceId(sessionId),
-                                true,
-                                null,
-                                null,
-                                new AgentShutdownStatus(
-                                    AgentLifecycleState.Running,
-                                    null,
-                                    [],
-                                    [],
-                                    false),
-                                []),
-                            [],
-                            [new AlgorithmIdentity(
-                                "ALG-TEST",
-                                "1",
-                                AlgorithmConfidence.Proven,
-                                "test")])),
-                    request.CorrelationId));
-
-        public Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
+        public virtual Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
             OpenMainWindowRequest request,
+            CancellationToken cancellationToken) =>
+            Acknowledge(request);
+
+        public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
+            OpenAgentNativePropertiesRequest request,
             CancellationToken cancellationToken) =>
             Acknowledge(request);
 
@@ -1054,112 +902,53 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken cancellationToken) =>
             Acknowledge(request);
 
-        public Task<ApplicationResult<AgentResponse>> StartTestAsync(
-            StartAgentTestRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> CancelTestAsync(
-            CancelAgentTestRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> PauseTestAsync(
-            PauseAgentTestRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
-            ResumeAgentTestRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> GetTestResultAsync(
-            GetAgentTestResultRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> ListTestRunsAsync(
-            ListAgentTestRunsRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> ListUserTestPresetsAsync(
-            ListUserTestPresetsRequest request,
+        public Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
+            LoadAgentWorkspaceStateRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new UserTestPresetListResponse([]),
+                    new WorkspaceStateLoadedResponse(null),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>> SaveUserTestPresetAsync(
-            SaveUserTestPresetRequest request,
+        public Task<ApplicationResult<AgentResponse>> SaveWorkspaceStateAsync(
+            SaveAgentWorkspaceStateRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new UserTestPresetSavedResponse(request.Preset),
+                    new WorkspaceStateSavedResponse(request.State),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>> DeleteUserTestPresetAsync(
-            DeleteUserTestPresetRequest request,
+        public Task<ApplicationResult<AgentResponse>> ListSimulationDocumentsAsync(
+            ListAgentSimulationDocumentsRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new UserTestPresetDeletedResponse(request.PresetId, true),
+                    new SimulationDocumentListResponse([]),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>> PersistDiteLegacyImportAsync(
-            PersistDiteLegacyImportRequest request,
+        public Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(
+            SaveAgentSimulationDocumentRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new DiteLegacyImportPersistenceResponse(
-                        Guid.NewGuid(),
-                        false,
-                        2,
-                        3),
+                    new SimulationDocumentSavedResponse(request.Document),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>> ListDiteLegacyImportsAsync(
-            ListDiteLegacyImportsRequest request,
+        public Task<ApplicationResult<AgentResponse>> DeleteSimulationDocumentAsync(
+            DeleteAgentSimulationDocumentRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new DiteLegacyImportHistoryResponse(
-                    [
-                        new(
-                            Guid.NewGuid(),
-                            "dite.csv",
-                            new string('a', 64),
-                            DateTimeOffset.UtcNow,
-                            2,
-                            3)
-                    ]),
+                    new SimulationDocumentDeletedResponse(request.DocumentId, true),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>>
-            GetDiteLegacyImportSummaryAsync(
-                GetDiteLegacyImportSummaryRequest request,
-                CancellationToken cancellationToken) =>
+        public Task<ApplicationResult<AgentResponse>> CommitSimulationEditAsync(
+            CommitAgentSimulationEditRequest request,
+            CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new DiteLegacyImportSummaryResponse(
-                        request.ImportId,
-                        [
-                            new(
-                                "throughput",
-                                "MiB/s",
-                                2,
-                                100,
-                                110,
-                                120)
-                        ]),
+                    new SimulationDocumentSavedResponse(request.Document),
                     request.CorrelationId));
-
-        public Task<ApplicationResult<AgentResponse>> ExportTestRunAsync(
-            ExportAgentTestRunRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
 
         public Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
             CaptureAgentInventoryRequest request,
@@ -1186,6 +975,11 @@ public sealed class NamedPipeAgentConnectionTests
                         LocalInventory()),
                     request.CorrelationId));
 
+        public Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
+            ExportAgentMonitorCsvRequest request,
+            CancellationToken cancellationToken) =>
+            Acknowledge(request);
+
         private static LocalInventoryDocumentPayload LocalInventory() =>
             new(
                 "local:test",
@@ -1195,59 +989,6 @@ public sealed class NamedPipeAgentConnectionTests
                 new string('a', 64),
                 DateTimeOffset.FromUnixTimeSeconds(1_800_000_000));
 
-        public Task<ApplicationResult<AgentResponse>> DetectToolAsync(
-            DetectAgentToolRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> InstallMsiToolAsync(
-            InstallAgentMsiToolRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(
-                ApplicationResult<AgentResponse>.Succeeded(
-                    new MsiToolInstallResponse(
-                        new ElevatedBrokerExecutionResult(
-                            ElevatedBrokerOperationKind.InstallMsiTool,
-                            true,
-                            "broker.msi-install.completed",
-                            MsiInstallEvidence: new MsiToolInstallEvidence(0, false))),
-                    request.CorrelationId));
-
-        public Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
-            ExportAgentMonitorCsvRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> ReviewSystemSupportAsync(
-            ReviewAgentSystemSupportRequest request,
-            CancellationToken cancellationToken)
-        {
-            reviewedOperation = request.ExecutionRequest.Operation;
-            return Task.FromResult(
-                ApplicationResult<AgentResponse>.Succeeded(
-                    new SystemSupportReviewResponse(
-                        Guid.NewGuid(),
-                        reviewedOperation,
-                        request.ExecutionRequest.PlanHash,
-                        DateTimeOffset.UtcNow.AddMinutes(2),
-                        0,
-                        0,
-                        "system-support.warning"),
-                    request.CorrelationId));
-        }
-
-        public Task<ApplicationResult<AgentResponse>> ExecuteSystemSupportAsync(
-            ExecuteAgentSystemSupportRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(
-                ApplicationResult<AgentResponse>.Succeeded(
-                    new SystemSupportExecutionResponse(
-                        new ElevatedBrokerExecutionResult(
-                            reviewedOperation,
-                            true,
-                            "broker.completed")),
-                    request.CorrelationId));
-
         private static Task<ApplicationResult<AgentResponse>> Acknowledge(
             AgentRequest request) =>
             Task.FromResult(
@@ -1256,37 +997,33 @@ public sealed class NamedPipeAgentConnectionTests
                     request.CorrelationId));
     }
 
-    private sealed class BlockingDiagnosticsOperations(Guid sessionId)
+    private sealed class BlockingMainWindowOperations(Guid sessionId)
         : SnapshotOperations(sessionId)
     {
-        public TaskCompletionSource DiagnosticsStarted { get; } = new(
+        public TaskCompletionSource MainWindowStarted { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public TaskCompletionSource ReleaseDiagnostics { get; } = new(
+        public TaskCompletionSource ReleaseMainWindow { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public override async Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
-            GetDevelopmentDiagnosticsRequest request,
+        public override async Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
+            OpenMainWindowRequest request,
             CancellationToken cancellationToken)
         {
-            DiagnosticsStarted.TrySetResult();
-            await ReleaseDiagnostics.Task;
-            return await base.GetDevelopmentDiagnosticsAsync(request, cancellationToken);
+            MainWindowStarted.TrySetResult();
+            await ReleaseMainWindow.Task.WaitAsync(cancellationToken);
+            return await base.OpenMainWindowAsync(request, cancellationToken);
         }
     }
 
     private sealed class NoOpShutdownActions : IAgentShutdownActions
     {
-        public bool HasActiveTest => false;
         public Task NotifyClientsAsync(ShutdownReason reason, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task RequestTestCancellationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task TerminateExternalToolJobsAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task StopMonitoringAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<bool> RestoreTemporarySystemStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);
         public Task<int> FlushSqliteQueuesAsync(CancellationToken cancellationToken) => Task.FromResult(0);
         public Task CloseNamedPipesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task CloseMainApplicationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task StopSupervisedProcessesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task RemoveTrayIconAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task ExitAgentAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }

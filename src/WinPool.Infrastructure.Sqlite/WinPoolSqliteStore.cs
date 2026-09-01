@@ -7,7 +7,7 @@ public sealed class WinPoolSqliteStore
     // V0.41 starts from a deliberately clean data root. Do not add a
     // migration from schema 12: its generic preferences table mixed distinct
     // ownership domains and is intentionally rejected by InitializeAsync.
-    public const int CurrentSchemaVersion = 13;
+    public const int CurrentSchemaVersion = 14;
 
     private readonly string connectionString;
 
@@ -512,12 +512,6 @@ public sealed class WinPoolSqliteStore
             json TEXT NOT NULL,
             updated_at_utc_ms INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS test_presets(
-            preset_id TEXT PRIMARY KEY,
-            json TEXT NOT NULL,
-            created_at_utc_ms INTEGER NOT NULL,
-            updated_at_utc_ms INTEGER NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS systems(
             system_id TEXT PRIMARY KEY,
             kind INTEGER NOT NULL,
@@ -607,30 +601,6 @@ public sealed class WinPoolSqliteStore
         );
         CREATE INDEX IF NOT EXISTS ix_simulation_edit_commits_document_revision
             ON simulation_edit_commits(document_id, document_revision DESC);
-        CREATE TABLE IF NOT EXISTS system_support_audit_events(
-            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            correlation_id TEXT NOT NULL,
-            plan_hash TEXT NOT NULL,
-            action_kind INTEGER NOT NULL,
-            stage INTEGER NOT NULL,
-            occurred_at_utc_ms INTEGER NOT NULL,
-            code TEXT NOT NULL,
-            user_text_key TEXT NOT NULL,
-            redacted_diagnostic TEXT NOT NULL,
-            policy_rule_version TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_system_support_audit_plan_time
-            ON system_support_audit_events(plan_hash, occurred_at_utc_ms, event_id);
-        CREATE TABLE IF NOT EXISTS system_support_recovery(
-            recovery_id TEXT PRIMARY KEY,
-            plan_hash TEXT NOT NULL,
-            action_kind INTEGER NOT NULL,
-            state_kind INTEGER NOT NULL,
-            state_json TEXT NOT NULL,
-            prepared_at_utc_ms INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_system_support_recovery_prepared
-            ON system_support_recovery(prepared_at_utc_ms, recovery_id);
         CREATE TABLE IF NOT EXISTS monitor_sessions(
             session_id TEXT PRIMARY KEY,
             started_at_utc_ms INTEGER NOT NULL,
@@ -654,7 +624,6 @@ public sealed class WinPoolSqliteStore
             read_bytes_per_sec REAL NOT NULL,
             write_bytes_per_sec REAL NOT NULL,
             queue_length REAL NOT NULL,
-            sample_flags INTEGER NOT NULL,
             FOREIGN KEY(session_id, device_id)
                 REFERENCES monitor_devices(session_id, device_id) ON DELETE CASCADE
         );
@@ -683,190 +652,12 @@ public sealed class WinPoolSqliteStore
             sanitized_json TEXT NOT NULL,
             PRIMARY KEY(session_id, device_id, bucket_start_utc_ms, bucket_width_ms)
         );
-        CREATE TABLE IF NOT EXISTS test_definitions(
-            definition_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            sanitized_json TEXT NOT NULL,
-            created_at_utc_ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS test_runs(
-            run_id TEXT PRIMARY KEY,
-            definition_id TEXT REFERENCES test_definitions(definition_id),
-            state INTEGER NOT NULL,
-            started_at_utc_ms INTEGER NOT NULL,
-            ended_at_utc_ms INTEGER,
-            plan_hash TEXT NOT NULL,
-            environment_snapshot_json TEXT NOT NULL,
-            plan_json TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS test_steps(
-            run_id TEXT NOT NULL REFERENCES test_runs(run_id) ON DELETE CASCADE,
-            step_id TEXT NOT NULL,
-            sequence_no INTEGER NOT NULL,
-            state INTEGER NOT NULL,
-            tool_id TEXT,
-            sanitized_json TEXT NOT NULL,
-            PRIMARY KEY(run_id, step_id)
-        );
-        CREATE TABLE IF NOT EXISTS test_events(
-            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL REFERENCES test_runs(run_id) ON DELETE CASCADE,
-            step_id TEXT NOT NULL,
-            event_kind INTEGER NOT NULL,
-            importance INTEGER NOT NULL,
-            occurred_at_utc_ms INTEGER NOT NULL,
-            code TEXT NOT NULL,
-            process_id INTEGER,
-            exit_code INTEGER,
-            raw_byte_count INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_test_events_run_time
-            ON test_events(run_id, occurred_at_utc_ms, event_id);
-        CREATE TABLE IF NOT EXISTS test_metrics(
-            run_id TEXT NOT NULL REFERENCES test_runs(run_id) ON DELETE CASCADE,
-            step_id TEXT,
-            metric_name TEXT NOT NULL,
-            metric_value REAL NOT NULL,
-            unit TEXT NOT NULL,
-            aggregation TEXT NOT NULL,
-            PRIMARY KEY(run_id, step_id, metric_name, aggregation)
-        );
-        CREATE TABLE IF NOT EXISTS latency_histograms(
-            run_id TEXT NOT NULL REFERENCES test_runs(run_id) ON DELETE CASCADE,
-            step_id TEXT NOT NULL,
-            bucket_upper_ns INTEGER NOT NULL,
-            sample_count INTEGER NOT NULL,
-            PRIMARY KEY(run_id, step_id, bucket_upper_ns)
-        );
-        CREATE TABLE IF NOT EXISTS copy_batch_manifests(
-            run_id TEXT NOT NULL,
-            step_id TEXT NOT NULL,
-            plan_hash TEXT NOT NULL,
-            manifest_hash TEXT NOT NULL,
-            source_identity TEXT NOT NULL,
-            destination_identity TEXT NOT NULL,
-            batch_threshold_bytes INTEGER NOT NULL,
-            maximum_files_per_batch INTEGER NOT NULL,
-            algorithm_id TEXT NOT NULL,
-            algorithm_version TEXT NOT NULL,
-            algorithm_confidence INTEGER NOT NULL,
-            algorithm_reference TEXT NOT NULL,
-            created_at_utc_ms INTEGER NOT NULL,
-            PRIMARY KEY(run_id, step_id),
-            UNIQUE(manifest_hash),
-            FOREIGN KEY(run_id, step_id)
-                REFERENCES test_steps(run_id, step_id) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS copy_batches(
-            run_id TEXT NOT NULL,
-            step_id TEXT NOT NULL,
-            batch_number INTEGER NOT NULL,
-            state INTEGER NOT NULL,
-            planned_bytes INTEGER NOT NULL,
-            planned_file_count INTEGER NOT NULL,
-            started_at_utc_ms INTEGER,
-            ended_at_utc_ms INTEGER,
-            end_reason_code TEXT,
-            PRIMARY KEY(run_id, step_id, batch_number),
-            FOREIGN KEY(run_id, step_id)
-                REFERENCES copy_batch_manifests(run_id, step_id) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS copy_batch_entries(
-            run_id TEXT NOT NULL,
-            step_id TEXT NOT NULL,
-            ordinal INTEGER NOT NULL,
-            batch_number INTEGER NOT NULL,
-            relative_path TEXT NOT NULL,
-            length_bytes INTEGER NOT NULL,
-            last_write_utc_ticks INTEGER NOT NULL,
-            attributes INTEGER NOT NULL,
-            sha256 TEXT,
-            state INTEGER NOT NULL,
-            attempts INTEGER NOT NULL DEFAULT 0,
-            last_exit_code INTEGER,
-            diagnostic_code TEXT,
-            updated_at_utc_ms INTEGER NOT NULL,
-            PRIMARY KEY(run_id, step_id, ordinal),
-            UNIQUE(run_id, step_id, relative_path),
-            FOREIGN KEY(run_id, step_id, batch_number)
-                REFERENCES copy_batches(run_id, step_id, batch_number)
-                ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS ix_copy_batch_entries_state
-            ON copy_batch_entries(run_id, step_id, state, batch_number, ordinal);
-        CREATE TABLE IF NOT EXISTS legacy_test_imports(
-            import_id TEXT PRIMARY KEY,
-            source_file_name TEXT NOT NULL,
-            source_sha256 TEXT NOT NULL UNIQUE,
-            format_version TEXT NOT NULL,
-            imported_at_utc_ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS legacy_test_runs(
-            import_id TEXT NOT NULL
-                REFERENCES legacy_test_imports(import_id) ON DELETE CASCADE,
-            run_ordinal INTEGER NOT NULL,
-            test_time TEXT NOT NULL,
-            drive TEXT NOT NULL,
-            tool TEXT NOT NULL,
-            profile TEXT NOT NULL,
-            log_file_name TEXT,
-            PRIMARY KEY(import_id, run_ordinal)
-        );
-        CREATE INDEX IF NOT EXISTS ix_legacy_test_runs_tool_profile
-            ON legacy_test_runs(tool, profile, import_id, run_ordinal);
-        CREATE TABLE IF NOT EXISTS legacy_test_metrics(
-            import_id TEXT NOT NULL,
-            run_ordinal INTEGER NOT NULL,
-            metric_name TEXT NOT NULL,
-            metric_value REAL NOT NULL,
-            unit TEXT NOT NULL,
-            PRIMARY KEY(import_id, run_ordinal, metric_name),
-            FOREIGN KEY(import_id, run_ordinal)
-                REFERENCES legacy_test_runs(import_id, run_ordinal)
-                ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS ix_legacy_test_metrics_name
-            ON legacy_test_metrics(metric_name, import_id, run_ordinal);
-        CREATE TABLE IF NOT EXISTS artifacts(
-            artifact_id TEXT PRIMARY KEY,
-            owner_kind TEXT NOT NULL,
-            owner_id TEXT NOT NULL,
-            relative_path TEXT NOT NULL,
-            sha256 TEXT NOT NULL,
-            byte_length INTEGER NOT NULL,
-            media_type TEXT NOT NULL,
-            created_at_utc_ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS algorithm_registry(
-            algorithm_id TEXT NOT NULL,
-            version TEXT NOT NULL,
-            confidence INTEGER NOT NULL,
-            evidence_reference TEXT NOT NULL,
-            registered_at_utc_ms INTEGER NOT NULL,
-            PRIMARY KEY(algorithm_id, version)
-        );
         CREATE TABLE IF NOT EXISTS inventory_comparisons(
             comparison_id TEXT PRIMARY KEY,
             reference_snapshot_id TEXT NOT NULL REFERENCES inventory_snapshots(snapshot_id),
             candidate_snapshot_id TEXT NOT NULL REFERENCES inventory_snapshots(snapshot_id),
             sanitized_json TEXT NOT NULL,
             created_at_utc_ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS external_tools(
-            tool_id TEXT PRIMARY KEY,
-            configured_path TEXT,
-            detected_version TEXT,
-            sha256 TEXT,
-            signature_state INTEGER NOT NULL,
-            detected_at_utc_ms INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS tool_install_events(
-            event_id TEXT PRIMARY KEY,
-            tool_id TEXT NOT NULL REFERENCES external_tools(tool_id),
-            state INTEGER NOT NULL,
-            source_uri_redacted TEXT NOT NULL,
-            package_sha256 TEXT,
-            occurred_at_utc_ms INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS agent_sessions(
             session_id TEXT PRIMARY KEY,

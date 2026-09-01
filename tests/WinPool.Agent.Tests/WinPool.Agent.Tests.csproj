@@ -17,7 +17,5 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinPool.Agent\WinPool.Agent.csproj" />
-    <ProjectReference Include="..\..\src\WinPool.Testing\WinPool.Testing.csproj" />
-    <ProjectReference Include="..\..\workers\WinPool.TestWorker\WinPool.TestWorker.csproj" />
   </ItemGroup>
 </Project>

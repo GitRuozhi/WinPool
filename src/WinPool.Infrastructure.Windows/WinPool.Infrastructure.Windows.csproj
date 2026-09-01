@@ -6,7 +6,6 @@
     <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\WinPool.Domain\WinPool.Domain.csproj" />
     <ProjectReference Include="..\WinPool.Execution\WinPool.Execution.csproj" />
-    <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -6,55 +6,11 @@ namespace WinPool.Agent.Tests;
 
 public sealed class AgentSessionCoordinatorTests
 {
-    [Theory]
-    [InlineData(
-        ElevatedBrokerOperationKind.CleanTemporaryFiles,
-        SystemSupportActionKind.CleanTemporaryFiles)]
-    [InlineData(
-        ElevatedBrokerOperationKind.ClearSystemFileCache,
-        SystemSupportActionKind.ClearSystemFileCache)]
-    [InlineData(
-        ElevatedBrokerOperationKind.FlushVolume,
-        SystemSupportActionKind.FlushVolume)]
-    [InlineData(
-        ElevatedBrokerOperationKind.TrimOrOptimizeVolume,
-        SystemSupportActionKind.TrimOrOptimizeVolume)]
-    [InlineData(
-        ElevatedBrokerOperationKind.SetActivePowerPlan,
-        SystemSupportActionKind.UseTemporaryPowerPlan)]
-    public void ElevatedBrokerOperationsHaveClosedAuditMappings(
-        ElevatedBrokerOperationKind operation,
-        SystemSupportActionKind expected)
-    {
-        Assert.Equal(
-            expected,
-            DesktopAgentRuntime.ToSystemSupportActionKind(operation));
-    }
-
-    [Fact]
-    public async Task ActiveTestRequiresConfirmationBeforeStateTransition()
-    {
-        var actions = new RecordingShutdownActions { HasActiveTest = true };
-        var coordinator = CreateCoordinator(actions);
-        var correlationId = CorrelationId.New();
-
-        var result = await coordinator.HandleAsync(
-            new RequestAgentShutdownRequest(
-                ShutdownReason.TrayExit,
-                false,
-                correlationId));
-
-        Assert.Equal(ApplicationStatus.RequiresAuthorization, result.Status);
-        Assert.Equal(AgentLifecycleState.Running, coordinator.State);
-        Assert.Empty(actions.Calls);
-    }
-
     [Fact]
     public async Task ShutdownRunsTheRequiredOrderAndStopsSession()
     {
         var actions = new RecordingShutdownActions
         {
-            HasActiveTest = true,
             FlushedEventCount = 42
         };
         var coordinator = CreateCoordinator(actions);
@@ -62,7 +18,6 @@ public sealed class AgentSessionCoordinatorTests
         var result = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.Succeeded, result.Status);
@@ -70,13 +25,10 @@ public sealed class AgentSessionCoordinatorTests
         Assert.Equal(
             [
                 AgentShutdownStep.NotifyClients,
-                AgentShutdownStep.RequestTestCancellation,
-                AgentShutdownStep.TerminateExternalToolJobs,
                 AgentShutdownStep.StopMonitoring,
                 AgentShutdownStep.RestoreTemporarySystemState,
                 AgentShutdownStep.FlushSqliteQueues,
                 AgentShutdownStep.CloseMainApplication,
-                AgentShutdownStep.StopSupervisedProcesses,
                 AgentShutdownStep.CloseNamedPipes,
                 AgentShutdownStep.RemoveTrayIcon,
                 AgentShutdownStep.ExitAgent
@@ -99,7 +51,6 @@ public sealed class AgentSessionCoordinatorTests
         var shutdown = coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
         await actions.NotificationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -167,13 +118,11 @@ public sealed class AgentSessionCoordinatorTests
                 instanceId,
                 IsTrayVisible: false,
                 ActiveMonitoringSession: null,
-                ActiveTestRunId: null,
                 lifecycle.Snapshot(),
                 [],
                 [],
                 [],
-                new MonitorRuntimeDiagnostics(0, 0),
-                []));
+                new MonitorRuntimeDiagnostics(0, 0)));
 
         var snapshot = await coordinator.HandleAsync(
             new GetAgentSnapshotRequest(CorrelationId.New()));
@@ -233,7 +182,6 @@ public sealed class AgentSessionCoordinatorTests
         var result = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.PartiallyCompleted, result.Status);
@@ -256,7 +204,7 @@ public sealed class AgentSessionCoordinatorTests
     {
         var actions = new RecordingShutdownActions
         {
-            StepToHang = AgentShutdownStep.TerminateExternalToolJobs
+            StepToHang = AgentShutdownStep.StopMonitoring
         };
         var registry = new AgentProcessRegistry();
         var coordinator = new AgentSessionCoordinator(
@@ -270,14 +218,12 @@ public sealed class AgentSessionCoordinatorTests
         var result = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.PartiallyCompleted, result.Status);
         Assert.Contains(
-            AgentShutdownStep.TerminateExternalToolJobs,
+            AgentShutdownStep.StopMonitoring,
             coordinator.ShutdownExecution!.FailedSteps);
-        Assert.Contains(AgentShutdownStep.StopMonitoring, actions.Calls);
         Assert.Contains(AgentShutdownStep.FlushSqliteQueues, actions.Calls);
         Assert.DoesNotContain(AgentShutdownStep.RemoveTrayIcon, actions.Calls);
         Assert.DoesNotContain(AgentShutdownStep.ExitAgent, actions.Calls);
@@ -332,7 +278,6 @@ public sealed class AgentSessionCoordinatorTests
         var result = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.StorageLocationSwitch,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.Succeeded, result.Status);
@@ -351,7 +296,6 @@ public sealed class AgentSessionCoordinatorTests
         var shutdown = coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.DevelopmentRestart,
-                true,
                 CorrelationId.New()));
         await actions.NotificationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -360,7 +304,7 @@ public sealed class AgentSessionCoordinatorTests
             new(
                 ProcessInstanceId.New(),
                 987,
-                AgentManagedProcessKind.TestWorker,
+                AgentManagedProcessKind.InventoryWorker,
                 CorrelationId.New(),
                 now,
                 now,
@@ -382,7 +326,7 @@ public sealed class AgentSessionCoordinatorTests
             new(
                 ProcessInstanceId.New(),
                 654,
-                AgentManagedProcessKind.ExternalTool,
+                AgentManagedProcessKind.MainApplication,
                 CorrelationId.New(),
                 now,
                 now,
@@ -393,7 +337,6 @@ public sealed class AgentSessionCoordinatorTests
         var result = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.PartiallyCompleted, result.Status);
@@ -418,7 +361,7 @@ public sealed class AgentSessionCoordinatorTests
         var registration = new AgentManagedProcess(
             ProcessInstanceId.New(),
             765,
-            AgentManagedProcessKind.ExternalTool,
+            AgentManagedProcessKind.MainApplication,
             CorrelationId.New(),
             now,
             now,
@@ -430,7 +373,6 @@ public sealed class AgentSessionCoordinatorTests
         var first = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.PartiallyCompleted, first.Status);
@@ -447,7 +389,6 @@ public sealed class AgentSessionCoordinatorTests
         var retried = await coordinator.HandleAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.TrayExit,
-                true,
                 CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.Succeeded, retried.Status);
@@ -481,6 +422,11 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
+        public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
+            OpenAgentNativePropertiesRequest request,
+            CancellationToken cancellationToken) =>
+            Succeed(request);
+
         public Task<ApplicationResult<AgentResponse>> StartMonitoringAsync(
             StartAgentMonitoringRequest request,
             CancellationToken cancellationToken) =>
@@ -491,69 +437,33 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> StartTestAsync(
-            StartAgentTestRequest request,
+        public Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
+            LoadAgentWorkspaceStateRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> CancelTestAsync(
-            CancelAgentTestRequest request,
+        public Task<ApplicationResult<AgentResponse>> SaveWorkspaceStateAsync(
+            SaveAgentWorkspaceStateRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> PauseTestAsync(
-            PauseAgentTestRequest request,
+        public Task<ApplicationResult<AgentResponse>> ListSimulationDocumentsAsync(
+            ListAgentSimulationDocumentsRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
-            ResumeAgentTestRequest request,
+        public Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(
+            SaveAgentSimulationDocumentRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> GetTestResultAsync(
-            GetAgentTestResultRequest request,
+        public Task<ApplicationResult<AgentResponse>> DeleteSimulationDocumentAsync(
+            DeleteAgentSimulationDocumentRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> ListTestRunsAsync(
-            ListAgentTestRunsRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> ListUserTestPresetsAsync(
-            ListUserTestPresetsRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> SaveUserTestPresetAsync(
-            SaveUserTestPresetRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> DeleteUserTestPresetAsync(
-            DeleteUserTestPresetRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> PersistDiteLegacyImportAsync(
-            PersistDiteLegacyImportRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> ListDiteLegacyImportsAsync(
-            ListDiteLegacyImportsRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>>
-            GetDiteLegacyImportSummaryAsync(
-                GetDiteLegacyImportSummaryRequest request,
-                CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> ExportTestRunAsync(
-            ExportAgentTestRunRequest request,
+        public Task<ApplicationResult<AgentResponse>> CommitSimulationEditAsync(
+            CommitAgentSimulationEditRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
@@ -562,28 +472,18 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> DetectToolAsync(
-            DetectAgentToolRequest request,
+        public Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
+            CaptureAgentManageInventoryRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> InstallMsiToolAsync(
-            InstallAgentMsiToolRequest request,
+        public Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
+            LoadAgentManageInventoryRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
         public Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
             ExportAgentMonitorCsvRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> ReviewSystemSupportAsync(
-            ReviewAgentSystemSupportRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> ExecuteSystemSupportAsync(
-            ExecuteAgentSystemSupportRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
@@ -599,8 +499,6 @@ public sealed class AgentSessionCoordinatorTests
 
     private sealed class RecordingShutdownActions : IAgentShutdownActions
     {
-        public bool HasActiveTest { get; init; }
-
         public int FlushedEventCount { get; init; } = 7;
 
         public bool PauseNotification { get; init; }
@@ -634,16 +532,6 @@ public sealed class AgentSessionCoordinatorTests
             }
         }
 
-        public Task RequestTestCancellationAsync(CancellationToken cancellationToken) =>
-            RecordAsync(
-                AgentShutdownStep.RequestTestCancellation,
-                cancellationToken);
-
-        public Task TerminateExternalToolJobsAsync(CancellationToken cancellationToken) =>
-            RecordAsync(
-                AgentShutdownStep.TerminateExternalToolJobs,
-                cancellationToken);
-
         public Task StopMonitoringAsync(CancellationToken cancellationToken) =>
             RecordAsync(AgentShutdownStep.StopMonitoring, cancellationToken);
 
@@ -665,11 +553,6 @@ public sealed class AgentSessionCoordinatorTests
 
         public Task CloseMainApplicationAsync(CancellationToken cancellationToken) =>
             RecordAsync(AgentShutdownStep.CloseMainApplication, cancellationToken);
-
-        public Task StopSupervisedProcessesAsync(CancellationToken cancellationToken) =>
-            RecordAsync(
-                AgentShutdownStep.StopSupervisedProcesses,
-                cancellationToken);
 
         public Task RemoveTrayIconAsync(CancellationToken cancellationToken) =>
             RecordAsync(AgentShutdownStep.RemoveTrayIcon, cancellationToken);
@@ -706,8 +589,6 @@ public sealed class AgentSessionCoordinatorTests
         IAgentShutdownActions,
         IAgentShutdownTerminalActions
     {
-        public bool HasActiveTest => false;
-
         public bool ExitCommitted { get; private set; }
 
         public TaskCompletionSource ExitEntered { get; } =
@@ -720,14 +601,11 @@ public sealed class AgentSessionCoordinatorTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task NotifyClientsAsync(ShutdownReason reason, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task RequestTestCancellationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task TerminateExternalToolJobsAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task StopMonitoringAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<bool> RestoreTemporarySystemStateAsync(CancellationToken cancellationToken) => Task.FromResult(true);
         public Task<int> FlushSqliteQueuesAsync(CancellationToken cancellationToken) => Task.FromResult(0);
         public Task CloseNamedPipesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task CloseMainApplicationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task StopSupervisedProcessesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task RemoveTrayIconAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task ExitAgentAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 

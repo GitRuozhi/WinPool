@@ -9,13 +9,6 @@ namespace WinPool.Infrastructure.Windows;
 /// </summary>
 public sealed class PdhDiskMonitorSource : IMonitorSource
 {
-    private readonly Func<bool> isTestActive;
-
-    public PdhDiskMonitorSource(Func<bool>? isTestActive = null)
-    {
-        this.isTestActive = isTestActive ?? (() => false);
-    }
-
     public async IAsyncEnumerable<MonitorSample> SampleAsync(
         MonitorRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -51,8 +44,7 @@ public sealed class PdhDiskMonitorSource : IMonitorSource
                                 target.ObjectId.Kind,
                                 $"pdh-storage-spaces:{discovered.InstanceName}"),
                             sampledAtUtc,
-                            RequestedVirtualDiskValues(request.Metrics, discovered),
-                            isTestActive());
+                            RequestedVirtualDiskValues(request.Metrics, discovered));
                     }
 
                     continue;
@@ -69,8 +61,7 @@ public sealed class PdhDiskMonitorSource : IMonitorSource
                                 target.ObjectId.Kind,
                                 $"pdh:{discovered.InstanceName}"),
                             sampledAtUtc,
-                            RequestedValues(request.Metrics, discovered),
-                            isTestActive());
+                            RequestedValues(request.Metrics, discovered));
                     }
 
                     continue;
@@ -86,8 +77,7 @@ public sealed class PdhDiskMonitorSource : IMonitorSource
                     request.SessionId,
                     target.ObjectId,
                     sampledAtUtc,
-                    values,
-                    isTestActive());
+                    values);
             }
         }
     }

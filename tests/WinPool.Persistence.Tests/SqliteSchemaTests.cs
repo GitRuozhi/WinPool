@@ -9,17 +9,13 @@ public sealed class SqliteSchemaTests
 {
     private static readonly string[] RequiredTables =
     [
-        "schema_info", "workspace_state", "test_presets", "systems",
+        "schema_info", "workspace_state", "systems",
         "inventory_snapshots", "local_inventory_document", "storage_objects", "storage_relationships",
         "operation_plans", "operation_steps", "execution_events",
-        "simulation_documents", "simulation_edit_commits", "system_support_audit_events",
-        "system_support_recovery",
+        "simulation_documents", "simulation_edit_commits",
         "monitor_sessions", "monitor_devices", "monitor_samples", "storage_health_events",
         "monitor_rollups",
-        "test_definitions", "test_runs", "test_steps", "test_events", "test_metrics",
-        "latency_histograms", "copy_batch_manifests", "copy_batches",
-        "copy_batch_entries", "artifacts", "algorithm_registry",
-        "inventory_comparisons", "external_tools", "tool_install_events",
+        "inventory_comparisons",
         "agent_sessions", "worker_processes"
     ];
 
@@ -142,7 +138,6 @@ public sealed class SqliteSchemaTests
         {
             await using var downgrade = connection.CreateCommand();
             downgrade.CommandText = """
-                ALTER TABLE test_runs DROP COLUMN plan_json;
                 UPDATE schema_info
                 SET schema_version = 7
                 WHERE singleton = 1;
@@ -210,7 +205,7 @@ public sealed class SqliteSchemaTests
     }
 
     [Theory]
-    [InlineData("DROP TABLE external_tools;", "tables")]
+    [InlineData("DROP TABLE worker_processes;", "tables")]
     [InlineData("ALTER TABLE worker_processes DROP COLUMN owns_job_object;", "worker_processes.columns")]
     [InlineData("DROP INDEX ix_worker_processes_live_pid;", "worker_processes.indexes")]
     public async Task CurrentSchemaMismatchIsRejectedWithoutChangingItsFiles(
@@ -266,7 +261,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 13, 0);
+        VALUES(1, 14, 0);
         """,
         "schema_info.checks")]
     [InlineData(
@@ -318,8 +313,7 @@ public sealed class SqliteSchemaTests
                 new(MonitorMetricKind.ReadBytesPerSecond, 1_024),
                 new(MonitorMetricKind.WriteBytesPerSecond, 2_048),
                 new(MonitorMetricKind.AverageQueueLength, 3)
-            ],
-            MayBeAffectedByActiveTest: true);
+            ]);
         var persistedDeviceId = MonitorSampleBatchWriter.PersistedDeviceId(first);
 
         await using (var connection = await database.Store.OpenConnectionAsync())
@@ -357,7 +351,7 @@ public sealed class SqliteSchemaTests
         await using var verify = await database.Store.OpenConnectionAsync();
         await using var query = verify.CreateCommand();
         query.CommandText = """
-            SELECT COUNT(*), MIN(activity_pct), MIN(sample_flags)
+            SELECT COUNT(*), MIN(activity_pct)
             FROM monitor_samples
             WHERE session_id=$session AND device_id=$device;
             """;
@@ -367,7 +361,6 @@ public sealed class SqliteSchemaTests
         Assert.True(await reader.ReadAsync());
         Assert.Equal(2, reader.GetInt64(0));
         Assert.Equal(42, reader.GetDouble(1));
-        Assert.Equal(1, reader.GetInt64(2));
         Assert.DoesNotContain("SECRET", persistedDeviceId, StringComparison.Ordinal);
     }
 

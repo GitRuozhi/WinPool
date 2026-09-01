@@ -17,10 +17,14 @@ public sealed class SqliteMigrationAuditorTests
         {
             await using var insert = connection.CreateCommand();
             insert.CommandText = """
-                INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
+                INSERT INTO simulation_documents(
+                    document_id, document_schema_version, display_name,
+                    sanitized_json, sha256, revision, created_at_utc_ms, updated_at_utc_ms)
                 VALUES
-                    ('migration-a', '{"value":1}', 100, 100),
-                    ('migration-b', '{"value":2}', 200, 200);
+                    ('migration-a', 1, 'A', '{"value":1}',
+                        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 100, 100),
+                    ('migration-b', 1, 'B', '{"value":2}',
+                        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 1, 200, 200);
                 PRAGMA wal_checkpoint(TRUNCATE);
                 """;
             await insert.ExecuteNonQueryAsync();
@@ -34,10 +38,10 @@ public sealed class SqliteMigrationAuditorTests
         Assert.True(source.IsHealthy);
         Assert.Equal(WinPoolSqliteStore.CurrentSchemaVersion, source.SchemaVersion);
         Assert.True(source.HasSameLogicalIdentity(destination));
-        var presets = source.Tables.Single(item => item.TableName == "test_presets");
-        Assert.Equal(2, presets.RowCount);
-        Assert.Equal(["preset_id"], presets.PrimaryKeyColumns);
-        Assert.Equal(64, presets.PrimaryKeySha256.Length);
+        var documents = source.Tables.Single(item => item.TableName == "simulation_documents");
+        Assert.Equal(2, documents.RowCount);
+        Assert.Equal(["document_id"], documents.PrimaryKeyColumns);
+        Assert.Equal(64, documents.PrimaryKeySha256.Length);
     }
 
     [Fact]
@@ -59,18 +63,21 @@ public sealed class SqliteMigrationAuditorTests
             second.Tables.Select(item => item.RowCount));
     }
 
-    private static async Task CreateWithPresetAsync(string path, string presetId)
+    private static async Task CreateWithPresetAsync(string path, string documentId)
     {
         var store = new WinPoolSqliteStore(path);
         await store.InitializeAsync();
         await using var connection = await store.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
-            VALUES($presetId, '{}', 1, 1);
+            INSERT INTO simulation_documents(
+                document_id, document_schema_version, display_name,
+                sanitized_json, sha256, revision, created_at_utc_ms, updated_at_utc_ms)
+            VALUES($documentId, 1, 'Test', '{}',
+                'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 1, 1, 1);
             PRAGMA wal_checkpoint(TRUNCATE);
             """;
-        command.Parameters.AddWithValue("$presetId", presetId);
+        command.Parameters.AddWithValue("$documentId", documentId);
         await command.ExecuteNonQueryAsync();
     }
 

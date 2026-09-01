@@ -40,7 +40,6 @@ public sealed class AgentClientEventFanoutTests
             new AgentInstanceId(Guid.NewGuid()),
             true,
             null,
-            null,
             new AgentShutdownStatus(
                 AgentLifecycleState.Running,
                 null,

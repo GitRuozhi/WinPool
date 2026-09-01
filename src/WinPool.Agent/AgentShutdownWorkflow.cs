@@ -6,14 +6,11 @@ public enum AgentShutdownStep
 {
     MarkShuttingDown,
     NotifyClients,
-    RequestTestCancellation,
-    TerminateExternalToolJobs,
     StopMonitoring,
     RestoreTemporarySystemState,
     FlushSqliteQueues,
     CloseNamedPipes,
     CloseMainApplication,
-    StopSupervisedProcesses,
     RemoveTrayIcon,
     ExitAgent
 }
@@ -29,15 +26,9 @@ public sealed record AgentShutdownExecution(
 /// </summary>
 public interface IAgentShutdownActions
 {
-    bool HasActiveTest { get; }
-
     Task NotifyClientsAsync(
         ShutdownReason reason,
         CancellationToken cancellationToken);
-
-    Task RequestTestCancellationAsync(CancellationToken cancellationToken);
-
-    Task TerminateExternalToolJobsAsync(CancellationToken cancellationToken);
 
     Task StopMonitoringAsync(CancellationToken cancellationToken);
 
@@ -48,8 +39,6 @@ public interface IAgentShutdownActions
     Task CloseNamedPipesAsync(CancellationToken cancellationToken);
 
     Task CloseMainApplicationAsync(CancellationToken cancellationToken);
-
-    Task StopSupervisedProcessesAsync(CancellationToken cancellationToken);
 
     Task RemoveTrayIconAsync(CancellationToken cancellationToken);
 
@@ -126,8 +115,6 @@ public sealed class AgentShutdownWorkflow
         }
     }
 
-    public bool HasActiveTest => actions.HasActiveTest;
-
     public async Task<AgentShutdownExecution> ExecuteAsync(ShutdownReason reason)
     {
         var attempt = new AgentShutdownAttempt(Interlocked.Increment(ref nextAttemptId));
@@ -142,18 +129,6 @@ public sealed class AgentShutdownWorkflow
         await RunBoundedShutdownStepAsync(
             AgentShutdownStep.NotifyClients,
             token => actions.NotifyClientsAsync(reason, token),
-            completed,
-            failed,
-            attempt);
-        await RunBoundedShutdownStepAsync(
-            AgentShutdownStep.RequestTestCancellation,
-            actions.RequestTestCancellationAsync,
-            completed,
-            failed,
-            attempt);
-        await RunBoundedShutdownStepAsync(
-            AgentShutdownStep.TerminateExternalToolJobs,
-            actions.TerminateExternalToolJobsAsync,
             completed,
             failed,
             attempt);
@@ -188,12 +163,6 @@ public sealed class AgentShutdownWorkflow
                 failed,
                 attempt);
         }
-        await RunBoundedShutdownStepAsync(
-            AgentShutdownStep.StopSupervisedProcesses,
-            actions.StopSupervisedProcessesAsync,
-            completed,
-            failed,
-            attempt);
 
         var remainingProcessIds = processRegistry.Snapshot()
             .Where(process =>

@@ -95,36 +95,6 @@ public sealed class MonitoringAlgorithmTests
         Assert.Equal(4, rollup.MissingCount);
     }
 
-    [Fact]
-    public void IdleDetectorRequiresFreshCompleteSamplesAndAllTargetsIdle()
-    {
-        var now = DateTimeOffset.Parse("2026-08-01T10:00:00Z");
-        var policy = MonitorIdlePolicy.CopyBatchDefault;
-        var idle = MonitorIdleDetector.Evaluate(
-            [CreateStorageSample(0, now, 2, 0.1, 100_000, 200_000)],
-            policy,
-            now);
-        Assert.True(idle.IsIdle);
-        Assert.Equal(1, idle.QualifiedTargetCount);
-
-        var busy = MonitorIdleDetector.Evaluate(
-            [
-                CreateStorageSample(0, now, 2, 0.1, 100_000, 200_000),
-                CreateStorageSample(1, now, 6, 0.1, 0, 0)
-            ],
-            policy,
-            now);
-        Assert.False(busy.IsIdle);
-        Assert.Equal(6, busy.MaximumActivityPercent);
-
-        var stale = MonitorIdleDetector.Evaluate(
-            [CreateStorageSample(0, now.AddSeconds(-4), 0, 0, 0, 0)],
-            policy,
-            now);
-        Assert.False(stale.IsIdle);
-        Assert.Equal(0, stale.QualifiedTargetCount);
-    }
-
     private static MonitorSample CreateSample(int index)
     {
         var system = new SystemId(Guid.Parse("11111111-1111-1111-1111-111111111111"));
@@ -132,8 +102,7 @@ public sealed class MonitoringAlgorithmTests
             new SessionId(Guid.Parse("22222222-2222-2222-2222-222222222222")),
             new StorageObjectId(system, StorageObjectKind.PhysicalDisk, $"disk-{index}"),
             DateTimeOffset.UnixEpoch.AddSeconds(index),
-            [],
-            false);
+            []);
     }
 
     private static MonitorSample CreateStorageSample(
@@ -154,8 +123,7 @@ public sealed class MonitoringAlgorithmTests
                 new(MonitorMetricKind.AverageQueueLength, queue),
                 new(MonitorMetricKind.ReadBytesPerSecond, readBytes),
                 new(MonitorMetricKind.WriteBytesPerSecond, writeBytes)
-            ],
-            true);
+            ]);
     }
 
     private sealed class FakeClock : IMonotonicClock

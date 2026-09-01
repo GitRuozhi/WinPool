@@ -11,13 +11,6 @@
     <Project Path="src/WinPool.Ipc/WinPool.Ipc.csproj" />
     <Project Path="src/WinPool.Inventory/WinPool.Inventory.csproj" />
     <Project Path="src/WinPool.Monitoring/WinPool.Monitoring.csproj" />
-    <Project Path="src/WinPool.Testing/WinPool.Testing.csproj" />
-    <Project Path="src/WinPool.Testing.Tools/WinPool.Testing.Tools.csproj" />
-    <Project Path="src/WinPool.ToolManagement/WinPool.ToolManagement.csproj" />
-  </Folder>
-  <Folder Name="/workers/">
-    <Project Path="workers/WinPool.ElevatedBroker/WinPool.ElevatedBroker.csproj" />
-    <Project Path="workers/WinPool.TestWorker/WinPool.TestWorker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WinPool.Agent.Tests/WinPool.Agent.Tests.csproj" />
@@ -31,10 +24,5 @@
     <Project Path="tests/WinPool.Inventory.Tests/WinPool.Inventory.Tests.csproj" />
     <Project Path="tests/WinPool.Monitoring.Tests/WinPool.Monitoring.Tests.csproj" />
     <Project Path="tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj" />
-    <Project Path="tests/WinPool.Testing.Tests/WinPool.Testing.Tests.csproj" />
-    <Project Path="tests/WinPool.Testing.Tools.Tests/WinPool.Testing.Tools.Tests.csproj" />
-    <Project Path="tests/WinPool.TestWorker.Tests/WinPool.TestWorker.Tests.csproj" />
-    <Project Path="tests/WinPool.TestWorker.Tests/Helper/WinPool.TestWorker.ProcessHelper.csproj" />
-    <Project Path="tests/WinPool.ToolManagement.Tests/WinPool.ToolManagement.Tests.csproj" />
   </Folder>
 </Solution>

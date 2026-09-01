@@ -228,7 +228,6 @@ public sealed class LocalizationService : ObservableObject
             ["PortableLocation"] = ("软件目录（便携）", "App folder (portable)"),
             ["DataLocationSwitched"] = ("数据存储位置已切换，已有数据已迁移。", "Data location changed; existing data was migrated."),
             ["DataLocationFailed"] = ("无法切换数据存储位置：目标目录不可写。", "The data location could not be changed: the target folder is not writable."),
-            ["ExternalTools"] = ("外部工具", "External tools"),
             ["BackgroundMonitoring"] = ("后台持续监控", "Keep monitoring in background"),
             ["ContinuousMonitoring"] = ("持续监控", "Continuous monitoring"),
             ["MonitoringEvents"] = ("事件", "Events"),

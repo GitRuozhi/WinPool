@@ -5,10 +5,7 @@ namespace WinPool.Agent;
 public enum AgentManagedProcessKind
 {
     MainApplication,
-    TestWorker,
-    InventoryWorker,
-    ElevatedBroker,
-    ExternalTool
+    InventoryWorker
 }
 
 public sealed record AgentManagedProcess(
@@ -346,7 +343,6 @@ public sealed class AgentProcessRegistry
 
     private static bool RequiresHeartbeat(AgentManagedProcessKind kind) =>
         kind is AgentManagedProcessKind.MainApplication
-            or AgentManagedProcessKind.TestWorker
             or AgentManagedProcessKind.InventoryWorker;
 
     private static DateTimeOffset Max(DateTimeOffset left, DateTimeOffset right) =>

@@ -126,16 +126,6 @@ public sealed class DefaultOperationPlanner(IOperationInventoryVersionSource inv
             "Re-evaluate policy and capabilities immediately before execution."
         };
 
-        if (definition.MinimumRisk == RiskLevel.R2RecoverableFileWrite)
-        {
-            preconditions.Add("Validate the selected run directory and registered-file manifest.");
-        }
-
-        if (definition.MinimumRisk == RiskLevel.R3ControlledSystemSupport)
-        {
-            preconditions.Add("Record the action and capture state required for restoration.");
-        }
-
         if (OperationSecurityCatalog.IsStorageStructureMutation(request.Intent))
         {
             preconditions.Add("A production local-storage mutation executor is intentionally unavailable in the current WinPool release.");
@@ -155,12 +145,6 @@ public sealed class DefaultOperationPlanner(IOperationInventoryVersionSource inv
             new("execute", $"Execute the typed {request.Intent} adapter.", ["revalidate"], true),
             new("verify", "Verify post-operation state and record an audit event.", ["execute"])
         };
-
-        if (definition.MinimumRisk == RiskLevel.R3ControlledSystemSupport &&
-            request.Intent is OperationIntent.AdjustProcessScheduling or OperationIntent.UseTemporaryPowerPlan)
-        {
-            steps.Add(new("restore", "Restore the recorded reversible system setting.", ["execute"]));
-        }
 
         return steps;
     }

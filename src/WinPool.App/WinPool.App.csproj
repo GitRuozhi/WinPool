@@ -59,8 +59,6 @@
     <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\WinPool.Infrastructure.Sqlite\WinPool.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\WinPool.Monitoring\WinPool.Monitoring.csproj" />
-    <ProjectReference Include="..\WinPool.ToolManagement\WinPool.ToolManagement.csproj" />
-    <ProjectReference Include="..\WinPool.Testing\WinPool.Testing.csproj" />
   </ItemGroup>
 
   <Target Name="BuildAgentRuntime" AfterTargets="Build">

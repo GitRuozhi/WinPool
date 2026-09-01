@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Application;
 using WinPool.Domain;
-using WinPool.ToolManagement;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -160,117 +159,8 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
         preferences with
         {
             FormatVersion = CurrentFormatVersion,
-            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20),
-            CustomToolPaths = preferences.CustomToolPaths is null
-                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                : preferences.CustomToolPaths
-                    .Where(pair => !string.IsNullOrWhiteSpace(pair.Key)
-                        && !string.IsNullOrWhiteSpace(pair.Value)
-                        && Path.IsPathFullyQualified(pair.Value))
-                    .ToDictionary(
-                        pair => pair.Key,
-                        pair => Path.GetFullPath(pair.Value),
-                        StringComparer.OrdinalIgnoreCase)
+            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20)
         };
-}
-
-/// <summary>
-/// Stores registered external-tool overrides inside the sole user-preferences
-/// document. It keeps an immutable in-memory view for synchronous discovery
-/// while serializing changes through the preference service's atomic writer.
-/// </summary>
-public sealed class PreferencesToolPathConfiguration : IMutableToolPathConfiguration
-{
-    private readonly IUserPreferencesService preferencesService;
-    private readonly SemaphoreSlim writeGate = new(1, 1);
-    private IReadOnlyDictionary<string, string> paths;
-
-    public PreferencesToolPathConfiguration(IUserPreferencesService preferencesService)
-        : this(
-            preferencesService,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))
-    {
-    }
-
-    private PreferencesToolPathConfiguration(
-        IUserPreferencesService preferencesService,
-        IReadOnlyDictionary<string, string> paths)
-    {
-        this.preferencesService = preferencesService
-            ?? throw new ArgumentNullException(nameof(preferencesService));
-        this.paths = paths;
-    }
-
-    public static async Task<PreferencesToolPathConfiguration> CreateAsync(
-        IUserPreferencesService preferencesService,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(preferencesService);
-        var preferences = await preferencesService.LoadAsync(cancellationToken);
-        return new PreferencesToolPathConfiguration(
-            preferencesService,
-            Normalize(preferences.CustomToolPaths));
-    }
-
-    public string? GetCustomExecutablePath(ToolId toolId) =>
-        paths.TryGetValue(toolId.Value, out var path) ? path : null;
-
-    public async Task SetCustomExecutablePathAsync(
-        ToolId toolId,
-        string? executablePath,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(toolId.Value))
-        {
-            throw new ArgumentException("A ToolId is required.", nameof(toolId));
-        }
-        if (!string.IsNullOrWhiteSpace(executablePath)
-            && !Path.IsPathFullyQualified(executablePath))
-        {
-            throw new ArgumentException(
-                "A custom tool path must be fully qualified.",
-                nameof(executablePath));
-        }
-
-        await writeGate.WaitAsync(cancellationToken);
-        try
-        {
-            var latest = await preferencesService.LoadAsync(cancellationToken);
-            var updated = new Dictionary<string, string>(
-                Normalize(latest.CustomToolPaths),
-                StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrWhiteSpace(executablePath))
-            {
-                updated.Remove(toolId.Value);
-            }
-            else
-            {
-                updated[toolId.Value] = Path.GetFullPath(executablePath);
-            }
-
-            paths = new Dictionary<string, string>(updated, StringComparer.OrdinalIgnoreCase);
-            await preferencesService.SaveAsync(
-                latest with { FormatVersion = 1, CustomToolPaths = paths },
-                cancellationToken);
-        }
-        finally
-        {
-            writeGate.Release();
-        }
-    }
-
-    private static IReadOnlyDictionary<string, string> Normalize(
-        IReadOnlyDictionary<string, string>? values) =>
-        values is null
-            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            : values
-                .Where(pair => !string.IsNullOrWhiteSpace(pair.Key)
-                    && !string.IsNullOrWhiteSpace(pair.Value)
-                    && Path.IsPathFullyQualified(pair.Value))
-                .ToDictionary(
-                    pair => pair.Key,
-                    pair => Path.GetFullPath(pair.Value),
-                    StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class LocalWorkspaceStateService : IWorkspaceStateService

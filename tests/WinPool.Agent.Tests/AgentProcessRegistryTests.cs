@@ -16,15 +16,19 @@ public sealed class AgentProcessRegistryTests
             startedAt);
         var testWorker = Create(
             102,
-            AgentManagedProcessKind.TestWorker,
+            AgentManagedProcessKind.InventoryWorker,
             startedAt);
         var broker = Create(
             103,
-            AgentManagedProcessKind.ElevatedBroker,
+            AgentManagedProcessKind.MainApplication,
             startedAt);
         Assert.True(registry.TryRegister(mainApplication));
         Assert.True(registry.TryRegister(testWorker));
         Assert.True(registry.TryRegister(broker));
+        Assert.True(registry.TryRecordHeartbeat(
+            broker.ProcessInstanceId,
+            broker.ProcessId,
+            startedAt.AddSeconds(5)));
 
         var unresponsive = registry.SweepUnresponsive(
             startedAt.AddSeconds(16),
@@ -52,7 +56,7 @@ public sealed class AgentProcessRegistryTests
         var startedAt = DateTimeOffset.UtcNow;
         var registration = Create(
             201,
-            AgentManagedProcessKind.ExternalTool,
+            AgentManagedProcessKind.MainApplication,
             startedAt,
             ownsJobObject: true);
         Assert.True(registry.TryRegister(registration));
@@ -90,7 +94,7 @@ public sealed class AgentProcessRegistryTests
 
         var reused = Create(
             201,
-            AgentManagedProcessKind.ExternalTool,
+            AgentManagedProcessKind.MainApplication,
             deadline.AddSeconds(2));
         Assert.True(registry.TryRegister(reused));
         Assert.Equal(reused.ProcessInstanceId, registry.Snapshot().Single().ProcessInstanceId);
@@ -122,7 +126,7 @@ public sealed class AgentProcessRegistryTests
             var processId = 1_000 + index;
             var registration = Create(
                 processId,
-                AgentManagedProcessKind.ExternalTool,
+                AgentManagedProcessKind.MainApplication,
                 startedAt.AddSeconds(index));
             Assert.True(registry.TryRegister(registration));
             Assert.True(registry.TryMarkExited(
@@ -139,7 +143,7 @@ public sealed class AgentProcessRegistryTests
 
         Assert.True(registry.TryRegister(Create(
             1_000,
-            AgentManagedProcessKind.ExternalTool,
+            AgentManagedProcessKind.MainApplication,
             startedAt.AddHours(1))));
     }
 

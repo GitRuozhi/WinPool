@@ -44,5 +44,4 @@ public sealed record UserPreferences(
     bool ContinuousMonitoringEnabled = false,
     double MonitoringSampleRateHz = 5,
     string LastActivePage = "Manage",
-    int FormatVersion = 1,
-    IReadOnlyDictionary<string, string>? CustomToolPaths = null);
+    int FormatVersion = 1);

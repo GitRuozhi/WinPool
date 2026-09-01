@@ -111,8 +111,7 @@ internal sealed class SqliteMonitorSessionPersistence
                 session.SessionId,
                 target.ObjectId,
                 session.CreatedAtUtc,
-                [],
-                false);
+                []);
             await devices.UpsertAsync(
                 new PersistedMonitorDevice(
                     session.SessionId,

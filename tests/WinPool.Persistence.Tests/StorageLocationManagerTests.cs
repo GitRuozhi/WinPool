@@ -147,8 +147,11 @@ public sealed class StorageLocationManagerTests
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                INSERT INTO test_presets(preset_id, json, created_at_utc_ms, updated_at_utc_ms)
-                VALUES('migration-rehearsal', '{"enabled":true}', 1, 1);
+                INSERT INTO simulation_documents(
+                    document_id, document_schema_version, display_name,
+                    sanitized_json, sha256, revision, created_at_utc_ms, updated_at_utc_ms)
+                VALUES('migration-rehearsal', 1, 'Rehearsal', '{"enabled":true}',
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 1);
                 PRAGMA wal_checkpoint(TRUNCATE);
                 """;
             await command.ExecuteNonQueryAsync();

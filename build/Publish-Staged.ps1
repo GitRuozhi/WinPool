@@ -33,9 +33,7 @@ New-Item -ItemType Directory -Path $stageRoot | Out-Null
 
 $publishProjects = @(
     (Join-Path $repositoryRoot 'src\WinPool.App\WinPool.App.csproj'),
-    (Join-Path $repositoryRoot 'src\WinPool.Agent\WinPool.Agent.csproj'),
-    (Join-Path $repositoryRoot 'workers\WinPool.TestWorker\WinPool.TestWorker.csproj'),
-    (Join-Path $repositoryRoot 'workers\WinPool.ElevatedBroker\WinPool.ElevatedBroker.csproj')
+    (Join-Path $repositoryRoot 'src\WinPool.Agent\WinPool.Agent.csproj')
 )
 
 foreach ($project in $publishProjects) {
@@ -60,8 +58,6 @@ if ($LASTEXITCODE -ne 0) {
 $requiredExecutables = @{
     'WinPool.App.exe' = 'WinPool.App.exe'
     'WinPool.Agent.exe' = 'Agent/WinPool.Agent.exe'
-    'WinPool.TestWorker.exe' = 'Agent/TestWorker/WinPool.TestWorker.exe'
-    'WinPool.ElevatedBroker.exe' = 'Agent/Broker/WinPool.ElevatedBroker.exe'
 }
 
 $allFiles = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File)

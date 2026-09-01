@@ -242,8 +242,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     new AgentInstanceId(reply.AgentSessionId),
                     reply.AgentProcessId,
                     AgentCapability.Monitoring
-                    | AgentCapability.Testing
-                    | AgentCapability.ToolManagement
+                    | AgentCapability.Inventory
                     | AgentCapability.Tray
                     | AgentCapability.Persistence,
                     endpoint.StartedAtUtc);
@@ -857,9 +856,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             nameof(AgentTaskEvent) => payload.Event.Deserialize<AgentTaskEvent>(JsonOptions),
             nameof(AgentMonitorSampleEvent) =>
                 payload.Event.Deserialize<AgentMonitorSampleEvent>(JsonOptions),
-            nameof(AgentTestEvent) => payload.Event.Deserialize<AgentTestEvent>(JsonOptions),
-            nameof(AgentToolStateEvent) =>
-                payload.Event.Deserialize<AgentToolStateEvent>(JsonOptions),
             nameof(AgentProcessStateEvent) =>
                 payload.Event.Deserialize<AgentProcessStateEvent>(JsonOptions),
             nameof(AgentShutdownEvent) =>
@@ -873,24 +869,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         request switch
         {
             GetAgentSnapshotRequest => AgentControlMessageTypes.GetSnapshot,
-            GetDevelopmentDiagnosticsRequest =>
-                AgentControlMessageTypes.GetDevelopmentDiagnostics,
             OpenMainWindowRequest => AgentControlMessageTypes.OpenMainWindow,
             OpenAgentNativePropertiesRequest => AgentControlMessageTypes.OpenNativeProperties,
             StartAgentMonitoringRequest => AgentControlMessageTypes.StartMonitoring,
             StopAgentMonitoringRequest => AgentControlMessageTypes.StopMonitoring,
-            StartAgentTestRequest => AgentControlMessageTypes.StartTest,
-            CancelAgentTestRequest => AgentControlMessageTypes.CancelTest,
-            PauseAgentTestRequest => AgentControlMessageTypes.PauseTest,
-            ResumeAgentTestRequest => AgentControlMessageTypes.ResumeTest,
-            GetAgentTestResultRequest => AgentControlMessageTypes.GetTestResult,
-            ListAgentTestRunsRequest => AgentControlMessageTypes.ListTestRuns,
-            ListUserTestPresetsRequest =>
-                AgentControlMessageTypes.ListUserTestPresets,
-            SaveUserTestPresetRequest =>
-                AgentControlMessageTypes.SaveUserTestPreset,
-            DeleteUserTestPresetRequest =>
-                AgentControlMessageTypes.DeleteUserTestPreset,
             LoadAgentWorkspaceStateRequest =>
                 AgentControlMessageTypes.LoadWorkspaceState,
             SaveAgentWorkspaceStateRequest =>
@@ -903,27 +885,12 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.DeleteSimulationDocument,
             CommitAgentSimulationEditRequest =>
                 AgentControlMessageTypes.CommitSimulationEdit,
-            PersistDiteLegacyImportRequest =>
-                AgentControlMessageTypes.PersistDiteLegacyImport,
-            ListDiteLegacyImportsRequest =>
-                AgentControlMessageTypes.ListDiteLegacyImports,
-            GetDiteLegacyImportSummaryRequest =>
-                AgentControlMessageTypes.GetDiteLegacyImportSummary,
-            ExportAgentTestRunRequest => AgentControlMessageTypes.ExportTestRun,
             CaptureAgentInventoryRequest => AgentControlMessageTypes.CaptureInventory,
             CaptureAgentManageInventoryRequest =>
                 AgentControlMessageTypes.CaptureManageInventory,
             LoadAgentManageInventoryRequest =>
                 AgentControlMessageTypes.LoadManageInventory,
-            DetectAgentToolRequest => AgentControlMessageTypes.DetectTool,
-            ConfigureAgentToolPathRequest =>
-                AgentControlMessageTypes.ConfigureToolPath,
-            InstallAgentMsiToolRequest => AgentControlMessageTypes.InstallMsiTool,
             ExportAgentMonitorCsvRequest => AgentControlMessageTypes.ExportMonitorCsv,
-            ReviewAgentSystemSupportRequest =>
-                AgentControlMessageTypes.ReviewSystemSupport,
-            ExecuteAgentSystemSupportRequest =>
-                AgentControlMessageTypes.ExecuteSystemSupport,
             RequestAgentShutdownRequest => AgentControlMessageTypes.Shutdown,
             _ => throw new NotSupportedException(
                 $"Unsupported Agent request {request.GetType().Name}.")
@@ -944,24 +911,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<AgentAcknowledgement>(JsonOptions),
             nameof(AgentSnapshotResponse) =>
                 response.Deserialize<AgentSnapshotResponse>(JsonOptions),
-            nameof(DevelopmentDiagnosticsResponse) =>
-                response.Deserialize<DevelopmentDiagnosticsResponse>(JsonOptions),
             nameof(MonitoringSessionResponse) =>
                 response.Deserialize<MonitoringSessionResponse>(JsonOptions),
-            nameof(ToolStateResponse) =>
-                response.Deserialize<ToolStateResponse>(JsonOptions),
-            nameof(MsiToolInstallResponse) =>
-                response.Deserialize<MsiToolInstallResponse>(JsonOptions),
-            nameof(TestRunResultResponse) =>
-                response.Deserialize<TestRunResultResponse>(JsonOptions),
-            nameof(TestRunHistoryResponse) =>
-                response.Deserialize<TestRunHistoryResponse>(JsonOptions),
-            nameof(UserTestPresetListResponse) =>
-                response.Deserialize<UserTestPresetListResponse>(JsonOptions),
-            nameof(UserTestPresetSavedResponse) =>
-                response.Deserialize<UserTestPresetSavedResponse>(JsonOptions),
-            nameof(UserTestPresetDeletedResponse) =>
-                response.Deserialize<UserTestPresetDeletedResponse>(JsonOptions),
             nameof(WorkspaceStateLoadedResponse) =>
                 response.Deserialize<WorkspaceStateLoadedResponse>(JsonOptions),
             nameof(WorkspaceStateSavedResponse) =>
@@ -972,12 +923,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<SimulationDocumentSavedResponse>(JsonOptions),
             nameof(SimulationDocumentDeletedResponse) =>
                 response.Deserialize<SimulationDocumentDeletedResponse>(JsonOptions),
-            nameof(DiteLegacyImportPersistenceResponse) =>
-                response.Deserialize<DiteLegacyImportPersistenceResponse>(JsonOptions),
-            nameof(DiteLegacyImportHistoryResponse) =>
-                response.Deserialize<DiteLegacyImportHistoryResponse>(JsonOptions),
-            nameof(DiteLegacyImportSummaryResponse) =>
-                response.Deserialize<DiteLegacyImportSummaryResponse>(JsonOptions),
             nameof(InventoryCaptureResponse) =>
                 response.Deserialize<InventoryCaptureResponse>(JsonOptions),
             nameof(ManageInventoryCaptureResponse) =>
@@ -986,10 +931,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<ManageInventoryLoadedResponse>(JsonOptions),
             nameof(ExportArtifactResponse) =>
                 response.Deserialize<ExportArtifactResponse>(JsonOptions),
-            nameof(SystemSupportExecutionResponse) =>
-                response.Deserialize<SystemSupportExecutionResponse>(JsonOptions),
-            nameof(SystemSupportReviewResponse) =>
-                response.Deserialize<SystemSupportReviewResponse>(JsonOptions),
             nameof(ShutdownResponse) =>
                 response.Deserialize<ShutdownResponse>(JsonOptions),
             _ => throw new InvalidDataException(

@@ -386,8 +386,7 @@ public sealed class MonitoringSessionCoordinatorTests
                 Request.SessionId,
                 target,
                 DateTimeOffset.UtcNow,
-                [new MonitorMetricValue(MonitorMetricKind.ActiveTimePercent, value)],
-                false);
+                [new MonitorMetricValue(MonitorMetricKind.ActiveTimePercent, value)]);
     }
 
     private sealed class ControlledSource : IMonitorSource

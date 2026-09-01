@@ -97,11 +97,6 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
             return PolicyDecision.Reject("policy.r5-not-implemented", "R5 operations are not implemented in the current WinPool release.");
         }
 
-        if (plan.Intent == OperationIntent.InstallExternalTool)
-        {
-            return PolicyDecision.Confirm("policy.tool-install-confirmation", "External tool installation always requires explicit confirmation.");
-        }
-
         if (context.IsReleaseBuild &&
             plan.Risk is RiskLevel.R2RecoverableFileWrite or RiskLevel.R3ControlledSystemSupport)
         {

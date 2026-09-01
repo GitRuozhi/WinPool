@@ -6,7 +6,6 @@ using WinPool.Ipc;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
 using WinPool.Monitoring;
-using WinPool.ToolManagement;
 using WinPool.Inventory;
 
 namespace WinPool.Agent;
@@ -67,13 +66,11 @@ internal static class Program
                     instanceId,
                     context.IsTrayVisible,
                     ActiveMonitoringSession: null,
-                    ActiveTestRunId: null,
                     ShutdownStatus: lifecycle.Snapshot(),
                     Processes: [],
                     LatestMonitorSamples: [],
                     RecentStorageHealthEvents: [],
-                    MonitorDiagnostics: new MonitorRuntimeDiagnostics(0, 0),
-                    CurrentToolStates: []));
+                    MonitorDiagnostics: new MonitorRuntimeDiagnostics(0, 0)));
             context.AttachCoordinator(coordinator);
             var nonce = Guid.NewGuid();
             var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
@@ -122,127 +119,20 @@ internal static class Program
             var monitoring = new MonitoringSessionCoordinator(
                 new PdhDiskMonitorSource(),
                 new SqliteMonitorSessionPersistenceFactory(store, writeOwner));
-            var toolPathConfiguration = PreferencesToolPathConfiguration
-                .CreateAsync(preferencesService)
-                .GetAwaiter()
-                .GetResult();
-            var toolCatalog = new ToolCatalog();
-            var toolRegistry = new ExternalToolRegistry(
-                toolCatalog,
-                new ToolPathDiscovery(
-                    toolPathConfiguration,
-                    new EnvironmentToolSearchPath()),
-                new WindowsToolVersionProbe(),
-                new Sha256ToolFileHasher());
             workerProcesses = new WorkerProcessRepository(store, writeOwner);
-            var testRuns = new TestRunRepository(store, writeOwner);
-            var copyBatches = new CopyBatchRepository(store, writeOwner);
-            var interruptedTestRuns = testRuns
-                .RecoverInterruptedRunsAsync(
-                    DateTimeOffset.UtcNow,
-                    CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
-            foreach (var interruptedRunId in interruptedTestRuns)
-            {
-                var interruptedPlan = testRuns
-                    .GetPlanAsync(
-                        interruptedRunId,
-                        CancellationToken.None)
-                    .GetAwaiter()
-                    .GetResult();
-                if (interruptedPlan is null)
-                {
-                    continue;
-                }
-
-                foreach (var copyStep in interruptedPlan.Steps.Where(
-                             step => step.Action is TestActionKind.Copy
-                                 && step.Parameters.ContainsKey(
-                                     "sourceRelativeDirectory")
-                                 && step.Parameters.ContainsKey(
-                                     "destinationRelativeDirectory")))
-                {
-                    copyBatches.MarkOpenBatchInterruptedAsync(
-                            interruptedRunId,
-                            copyStep.Id,
-                            DateTimeOffset.UtcNow,
-                            CancellationToken.None)
-                        .GetAwaiter()
-                        .GetResult();
-                }
-            }
-            context.ShowInterruptedTestRecoveryNotice(
-                interruptedTestRuns.Count);
-            var diteLegacyImports =
-                new DiteLegacyImportRepository(store, writeOwner);
-            var testArtifacts = new TestArtifactStore(store, writeOwner);
-            var storageHealthEvents =
-                new StorageHealthEventRepository(store, writeOwner);
-            var systemSupportAudit =
-                new SystemSupportAuditRepository(store, writeOwner);
-            var systemSupportRecoveryStore =
-                new SystemSupportRecoveryRepository(store, writeOwner);
-            var schedulingPort = new WindowsTestProcessSchedulingPort(
-                processId => IsRegisteredTestProcess(processRegistry, processId));
-            var powerPlanPort = new WindowsTemporaryPowerPlanPort(
-                new ProcessWindowsCommandRunner());
-            var systemSupportRecovery = new SystemSupportRecoveryCoordinator(
-                systemSupportRecoveryStore,
-                schedulingPort,
-                powerPlanPort,
-                systemSupportAudit,
-                processId => IsRegisteredTestProcess(processRegistry, processId),
-                IsProcessAlive);
-            var recoverySummary = systemSupportRecovery
-                .RecoverPendingAsync(CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
-            if (recoverySummary.Failed > 0)
-            {
-                context.ShowSystemSupportRecoveryWarning(recoverySummary.Failed);
-            }
+            var storageHealthEvents = new StorageHealthEventRepository(store, writeOwner);
             var initialStorageHealthEvents = storageHealthEvents
                 .ListRecentAsync(200, CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
-            var testWorkerHost = new TestWorkerProcessHost(
-                Path.Combine(
-                    AppContext.BaseDirectory,
-                    "TestWorker",
-                    "WinPool.TestWorker.exe"),
-                userHash,
-                Environment.ProcessId);
-            var elevatedBrokerHost = new ElevatedBrokerProcessHost(
-                Path.Combine(
-                    AppContext.BaseDirectory,
-                    "Broker",
-                    "WinPool.ElevatedBroker.exe"),
-                userHash,
-                Environment.ProcessId,
-                agentSessionId,
-                dataRoot);
             var runtime = new DesktopAgentRuntime(
                 context,
                 instanceId,
                 monitoring,
                 new MonitorCsvExporter(store),
                 processRegistry,
-                toolRegistry,
-                new ToolPathConfigurationCoordinator(
-                    toolCatalog,
-                    toolPathConfiguration,
-                    toolRegistry),
-                new ExternalToolStateRepository(store, writeOwner),
-                workerProcesses,
-                testRuns,
-                new UserTestPresetRepository(store, writeOwner),
                 new WorkspaceSessionStateRepository(store, writeOwner),
                 new SimulationDocumentRepository(store, writeOwner),
-                copyBatches,
-                diteLegacyImports,
-                testArtifacts,
-                new TestRunExporter(store, testRuns, testArtifacts),
                 new NativeWindowsInventoryProvider(),
                 new EmbeddedPowerShellInventoryProvider(),
                 new WindowsHardwareInventoryProvider(),
@@ -253,16 +143,6 @@ internal static class Program
                 new LocalSystemIdentityResolver(store, writeOwner),
                 processIncarnationVerifier,
                 mainApplicationExecutablePath,
-                testWorkerHost,
-                elevatedBrokerHost,
-                systemSupportAudit,
-                systemSupportRecovery,
-                new TestProcessSchedulingScope(
-                    schedulingPort,
-                    systemSupportRecoveryStore,
-                    systemSupportAudit),
-                powerPlanPort,
-                systemSupportRecoveryStore,
                 new WindowsStorageHealthEventSource(),
                 storageHealthEvents,
                 initialStorageHealthEvents,
@@ -339,16 +219,6 @@ internal static class Program
         }
     }
 
-    private static bool IsRegisteredTestProcess(
-        AgentProcessRegistry registry,
-        int processId) =>
-        registry.TryGet(processId, out var process) &&
-        process is not null &&
-        (process.Kind is AgentManagedProcessKind.TestWorker
-            or AgentManagedProcessKind.ExternalTool) &&
-        (process.State is SupervisedProcessState.Starting
-            or SupervisedProcessState.Running);
-
     private static string ResolveProductRoot()
     {
         var agentRoot = Path.TrimEndingDirectorySeparator(
@@ -358,24 +228,6 @@ internal static class Program
                && File.Exists(Path.Combine(parent, "WinPool.App.exe"))
             ? parent
             : agentRoot;
-    }
-
-    private static bool IsProcessAlive(int processId)
-    {
-        if (processId <= 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
     }
 
     private static string PublishEndpoint(AgentEndpointRecord endpoint, string dataRoot)

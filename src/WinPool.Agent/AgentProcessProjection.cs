@@ -11,10 +11,7 @@ internal static class AgentProcessProjection
             process.Kind switch
             {
                 AgentManagedProcessKind.MainApplication => WorkerKind.MainApplication,
-                AgentManagedProcessKind.TestWorker => WorkerKind.Test,
                 AgentManagedProcessKind.InventoryWorker => WorkerKind.Inventory,
-                AgentManagedProcessKind.ElevatedBroker => WorkerKind.ElevatedBroker,
-                AgentManagedProcessKind.ExternalTool => WorkerKind.ExternalTool,
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(process), process.Kind, "Unknown managed process kind.")
             },

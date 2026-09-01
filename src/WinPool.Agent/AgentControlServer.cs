@@ -61,8 +61,6 @@ public sealed class AgentControlProtocolCodec
             {
                 AgentControlMessageTypes.GetSnapshot =>
                     Deserialize<GetAgentSnapshotRequest>(envelope),
-                AgentControlMessageTypes.GetDevelopmentDiagnostics =>
-                    Deserialize<GetDevelopmentDiagnosticsRequest>(envelope),
                 AgentControlMessageTypes.OpenMainWindow =>
                     Deserialize<OpenMainWindowRequest>(envelope),
                 AgentControlMessageTypes.OpenNativeProperties =>
@@ -71,24 +69,6 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<StartAgentMonitoringRequest>(envelope),
                 AgentControlMessageTypes.StopMonitoring =>
                     Deserialize<StopAgentMonitoringRequest>(envelope),
-                AgentControlMessageTypes.StartTest =>
-                    Deserialize<StartAgentTestRequest>(envelope),
-                AgentControlMessageTypes.CancelTest =>
-                    Deserialize<CancelAgentTestRequest>(envelope),
-                AgentControlMessageTypes.PauseTest =>
-                    Deserialize<PauseAgentTestRequest>(envelope),
-                AgentControlMessageTypes.ResumeTest =>
-                    Deserialize<ResumeAgentTestRequest>(envelope),
-                AgentControlMessageTypes.GetTestResult =>
-                    Deserialize<GetAgentTestResultRequest>(envelope),
-                AgentControlMessageTypes.ListTestRuns =>
-                    Deserialize<ListAgentTestRunsRequest>(envelope),
-                AgentControlMessageTypes.ListUserTestPresets =>
-                    Deserialize<ListUserTestPresetsRequest>(envelope),
-                AgentControlMessageTypes.SaveUserTestPreset =>
-                    Deserialize<SaveUserTestPresetRequest>(envelope),
-                AgentControlMessageTypes.DeleteUserTestPreset =>
-                    Deserialize<DeleteUserTestPresetRequest>(envelope),
                 AgentControlMessageTypes.LoadWorkspaceState =>
                     Deserialize<LoadAgentWorkspaceStateRequest>(envelope),
                 AgentControlMessageTypes.SaveWorkspaceState =>
@@ -101,32 +81,14 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<DeleteAgentSimulationDocumentRequest>(envelope),
                 AgentControlMessageTypes.CommitSimulationEdit =>
                     Deserialize<CommitAgentSimulationEditRequest>(envelope),
-                AgentControlMessageTypes.PersistDiteLegacyImport =>
-                    Deserialize<PersistDiteLegacyImportRequest>(envelope),
-                AgentControlMessageTypes.ListDiteLegacyImports =>
-                    Deserialize<ListDiteLegacyImportsRequest>(envelope),
-                AgentControlMessageTypes.GetDiteLegacyImportSummary =>
-                    Deserialize<GetDiteLegacyImportSummaryRequest>(envelope),
-                AgentControlMessageTypes.ExportTestRun =>
-                    Deserialize<ExportAgentTestRunRequest>(envelope),
                 AgentControlMessageTypes.CaptureInventory =>
                     Deserialize<CaptureAgentInventoryRequest>(envelope),
                 AgentControlMessageTypes.CaptureManageInventory =>
                     Deserialize<CaptureAgentManageInventoryRequest>(envelope),
                 AgentControlMessageTypes.LoadManageInventory =>
                     Deserialize<LoadAgentManageInventoryRequest>(envelope),
-                AgentControlMessageTypes.DetectTool =>
-                    Deserialize<DetectAgentToolRequest>(envelope),
-                AgentControlMessageTypes.ConfigureToolPath =>
-                    Deserialize<ConfigureAgentToolPathRequest>(envelope),
-                AgentControlMessageTypes.InstallMsiTool =>
-                    Deserialize<InstallAgentMsiToolRequest>(envelope),
                 AgentControlMessageTypes.ExportMonitorCsv =>
                     Deserialize<ExportAgentMonitorCsvRequest>(envelope),
-                AgentControlMessageTypes.ReviewSystemSupport =>
-                    Deserialize<ReviewAgentSystemSupportRequest>(envelope),
-                AgentControlMessageTypes.ExecuteSystemSupport =>
-                    Deserialize<ExecuteAgentSystemSupportRequest>(envelope),
                 AgentControlMessageTypes.Shutdown =>
                     Deserialize<RequestAgentShutdownRequest>(envelope),
                 _ => null

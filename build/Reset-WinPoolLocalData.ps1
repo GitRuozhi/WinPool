@@ -47,9 +47,7 @@ function Assert-DescendantPath([string]$parentPath, [string]$childPath) {
 function Stop-WinPoolProcesses {
     $processNames = @(
         'WinPool.App',
-        'WinPool.Agent',
-        'WinPool.TestWorker',
-        'WinPool.ElevatedBroker'
+        'WinPool.Agent'
     )
     $running = @(Get-Process -Name $processNames -ErrorAction SilentlyContinue)
     if ($running.Count -eq 0) {

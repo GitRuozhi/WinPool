@@ -8,12 +8,4 @@
     <OutputPath>$(WinPoolLocalOutputRoot)Agent\</OutputPath>
     <OutDir>$(WinPoolLocalOutputRoot)Agent\</OutDir>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.TestWorker'">
-    <OutputPath>$(WinPoolLocalOutputRoot)Agent\TestWorker\</OutputPath>
-    <OutDir>$(WinPoolLocalOutputRoot)Agent\TestWorker\</OutDir>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.ElevatedBroker'">
-    <OutputPath>$(WinPoolLocalOutputRoot)Agent\Broker\</OutputPath>
-    <OutDir>$(WinPoolLocalOutputRoot)Agent\Broker\</OutDir>
-  </PropertyGroup>
 </Project>

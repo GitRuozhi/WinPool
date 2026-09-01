@@ -199,10 +199,10 @@ public sealed class MonitorSampleBatchWriter : IAsyncDisposable
         command.CommandText = """
             INSERT INTO monitor_samples(
                 session_id, device_id, timestamp_utc_ms, activity_pct,
-                read_bytes_per_sec, write_bytes_per_sec, queue_length, sample_flags)
+                read_bytes_per_sec, write_bytes_per_sec, queue_length)
             VALUES (
                 $session, $device, $timestamp, $activity,
-                $read, $write, $queue, $flags);
+                $read, $write, $queue);
             """;
         var session = command.Parameters.Add("$session", SqliteType.Text);
         var device = command.Parameters.Add("$device", SqliteType.Text);
@@ -211,7 +211,6 @@ public sealed class MonitorSampleBatchWriter : IAsyncDisposable
         var read = command.Parameters.Add("$read", SqliteType.Real);
         var write = command.Parameters.Add("$write", SqliteType.Real);
         var queue = command.Parameters.Add("$queue", SqliteType.Real);
-        var flags = command.Parameters.Add("$flags", SqliteType.Integer);
 
         foreach (var sample in batch)
         {
@@ -229,7 +228,6 @@ public sealed class MonitorSampleBatchWriter : IAsyncDisposable
             read.Value = Metric(sample, MonitorMetricKind.ReadBytesPerSecond);
             write.Value = Metric(sample, MonitorMetricKind.WriteBytesPerSecond);
             queue.Value = Metric(sample, MonitorMetricKind.AverageQueueLength);
-            flags.Value = sample.MayBeAffectedByActiveTest ? 1 : 0;
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 

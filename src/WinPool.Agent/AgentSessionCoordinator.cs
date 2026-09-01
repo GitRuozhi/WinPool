@@ -11,19 +11,13 @@ public interface IAgentRequestOperations
         GetAgentSnapshotRequest request,
         CancellationToken cancellationToken);
 
-    Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
-        GetDevelopmentDiagnosticsRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
-
     Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
         OpenMainWindowRequest request,
         CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
         OpenAgentNativePropertiesRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> StartMonitoringAsync(
         StartAgentMonitoringRequest request,
@@ -33,99 +27,28 @@ public interface IAgentRequestOperations
         StopAgentMonitoringRequest request,
         CancellationToken cancellationToken);
 
-    Task<ApplicationResult<AgentResponse>> StartTestAsync(
-        StartAgentTestRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> CancelTestAsync(
-        CancelAgentTestRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> PauseTestAsync(
-        PauseAgentTestRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
-        ResumeAgentTestRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> GetTestResultAsync(
-        GetAgentTestResultRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ListTestRunsAsync(
-        ListAgentTestRunsRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ListUserTestPresetsAsync(
-        ListUserTestPresetsRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> SaveUserTestPresetAsync(
-        SaveUserTestPresetRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> DeleteUserTestPresetAsync(
-        DeleteUserTestPresetRequest request,
-        CancellationToken cancellationToken);
-
     Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
         LoadAgentWorkspaceStateRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> SaveWorkspaceStateAsync(
         SaveAgentWorkspaceStateRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> ListSimulationDocumentsAsync(
         ListAgentSimulationDocumentsRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(
         SaveAgentSimulationDocumentRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> DeleteSimulationDocumentAsync(
         DeleteAgentSimulationDocumentRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> CommitSimulationEditAsync(
         CommitAgentSimulationEditRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
-
-    private static Task<ApplicationResult<AgentResponse>> UnsupportedPersistenceAsync(
-        CorrelationId correlationId) =>
-        Task.FromResult(
-            ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.Rejected,
-                correlationId,
-                new ApplicationMessage(
-                    "agent.persistence.unsupported",
-                    "Agent persistence is unavailable.",
-                    string.Empty,
-                    ApplicationMessageSeverity.Warning,
-                    [])));
-
-    Task<ApplicationResult<AgentResponse>> PersistDiteLegacyImportAsync(
-        PersistDiteLegacyImportRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ListDiteLegacyImportsAsync(
-        ListDiteLegacyImportsRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> GetDiteLegacyImportSummaryAsync(
-        GetDiteLegacyImportSummaryRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ExportTestRunAsync(
-        ExportAgentTestRunRequest request,
         CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
@@ -134,37 +57,14 @@ public interface IAgentRequestOperations
 
     Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
         CaptureAgentManageInventoryRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
+        CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
         LoadAgentManageInventoryRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
-
-    Task<ApplicationResult<AgentResponse>> DetectToolAsync(
-        DetectAgentToolRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ConfigureToolPathAsync(
-        ConfigureAgentToolPathRequest request,
-        CancellationToken cancellationToken) =>
-        UnsupportedPersistenceAsync(request.CorrelationId);
-
-    Task<ApplicationResult<AgentResponse>> InstallMsiToolAsync(
-        InstallAgentMsiToolRequest request,
         CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
         ExportAgentMonitorCsvRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ReviewSystemSupportAsync(
-        ReviewAgentSystemSupportRequest request,
-        CancellationToken cancellationToken);
-
-    Task<ApplicationResult<AgentResponse>> ExecuteSystemSupportAsync(
-        ExecuteAgentSystemSupportRequest request,
         CancellationToken cancellationToken);
 }
 
@@ -263,8 +163,6 @@ public sealed class AgentSessionCoordinator
         {
             GetAgentSnapshotRequest typed =>
                 operations.GetSnapshotAsync(typed, cancellationToken),
-            GetDevelopmentDiagnosticsRequest typed =>
-                operations.GetDevelopmentDiagnosticsAsync(typed, cancellationToken),
             OpenMainWindowRequest typed =>
                 operations.OpenMainWindowAsync(typed, cancellationToken),
             OpenAgentNativePropertiesRequest typed =>
@@ -273,24 +171,6 @@ public sealed class AgentSessionCoordinator
                 operations.StartMonitoringAsync(typed, cancellationToken),
             StopAgentMonitoringRequest typed =>
                 operations.StopMonitoringAsync(typed, cancellationToken),
-            StartAgentTestRequest typed =>
-                operations.StartTestAsync(typed, cancellationToken),
-            CancelAgentTestRequest typed =>
-                operations.CancelTestAsync(typed, cancellationToken),
-            PauseAgentTestRequest typed =>
-                operations.PauseTestAsync(typed, cancellationToken),
-            ResumeAgentTestRequest typed =>
-                operations.ResumeTestAsync(typed, cancellationToken),
-            GetAgentTestResultRequest typed =>
-                operations.GetTestResultAsync(typed, cancellationToken),
-            ListAgentTestRunsRequest typed =>
-                operations.ListTestRunsAsync(typed, cancellationToken),
-            ListUserTestPresetsRequest typed =>
-                operations.ListUserTestPresetsAsync(typed, cancellationToken),
-            SaveUserTestPresetRequest typed =>
-                operations.SaveUserTestPresetAsync(typed, cancellationToken),
-            DeleteUserTestPresetRequest typed =>
-                operations.DeleteUserTestPresetAsync(typed, cancellationToken),
             LoadAgentWorkspaceStateRequest typed =>
                 operations.LoadWorkspaceStateAsync(typed, cancellationToken),
             SaveAgentWorkspaceStateRequest typed =>
@@ -303,34 +183,14 @@ public sealed class AgentSessionCoordinator
                 operations.DeleteSimulationDocumentAsync(typed, cancellationToken),
             CommitAgentSimulationEditRequest typed =>
                 operations.CommitSimulationEditAsync(typed, cancellationToken),
-            PersistDiteLegacyImportRequest typed =>
-                operations.PersistDiteLegacyImportAsync(typed, cancellationToken),
-            ListDiteLegacyImportsRequest typed =>
-                operations.ListDiteLegacyImportsAsync(typed, cancellationToken),
-            GetDiteLegacyImportSummaryRequest typed =>
-                operations.GetDiteLegacyImportSummaryAsync(
-                    typed,
-                    cancellationToken),
-            ExportAgentTestRunRequest typed =>
-                operations.ExportTestRunAsync(typed, cancellationToken),
             CaptureAgentInventoryRequest typed =>
                 operations.CaptureInventoryAsync(typed, cancellationToken),
             CaptureAgentManageInventoryRequest typed =>
                 operations.CaptureManageInventoryAsync(typed, cancellationToken),
             LoadAgentManageInventoryRequest typed =>
                 operations.LoadManageInventoryAsync(typed, cancellationToken),
-            DetectAgentToolRequest typed =>
-                operations.DetectToolAsync(typed, cancellationToken),
-            ConfigureAgentToolPathRequest typed =>
-                operations.ConfigureToolPathAsync(typed, cancellationToken),
-            InstallAgentMsiToolRequest typed =>
-                operations.InstallMsiToolAsync(typed, cancellationToken),
             ExportAgentMonitorCsvRequest typed =>
                 operations.ExportMonitorCsvAsync(typed, cancellationToken),
-            ReviewAgentSystemSupportRequest typed =>
-                operations.ReviewSystemSupportAsync(typed, cancellationToken),
-            ExecuteAgentSystemSupportRequest typed =>
-                operations.ExecuteSystemSupportAsync(typed, cancellationToken),
             _ => Task.FromResult(RejectUnsupportedRequest(request.CorrelationId))
         };
     }
@@ -352,13 +212,6 @@ public sealed class AgentSessionCoordinator
                 if (lifecycle.State == AgentLifecycleState.Stopped && shutdownExecution is not null)
                 {
                     return ResultForExecution(shutdownExecution, request.CorrelationId);
-                }
-
-                if (lifecycle.State == AgentLifecycleState.Running
-                    && shutdownWorkflow.HasActiveTest
-                    && !request.UserConfirmedActiveTestCancellation)
-                {
-                    return RequiresActiveTestConfirmation(request.CorrelationId);
                 }
 
                 // The gate guarantees one workflow. A second request joins the first,
@@ -440,15 +293,6 @@ public sealed class AgentSessionCoordinator
             correlationId,
             Message(
                 "agent.request.unsupported_type",
-                ApplicationMessageSeverity.Warning));
-
-    private static ApplicationResult<AgentResponse> RequiresActiveTestConfirmation(
-        CorrelationId correlationId) =>
-        ApplicationResult<AgentResponse>.FromStatus(
-            ApplicationStatus.RequiresAuthorization,
-            correlationId,
-            Message(
-                "agent.shutdown.active_test_confirmation_required",
                 ApplicationMessageSeverity.Warning));
 
     private static ApplicationMessage Message(

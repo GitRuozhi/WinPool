@@ -18,8 +18,6 @@ $appExe = Join-Path $runRoot 'WinPool.App.exe'
 $requiredExecutables = [ordered]@{
     'WinPool.App.exe' = 'WinPool.App.exe'
     'WinPool.Agent.exe' = 'Agent\WinPool.Agent.exe'
-    'WinPool.TestWorker.exe' = 'Agent\TestWorker\WinPool.TestWorker.exe'
-    'WinPool.ElevatedBroker.exe' = 'Agent\Broker\WinPool.ElevatedBroker.exe'
 }
 
 function Invoke-Native([string]$fileName, [string[]]$arguments) {
@@ -30,7 +28,7 @@ function Invoke-Native([string]$fileName, [string[]]$arguments) {
 }
 
 function Stop-WinPoolProcesses {
-    $names = @('WinPool.App', 'WinPool.Agent', 'WinPool.TestWorker', 'WinPool.ElevatedBroker')
+    $names = @('WinPool.App', 'WinPool.Agent')
     $running = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
     $propertiesHosts = @(Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
         Where-Object { $_.CommandLine -like '*DeviceProperties_RunDLL*' })

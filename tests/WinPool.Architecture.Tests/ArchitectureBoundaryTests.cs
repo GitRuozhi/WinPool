@@ -14,10 +14,7 @@ public sealed class ArchitectureBoundaryTests
             ["WinPool.Ipc"] = [],
             ["WinPool.Inventory"] = ["WinPool.Application", "WinPool.Domain"],
             ["WinPool.Agent.Client"] = ["WinPool.Application", "WinPool.Ipc"],
-            ["WinPool.Monitoring"] = ["WinPool.Application", "WinPool.Domain"],
-            ["WinPool.Testing"] = ["WinPool.Application", "WinPool.Domain"],
-            ["WinPool.Testing.Tools"] = ["WinPool.Application"],
-            ["WinPool.ToolManagement"] = ["WinPool.Application"]
+            ["WinPool.Monitoring"] = ["WinPool.Application", "WinPool.Domain"]
         };
 
     [Fact]
@@ -163,6 +160,7 @@ public sealed class ArchitectureBoundaryTests
             ("docs/Product.md", "docs/Product.zh-CN.md"),
             ("docs/Development.md", "docs/Development.zh-CN.md"),
             ("docs/Quality.md", "docs/Quality.zh-CN.md"),
+            ("docs/Plan.md", "docs/Plan.zh-CN.md"),
             ("docs/Archive/V0.32/Plan.md", "docs/Archive/V0.32/Plan.zh-CN.md"),
             ("docs/Archive/V0.33/Plan.md", "docs/Archive/V0.33/Plan.zh-CN.md"),
             ("docs/Archive/V0.33/README.md", "docs/Archive/V0.33/README.zh-CN.md"),
@@ -243,11 +241,11 @@ public sealed class ArchitectureBoundaryTests
             "$(WinPoolLocalOutputRoot)Agent\\",
             directoryBuildProps,
             StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "$(WinPoolLocalOutputRoot)Agent\\TestWorker\\",
             directoryBuildProps,
             StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "$(WinPoolLocalOutputRoot)Agent\\Broker\\",
             directoryBuildProps,
             StringComparison.Ordinal);
@@ -555,7 +553,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>4</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>2</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>3</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
@@ -568,7 +566,7 @@ public sealed class ArchitectureBoundaryTests
             settingsPage,
             StringComparison.Ordinal);
         Assert.Contains(
-            "UserAgent.ParseAdd(ProductInformation.UserAgent);",
+            "OpenAsync(ProductInformation.UpdateUri)",
             settingsPage,
             StringComparison.Ordinal);
     }
@@ -693,26 +691,20 @@ public sealed class ArchitectureBoundaryTests
 
         foreach (var coordinator in new[]
                  {
-                     "AgentTestCoordinator",
-                     "AgentSystemSupportCoordinator",
                      "AgentInventoryCoordinator",
-                     "TestWorkerSupervisor",
-                     "CopyBatchRecoveryCoordinator",
-                     "CopyBatchExecutionCoordinator",
-                     "AgentTestRunWorkflow",
-                     "TestRunStartCoordinator"
+                     "AgentShutdownWorkflow",
+                     "AgentSessionCoordinator"
                  })
         {
             Assert.True(File.Exists(Path.Combine(agentRoot, coordinator + ".cs")), coordinator);
-            Assert.Contains(coordinator, runtime, StringComparison.Ordinal);
         }
 
-        Assert.Contains("systemSupportCoordinator.ReviewAsync", runtime, StringComparison.Ordinal);
-        Assert.Contains("systemSupportCoordinator.ExecuteAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("AgentInventoryCoordinator", runtime, StringComparison.Ordinal);
+        Assert.Contains("MonitoringSessionCoordinator", runtime, StringComparison.Ordinal);
         Assert.Contains("inventoryCoordinator.CaptureManageAsync", runtime, StringComparison.Ordinal);
         Assert.Contains("inventoryCoordinator.CaptureComparisonAsync", runtime, StringComparison.Ordinal);
-        Assert.Contains("testCoordinator.TryCancel", runtime, StringComparison.Ordinal);
-        Assert.Contains("testRunStartCoordinator.StartAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("monitoring.StartAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("monitoring.StopAsync", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("RunTestAsync(", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("ExecuteCopyBatchStepAsync(", runtime, StringComparison.Ordinal);
     }
@@ -730,23 +722,27 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildTestWorkerRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildElevatedBrokerRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishTestWorkerRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishElevatedBrokerRuntime", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "<ProjectReference Include=\"..\\WinPool.Agent\\WinPool.Agent.csproj\"",
             appProject,
             StringComparison.Ordinal);
-        Assert.Contains("PublishTestWorkerRuntime", agentProject, StringComparison.Ordinal);
-        Assert.Contains("PublishElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
-        Assert.Contains("BuildTestWorkerRuntime", agentProject, StringComparison.Ordinal);
-        Assert.Contains("BuildElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishTestWorkerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildTestWorkerRuntime", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyTestWorkerRuntime", agentProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
         Assert.Contains("System.IO.Path]::GetFullPath", appProject, StringComparison.Ordinal);
-        Assert.Contains("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
         Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);
         Assert.Contains("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("Agent/TestWorker/WinPool.TestWorker.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("Agent/Broker/WinPool.ElevatedBroker.exe", stagingScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Agent/TestWorker/WinPool.TestWorker.exe", stagingScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Agent/Broker/WinPool.ElevatedBroker.exe", stagingScript, StringComparison.Ordinal);
         Assert.Contains("duplicate", stagingScript, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -760,7 +756,7 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "TestPage.xaml.cs"));
 
         Assert.Contains("WinPool 2.0", view, StringComparison.Ordinal);
-        Assert.Contains("outside WinPool 1.x", view, StringComparison.Ordinal);
+        Assert.Contains("WinPool 1.x", view, StringComparison.Ordinal);
         Assert.DoesNotContain("ChooseTargetButton", view, StringComparison.Ordinal);
         Assert.DoesNotContain("NumberBox", view, StringComparison.Ordinal);
         Assert.DoesNotContain("TestDefinitionFactory", page, StringComparison.Ordinal);
@@ -841,69 +837,6 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void TestOrchestrationKeepsDurableRecoveryAroundSchedulingAndPowerChanges()
-    {
-        var root = FindRepositoryRoot();
-        var agentRoot = Path.Combine(root, "src", "WinPool.Agent");
-        var workerSupervisor = File.ReadAllText(
-            Path.Combine(agentRoot, "TestWorkerSupervisor.cs"));
-        var workflow = File.ReadAllText(
-            Path.Combine(agentRoot, "AgentTestRunWorkflow.cs"));
-
-        var register = workerSupervisor.IndexOf(
-            "await workerProcessRepository.SaveAsync(",
-            StringComparison.Ordinal);
-        var schedulingPrepare = workerSupervisor.IndexOf(
-            "await testProcessSchedulingScope.PrepareAsync(",
-            register,
-            StringComparison.Ordinal);
-        var workerRun = workerSupervisor.IndexOf(
-            "return await testWorkerHost.RunAsync(",
-            StringComparison.Ordinal);
-        var schedulingRestore = workerSupervisor.IndexOf(
-            "await testProcessSchedulingScope.RestoreAsync(",
-            schedulingPrepare,
-            StringComparison.Ordinal);
-        var powerPrepare = workflow.IndexOf(
-            "powerPlanScope = await testPowerPlanScope.PrepareAsync(",
-            StringComparison.Ordinal);
-        var localExecution = workflow.IndexOf(
-            "var localExecutor = new LocalTestStepExecutor(",
-            powerPrepare,
-            StringComparison.Ordinal);
-        var powerRestore = workflow.IndexOf(
-            "await testPowerPlanScope.RestoreAsync(",
-            powerPrepare,
-            StringComparison.Ordinal);
-        var completeRun = workflow.IndexOf(
-            "await testRunRepository.CompleteAsync(",
-            powerRestore,
-            StringComparison.Ordinal);
-
-        Assert.True(workerRun >= 0 && register >= 0);
-        Assert.True(schedulingPrepare > register);
-        Assert.True(schedulingRestore > schedulingPrepare);
-        Assert.True(powerPrepare >= 0 && localExecution > powerPrepare);
-        Assert.True(powerRestore > localExecution);
-        Assert.True(completeRun > powerRestore);
-    }
-
-    [Fact]
-    public void RetainedTestingFoundationDoesNotLeakIntoThePlaceholderPage()
-    {
-        var root = FindRepositoryRoot();
-        var page = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "TestPage.xaml.cs"));
-        var factory = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.Testing", "TestDefinitionFactory.cs"));
-
-        Assert.DoesNotContain("TestDefinitionFactory", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("IAgentConnection", page, StringComparison.Ordinal);
-        Assert.Contains("copyBatchThresholdMiB", factory, StringComparison.Ordinal);
-        Assert.Contains("MixedFileCopyVerification", factory, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void DevelopmentPageIsAWinPoolTwoRoadmapPlaceholder()
     {
         var root = FindRepositoryRoot();
@@ -912,11 +845,114 @@ public sealed class ArchitectureBoundaryTests
         var view = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml"));
         Assert.Contains("WinPool 2.0", view, StringComparison.Ordinal);
-        Assert.Contains("outside WinPool 1.x", view, StringComparison.Ordinal);
+        Assert.Contains("WinPool 1.x", view, StringComparison.Ordinal);
         Assert.DoesNotContain("TextBox", view, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GetDevelopmentDiagnosticsRequest", page, StringComparison.Ordinal);
         Assert.DoesNotContain("IAgentConnection", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Process.Start", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IpcProtocolCurrentVersionIsFour()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
+
+        Assert.Contains("public const int CurrentVersion = 4;", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("= 3;", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SqliteStoreSchemaVersionIsFourteen()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Infrastructure.Sqlite", "WinPoolSqliteStore.cs"));
+
+        Assert.Contains("public const int CurrentSchemaVersion = 14;", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("= 13;", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SolutionDoesNotContainRetiredProjects()
+    {
+        var root = FindRepositoryRoot();
+        var solution = File.ReadAllText(Path.Combine(root, "WinPool.slnx"));
+        var retired = new[]
+        {
+            "WinPool.Testing",
+            "WinPool.Testing.Tools",
+            "WinPool.ToolManagement",
+            "WinPool.TestWorker",
+            "WinPool.ElevatedBroker"
+        };
+
+        Assert.All(
+            retired,
+            name => Assert.DoesNotContain(name, solution, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NoProductionProjectReferencesRetiredSubsystems()
+    {
+        var root = FindRepositoryRoot();
+        var retired = new[]
+        {
+            "WinPool.Testing",
+            "WinPool.Testing.Tools",
+            "WinPool.ToolManagement",
+            "WinPool.TestWorker",
+            "WinPool.ElevatedBroker"
+        };
+        var projectFiles = Directory.EnumerateFiles(
+                Path.Combine(root, "src"),
+                "*.csproj",
+                SearchOption.AllDirectories)
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        Assert.All(
+            projectFiles,
+            path =>
+            {
+                var content = File.ReadAllText(path);
+                Assert.All(
+                    retired,
+                    name => Assert.DoesNotContain(
+                        $"Include=\"..\\{name}\\{name}.csproj\"",
+                        content,
+                        StringComparison.Ordinal));
+            });
+    }
+
+    [Fact]
+    public void TestAndDevelopmentPagesStillExposeNavigationIdentity()
+    {
+        var root = FindRepositoryRoot();
+        var testPageXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "TestPage.xaml"));
+        var testPageCode = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "TestPage.xaml.cs"));
+        var developmentPageXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml"));
+        var developmentPageCode = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml.cs"));
+
+        Assert.Contains("WinPool 2.0", testPageXaml, StringComparison.Ordinal);
+        Assert.Contains("WinPool 1.x", testPageXaml, StringComparison.Ordinal);
+        Assert.Contains("WinPool 2.0", developmentPageXaml, StringComparison.Ordinal);
+        Assert.Contains("WinPool 1.x", developmentPageXaml, StringComparison.Ordinal);
+
+        foreach (var pageCode in new[] { testPageCode, developmentPageCode })
+        {
+            Assert.DoesNotContain("IAgentConnection", pageCode, StringComparison.Ordinal);
+            Assert.DoesNotContain("TestDefinitionFactory", pageCode, StringComparison.Ordinal);
+            Assert.DoesNotContain("GetDevelopmentDiagnosticsRequest", pageCode, StringComparison.Ordinal);
+            Assert.DoesNotContain("Process.Start", pageCode, StringComparison.Ordinal);
+        }
     }
 
     private static string FindRepositoryRoot()

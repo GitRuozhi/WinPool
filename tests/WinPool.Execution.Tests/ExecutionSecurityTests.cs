@@ -98,17 +98,15 @@ public sealed class ExecutionSecurityTests
     {
         var fixture = Fixture.Create(EnvironmentKind.ProtectedDevelopmentMachine);
         var request = fixture.CreateRequest(
-            OperationIntent.RunFileTest,
+            OperationIntent.SimulateStorageMutation,
             new Dictionary<string, string> { ["EstimatedWriteBytes"] = "4096" });
         var planner = new DefaultOperationPlanner(new FixedOperationInventoryVersionSource(Fixture.InventoryVersion));
 
         var plan = await planner.BuildAsync(request, CancellationToken.None);
 
-        Assert.Equal(RiskLevel.R2RecoverableFileWrite, plan.Risk);
+        Assert.Equal(RiskLevel.R1SimulationWrite, plan.Risk);
         Assert.Equal(
-            ExecutionCapability.ReadFileTest |
-            ExecutionCapability.WriteFileTest |
-            ExecutionCapability.RunExternalTestTool,
+            ExecutionCapability.SimulateStorageMutation,
             plan.RequiredCapabilities);
         Assert.Equal(Fixture.InventoryVersion, plan.InventoryVersion);
         Assert.Equal(4096, plan.EstimatedWriteBytes);
@@ -217,18 +215,6 @@ public sealed class ExecutionSecurityTests
 
         Assert.Equal(AuthorizationValidationKind.Valid, first.Kind);
         Assert.Equal(AuthorizationValidationKind.AlreadyUsed, second.Kind);
-    }
-
-    [Fact]
-    public async Task InstallExternalTool_CannotBeAuthorizedWithoutExplicitConfirmation()
-    {
-        var fixture = Fixture.Create(EnvironmentKind.ProtectedDevelopmentMachine);
-        var plan = fixture.CreatePlan(OperationIntent.InstallExternalTool);
-
-        var result = await fixture.Authority.AuthorizeAsync(plan, fixture.Context, false, CancellationToken.None);
-
-        Assert.Equal(AuthorizationIssueKind.ConfirmationRequired, result.Kind);
-        Assert.Null(result.Token);
     }
 
     [Fact]

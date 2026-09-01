@@ -70,7 +70,7 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
                     SELECT
                         s.timestamp_utc_ms, d.sanitized_name, s.activity_pct,
                         s.read_bytes_per_sec, s.write_bytes_per_sec,
-                        s.queue_length, s.sample_flags
+                        s.queue_length
                     FROM monitor_samples AS s
                     JOIN monitor_devices AS d
                       ON d.session_id = s.session_id AND d.device_id = s.device_id
@@ -82,7 +82,7 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
                     sessionId.Value.ToString("N"));
                 await writer.WriteLineAsync(
                     "TimestampUtc,Device,ActivityPercent,ReadBytesPerSecond," +
-                    "WriteBytesPerSecond,QueueLength,SampleFlags");
+                    "WriteBytesPerSecond,QueueLength");
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
                 {
@@ -96,8 +96,7 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
                         reader.GetDouble(2).ToString("R", CultureInfo.InvariantCulture),
                         reader.GetDouble(3).ToString("R", CultureInfo.InvariantCulture),
                         reader.GetDouble(4).ToString("R", CultureInfo.InvariantCulture),
-                        reader.GetDouble(5).ToString("R", CultureInfo.InvariantCulture),
-                        reader.GetInt32(6).ToString(CultureInfo.InvariantCulture));
+                        reader.GetDouble(5).ToString("R", CultureInfo.InvariantCulture));
                     await writer.WriteLineAsync(line);
                     rowCount++;
                 }

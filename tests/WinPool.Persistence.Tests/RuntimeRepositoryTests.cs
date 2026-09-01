@@ -8,31 +8,6 @@ namespace WinPool.Persistence.Tests;
 public sealed class RuntimeRepositoryTests
 {
     [Fact]
-    public async Task AlgorithmRegistryRoundTripsInStableOrderAndIsVersionImmutable()
-    {
-        await using var database = await RuntimeDatabase.CreateAsync();
-        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var writer = new AlgorithmRegistryRepository(database.Store, lease);
-        await writer.RegisterAsync(
-            new("ALG-Z", "1.0.0", AlgorithmConfidence.Derived, "Plan/old"));
-        await writer.RegisterAsync(
-            new("ALG-A", "2.0.0", AlgorithmConfidence.Speculative, "Plan/A"));
-        await writer.RegisterAsync(
-            new("ALG-Z", "1.0.0", AlgorithmConfidence.Derived, "Plan/old"));
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => writer.RegisterAsync(
-                new("ALG-Z", "1.0.0", AlgorithmConfidence.Proven, "Plan/new")));
-
-        var algorithms = await new AlgorithmRegistryRepository(database.Store)
-            .ListAsync();
-
-        Assert.Equal(["ALG-A", "ALG-Z"], algorithms.Select(item => item.Id));
-        var updated = algorithms.Single(item => item.Id == "ALG-Z");
-        Assert.Equal(AlgorithmConfidence.Derived, updated.Confidence);
-        Assert.Equal("Plan/old", updated.EvidenceReference);
-    }
-
-    [Fact]
     public async Task AgentSessionRecordsUncleanStartAndCleanEnd()
     {
         await using var database = await RuntimeDatabase.CreateAsync();
@@ -85,51 +60,14 @@ public sealed class RuntimeRepositoryTests
         await using var database = await RuntimeDatabase.CreateAsync();
 
         await Assert.ThrowsAsync<AgentWriteOwnershipException>(
-            () => new AlgorithmRegistryRepository(database.Store).RegisterAsync(
-                new(
-                    "ALG-TEST",
-                    "1.0.0",
-                    AlgorithmConfidence.Derived,
-                    "test")));
+            () => new WorkerProcessRepository(database.Store).SaveAsync(
+                new AgentInstanceId(Guid.NewGuid()),
+                CreateRunningRegistration(DateTimeOffset.UtcNow)));
         await Assert.ThrowsAsync<AgentWriteOwnershipException>(
             () => new AgentSessionRepository(database.Store).StartAsync(
                 new AgentInstanceId(Guid.NewGuid()),
                 1,
                 DateTimeOffset.UtcNow));
-    }
-
-    [Fact]
-    public async Task ExternalToolStateRoundTripsCustomPathAndAvailability()
-    {
-        await using var database = await RuntimeDatabase.CreateAsync();
-        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var writer = new ExternalToolStateRepository(database.Store, lease);
-        var detectedAt = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
-        await writer.SaveAsync(
-            new ToolState(
-                new ToolId("fio"),
-                ToolAvailability.UnsupportedVersion,
-                @"D:\Tools\fio.exe",
-                ToolPathSource.CustomPath,
-                "4.1",
-                new string('A', 64),
-                null,
-                ToolCapabilities.RandomIo,
-                false),
-            detectedAt);
-
-        var state = await new ExternalToolStateRepository(database.Store)
-            .GetAsync(new ToolId("fio"));
-
-        Assert.NotNull(state);
-        Assert.Equal(ToolAvailability.UnsupportedVersion, state.Availability);
-        Assert.Equal(@"D:\Tools\fio.exe", state.ConfiguredPath);
-        Assert.Equal("4.1", state.DetectedVersion);
-        Assert.Equal(detectedAt, state.DetectedAtUtc);
-
-        var listed = await new ExternalToolStateRepository(database.Store).ListAsync();
-        var listedState = Assert.Single(listed);
-        Assert.Equal(state, listedState);
     }
 
     [Fact]
@@ -144,7 +82,7 @@ public sealed class RuntimeRepositoryTests
         var expected = new ProcessRegistration(
             ProcessInstanceId.New(),
             42,
-            WorkerKind.Test,
+            WorkerKind.Inventory,
             CorrelationId.New(),
             started,
             started.AddSeconds(5),
@@ -174,7 +112,7 @@ public sealed class RuntimeRepositoryTests
         var running = new ProcessRegistration(
             ProcessInstanceId.New(),
             42,
-            WorkerKind.Test,
+            WorkerKind.Inventory,
             CorrelationId.New(),
             started,
             started.AddSeconds(5),
@@ -264,7 +202,7 @@ public sealed class RuntimeRepositoryTests
                  {
                      (Session: sessionId, Registration: running with { ProcessId = running.ProcessId + 1 }),
                      (Session: otherSessionId, Registration: running),
-                     (Session: sessionId, Registration: running with { Kind = WorkerKind.Inventory }),
+                     (Session: sessionId, Registration: running with { Kind = WorkerKind.MainApplication }),
                      (Session: sessionId, Registration: running with { CorrelationId = CorrelationId.New() }),
                      (Session: sessionId, Registration: running with
                      {
@@ -398,7 +336,7 @@ public sealed class RuntimeRepositoryTests
         new(
             ProcessInstanceId.New(),
             42,
-            WorkerKind.Test,
+            WorkerKind.Inventory,
             CorrelationId.New(),
             started,
             started.AddSeconds(5),

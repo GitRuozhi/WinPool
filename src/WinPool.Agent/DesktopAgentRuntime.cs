@@ -1,17 +1,13 @@
-using WinPool.Application;
-using Microsoft.Data.Sqlite;
-using WinPool.Domain;
-using WinPool.Execution;
-using WinPool.Monitoring;
-using WinPool.Infrastructure.Sqlite;
-using WinPool.Ipc;
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.Json;
-using WinPool.Testing;
-using WinPool.Testing.Tools;
-using WinPool.ToolManagement;
+using WinPool.Application;
+using WinPool.Domain;
+using WinPool.Execution;
+using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
+using WinPool.Ipc;
+using WinPool.Monitoring;
 
 namespace WinPool.Agent;
 
@@ -25,27 +21,9 @@ internal sealed class DesktopAgentRuntime :
     private readonly MonitoringSessionCoordinator monitoring;
     private readonly MonitorCsvExporter monitorCsvExporter;
     private readonly AgentProcessRegistry processRegistry;
-    private readonly IExternalToolRegistry toolRegistry;
-    private readonly ToolPathConfigurationCoordinator toolPathCoordinator;
-    private readonly ExternalToolStateRepository toolStateRepository;
-    private readonly TestRunRepository testRunRepository;
-    private readonly UserTestPresetRepository userTestPresets;
     private readonly WorkspaceSessionStateRepository workspaceState;
     private readonly SimulationDocumentRepository simulationDocuments;
-    private readonly CopyBatchRepository copyBatchRepository;
-    private readonly CopyBatchRecoveryCoordinator copyBatchRecovery;
-    private readonly CopyBatchExecutionCoordinator copyBatchExecutor;
-    private readonly AgentTestRunWorkflow testRunWorkflow;
-    private readonly TestRunStartCoordinator testRunStartCoordinator;
-    private readonly DiteLegacyImportRepository diteLegacyImports;
-    private readonly TestArtifactStore testArtifactStore;
-    private readonly TestRunExporter testRunExporter;
     private readonly AgentInventoryCoordinator inventoryCoordinator;
-    private readonly ElevatedBrokerProcessHost elevatedBrokerHost;
-    private readonly AgentSystemSupportCoordinator systemSupportCoordinator;
-    private readonly SystemSupportRecoveryCoordinator systemSupportRecovery;
-    private readonly TestWorkerSupervisor testWorkerSupervisor;
-    private readonly TestPowerPlanScope testPowerPlanScope;
     private readonly IStorageHealthEventSource storageHealthEventSource;
     private readonly StorageHealthEventRepository storageHealthEventRepository;
     private readonly AgentEventHub agentEvents;
@@ -57,7 +35,6 @@ internal sealed class DesktopAgentRuntime :
     private readonly object storageHealthEventSync = new();
     private readonly Queue<StorageHealthEvent> recentStorageHealthEvents = new();
     private readonly Task storageHealthEventTask;
-    private readonly AgentTestCoordinator testCoordinator = new();
 
     public DesktopAgentRuntime(
         TrayApplicationContext tray,
@@ -65,18 +42,8 @@ internal sealed class DesktopAgentRuntime :
         MonitoringSessionCoordinator monitoring,
         MonitorCsvExporter monitorCsvExporter,
         AgentProcessRegistry processRegistry,
-        IExternalToolRegistry toolRegistry,
-        ToolPathConfigurationCoordinator toolPathCoordinator,
-        ExternalToolStateRepository toolStateRepository,
-        WorkerProcessRepository workerProcessRepository,
-        TestRunRepository testRunRepository,
-        UserTestPresetRepository userTestPresets,
         WorkspaceSessionStateRepository workspaceState,
         SimulationDocumentRepository simulationDocuments,
-        CopyBatchRepository copyBatchRepository,
-        DiteLegacyImportRepository diteLegacyImports,
-        TestArtifactStore testArtifactStore,
-        TestRunExporter testRunExporter,
         IInventoryProvider nativeInventoryProvider,
         IInventoryProvider legacyInventoryProvider,
         IHardwareInventoryProvider manageInventoryProvider,
@@ -87,13 +54,6 @@ internal sealed class DesktopAgentRuntime :
         LocalSystemIdentityResolver localSystemIdentity,
         IProcessIncarnationVerifier processIncarnationVerifier,
         string mainApplicationExecutablePath,
-        TestWorkerProcessHost testWorkerHost,
-        ElevatedBrokerProcessHost elevatedBrokerHost,
-        SystemSupportAuditRepository systemSupportAuditRepository,
-        SystemSupportRecoveryCoordinator systemSupportRecovery,
-        TestProcessSchedulingScope testProcessSchedulingScope,
-        ITemporaryPowerPlanPort testPowerPlanPort,
-        ISystemSupportRecoveryStore systemSupportRecoveryStore,
         IStorageHealthEventSource storageHealthEventSource,
         StorageHealthEventRepository storageHealthEventRepository,
         IReadOnlyList<StorageHealthEvent> initialStorageHealthEvents,
@@ -109,30 +69,10 @@ internal sealed class DesktopAgentRuntime :
             ?? throw new ArgumentNullException(nameof(monitorCsvExporter));
         this.processRegistry = processRegistry
             ?? throw new ArgumentNullException(nameof(processRegistry));
-        this.toolRegistry = toolRegistry
-            ?? throw new ArgumentNullException(nameof(toolRegistry));
-        this.toolPathCoordinator = toolPathCoordinator
-            ?? throw new ArgumentNullException(nameof(toolPathCoordinator));
-        this.toolStateRepository = toolStateRepository
-            ?? throw new ArgumentNullException(nameof(toolStateRepository));
-        ArgumentNullException.ThrowIfNull(workerProcessRepository);
-        this.testRunRepository = testRunRepository
-            ?? throw new ArgumentNullException(nameof(testRunRepository));
-        this.userTestPresets = userTestPresets
-            ?? throw new ArgumentNullException(nameof(userTestPresets));
         this.workspaceState = workspaceState
             ?? throw new ArgumentNullException(nameof(workspaceState));
         this.simulationDocuments = simulationDocuments
             ?? throw new ArgumentNullException(nameof(simulationDocuments));
-        this.copyBatchRepository = copyBatchRepository
-            ?? throw new ArgumentNullException(nameof(copyBatchRepository));
-        copyBatchRecovery = new(this.copyBatchRepository);
-        this.diteLegacyImports = diteLegacyImports
-            ?? throw new ArgumentNullException(nameof(diteLegacyImports));
-        this.testArtifactStore = testArtifactStore
-            ?? throw new ArgumentNullException(nameof(testArtifactStore));
-        this.testRunExporter = testRunExporter
-            ?? throw new ArgumentNullException(nameof(testRunExporter));
         this.processIncarnationVerifier = processIncarnationVerifier
             ?? throw new ArgumentNullException(nameof(processIncarnationVerifier));
         if (string.IsNullOrWhiteSpace(mainApplicationExecutablePath)
@@ -154,24 +94,6 @@ internal sealed class DesktopAgentRuntime :
             localInventoryDocument,
             localSystemIdentity,
             physicalDiskDeviceResolver ?? new WindowsPhysicalDiskDeviceResolver());
-        ArgumentNullException.ThrowIfNull(testWorkerHost);
-        this.elevatedBrokerHost = elevatedBrokerHost
-            ?? throw new ArgumentNullException(nameof(elevatedBrokerHost));
-        ArgumentNullException.ThrowIfNull(systemSupportAuditRepository);
-        systemSupportCoordinator = new(
-            instanceId,
-            systemSupportAuditRepository,
-            ExecuteElevatedBrokerAsync);
-        this.systemSupportRecovery = systemSupportRecovery
-            ?? throw new ArgumentNullException(nameof(systemSupportRecovery));
-        ArgumentNullException.ThrowIfNull(testProcessSchedulingScope);
-        ArgumentNullException.ThrowIfNull(testPowerPlanPort);
-        ArgumentNullException.ThrowIfNull(systemSupportRecoveryStore);
-        testPowerPlanScope = new(
-            testPowerPlanPort,
-            systemSupportRecoveryStore,
-            systemSupportAuditRepository,
-            SetActivePowerPlanForTestAsync);
         this.storageHealthEventSource = storageHealthEventSource
             ?? throw new ArgumentNullException(nameof(storageHealthEventSource));
         this.storageHealthEventRepository = storageHealthEventRepository
@@ -180,54 +102,6 @@ internal sealed class DesktopAgentRuntime :
         this.lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         this.preferencesService = preferencesService
             ?? throw new ArgumentNullException(nameof(preferencesService));
-        testCoordinator.PauseStateChanged += (runId, state) => tray.SetTestRun(
-            runId,
-            state switch
-            {
-                TestPauseState.Pausing => "pausing",
-                TestPauseState.Paused => "paused",
-                TestPauseState.Running => "running",
-                _ => "none"
-            });
-        testWorkerSupervisor = new(
-            instanceId,
-            testWorkerHost,
-            processRegistry,
-            workerProcessRepository,
-            testRunRepository,
-            testProcessSchedulingScope,
-            this.agentEvents,
-            this.tray);
-        copyBatchExecutor = new(
-            copyBatchRecovery,
-            this.copyBatchRepository,
-            testWorkerSupervisor,
-            testArtifactStore,
-            testRunRepository,
-            monitoring,
-            ExecuteRamMapBeforeBatchAsync,
-            ExecuteFlushBetweenCopyBatchesAsync);
-        testRunWorkflow = new(
-            testCoordinator,
-            testPowerPlanScope,
-            testRunRepository,
-            monitoring,
-            testArtifactStore,
-            this.copyBatchRepository,
-            copyBatchRecovery,
-            copyBatchExecutor,
-            testWorkerSupervisor,
-            this.tray,
-            this.agentEvents,
-            ExecuteRamMapBeforeBatchAsync);
-        testRunStartCoordinator = new(
-            instanceId,
-            testRunRepository,
-            toolRegistry,
-            toolStateRepository,
-            testCoordinator,
-            testRunWorkflow,
-            this.tray);
         ArgumentNullException.ThrowIfNull(initialStorageHealthEvents);
         foreach (var storageEvent in initialStorageHealthEvents.TakeLast(200))
         {
@@ -237,185 +111,24 @@ internal sealed class DesktopAgentRuntime :
         storageHealthEventTask = Task.Run(CaptureStorageHealthEventsAsync);
     }
 
-    internal async Task<ElevatedBrokerExecutionResult> ExecuteElevatedBrokerAsync(
-        ElevatedBrokerExecutionRequest request,
-        CorrelationId correlationId,
-        CancellationToken cancellationToken)
-    {
-        var brokerProcessId = 0;
-        ProcessInstanceId? brokerProcessInstanceId = null;
-        try
-        {
-            return await elevatedBrokerHost.ExecuteAsync(
-                request,
-                (processId, _) =>
-                {
-                    brokerProcessId = processId;
-                    var now = DateTimeOffset.UtcNow;
-                    brokerProcessInstanceId = ProcessInstanceId.New();
-                    if (!processRegistry.TryRegister(
-                            new AgentManagedProcess(
-                                brokerProcessInstanceId.Value,
-                                processId,
-                                AgentManagedProcessKind.ElevatedBroker,
-                                correlationId,
-                                AgentProcessProjection.GetStartedAtUtc(processId),
-                                now,
-                                SupervisedProcessState.Starting,
-                                OwnsJobObject: false,
-                                ShutdownDeadlineUtc: null)) ||
-                        !processRegistry.TryMarkRunning(
-                            brokerProcessInstanceId.Value,
-                            processId,
-                            now))
-                    {
-                        throw new InvalidOperationException(
-                            "The elevated Broker process identity was already registered.");
-                    }
-
-                    return Task.CompletedTask;
-                },
-                cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (brokerProcessId > 0 && brokerProcessInstanceId is { } processInstanceId)
-            {
-                processRegistry.TryMarkExited(
-                    processInstanceId,
-                    brokerProcessId,
-                    DateTimeOffset.UtcNow,
-                    out _);
-            }
-        }
-    }
-
-    public bool HasActiveTest => testCoordinator.HasActiveTest;
-
     public async Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
         GetAgentSnapshotRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var toolStates = await LoadCachedToolStatesAsync(cancellationToken)
-            .ConfigureAwait(false);
         var snapshot = new AgentSnapshot(
             instanceId,
             tray.IsTrayVisible,
             ActiveMonitoringSession: monitoring.CurrentSession,
-            ActiveTestRunId: testCoordinator.ActiveRunId,
             ShutdownStatus: lifecycle.Snapshot(),
             Processes: processRegistry.Snapshot()
                 .Select(AgentProcessProjection.ToRegistration)
                 .ToArray(),
             LatestMonitorSamples: monitoring.CurrentSamples,
             RecentStorageHealthEvents: GetRecentStorageHealthEvents(),
-            MonitorDiagnostics: monitoring.CurrentDiagnostics,
-            CurrentToolStates: toolStates);
+            MonitorDiagnostics: monitoring.CurrentDiagnostics);
         return await SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
     }
-
-    private async Task<IReadOnlyList<ToolState>> LoadCachedToolStatesAsync(
-        CancellationToken cancellationToken)
-    {
-        var persisted = await toolStateRepository.ListAsync(cancellationToken)
-            .ConfigureAwait(false);
-        var catalog = new ToolCatalog();
-        return persisted.Select(state =>
-        {
-            catalog.TryGet(state.ToolId, out var descriptor);
-            return new ToolState(
-                state.ToolId,
-                state.Availability,
-                state.ConfiguredPath,
-                string.IsNullOrWhiteSpace(state.ConfiguredPath) ? null : ToolPathSource.CustomPath,
-                state.DetectedVersion,
-                state.Sha256,
-                Publisher: null,
-                descriptor?.Capabilities ?? ToolCapabilities.None,
-                descriptor?.RequiresElevationForUse ?? false);
-        }).ToArray();
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> GetDevelopmentDiagnosticsAsync(
-        GetDevelopmentDiagnosticsRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.RecentRunLimit is <= 0 or > 20)
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.development.invalid_recent_run_limit");
-        }
-
-        var snapshotResult = await GetSnapshotAsync(
-            new GetAgentSnapshotRequest(request.CorrelationId),
-            cancellationToken).ConfigureAwait(false);
-        var snapshot = ((AgentSnapshotResponse)snapshotResult.Value!).Snapshot;
-        var runs = await testRunRepository.ListRunsAsync(
-            states: null,
-            request.RecentRunLimit,
-            cancellationToken).ConfigureAwait(false);
-        var plans = new List<DevelopmentPlanDiagnostic>(runs.Count);
-        foreach (var run in runs)
-        {
-            var plan = await testRunRepository.GetPlanAsync(
-                run.RunId,
-                cancellationToken).ConfigureAwait(false);
-            if (plan is null)
-            {
-                continue;
-            }
-
-            var persistedSteps = await testRunRepository.ListStepsAsync(
-                run.RunId,
-                cancellationToken).ConfigureAwait(false);
-            plans.Add(DevelopmentDiagnosticsProjection.ProjectPlan(
-                run,
-                plan,
-                persistedSteps));
-        }
-
-        var algorithms = DevelopmentDiagnosticsProjection.Algorithms(plans);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new DevelopmentDiagnosticsResponse(
-                new DevelopmentDiagnostics(snapshot, plans, algorithms)),
-            request.CorrelationId);
-    }
-
-    public Task<ApplicationResult<AgentResponse>> ReviewSystemSupportAsync(
-        ReviewAgentSystemSupportRequest request,
-        CancellationToken cancellationToken) =>
-        systemSupportCoordinator.ReviewAsync(request, cancellationToken);
-
-    public Task<ApplicationResult<AgentResponse>> ExecuteSystemSupportAsync(
-        ExecuteAgentSystemSupportRequest request,
-        CancellationToken cancellationToken) =>
-        systemSupportCoordinator.ExecuteAsync(request, cancellationToken);
-
-    internal static SystemSupportActionKind ToSystemSupportActionKind(
-        ElevatedBrokerOperationKind operation) =>
-        AgentSystemSupportCoordinator.ToSystemSupportActionKind(operation);
-
-    private ValueTask WriteSystemSupportAuditAsync(
-        ElevatedBrokerExecutionRequest executionRequest,
-        CorrelationId correlationId,
-        SystemSupportActionKind actionKind,
-        SystemSupportAuditStage stage,
-        string code,
-        CancellationToken cancellationToken) =>
-        systemSupportCoordinator.WriteAuditAsync(
-            executionRequest,
-            correlationId,
-            actionKind,
-            stage,
-            code,
-            cancellationToken);
-
-    private static ApplicationMessage AgentMessage(
-        string code,
-        ApplicationMessageSeverity severity) =>
-        new(code, code, string.Empty, severity, []);
 
     public Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
         OpenMainWindowRequest request,
@@ -463,9 +176,12 @@ internal sealed class DesktopAgentRuntime :
         return Task.FromResult<ApplicationResult<AgentResponse>>(new(
             ApplicationStatus.PartiallyCompleted,
             new AgentAcknowledgement(),
-            [AgentMessage(
+            [new ApplicationMessage(
                 "agent.native-properties.disk-management-fallback",
-                ApplicationMessageSeverity.Warning)],
+                "agent.native-properties.disk-management-fallback",
+                string.Empty,
+                ApplicationMessageSeverity.Warning,
+                [])],
             request.CorrelationId));
     }
 
@@ -498,207 +214,6 @@ internal sealed class DesktopAgentRuntime :
         StopAgentMonitoringRequest request,
         CancellationToken cancellationToken) =>
         StopMonitoringCoreAsync(request, cancellationToken);
-
-    public Task<ApplicationResult<AgentResponse>> StartTestAsync(
-        StartAgentTestRequest request,
-        CancellationToken cancellationToken) =>
-        testRunStartCoordinator.StartAsync(request, cancellationToken);
-    public Task<ApplicationResult<AgentResponse>> CancelTestAsync(
-        CancelAgentTestRequest request,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!testCoordinator.TryCancel(request.RunId))
-        {
-            return RejectAsync(
-                request.CorrelationId,
-                "agent.testing.run_not_active");
-        }
-
-        tray.SetTestRun(request.RunId, "cancelling");
-        return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
-    }
-
-    public Task<ApplicationResult<AgentResponse>> PauseTestAsync(
-        PauseAgentTestRequest request,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!testCoordinator.TryRequestPause(request.RunId))
-        {
-            return RejectAsync(request.CorrelationId, "agent.testing.pause_not_available");
-        }
-
-        tray.SetTestRun(request.RunId, "pausing");
-        return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
-    }
-
-    public Task<ApplicationResult<AgentResponse>> ResumeTestAsync(
-        ResumeAgentTestRequest request,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!testCoordinator.TryResume(request.RunId))
-        {
-            return RejectAsync(request.CorrelationId, "agent.testing.resume_not_available");
-        }
-
-        tray.SetTestRun(request.RunId, "running");
-        return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> GetTestResultAsync(
-        GetAgentTestResultRequest request,
-        CancellationToken cancellationToken)
-    {
-        var run = await testRunRepository.GetAsync(
-            request.RunId,
-            cancellationToken);
-        if (run is null)
-        {
-            return ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.RequiresEnvironment,
-                request.CorrelationId,
-                Message("agent.testing.result_not_found"));
-        }
-
-        var metrics = await testRunRepository.ListStepMetricsAsync(
-            request.RunId,
-            cancellationToken);
-        var plan = await testRunRepository.GetPlanAsync(
-            request.RunId,
-            cancellationToken);
-        var steps = await testRunRepository.ListStepsAsync(
-            request.RunId,
-            cancellationToken);
-        var artifacts = await testArtifactStore.ListRunArtifactsAsync(
-            request.RunId,
-            cancellationToken);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new TestRunResultResponse(
-                new(
-                    run.RunId,
-                    run.State.ToString(),
-                    run.StartedAtUtc,
-                    run.EndedAtUtc,
-                    steps.Select(step => new TestStepResult(
-                            step.StepId,
-                            step.State.ToString(),
-                            step.ToolId))
-                        .ToArray(),
-                    metrics.Select(metric => new TestResultMetric(
-                            metric.MetricId,
-                            metric.Value,
-                            metric.Unit,
-                            metric.Aggregation,
-                            metric.StepId,
-                            TestMetricSemanticsCatalog.Describe(
-                                metric.StepId is null
-                                    ? null
-                                    : plan?.Steps.FirstOrDefault(step =>
-                                        StringComparer.Ordinal.Equals(
-                                            step.Id,
-                                            metric.StepId)),
-                                metric.MetricId,
-                                metric.Unit)))
-                        .ToArray(),
-                    artifacts.Select(artifact => new TestResultArtifact(
-                            artifact.RelativePath,
-                            artifact.Sha256,
-                            artifact.ByteLength,
-                            artifact.MediaType))
-                        .ToArray())),
-            request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> ListTestRunsAsync(
-        ListAgentTestRunsRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.Limit is <= 0 or > 200
-            || !Enum.IsDefined(request.Filter))
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.testing.history_filter_invalid");
-        }
-
-        IReadOnlyCollection<PersistedTestRunState>? states = request.Filter switch
-        {
-            TestRunHistoryFilter.All => null,
-            TestRunHistoryFilter.Completed => [PersistedTestRunState.Completed],
-            TestRunHistoryFilter.Failed => [PersistedTestRunState.Failed],
-            TestRunHistoryFilter.Cancelled => [PersistedTestRunState.Cancelled],
-            TestRunHistoryFilter.Active =>
-            [
-                PersistedTestRunState.Created,
-                PersistedTestRunState.Running
-            ],
-            _ => null
-        };
-        var runs = await testRunRepository.ListRunsAsync(
-            states,
-            request.Limit,
-            cancellationToken);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new TestRunHistoryResponse(
-                runs.Select(item => new TestRunHistoryItem(
-                        item.RunId,
-                        item.DefinitionId,
-                        item.State.ToString(),
-                        item.StartedAtUtc,
-                        item.EndedAtUtc))
-                    .ToArray()),
-            request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> ListUserTestPresetsAsync(
-        ListUserTestPresetsRequest request,
-        CancellationToken cancellationToken)
-    {
-        var presets = await userTestPresets.ListAsync(cancellationToken);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new UserTestPresetListResponse(presets),
-            request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> SaveUserTestPresetAsync(
-        SaveUserTestPresetRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!UserTestPresetValidator.IsValid(request.Preset))
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.testing.preset_invalid");
-        }
-
-        var saved = await userTestPresets.SaveAsync(
-            request.Preset,
-            cancellationToken);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new UserTestPresetSavedResponse(saved),
-            request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> DeleteUserTestPresetAsync(
-        DeleteUserTestPresetRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.PresetId == Guid.Empty)
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.testing.preset_id_invalid");
-        }
-
-        var deleted = await userTestPresets.DeleteAsync(
-            request.PresetId,
-            cancellationToken);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new UserTestPresetDeletedResponse(request.PresetId, deleted),
-            request.CorrelationId);
-    }
 
     public async Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
         LoadAgentWorkspaceStateRequest request,
@@ -802,172 +317,9 @@ internal sealed class DesktopAgentRuntime :
         }
         catch (Exception exception) when (exception is
             ArgumentException or JsonException or InvalidDataException
-            or SimulationDocumentConflictException or SqliteException)
+            or SimulationDocumentConflictException or Microsoft.Data.Sqlite.SqliteException)
         {
             return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
-        }
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> PersistDiteLegacyImportAsync(
-        PersistDiteLegacyImportRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.SourcePath)
-            || request.ExpectedSha256.Length != 64
-            || request.ExpectedSha256.Any(character => !Uri.IsHexDigit(character)))
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.testing.dite_import_request_invalid");
-        }
-
-        try
-        {
-            var import = await new DiteLegacyResultImporter()
-                .ImportAsync(request.SourcePath, cancellationToken)
-                .ConfigureAwait(false);
-            if (!string.Equals(
-                    import.SourceSha256,
-                    request.ExpectedSha256,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return Reject(
-                    request.CorrelationId,
-                    "agent.testing.dite_import_source_changed");
-            }
-
-            var saved = await diteLegacyImports.SaveAsync(
-                    import,
-                    DateTimeOffset.UtcNow,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            return ApplicationResult<AgentResponse>.Succeeded(
-                new DiteLegacyImportPersistenceResponse(
-                    saved.Import.ImportId,
-                    saved.AlreadyExisted,
-                    saved.Import.RunCount,
-                    saved.Import.MetricCount),
-                request.CorrelationId);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or InvalidDataException
-                or UnauthorizedAccessException
-                or ArgumentException
-                or InvalidOperationException
-                or Microsoft.Data.Sqlite.SqliteException)
-        {
-            return ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.Failed,
-                request.CorrelationId,
-                new ApplicationMessage(
-                    "agent.testing.dite_import_failed",
-                    "agent.testing.dite_import_failed",
-                    exception.Message,
-                    ApplicationMessageSeverity.Error,
-                    []));
-        }
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> ListDiteLegacyImportsAsync(
-        ListDiteLegacyImportsRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (request.Limit is <= 0 or > 200)
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.testing.dite_import_history_limit_invalid");
-        }
-
-        var imports = await diteLegacyImports
-            .ListAsync(request.Limit, cancellationToken)
-            .ConfigureAwait(false);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new DiteLegacyImportHistoryResponse(
-                imports.Select(item => new DiteLegacyImportHistoryItem(
-                        item.ImportId,
-                        item.SourceFileName,
-                        item.SourceSha256,
-                        item.ImportedAtUtc,
-                        item.RunCount,
-                        item.MetricCount))
-                    .ToArray()),
-            request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>>
-        GetDiteLegacyImportSummaryAsync(
-            GetDiteLegacyImportSummaryRequest request,
-            CancellationToken cancellationToken)
-    {
-        if (request.ImportId == Guid.Empty)
-        {
-            return Reject(
-                request.CorrelationId,
-                "agent.testing.dite_import_id_invalid");
-        }
-
-        var summaries = await diteLegacyImports
-            .GetSummariesAsync(request.ImportId, cancellationToken)
-            .ConfigureAwait(false);
-        return summaries is null
-            ? ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.RequiresEnvironment,
-                request.CorrelationId,
-                Message("agent.testing.dite_import_not_found"))
-            : ApplicationResult<AgentResponse>.Succeeded(
-                new DiteLegacyImportSummaryResponse(
-                    request.ImportId,
-                    summaries.Select(summary =>
-                            summary.Semantic is null
-                                ? summary with
-                                {
-                                    Semantic = TestMetricSemanticsCatalog
-                                        .DescribeLegacy(
-                                            summary.MetricId,
-                                            summary.Unit)
-                                }
-                                : summary)
-                        .ToArray()),
-                request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> ExportTestRunAsync(
-        ExportAgentTestRunRequest request,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var result = await testRunExporter.ExportAsync(
-                request.RunId,
-                request.Format,
-                request.DestinationPath,
-                request.UserConfirmedOverwrite,
-                cancellationToken);
-            return ApplicationResult<AgentResponse>.Succeeded(
-                new ExportArtifactResponse(
-                    result.DestinationPath,
-                    result.Sha256,
-                    result.ItemCount),
-                request.CorrelationId);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or ArgumentException
-                or InvalidOperationException
-                or KeyNotFoundException)
-        {
-            return ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.Failed,
-                request.CorrelationId,
-                new ApplicationMessage(
-                    "agent.testing.export_failed",
-                    "agent.testing.export_failed",
-                    exception.Message,
-                    ApplicationMessageSeverity.Error,
-                    []));
         }
     }
 
@@ -985,140 +337,6 @@ internal sealed class DesktopAgentRuntime :
         CaptureAgentInventoryRequest request,
         CancellationToken cancellationToken) =>
         inventoryCoordinator.CaptureComparisonAsync(request, cancellationToken);
-
-    public async Task<ApplicationResult<AgentResponse>> DetectToolAsync(
-        DetectAgentToolRequest request,
-        CancellationToken cancellationToken)
-    {
-        var result = await toolRegistry.DetectAsync(
-            request.ToolId,
-            cancellationToken);
-        if (result.Value is { } state)
-        {
-            await toolStateRepository.SaveAsync(
-                state,
-                DateTimeOffset.UtcNow,
-                cancellationToken);
-            agentEvents.Publish(
-                new AgentToolStateEvent(state, DateTimeOffset.UtcNow));
-        }
-
-        return result.Value is null
-            ? new ApplicationResult<AgentResponse>(
-                result.Status,
-                null,
-                result.Messages,
-                request.CorrelationId)
-            : new ApplicationResult<AgentResponse>(
-                result.Status,
-                new ToolStateResponse(result.Value),
-                result.Messages,
-                request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> ConfigureToolPathAsync(
-        ConfigureAgentToolPathRequest request,
-        CancellationToken cancellationToken)
-    {
-        var detected = await toolPathCoordinator.ConfigureAsync(
-            request.ToolId,
-            request.ExecutablePath,
-            request.CorrelationId,
-            cancellationToken);
-        if (detected.Value is not { } state)
-        {
-            return new(
-                detected.Status,
-                null,
-                detected.Messages,
-                request.CorrelationId);
-        }
-
-        await toolStateRepository.SaveAsync(
-            state,
-            DateTimeOffset.UtcNow,
-            cancellationToken);
-        agentEvents.Publish(new AgentToolStateEvent(state, DateTimeOffset.UtcNow));
-        return new(
-            detected.Status,
-            new ToolStateResponse(state),
-            detected.Messages,
-            request.CorrelationId);
-    }
-
-    public async Task<ApplicationResult<AgentResponse>> InstallMsiToolAsync(
-        InstallAgentMsiToolRequest request,
-        CancellationToken cancellationToken)
-    {
-        var catalog = new ToolCatalog();
-        if (!catalog.TryGet(request.Plan.ToolId, out var descriptor) ||
-            descriptor.InstallerKind != ToolInstallerKind.Msi ||
-            request.Plan.InstallerKind != ToolInstallerKind.Msi ||
-            request.Plan.OfficialSource != descriptor.OfficialInstallSource ||
-            !StringComparer.OrdinalIgnoreCase.Equals(
-                request.Plan.ExpectedSha256,
-                descriptor.OfficialPackageSha256) ||
-            !StringComparer.Ordinal.Equals(
-                request.Plan.PlanHash,
-                ToolInstallPlanHasher.Compute(
-                    descriptor,
-                    request.Plan.Location,
-                    request.Plan.ExpectedSha256,
-                    request.Plan.CreatedAtUtc,
-                    request.Plan.ExpiresAtUtc)))
-        {
-            return RejectMsiInstall(request.CorrelationId, "agent.msi-install.plan-invalid");
-        }
-
-        var authorization = ToolInstallAuthorization.Authorize(
-            request.Plan,
-            request.UserConfirmed,
-            DateTimeOffset.UtcNow,
-            request.CorrelationId);
-        if (!authorization.IsSuccess)
-        {
-            return new(
-                authorization.Status,
-                null,
-                authorization.Messages,
-                request.CorrelationId);
-        }
-
-        var brokerRequest = new ElevatedBrokerExecutionRequest(
-            Guid.Empty,
-            Guid.Empty,
-            0,
-            string.Empty,
-            request.Plan.PlanHash,
-            DateTimeOffset.MinValue,
-            ElevatedBrokerOperationKind.InstallMsiTool,
-            MsiToolInstall: new MsiToolInstallSnapshot(
-                request.Plan.ToolId,
-                request.PackageRelativePath,
-                request.Plan.ExpectedSha256));
-        var result = await ExecuteElevatedBrokerAsync(
-            brokerRequest,
-            request.CorrelationId,
-            cancellationToken).ConfigureAwait(false);
-        return result.Succeeded
-            ? ApplicationResult<AgentResponse>.Succeeded(
-                new MsiToolInstallResponse(result),
-                request.CorrelationId)
-            : RejectMsiInstall(request.CorrelationId, result.Code);
-    }
-
-    private static ApplicationResult<AgentResponse> RejectMsiInstall(
-        CorrelationId correlationId,
-        string code) =>
-        ApplicationResult<AgentResponse>.FromStatus(
-            ApplicationStatus.Rejected,
-            correlationId,
-            new ApplicationMessage(
-                code,
-                code,
-                code,
-                ApplicationMessageSeverity.Error,
-                []));
 
     public async Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
         ExportAgentMonitorCsvRequest request,
@@ -1178,25 +396,6 @@ internal sealed class DesktopAgentRuntime :
         CancellationToken cancellationToken) =>
         Task.CompletedTask;
 
-    public Task RequestTestCancellationAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _ = testCoordinator.CancelActive();
-
-        return Task.CompletedTask;
-    }
-
-    public async Task TerminateExternalToolJobsAsync(
-        CancellationToken cancellationToken)
-    {
-        var task = testCoordinator.CancelActive();
-
-        if (task is not null)
-        {
-            await task.WaitAsync(cancellationToken);
-        }
-    }
-
     public async Task StopMonitoringAsync(CancellationToken cancellationToken)
     {
         var session = monitoring.CurrentSession;
@@ -1207,14 +406,8 @@ internal sealed class DesktopAgentRuntime :
         }
     }
 
-    public async Task<bool> RestoreTemporarySystemStateAsync(
-        CancellationToken cancellationToken)
-    {
-        var summary = await systemSupportRecovery
-            .RecoverPendingAsync(cancellationToken)
-            .ConfigureAwait(false);
-        return summary.Failed == 0;
-    }
+    public Task<bool> RestoreTemporarySystemStateAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(true);
 
     public Task<int> FlushSqliteQueuesAsync(CancellationToken cancellationToken) =>
         Task.FromResult(0);
@@ -1288,9 +481,6 @@ internal sealed class DesktopAgentRuntime :
                 out _);
         }
     }
-
-    public Task StopSupervisedProcessesAsync(CancellationToken cancellationToken) =>
-        TerminateExternalToolJobsAsync(cancellationToken);
 
     public Task RemoveTrayIconAsync(CancellationToken cancellationToken)
     {
@@ -1456,109 +646,6 @@ internal sealed class DesktopAgentRuntime :
             request.CorrelationId);
     }
 
-    private static IExternalToolAdapter? CreateAdapter(ToolState tool) =>
-        tool.ToolId.Value switch
-        {
-            "microsoft.diskspd" => new DiskSpdAdapter(tool.ExecutablePath!),
-            "fio" => new FioAdapter(tool.ExecutablePath!),
-            "windows.robocopy" => new RoboCopyAdapter(tool.ExecutablePath!),
-            "dite.filegen" => new DiteFileGenAdapter(tool.ExecutablePath!),
-            _ => null
-        };
-
-    private async Task ExecuteFlushBetweenCopyBatchesAsync(
-        AuthorizedTestRun run,
-        CopyBatchManifest manifest,
-        int completedBatchNumber,
-        FlushVolumeAction action,
-        CorrelationId correlationId,
-        CancellationToken cancellationToken)
-    {
-        if (action.VolumeId != run.Plan.Target.VolumeId
-            || action.PlannedTarget is not { } target
-            || target.VolumeId != action.VolumeId)
-        {
-            throw new UnauthorizedAccessException(
-                "The copy-batch Flush target no longer matches the immutable test target.");
-        }
-
-        var request = new ElevatedBrokerExecutionRequest(
-            Guid.Empty,
-            Guid.Empty,
-            0,
-            string.Empty,
-            manifest.PlanHash,
-            DateTimeOffset.UtcNow.AddMinutes(1),
-            ElevatedBrokerOperationKind.FlushVolume,
-            VolumeTarget: target);
-        await WriteSystemSupportAuditAsync(
-            request,
-            correlationId,
-            SystemSupportActionKind.FlushVolume,
-            SystemSupportAuditStage.Started,
-            "system-support.test-copy-flush-started",
-            cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var result = await ExecuteElevatedBrokerAsync(
-                request,
-                correlationId,
-                cancellationToken).ConfigureAwait(false);
-            if (!result.Succeeded || result.VolumeEvidence is null)
-            {
-                throw new InvalidOperationException(result.Code);
-            }
-
-            var artifact = JsonSerializer.SerializeToUtf8Bytes(
-                new
-                {
-                    format = "WinPool.CopyBatchFlushEvidence",
-                    version = 1,
-                    runId = manifest.RunId.Value,
-                    stepId = manifest.StepId,
-                    batchNumber = completedBatchNumber,
-                    planHash = manifest.PlanHash,
-                    target,
-                    result.VolumeEvidence
-                });
-            await testArtifactStore.SaveGeneratedArtifactAsync(
-                manifest.RunId,
-                $"copy-flush-{manifest.StepId}-{completedBatchNumber}",
-                "application/json",
-                artifact,
-                CancellationToken.None);
-            await WriteSystemSupportAuditAsync(
-                request,
-                correlationId,
-                SystemSupportActionKind.FlushVolume,
-                SystemSupportAuditStage.Completed,
-                "system-support.test-copy-flush-completed",
-                CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            await WriteSystemSupportAuditAsync(
-                request,
-                correlationId,
-                SystemSupportActionKind.FlushVolume,
-                SystemSupportAuditStage.Cancelled,
-                "system-support.test-copy-flush-cancelled",
-                CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-        catch
-        {
-            await WriteSystemSupportAuditAsync(
-                request,
-                correlationId,
-                SystemSupportActionKind.FlushVolume,
-                SystemSupportAuditStage.Failed,
-                "system-support.test-copy-flush-failed",
-                CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-    }
-
     private static MonitorRequest CreateDefaultMonitorRequest(double rateHz)
     {
         var systemId = SystemId.New();
@@ -1595,122 +682,6 @@ internal sealed class DesktopAgentRuntime :
             ContinueWhenUiCloses: true);
     }
 
-    private async Task ExecuteRamMapBeforeBatchAsync(
-        TestRunId runId,
-        string firstBatchStepId,
-        string planHash,
-        ClearSystemFileCacheAction action,
-        CorrelationId correlationId,
-        CancellationToken cancellationToken)
-    {
-        var request = new ElevatedBrokerExecutionRequest(
-            Guid.Empty,
-            Guid.Empty,
-            0,
-            string.Empty,
-            planHash,
-            DateTimeOffset.UtcNow.AddMinutes(1),
-            ElevatedBrokerOperationKind.ClearSystemFileCache,
-            RamMapMode: action.Mode,
-            PlannedRamMapIdentity: action.PlannedToolIdentity);
-        await WriteSystemSupportAuditAsync(
-            request,
-            correlationId,
-            SystemSupportActionKind.ClearSystemFileCache,
-            SystemSupportAuditStage.Started,
-            "system-support.test-rammap-started",
-            cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var result = await ExecuteElevatedBrokerAsync(
-                request,
-                correlationId,
-                cancellationToken).ConfigureAwait(false);
-            if (!result.Succeeded
-                || result.RamMapEvidence is not
-                {
-                    ExitCode: 0,
-                    UsedElevatedBroker: true
-                } evidence
-                || !evidence.Arguments.SequenceEqual(["-Es", "-Et"]))
-            {
-                throw new InvalidOperationException(result.Code);
-            }
-
-            var artifact = JsonSerializer.SerializeToUtf8Bytes(
-                new
-                {
-                    format = "WinPool.RamMapBatchEvidence",
-                    version = 1,
-                    runId = runId.Value,
-                    firstBatchStepId,
-                    planHash,
-                    mode = action.Mode.ToString(),
-                    tool = action.PlannedToolIdentity,
-                    evidence
-                });
-            await testArtifactStore.SaveGeneratedArtifactAsync(
-                runId,
-                $"rammap-before-{firstBatchStepId}",
-                "application/json",
-                artifact,
-                CancellationToken.None);
-            await WriteSystemSupportAuditAsync(
-                request,
-                correlationId,
-                SystemSupportActionKind.ClearSystemFileCache,
-                SystemSupportAuditStage.Completed,
-                "system-support.test-rammap-completed",
-                CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            await WriteSystemSupportAuditAsync(
-                request,
-                correlationId,
-                SystemSupportActionKind.ClearSystemFileCache,
-                SystemSupportAuditStage.Cancelled,
-                "system-support.test-rammap-cancelled",
-                CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-        catch
-        {
-            await WriteSystemSupportAuditAsync(
-                request,
-                correlationId,
-                SystemSupportActionKind.ClearSystemFileCache,
-                SystemSupportAuditStage.Failed,
-                "system-support.test-rammap-failed",
-                CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    private async Task SetActivePowerPlanForTestAsync(
-        Guid powerPlanId,
-        string planHash,
-        CorrelationId correlationId,
-        CancellationToken cancellationToken)
-    {
-        var result = await ExecuteElevatedBrokerAsync(
-            new(
-                Guid.Empty,
-                Guid.Empty,
-                0,
-                string.Empty,
-                planHash,
-                DateTimeOffset.UtcNow.AddMinutes(1),
-                ElevatedBrokerOperationKind.SetActivePowerPlan,
-                PowerPlanId: powerPlanId),
-            correlationId,
-            cancellationToken).ConfigureAwait(false);
-        if (!result.Succeeded)
-        {
-            throw new InvalidOperationException(result.Code);
-        }
-    }
-
     private static ApplicationResult<AgentResponse> Reject(
         CorrelationId correlationId,
         string code) =>
@@ -1724,20 +695,6 @@ internal sealed class DesktopAgentRuntime :
         string code) =>
         Task.FromResult(Reject(correlationId, code));
 
-    private static Task<ApplicationResult<AgentResponse>> NotConnectedAsync(
-        CorrelationId correlationId,
-        string code) =>
-        Task.FromResult(
-            ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.RequiresEnvironment,
-                correlationId,
-                new ApplicationMessage(
-                    code,
-                    code,
-                    string.Empty,
-                    ApplicationMessageSeverity.Warning,
-                [])));
-
     private static ApplicationMessage Message(string code) =>
         new(
             code,
@@ -1745,7 +702,6 @@ internal sealed class DesktopAgentRuntime :
             string.Empty,
             ApplicationMessageSeverity.Warning,
             []);
-
 }
 
 internal sealed record AgentEndpointRecord(

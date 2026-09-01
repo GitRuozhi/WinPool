@@ -15,7 +15,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ContextMenuStrip menu = new();
     private readonly ToolStripMenuItem welcomeItem;
     private readonly ToolStripMenuItem showMainWindowItem;
-    private readonly ToolStripMenuItem pauseTestItem;
     private readonly ToolStripMenuItem pauseMonitoringItem;
     private readonly ToolStripMenuItem exitItem;
     private readonly IUserPreferencesService preferencesService;
@@ -24,8 +23,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private AgentSessionCoordinator? coordinator;
     private UserPreferences preferences = new();
     private MonitoringSession? monitoringSession;
-    private TestRunId? activeTestRun;
-    private string activeTestState = "none";
 
     public TrayApplicationContext(IUserPreferencesService preferencesService)
     {
@@ -38,8 +35,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         welcomeItem.Click += (_, _) => OpenApp("Welcome");
         showMainWindowItem = new ToolStripMenuItem { Name = "show-main-window" };
         showMainWindowItem.Click += (_, _) => OpenApp();
-        pauseTestItem = new ToolStripMenuItem { Name = "pause-test", Enabled = false };
-        pauseTestItem.Click += async (_, _) => await ToggleTestPauseAsync();
         pauseMonitoringItem = new ToolStripMenuItem { Name = "pause-monitoring" };
         pauseMonitoringItem.Click += async (_, _) => await ToggleMonitoringAsync();
         exitItem = new ToolStripMenuItem { Name = "exit" };
@@ -47,7 +42,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         menu.Items.Add(welcomeItem);
         menu.Items.Add(showMainWindowItem);
-        menu.Items.Add(pauseTestItem);
         menu.Items.Add(pauseMonitoringItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -109,33 +103,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         uiContext.Post(_ => RefreshPresentation(), null);
     }
 
-    internal void SetTestRun(TestRunId? runId, string state)
-    {
-        activeTestRun = runId;
-        activeTestState = state;
-        uiContext.Post(_ => RefreshPresentation(), null);
-    }
-
-    internal void ShowSystemSupportRecoveryWarning(int failedCount)
-    {
-        if (failedCount > 0)
-        {
-            trayIcon.ShowBalloonTip(8_000, "WinPool",
-                $"{failedCount} temporary system state item(s) could not be restored.",
-                ToolTipIcon.Warning);
-        }
-    }
-
-    internal void ShowInterruptedTestRecoveryNotice(int interruptedRunCount)
-    {
-        if (interruptedRunCount > 0)
-        {
-            trayIcon.ShowBalloonTip(8_000, "WinPool",
-                $"{interruptedRunCount} interrupted test run(s) were preserved.",
-                ToolTipIcon.Warning);
-        }
-    }
-
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -182,13 +149,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ? zh ? "暂停监控" : "Pause monitoring"
             : zh ? "恢复监控" : "Resume monitoring";
         pauseMonitoringItem.Enabled = coordinator?.State == AgentLifecycleState.Running;
-
-        var testCanPause = activeTestRun is not null
-            && activeTestState is "paused" or "pausing" or "running" or "starting";
-        pauseTestItem.Text = activeTestState is "paused"
-            ? zh ? "恢复测试" : "Resume test"
-            : zh ? "暂停测试" : "Pause test";
-        pauseTestItem.Enabled = testCanPause && coordinator?.State == AgentLifecycleState.Running;
         exitItem.Text = zh ? "退出 WinPool" : "Exit WinPool";
         trayIcon.Text = coordinator?.State is AgentLifecycleState.Starting
             or AgentLifecycleState.Recovering
@@ -254,40 +214,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         await coordinator.HandleAsync(new StartAgentMonitoringRequest(request, CorrelationId.New()));
     }
 
-    private async Task ToggleTestPauseAsync()
-    {
-        if (coordinator?.State != AgentLifecycleState.Running || activeTestRun is not { } runId)
-        {
-            return;
-        }
-
-        if (activeTestState == "paused")
-        {
-            await coordinator.HandleAsync(new ResumeAgentTestRequest(runId, CorrelationId.New()));
-        }
-        else
-        {
-            await coordinator.HandleAsync(new PauseAgentTestRequest(runId, CorrelationId.New()));
-        }
-    }
-
     private async Task BeginCompleteExitAsync()
     {
         if (coordinator is null || coordinator.State is AgentLifecycleState.ShuttingDown or AgentLifecycleState.Stopped)
         {
             return;
         }
-        var snapshot = await coordinator.HandleAsync(new GetAgentSnapshotRequest(CorrelationId.New()));
-        var activeRun = (snapshot.Value as AgentSnapshotResponse)?.Snapshot.ActiveTestRunId;
-        if (activeRun is not null && MessageBox.Show(
-                "A disk test is active. Exit WinPool will cancel it.\n\nExit WinPool?",
-                "WinPool — Active test", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-        {
-            return;
-        }
+
         await coordinator.HandleAsync(new RequestAgentShutdownRequest(
-            ShutdownReason.TrayExit, activeRun is not null, CorrelationId.New()));
+            ShutdownReason.TrayExit, CorrelationId.New()));
     }
 
     private static string ResolveMainApplicationPath()

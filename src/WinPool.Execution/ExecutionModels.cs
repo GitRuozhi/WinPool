@@ -11,18 +11,8 @@ public enum ExecutionCapability
     ReadPerformanceCounters = 1 << 1,
     OpenNativeProperties = 1 << 2,
     SimulateStorageMutation = 1 << 3,
-    ReadFileTest = 1 << 4,
-    WriteFileTest = 1 << 5,
-    RunExternalTestTool = 1 << 6,
-    CleanTemporaryFiles = 1 << 7,
-    FlushVolume = 1 << 8,
-    TrimOrOptimizeVolume = 1 << 9,
-    AdjustProcessScheduling = 1 << 10,
-    UseTemporaryPowerPlan = 1 << 11,
-    InstallExternalTool = 1 << 12,
-    ClearSystemFileCache = 1 << 13,
-    MutateStorageStructure = 1 << 14,
-    ReplayEvidence = 1 << 15
+    MutateStorageStructure = 1 << 4,
+    ReplayEvidence = 1 << 5
 }
 
 public enum RiskLevel
@@ -42,15 +32,6 @@ public enum OperationIntent
     OpenNativeProperties,
     ReplayHistoricalEvents,
     SimulateStorageMutation,
-    RunFileTest,
-    CleanRegisteredTestFiles,
-    CleanTemporaryFiles,
-    FlushVolume,
-    TrimOrOptimizeVolume,
-    AdjustProcessScheduling,
-    UseTemporaryPowerPlan,
-    InstallExternalTool,
-    ClearSystemFileCache,
     InitializeDisk,
     ConvertDisk,
     SetDiskOnlineState,
