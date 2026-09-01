@@ -14,20 +14,20 @@ public sealed class AgentProcessRegistryTests
             101,
             AgentManagedProcessKind.MainApplication,
             startedAt);
-        var testWorker = Create(
+        var inventoryWorker = Create(
             102,
             AgentManagedProcessKind.InventoryWorker,
             startedAt);
-        var broker = Create(
+        var responsiveApplication = Create(
             103,
             AgentManagedProcessKind.MainApplication,
             startedAt);
         Assert.True(registry.TryRegister(mainApplication));
-        Assert.True(registry.TryRegister(testWorker));
-        Assert.True(registry.TryRegister(broker));
+        Assert.True(registry.TryRegister(inventoryWorker));
+        Assert.True(registry.TryRegister(responsiveApplication));
         Assert.True(registry.TryRecordHeartbeat(
-            broker.ProcessInstanceId,
-            broker.ProcessId,
+            responsiveApplication.ProcessInstanceId,
+            responsiveApplication.ProcessId,
             startedAt.AddSeconds(5)));
 
         var unresponsive = registry.SweepUnresponsive(

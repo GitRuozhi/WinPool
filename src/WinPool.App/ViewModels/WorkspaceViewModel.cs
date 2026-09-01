@@ -699,8 +699,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             {
             }
             SystemCatalog.ReplaceLocal(localDocument);
-            OnPropertyChanged(nameof(ActiveSnapshot));
-            OnPropertyChanged(nameof(ActiveDocument));
             OnPropertyChanged(nameof(Snapshot));
             if (!IsLocalSystem)
             {
@@ -708,13 +706,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             }
             else
             {
+                var preferredSelection = previous is null
+                    ? null
+                    : ResolveSelection(
+                        localDocument,
+                        SelectedCategory,
+                        previous.Id.ProviderKey);
                 SelectedSystem = localDocument;
-                if (previous is not null)
-                {
-                    SelectedCategory = previous.Category;
-                }
+                OnPropertyChanged(nameof(SelectedSystem));
+                OnPropertyChanged(nameof(ActiveSnapshot));
+                OnPropertyChanged(nameof(ActiveDocument));
+                OnPropertyChanged(nameof(CanOpenSelectedPartition));
                 RebuildTopology();
-                RebuildObjects(previous);
+                RebuildObjects(preferredSelection);
             }
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
             _notificationService.DismissByKey(ScanningNotificationKey);

@@ -208,11 +208,7 @@ public sealed class LocalizationService : ObservableObject
             ["Optimize"] = ("优化", "Optimize"),
             ["Trim"] = ("剪裁", "Trim"),
             ["Defragment"] = ("碎片整理", "Defragment"),
-            ["TestPageIntro"] = (
-                "测试板块将复刻本项目 Dite、RealSoak、WEmxx 的磁盘测试能力：DiskSpd 基准、真实负载、增量填充与哈希校验。功能开发中。",
-                "The Test area will reproduce this project's Dite, RealSoak, and WEmxx capabilities: DiskSpd benchmarks, realistic workloads, incremental fill, and hash verification. Under development."),
             ["MonitorIntro"] = ("实时显示本机磁盘的活动时间与读写速度。", "Shows live disk activity and read/write throughput of this computer."),
-            ["DevelopmentIntro"] = ("此处实时显示程序执行的命令和系统返回（只读日志）。", "Shows the commands executed by WinPool and their output in real time (read-only log)."),
             ["SystemDisk"] = ("系统盘", "System disk"),
             ["Welcome"] = ("欢迎页面", "Welcome page"),
             ["WelcomeTitle"] = ("欢迎使用 WinPool ！", "Welcome to WinPool!"),

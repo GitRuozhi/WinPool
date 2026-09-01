@@ -4,9 +4,9 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WinPoolSqliteStore
 {
-    // V0.41 starts from a deliberately clean data root. Do not add a
-    // migration from schema 12: its generic preferences table mixed distinct
-    // ownership domains and is intentionally rejected by InitializeAsync.
+    // V0.43 starts from a deliberately clean schema 14 data root. Do not add
+    // migrations from earlier schemas: they contain retired product domains
+    // and are intentionally rejected by InitializeAsync.
     public const int CurrentSchemaVersion = 14;
 
     private readonly string connectionString;
@@ -80,7 +80,7 @@ public sealed class WinPoolSqliteStore
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = SchemaV1;
+        command.CommandText = CurrentSchemaDefinition;
         await command.ExecuteNonQueryAsync(cancellationToken);
 
         command.CommandText = """
@@ -183,7 +183,7 @@ public sealed class WinPoolSqliteStore
             await expectedConnection.OpenAsync(cancellationToken);
             await using (var create = expectedConnection.CreateCommand())
             {
-                create.CommandText = SchemaV1;
+                create.CommandText = CurrentSchemaDefinition;
                 await create.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -501,7 +501,7 @@ public sealed class WinPoolSqliteStore
             string Definition);
     }
 
-    private const string SchemaV1 = """
+    private const string CurrentSchemaDefinition = """
         CREATE TABLE IF NOT EXISTS schema_info(
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
             schema_version INTEGER NOT NULL,
