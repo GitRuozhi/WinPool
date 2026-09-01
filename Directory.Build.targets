@@ -1,11 +1,8 @@
 <Project>
   <!-- Re-apply after the SDK so WinUI/RID evaluation cannot reintroduce tfm/rid folders. -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'
+                         Or '$(MSBuildProjectName)' == 'WinPool.Agent'">
     <OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>
     <OutDir>$(WinPoolLocalOutputRoot)</OutDir>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
-    <OutputPath>$(WinPoolLocalOutputRoot)Agent\</OutputPath>
-    <OutDir>$(WinPoolLocalOutputRoot)Agent\</OutDir>
   </PropertyGroup>
 </Project>

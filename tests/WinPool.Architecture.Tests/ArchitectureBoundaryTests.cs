@@ -228,23 +228,39 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void AgentRuntimeIsPackagedInAnIsolatedSubdirectory()
+    public void AppAndAgentShareTheLocalRunTreeRoot()
     {
         var root = FindRepositoryRoot();
         var appProject = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
         var appStartup = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "App.xaml.cs"));
+        var startupRegistration = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "Services", "AgentStartupRegistration.cs"));
         var directoryBuildProps = File.ReadAllText(
             Path.Combine(root, "Directory.Build.props"));
+        var directoryBuildTargets = File.ReadAllText(
+            Path.Combine(root, "Directory.Build.targets"));
 
         Assert.Contains(
             "artifacts\\$(Configuration)\\",
             directoryBuildProps,
             StringComparison.Ordinal);
         Assert.Contains(
+            "<OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>",
+            directoryBuildTargets,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
             "$(WinPoolLocalOutputRoot)Agent\\",
             directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "$(WinPoolLocalOutputRoot)Agent\\",
+            directoryBuildTargets,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "$(WinPoolLocalOutputRoot)Agent\\TestWorker\\",
@@ -255,15 +271,48 @@ public sealed class ArchitectureBoundaryTests
             directoryBuildProps,
             StringComparison.Ordinal);
         Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "bin\\$(Platform)\\$(Configuration)\\net10.0-windows10.0.19041.0",
             appProject,
             StringComparison.Ordinal);
         Assert.Contains(
+            "\"WinPool.Agent.exe\"",
+            appStartup.ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
             "\"Agent\",\n            \"WinPool.Agent.exe\"",
             appStartup.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
+        Assert.Contains(
+            "Path.Combine(AppContext.BaseDirectory, \"WinPool.Agent.exe\")",
+            startupRegistration,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppAlignsWindowsDesktopRuntimeWithoutWinFormsUi()
+    {
+        var root = FindRepositoryRoot();
+        var appProject = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
+
+        Assert.Contains(
+            "<FrameworkReference Include=\"Microsoft.WindowsDesktop.App.WindowsForms\" />",
+            appProject,
+            StringComparison.Ordinal);
+        Assert.Contains("align", appProject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<UseWindowsForms>", appProject, StringComparison.OrdinalIgnoreCase);
+
+        var appSource = string.Join(
+            '\n',
+            Directory.EnumerateFiles(
+                    Path.Combine(root, "src", "WinPool.App"),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Select(File.ReadAllText));
+        Assert.DoesNotContain("System.Windows.Forms", appSource, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -725,7 +774,7 @@ public sealed class ArchitectureBoundaryTests
         var stagingScript = File.ReadAllText(
             Path.Combine(root, "build", "Publish-Staged.ps1"));
 
-        Assert.Contains("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("BuildTestWorkerRuntime", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("BuildElevatedBrokerRuntime", appProject, StringComparison.Ordinal);
@@ -742,12 +791,17 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("BuildElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyTestWorkerRuntime", agentProject, StringComparison.Ordinal);
         Assert.DoesNotContain("CopyElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
-        Assert.Contains("System.IO.Path]::GetFullPath", appProject, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.IO.Path]::GetFullPath", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
         Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("*.pdb", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("Remove-Item", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("'WinPool.Agent.exe' = 'WinPool.Agent.exe'", stagingScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("SHA256", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("collision", stagingScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PublishTrimmed=false", stagingScript, StringComparison.Ordinal);
+        Assert.Contains(".pdb", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("$appPublish", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("$agentPublish", stagingScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Agent/TestWorker/WinPool.TestWorker.exe", stagingScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Agent/Broker/WinPool.ElevatedBroker.exe", stagingScript, StringComparison.Ordinal);
         Assert.Contains("duplicate", stagingScript, StringComparison.OrdinalIgnoreCase);

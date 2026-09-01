@@ -29,38 +29,133 @@ if (Test-Path -LiteralPath $stageRoot) {
     throw "Staging path already exists and will not be overwritten: $stageRoot"
 }
 
+function Get-PublishFileMap([string]$root) {
+    $map = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File)) {
+        if ($file.Extension -eq '.pdb') {
+            continue
+        }
+
+        $relative = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/')
+        if ($map.ContainsKey($relative)) {
+            throw "Duplicate relative path in publish tree ${root}: $relative"
+        }
+
+        $map[$relative] = $file.FullName
+    }
+
+    return $map
+}
+
+function Copy-StagedFile([string]$sourcePath, [string]$destinationPath) {
+    $directory = Split-Path -Parent $destinationPath
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory | Out-Null
+    }
+
+    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+}
+
+function Merge-PublishTrees([string]$appPublish, [string]$agentPublish, [string]$destination) {
+    $appMap = Get-PublishFileMap $appPublish
+    $agentMap = Get-PublishFileMap $agentPublish
+    $relativePaths = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($key in $appMap.Keys) {
+        [void]$relativePaths.Add($key)
+    }
+    foreach ($key in $agentMap.Keys) {
+        [void]$relativePaths.Add($key)
+    }
+
+    $sharedCount = 0
+    $appOnlyCount = 0
+    $agentOnlyCount = 0
+
+    foreach ($relative in ($relativePaths | Sort-Object)) {
+        $inApp = $appMap.ContainsKey($relative)
+        $inAgent = $agentMap.ContainsKey($relative)
+        $destinationPath = Join-Path $destination ($relative.Replace('/', '\'))
+
+        if ($inApp -and $inAgent) {
+            $appHash = (Get-FileHash -LiteralPath $appMap[$relative] -Algorithm SHA256).Hash
+            $agentHash = (Get-FileHash -LiteralPath $agentMap[$relative] -Algorithm SHA256).Hash
+            if ($appHash -ne $agentHash) {
+                throw "Staging collision: $relative has different SHA-256 hashes (App=$appHash, Agent=$agentHash)."
+            }
+
+            Copy-StagedFile $appMap[$relative] $destinationPath
+            $sharedCount += 1
+        }
+        elseif ($inApp) {
+            Copy-StagedFile $appMap[$relative] $destinationPath
+            $appOnlyCount += 1
+        }
+        else {
+            Copy-StagedFile $agentMap[$relative] $destinationPath
+            $agentOnlyCount += 1
+        }
+    }
+
+    Write-Output "Union merge: $sharedCount shared, $appOnlyCount App-only, $agentOnlyCount Agent-only, 0 collisions"
+}
+
+$appProject = Join-Path $repositoryRoot 'src\WinPool.App\WinPool.App.csproj'
+$agentProject = Join-Path $repositoryRoot 'src\WinPool.Agent\WinPool.Agent.csproj'
+$publishProjects = @($appProject, $agentProject)
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('winpool-stage-' + [guid]::NewGuid().ToString('N'))
+$appPublish = Join-Path $tempRoot 'App'
+$agentPublish = Join-Path $tempRoot 'Agent'
+
 New-Item -ItemType Directory -Path $stageRoot | Out-Null
+New-Item -ItemType Directory -Path $appPublish | Out-Null
+New-Item -ItemType Directory -Path $agentPublish | Out-Null
 
-$publishProjects = @(
-    (Join-Path $repositoryRoot 'src\WinPool.App\WinPool.App.csproj'),
-    (Join-Path $repositoryRoot 'src\WinPool.Agent\WinPool.Agent.csproj')
-)
+try {
+    foreach ($project in $publishProjects) {
+        & dotnet restore $project --runtime win-x64 '-p:Platform=x64'
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet restore failed for $project with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
+        }
+    }
 
-foreach ($project in $publishProjects) {
-    & dotnet restore $project --runtime win-x64 '-p:Platform=x64'
+    & dotnet publish $appProject `
+        --configuration $Configuration `
+        --runtime win-x64 `
+        --self-contained true `
+        --no-restore `
+        --output $appPublish `
+        '-p:Platform=x64' `
+        '-p:PublishTrimmed=false'
+
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet restore failed for $project with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
+        throw "dotnet publish failed for WinPool.App with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
+    }
+
+    & dotnet publish $agentProject `
+        --configuration $Configuration `
+        --runtime win-x64 `
+        --self-contained true `
+        --no-restore `
+        --output $agentPublish `
+        '-p:Platform=x64' `
+        '-p:PublishTrimmed=false'
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed for WinPool.Agent with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
+    }
+
+    Merge-PublishTrees $appPublish $agentPublish $stageRoot
+}
+finally {
+    if (Test-Path -LiteralPath $tempRoot) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
-& dotnet publish (Join-Path $repositoryRoot 'src\WinPool.App\WinPool.App.csproj') `
-    --configuration $Configuration `
-    --runtime win-x64 `
-    --self-contained true `
-    --no-restore `
-    --output $stageRoot `
-    '-p:Platform=x64'
-
-if ($LASTEXITCODE -ne 0) {
-    throw "dotnet publish failed with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
-}
-
-Get-ChildItem -LiteralPath $stageRoot -Recurse -File -Filter '*.pdb' |
-    Remove-Item -Force
-
 $requiredExecutables = @{
     'WinPool.App.exe' = 'WinPool.App.exe'
-    'WinPool.Agent.exe' = 'Agent/WinPool.Agent.exe'
+    'WinPool.Agent.exe' = 'WinPool.Agent.exe'
 }
 
 $allFiles = @(Get-ChildItem -LiteralPath $stageRoot -Recurse -File)
@@ -114,7 +209,10 @@ if ($bundledExternalTools.Count -gt 0) {
     throw "Staging bundles forbidden external tools: $($relativePaths -join ', ')"
 }
 
+$bytes = ($allFiles | Measure-Object -Property Length -Sum).Sum
+$mebibytes = [math]::Round($bytes / 1MB, 2)
 Write-Output "Verified $expectedProductVersion staging tree: $stageRoot"
+Write-Output "  $($allFiles.Count) files, $mebibytes MiB"
 foreach ($entry in $requiredExecutables.GetEnumerator() | Sort-Object Value) {
     Write-Output "  $($entry.Value)"
 }

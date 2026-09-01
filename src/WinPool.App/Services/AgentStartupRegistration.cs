@@ -10,7 +10,7 @@ internal sealed class AgentStartupRegistration
     private const string LegacyAgentValueName = "WinPool.Agent";
 
     public string AgentExecutablePath => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "Agent", "WinPool.Agent.exe"));
+        Path.Combine(AppContext.BaseDirectory, "WinPool.Agent.exe"));
 
     public bool IsEnabled()
     {

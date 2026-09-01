@@ -17,7 +17,7 @@ $appExe = Join-Path $runRoot 'WinPool.App.exe'
 
 $requiredExecutables = [ordered]@{
     'WinPool.App.exe' = 'WinPool.App.exe'
-    'WinPool.Agent.exe' = 'Agent\WinPool.Agent.exe'
+    'WinPool.Agent.exe' = 'WinPool.Agent.exe'
 }
 
 function Invoke-Native([string]$fileName, [string[]]$arguments) {

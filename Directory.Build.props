@@ -30,12 +30,6 @@
                          Or '$(MSBuildProjectName)' == 'WinPool.Agent'">
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
     <OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
-    <OutputPath>$(WinPoolLocalOutputRoot)Agent\</OutputPath>
   </PropertyGroup>
 </Project>

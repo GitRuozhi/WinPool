@@ -320,7 +320,6 @@ public partial class App : Application
 
         var executable = Path.Combine(
             AppContext.BaseDirectory,
-            "Agent",
             "WinPool.Agent.exe");
         s_agentConnection = new NamedPipeAgentConnection(
             DataRootLayout.AgentEndpointPath(StorageDataLocations.CurrentRoot),

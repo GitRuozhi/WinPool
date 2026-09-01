@@ -73,6 +73,10 @@
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
+  <!--
+    Aligns App self-contained WindowsDesktop asset selection with Agent.
+    Do not set UseWindowsForms. App remains WinUI and must not add WinForms UI.
+  -->
   <ItemGroup>
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
   </ItemGroup>
@@ -89,12 +93,6 @@
              Targets="Build"
              Properties="Configuration=$(Configuration)"
              RemoveProperties="RuntimeIdentifier;SelfContained;Platform;PublishDir" />
-  </Target>
-
-  <Target Name="PublishAgentRuntimeBesideApp" AfterTargets="Publish">
-    <MSBuild Projects="..\WinPool.Agent\WinPool.Agent.csproj"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishDir=$([System.IO.Path]::GetFullPath('$(PublishDir)Agent\', '$(MSBuildProjectDirectory)'))" />
   </Target>
 
   <!-- V0.1 favors reliable JSON serialization over trimmed output size. -->
