@@ -74,6 +74,9 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\WinPool.Agent.Client\WinPool.Agent.Client.csproj" />
     <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
