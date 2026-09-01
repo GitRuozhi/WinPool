@@ -4,17 +4,18 @@
 
 ## 0. Status, authority, and baseline
 
-- **Plan status:** confirmed follow-up scope; implementation not started
+- **Plan status:** implemented 2026-09-01; automatic gates passed; targeted merged-directory process smoke passed; inherited OS-matrix and full human UI cases unverified
 - **Created:** 2026-09-01
 - **Baseline commit:** `3bfd6192561fc590e1db2b33b1257badb97cf841`
+- **Implementation commit:** `3e00633`
 - **Working branch:** `main`
 - **Current product version:** V0.44
 - **Target product version:** V0.44
 - **Stage type:** portable staging union after runtime alignment; no new user feature
 
 The developer’s informal staging draft is frozen under
-[`Archive/V0.44-shared-staging-draft`](Archive/V0.44-shared-staging-draft/README.md).
-This file is the only active Plan. Product version **must not** be bumped.
+[`../V0.44-shared-staging-draft`](../V0.44-shared-staging-draft/README.md).
+This file is the frozen Plan for that stage. Product version **must not** be bumped.
 
 The runtime-alignment experiment is recorded in
 [`V0.44 App - Agent runtime alignment experiment.md`](V0.44%20App%20-%20Agent%20runtime%20alignment%20experiment.md).
@@ -235,6 +236,17 @@ App-only count, Agent-only count, collision count.
 
 The alignment experiment’s unique set of about 232 MiB is a reference, not a
 hard gate.
+
+Implemented result:
+
+```text
+nested V0.44 baseline: 779 files, 338.40 MiB
+flat union:            574 files, 231.58 MiB
+shared:                281
+App-only:              288
+Agent-only:            5
+collisions:            0
+```
 
 ## 9. Non-goals
 

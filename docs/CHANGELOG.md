@@ -7,6 +7,36 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.44 shared runtime staging — 2026-09-01
+
+### Changed
+- Portable staging is the SHA-256-checked union of independent App and Agent
+  self-contained publishes. Shared identical files are stored once. Same-name
+  different-content files fail staging.
+- Local `artifacts\$(Configuration)\` uses the same flat root:
+  `WinPool.App.exe` and `WinPool.Agent.exe` beside each other.
+- The nested `Agent\` runtime tree is removed from staging and from the local
+  run tree. Product version remains V0.44.
+
+### Verification
+- Release solution build: 0 warnings, 0 errors.
+- Release automatic tests: 353 passed, 0 failed, 0 skipped.
+- No known vulnerable packages.
+- Union merge: 281 shared, 288 App-only, 5 Agent-only, 0 collisions.
+- Portable staging: 574 files, 231.58 MiB, down from the nested V0.44 baseline
+  of 779 files / 338.40 MiB.
+- Layout: both executables at the staging root, product version V0.44, 0 PDB,
+  PRI and XBF present.
+- Targeted process smoke from the merged tree: App cold-start launched Agent
+  from the root path; Agent also started directly.
+
+### Known Limitations
+- Full App/Agent UI smoke (navigation, theme, language, Picker, inventory,
+  monitoring, tray commands) remains `unverified` in this change.
+- Win10 22H2, Win11 24H2/25H2 full manual matrices, and inherited device, UAC,
+  DPI, and long-duration cases remain `unverified`.
+- No real storage mutation occurs.
+
 ## V0.44 platform upgrade and distribution slimming — 2026-09-01
 
 ### Changed

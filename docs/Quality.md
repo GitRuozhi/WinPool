@@ -71,9 +71,11 @@ explanation or a user-approved exception.
 
 ### Windows native integration gate
 
-- The App and Agent publish to their required nested paths.
-- Local `dotnet build` writes the same nested tree to `artifacts\$(Configuration)\`.
-- App runtime lookup paths match the staged tree.
+- The App and Agent publish independently, then merge into one flat portable
+  directory. Same relative path and identical SHA-256: store one file. Different
+  SHA-256: fail staging.
+- Local `dotnet build` writes the same flat tree to `artifacts\$(Configuration)\`.
+- App runtime lookup paths match the staged tree (`WinPool.Agent.exe` beside App).
 - Named-pipe identity and ACL behavior, SQLite ownership, and read-only
   inventory boundaries remain covered by automatic or controlled local
   integration checks.

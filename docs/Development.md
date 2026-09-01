@@ -16,9 +16,9 @@ Portable delivery is the only implemented mode through V0.7. Signed MSIX work
 is scheduled for V0.8–V0.9, and Microsoft Store submission is post-V1.0 work.
 These roadmap entries do not authorize packaging work in an earlier Plan.
 
-The portable artifact must be kept as one complete directory. Run
-`WinPool.App.exe` with its `Agent`, framework, and resource files in their staged
-relative locations. WinPool installs no Windows service and opening the
+The portable artifact must be kept as one complete directory.
+`WinPool.App.exe` and `WinPool.Agent.exe` sit at that directory root with shared
+runtime files stored once. WinPool installs no Windows service and opening the
 application does not itself require elevation. Exit all WinPool processes before
 replacing program files; partially overwriting a live directory is not a
 supported upgrade method.
@@ -195,12 +195,14 @@ The required layout is:
 
 ```text
 WinPool.App.exe
-Agent/WinPool.Agent.exe
+WinPool.Agent.exe
 ```
 
-V0.44 attempted to flatten App and Agent into one directory and retained this
-nested layout after five same-name desktop assemblies differed. Formal staging
-excludes `*.pdb`; local build outputs may still contain symbols.
+Portable staging is the SHA-256-checked union of independent App and Agent
+self-contained publishes. Same relative path and identical hash: store one file.
+Same relative path and different hash: fail staging. App-only and Agent-only
+files remain. Formal staging excludes `*.pdb`; local build outputs may still
+contain symbols. `PublishTrimmed` remains false.
 
 Staging must not contain duplicate child executables, scripts, PDB files, source artwork,
 unreferenced local assets, SQLite files, test results, or release metadata.

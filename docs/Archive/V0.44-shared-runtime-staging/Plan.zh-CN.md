@@ -7,17 +7,18 @@
 
 ## 0. 状态、授权与基线
 
-- **计划状态：** 跟进范围已确认，尚未开始实施
+- **计划状态：** 已于 2026-09-01 实施；自动门通过；目标合并目录进程冒烟通过；继承的操作系统矩阵与完整人工 UI 用例未验证
 - **创建日期：** 2026-09-01
 - **基线提交：** `3bfd6192561fc590e1db2b33b1257badb97cf841`
+- **实施提交：** `3e00633`
 - **工作分支：** `main`
 - **当前产品版本：** V0.44
 - **目标产品版本：** V0.44
 - **阶段性质：** 运行时对齐之后的 portable staging 并集；不新增用户功能
 
 开发者的非正式 staging 草稿已冻结在
-[`Archive/V0.44-shared-staging-draft`](Archive/V0.44-shared-staging-draft/README.md)。
-本文件是唯一的活动 Plan。产品版本 **不得** 上调。
+[`../V0.44-shared-staging-draft`](../V0.44-shared-staging-draft/README.md)。
+本文件是该阶段的冻结 Plan。产品版本 **不得** 上调。
 
 运行时对齐实验记录在
 [`V0.44 App - Agent runtime alignment experiment.md`](V0.44%20App%20-%20Agent%20runtime%20alignment%20experiment.md)。
@@ -224,6 +225,17 @@ Agent：直接启动、托盘图标与命令、IPC、SQLite、盘点、监控、
 记录 nested 之前与扁平之后：总大小、文件数、共享数、仅 App、仅 Agent、冲突数。
 
 对齐实验约 232 MiB 的唯一文件集只是参考，不是硬门槛。
+
+实施结果：
+
+```text
+nested V0.44 基线：779 个文件，338.40 MiB
+扁平并集：         574 个文件，231.58 MiB
+共享：             281
+仅 App：           288
+仅 Agent：         5
+冲突：             0
+```
 
 ## 9. 非目标
 

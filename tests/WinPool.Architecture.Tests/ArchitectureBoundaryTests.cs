@@ -160,7 +160,8 @@ public sealed class ArchitectureBoundaryTests
             ("docs/Product.md", "docs/Product.zh-CN.md"),
             ("docs/Development.md", "docs/Development.zh-CN.md"),
             ("docs/Quality.md", "docs/Quality.zh-CN.md"),
-            ("docs/Plan.md", "docs/Plan.zh-CN.md"),
+            ("docs/Archive/V0.44-shared-runtime-staging/README.md", "docs/Archive/V0.44-shared-runtime-staging/README.zh-CN.md"),
+            ("docs/Archive/V0.44-shared-runtime-staging/Plan.md", "docs/Archive/V0.44-shared-runtime-staging/Plan.zh-CN.md"),
             ("docs/Archive/V0.44-shared-staging-draft/README.md", "docs/Archive/V0.44-shared-staging-draft/README.zh-CN.md"),
             ("docs/Archive/V0.43/Plan.md", "docs/Archive/V0.43/Plan.zh-CN.md"),
             ("docs/Archive/V0.44/Plan.md", "docs/Archive/V0.44/Plan.zh-CN.md"),
@@ -183,6 +184,18 @@ public sealed class ArchitectureBoundaryTests
                 Assert.True(File.Exists(readingCopy), pair.Item2);
                 Assert.Contains("无 `.zh-CN` 后缀", File.ReadAllText(readingCopy));
             });
+
+        var activePlan = Path.Combine(root, "docs", "Plan.md");
+        var activePlanZh = Path.Combine(root, "docs", "Plan.zh-CN.md");
+        if (File.Exists(activePlan))
+        {
+            Assert.True(File.Exists(activePlanZh), "docs/Plan.zh-CN.md");
+            Assert.Contains("无 `.zh-CN` 后缀", File.ReadAllText(activePlanZh));
+        }
+        else
+        {
+            Assert.False(File.Exists(activePlanZh));
+        }
     }
 
     [Fact]

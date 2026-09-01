@@ -4,9 +4,9 @@
 
 Archive content records historical state and does not define current requirements.
 V0.44 is the latest implemented record. The original V0.44 platform plan is
-archived under `V0.44`. The active Plan is [`docs/Plan.md`](../Plan.md)
-(shared runtime staging; implementation not started; product version remains
-V0.44).
+archived under `V0.44`. Shared-runtime staging is archived under
+`V0.44-shared-runtime-staging`. There is no active Plan. Product version
+remains V0.44.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
@@ -27,7 +27,8 @@ V0.44).
 | [`V0.43/`](V0.43/) | implemented; automatic gates passed; targeted native checks passed; inherited native/manual cases unverified | 2026-09-01 | V0.43; local Git checkpoint | Product slimming: disk-test, external-tool, Development/AI diagnostics, TestWorker, and ElevatedBroker removed; App+Agent runtime; IPC protocol 4; SQLite schema 14 |
 | [`V0.44/`](V0.44/) | implemented; automatic gates passed; targeted native smoke passed; inherited native/manual matrix unverified | 2026-09-01 | V0.44; local Git checkpoint `23ed240` for the later collision note | Platform upgrade to Windows App SDK 2.4; 26100 TFM with 28000 BuildTools; AI/ML publish exclusion; nested Agent layout retained; staging without PDB; 338.40 MiB; later archived App/Agent collision analysis |
 | [`V0.44-draft/`](V0.44-draft/) | archived source records; superseded by the V0.44 Plan | 2026-09-01 | handwritten input for V0.44 | Developer handwritten Chinese drafts for platform upgrade and distribution slimming; superseded by `V0.44/Plan.md` |
-| [`V0.44-shared-staging-draft/`](V0.44-shared-staging-draft/) | archived source records; superseded by the active Plan | 2026-09-01 | informal follow-up for V0.44 | Developer English draft for App/Agent shared-runtime staging after alignment; superseded by `docs/Plan.md` |
+| [`V0.44-shared-staging-draft/`](V0.44-shared-staging-draft/) | archived source records; superseded by `V0.44-shared-runtime-staging` | 2026-09-01 | informal follow-up for V0.44 | Developer English draft for App/Agent shared-runtime staging after alignment; superseded by `V0.44-shared-runtime-staging/Plan.md` |
+| [`V0.44-shared-runtime-staging/`](V0.44-shared-runtime-staging/) | implemented; automatic gates passed; targeted merged-directory process smoke passed; inherited OS-matrix and full human UI cases unverified | 2026-09-01 | V0.44; implementation `3e00633` | Flat App+Agent portable union; SHA-256 collision gate; 574 files / 231.58 MiB; alignment experiment archived with the Plan |
 | [`V0.39a-draft/`](V0.39a-draft/) | superseded; never approved or implemented | 2026-08-13 | invalid draft label, not a product version | Original broad correction proposal preserved as historical input; reusable observations moved to the V0.8–V0.9 technical-debt reference |
 | [`V0.33重构.md`](V0.33重构.md) and [`V0.33重构补充.md`](V0.33重构补充.md) | archived source records | 2026-08-11 | V0.33 | Original V0.33 reconstruction and supplement records, preserved unchanged after relocation from `docs/` |
 

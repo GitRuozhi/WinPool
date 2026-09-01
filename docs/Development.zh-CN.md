@@ -12,8 +12,8 @@ WinPool 使用 C#、WinUI 3、.NET 10、Windows App SDK 2.4，以及已有充分
 V0.7 及以前仅实现便携式交付；签名 MSIX 安排在 V0.8～V0.9；Microsoft Store 上架属于
 V1.0 完成后的工作。这些路线记录不授权在更早计划中执行打包。
 
-便携成品必须保持为一个完整目录。运行 `WinPool.App.exe` 时，`Agent`、框架和资源文件
-必须位于 staging 规定的相对位置。WinPool 不安装 Windows 服务，仅打开程序不要求提权。
+便携成品必须保持为一个完整目录。`WinPool.App.exe` 与 `WinPool.Agent.exe` 位于该
+目录根，公共 runtime 文件只存一份。WinPool 不安装 Windows 服务，仅打开程序不要求提权。
 替换程序文件前必须退出全部 WinPool 进程；只覆盖仍在运行目录中的部分文件不属于受支持升级方式。
 
 V0.8～V0.9 的 MSIX 验收必须在明确的 Windows 矩阵上覆盖签名与包身份、全新安装、首次启动、
@@ -152,11 +152,13 @@ artifacts\build\                类库和测试输出
 
 ```text
 WinPool.App.exe
-Agent/WinPool.Agent.exe
+WinPool.Agent.exe
 ```
 
-V0.44 曾尝试把 App 和 Agent 放到同一目录；因 5 个同名桌面程序集内容不同，仍保留
-该 nested 布局。正式 staging 不含 `*.pdb`；本地构建产物仍可保留符号。
+portable staging 是 App 与 Agent 两份独立 self-contained 发布经 SHA-256 检查的
+并集。相对路径相同且哈希相同：只存一份。相对路径相同且哈希不同：staging 失败。
+仅 App 与仅 Agent 的文件保留。正式 staging 不含 `*.pdb`；本地构建产物仍可保留
+符号。`PublishTrimmed` 保持 false。
 
 Staging 不得包含重复子进程可执行文件、脚本、PDB 文件、艺术源文件、未引用的本地资源、SQLite 文件、测试结果或发布元数据。应用明确使用的软件资源可以进入 staging。生成输出只作证据，永不提交。
 
