@@ -7,6 +7,20 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.44 Settings card layout — 2026-09-01
+
+### Changed
+- Settings uses one card layout for appearance, general, and about rows:
+  shared section titles, label column, spacing, and left-aligned controls.
+
+### Verification
+- Targeted native screenshot of the Settings page after the layout change.
+- Product version remains V0.44.
+
+### Known Limitations
+- Full bilingual, theme, DPI, and high-contrast Settings review remains
+  `unverified`.
+
 ## V0.44 Agent client image path — 2026-09-01
 
 ### Changed
