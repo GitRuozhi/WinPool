@@ -7,6 +7,23 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.43 product slimming — 2026-08-31
+
+### Changed
+- Disk-test, external-tool, Development/AI diagnostics, TestWorker, and
+  ElevatedBroker subsystems removed from the 1.0 release path and deferred to
+  1.x/2.0.
+- Runtime reduced to App + Agent.
+- IPC protocol bumped to 4; SQLite schema bumped to 14.
+
+### Verification
+- Release solution build: 0 warnings, 0 errors.
+- Release automatic tests: 350 passed, 0 failed, 0 skipped.
+
+### Known Limitations
+- The Test and Development tabs remain roadmap placeholders.
+- No real storage mutation occurs.
+
 ## V0.42 scope reduction — 2026-08-31
 
 ### Changed

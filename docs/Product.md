@@ -28,8 +28,8 @@ groups understandable without hiding important parameters.
 ## Product boundary
 
 WinPool may inspect the local machine through read-only collectors, edit persistent
-simulated systems, run registered-directory file tests, monitor supported devices,
-and execute explicitly reviewed support actions.
+simulated systems, monitor supported devices, and execute explicitly reviewed
+support actions.
 
 Real storage-structure mutation is outside the product boundary until V0.5. Until
 then, WinPool must not initialize, clear, format, create, remove, repair, or
@@ -50,10 +50,6 @@ The mutation path must retain typed operations, target validation, an operation
 preview, and an audit record. Simulation remains the default path, and free-form
 storage commands remain outside the product boundary.
 
-External DiskSpd, fio, Dite, RoboCopy, and RAMMap installations remain separate.
-WinPool discovers or invokes them through typed adapters and validated targets; it
-does not bundle their engines.
-
 ## WinPool 1.x scope
 
 WinPool 1.0 and the complete 1.x product line focus on storage topology,
@@ -63,20 +59,18 @@ but each contains only a short roadmap notice. Their complete user interfaces,
 registered-directory test workflows, developer workspace, and AI Agent features
 are outside every 1.x release and are planned as WinPool 2.0 features.
 
-Existing internal test, worker, persistence, or diagnostic foundations do not
-make those features part of the supported 1.x product surface. Retaining an
-internal foundation is permitted when removing it would add release risk; it
-must not re-expand the 1.x user interface or acceptance scope.
+Disk-test, external-tool, and Development/AI diagnostics subsystems have been
+removed from the 1.0 release path and are deferred to 1.x/2.0; they are not part
+of the supported 1.x product surface.
 
 ## Architecture line
 
 The V0.4 product line retains the accepted V0.13 visual baseline and the V0.2
-multi-process rewrite:
+multi-process rewrite, reduced to the two processes required for the 1.0 release
+path:
 
 - one unpackaged WinUI 3 App;
 - one visible per-user tray Agent and SQLite writer;
-- one isolated TestWorker;
-- one one-shot elevated Broker;
 - typed named-pipe IPC and deny-by-default execution policy.
 
 The project version uses `Va.b` for a new product line and may use `Va.bc` for a
@@ -107,9 +101,9 @@ active Plan, or evidence that a phase is complete.
 
 Every implementation phase requires its own confirmed `docs/Plan.md`. The
 deny-by-default executor, simulation-first storage editing, read-only inventory,
-data-redaction, and external-tool boundaries remain in force throughout this
-route; V0.5 real mutation is the defined, explicitly authorized exception to the
-simulation-only rule.
+and data-redaction boundaries remain in force throughout this route; V0.5 real
+mutation is the defined, explicitly authorized exception to the simulation-only
+rule.
 
 ## Installation route
 
@@ -124,7 +118,7 @@ listing. A future route in this document does not imply that its package exists.
 | Microsoft Store | Planned after V1.0 is complete | Prepare identity, privacy, support, certification, package, and listing material only after the formal V1.0 product and its release evidence exist. Store publication is not a V1.0 prerequisite. |
 
 All modes must expose the same safety boundary. Packaging must not grant extra
-storage-mutation authority, turn the Agent into a Windows service, bundle the
-external DiskSpd/fio/Dite/RoboCopy/RAMMap engines, or bypass explicit target
-validation. Creating an account, reserving a product name, uploading a package,
-or publishing a listing each requires explicit authorization at that time.
+storage-mutation authority, turn the Agent into a Windows service, or bypass
+explicit target validation. Creating an account, reserving a product name,
+uploading a package, or publishing a listing each requires explicit
+authorization at that time.

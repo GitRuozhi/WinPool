@@ -53,8 +53,7 @@ applicable unless WinPool later introduces a separately approved web surface.
 - Architecture boundaries, closed diagnostics, typed commands, and deny-by-default
   execution remain covered.
 - Git scope includes software-consumed `assets` and excludes `OriginArtWork`,
-  local-only resources, generated output, databases, logs, external tools, and
-  release binaries.
+  local-only resources, generated output, databases, logs, and release binaries.
 
 ### .NET automatic gate
 
@@ -72,25 +71,20 @@ explanation or a user-approved exception.
 
 ### Windows native integration gate
 
-- The App, Agent, TestWorker, and Broker publish to their required nested paths.
+- The App and Agent publish to their required nested paths.
 - Local `dotnet build` writes the same nested tree to `artifacts\$(Configuration)\`.
 - App runtime lookup paths match the staged tree.
-- Named-pipe identity and ACL behavior, Worker cleanup, SQLite ownership, and
-  read-only inventory boundaries remain covered by automatic or controlled local
+- Named-pipe identity and ACL behavior, SQLite ownership, and read-only
+  inventory boundaries remain covered by automatic or controlled local
   integration checks.
-- Staging contains no scripts, local assets, databases, test results, external
-  tools, or duplicate child executables.
+- Staging contains no scripts, local assets, databases, test results, or
+  duplicate child executables.
 
 ### Human and device gate
 
 Manual evidence is required for native WinUI presentation, bilingual switching,
-themes, DPI, high contrast, keyboard use, tray lifecycle, UAC, native folder
-pickers, registered tool execution, long-running monitoring, cancellation,
-recovery, and data-location round trips.
-
-Registered test-tool execution and test-workspace cancellation are required only
-for a Product phase that includes the complete Test workspace. They are not part
-of the WinPool 1.x human/device gate.
+themes, DPI, high contrast, keyboard use, tray lifecycle, native folder pickers,
+monitoring start/stop, and data-location round trips.
 
 A formal manual matrix uses the directory named by the active Plan or the
 archived stage that defined it. Manual checks must not select the source tree,

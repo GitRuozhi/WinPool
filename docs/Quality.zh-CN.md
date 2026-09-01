@@ -36,7 +36,7 @@ WinPool 是原生 Windows 多进程 .NET 应用。参考项目中的浏览器 DO
 - Markdown 链接和文档路径可以解析。
 - 产品版本源是 `Directory.Build.props`。运行时显示值必须与该源一致。提到产品版本的文档不得与之矛盾。
 - 架构边界、封闭诊断、类型化命令和默认拒绝执行持续受测试保护。
-- Git 范围包括软件引用的 `assets`，排除 `OriginArtWork`、本地资源、生成输出、数据库、日志、外部工具和发布二进制。
+- Git 范围包括软件引用的 `assets`，排除 `OriginArtWork`、本地资源、生成输出、数据库、日志和发布二进制。
 
 ### .NET 自动门
 
@@ -53,17 +53,15 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 
 ### Windows 原生集成门
 
-- App、Agent、TestWorker 和 Broker 发布到要求的嵌套路径。
+- App 和 Agent 发布到要求的嵌套路径。
 - 本地 `dotnet build` 把同一棵嵌套树写到 `artifacts\$(Configuration)\`。
 - App 运行时查找路径与 staging 树一致。
-- 命名管道身份和 ACL、Worker 清理、SQLite 所有权及只读采集边界由自动或受控本地集成检查覆盖。
-- Staging 不包含脚本、艺术源文件、数据库、测试结果、外部工具或重复子进程可执行文件。
+- 命名管道身份和 ACL、SQLite 所有权及只读采集边界由自动或受控本地集成检查覆盖。
+- Staging 不包含脚本、艺术源文件、数据库、测试结果或重复子进程可执行文件。
 
 ### 人工和设备门
 
-原生 WinUI 表现、双语切换、主题、DPI、高对比度、键盘、托盘生命周期、UAC、原生文件夹选择器、登记工具执行、长时间监控、取消、恢复和数据位置往返都需要人工证据。
-
-只有 Product 阶段包含完整测试工作区时，才要求已登记测试工具执行和测试工作区取消证据；它们不属于 WinPool 1.x 的人工/设备质量门。
+原生 WinUI 表现、双语切换、主题、DPI、高对比度、键盘、托盘生命周期、原生文件夹选择器、监控启动/停止和数据位置往返都需要人工证据。
 
 正式人工矩阵使用活动 Plan 或定义该阶段的归档中给出的目录。人工检查不得选择源码树、网络共享或未登记目录。
 

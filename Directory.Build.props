@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
-    <!-- Va.b: a=major, b=product line. V0.42 is the current project version. -->
+    <!-- Va.b: a=major, b=product line. V0.43 is the current project version. -->
     <WinPoolVersionMajor>0</WinPoolVersionMajor>
     <WinPoolVersionMinor>4</WinPoolVersionMinor>
-    <WinPoolVersionIteration>2</WinPoolVersionIteration>
+    <WinPoolVersionIteration>3</WinPoolVersionIteration>
     <WinPoolArchitectureVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)</WinPoolArchitectureVersion>
     <WinPoolVersion Condition="'$(WinPoolVersionIteration)' == '0'">$(WinPoolArchitectureVersion)</WinPoolVersion>
     <WinPoolVersion Condition="'$(WinPoolVersionIteration)' != '0'">$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)</WinPoolVersion>
@@ -22,9 +22,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'
-                         Or '$(MSBuildProjectName)' == 'WinPool.Agent'
-                         Or '$(MSBuildProjectName)' == 'WinPool.TestWorker'
-                         Or '$(MSBuildProjectName)' == 'WinPool.ElevatedBroker'">
+                         Or '$(MSBuildProjectName)' == 'WinPool.Agent'">
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
@@ -34,11 +32,5 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
     <OutputPath>$(WinPoolLocalOutputRoot)Agent\</OutputPath>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.TestWorker'">
-    <OutputPath>$(WinPoolLocalOutputRoot)Agent\TestWorker\</OutputPath>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.ElevatedBroker'">
-    <OutputPath>$(WinPoolLocalOutputRoot)Agent\Broker\</OutputPath>
   </PropertyGroup>
 </Project>

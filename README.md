@@ -6,7 +6,7 @@ WinPool is a third-party WinUI 3 desktop application for understanding,
 monitoring, managing, and safely planning operations across Windows storage
 systems.
 
-The current product version is **V0.42**. The version source is
+The current product version is **V0.43**. The version source is
 `Directory.Build.props`. Final results are in the [changelog](docs/CHANGELOG.md).
 
 ## Capabilities
@@ -17,9 +17,10 @@ portable application.
 
 Real storage-structure mutation is not enabled. The Test and Development tabs
 are intentionally limited to simple roadmap notices throughout WinPool 1.x;
-their complete workspaces are planned for WinPool 2.0. DiskSpd, fio, Dite,
-RoboCopy, and RAMMap remain separately installed external tools. Product limits
-are defined in [Product](docs/Product.md).
+their complete workspaces are planned for WinPool 2.0. Disk-test,
+external-tool, and Development/AI diagnostics subsystems were removed from the
+1.x runtime and are deferred to 1.x/2.0. Product limits are defined in
+[Product](docs/Product.md).
 
 ## Build
 

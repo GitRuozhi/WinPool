@@ -18,13 +18,13 @@
 开发者已经确认以下控制决定：
 
 1. WinPool 应在实质降低产品与维护复杂度的前提下尽快达到 V1.0。
-2. 完整测试工作区以及完整开发者/AI Agent 工作区不属于任何 WinPool 1.x 版本，延期至 V2.0。
+2. V1.0 不包含磁盘测试工作区和开发者/AI Agent 工作区；这些功能在 1.x 各版本中逐步完善，完整工作区在正式 V2.0 推出。
 3. “测试”和“开发”导航标签继续存在，但页面只显示简短双语 V2.0 路线说明。
 4. V0.43 完整移除活动磁盘测试实现，而不是只隐藏或禁用 UI。
 5. 不要求数据库兼容。WinPool 仍处于开发期；V0.43 不迁移、导入、改写或打开 schema 13。
 6. 本阶段绝不卸载或删除 WinPool 之外已有的外部工具和用户文件。
 
-未来 V2 恢复以现有 Git 历史为权威。提交 `ea71e6b` 保留原完整测试 UI 与后端；上面的基线
+未来 1.x 完善和 V2 恢复以现有 Git 历史为权威。提交 `ea71e6b` 保留原完整测试 UI 与后端；上面的基线
 提交保留改成占位页后的测试后端。V0.43 不为了充当未来归档而保留无消费者的运行时代码。
 
 编写本计划不等于授权实施、push、tag、GitHub Release、二进制上传、部署或真实存储修改。
@@ -46,7 +46,7 @@ V0.43 建立一个面向 1.x 的小型、真实基础，只聚焦存储拓扑、
 7. 构建、便携 staging、文档、自动测试和产品版本必须描述同一个收缩后的架构。
 
 代码行下降只作为证据，不能代替正确职责和行为。预计移除约 22,000～25,000 行产品代码和
-10,000～11,000 行功能专属测试代码，但完成条件不绑定任意行数指标。
+9,000～11,000 行功能专属测试代码，但完成条件不绑定任意行数指标。
 
 ## 2. 永久安全与产品边界
 
@@ -181,8 +181,10 @@ schema 14 只保留以下有当前消费者的表：
 `worker_processes` 继续表达仍存 App 和真实 Inventory 子进程生命周期。移除 TestWorker、
 ElevatedBroker、ExternalTool 进程类型及其全部处理。
 
-监控中移除测试专属 `MayBeAffectedByActiveTest`。若 `monitor_samples.sample_flags` 没有独立、
-已验证的保留含义，schema 14 直接移除该列，不永久写入无意义的 0。
+监控中移除测试专属 `MayBeAffectedByActiveTest`。其唯一持久化编码是 `monitor_samples.sample_flags`，
+由 `MonitorSampleBatchWriter` 写入、仅监控 CSV 导出读取；活动 Agent 构造 `PdhDiskMonitorSource`
+时未传 `isTestActive` 回调，运行时该标记恒为 false。该列没有仍存含义，schema 14 直接移除，
+不永久写入无意义的 0。
 
 ### 5.3 退役表
 
@@ -315,6 +317,11 @@ Agent：
 - `src/WinPool.Infrastructure.Windows/WindowsSystemSupportPorts.cs`
 - `src/WinPool.Infrastructure.Windows/WindowsToolVersionProbe.cs`
 
+监控：
+
+- `src/WinPool.Monitoring/MonitorIdleDetector.cs`（整个文件是 CopyBatch 闲置判定逻辑，唯一生产
+  消费者是被退役的 `CopyBatchExecutionCoordinator.cs`）
+
 移动任何完整文件前，必须最终检查引用、序列化、DI、源生成、XAML 和项目引用。若发现新的真实管理
 或监控消费者，停止该文件退役并把仍存基础拆到真实的非测试所有者；不得因此保留整个延期子系统。
 
@@ -353,11 +360,24 @@ IPC、Agent session、schema、runtime repository、storage location、architect
 共享测试只移除退役用例。保护仍存管理、监控、安全、脱敏、进程身份、数据库所有权和 fail-closed
 行为的测试必须保留。
 
+以下混合测试文件需要精确编辑，不得整体移除：
+
+- `tests/WinPool.Agent.Tests/AgentProcessRegistryTests.cs`（TestWorker 与 ElevatedBroker 进程
+  类型用例）；
+- `tests/WinPool.Agent.Client.Tests/NamedPipeAgentConnectionTests.cs`（退役请求族的端到端管道
+  覆盖）；
+- `tests/WinPool.Monitoring.Tests/MonitoringAlgorithmTests.cs`（仅 CopyBatch 闲置判定用例）；
+- `tests/WinPool.Persistence.Tests/ExecutionAndTestRepositoryTests.cs`（系统支持审计用例；随 WP5
+  的纯执行所有者一并改名）；
+- `tests/WinPool.Persistence.Tests/SqliteRepositoryTests.cs`（`sample_flags` SQL 与
+  `MayBeAffectedByActiveTest` 构造）。
+
 ### 7.5 必须精确编辑的混合文件
 
 至少审计并缩减以下混合文件，不能整体删除：
 
 - `Directory.Build.props`
+- `Directory.Build.targets`
 - `WinPool.slnx`
 - `build/Rebuild-WinPool.ps1`
 - `build/Publish-Staged.ps1`
@@ -375,9 +395,11 @@ IPC、Agent session、schema、runtime repository、storage location、architect
 - `src/WinPool.Application/TaskEvents.cs`
 - `src/WinPool.Domain/Preferences.cs`
 - `src/WinPool.Execution/ExecutionModels.cs`
+- `src/WinPool.Execution/OperationPlanning.cs`
 - `src/WinPool.Execution/OperationPolicyEvaluator.cs`
 - `src/WinPool.Execution/OperationSecurityCatalog.cs`
 - `src/WinPool.Infrastructure.Sqlite/ExecutionAndTestRepositories.cs`
+- `src/WinPool.Infrastructure.Sqlite/MonitorCsvExporter.cs`
 - `src/WinPool.Infrastructure.Sqlite/MonitorRepositories.cs`
 - `src/WinPool.Infrastructure.Sqlite/MonitorSampleBatchWriter.cs`
 - `src/WinPool.Infrastructure.Sqlite/RuntimeRepositories.cs`
@@ -421,12 +443,17 @@ IPC、Agent session、schema、runtime repository、storage location、architect
 4. 移除受管工具/工具下载数据类别，同时保留数据位置原子切换能力。
 5. 确认语言切换和进入设置页不再触发任何工具工作。
 
+设置页 code-behind 中工具代码与仍存设置处理器交织（共享文本更新、语言切换重建和构造函数接线），
+属于提取式删改而非整段切除。工具字符串大多是 `SettingsPage.xaml.cs` 中的硬编码双语字面量而非
+`LocalizationService` 键；两个字符串表面都要清理，且不得触碰仍存设置项。
+
 ### WP3：退役 TestWorker、测试项目和 Broker
 
 1. 将已批准完整产品和功能测试目录移动到指定 Rubbish 恢复树。
-2. 移除解决方案和项目引用。
+2. 移除解决方案和项目引用，包括 `tests/WinPool.Agent.Tests/WinPool.Agent.Tests.csproj` 中对
+   `WinPool.Testing` 和 `WinPool.TestWorker` 的 ProjectReference。
 3. 移除 Agent 构建/发布 Worker 和 Broker 的 MSBuild Target。
-4. 将 `Directory.Build.props`、构建、重置和 staging 脚本缩减为 App + Agent。
+4. 将 `Directory.Build.props`、`Directory.Build.targets`、构建、重置和 staging 脚本缩减为 App + Agent。
 5. 移除 staging 中 TestWorker/Broker 目录与可执行文件断言。
 6. 保持 App/Agent 关闭、身份、单实例、托盘和监控行为。
 
@@ -463,8 +490,9 @@ IPC、Agent session、schema、runtime repository、storage location、architect
 实施及要求的自动检查成功后：
 
 1. 将 `Directory.Build.props` 从 V0.42 更新为 V0.43；
-2. 更新 README、Product、Development、Quality 及其中文阅读副本，反映真实两进程、schema 14、
-   protocol 4 结果；
+2. 更新 README、Product、Development、Quality 和 AGENTS.md 及其中文阅读副本，反映真实两进程、
+   schema 14、protocol 4 结果，包括退役 AGENTS.md 中描述已移除文件测试与外部工具适配器产品的
+   规则；
 3. 在 CHANGELOG 及阅读副本记录最终结果、兼容性断点、实际测试/构建、项目/行数下降和仍未验证
    人工门；
 4. 执行最终一致性和退役词扫描；

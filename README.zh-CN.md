@@ -8,7 +8,7 @@
 WinPool 是面向 Windows 存储系统的第三方 WinUI 3 桌面应用，用于理解存储拓扑、监控和管理存储，
 并以可审阅、可验证的方式规划操作。
 
-当前产品版本为 **V0.42**。版本源是 `Directory.Build.props`。最终结果见
+当前产品版本为 **V0.43**。版本源是 `Directory.Build.props`。最终结果见
 [变更记录](docs/CHANGELOG.zh-CN.md)。
 
 ## 能力
@@ -17,8 +17,8 @@ WinPool 提供存储拓扑、聚焦的操作工作区、模拟编辑和监控。
 Windows x64 便携式应用。
 
 真实存储结构修改尚未开放。WinPool 1.x 的“测试”和“开发”标签页只保留简单路线说明；完整工作区
-计划在 WinPool 2.0 推出。DiskSpd、fio、Dite、RoboCopy 和 RAMMap 仍是单独安装的外部工具。
-产品边界见[产品方向](docs/Product.zh-CN.md)。
+计划在 WinPool 2.0 推出。磁盘测试、外部工具和开发/AI 诊断子系统已从 1.x 运行时移除，推迟到
+1.x/2.0。产品边界见[产品方向](docs/Product.zh-CN.md)。
 
 ## 构建
 

@@ -8,6 +8,22 @@
 本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
 `Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
+## V0.43 产品瘦身 — 2026-08-31
+
+### Changed
+- 磁盘测试、外部工具、开发/AI 诊断、TestWorker 和 ElevatedBroker 子系统已从 1.0
+  发布路径移除，推迟到 1.x/2.0。
+- 运行时收缩为 App + Agent。
+- IPC 协议升到 4；SQLite schema 升到 14。
+
+### Verification
+- Release 解决方案构建：0 warnings、0 errors。
+- Release 自动测试：350 passed、0 failed、0 skipped。
+
+### Known Limitations
+- “测试”和“开发”标签页继续作为路线占位页。
+- 不发生真实存储结构修改。
+
 ## V0.42 范围收缩 — 2026-08-31
 
 ### Changed

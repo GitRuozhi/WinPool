@@ -97,14 +97,6 @@ boundary; that option must not be preselected or persisted as consent.
 Which product phase may add a typed real-mutation path is defined by
 [Product](docs/Product.md) and the confirmed Plan, not by this file.
 
-- File tests may touch only files registered to a run inside an explicitly
-  selected test directory. Raw-device writes are forbidden.
-- Support actions such as cache cleanup, volume flush, TRIM/Optimize, process
-  scheduling, and temporary power-plan changes require typed plans, target
-  validation, confirmation where required, audit, and restoration of reversible
-  state.
-- External DiskSpd, fio, Dite, RoboCopy, and RAMMap engines remain separately
-  installed tools behind typed adapters. Do not bundle or reimplement them.
 - Persisted, exported, imported, logged, or copied hardware data must pass
   through the approved redaction boundary.
 - Do not store or publish a standalone inventory `.ps1`; fixed read-only
@@ -184,8 +176,8 @@ when a test or acceptance task requires them.
 - Completing a formal stage does not start full acceptance. Ask the developer
   whether to enter formal testing.
 - Never report an unavailable or unrun gate as passed.
-- Automatic checks do not substitute for UAC, tray, native-picker, visual,
-  device, or long-duration human evidence.
+- Automatic checks do not substitute for tray, native-picker, visual, device,
+  or long-duration human evidence.
 - Real hardware mutation is not an accepted verification technique unless a
   confirmed Plan for a permitted mutation stage requires it, and then only
   under the authorization rules above.

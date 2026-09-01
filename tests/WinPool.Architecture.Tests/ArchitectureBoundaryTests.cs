@@ -160,7 +160,7 @@ public sealed class ArchitectureBoundaryTests
             ("docs/Product.md", "docs/Product.zh-CN.md"),
             ("docs/Development.md", "docs/Development.zh-CN.md"),
             ("docs/Quality.md", "docs/Quality.zh-CN.md"),
-            ("docs/Plan.md", "docs/Plan.zh-CN.md"),
+            ("docs/Archive/V0.43/Plan.md", "docs/Archive/V0.43/Plan.zh-CN.md"),
             ("docs/Archive/V0.32/Plan.md", "docs/Archive/V0.32/Plan.zh-CN.md"),
             ("docs/Archive/V0.33/Plan.md", "docs/Archive/V0.33/Plan.zh-CN.md"),
             ("docs/Archive/V0.33/README.md", "docs/Archive/V0.33/README.zh-CN.md"),

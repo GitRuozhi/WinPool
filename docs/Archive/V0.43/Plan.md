@@ -16,8 +16,9 @@ The developer has made the following controlling decisions:
 
 1. WinPool must reach V1.0 as quickly as practical with materially lower
    product and maintenance complexity.
-2. The complete Test workspace and the complete Development/AI Agent workspace
-   are excluded from every WinPool 1.x release and are deferred to V2.0.
+2. V1.0 ships without the disk-test workspace and the Development/AI Agent
+   workspace. These features are refined across the 1.x releases, and their
+   complete workspaces launch in V2.0.
 3. The Test and Development navigation tabs remain, but their pages contain
    only short bilingual V2.0 roadmap notices.
 4. V0.43 removes the complete live disk-test implementation rather than hiding
@@ -27,7 +28,8 @@ The developer has made the following controlling decisions:
 6. Existing external tools or user files outside WinPool are never uninstalled
    or deleted by this work.
 
-The existing Git history is the recovery authority for future V2 work. Commit
+The existing Git history is the recovery authority for future 1.x refinement
+and V2 work. Commit
 `ea71e6b` retains the former complete Test UI and backend; the baseline commit
 above retains the backend after the UI became a placeholder. V0.43 does not keep
 dead runtime code solely as a future archive.
@@ -61,7 +63,7 @@ The completed stage must have all of these properties:
 
 Line-count reduction is recorded as evidence, not used as a substitute for
 correct ownership or behavior. The expected removal is approximately
-22,000–25,000 production lines plus 10,000–11,000 feature-specific test lines,
+22,000–25,000 production lines plus 9,000–11,000 feature-specific test lines,
 but no completion claim depends on achieving an arbitrary number.
 
 ## 2. Permanent safety and product boundaries
@@ -229,9 +231,12 @@ actual inventory child lifecycle. TestWorker, ElevatedBroker, and ExternalTool
 process kinds and all handling for them are removed.
 
 The test-only `MayBeAffectedByActiveTest` property is removed from monitoring.
-If `monitor_samples.sample_flags` has no independently verified surviving
-meaning, the column is removed from schema 14 rather than permanently writing
-zero into dead state.
+Its only persistence encoding is `monitor_samples.sample_flags`, written by
+`MonitorSampleBatchWriter` and read back only by monitor CSV export; the live
+Agent constructs `PdhDiskMonitorSource` without an `isTestActive` callback, so
+the flag is already always false at runtime. The column has no surviving
+meaning and is removed from schema 14 rather than permanently writing zero
+into dead state.
 
 ### 5.3 Retired tables
 
@@ -377,6 +382,12 @@ Persistence and Windows integration:
 - `src/WinPool.Infrastructure.Windows/WindowsSystemSupportPorts.cs`
 - `src/WinPool.Infrastructure.Windows/WindowsToolVersionProbe.cs`
 
+Monitoring:
+
+- `src/WinPool.Monitoring/MonitorIdleDetector.cs` (the entire file is
+  copy-batch idle-settle logic; its only production consumer is the retired
+  `CopyBatchExecutionCoordinator.cs`)
+
 Before moving any listed complete file, implementation performs a final reference,
 serialization, DI, source-generation, XAML, and project-reference scan. If a
 listed file contains a newly discovered surviving management or monitoring
@@ -418,6 +429,18 @@ Shared tests such as IPC, Agent session, schema, runtime repository, storage
 location, architecture, and execution-policy tests are edited to remove only the
 retired cases. Tests protecting surviving management, monitoring, security,
 redaction, process identity, database ownership, and fail-closed behavior remain.
+Named mixed test files that require precise edits rather than wholesale removal:
+
+- `tests/WinPool.Agent.Tests/AgentProcessRegistryTests.cs` (TestWorker and
+  ElevatedBroker process-kind cases);
+- `tests/WinPool.Agent.Client.Tests/NamedPipeAgentConnectionTests.cs`
+  (end-to-end pipe coverage of retired request families);
+- `tests/WinPool.Monitoring.Tests/MonitoringAlgorithmTests.cs` (copy-batch
+  idle-detector cases only);
+- `tests/WinPool.Persistence.Tests/ExecutionAndTestRepositoryTests.cs`
+  (system-support audit cases; renamed with the execution-only owner in WP5);
+- `tests/WinPool.Persistence.Tests/SqliteRepositoryTests.cs` (`sample_flags`
+  SQL and `MayBeAffectedByActiveTest` construction).
 
 ### 7.5 Mixed files requiring precise edits
 
@@ -425,6 +448,7 @@ At minimum, the following mixed files must be audited and reduced rather than
 deleted wholesale:
 
 - `Directory.Build.props`
+- `Directory.Build.targets`
 - `WinPool.slnx`
 - `build/Rebuild-WinPool.ps1`
 - `build/Publish-Staged.ps1`
@@ -442,9 +466,11 @@ deleted wholesale:
 - `src/WinPool.Application/TaskEvents.cs`
 - `src/WinPool.Domain/Preferences.cs`
 - `src/WinPool.Execution/ExecutionModels.cs`
+- `src/WinPool.Execution/OperationPlanning.cs`
 - `src/WinPool.Execution/OperationPolicyEvaluator.cs`
 - `src/WinPool.Execution/OperationSecurityCatalog.cs`
 - `src/WinPool.Infrastructure.Sqlite/ExecutionAndTestRepositories.cs`
+- `src/WinPool.Infrastructure.Sqlite/MonitorCsvExporter.cs`
 - `src/WinPool.Infrastructure.Sqlite/MonitorRepositories.cs`
 - `src/WinPool.Infrastructure.Sqlite/MonitorSampleBatchWriter.cs`
 - `src/WinPool.Infrastructure.Sqlite/RuntimeRepositories.cs`
@@ -497,14 +523,23 @@ are moved out of the live repository tree.
    data-location atomicity.
 5. Confirm language switching and Settings entry no longer trigger tool work.
 
+The Settings page code-behind interleaves tool code with surviving settings
+handlers (shared text updates, language-change rebuilds, and constructor
+wiring), so this is an extraction edit, not a block cut. Most tool strings are
+hardcoded bilingual literals in `SettingsPage.xaml.cs`, not
+`LocalizationService` keys; both string surfaces are cleaned without touching
+surviving settings entries.
+
 ### WP3: Retire TestWorker, testing projects, and Broker
 
 1. Move the approved complete product and feature-test directories to the named
    Rubbish recovery tree.
-2. Remove their solution and project references.
+2. Remove their solution and project references, including the
+   `WinPool.Testing` and `WinPool.TestWorker` ProjectReference entries in
+   `tests/WinPool.Agent.Tests/WinPool.Agent.Tests.csproj`.
 3. Remove Agent MSBuild targets that build or publish Worker and Broker children.
-4. Reduce `Directory.Build.props`, build, reset, and staging scripts to App and
-   Agent.
+4. Reduce `Directory.Build.props`, `Directory.Build.targets`, build, reset,
+   and staging scripts to App and Agent.
 5. Remove staged TestWorker/Broker directories and executable assertions.
 6. Preserve App/Agent process shutdown, identity, single-instance, tray, and
    monitoring behavior.
@@ -555,8 +590,10 @@ are moved out of the live repository tree.
 After implementation and its required automatic checks succeed:
 
 1. update `Directory.Build.props` from V0.42 to V0.43;
-2. update README, Product, Development, and Quality plus their Chinese reading
-   copies to the actual two-process/schema-14/protocol-4 result;
+2. update README, Product, Development, Quality, and AGENTS.md plus their
+   Chinese reading copies to the actual two-process/schema-14/protocol-4
+   result, including retiring the AGENTS.md rules that describe the removed
+   file-test and external-tool adapter product;
 3. record final results, compatibility break, actual tests, build, project/line
    reduction, and remaining unverified manual gates in CHANGELOG and its reading
    copy;
