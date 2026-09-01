@@ -15,6 +15,11 @@
     <InformationalVersion>$(WinPoolVersion)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
+    <!-- NU1900 is a failed advisory download, not a known vulnerability.
+         TreatWarningsAsErrors must not fail restore when nuget.org audit data
+         is unreachable. NU1901–NU1904 remain errors. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>
+
     <!-- Generated output stays under artifacts. Source trees remain source. -->
     <WinPoolLocalOutputRoot>$(MSBuildThisFileDirectory)artifacts\$(Configuration)\</WinPoolLocalOutputRoot>
     <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\build\$(MSBuildProjectName)\</BaseOutputPath>
