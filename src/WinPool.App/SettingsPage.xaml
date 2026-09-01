@@ -16,15 +16,16 @@
             <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style x:Key="SettingsSectionTitle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontSize" Value="16" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style x:Key="SettingsFieldLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
         <Style x:Key="SettingsFieldValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
     </Page.Resources>
@@ -38,9 +39,9 @@
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -61,6 +62,8 @@
                         Grid.Row="1"
                         Grid.Column="1"
                         MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         SelectionChanged="ThemeOptions_SelectionChanged" />
@@ -74,6 +77,8 @@
                         Grid.Row="2"
                         Grid.Column="1"
                         MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         SelectionChanged="AccentOptions_SelectionChanged" />
@@ -87,6 +92,8 @@
                         Grid.Row="3"
                         Grid.Column="1"
                         MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         SelectionChanged="LanguageOptions_SelectionChanged" />
@@ -97,12 +104,12 @@
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -122,6 +129,8 @@
                         x:Name="SettingsExecutionModeSwitch"
                         Grid.Row="1"
                         Grid.Column="1"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="SettingsExecutionModeSwitch_Click"
@@ -135,6 +144,8 @@
                         x:Name="MsrCheckBox"
                         Grid.Row="2"
                         Grid.Column="1"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="MsrCheckBox_Click"
@@ -148,6 +159,8 @@
                         x:Name="ShowHardwareIdsCheckBox"
                         Grid.Row="3"
                         Grid.Column="1"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="ShowHardwareIdsCheckBox_Click"
@@ -161,6 +174,9 @@
                         x:Name="WelcomeButton"
                         Grid.Row="4"
                         Grid.Column="1"
+                        MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="WelcomeButton_Click"
@@ -174,6 +190,8 @@
                         x:Name="StartupAgentCheckBox"
                         Grid.Row="5"
                         Grid.Column="1"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="StartupAgentCheckBox_Click"
@@ -194,6 +212,8 @@
                         <ComboBox
                             x:Name="DataLocationOptions"
                             MinWidth="220"
+                            MinHeight="32"
+                            FontSize="14"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
                             SelectionChanged="DataLocationOptions_SelectionChanged" />
@@ -201,7 +221,7 @@
                             x:Name="DataLocationPath"
                             Grid.Column="1"
                             VerticalAlignment="Center"
-                            FontSize="12"
+                            FontSize="14"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             TextTrimming="CharacterEllipsis"
                             ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
@@ -213,13 +233,13 @@
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -270,12 +290,15 @@
                         x:Name="WebsiteButton"
                         Grid.Row="4"
                         Grid.Column="1"
+                        MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="WebsiteLink_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="13" Glyph="&#xE774;" />
-                            <TextBlock x:Name="WebsiteButtonText" VerticalAlignment="Center" Text="访问官网" />
+                            <FontIcon FontSize="14" Glyph="&#xE774;" />
+                            <TextBlock x:Name="WebsiteButtonText" VerticalAlignment="Center" FontSize="14" Text="访问官网" />
                         </StackPanel>
                     </Button>
                     <TextBlock
@@ -287,12 +310,15 @@
                         x:Name="UpdateButton"
                         Grid.Row="5"
                         Grid.Column="1"
+                        MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="UpdateLink_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="13" Glyph="&#xE777;" />
-                            <TextBlock x:Name="UpdateButtonText" VerticalAlignment="Center" Text="查看更新" />
+                            <FontIcon FontSize="14" Glyph="&#xE777;" />
+                            <TextBlock x:Name="UpdateButtonText" VerticalAlignment="Center" FontSize="14" Text="查看更新" />
                         </StackPanel>
                     </Button>
                     <TextBlock
@@ -304,12 +330,15 @@
                         x:Name="FeedbackButton"
                         Grid.Row="6"
                         Grid.Column="1"
+                        MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="FeedbackLink_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="13" Glyph="&#xE8F2;" />
-                            <TextBlock x:Name="FeedbackButtonText" VerticalAlignment="Center" Text="提交反馈" />
+                            <FontIcon FontSize="14" Glyph="&#xE8F2;" />
+                            <TextBlock x:Name="FeedbackButtonText" VerticalAlignment="Center" FontSize="14" Text="提交反馈" />
                         </StackPanel>
                     </Button>
                     <TextBlock
@@ -321,14 +350,18 @@
                         x:Name="AboutCommunityButton"
                         Grid.Row="7"
                         Grid.Column="1"
+                        MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="CommunityButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="13" Glyph="&#xE8F2;" />
+                            <FontIcon FontSize="14" Glyph="&#xE8F2;" />
                             <TextBlock
                                 x:Name="CommunityButtonText"
                                 VerticalAlignment="Center"
+                                FontSize="14"
                                 Text="加入 QQ 群" />
                         </StackPanel>
                     </Button>
