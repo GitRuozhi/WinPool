@@ -8,6 +8,19 @@
 本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
 `Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
+## V0.44 Agent 客户端映像路径 — 2026-09-01
+
+### Changed
+- Agent 现在要求 `WinPool.App.exe` 在自己旁边。扁平布局后仍检查
+  `..\WinPool.App.exe` 会拒绝 App 握手，导致 IPC 和盘点失败。
+
+### Verification
+- 架构路径护栏要求客户端映像与 App 同目录。
+- 产品版本仍为 V0.44。
+
+### Known Limitations
+- 完整 App/Agent UI 盘点冒烟在本次变更为 `unverified`。
+
 ## V0.44 本地 Agent 自包含运行树 — 2026-09-01
 
 ### Changed

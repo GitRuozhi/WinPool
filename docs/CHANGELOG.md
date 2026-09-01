@@ -7,6 +7,20 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.44 Agent client image path — 2026-09-01
+
+### Changed
+- Agent now expects `WinPool.App.exe` beside itself. The old `..\WinPool.App.exe`
+  handshake check rejected the App after the flat layout, so IPC and inventory
+  failed.
+
+### Verification
+- Architecture path guards require the beside-App client image.
+- Product version remains V0.44.
+
+### Known Limitations
+- Full App/Agent UI inventory smoke remains `unverified` in this change.
+
 ## V0.44 local Agent self-contained run tree — 2026-09-01
 
 ### Changed
