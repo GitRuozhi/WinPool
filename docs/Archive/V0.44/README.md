@@ -21,3 +21,7 @@ vulnerable packages. App and Agent launched from the staged tree.
 Inherited device, UAC, DPI, Win10 22H2, Win11 24H2/25H2, and long-duration
 cases remain `unverified`. No push, tag, Release, binary upload, or deployment
 was created.
+
+Later annotation, 2026-09-01: the temporary App/Agent runtime-collision analysis
+note was moved here from `docs/`. Source commit `23ed240`. Product version
+remains V0.44. The note is historical input and is not a current requirement.

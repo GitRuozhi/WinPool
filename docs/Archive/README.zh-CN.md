@@ -25,7 +25,7 @@
 | [`V0.39-architecture-hardening/`](V0.39-architecture-hardening/) | 已实施；自动门通过；目标原生导航通过；其余原生/人工用例未验证 | 2026-08-14 | V0.39；架构治理分支 | V0.40 前无用代码清理、Agent 职责拆分、定义图迁移、数据位置交接隔离和架构护栏 |
 | [`V0.41/`](V0.41/) | 已实施；自动门通过；目标原生检查通过；继承的原生/人工用例未验证 | 2026-08-14 | V0.41；未授权 Git commit、push、tag、Release 或部署 | 启动、欢迎、监控、持久化、托盘和基础交互计划及最终 V0.41 产品版本 |
 | [`V0.43/`](V0.43/) | 已实施；自动门通过；目标原生检查通过；继承的原生/人工用例未验证 | 2026-09-01 | V0.43；本地 Git checkpoint | 产品瘦身：移除磁盘测试、外部工具、开发/AI 诊断、TestWorker 与 ElevatedBroker；App+Agent 运行时；IPC 协议 4；SQLite schema 14 |
-| [`V0.44/`](V0.44/) | 已实施；自动门通过；目标原生冒烟通过；继承的原生/人工矩阵未验证 | 2026-09-01 | V0.44；本地 Git checkpoint | 平台升级到 Windows App SDK 2.4；26100 TFM 与 28000 BuildTools；排除 AI/ML publish 载荷；保留 nested Agent 布局；staging 无 PDB；338.40 MiB |
+| [`V0.44/`](V0.44/) | 已实施；自动门通过；目标原生冒烟通过；继承的原生/人工矩阵未验证 | 2026-09-01 | V0.44；碰撞分析稿对应提交 `23ed240` | 平台升级到 Windows App SDK 2.4；26100 TFM 与 28000 BuildTools；排除 AI/ML publish 载荷；保留 nested Agent 布局；staging 无 PDB；338.40 MiB；后归档 App/Agent 冲突分析 |
 | [`V0.44-draft/`](V0.44-draft/) | 归档源记录；已被 V0.44 Plan 替代 | 2026-09-01 | V0.44 手写输入 | 开发者手写的平台升级与发行瘦身中文草案；已被 `V0.44/Plan.md` 替代 |
 | [`V0.39a-draft/`](V0.39a-draft/) | 已被替代；从未批准或实施 | 2026-08-13 | 无效草案标签，不是产品版本 | 保留原始大范围修正提案；可复用观察已转入 V0.8–V0.9 技术债务参考 |
 | [`V0.33重构.md`](V0.33重构.md) 与 [`V0.33重构补充.md`](V0.33重构补充.md) | archived source records | 2026-08-11 | V0.33 | 从 `docs/` 移入后保持未改动的 V0.33 重构与补充原始记录 |

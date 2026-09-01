@@ -20,3 +20,6 @@ Release 构建、无已知易受攻击包。App 与 Agent 能从 staging 树启�
 
 继承的设备、UAC、DPI、Win10 22H2、Win11 24H2/25H2 与长期用例仍为
 `unverified`。未创建 push、tag、Release、二进制上传或部署。
+
+后加注释，2026-09-01：临时 App/Agent 运行时冲突分析稿已从 `docs/` 移入此处。来源
+提交 `23ed240`。产品版本仍为 V0.44。该稿为历史输入，不构成当前要求。
