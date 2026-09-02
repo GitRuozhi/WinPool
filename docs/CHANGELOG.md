@@ -13,6 +13,7 @@ are not rewritten for format consistency.
 - The main window paints tab structure before waiting for the tray Agent.
 - Manage shows connecting/scanning status on an in-page `InfoBar`. Cached local
   inventory is projected first, then the PowerShell scan replaces it in place.
+  The in-progress scan toast is not also shown in the global notification stack.
 
 ### Verification
 - Architecture tests require `NavigateStartupPage` before

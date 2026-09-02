@@ -13,7 +13,7 @@
 ### Changed
 - 主窗口在等待托盘 Agent 之前先画出标签页结构。
 - 管理页用页内 `InfoBar` 显示连接/扫描状态。若有本机缓存则先投影，再由
-  PowerShell 扫描原位替换。
+  PowerShell 扫描原位替换。进行中的扫描不再同时出现在右下角全局通知里。
 
 ### Verification
 - 架构测试要求 `NavigateStartupPage` 早于 `InitialAgentConnectionTask`，且主窗口
