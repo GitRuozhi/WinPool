@@ -29,77 +29,7 @@ if (Test-Path -LiteralPath $stageRoot) {
     throw "Staging path already exists and will not be overwritten: $stageRoot"
 }
 
-function Get-PublishFileMap([string]$root) {
-    $map = @{}
-    foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File)) {
-        if ($file.Extension -eq '.pdb') {
-            continue
-        }
-
-        $relative = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/')
-        if ($map.ContainsKey($relative)) {
-            throw "Duplicate relative path in publish tree ${root}: $relative"
-        }
-
-        $map[$relative] = $file.FullName
-    }
-
-    return $map
-}
-
-function Copy-StagedFile([string]$sourcePath, [string]$destinationPath) {
-    $directory = Split-Path -Parent $destinationPath
-    if (-not (Test-Path -LiteralPath $directory)) {
-        New-Item -ItemType Directory -Path $directory | Out-Null
-    }
-
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
-}
-
-function Merge-PublishTrees([string]$appPublish, [string]$agentPublish, [string]$destination) {
-    $appMap = Get-PublishFileMap $appPublish
-    $agentMap = Get-PublishFileMap $agentPublish
-    $relativePaths = [System.Collections.Generic.HashSet[string]]::new(
-        [System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($key in $appMap.Keys) {
-        [void]$relativePaths.Add($key)
-    }
-    foreach ($key in $agentMap.Keys) {
-        [void]$relativePaths.Add($key)
-    }
-
-    $sharedCount = 0
-    $appOnlyCount = 0
-    $agentOnlyCount = 0
-
-    foreach ($relative in ($relativePaths | Sort-Object)) {
-        $inApp = $appMap.ContainsKey($relative)
-        $inAgent = $agentMap.ContainsKey($relative)
-        $destinationPath = Join-Path $destination ($relative.Replace('/', '\'))
-
-        if ($inApp -and $inAgent) {
-            $appHash = (Get-FileHash -LiteralPath $appMap[$relative] -Algorithm SHA256).Hash
-            $agentHash = (Get-FileHash -LiteralPath $agentMap[$relative] -Algorithm SHA256).Hash
-            if ($appHash -ne $agentHash) {
-                throw "Staging collision: $relative has different SHA-256 hashes (App=$appHash, Agent=$agentHash)."
-            }
-
-            Copy-StagedFile $appMap[$relative] $destinationPath
-            $sharedCount += 1
-        }
-        elseif ($inApp) {
-            Copy-StagedFile $appMap[$relative] $destinationPath
-            $appOnlyCount += 1
-        }
-        else {
-            Copy-StagedFile $agentMap[$relative] $destinationPath
-            $agentOnlyCount += 1
-        }
-    }
-
-    Write-Output "Union merge: $sharedCount shared, $appOnlyCount App-only, $agentOnlyCount Agent-only, 0 collisions"
-}
-
+$mergeScript = Join-Path $PSScriptRoot 'Merge-RuntimeTrees.ps1'
 $appProject = Join-Path $repositoryRoot 'src\WinPool.App\WinPool.App.csproj'
 $agentProject = Join-Path $repositoryRoot 'src\WinPool.Agent\WinPool.Agent.csproj'
 $publishProjects = @($appProject, $agentProject)
@@ -145,7 +75,10 @@ try {
         throw "dotnet publish failed for WinPool.Agent with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
     }
 
-    Merge-PublishTrees $appPublish $agentPublish $stageRoot
+    & $mergeScript -AppDir $appPublish -AgentDir $agentPublish -Destination $stageRoot -SkipPdb
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runtime union merge failed with exit code $LASTEXITCODE. Partial staging was retained at $stageRoot."
+    }
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

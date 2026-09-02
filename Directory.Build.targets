@@ -1,8 +1,21 @@
 <Project>
   <!-- Re-apply after the SDK so WinUI/RID evaluation cannot reintroduce tfm/rid folders. -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'
-                         Or '$(MSBuildProjectName)' == 'WinPool.Agent'">
-    <OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>
-    <OutDir>$(WinPoolLocalOutputRoot)</OutDir>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
+    <OutputPath>$(WinPoolLocalTreeRoot)App\</OutputPath>
+    <OutDir>$(WinPoolLocalTreeRoot)App\</OutDir>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
+    <OutputPath>$(WinPoolLocalTreeRoot)Agent\</OutputPath>
+    <OutDir>$(WinPoolLocalTreeRoot)Agent\</OutDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <WinPoolMergeRuntimeCommand>pwsh -NoProfile -ExecutionPolicy Bypass -File "$(WinPoolMergeRuntimeScript)" -AppDir "$(WinPoolLocalTreeRoot)App" -AgentDir "$(WinPoolLocalTreeRoot)Agent" -Destination "$(MSBuildThisFileDirectory)artifacts\$(Configuration)" -ReplaceDestination</WinPoolMergeRuntimeCommand>
+  </PropertyGroup>
+
+  <Target Name="MergeLocalAppAndAgentRuntime"
+          AfterTargets="BuildAgentRuntime"
+          Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
+    <Exec Command="$(WinPoolMergeRuntimeCommand)" />
+  </Target>
 </Project>

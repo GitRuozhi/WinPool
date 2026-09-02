@@ -22,14 +22,20 @@
 
     <!-- Generated output stays under artifacts. Source trees remain source. -->
     <WinPoolLocalOutputRoot>$(MSBuildThisFileDirectory)artifacts\$(Configuration)\</WinPoolLocalOutputRoot>
+    <WinPoolLocalTreeRoot>$(MSBuildThisFileDirectory)artifacts\trees\$(Configuration)\</WinPoolLocalTreeRoot>
+    <WinPoolMergeRuntimeScript>$(MSBuildThisFileDirectory)build\Merge-RuntimeTrees.ps1</WinPoolMergeRuntimeScript>
     <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts\build\$(MSBuildProjectName)\</BaseOutputPath>
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'
-                         Or '$(MSBuildProjectName)' == 'WinPool.Agent'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-    <OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>
+    <OutputPath>$(WinPoolLocalTreeRoot)App\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.Agent'">
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <OutputPath>$(WinPoolLocalTreeRoot)Agent\</OutputPath>
   </PropertyGroup>
 </Project>

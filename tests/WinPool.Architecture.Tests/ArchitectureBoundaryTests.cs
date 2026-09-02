@@ -264,13 +264,33 @@ public sealed class ArchitectureBoundaryTests
             directoryBuildProps,
             StringComparison.Ordinal);
         Assert.Contains(
+            "artifacts\\trees\\$(Configuration)\\",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<OutputPath>$(WinPoolLocalTreeRoot)App\\</OutputPath>",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<OutputPath>$(WinPoolLocalTreeRoot)Agent\\</OutputPath>",
+            directoryBuildProps,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
             "<OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>",
             directoryBuildProps,
             StringComparison.Ordinal);
         Assert.Contains(
-            "<OutputPath>$(WinPoolLocalOutputRoot)</OutputPath>",
+            "<OutputPath>$(WinPoolLocalTreeRoot)App\\</OutputPath>",
             directoryBuildTargets,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "<OutputPath>$(WinPoolLocalTreeRoot)Agent\\</OutputPath>",
+            directoryBuildTargets,
+            StringComparison.Ordinal);
+        Assert.Contains("Merge-RuntimeTrees.ps1", directoryBuildProps, StringComparison.Ordinal);
+        Assert.Contains("MergeLocalAppAndAgentRuntime", directoryBuildTargets, StringComparison.Ordinal);
+        Assert.Contains("SHA256", File.ReadAllText(
+            Path.Combine(root, "build", "Merge-RuntimeTrees.ps1")), StringComparison.Ordinal);
         Assert.DoesNotContain(
             "$(WinPoolLocalOutputRoot)Agent\\",
             directoryBuildProps,
@@ -807,6 +827,8 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.Agent", "WinPool.Agent.csproj"));
         var stagingScript = File.ReadAllText(
             Path.Combine(root, "build", "Publish-Staged.ps1"));
+        var mergeScript = File.ReadAllText(
+            Path.Combine(root, "build", "Merge-RuntimeTrees.ps1"));
 
         Assert.DoesNotContain("PublishAgentRuntimeBesideApp", appProject, StringComparison.Ordinal);
         Assert.Contains("BuildAgentRuntime", appProject, StringComparison.Ordinal);
@@ -832,8 +854,10 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);
         Assert.Contains("'WinPool.Agent.exe' = 'WinPool.Agent.exe'", stagingScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("SHA256", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("collision", stagingScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Merge-RuntimeTrees.ps1", stagingScript, StringComparison.Ordinal);
+        Assert.Contains("SHA256", mergeScript, StringComparison.Ordinal);
+        Assert.Contains("collision", mergeScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("-SkipPdb", stagingScript, StringComparison.Ordinal);
         Assert.Contains("PublishTrimmed=false", stagingScript, StringComparison.Ordinal);
         Assert.Contains(".pdb", stagingScript, StringComparison.Ordinal);
         Assert.Contains("$appPublish", stagingScript, StringComparison.Ordinal);
