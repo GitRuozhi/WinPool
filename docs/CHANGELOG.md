@@ -15,6 +15,9 @@ are not rewritten for format consistency.
   Cached local inventory is projected first, then the PowerShell scan replaces it
   in place. Global toasts sit on an opaque theme surface so they remain readable
   over Mica.
+- Replacing the empty startup local document with a cached scan no longer throws
+  a workspace-initialization error while the first-paint selection is still bound
+  to the previous identity.
 
 ### Verification
 - Architecture tests require `NavigateStartupPage` before
