@@ -7,6 +7,23 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.45 shell-first startup — 2026-09-02
+
+### Changed
+- The main window paints tab structure before waiting for the tray Agent.
+- Manage shows connecting/scanning status on an in-page `InfoBar`. Cached local
+  inventory is projected first, then the PowerShell scan replaces it in place.
+
+### Verification
+- Architecture tests require `NavigateStartupPage` before
+  `InitialAgentConnectionTask`, and no full-window `ProgressRing`.
+- Local unpackaged launch: main window handle was non-zero, title `WinPool`,
+  shell tabs and Manage categories were present while Agent started.
+
+### Known Limitations
+- Cold Agent start and the embedded PowerShell inventory can still take several
+  seconds; the wait no longer leaves an empty frame.
+
 ## V0.45 local runtime collision gate — 2026-09-01
 
 ### Changed

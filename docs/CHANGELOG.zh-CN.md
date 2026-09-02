@@ -8,6 +8,22 @@
 本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
 `Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
+## V0.45 先出壳再填数据 — 2026-09-02
+
+### Changed
+- 主窗口在等待托盘 Agent 之前先画出标签页结构。
+- 管理页用页内 `InfoBar` 显示连接/扫描状态。若有本机缓存则先投影，再由
+  PowerShell 扫描原位替换。
+
+### Verification
+- 架构测试要求 `NavigateStartupPage` 早于 `InitialAgentConnectionTask`，且主窗口
+  没有全屏 `ProgressRing`。
+- 本地未打包启动：主窗口句柄非 0、标题为 `WinPool`，Agent 启动期间已能看到外壳
+  标签和管理页分类。
+
+### Known Limitations
+- Agent 冷启动和嵌入 PowerShell 清单仍可能要数秒；等待不再留下空白 Frame。
+
 ## V0.45 本地运行时碰撞门 — 2026-09-01
 
 ### Changed
