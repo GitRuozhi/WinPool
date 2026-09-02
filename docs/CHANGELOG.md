@@ -7,6 +7,30 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.45 Edit-page topology workspace — 2026-09-02
+
+### Changed
+- The Edit page is two independently scrolling halves with a row splitter and
+  fixed-width control columns. Half titles are gone.
+- The upper half shows a two-level disk/partition topology, including split
+  unallocated regions, and keeps the existing partition actions.
+- The lower half shows internal pools, including primordial, plus a create-pool
+  tile. Physical disks drag between pools in a working copy and auto-enter SSD,
+  HDD, or SCM tiers. Execute commits simulation operations only.
+- New simulated operations create a tiered pool, update pool parameters, and
+  dissolve a pool back to primordial.
+
+### Verification
+- Application tests cover partition/pool projections, unallocated gaps,
+  auto-tier assignment, unknown-media refusal, tiered create, dissolve, and
+  multi-virtual-disk modify rejection.
+- Architecture tests require the Edit page to use those projections and the
+  canonical simulation coordinator, and to keep two untitled halves.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+- Native Edit-page click-through remains `unverified`.
+
 ## V0.45 shell-first startup — 2026-09-02
 
 ### Changed

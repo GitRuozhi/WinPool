@@ -4,9 +4,10 @@
 
 ## 0. Status, authority, and baseline
 
-- **Plan status:** draft complete; remaining product questions closed by recorded defaults; **not confirmed for implementation**
+- **Plan status:** implemented; automatic tests passed; native Edit click-through `unverified`
 - **Created:** 2026-09-02
 - **Updated:** 2026-09-02
+- **Implemented:** 2026-09-02
 - **Baseline commit:** `c471311460445d9b57fe790df2a00444bed7754a`
 - **Working branch:** `main`
 - **Current product version:** V0.45
@@ -17,10 +18,9 @@ This file exists because the developer asked to write `docs/Plan.md` from the
 Edit-page requirements, then wait. It is **not** a confirmed plan.
 Archive history must not be used to invent extra stages or extra features.
 
-Writing or updating this Plan does not authorize implementation, push, tag,
-GitHub Release, binary upload, deployment, or real storage mutation.
-Implementation starts only after the developer explicitly approves this Plan
-and then explicitly asks to execute it.
+The developer asked to execute this Plan. Implementation is simulation-only.
+This still does not authorize push, tag, GitHub Release, binary upload,
+deployment, or real storage mutation.
 
 ## 1. Controlling decisions
 
@@ -287,8 +287,5 @@ After a later approved implementation:
 
 ## 8. Approval gate
 
-The questionnaire is closed. This Plan is complete as a draft.
-
-Implementation still does not start until the developer explicitly confirms
-this Plan and asks to execute it. Silence is not approval. Name a specific
-row in §2 if a closed default is wrong.
+This Plan has been executed. Native Edit-page click-through remains
+`unverified` until the developer asks for that evidence.
