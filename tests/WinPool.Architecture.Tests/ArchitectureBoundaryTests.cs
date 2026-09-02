@@ -406,6 +406,22 @@ public sealed class ArchitectureBoundaryTests
             editPage,
             StringComparison.Ordinal);
         Assert.Contains(
+            "EditWorkspace.ProjectPartitionWorkspace",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EditWorkspace.ProjectPoolWorkspace",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SimulationOperationKind.CreateTieredPool",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SimulationOperationKind.DissolveStoragePool",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "_simulationEditCoordinator.ExecuteAsync",
             workspace,
             StringComparison.Ordinal);
@@ -413,6 +429,24 @@ public sealed class ArchitectureBoundaryTests
             "_simulationOperations.Apply(ActiveDocument",
             workspace,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EditPageSplitsHalvesWithoutSectionTitles()
+    {
+        var root = FindRepositoryRoot();
+        var xaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "EditPage.xaml"));
+        Assert.Contains("Height=\"*\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GridSplitter", xaml, StringComparison.Ordinal);
+        Assert.Contains("UpperTopologyControl", xaml, StringComparison.Ordinal);
+        Assert.Contains("LowerTopologyControl", xaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"280\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"320\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DiskSectionTitle", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("PoolSectionTitle", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("磁盘与分区", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("存储池与虚拟磁盘", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

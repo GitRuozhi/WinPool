@@ -5,6 +5,12 @@ using WinPool.Application;
 
 namespace WinPool.App.ViewModels;
 
+public sealed record TopologyEditInteraction(
+    Func<TopologyNodeViewModel, bool> IsSelected,
+    Action<TopologyNodeViewModel> OnSelect,
+    bool AllowDiskDrag,
+    Action<string, string>? OnDiskDropped = null);
+
 public sealed partial class TopologyNodeViewModel : ObservableObject
 {
     private readonly WorkspaceViewModel _owner;
@@ -13,15 +19,19 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     private readonly string _occurrenceKey;
 
+    private readonly TopologyEditInteraction? _edit;
+
     public TopologyNodeViewModel(
         ManageTopologyNodeView node,
         WorkspaceViewModel owner,
-        StorageSnapshot snapshot)
+        StorageSnapshot snapshot,
+        TopologyEditInteraction? edit = null)
     {
         _owner = owner;
         _snapshot = snapshot;
         _occurrenceKey = node.OccurrenceKey;
-        var unit = ToStorageUnit(node);
+        _edit = edit;
+        var unit = ToStorageUnit(node, snapshot);
         ObjectId = node.Id;
         Role = node.Role;
         Unit = unit with { DisplayName = LocalizeName(unit, owner) };
@@ -41,10 +51,31 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             ? true
             : owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
         Children = node.Children
-            .Select(child => new TopologyNodeViewModel(child, owner, snapshot))
+            .Select(child => new TopologyNodeViewModel(child, owner, snapshot, edit))
             .ToList();
         (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit);
         IsWindowsBacked = ComputeIsWindowsBacked(snapshot, unit);
+        var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == unit.StableId);
+        IsDragSource = edit?.AllowDiskDrag == true
+            && unit.Kind == StorageUnitKind.PhysicalDisk
+            && physical is { IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false };
+        IsDropTarget = edit?.AllowDiskDrag == true && unit.Kind == StorageUnitKind.StoragePool;
+    }
+
+    public bool IsDragSource { get; }
+
+    public bool IsDropTarget { get; }
+
+    public TopologyEditInteraction? EditInteraction => _edit;
+
+    public string? ResolvePoolDropId()
+    {
+        if (Unit.Kind == StorageUnitKind.StoragePool)
+        {
+            return Unit.StableId;
+        }
+
+        return Unit.ParentStableId;
     }
 
     public string BadgeText { get; }
@@ -185,7 +216,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     }
 
     public bool IsSelected =>
-        _owner.IsTopologySelected(ObjectId, Role);
+        _edit?.IsSelected(this) ?? _owner.IsTopologySelected(ObjectId, Role);
 
     public int HeaderRow => 0;
 
@@ -266,10 +297,18 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     [RelayCommand]
     private void Select()
     {
-        if (IsSelectable)
+        if (!IsSelectable)
         {
-            _owner.SelectManageTopologyNode(ObjectId, Role, _snapshot);
+            return;
         }
+
+        if (_edit is not null)
+        {
+            _edit.OnSelect(this);
+            return;
+        }
+
+        _owner.SelectManageTopologyNode(ObjectId, Role, _snapshot);
     }
 
     [RelayCommand]
@@ -283,11 +322,18 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public void RequestContextMenu(
         Microsoft.UI.Xaml.FrameworkElement target,
-        Windows.Foundation.Point pointerPosition) =>
+        Windows.Foundation.Point pointerPosition)
+    {
+        if (_edit is not null)
+        {
+            return;
+        }
+
         _owner.NodeContextMenuRequested?.Invoke(
             new ManageObjectTarget(ObjectId, Role),
             target,
             pointerPosition);
+    }
 
     public void RefreshSelection()
     {
@@ -333,6 +379,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private static string LocalizeName(StorageUnitRef unit, WorkspaceViewModel owner) =>
         unit.StableId switch
         {
+            _ when EditWorkspace.IsPlus(unit.StableId) => "+",
+            _ when EditWorkspace.IsUnallocated(unit.StableId) => owner.Localization["Unallocated"],
+            _ when EditWorkspace.IsPendingVirtualDisk(unit.StableId) => owner.Localization["NotCreated"],
             _ when unit.Kind == StorageUnitKind.NetworkDiskGroup => owner.Localization["Network"],
             _ when unit.Kind == StorageUnitKind.OtherDiskGroup => owner.Localization["Other"],
             _ when unit.Kind == StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],
@@ -345,7 +394,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         WorkspaceViewModel owner,
         StorageSnapshot snapshot)
     {
-        var unit = ToStorageUnit(node);
+        var unit = ToStorageUnit(node, snapshot);
         if (unit.Kind == StorageUnitKind.System)
         {
             var physical = snapshot.PhysicalDisks
@@ -363,9 +412,26 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(physical.Sum(x => x.Size)));
         }
 
+        if (EditWorkspace.IsPlus(unit.StableId) || EditWorkspace.IsPendingVirtualDisk(unit.StableId))
+        {
+            return string.Empty;
+        }
+
+        if (EditWorkspace.IsUnallocated(unit.StableId)
+            && EditWorkspace.TryParseUnallocated(unit.StableId, out _, out _, out var unallocatedSize))
+        {
+            return TopologyProjector.JoinSummary(
+                owner.Localization["Unallocated"],
+                TopologyProjector.FormatBytes(unallocatedSize));
+        }
+
         if (unit.Kind == StorageUnitKind.StoragePool)
         {
-            var pool = snapshot.StoragePools.First(x => x.StableId == unit.StableId);
+            var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId);
+            if (pool is null)
+            {
+                return node.Summary;
+            }
             var members = snapshot.PhysicalDisks
                 .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
                 .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
@@ -381,7 +447,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
         if (unit.Kind == StorageUnitKind.StorageTier)
         {
-            var tier = snapshot.StorageTiers.First(x => x.StableId == unit.StableId);
+            var tier = snapshot.StorageTiers.FirstOrDefault(x => x.StableId == unit.StableId);
+            if (tier is null)
+            {
+                return node.Summary;
+            }
+
             var members = snapshot.PhysicalDisks
                 .Where(x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
                 .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
@@ -400,7 +471,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
         if (unit.Kind == StorageUnitKind.VirtualDisk)
         {
-            var disk = snapshot.VirtualDisks.First(x => x.StableId == unit.StableId);
+            var disk = snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == unit.StableId);
+            if (disk is null)
+            {
+                return owner.Localization["NotCreated"];
+            }
+
             return TopologyProjector.JoinSummary(
                 disk.TierStableIds.Count > 0 ? "Tiered" : "Virtual",
                 TopologyProjector.FormatBytes(disk.Size));
@@ -464,7 +540,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
         if (unit.Kind == StorageUnitKind.Partition)
         {
-            var partition = snapshot.Partitions.First(x => x.StableId == unit.StableId);
+            var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId);
+            if (partition is null)
+            {
+                return node.Summary;
+            }
+
             return TopologyProjector.JoinSummary(
                 string.IsNullOrWhiteSpace(partition.FileSystem) ? owner.Localization["Unknown"] : partition.FileSystem,
                 TopologyProjector.FormatBytes(partition.Size));
@@ -473,28 +554,47 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         return node.Summary.Replace(" · ", "  ", StringComparison.Ordinal);
     }
 
-    private static StorageUnitRef ToStorageUnit(ManageTopologyNodeView node) =>
-        new(
-            node.Id.ProviderKey,
-            node.Role switch
-            {
-                ManageObjectRole.System => StorageUnitKind.System,
-                ManageObjectRole.StorageSubsystem => StorageUnitKind.StorageSubsystem,
-                ManageObjectRole.StoragePool => StorageUnitKind.StoragePool,
-                ManageObjectRole.StorageTier => StorageUnitKind.StorageTier,
-                ManageObjectRole.PhysicalDisk => StorageUnitKind.PhysicalDisk,
-                ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
-                ManageObjectRole.NetworkDisk => StorageUnitKind.NetworkDisk,
-                ManageObjectRole.OsDisk => StorageUnitKind.OsDisk,
-                ManageObjectRole.Partition => StorageUnitKind.Partition,
-                ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
-                ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
-                ManageObjectRole.DirectDiskGroup => StorageUnitKind.DirectDiskGroup,
-                ManageObjectRole.VirtualDiskGroup => StorageUnitKind.VirtualDiskGroup,
-                _ => throw new ArgumentOutOfRangeException(nameof(node))
-            },
-            node.DisplayName,
-            node.IsStableIdentity);
+    private static StorageUnitRef ToStorageUnit(ManageTopologyNodeView node, StorageSnapshot snapshot)
+    {
+        var kind = node.Role switch
+        {
+            ManageObjectRole.System => StorageUnitKind.System,
+            ManageObjectRole.StorageSubsystem => StorageUnitKind.StorageSubsystem,
+            ManageObjectRole.StoragePool => StorageUnitKind.StoragePool,
+            ManageObjectRole.StorageTier => StorageUnitKind.StorageTier,
+            ManageObjectRole.PhysicalDisk => StorageUnitKind.PhysicalDisk,
+            ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
+            ManageObjectRole.NetworkDisk => StorageUnitKind.NetworkDisk,
+            ManageObjectRole.OsDisk => StorageUnitKind.OsDisk,
+            ManageObjectRole.Partition => StorageUnitKind.Partition,
+            ManageObjectRole.NetworkGroup => StorageUnitKind.NetworkDiskGroup,
+            ManageObjectRole.OtherGroup => StorageUnitKind.OtherDiskGroup,
+            ManageObjectRole.DirectDiskGroup => StorageUnitKind.DirectDiskGroup,
+            ManageObjectRole.VirtualDiskGroup => StorageUnitKind.VirtualDiskGroup,
+            _ => throw new ArgumentOutOfRangeException(nameof(node))
+        };
+        var key = node.Id.ProviderKey;
+        string? parent = kind switch
+        {
+            StorageUnitKind.StorageTier =>
+                snapshot.StorageTiers.FirstOrDefault(item => item.StableId == key)?.PoolStableId,
+            StorageUnitKind.PhysicalDisk =>
+                snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == key)?.PoolStableId,
+            StorageUnitKind.VirtualDisk =>
+                snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == key)?.PoolStableId
+                ?? (EditWorkspace.IsPendingVirtualDisk(key)
+                    ? key[EditWorkspace.PendingVirtualPrefix.Length..]
+                    : null),
+            StorageUnitKind.Partition =>
+                snapshot.Partitions.FirstOrDefault(item => item.StableId == key)?.OsDiskStableId
+                ?? (EditWorkspace.TryParseUnallocated(key, out var osDisk, out _, out _) ? osDisk : null),
+            StorageUnitKind.OsDisk =>
+                snapshot.OsDisks.FirstOrDefault(item => item.StableId == key)?.PhysicalDiskStableId
+                ?? snapshot.OsDisks.FirstOrDefault(item => item.StableId == key)?.VirtualDiskStableId,
+            _ => null
+        };
+        return new StorageUnitRef(key, kind, node.DisplayName, node.IsStableIdentity, parent);
+    }
 
     private static string LocalizeType(StorageUnitRef unit, WorkspaceViewModel owner, StorageSnapshot snapshot) =>
         unit.Kind switch
@@ -507,8 +607,10 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             StorageUnitKind.PhysicalDisk => owner.Localization["PhysicalDisk"],
             StorageUnitKind.VirtualDisk => owner.Localization["VirtualDisk"],
             StorageUnitKind.NetworkDisk => owner.Localization["NetworkDisk"],
-            StorageUnitKind.Partition => owner.PartitionTypeName(
-                snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId)?.Type ?? "Unknown"),
+            StorageUnitKind.Partition => EditWorkspace.IsUnallocated(unit.StableId)
+                ? owner.Localization["Unallocated"]
+                : owner.PartitionTypeName(
+                    snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId)?.Type ?? "Unknown"),
             StorageUnitKind.OsDisk => owner.Localization["OtherDisk"],
             StorageUnitKind.NetworkDiskGroup => owner.Localization["NetworkStorageGroup"],
             StorageUnitKind.OtherDiskGroup => owner.Localization["OtherStorageGroup"],
@@ -517,18 +619,27 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             _ => unit.Kind.ToString()
         };
 
-    private static string SnapshotPoolType(StorageUnitRef unit, WorkspaceViewModel owner, StorageSnapshot snapshot) =>
-        snapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId)?.IsPrimordial == true
+    private static string SnapshotPoolType(StorageUnitRef unit, WorkspaceViewModel owner, StorageSnapshot snapshot)
+    {
+        if (EditWorkspace.IsPlus(unit.StableId))
+        {
+            return owner.Localization["NewPool"];
+        }
+
+        return snapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId)?.IsPrimordial == true
             ? owner.Localization["OriginalPool"]
             : owner.Localization["StoragePool"];
+    }
 
     private static string SnapshotTierType(StorageUnitRef unit, WorkspaceViewModel owner, StorageSnapshot snapshot)
     {
         var media = snapshot.StorageTiers.FirstOrDefault(x => x.StableId == unit.StableId)?.MediaType;
-        return media is "SSD" or "SCM"
+        return media == "SSD"
             ? owner.Localization["PerformanceTier"]
             : media == "HDD"
                 ? owner.Localization["CapacityTier"]
-                : owner.Localization["StorageTier"];
+                : media == "SCM"
+                    ? owner.Localization["DedicatedTier"]
+                    : owner.Localization["StorageTier"];
     }
 }

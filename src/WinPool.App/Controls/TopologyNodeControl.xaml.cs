@@ -4,7 +4,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using WinPool.App.ViewModels;
+using WinPool.Application;
 
 namespace WinPool_App.Controls;
 
@@ -26,6 +28,9 @@ public sealed partial class TopologyNodeControl : UserControl
         InitializeComponent();
         Loaded += (_, _) => UpdateSelectionVisual();
         ActualThemeChanged += (_, _) => UpdateSelectionVisual();
+        DragStarting += TopologyNodeControl_DragStarting;
+        DragOver += TopologyNodeControl_DragOver;
+        Drop += TopologyNodeControl_Drop;
     }
 
     public TopologyNodeViewModel ViewModel
@@ -46,6 +51,8 @@ public sealed partial class TopologyNodeControl : UserControl
             newValue.PropertyChanged += control.ViewModel_PropertyChanged;
         }
         control.Bindings.Update();
+        control.CanDrag = args.NewValue is TopologyNodeViewModel drag && drag.IsDragSource;
+        control.AllowDrop = true;
         control.UpdateSelectionVisual();
     }
 
@@ -276,6 +283,68 @@ public sealed partial class TopologyNodeControl : UserControl
     {
         _hasKeyboardFocus = false;
         UpdateSelectionVisual();
+    }
+
+    private void TopologyNodeControl_DragStarting(UIElement sender, DragStartingEventArgs e)
+    {
+        if (ViewModel?.IsDragSource != true)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        e.Data.SetText(ViewModel.Unit.StableId);
+        e.Data.RequestedOperation = DataPackageOperation.Move;
+    }
+
+    private void TopologyNodeControl_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.Text) || FindPoolDropTarget() is null)
+        {
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.Handled = true;
+    }
+
+    private async void TopologyNodeControl_Drop(object sender, DragEventArgs e)
+    {
+        var poolId = FindPoolDropTarget();
+        if (poolId is null || !e.DataView.Contains(StandardDataFormats.Text))
+        {
+            return;
+        }
+
+        var diskId = await e.DataView.GetTextAsync();
+        if (!string.IsNullOrWhiteSpace(diskId))
+        {
+            ViewModel.EditInteraction?.OnDiskDropped?.Invoke(diskId, poolId);
+        }
+
+        e.Handled = true;
+    }
+
+    private string? FindPoolDropTarget()
+    {
+        if (ViewModel?.IsDropTarget == true)
+        {
+            return ViewModel.Unit.StableId;
+        }
+
+        for (var ancestor = FindParentTopologyNode();
+             ancestor is not null;
+             ancestor = ancestor.FindParentTopologyNode())
+        {
+            if (ancestor.ViewModel?.IsDropTarget == true)
+            {
+                return ancestor.ViewModel.Unit.StableId;
+            }
+        }
+
+        return ViewModel?.EditInteraction?.AllowDiskDrag == true
+            ? ViewModel.ResolvePoolDropId()
+            : null;
     }
 
     private void TopologyNodeControl_KeyDown(object sender, KeyRoutedEventArgs e)

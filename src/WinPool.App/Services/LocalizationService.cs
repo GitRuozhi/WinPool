@@ -250,7 +250,46 @@ public sealed class LocalizationService : ObservableObject
             ["AutoColor"] = ("自动颜色", "Automatic color"),
             ["ActivityLabelShort"] = ("活", "A"),
             ["ReadLabelShort"] = ("读", "R"),
-            ["WriteLabelShort"] = ("写", "W")
+            ["WriteLabelShort"] = ("写", "W"),
+            ["Unallocated"] = ("未分配", "Unallocated"),
+            ["NotCreated"] = ("未建立", "Not created"),
+            ["DedicatedTier"] = ("专用层", "Dedicated tier"),
+            ["ExecuteModify"] = ("执行修改", "Execute modify"),
+            ["CreateNewPool"] = ("创建新池", "Create new pool"),
+            ["DissolvePool"] = ("解散池", "Dissolve pool"),
+            ["PoolName"] = ("池名", "Pool name"),
+            ["VirtualDiskName"] = ("虚拟磁盘名", "Virtual disk name"),
+            ["PerformanceResiliency"] = ("性能层复原类型", "Performance resiliency"),
+            ["PerformanceInterleave"] = ("性能层交织大小", "Performance interleave"),
+            ["PerformanceSize"] = ("性能层大小", "Performance size"),
+            ["PerformanceColumns"] = ("性能层列数", "Performance columns"),
+            ["PerformanceCopies"] = ("性能层冗余副本数量", "Performance data copies"),
+            ["PerformanceFailures"] = ("性能层允许故障盘数", "Performance tolerated failures"),
+            ["CapacityResiliency"] = ("容量层复原类型", "Capacity resiliency"),
+            ["CapacityInterleave"] = ("容量层交织大小", "Capacity interleave"),
+            ["CapacitySize"] = ("容量层大小", "Capacity size"),
+            ["CapacityColumns"] = ("容量层列数", "Capacity columns"),
+            ["CapacityCopies"] = ("容量层冗余副本数量", "Capacity data copies"),
+            ["CapacityFailures"] = ("容量层允许故障盘数", "Capacity tolerated failures"),
+            ["ScmResiliency"] = ("专用层复原类型", "Dedicated resiliency"),
+            ["ScmInterleave"] = ("专用层交织大小", "Dedicated interleave"),
+            ["ScmSize"] = ("专用层大小", "Dedicated size"),
+            ["ScmColumns"] = ("专用层列数", "Dedicated columns"),
+            ["ScmCopies"] = ("专用层冗余副本数量", "Dedicated data copies"),
+            ["ScmFailures"] = ("专用层允许故障盘数", "Dedicated tolerated failures"),
+            ["PartitionFileSystem"] = ("分区系统格式", "Partition file system"),
+            ["PartitionClusterSize"] = ("分区簇大小", "Partition cluster size"),
+            ["ResearchNote64k"] = (
+                "本项目测试结论：64K 交织 + 64K NTFS 簇为当前安全推荐配置。",
+                "Tested recommendation: 64K interleave + 64K NTFS cluster."),
+            ["MultipleVirtualDiskWarning"] = (
+                "不推荐在一个 Windows 存储空间内创建多个虚拟磁盘。如确有需要，推荐创建一个虚拟磁盘并创建多个分区。",
+                "Creating more than one virtual disk in a Windows storage space is not recommended. If you need more volumes, create one virtual disk and multiple partitions."),
+            ["DissolvePoolTitle"] = ("解散模拟存储池", "Dissolve simulated pool"),
+            ["DissolvePoolMessage"] = (
+                "将删除该池、存储层、虚拟磁盘和分区，物理磁盘回到原始池。确定继续？",
+                "This removes the pool, tiers, virtual disks, and partitions, and returns physical disks to the primordial pool. Continue?"),
+            ["SizeGbPlaceholder"] = ("GB，留空为成员容量", "GB, blank = member capacity")
         };
 
     public LanguagePreference Language
