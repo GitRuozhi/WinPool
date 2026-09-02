@@ -720,7 +720,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         ScanError = string.Empty;
         StatusMessage = Localization["Scanning"];
         _notificationService.DismissByKey(ScanningNotificationKey);
-        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted());
         var previous = _selectedSelection;
         try
         {

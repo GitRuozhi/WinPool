@@ -978,7 +978,7 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "ViewModels", "WorkspaceViewModel.cs"));
         var mainPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MainPage.xaml.cs"));
-        Assert.Contains("WorkspaceNotificationFactory.ScanStarted()", workspace, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkspaceNotificationFactory.ScanStarted()", workspace, StringComparison.Ordinal);
         Assert.Contains("WorkspaceNotificationFactory.ScanCompleted(", workspace, StringComparison.Ordinal);
         Assert.Contains("WorkspaceNotificationFactory.ScanFailed(", workspace, StringComparison.Ordinal);
         Assert.Contains("WorkspaceNotificationFactory.ExportCompleted(", mainPage, StringComparison.Ordinal);
