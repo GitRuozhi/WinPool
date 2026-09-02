@@ -172,13 +172,21 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <InfoBar
-                            IsClosable="True"
-                            IsOpen="True"
-                            CloseButtonClick="GlobalNotification_CloseButtonClick"
-                            Message="{Binding Message}"
-                            Severity="{Binding Severity, Converter={StaticResource NotificationSeverityConverter}}"
-                            Title="{Binding Title}" />
+                        <Border
+                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4">
+                            <InfoBar
+                                Background="Transparent"
+                                BorderThickness="0"
+                                IsClosable="True"
+                                IsOpen="True"
+                                CloseButtonClick="GlobalNotification_CloseButtonClick"
+                                Message="{Binding Message}"
+                                Severity="{Binding Severity, Converter={StaticResource NotificationSeverityConverter}}"
+                                Title="{Binding Title}" />
+                        </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

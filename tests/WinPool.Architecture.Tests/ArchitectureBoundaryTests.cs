@@ -772,7 +772,9 @@ public sealed class ArchitectureBoundaryTests
             StringComparison.Ordinal);
         Assert.True(navigate >= 0 && wait > navigate);
         Assert.DoesNotContain("ProgressRing", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
+        Assert.Contains("SolidBackgroundFillColorBaseBrush", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"GlobalNotificationStack\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("BeginWorkspacePrepare()", loaded, StringComparison.Ordinal);
         Assert.Contains("CompleteWorkspacePrepare()", loaded, StringComparison.Ordinal);
     }
@@ -978,7 +980,7 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "ViewModels", "WorkspaceViewModel.cs"));
         var mainPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MainPage.xaml.cs"));
-        Assert.DoesNotContain("WorkspaceNotificationFactory.ScanStarted()", workspace, StringComparison.Ordinal);
+        Assert.Contains("WorkspaceNotificationFactory.ScanStarted()", workspace, StringComparison.Ordinal);
         Assert.Contains("WorkspaceNotificationFactory.ScanCompleted(", workspace, StringComparison.Ordinal);
         Assert.Contains("WorkspaceNotificationFactory.ScanFailed(", workspace, StringComparison.Ordinal);
         Assert.Contains("WorkspaceNotificationFactory.ExportCompleted(", mainPage, StringComparison.Ordinal);

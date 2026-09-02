@@ -40,6 +40,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly HashSet<string> _shownFindings = new(StringComparer.Ordinal);
     public const string AddStorageSystemKey = "action:add-storage-system";
     private const string ScanningNotificationKey = "inventory:scanning";
+    private const string WorkspacePrepareNotificationKey = "startup:workspace-prepare";
 
     public WorkspaceViewModel(
         IHardwareInventoryProvider hardwareInventoryProvider,
@@ -245,8 +246,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool HasScanError => !string.IsNullOrWhiteSpace(ScanError);
 
-    public bool ShowInventoryStatus => IsPreparingWorkspace || IsScanning;
-
     public Task WhenWorkspaceReady => _workspaceReady.Task;
 
     public bool HasSelection => SelectedWorkspaceItem?.Projection is not null;
@@ -356,23 +355,26 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     partial void OnScanErrorChanged(string value) => OnPropertyChanged(nameof(HasScanError));
 
-    partial void OnIsScanningChanged(bool value) => OnPropertyChanged(nameof(ShowInventoryStatus));
-
-    partial void OnIsPreparingWorkspaceChanged(bool value) =>
-        OnPropertyChanged(nameof(ShowInventoryStatus));
-
     public void BeginWorkspacePrepare()
     {
         IsPreparingWorkspace = true;
         StatusMessage = Localization["ConnectingAgent"];
+        ReplacePersistentInfo(
+            Localization["ConnectingAgent"],
+            WorkspacePrepareNotificationKey);
     }
 
     public void NotifyWorkspaceLoading()
     {
-        if (IsPreparingWorkspace)
+        if (!IsPreparingWorkspace)
         {
-            StatusMessage = Localization["LoadingWorkspace"];
+            return;
         }
+
+        StatusMessage = Localization["LoadingWorkspace"];
+        ReplacePersistentInfo(
+            Localization["LoadingWorkspace"],
+            WorkspacePrepareNotificationKey);
     }
 
     public void CompleteWorkspacePrepare()
@@ -383,7 +385,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             StatusMessage = string.Empty;
         }
 
+        _notificationService.DismissByKey(WorkspacePrepareNotificationKey);
         _workspaceReady.TrySetResult();
+    }
+
+    private void ReplacePersistentInfo(string title, string occurrenceKey)
+    {
+        _notificationService.DismissByKey(occurrenceKey);
+        _notificationService.PublishInfo(
+            title,
+            string.Empty,
+            "startup",
+            occurrenceKey,
+            autoDismiss: false);
     }
 
     public async Task InitializeAsync()
@@ -720,6 +734,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         ScanError = string.Empty;
         StatusMessage = Localization["Scanning"];
         _notificationService.DismissByKey(ScanningNotificationKey);
+        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted());
         var previous = _selectedSelection;
         try
         {
