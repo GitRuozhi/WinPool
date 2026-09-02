@@ -11,9 +11,10 @@ are not rewritten for format consistency.
 
 ### Changed
 - The main window paints tab structure before waiting for the tray Agent.
-- Manage shows connecting/scanning status on an in-page `InfoBar`. Cached local
-  inventory is projected first, then the PowerShell scan replaces it in place.
-  The in-progress scan toast is not also shown in the global notification stack.
+- Manage shows connecting/scanning status only in the global notification stack.
+  Cached local inventory is projected first, then the PowerShell scan replaces it
+  in place. Global toasts sit on an opaque theme surface so they remain readable
+  over Mica.
 
 ### Verification
 - Architecture tests require `NavigateStartupPage` before
