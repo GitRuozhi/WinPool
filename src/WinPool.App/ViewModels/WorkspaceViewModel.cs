@@ -288,6 +288,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return null;
         }
 
+        if (current.Projection.Id.System != ActiveDocument.SystemId)
+        {
+            return null;
+        }
+
         var navigation = _manageNavigationProjector.Project(
             ActiveDocument,
             current.Projection.Id,
@@ -407,6 +412,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         if (cachedLocal is not null)
         {
             SystemCatalog.ReplaceLocal(cachedLocal);
+            if (SelectedSystem.IsLocal)
+            {
+                SelectedSystem = cachedLocal;
+                OnPropertyChanged(nameof(SelectedSystem));
+                OnPropertyChanged(nameof(ActiveDocument));
+                OnPropertyChanged(nameof(ActiveSnapshot));
+            }
+
             OnPropertyChanged(nameof(Snapshot));
         }
         var persisted = (await _systemRepository.LoadSimulationsAsync()).ToList();
@@ -414,6 +427,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var selectedId = SelectedSystem.Id;
         SystemCatalog.ReplaceSimulations(merged);
         SelectedSystem = SystemCatalog.Find(selectedId)
+            ?? SystemCatalog.Systems.FirstOrDefault(system => system.IsLocal)
             ?? SystemCatalog.Systems.First(x => !x.IsLocal);
         RestoredUiState = await _workspaceStateService.LoadAsync();
         if (RestoredUiState is not null)
@@ -1253,6 +1267,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var document = item.StorageSystemId is null
             ? ActiveDocument
             : SystemCatalog.Find(item.StorageSystemId) ?? ActiveDocument;
+        if (item.Projection.Id.System != document.SystemId)
+        {
+            DetailTitle = string.Empty;
+            DetailSubtitle = string.Empty;
+            NotifySelectionState();
+            return;
+        }
+
         var details = _manageDetailsProjector.Project(
             document,
             item.Projection.Id,
@@ -1342,6 +1364,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             return null;
         }
+
+        if (item.Projection.Id.System != ActiveDocument.SystemId)
+        {
+            return null;
+        }
+
         return _manageNavigationProjector.Project(
             ActiveDocument,
             item.Projection.Id,
