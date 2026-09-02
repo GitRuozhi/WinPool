@@ -173,13 +173,17 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 `dotnet build` writes generated files only under `artifacts`:
 
 ```text
-artifacts\$(Configuration)\     two-process run tree
-artifacts\obj\                  compiler intermediates
-artifacts\build\                class-library and test outputs
+artifacts\trees\$(Configuration)\App\    App self-contained build tree
+artifacts\trees\$(Configuration)\Agent\  Agent self-contained build tree
+artifacts\$(Configuration)\              SHA-256-checked union run tree
+artifacts\obj\                           compiler intermediates
+artifacts\build\                         class-library and test outputs
 ```
 
-`src` and `tests` stay source. The App and Agent projects do not copy one another after build.
-Both local executables are self-contained in that shared root, so launching
+`src` and `tests` stay source. App and Agent first build into independent trees.
+`build/Merge-RuntimeTrees.ps1` then writes the run tree: same relative path and
+identical SHA-256 stores one file; different hashes fail the build. Both local
+executables are self-contained in that shared root, so launching
 `WinPool.Agent.exe` beside App does not look for a machine-wide .NET Runtime.
 
 Test commands and when to run them are defined in [Quality](Quality.md).

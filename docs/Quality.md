@@ -74,7 +74,8 @@ explanation or a user-approved exception.
 - The App and Agent publish independently, then merge into one flat portable
   directory. Same relative path and identical SHA-256: store one file. Different
   SHA-256: fail staging.
-- Local `dotnet build` writes the same flat tree to `artifacts\$(Configuration)\`.
+- Local `dotnet build` writes App and Agent to independent trees, then the same
+  SHA-256 union into `artifacts\$(Configuration)\`. A collision fails the build.
 - App runtime lookup paths match the staged tree (`WinPool.Agent.exe` beside App).
 - Named-pipe identity and ACL behavior, SQLite ownership, and read-only
   inventory boundaries remain covered by automatic or controlled local

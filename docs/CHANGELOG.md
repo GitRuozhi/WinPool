@@ -7,6 +7,19 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.45 local runtime collision gate — 2026-09-01
+
+### Changed
+- Local App and Agent builds write independent trees, then reuse the staging
+  SHA-256 union. Same-name different-content files fail the local build.
+
+### Verification
+- Architecture tests require the shared merge script and separate local trees.
+- Product version remains V0.45.
+
+### Known Limitations
+- Inherited OS-matrix and full human UI cases remain `unverified`.
+
 ## V0.45 — 2026-09-01
 
 ### Changed

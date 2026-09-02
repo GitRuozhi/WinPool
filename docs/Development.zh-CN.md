@@ -131,14 +131,17 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 `dotnet build` 只把生成文件写到 `artifacts`：
 
 ```text
-artifacts\$(Configuration)\     两进程运行树
-artifacts\obj\                  编译中间文件
-artifacts\build\                类库和测试输出
+artifacts\trees\$(Configuration)\App\    App 自包含构建树
+artifacts\trees\$(Configuration)\Agent\  Agent 自包含构建树
+artifacts\$(Configuration)\              经 SHA-256 检查的并集运行树
+artifacts\obj\                           编译中间文件
+artifacts\build\                         类库和测试输出
 ```
 
-`src` 和 `tests` 只保留源码。App 与 Agent 构建后不再互相复制。
-本地两个可执行文件都在该共享根目录中自包含，因此在 App 旁边启动
-`WinPool.Agent.exe` 不会去找机器上的 .NET Runtime。
+`src` 和 `tests` 只保留源码。App 与 Agent 先输出到独立树，再由
+`build/Merge-RuntimeTrees.ps1` 写入运行树：相对路径相同且 SHA-256 相同则只存一份，
+哈希不同则构建失败。本地两个可执行文件都在该共享根目录中自包含，因此在 App 旁边
+启动 `WinPool.Agent.exe` 不会去找机器上的 .NET Runtime。
 
 测试命令及何时运行由 [质量规则](Quality.zh-CN.md) 定义。
 

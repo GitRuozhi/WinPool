@@ -55,7 +55,8 @@ dotnet list WinPool.slnx package --vulnerable --include-transitive
 
 - App 和 Agent 先独立发布，再合并成一个扁平 portable 目录。相对路径相同且
   SHA-256 相同：只存一份。SHA-256 不同：staging 失败。
-- 本地 `dotnet build` 把同一棵扁平树写到 `artifacts\$(Configuration)\`。
+- 本地 `dotnet build` 先把 App 和 Agent 写到独立树，再用同一套 SHA-256 并集写到
+  `artifacts\$(Configuration)\`。冲突会使构建失败。
 - App 运行时查找路径与 staging 树一致（`WinPool.Agent.exe` 在 App 旁边）。
 - 命名管道身份和 ACL、SQLite 所有权及只读采集边界由自动或受控本地集成检查覆盖。
 - Staging 不包含脚本、PDB 文件、艺术源文件、数据库、测试结果或重复子进程可执行文件。构建产物仍可包含 PDB。
