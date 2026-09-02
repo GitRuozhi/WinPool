@@ -102,11 +102,6 @@ public sealed partial class MainPage : Page
 
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.AutoScanAttempted && !ViewModel.IsScanning)
-        {
-            ViewModel.AutoScanAttempted = true;
-            _ = RefreshLocalInventoryAsync();
-        }
         DispatcherQueue.TryEnqueue(() =>
             TopologyScrollViewer.ChangeView(
                 ViewModel.TopologyHorizontalOffset,
@@ -115,10 +110,19 @@ public sealed partial class MainPage : Page
                 disableAnimation: true));
         RebuildComparisonTable();
         BuildCommandButtons();
+        await ViewModel.WhenWorkspaceReady;
+        RebuildComparisonTable();
+        BuildCommandButtons();
+        if (!ViewModel.AutoScanAttempted && !ViewModel.IsScanning)
+        {
+            ViewModel.AutoScanAttempted = true;
+            _ = RefreshLocalInventoryAsync();
+        }
     }
 
     private async Task RefreshLocalInventoryAsync()
     {
+        await App.InitialAgentConnectionTask;
         await ViewModel.ScanAsync();
         DispatcherQueue.TryEnqueue(() =>
         {

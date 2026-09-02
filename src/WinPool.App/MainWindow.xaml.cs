@@ -144,12 +144,14 @@ public sealed partial class MainWindow : Window
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
+        NavigateStartupPage();
+        ViewModel.BeginWorkspacePrepare();
         try
         {
-            // On a cold boot the tray Agent can take a while to become ready;
-            // wait for the initial connection so workspace initialization does
-            // not fail against a not-yet-started Agent.
+            // Show the shell first. Agent readiness is required for SQLite
+            // restore and inventory, not for painting tab structure.
             await App.InitialAgentConnectionTask;
+            ViewModel.NotifyWorkspaceLoading();
             await ViewModel.InitializeAsync();
         }
         catch (Exception exception)
@@ -163,29 +165,33 @@ public sealed partial class MainWindow : Window
                     "startup-initialize-failed");
             }
         }
+        finally
+        {
+            ViewModel.CompleteWorkspacePrepare();
+        }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
         RefreshChrome();
         UpdateCaptionInset();
         UpdateCaptionButtonColors();
+    }
+
+    private void NavigateStartupPage()
+    {
         if (_startupTarget is not (ApplicationStartupTarget.None or ApplicationStartupTarget.Welcome))
         {
             ActivateTarget(_startupTarget);
+            return;
         }
-        else if (Enum.TryParse<ShellPageKind>(_preferredShellPage, out var preferredPage)
+
+        if (Enum.TryParse<ShellPageKind>(_preferredShellPage, out var preferredPage)
             && preferredPage != ShellPageKind.Manage)
         {
             SelectShellPage(preferredPage);
+            return;
         }
-        else if (Enum.TryParse<ShellPageKind>(ViewModel.RestoredUiState?.ShellPage, out var restoredPage)
-            && restoredPage != ShellPageKind.Manage)
-        {
-            SelectShellPage(restoredPage);
-        }
-        else
-        {
-            SelectShellPage(ShellPageKind.Manage);
-        }
+
+        SelectShellPage(ShellPageKind.Manage);
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
@@ -752,11 +758,21 @@ public sealed partial class MainWindow : Window
 
         _nonClientPointerSource ??= InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
         var scale = CustomTitleBar.XamlRoot.RasterizationScale;
-        var regions = new[]
+        RectInt32[] regions;
+        try
         {
-            GetPhysicalRect(ShellNavigationList, scale),
-            GetPhysicalRect(ModeControls, scale)
-        };
+            regions =
+            [
+                GetPhysicalRect(ShellNavigationList, scale),
+                GetPhysicalRect(ModeControls, scale)
+            ];
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or ArgumentException)
+        {
+            return;
+        }
+
         _nonClientPointerSource.SetRegionRects(NonClientRegionKind.Passthrough, regions);
     }
 

@@ -27,6 +27,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly WinPool.Application.IManageNavigationProjector<StorageSystemDocument> _manageNavigationProjector;
     private readonly WinPool.Application.IManageCommandProjector<StorageSystemDocument> _manageCommandProjector;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
+    private readonly TaskCompletionSource _workspaceReady = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<string, bool> _expandedStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(SystemId System, ManageWorkspaceCategory Category), ManageSelectionKey>
         _categorySelections = [];
@@ -233,12 +235,19 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private bool _isScanning;
 
     [ObservableProperty]
+    private bool _isPreparingWorkspace;
+
+    [ObservableProperty]
     private string _scanError = string.Empty;
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
     public bool HasScanError => !string.IsNullOrWhiteSpace(ScanError);
+
+    public bool ShowInventoryStatus => IsPreparingWorkspace || IsScanning;
+
+    public Task WhenWorkspaceReady => _workspaceReady.Task;
 
     public bool HasSelection => SelectedWorkspaceItem?.Projection is not null;
 
@@ -346,6 +355,36 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     partial void OnScanErrorChanged(string value) => OnPropertyChanged(nameof(HasScanError));
+
+    partial void OnIsScanningChanged(bool value) => OnPropertyChanged(nameof(ShowInventoryStatus));
+
+    partial void OnIsPreparingWorkspaceChanged(bool value) =>
+        OnPropertyChanged(nameof(ShowInventoryStatus));
+
+    public void BeginWorkspacePrepare()
+    {
+        IsPreparingWorkspace = true;
+        StatusMessage = Localization["ConnectingAgent"];
+    }
+
+    public void NotifyWorkspaceLoading()
+    {
+        if (IsPreparingWorkspace)
+        {
+            StatusMessage = Localization["LoadingWorkspace"];
+        }
+    }
+
+    public void CompleteWorkspacePrepare()
+    {
+        IsPreparingWorkspace = false;
+        if (!IsScanning && string.IsNullOrWhiteSpace(ScanError))
+        {
+            StatusMessage = string.Empty;
+        }
+
+        _workspaceReady.TrySetResult();
+    }
 
     public async Task InitializeAsync()
     {
@@ -676,6 +715,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
+        await WhenWorkspaceReady;
         IsScanning = true;
         ScanError = string.Empty;
         StatusMessage = Localization["Scanning"];

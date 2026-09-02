@@ -139,14 +139,26 @@ public sealed partial class MonitorPage : Page
         {
             try
             {
-                var started = await Monitoring.StartAsync(SelectedRate());
-                if (!started)
+                await App.InitialAgentConnectionTask;
+                if (App.InitialAgentWarningPublished)
                 {
                     _viewModel.NotificationService.PublishWarning(
                         _viewModel.Localization["MonitorIntro"],
                         Monitoring.LastError ?? "监控 Agent 未能启动。",
                         "monitor",
                         "monitor-start-failed");
+                }
+                else
+                {
+                    var started = await Monitoring.StartAsync(SelectedRate());
+                    if (!started)
+                    {
+                        _viewModel.NotificationService.PublishWarning(
+                            _viewModel.Localization["MonitorIntro"],
+                            Monitoring.LastError ?? "监控 Agent 未能启动。",
+                            "monitor",
+                            "monitor-start-failed");
+                    }
                 }
             }
             catch (Exception exception)

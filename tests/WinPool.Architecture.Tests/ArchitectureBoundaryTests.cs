@@ -749,6 +749,35 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void MainWindowPaintsShellBeforeWaitingForAgent()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+        var windowXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml"));
+        var pageXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainPage.xaml"));
+        var loadedStart = source.IndexOf(
+            "private async void RootGrid_Loaded",
+            StringComparison.Ordinal);
+        var loadedEnd = source.IndexOf(
+            "private async void MainWindow_Closed",
+            StringComparison.Ordinal);
+        Assert.True(loadedStart >= 0 && loadedEnd > loadedStart);
+        var loaded = source[loadedStart..loadedEnd];
+        var navigate = loaded.IndexOf("NavigateStartupPage()", StringComparison.Ordinal);
+        var wait = loaded.IndexOf(
+            "await App.InitialAgentConnectionTask",
+            StringComparison.Ordinal);
+        Assert.True(navigate >= 0 && wait > navigate);
+        Assert.DoesNotContain("ProgressRing", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
+        Assert.Contains("BeginWorkspacePrepare()", loaded, StringComparison.Ordinal);
+        Assert.Contains("CompleteWorkspacePrepare()", loaded, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TitleBarSeparatesTheActiveSystemFromNavigation()
     {
         var root = FindRepositoryRoot();

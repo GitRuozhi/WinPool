@@ -23,6 +23,16 @@
             <Border x:Name="ProbeHover" Background="{ThemeResource ControlFillColorSecondaryBrush}" />
         </Grid>
 
+        <InfoBar
+            Grid.Row="0"
+            Margin="20,12,20,0"
+            VerticalAlignment="Top"
+            Canvas.ZIndex="20"
+            IsClosable="False"
+            IsOpen="{x:Bind ViewModel.ShowInventoryStatus, Mode=OneWay}"
+            Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+            Severity="Informational" />
+
         <Border
             Grid.Row="0"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

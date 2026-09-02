@@ -52,6 +52,8 @@ public sealed class LocalizationService : ObservableObject
             ["OperationArea"] = ("操作区", "Operations"),
             ["TopologyArea"] = ("完整存储拓扑", "Complete storage topology"),
             ["Scanning"] = ("正在扫描存储对象…", "Scanning storage objects…"),
+            ["ConnectingAgent"] = ("正在连接后台服务…", "Connecting to the tray agent…"),
+            ["LoadingWorkspace"] = ("正在加载工作区…", "Loading the workspace…"),
             ["ScanComplete"] = ("扫描完成", "Scan complete"),
             ["NeverModified"] = ("当前第一稿只读取系统信息，不会修改任何磁盘。", "This first draft is read-only and never modifies a disk."),
             ["Rescan"] = ("重新扫描", "Rescan"),
