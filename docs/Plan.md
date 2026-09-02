@@ -4,7 +4,7 @@
 
 ## 0. Status, authority, and baseline
 
-- **Plan status:** draft; answers recorded; remaining questions open; **not confirmed for implementation**
+- **Plan status:** draft complete; remaining product questions closed by recorded defaults; **not confirmed for implementation**
 - **Created:** 2026-09-02
 - **Updated:** 2026-09-02
 - **Baseline commit:** `c471311460445d9b57fe790df2a00444bed7754a`
@@ -19,8 +19,8 @@ Archive history must not be used to invent extra stages or extra features.
 
 Writing or updating this Plan does not authorize implementation, push, tag,
 GitHub Release, binary upload, deployment, or real storage mutation.
-Implementation starts only after the developer answers the remaining questions,
-explicitly approves this Plan, and then explicitly asks to execute it.
+Implementation starts only after the developer explicitly approves this Plan
+and then explicitly asks to execute it.
 
 ## 1. Controlling decisions
 
@@ -53,7 +53,9 @@ safety boundary. All mutation in this stage is **simulation only**.
   - Unallocated space is a child node of the disk. If a partition splits
     unallocated space into two regions, those are **two** child nodes, using
     offset gaps, not one leftover total.
-- Boot/system disks and network disks in this list are still **Q20 / Q21**.
+- The Windows system/boot disk is shown. Operations on it stay restricted
+  by the existing simulation safety rules.
+- Network mapped drives are not shown. They are not locally partitionable.
 
 ### 1.3 Lower half — topology
 
@@ -70,6 +72,8 @@ safety boundary. All mutation in this stage is **simulation only**.
 - SSD → performance tier. HDD → capacity tier.
 - SCM uses a **dedicated tier**. That tier is hidden unless at least one SCM
   disk is present. The default visible tiers are SSD and HDD only.
+- SCM defaults match the performance tier: Mirror, 2 copies; Simple when
+  that tier has one disk. Interleave 64K.
 - Unknown / unspecified media: drop is refused.
 - Drag recognizes **pools only**, not tiers. On release the disk enters the
   matching tier automatically.
@@ -81,17 +85,24 @@ safety boundary. All mutation in this stage is **simulation only**.
 Two columns: item name | item value. Selecting a pool fills the grid from that
 pool. A plus-created draft is filled with recommended parameters.
 
-If the selected pool has **more than one virtual disk**: further modification
-is not allowed, and a warning is shown:
+If the selected pool has **more than one virtual disk**: parameter edits and
+disk drags are disabled, and a warning is shown:
 
 > 不推荐在一个 Windows 存储空间内创建多个虚拟磁盘。如确有需要，推荐创建一个虚拟磁盘并创建多个分区。
 
-English UI uses the same meaning.
+English UI uses the same meaning. **Dissolve remains enabled** so the user can
+leave that state.
+
+Selecting the primordial pool leaves the right-hand grid blank. Primordial
+cannot be dissolved.
 
 Added rows, per tier: column count, number of data copies, number of tolerated
-disk failures, together with the already named resiliency, interleave, and
-size. A one-click **dissolve pool** button is added. Exact extra-row order and
-dissolve placement are in §3, subject to Q22–Q29.
+disk failures, together with resiliency, interleave, and size.
+
+A one-click **dissolve pool** button sits in the grid as its own row directly
+under Execute. Dissolving an existing simulated pool asks for confirmation,
+then removes the pool, its tiers, virtual disks, and partitions, and returns
+physical disks to the primordial pool. Dissolving a draft discards the draft.
 
 ### 1.5 Execute and create defaults
 
@@ -108,10 +119,10 @@ dissolve placement are in §3, subject to Q22–Q29.
 | Performance resiliency | Mirror; **Simple** when that tier has one disk |
 | Performance data copies | 2; **1** when Simple |
 | Performance interleave | 64K |
-| Performance columns | Windows auto (V10: do not pass `-NumberOfColumns` for the SSD tier). Control behavior is Q26. |
+| Performance columns | Shown read-only. V10: do not pass `-NumberOfColumns` for the SSD tier. |
 | Capacity resiliency | Parity; **Simple** when that tier has one disk |
 | Capacity physical-disk redundancy | 1; **0** when Simple |
-| Capacity columns | Follow member HDDs: equal capacity `N = n`, mixed capacity `N = n − 1`. Confirm Q23. |
+| Capacity columns | Follow member HDDs: equal capacity `N = n`, mixed capacity `N = n − 1`. |
 | Capacity interleave | 64K |
 | Partition file system | NTFS |
 | Partition cluster | 64K |
@@ -120,70 +131,46 @@ dissolve placement are in §3, subject to Q22–Q29.
 The one-disk Simple fallback is **per tier**, matching V10 (“Mirror when the
 SSD tier has two drives and Simple when it has only one”).
 
+Copies and tolerated-failure fields are linked, not independently editable:
+
+- Mirror / SCM Mirror: edit data copies; tolerated failures = copies − 1,
+  read-only.
+- Parity: edit tolerated failures (`PhysicalDiskRedundancy`); data copies
+  stay 1, read-only.
+- Simple: copies = 1, tolerated = 0, both read-only.
+
+Execute on the selected pool commits that pool’s parameters and **all**
+pending disk moves in the working copy.
+
 ### 1.6 Modify existing simulated pools
 
 Selecting an existing simulated pool loads its parameters. The user may edit
 them and Execute modify. This rewrites the simulation document. It does not
 claim that Windows can apply the same change in place on real hardware.
 
-## 2. Remaining questions
+## 2. Closed defaults (not re-asked)
 
-Answer with the question number. Proposed defaults are **not** decisions.
+These were the leftover edge cases. They are now recorded so they are not
+asked again:
 
-**Q20.** 上区要不要显示装着 Windows 的系统盘（C: 所在的那块）？  
-A. 显示  
-B. 不显示
+| Topic | Closed as |
+| --- | --- |
+| System/boot disk in the upper list | Shown; existing operation restrictions stay |
+| Network mapped drives in the upper list | Hidden |
+| SCM resiliency | Same as performance: Mirror / 2 copies; Simple if one disk |
+| Capacity column count | `N = n` equal capacity, `N = n − 1` mixed, per V10 |
+| Multi-vdisk dissolve | Remains enabled |
+| Multi-vdisk drag | Disabled, with the warning |
+| Performance column control | Visible, read-only |
+| Copies vs tolerated failures | One master field per resiliency; the other is derived |
+| Primordial selected | Right-hand grid blank |
+| Execute commit scope | Selected pool parameters + all pending drags |
+| Dissolve effect | Confirm; delete pool/tiers/vdisks/partitions; disks return to primordial |
+| Dissolve button | Row under Execute |
 
-**Q21.** 上区要不要显示网络映射盘？  
-A. 不显示  
-B. 显示
+If any of these is wrong, name the row. Do not expect another questionnaire.
 
-**Q22.** SCM 专用层默认复原？  
-A. 镜像，2 副本（和性能层一样；一块 SCM 时回退 Simple）  
-B. 其他（请写）
-
-**Q23.** 容量层列数默认？  
-A. 跟当前 HDD 块数走（同容量 `N = n`，混容量 `N = n − 1`，按 V10）  
-B. 固定 5（V10 推荐硬件是 5 块 HDD）  
-C. 其他（请写）
-
-**Q24.** 选中有多个虚拟磁盘的池时，解散池按钮？  
-A. 仍可用  
-B. 禁用
-
-**Q25.** 选中有多个虚拟磁盘的池时，拖盘？  
-A. 仍可用  
-B. 禁用
-
-**Q26.** 性能层「列数」在控件里？  
-A. 显示，只读（V10：SSD 层不要手动传 `NumberOfColumns`）  
-B. 显示，可改  
-C. 不显示
-
-**Q27.** 「冗余副本数量」和「允许故障盘数」？  
-A. 两个都能改  
-B. 只改副本数，故障盘数自动算  
-C. 只改故障盘数，副本数自动算
-
-**Q28.** 选中原始池时，下区右侧控件？  
-A. 空白  
-B. 显示但全部禁用  
-C. 其他（请写）
-
-**Q29.** 点执行时提交范围？  
-A. 当前选中池的参数 + 全部尚未提交的拖盘  
-B. 只提交当前选中池自己的参数和进/出这块池的拖盘  
-C. 其他（请写）
-
-**Q30.** 解散已有模拟池时的效果？  
-A. 删池、层、虚拟磁盘、分区；物理盘回原始池；先确认  
-B. 其他（请写）
-
-**Q31.** 解散按钮放在哪？  
-A. 下区控件组里，执行按钮下面单独一行  
-B. 其他（请写）
-
-## 3. Proposed shape after the remaining answers
+## 3. Implementation mapping
 
 This section is a mapping, not extra product scope.
 
@@ -202,19 +189,17 @@ Switching away from Edit without Execute discards the working copy.
   tier when SCM is present, then the plus node. Manage
   `TopologyProjector.Project` is unchanged.
 
-### 3.3 Proposed lower-right row order
-
-Subject to Q26, Q27, Q31, and SCM visibility:
+### 3.3 Lower-right row order
 
 1. Execute modify / create new pool
-2. Dissolve pool (Q31)
+2. Dissolve pool
 3. Pool name
 4. Virtual disk name
-5. Performance: resiliency, interleave, size, columns, data copies, tolerated
-   failures
+5. Performance: resiliency, interleave, size, columns (read-only), data copies
+   or tolerated failures per §1.5
 6. Dedicated SCM (only if SCM is present): same field set
-7. Capacity: resiliency, interleave, size, columns, data copies, tolerated
-   failures
+7. Capacity: resiliency, interleave, size, columns, data copies or tolerated
+   failures per §1.5
 8. Partition file system
 9. Partition cluster size
 10. 64K + 64K helper text
@@ -235,8 +220,8 @@ This stage must add, still simulation-only:
 
 `StorageTierInfo` currently has `NumberOfColumns` and `Interleave` but not
 data-copies or tolerated-failure fields. Those become optional snapshot
-fields if Q27 needs them persisted. Schema 14 and IPC protocol 4 stay unless
-a later answer proves a wire or database change.
+fields. Schema 14 and IPC protocol 4 stay unless implementation proves a
+wire or database change.
 
 Physical-disk drag sources exist only on the Edit lower tree. Manage nodes
 stay non-draggable.
@@ -272,8 +257,7 @@ Commit split after execution: documentation, refactor, feature, visual.
 - Changing Manage-page topology rules.
 - Network / external pool editing.
 - Test and Development workspace features.
-- Schema or IPC version changes unless a remaining answer proves they are
-  required.
+- Schema or IPC version changes unless implementation proves they are required.
 - Push, tag, Release, or binary upload.
 - Revising or publishing the V10 article.
 - Work outside `Program\WinPool`.
@@ -303,8 +287,8 @@ After a later approved implementation:
 
 ## 8. Approval gate
 
-This Plan is ready for the remaining answers. It is not ready for
-implementation.
+The questionnaire is closed. This Plan is complete as a draft.
 
-Reply to Q20–Q31. After that, either confirm this Plan, or name the changes
-to make before confirmation. Silence is not approval.
+Implementation still does not start until the developer explicitly confirms
+this Plan and asks to execute it. Silence is not approval. Name a specific
+row in §2 if a closed default is wrong.
