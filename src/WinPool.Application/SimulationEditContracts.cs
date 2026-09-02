@@ -19,7 +19,10 @@ public enum SimulationEditKind
     CreateVirtualDisk,
     MovePhysicalDisk,
     OptimizeDrive,
-    ResetDocument
+    ResetDocument,
+    CreateTieredPool,
+    UpdateStoragePool,
+    DissolveStoragePool
 }
 
 /// <summary>
@@ -39,7 +42,21 @@ public sealed record SimulationEditRequest(
     bool? CreateMsr = null,
     long? InterleaveBytes = null,
     string? Resiliency = null,
-    IReadOnlyList<string>? MemberDiskIds = null);
+    IReadOnlyList<string>? MemberDiskIds = null,
+    string? VirtualDiskName = null,
+    string? PerformanceResiliency = null,
+    long? PerformanceInterleaveBytes = null,
+    long? PerformanceSizeBytes = null,
+    int? PerformanceDataCopies = null,
+    string? CapacityResiliency = null,
+    long? CapacityInterleaveBytes = null,
+    long? CapacitySizeBytes = null,
+    int? CapacityColumns = null,
+    int? CapacityToleratedFailures = null,
+    string? ScmResiliency = null,
+    long? ScmInterleaveBytes = null,
+    int? ScmDataCopies = null,
+    long? OffsetBytes = null);
 
 public sealed record SimulationEditReceipt(
     OperationId OperationId,

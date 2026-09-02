@@ -292,7 +292,10 @@ public enum SimulationOperationKind
     CreateStoragePool,
     CreateVirtualDisk,
     MovePhysicalDisk,
-    OptimizeDrive
+    OptimizeDrive,
+    CreateTieredPool,
+    UpdateStoragePool,
+    DissolveStoragePool
 }
 
 public sealed record SimulationOperationRequest(
@@ -307,7 +310,21 @@ public sealed record SimulationOperationRequest(
     bool? CreateMsr = null,
     long? InterleaveBytes = null,
     string? Resiliency = null,
-    IReadOnlyList<string>? MemberDiskIds = null);
+    IReadOnlyList<string>? MemberDiskIds = null,
+    string? VirtualDiskName = null,
+    string? PerformanceResiliency = null,
+    long? PerformanceInterleaveBytes = null,
+    long? PerformanceSizeBytes = null,
+    int? PerformanceDataCopies = null,
+    string? CapacityResiliency = null,
+    long? CapacityInterleaveBytes = null,
+    long? CapacitySizeBytes = null,
+    int? CapacityColumns = null,
+    int? CapacityToleratedFailures = null,
+    string? ScmResiliency = null,
+    long? ScmInterleaveBytes = null,
+    int? ScmDataCopies = null,
+    long? OffsetBytes = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -354,6 +371,15 @@ public static class SimulatedCommandText
             ["Add-PhysicalDisk / Remove-PhysicalDisk (move between pools)"],
         SimulationOperationKind.OptimizeDrive =>
             [$"Optimize-Volume"],
+        SimulationOperationKind.CreateTieredPool =>
+            [$"New-StoragePool -FriendlyName '{request.Name}'",
+             "New-StorageTier (Performance/Capacity)",
+             $"New-VirtualDisk -FriendlyName '{request.VirtualDiskName ?? request.Name}'",
+             $"New-Partition | Format-Volume -FileSystem {request.FileSystem ?? "NTFS"} -AllocationUnitSize {request.AllocationUnitSize ?? 65536}"],
+        SimulationOperationKind.UpdateStoragePool =>
+            [$"Set-StoragePool / Set-StorageTier / Set-VirtualDisk '{request.Name}'"],
+        SimulationOperationKind.DissolveStoragePool =>
+            ["Dissolve simulated pool and return member disks to primordial"],
         _ => []
     };
 
@@ -403,6 +429,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 SimulationOperationKind.CreateStoragePool => CreateStoragePool(document.Snapshot, request),
                 SimulationOperationKind.CreateVirtualDisk => CreateVirtualDisk(document.Snapshot, request),
                 SimulationOperationKind.MovePhysicalDisk => MovePhysicalDisk(document.Snapshot, request),
+                SimulationOperationKind.CreateTieredPool => CreateTieredPool(document.Snapshot, request),
+                SimulationOperationKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
+                SimulationOperationKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
                 SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive => document.Snapshot,
                 _ => throw new ArgumentOutOfRangeException(nameof(request))
             };
@@ -718,10 +747,28 @@ public sealed class SimulationOperationService : ISimulationOperationService
             .Where(x => x.OsDiskStableId == disk.StableId)
             .OrderBy(x => x.Offset)
             .ToList();
-        var offset = existing.Count == 0
-            ? 1024L * 1024
-            : existing.Max(x => x.Offset + x.Size);
-        var free = disk.Size - offset;
+        var gaps = EditWorkspace.UnallocatedGaps(disk, existing);
+        long offset;
+        long free;
+        if (request.OffsetBytes is >= 0)
+        {
+            var gap = gaps.FirstOrDefault(item => item.Offset == request.OffsetBytes.Value);
+            if (gap.Size <= 0)
+            {
+                throw new InvalidOperationException("The selected unallocated region was not found.");
+            }
+
+            offset = gap.Offset;
+            free = gap.Size;
+        }
+        else
+        {
+            offset = existing.Count == 0
+                ? 1024L * 1024
+                : existing.Max(x => x.Offset + x.Size);
+            free = disk.Size - offset;
+        }
+
         var size = request.SizeBytes is null or <= 0 ? free : Math.Min(request.SizeBytes.Value, free);
         if (size <= 0)
         {
@@ -933,49 +980,282 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
     private static StorageSnapshot MovePhysicalDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
-        var disk = snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
-            ?? throw new InvalidOperationException("The selected physical disk was not found.");
-        if (disk.IsBoot || disk.IsSystem || disk.IsPageFile || disk.IsCrashDump)
-        {
-            throw new InvalidOperationException("Boot, system, page-file, and crash-dump disks cannot move between pools.");
-        }
-        if (snapshot.StorageTiers.Any(x => x.MemberPhysicalDiskIds.Contains(
-                disk.StableId, StringComparer.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException("A disk used by a storage tier cannot move between pools.");
-        }
-
         var primordial = snapshot.StoragePools.FirstOrDefault(x => x.IsPrimordial)
             ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
         var targetId = string.IsNullOrWhiteSpace(request.Name)
             ? primordial.StableId
             : request.Name.Trim();
-        var target = snapshot.StoragePools.FirstOrDefault(x => x.StableId == targetId)
-            ?? throw new InvalidOperationException("The target pool was not found.");
-        if (disk.PoolStableId == target.StableId)
+        return EditWorkspace.MoveDiskToPool(snapshot, request.TargetStableId, targetId);
+    }
+
+    private static StorageSnapshot CreateTieredPool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    {
+        var primordial = snapshot.StoragePools.FirstOrDefault(item => item.IsPrimordial)
+            ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
+        foreach (var memberId in request.MemberDiskIds ?? [])
         {
-            return snapshot;
+            var disk = snapshot.PhysicalDisks.FirstOrDefault(item =>
+                item.StableId.Equals(memberId, StringComparison.OrdinalIgnoreCase));
+            if (disk is not null && disk.PoolStableId != primordial.StableId)
+            {
+                snapshot = EditWorkspace.MoveDiskToPool(snapshot, memberId, primordial.StableId);
+            }
         }
 
+        var created = CreateStoragePool(snapshot, request);
+        var pool = created.StoragePools.First(item =>
+            !item.IsPrimordial
+            && item.FriendlyName.Equals(request.Name?.Trim(), StringComparison.OrdinalIgnoreCase));
+        var members = created.PhysicalDisks
+            .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        var showScm = members.Any(disk => EditWorkspace.NormalizeMedia(disk.MediaType) == "SCM");
+        var tiers = new List<StorageTierInfo>
+        {
+            BuildTier(pool.StableId, "SSD", "Performance", members, request.PerformanceResiliency,
+                request.PerformanceInterleaveBytes, request.PerformanceDataCopies, null, request.PerformanceSizeBytes),
+            BuildTier(pool.StableId, "HDD", "Capacity", members, request.CapacityResiliency,
+                request.CapacityInterleaveBytes, null, request.CapacityToleratedFailures, request.CapacitySizeBytes,
+                request.CapacityColumns)
+        };
+        if (showScm)
+        {
+            tiers.Add(BuildTier(pool.StableId, "SCM", "Dedicated", members, request.ScmResiliency,
+                request.ScmInterleaveBytes, request.ScmDataCopies, null, null));
+        }
+
+        created = created with
+        {
+            StorageTiers = created.StorageTiers.Concat(tiers).ToArray(),
+            PhysicalDisks = created.PhysicalDisks
+                .Select(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)
+                    ? disk with { CanPool = false, PoolStableId = pool.StableId }
+                    : disk)
+                .ToArray()
+        };
+
+        var virtualName = string.IsNullOrWhiteSpace(request.VirtualDiskName)
+            ? pool.FriendlyName
+            : request.VirtualDiskName.Trim();
+        created = CreateVirtualDisk(created, new SimulationOperationRequest(
+            SimulationOperationKind.CreateVirtualDisk,
+            pool.StableId,
+            Name: virtualName,
+            Resiliency: request.PerformanceResiliency ?? "Mirror",
+            InterleaveBytes: request.PerformanceInterleaveBytes ?? 65536,
+            SizeBytes: request.SizeBytes,
+            AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+        var osDisk = created.OsDisks.Last(item => item.VirtualDiskStableId is not null);
+        created = CreatePartition(created, new SimulationOperationRequest(
+            SimulationOperationKind.CreatePartition,
+            osDisk.StableId));
+        var partition = created.Partitions
+            .Where(item => item.OsDiskStableId == osDisk.StableId)
+            .OrderByDescending(item => item.Offset)
+            .First();
+        return FormatPartition(created, new SimulationOperationRequest(
+            SimulationOperationKind.FormatPartition,
+            partition.StableId,
+            Name: virtualName,
+            FileSystem: string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
+            AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+    }
+
+    private static StorageTierInfo BuildTier(
+        string poolId,
+        string media,
+        string friendlyName,
+        IReadOnlyList<PhysicalDiskInfo> poolMembers,
+        string? resiliency,
+        long? interleave,
+        int? dataCopies,
+        int? toleratedFailures,
+        long? sizeBytes,
+        int? columns = null)
+    {
+        var members = poolMembers
+            .Where(disk => EditWorkspace.NormalizeMedia(disk.MediaType) == media)
+            .ToArray();
+        var setting = resiliency ?? EditWorkspace.RecommendedResiliency(media, members.Length);
+        var copies = dataCopies ?? EditWorkspace.RecommendedDataCopies(setting, members.Length);
+        var tolerated = toleratedFailures ?? EditWorkspace.RecommendedToleratedFailures(setting, copies);
+        var columnCount = media == "HDD"
+            ? columns ?? EditWorkspace.RecommendedCapacityColumns(members)
+            : (int?)null;
+        var size = sizeBytes is > 0 ? sizeBytes.Value : members.Sum(item => item.Size);
+        return new StorageTierInfo(
+            $"{poolId}:tier:{media.ToLowerInvariant()}",
+            true,
+            friendlyName,
+            media,
+            setting,
+            size,
+            size,
+            poolId,
+            null,
+            members.Select(item => item.StableId).ToArray(),
+            columnCount,
+            interleave ?? 65536,
+            copies,
+            tolerated);
+    }
+
+    private static StorageSnapshot UpdateStoragePool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    {
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId)
+            ?? throw new InvalidOperationException("The selected pool was not found.");
+        if (pool.IsPrimordial)
+        {
+            throw new InvalidOperationException("The primordial pool cannot be modified.");
+        }
+
+        if (snapshot.VirtualDisks.Count(item => item.PoolStableId == pool.StableId) > 1)
+        {
+            throw new InvalidOperationException(
+                "A simulated pool with more than one virtual disk cannot be modified.");
+        }
+
+        var name = string.IsNullOrWhiteSpace(request.Name) ? pool.FriendlyName : request.Name.Trim();
+        var virtualName = string.IsNullOrWhiteSpace(request.VirtualDiskName) ? null : request.VirtualDiskName.Trim();
+        var tiers = snapshot.StorageTiers
+            .Select(tier =>
+            {
+                if (tier.PoolStableId != pool.StableId)
+                {
+                    return tier;
+                }
+
+                var media = EditWorkspace.NormalizeMedia(tier.MediaType);
+                if (media == "SSD")
+                {
+                    return PatchTier(tier, request.PerformanceResiliency, request.PerformanceInterleaveBytes,
+                        request.PerformanceDataCopies, null, request.PerformanceSizeBytes, null);
+                }
+
+                if (media == "HDD")
+                {
+                    return PatchTier(tier, request.CapacityResiliency, request.CapacityInterleaveBytes,
+                        null, request.CapacityToleratedFailures, request.CapacitySizeBytes, request.CapacityColumns);
+                }
+
+                if (media == "SCM")
+                {
+                    return PatchTier(tier, request.ScmResiliency, request.ScmInterleaveBytes,
+                        request.ScmDataCopies, null, null, null);
+                }
+
+                return tier;
+            })
+            .ToArray();
+        var virtualDisks = snapshot.VirtualDisks
+            .Select(disk => disk.PoolStableId == pool.StableId && virtualName is not null
+                ? disk with { FriendlyName = virtualName }
+                : disk)
+            .ToArray();
+        var osDisks = snapshot.OsDisks
+            .Select(disk =>
+            {
+                var vdisk = virtualDisks.FirstOrDefault(item => item.StableId == disk.VirtualDiskStableId);
+                return vdisk is not null && virtualName is not null
+                    ? disk with { FriendlyName = virtualName }
+                    : disk;
+            })
+            .ToArray();
+        var updated = snapshot with
+        {
+            StoragePools = snapshot.StoragePools
+                .Select(item => item.StableId == pool.StableId ? item with { FriendlyName = name } : item)
+                .ToArray(),
+            StorageTiers = tiers,
+            VirtualDisks = virtualDisks,
+            OsDisks = osDisks
+        };
+        if (string.IsNullOrWhiteSpace(request.FileSystem))
+        {
+            return updated;
+        }
+
+        var vdisk = updated.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool.StableId);
+        var osDisk = updated.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk?.StableId);
+        var partition = updated.Partitions
+            .Where(item => item.OsDiskStableId == osDisk?.StableId && item.Type == "Primary")
+            .OrderBy(item => item.Offset)
+            .FirstOrDefault();
+        return partition is null
+            ? updated
+            : FormatPartition(updated, new SimulationOperationRequest(
+                SimulationOperationKind.FormatPartition,
+                partition.StableId,
+                Name: virtualName,
+                FileSystem: request.FileSystem,
+                AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+    }
+
+    private static StorageTierInfo PatchTier(
+        StorageTierInfo tier,
+        string? resiliency,
+        long? interleave,
+        int? dataCopies,
+        int? tolerated,
+        long? size,
+        int? columns)
+    {
+        var setting = resiliency ?? tier.ResiliencySettingName;
+        var copies = dataCopies ?? tier.NumberOfDataCopies
+            ?? EditWorkspace.RecommendedDataCopies(setting, tier.MemberPhysicalDiskIds.Count);
+        var redundancy = tolerated ?? tier.PhysicalDiskRedundancy
+            ?? EditWorkspace.RecommendedToleratedFailures(setting, copies);
+        return tier with
+        {
+            ResiliencySettingName = setting,
+            Interleave = interleave ?? tier.Interleave,
+            NumberOfDataCopies = copies,
+            PhysicalDiskRedundancy = redundancy,
+            Size = size is > 0 ? size.Value : tier.Size,
+            NumberOfColumns = columns ?? tier.NumberOfColumns
+        };
+    }
+
+    private static StorageSnapshot DissolveStoragePool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    {
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId)
+            ?? throw new InvalidOperationException("The selected pool was not found.");
+        if (pool.IsPrimordial)
+        {
+            throw new InvalidOperationException("The primordial pool cannot be dissolved.");
+        }
+
+        var primordial = snapshot.StoragePools.FirstOrDefault(item => item.IsPrimordial)
+            ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
+        var vdiskIds = snapshot.VirtualDisks
+            .Where(item => item.PoolStableId == pool.StableId)
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var osDiskIds = snapshot.OsDisks
+            .Where(item => item.VirtualDiskStableId is not null && vdiskIds.Contains(item.VirtualDiskStableId))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var members = pool.MemberPhysicalDiskIds;
         return snapshot with
         {
-            PhysicalDisks = snapshot.PhysicalDisks
-                .Select(x => x.StableId == disk.StableId
-                    ? x with { PoolStableId = target.StableId, CanPool = target.IsPrimordial }
-                    : x)
-                .ToArray(),
             StoragePools = snapshot.StoragePools
-                .Select(pool =>
-                {
-                    var members = pool.MemberPhysicalDiskIds
-                        .Where(id => !id.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-                    if (pool.StableId == target.StableId)
+                .Where(item => item.StableId != pool.StableId)
+                .Select(item => item.IsPrimordial
+                    ? item with
                     {
-                        members.Add(disk.StableId);
+                        MemberPhysicalDiskIds = item.MemberPhysicalDiskIds.Concat(members).ToArray()
                     }
-                    return pool with { MemberPhysicalDiskIds = members };
-                })
+                    : item)
+                .ToArray(),
+            StorageTiers = snapshot.StorageTiers.Where(item => item.PoolStableId != pool.StableId).ToArray(),
+            VirtualDisks = snapshot.VirtualDisks.Where(item => item.PoolStableId != pool.StableId).ToArray(),
+            OsDisks = snapshot.OsDisks.Where(item => !osDiskIds.Contains(item.StableId)).ToArray(),
+            Partitions = snapshot.Partitions.Where(item =>
+                item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray(),
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(disk => members.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)
+                    ? disk with { PoolStableId = primordial.StableId, CanPool = true }
+                    : disk)
                 .ToArray()
         };
     }

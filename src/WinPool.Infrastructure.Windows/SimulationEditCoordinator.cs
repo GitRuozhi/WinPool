@@ -257,6 +257,20 @@ public sealed class SimulationEditCoordinator(
                 request.MemberDiskIds.Order(StringComparer.Ordinal));
         }
 
+        Add(values, "VirtualDiskName", request.VirtualDiskName);
+        Add(values, "PerformanceResiliency", request.PerformanceResiliency);
+        Add(values, "PerformanceInterleaveBytes", request.PerformanceInterleaveBytes);
+        Add(values, "PerformanceSizeBytes", request.PerformanceSizeBytes);
+        Add(values, "PerformanceDataCopies", request.PerformanceDataCopies);
+        Add(values, "CapacityResiliency", request.CapacityResiliency);
+        Add(values, "CapacityInterleaveBytes", request.CapacityInterleaveBytes);
+        Add(values, "CapacitySizeBytes", request.CapacitySizeBytes);
+        Add(values, "CapacityColumns", request.CapacityColumns);
+        Add(values, "CapacityToleratedFailures", request.CapacityToleratedFailures);
+        Add(values, "ScmResiliency", request.ScmResiliency);
+        Add(values, "ScmInterleaveBytes", request.ScmInterleaveBytes);
+        Add(values, "ScmDataCopies", request.ScmDataCopies);
+        Add(values, "OffsetBytes", request.OffsetBytes);
         return values;
     }
 
@@ -295,7 +309,8 @@ public sealed class SimulationEditCoordinator(
             return direct;
         }
 
-        if (request.Kind == SimulationEditKind.CreateStoragePool
+        if ((request.Kind == SimulationEditKind.CreateStoragePool
+                || request.Kind == SimulationEditKind.CreateTieredPool)
             && StringComparer.OrdinalIgnoreCase.Equals(request.TargetProviderKey, "primordial"))
         {
             var primordial = snapshot.StoragePools.SingleOrDefault(pool => pool.IsPrimordial);
@@ -408,6 +423,20 @@ public sealed class SimulationEditCoordinator(
                 request.CreateMsr,
                 request.InterleaveBytes,
                 request.Resiliency,
-                request.MemberDiskIds);
+                request.MemberDiskIds,
+                request.VirtualDiskName,
+                request.PerformanceResiliency,
+                request.PerformanceInterleaveBytes,
+                request.PerformanceSizeBytes,
+                request.PerformanceDataCopies,
+                request.CapacityResiliency,
+                request.CapacityInterleaveBytes,
+                request.CapacitySizeBytes,
+                request.CapacityColumns,
+                request.CapacityToleratedFailures,
+                request.ScmResiliency,
+                request.ScmInterleaveBytes,
+                request.ScmDataCopies,
+                request.OffsetBytes);
     }
 }

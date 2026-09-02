@@ -190,4 +190,122 @@ public sealed class SimulationOperationTests
         Assert.Contains(findings, x => x.Kind == StorageFindingKind.MbrDisk);
         Assert.DoesNotContain(findings, x => x.Kind == StorageFindingKind.MultipleCapacityTiers);
     }
+
+    [Fact]
+    public void CreateTieredPoolCreatesTiersVirtualDiskAndFormattedPartition()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            VirtualDiskName: "SpaceA",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            PerformanceResiliency: "Mirror",
+            PerformanceInterleaveBytes: 65536,
+            PerformanceDataCopies: 2,
+            CapacityResiliency: "Parity",
+            CapacityInterleaveBytes: 65536,
+            CapacityColumns: 1,
+            CapacityToleratedFailures: 1,
+            FileSystem: "NTFS",
+            AllocationUnitSize: 65536));
+        var pool = Assert.Single(document.Snapshot.StoragePools, item => !item.IsPrimordial);
+        Assert.Equal("PoolA", pool.FriendlyName);
+        Assert.Contains(document.Snapshot.StorageTiers, tier =>
+            tier.PoolStableId == pool.StableId && tier.MediaType == "SSD");
+        Assert.Contains(document.Snapshot.StorageTiers, tier =>
+            tier.PoolStableId == pool.StableId && tier.MediaType == "HDD");
+        var vdisk = Assert.Single(document.Snapshot.VirtualDisks);
+        Assert.Equal("SpaceA", vdisk.FriendlyName);
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        Assert.Equal("NTFS", partition.FileSystem);
+        Assert.Equal(65536, partition.AllocationUnitSize);
+    }
+
+    [Fact]
+    public void MovePhysicalDiskLeavesSourceTierAndEntersMatchingTargetTier()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            VirtualDiskName: "SpaceA",
+            MemberDiskIds: ["physical:p1"],
+            FileSystem: "NTFS",
+            AllocationUnitSize: 65536));
+        var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.MovePhysicalDisk,
+            "physical:p2",
+            Name: pool.StableId));
+        var hddTier = document.Snapshot.StorageTiers.Single(tier =>
+            tier.PoolStableId == pool.StableId && tier.MediaType == "HDD");
+        Assert.Contains("physical:p2", hddTier.MemberPhysicalDiskIds);
+        Assert.Contains(
+            "physical:p2",
+            document.Snapshot.StoragePools.Single(item => item.StableId == pool.StableId).MemberPhysicalDiskIds);
+    }
+
+    [Fact]
+    public void DissolveStoragePoolReturnsDisksToPrimordial()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            FileSystem: "NTFS"));
+        var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.DissolveStoragePool,
+            pool.StableId));
+        Assert.DoesNotContain(document.Snapshot.StoragePools, item => !item.IsPrimordial);
+        Assert.Empty(document.Snapshot.VirtualDisks);
+        Assert.Empty(document.Snapshot.StorageTiers);
+        var primordial = document.Snapshot.StoragePools.Single(item => item.IsPrimordial);
+        Assert.Contains("physical:p1", primordial.MemberPhysicalDiskIds);
+        Assert.Contains("physical:p2", primordial.MemberPhysicalDiskIds);
+    }
+
+    [Fact]
+    public void UpdateStoragePoolRejectsMultipleVirtualDisks()
+    {
+        var document = CreateDocument();
+        var busy = CreateBusyPoolDocument();
+        var result = new SimulationOperationService().Apply(
+            busy,
+            new SimulationOperationRequest(
+                SimulationOperationKind.UpdateStoragePool,
+                "pool:busy",
+                Name: "Renamed"));
+        Assert.False(result.Succeeded);
+        Assert.Contains("more than one virtual disk", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static StorageSystemDocument CreateBusyPoolDocument()
+    {
+        var document = CreateDocument();
+        return document with
+        {
+            Snapshot = document.Snapshot with
+            {
+                StoragePools =
+                [
+                    document.Snapshot.StoragePools[0],
+                    new StoragePoolInfo(
+                        "pool:busy", true, "Busy", false, "Healthy", "OK",
+                        4_000_000_000L, 1_000_000_000, "subsystem:1", ["physical:p2"])
+                ],
+                VirtualDisks =
+                [
+                    new VirtualDiskInfo(
+                        "vdisk:1", true, "V1", "Healthy", "OK", "Simple", "Fixed",
+                        1, 65536, 500_000_000, 500_000_000, "pool:busy", [], [7]),
+                    new VirtualDiskInfo(
+                        "vdisk:2", true, "V2", "Healthy", "OK", "Simple", "Fixed",
+                        1, 65536, 500_000_000, 500_000_000, "pool:busy", [], [8])
+                ]
+            }
+        };
+    }
 }

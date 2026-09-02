@@ -122,7 +122,9 @@ public sealed record StorageTierInfo(
     string? VirtualDiskStableId,
     IReadOnlyList<string> MemberPhysicalDiskIds,
     int? NumberOfColumns = null,
-    long? Interleave = null);
+    long? Interleave = null,
+    int? NumberOfDataCopies = null,
+    int? PhysicalDiskRedundancy = null);
 
 public sealed record VirtualDiskInfo(
     string StableId,
