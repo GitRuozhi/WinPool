@@ -37,6 +37,7 @@ public sealed record UserPreferences(
     LanguagePreference Language = LanguagePreference.SystemDefault,
     bool ShowHardwareIds = false,
     bool CreateMsrOnInitialize = true,
+    long PartitionIgnoreSizeBytes = 8L * 1024 * 1024,
     bool ShowWelcomeAtStart = true,
     bool StartAgentAtLogin = false,
     bool ContinueMonitoringWhenUiCloses = false,

@@ -380,6 +380,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         unit.StableId switch
         {
             _ when EditWorkspace.IsPlus(unit.StableId) => "+",
+            _ when EditWorkspace.IsPoolRow(unit.StableId) => string.Empty,
             _ when EditWorkspace.IsUnallocated(unit.StableId) => owner.Localization["Unallocated"],
             _ when EditWorkspace.IsPendingVirtualDisk(unit.StableId) => owner.Localization["NotCreated"],
             _ when unit.Kind == StorageUnitKind.NetworkDiskGroup => owner.Localization["Network"],

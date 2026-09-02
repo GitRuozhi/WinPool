@@ -5,12 +5,17 @@ namespace WinPool.Application;
 public static class EditWorkspace
 {
     public const string PlusStableId = "edit:plus";
+    public const string PoolRowStableId = "edit:pool-row";
     public const string DraftPrefix = "edit:draft:";
     public const string UnallocatedPrefix = "unallocated:";
     public const string PendingVirtualPrefix = "edit:pending-vdisk:";
+    public const long DefaultUnallocatedIgnoreBytes = 8L * 1024 * 1024;
 
     public static bool IsPlus(string? id) =>
         string.Equals(id, PlusStableId, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsPoolRow(string? id) =>
+        string.Equals(id, PoolRowStableId, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsDraftPool(string? id) =>
         id is not null && id.StartsWith(DraftPrefix, StringComparison.OrdinalIgnoreCase);
@@ -137,9 +142,12 @@ public static class EditWorkspace
         return sizes.Length == 1 ? members.Count : Math.Max(1, members.Count - 1);
     }
 
-    public static IReadOnlyList<TopologyNode> ProjectPartitionWorkspace(StorageSnapshot snapshot)
+    public static IReadOnlyList<TopologyNode> ProjectPartitionWorkspace(
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        var ignore = Math.Max(0, minUnallocatedBytes);
         var nonPrimordialMembers = snapshot.StoragePools
             .Where(pool => !pool.IsPrimordial)
             .SelectMany(pool => pool.MemberPhysicalDiskIds)
@@ -160,14 +168,31 @@ public static class EditWorkspace
             .OrderBy(disk => disk.Number)
             .ToArray();
 
-        return disks.Select(disk => CreatePartitionableDiskNode(disk, snapshot)).ToArray();
+        return disks.Select(disk => CreatePartitionableDiskNode(disk, snapshot, ignore)).ToArray();
     }
 
-    public static IReadOnlyList<TopologyNode> ProjectPoolWorkspace(StorageSnapshot snapshot)
+    public static TopologyNode ProjectPoolWorkspaceRoot(
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
+    {
+        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes);
+        return new TopologyNode(
+            new StorageUnitRef(PoolRowStableId, StorageUnitKind.VirtualDiskGroup, string.Empty, false),
+            string.Empty,
+            children,
+            isSelectable: false,
+            childrenLayout: TopologyChildrenLayout.WeightedFlow,
+            layoutWeight: Math.Max(1, children.Count));
+    }
+
+    public static IReadOnlyList<TopologyNode> ProjectPoolWorkspace(
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var nodes = new List<TopologyNode>();
         var showScm = HasScmDisk(snapshot);
+        var ignore = Math.Max(0, minUnallocatedBytes);
 
         foreach (var pool in snapshot.StoragePools
                      .Where(pool => pool.IsPrimordial)
@@ -176,7 +201,7 @@ public static class EditWorkspace
                      .ThenBy(pool => IsDraftPool(pool.StableId) ? 1 : 0)
                      .ThenBy(pool => pool.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            nodes.Add(CreateEditPoolNode(pool, snapshot, showScm));
+            nodes.Add(CreateEditPoolNode(pool, snapshot, showScm, ignore));
         }
 
         nodes.Add(new TopologyNode(
@@ -305,7 +330,10 @@ public static class EditWorkspace
         return gaps;
     }
 
-    private static TopologyNode CreatePartitionableDiskNode(OsDiskInfo disk, StorageSnapshot snapshot)
+    private static TopologyNode CreatePartitionableDiskNode(
+        OsDiskInfo disk,
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes)
     {
         var partitions = snapshot.Partitions
             .Where(item => item.OsDiskStableId == disk.StableId)
@@ -315,7 +343,7 @@ public static class EditWorkspace
             new StorageUnitRef(disk.StableId, StorageUnitKind.OsDisk, disk.FriendlyName),
             TopologyProjector.JoinSummary(disk.PartitionStyle, TopologyProjector.FormatBytes(disk.Size)),
             childrenLayout: TopologyChildrenLayout.Flow);
-        foreach (var child in InterleavePartitionsAndGaps(disk, partitions))
+        foreach (var child in InterleavePartitionsAndGaps(disk, partitions, minUnallocatedBytes))
         {
             node.Children.Add(child);
         }
@@ -325,15 +353,17 @@ public static class EditWorkspace
 
     private static IEnumerable<TopologyNode> InterleavePartitionsAndGaps(
         OsDiskInfo disk,
-        IReadOnlyList<PartitionInfo> partitions)
+        IReadOnlyList<PartitionInfo> partitions,
+        long minUnallocatedBytes)
     {
         var ordered = partitions.OrderBy(item => item.Offset).ToArray();
         long cursor = 0;
         foreach (var partition in ordered)
         {
-            if (partition.Offset > cursor)
+            var gap = partition.Offset - cursor;
+            if (gap >= minUnallocatedBytes && gap > 0)
             {
-                yield return UnallocatedNode(disk, cursor, partition.Offset - cursor);
+                yield return UnallocatedNode(disk, cursor, gap);
             }
 
             yield return new TopologyNode(
@@ -349,9 +379,10 @@ public static class EditWorkspace
             cursor = Math.Max(cursor, partition.Offset + partition.Size);
         }
 
-        if (disk.Size > cursor)
+        var tail = disk.Size - cursor;
+        if (tail >= minUnallocatedBytes && tail > 0)
         {
-            yield return UnallocatedNode(disk, cursor, disk.Size - cursor);
+            yield return UnallocatedNode(disk, cursor, tail);
         }
     }
 
@@ -368,7 +399,8 @@ public static class EditWorkspace
     private static TopologyNode CreateEditPoolNode(
         StoragePoolInfo pool,
         StorageSnapshot snapshot,
-        bool showScm)
+        bool showScm,
+        long minUnallocatedBytes)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -383,7 +415,9 @@ public static class EditWorkspace
                 $"{members.Count} physical disks",
                 TopologyProjector.FormatBytes(members.Sum(item => item.Size))),
             childrenLayout: pool.IsPrimordial ? TopologyChildrenLayout.Flow : TopologyChildrenLayout.Stack,
-            layoutWeight: Math.Max(1, members.Count));
+            layoutWeight: pool.IsPrimordial
+                ? Math.Max(1, members.Count)
+                : TopologyProjector.CalculatePoolWeight(pool, snapshot));
 
         if (pool.IsPrimordial)
         {
@@ -413,7 +447,7 @@ public static class EditWorkspace
         {
             foreach (var virtualDisk in virtualDisks)
             {
-                poolNode.Children.Add(CreateVirtualDiskNode(virtualDisk, snapshot));
+                poolNode.Children.Add(CreateVirtualDiskNode(virtualDisk, snapshot, minUnallocatedBytes));
             }
         }
 
@@ -466,7 +500,10 @@ public static class EditWorkspace
         poolNode.Children.Add(node);
     }
 
-    private static TopologyNode CreateVirtualDiskNode(VirtualDiskInfo disk, StorageSnapshot snapshot)
+    private static TopologyNode CreateVirtualDiskNode(
+        VirtualDiskInfo disk,
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes)
     {
         var node = new TopologyNode(
             new StorageUnitRef(disk.StableId, StorageUnitKind.VirtualDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
@@ -476,7 +513,8 @@ public static class EditWorkspace
         {
             foreach (var child in InterleavePartitionsAndGaps(
                          osDisk,
-                         snapshot.Partitions.Where(item => item.OsDiskStableId == osDisk.StableId).ToArray()))
+                         snapshot.Partitions.Where(item => item.OsDiskStableId == osDisk.StableId).ToArray(),
+                         minUnallocatedBytes))
             {
                 node.Children.Add(child);
             }

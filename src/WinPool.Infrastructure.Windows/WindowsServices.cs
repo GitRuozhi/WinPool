@@ -159,7 +159,11 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
         preferences with
         {
             FormatVersion = CurrentFormatVersion,
-            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20)
+            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20),
+            PartitionIgnoreSizeBytes = Math.Clamp(
+                preferences.PartitionIgnoreSizeBytes,
+                0,
+                1024L * 1024 * 1024)
         };
 }
 

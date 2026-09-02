@@ -9,7 +9,7 @@ public sealed class EditWorkspaceTests
     public void PartitionWorkspaceShowsDiskAndPartitionOnlyAndSplitsUnallocatedGaps()
     {
         var snapshot = TwoGapDiskSnapshot();
-        var disks = EditWorkspace.ProjectPartitionWorkspace(snapshot);
+        var disks = EditWorkspace.ProjectPartitionWorkspace(snapshot, minUnallocatedBytes: 0);
         var disk = Assert.Single(disks);
         Assert.Equal(StorageUnitKind.OsDisk, disk.Unit.Kind);
         Assert.Equal(3, disk.Children.Count);
@@ -23,6 +23,25 @@ public sealed class EditWorkspaceTests
                 or StorageUnitKind.StoragePool
                 or StorageUnitKind.StorageTier
                 or StorageUnitKind.NetworkDisk));
+    }
+
+    [Fact]
+    public void PartitionWorkspaceIgnoresGapsBelowDefaultThreshold()
+    {
+        var snapshot = TwoGapDiskSnapshot();
+        var disk = Assert.Single(EditWorkspace.ProjectPartitionWorkspace(snapshot));
+        Assert.Equal(StorageUnitKind.Partition, Assert.Single(disk.Children).Unit.Kind);
+    }
+
+    [Fact]
+    public void PartitionWorkspaceKeepsGapsAtOrAboveThreshold()
+    {
+        var snapshot = TwoGapDiskSnapshot();
+        var disk = Assert.Single(EditWorkspace.ProjectPartitionWorkspace(snapshot, 200_000));
+        Assert.Equal(3, disk.Children.Count);
+        Assert.True(EditWorkspace.IsUnallocated(disk.Children[0].Unit.StableId));
+        Assert.Equal(StorageUnitKind.Partition, disk.Children[1].Unit.Kind);
+        Assert.True(EditWorkspace.IsUnallocated(disk.Children[2].Unit.StableId));
     }
 
     [Fact]

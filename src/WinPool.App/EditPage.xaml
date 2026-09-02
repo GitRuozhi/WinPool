@@ -13,24 +13,31 @@
             <RowDefinition MinHeight="160" Height="*" />
         </Grid.RowDefinitions>
 
-        <Border
-            Grid.Row="0"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
-            <ScrollViewer
-                Padding="8"
-                HorizontalScrollBarVisibility="Auto"
-                VerticalScrollBarVisibility="Auto">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="280" />
-                    </Grid.ColumnDefinitions>
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="280" />
+            </Grid.ColumnDefinitions>
+            <Border
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <ScrollViewer
+                    x:Name="UpperScrollViewer"
+                    Padding="8"
+                    HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Enabled"
+                    SizeChanged="UpperScrollViewer_SizeChanged"
+                    VerticalScrollBarVisibility="Auto">
                     <ItemsControl
                         x:Name="UpperTopologyControl"
                         HorizontalAlignment="Stretch">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Vertical" Spacing="6" />
@@ -44,10 +51,17 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <StackPanel
-                        Grid.Column="1"
-                        Padding="12,4,4,4"
-                        Spacing="8">
+                </ScrollViewer>
+            </Border>
+            <Border
+                Grid.Column="1"
+                Margin="8,0,0,0"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <ScrollViewer Padding="12,8" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="8">
                         <TextBlock
                             x:Name="SelectedPartitionInfo"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -60,9 +74,9 @@
                         <Button x:Name="InitializeButton" HorizontalAlignment="Stretch" Click="Initialize_Click" />
                         <Button x:Name="OfflineButton" HorizontalAlignment="Stretch" Click="Offline_Click" />
                     </StackPanel>
-                </Grid>
-            </ScrollViewer>
-        </Border>
+                </ScrollViewer>
+            </Border>
+        </Grid>
 
         <toolkit:GridSplitter
             Grid.Row="1"
@@ -71,29 +85,34 @@
             ResizeDirection="Rows"
             Background="{ThemeResource CardStrokeColorDefaultBrush}" />
 
-        <Border
-            Grid.Row="2"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
-            <ScrollViewer
-                Padding="8"
-                HorizontalScrollBarVisibility="Auto"
-                VerticalScrollBarVisibility="Auto">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="320" />
-                    </Grid.ColumnDefinitions>
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="320" />
+            </Grid.ColumnDefinitions>
+            <Border
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <ScrollViewer
+                    x:Name="LowerScrollViewer"
+                    Padding="8"
+                    HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Enabled"
+                    SizeChanged="LowerScrollViewer_SizeChanged"
+                    VerticalScrollBarVisibility="Auto">
                     <ItemsControl
                         x:Name="LowerTopologyControl"
                         HorizontalAlignment="Stretch">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <controls:AdaptiveFlowPanel
-                                    HorizontalAlignment="Stretch"
-                                    MinimumItemWidth="160" />
+                                <StackPanel Orientation="Vertical" Spacing="6" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
@@ -104,10 +123,18 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                </ScrollViewer>
+            </Border>
+            <Border
+                Grid.Column="1"
+                Margin="8,0,0,0"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <ScrollViewer Padding="8" VerticalScrollBarVisibility="Auto">
                     <Grid
                         x:Name="PoolFormGrid"
-                        Grid.Column="1"
-                        Padding="8,0,0,0"
                         ColumnSpacing="8"
                         RowSpacing="6">
                         <Grid.ColumnDefinitions>
@@ -115,8 +142,8 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                     </Grid>
-                </Grid>
-            </ScrollViewer>
-        </Border>
+                </ScrollViewer>
+            </Border>
+        </Grid>
     </Grid>
 </Page>

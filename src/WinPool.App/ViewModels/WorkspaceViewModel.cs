@@ -552,6 +552,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
+    public async Task SetPartitionIgnoreSizeMibAsync(double mib)
+    {
+        if (!double.IsFinite(mib))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mib));
+        }
+
+        var bytes = (long)Math.Round(Math.Clamp(mib, 0, 1024) * 1024d * 1024d);
+        CurrentPreferences = CurrentPreferences with { PartitionIgnoreSizeBytes = bytes };
+        await _preferencesService.SaveAsync(CurrentPreferences);
+    }
+
     public async Task SetContinuousMonitoringAsync(bool enabled)
     {
         CurrentPreferences = CurrentPreferences with

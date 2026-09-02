@@ -168,6 +168,13 @@ public sealed partial class MainWindow : Window
         finally
         {
             ViewModel.CompleteWorkspacePrepare();
+            // The Edit page captures the active snapshot once at navigation.
+            // When the workspace finished loading after a startup navigation,
+            // re-create it so the page does not stay on the pre-init snapshot.
+            if (SelectedShellItem?.Page == ShellPageKind.Create)
+            {
+                SelectShellPage(ShellPageKind.Create);
+            }
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);

@@ -347,9 +347,26 @@ public sealed partial class EditPage : Page
         UpdateButtonState();
     }
 
+    private long UnallocatedIgnoreBytes =>
+        Math.Max(0, ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
+
+    private void UpperScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var width = Math.Max(320, e.NewSize.Width - 20);
+        UpperTopologyControl.Width = width;
+        ViewModel.UpdateTopologyViewportWidth(width);
+    }
+
+    private void LowerScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var width = Math.Max(320, e.NewSize.Width - 20);
+        LowerTopologyControl.Width = width;
+        ViewModel.UpdateTopologyViewportWidth(width);
+    }
+
     private void RefreshUpper()
     {
-        var nodes = EditWorkspace.ProjectPartitionWorkspace(_working);
+        var nodes = EditWorkspace.ProjectPartitionWorkspace(_working, UnallocatedIgnoreBytes);
         UpperTopologyControl.ItemsSource = nodes
             .Select(node => new TopologyNodeViewModel(
                 EditWorkspace.ToManageView(node, ViewModel.ActiveDocument.SystemId, $"edit-disk:{node.Unit.StableId}"),
@@ -367,14 +384,15 @@ public sealed partial class EditPage : Page
 
     private void RefreshLower()
     {
-        var nodes = EditWorkspace.ProjectPoolWorkspace(_working);
-        LowerTopologyControl.ItemsSource = nodes
-            .Select(node => new TopologyNodeViewModel(
-                EditWorkspace.ToManageView(node, ViewModel.ActiveDocument.SystemId, $"edit-pool:{node.Unit.StableId}"),
+        var root = EditWorkspace.ProjectPoolWorkspaceRoot(_working, UnallocatedIgnoreBytes);
+        LowerTopologyControl.ItemsSource = new[]
+        {
+            new TopologyNodeViewModel(
+                EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
                 ViewModel,
                 _working,
-                _lowerInteraction))
-            .ToArray();
+                _lowerInteraction)
+        };
     }
 
     private StoragePoolInfo? SelectedPool() =>
@@ -383,17 +401,17 @@ public sealed partial class EditPage : Page
     private void FillPoolForm()
     {
         _fillingForm = true;
+        PoolFormGrid.Visibility = Visibility.Visible;
         var pool = SelectedPool();
-        var showForm = pool is { IsPrimordial: false };
-        PoolFormGrid.Visibility = showForm ? Visibility.Visible : Visibility.Collapsed;
         var showScm = EditWorkspace.HasScmDisk(_working);
         foreach (var element in _scmRows)
         {
             element.Visibility = showScm ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        if (!showForm || pool is null)
+        if (pool is null || pool.IsPrimordial)
         {
+            FillRecommendedDefaults();
             _fillingForm = false;
             return;
         }
@@ -449,6 +467,33 @@ public sealed partial class EditPage : Page
 
         UpdateLinkedFields();
         _fillingForm = false;
+    }
+
+    private void FillRecommendedDefaults()
+    {
+        _poolNameBox.Text = NextPoolName();
+        _virtualDiskNameBox.Text = _poolNameBox.Text;
+        SetResiliency(_performanceResiliencyBox, "Mirror");
+        SetResiliency(_capacityResiliencyBox, "Parity");
+        SetResiliency(_scmResiliencyBox, "Mirror");
+        SetInterleave(_performanceInterleaveBox, 65536);
+        SetInterleave(_capacityInterleaveBox, 65536);
+        SetInterleave(_scmInterleaveBox, 65536);
+        _performanceSizeBox.Text = string.Empty;
+        _capacitySizeBox.Text = string.Empty;
+        _scmSizeBox.Text = string.Empty;
+        _performanceColumnsBox.Text = "auto";
+        _capacityColumnsBox.Text = "5";
+        _scmColumnsBox.Text = "auto";
+        _performanceCopiesBox.Text = "2";
+        _capacityCopiesBox.Text = "1";
+        _scmCopiesBox.Text = "2";
+        _performanceFailuresBox.Text = "1";
+        _capacityFailuresBox.Text = "1";
+        _scmFailuresBox.Text = "1";
+        _fileSystemBox.SelectedItem = "NTFS";
+        _clusterBox.SelectedItem = "64K";
+        UpdateLinkedFields();
     }
 
     private StorageTierInfo? Tier(string poolId, string media) =>

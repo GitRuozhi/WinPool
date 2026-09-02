@@ -202,6 +202,7 @@ public sealed class LocalizationService : ObservableObject
                 "When enabled, mainboard, memory, disk, and volume serial numbers and MAC addresses are shown in plain text and may leak through screenshots or sharing. Continue?"),
             ["InitializeDisk"] = ("初始化磁盘", "Disk initialization"),
             ["CreateMsrOnInitialize"] = ("初始化磁盘时创建微软保留分区", "Create a Microsoft Reserved Partition when initializing disks"),
+            ["PartitionIgnoreSize"] = ("分区忽略大小 (MiB)", "Ignored partition gap (MiB)"),
             ["ExtendVolume"] = ("扩展卷", "Extend volume"),
             ["ShrinkVolume"] = ("压缩卷", "Shrink volume"),
             ["DeleteVolume"] = ("删除卷", "Delete volume"),

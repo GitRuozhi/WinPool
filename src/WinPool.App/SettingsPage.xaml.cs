@@ -26,6 +26,7 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMsr;
     private bool _updatingHardwareIds;
     private bool _updatingStartup;
+    private bool _updatingPartitionIgnore;
     private readonly AgentStartupRegistration _agentStartup = new();
 
     public SettingsPage()
@@ -52,6 +53,9 @@ public sealed partial class SettingsPage : Page
         _updatingStartup = true;
         StartupAgentSwitch.IsOn = ViewModel.CurrentPreferences.StartAgentAtLogin;
         _updatingStartup = false;
+        _updatingPartitionIgnore = true;
+        PartitionIgnoreBox.Value = ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes / (1024d * 1024d);
+        _updatingPartitionIgnore = false;
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
@@ -385,6 +389,30 @@ public sealed partial class SettingsPage : Page
         ((MainWindow)App.Window).RefreshChrome();
     }
 
+    private async void PartitionIgnoreBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (!_ready || _updatingPartitionIgnore)
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.SetPartitionIgnoreSizeMibAsync(sender.Value);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentOutOfRangeException)
+        {
+            _updatingPartitionIgnore = true;
+            PartitionIgnoreBox.Value = ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes / (1024d * 1024d);
+            _updatingPartitionIgnore = false;
+            PublishPreferenceFailure(exception);
+        }
+    }
+
     private async void MsrSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (!_ready || _updatingMsr)
@@ -536,6 +564,7 @@ public sealed partial class SettingsPage : Page
         LanguageTitle.Text = l["Language"];
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
+        PartitionIgnoreTitle.Text = l["PartitionIgnoreSize"];
         PrivacyTitle.Text = l["ShowHardwareIds"];
         WelcomeTitle.Text = l["Welcome"];
         WelcomeButtonText.Text = l["OpenWelcome"];
