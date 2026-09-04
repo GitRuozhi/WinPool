@@ -36,6 +36,12 @@ Chinese reading copies were updated in the same documentation work item.
 No implementation begins until the developer explicitly requests execution of
 this Plan.
 
+Before any execution, read the execution pitfall record
+[`Reference/20260905_统一拓扑布局引擎执行踩坑记录.md`](Reference/20260905_统一拓扑布局引擎执行踩坑记录.md).
+A previous execution attempt (2026-09-04/05) was fully reverted to
+`origin/main`; the record explains the failure and lists the plan amendments
+and confirmations required before a new attempt.
+
 ---
 
 ## 1. Controlling decisions
