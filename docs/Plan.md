@@ -1,291 +1,846 @@
-# WinPool Edit-page topology workspace Plan
+# WinPool Unified Topology Layout Engine Plan
 
 [English](Plan.md) | [简体中文（仅供阅读）](Plan.zh-CN.md)
 
 ## 0. Status, authority, and baseline
 
-- **Plan status:** implemented; automatic tests passed; native Edit click-through `unverified`
-- **Created:** 2026-09-02
-- **Updated:** 2026-09-02
-- **Implemented:** 2026-09-02
-- **Baseline commit:** `c471311460445d9b57fe790df2a00444bed7754a`
+- **Plan status:** confirmed and installed as the active Plan; implementation
+  not started; execution awaits the developer's explicit request
+- **Created:** 2026-09-03
+- **Updated:** 2026-09-04 (installed; baseline re-anchored; units clarified
+  as DIP; viewport-isolation automatic test, `TopologyLayoutMapper` mapping,
+  and the XAML-migration deletion precondition added)
+- **Baseline commit:** `0ef6d22b1803f3886a831fa34fbfb1dc4bc68f94`
+  (installation baseline; originally authored against `7bd21f2`)
 - **Working branch:** `main`
 - **Current product version:** V0.45
 - **Target product version:** V0.45
-- **Stage type:** Edit-page layout and simulated pool/partition workspace redesign; no real storage mutation
+- **Stage type:** topology-layout refactor and Edit-page presentation refinement; simulation behavior remains unchanged
 
-This file exists because the developer asked to write `docs/Plan.md` from the
-Edit-page requirements, then wait. It is **not** a confirmed plan.
-Archive history must not be used to invent extra stages or extra features.
+This Plan records the developer's current decisions for unifying the three logical
+topology regions around the Manage-page layout behavior.
 
-The developer asked to execute this Plan. Implementation is simulation-only.
-This still does not authorize push, tag, GitHub Release, binary upload,
-deployment, or real storage mutation.
+The Manage page is the baseline. The Edit upper and Edit lower regions are not
+independent topology implementations. They are restricted projections of the
+same topology model rendered through the same layout engine, with only the
+explicit differences recorded below.
+
+This Plan does **not** authorize real storage mutation, push, tag, GitHub Release,
+binary upload, deployment, schema changes, IPC changes, or unrelated product
+work.
+
+The implemented Edit-page Plan was frozen under `docs/Archive/V0.45` with its
+developer-accepted final state on 2026-09-04. The Archive index and matching
+Chinese reading copies were updated in the same documentation work item.
+
+No implementation begins until the developer explicitly requests execution of
+this Plan.
+
+---
 
 ## 1. Controlling decisions
 
-These outrank the current Edit page. They do not outrank the real-mutation
-safety boundary. All mutation in this stage is **simulation only**.
+These decisions control this stage and outrank the existing Edit-page layout
+implementation.
 
-### 1.1 Page chrome
+### 1.1 One topology layout engine
 
-- Two vertical halves, initial height 1:1, with a row splitter.
-- Each half has **one** vertical scrollbar. The two halves do not share a
-  page-wide scroll.
-- No titles for the halves, and no “logical topology” / “control group”
-  headings.
-- Inside each half: topology on the left, control group on the right.
-- The control group has a **fixed width**. Resizing the window changes the
-  topology area, like the Manage command pane. Topology uses the remaining
-  width.
+WinPool shall have one topology layout engine:
 
-### 1.2 Upper half
+`TopologyLayoutEngine`
 
-- Left: logical topology using the Manage visual controls
-  (`TopologyNodeControl` and the existing Stack / Flow layouts).
-- Right: keep the current partition actions — extend, shrink, delete, format,
-  new partition, initialize, offline / online.
-- Projection:
-  - Two levels only: disk and partition. No system, pool, or tier.
-  - Disks stacked vertically. Partitions inside a disk arranged horizontally.
-  - Show partitionable disks. Physical members of a non-primordial pool are
-    not shown. Virtual disks that can be partitioned are shown.
-  - Unallocated space is a child node of the disk. If a partition splits
-    unallocated space into two regions, those are **two** child nodes, using
-    offset gaps, not one leftover total.
-- The Windows system/boot disk is shown. Operations on it stay restricted
-  by the existing simulation safety rules.
-- Network mapped drives are not shown. They are not locally partitionable.
+Manage, Edit upper, and Edit lower shall all use this engine for topology
+measurement, row formation, minimum-width calculation, available-width
+handling, child-width allocation, and final layout planning.
 
-### 1.3 Lower half — topology
+The three regions may provide different topology trees and small layout or
+presentation options, but they shall not own independent layout algorithms.
 
-- Internal pools only, including the primordial pool. No network / external
-  pools.
-- Primordial pool is shown down to disks. It has no tiers and no partitions.
-- A storage pool shows tiers, disks, and virtual disks. Virtual disks show
-  partitions.
-- Pool row is left-to-right so a fake plus-pool sits to the right of all pools.
-- Clicking plus inserts a **local draft** pool. It is not written to the
-  simulation document until Execute succeeds.
-- A new draft pool shows: virtual disk “not created”, performance tier empty,
-  capacity tier empty.
-- SSD → performance tier. HDD → capacity tier.
-- SCM uses a **dedicated tier**. That tier is hidden unless at least one SCM
-  disk is present. The default visible tiers are SSD and HDD only.
-- SCM defaults match the performance tier: Mirror, 2 copies; Simple when
-  that tier has one disk. Interleave 64K.
-- Unknown / unspecified media: drop is refused.
-- Drag recognizes **pools only**, not tiers. On release the disk enters the
-  matching tier automatically.
-- Drag updates the Edit working copy only. It is **not** written to the
-  document until Execute.
+In particular:
 
-### 1.4 Lower half — control grid
+- Manage remains the behavioral and visual baseline.
+- Edit upper is a restricted disk/partition projection.
+- Edit lower is a restricted pool projection.
+- `AdaptiveFlowPanel`, `WeightedPoolPanel`, or replacement panels may remain as
+  WinUI measure/arrange adapters, but they must not implement competing layout
+  algorithms.
+- Equal-fill, weighted-fill, capacity-fill, wrapping, and minimum-width rules
+  belong to `TopologyLayoutEngine`.
+- Panels consume engine results and perform mechanical WinUI measurement and
+  arrangement only.
+- Do not introduce a second Edit-specific layout engine.
+- Do not introduce page-name checks such as `if (Manage)` or `if (EditUpper)`
+  inside the core algorithm. Required differences are explicit layout input or
+  policy data.
 
-Two columns: item name | item value. Selecting a pool fills the grid from that
-pool. A plus-created draft is filled with recommended parameters.
+The implementation must remain the minimum closed loop needed for these three
+regions. Do not build a generic public layout framework.
 
-If the selected pool has **more than one virtual disk**: parameter edits and
-disk drags are disabled, and a warning is shown:
+### 1.2 Manage page is the reference behavior
 
-> 不推荐在一个 Windows 存储空间内创建多个虚拟磁盘。如确有需要，推荐创建一个虚拟磁盘并创建多个分区。
+The Manage topology remains functionally and visually equivalent to the current
+Manage implementation.
 
-English UI uses the same meaning. **Dissolve remains enabled** so the user can
-leave that state.
+Its projection continues to show the complete logical topology according to the
+current `TopologyProjector`.
 
-Selecting the primordial pool leaves the right-hand grid blank. Primordial
-cannot be dissolved.
+Existing Manage rules for:
 
-Added rows, per tier: column count, number of data copies, number of tolerated
-disk failures, together with resiliency, interleave, and size.
+- system root;
+- pools;
+- tiers;
+- physical disks;
+- virtual disks;
+- partitions;
+- network and other groups;
+- Stack / Flow / WeightedFlow relationships;
+- sibling packing;
+- row-height relaxation;
+- topology selection;
+- expansion;
+- minimum node width;
 
-A one-click **dissolve pool** button sits in the grid as its own row directly
-under Execute. Dissolving an existing simulated pool asks for confirmation,
-then removes the pool, its tiers, virtual disks, and partitions, and returns
-physical disks to the primordial pool. Dissolving a draft discards the draft.
+remain the reference behavior.
 
-### 1.5 Execute and create defaults
+This stage may refactor the internal implementation used to produce that result,
+but must not deliberately redesign the Manage topology.
 
-- Product version stays **V0.45**.
-- Execute and dissolve run only against a **simulated** system. Local real
-  inventory stays read-only.
-- Empty pool: Execute stays disabled.
-- On Execute for a draft: create the pool, the virtual disk, and a partition.
-  The partition uses NTFS + 64K cluster, which includes simulated format.
-- Defaults from the V10 recommended configuration, adjusted by disk count:
+Manage-layout regression tests are therefore the compatibility reference for the
+unified engine.
 
-| Field | Default |
-| --- | --- |
-| Performance resiliency | Mirror; **Simple** when that tier has one disk |
-| Performance data copies | 2; **1** when Simple |
-| Performance interleave | 64K |
-| Performance columns | Shown read-only. V10: do not pass `-NumberOfColumns` for the SSD tier. |
-| Capacity resiliency | Parity; **Simple** when that tier has one disk |
-| Capacity physical-disk redundancy | 1; **0** when Simple |
-| Capacity columns | Follow member HDDs: equal capacity `N = n`, mixed capacity `N = n − 1`. |
-| Capacity interleave | 64K |
-| Partition file system | NTFS |
-| Partition cluster | 64K |
-| 64K + 64K research note | helper text under the cluster-size row, not a half title |
+---
 
-The one-disk Simple fallback is **per tier**, matching V10 (“Mirror when the
-SSD tier has two drives and Simple when it has only one”).
+## 2. Edit lower topology
 
-Copies and tolerated-failure fields are linked, not independently editable:
+### 2.1 Structure
 
-- Mirror / SCM Mirror: edit data copies; tolerated failures = copies − 1,
-  read-only.
-- Parity: edit tolerated failures (`PhysicalDiskRedundancy`); data copies
-  stay 1, read-only.
-- Simple: copies = 1, tolerated = 0, both read-only.
+The Edit lower topology uses the same pool-oriented structure and layout
+behavior as Manage wherever no Edit-specific rule is listed below.
 
-Execute on the selected pool commits that pool’s parameters and **all**
-pending disk moves in the working copy.
+It shows internal pools only, including the primordial pool.
 
-### 1.6 Modify existing simulated pools
+The existing Edit working-copy, drag, simulation Execute, create, modify, and
+dissolve behavior is not redesigned by this stage.
 
-Selecting an existing simulated pool loads its parameters. The user may edit
-them and Execute modify. This rewrites the simulation document. It does not
-claim that Windows can apply the same change in place on real hardware.
+### 2.2 Primordial pool
 
-## 2. Closed defaults (not re-asked)
+The primordial pool shows its physical disks.
 
-These were the leftover edge cases. They are now recorded so they are not
-asked again:
+Physical disks shown inside the primordial pool do **not** show partitions in
+the Edit lower topology.
 
-| Topic | Closed as |
-| --- | --- |
-| System/boot disk in the upper list | Shown; existing operation restrictions stay |
-| Network mapped drives in the upper list | Hidden |
-| SCM resiliency | Same as performance: Mirror / 2 copies; Simple if one disk |
-| Capacity column count | `N = n` equal capacity, `N = n − 1` mixed, per V10 |
-| Multi-vdisk dissolve | Remains enabled |
-| Multi-vdisk drag | Disabled, with the warning |
-| Performance column control | Visible, read-only |
-| Copies vs tolerated failures | One master field per resiliency; the other is derived |
-| Primordial selected | Right-hand grid blank |
-| Execute commit scope | Selected pool parameters + all pending drags |
-| Dissolve effect | Confirm; delete pool/tiers/vdisks/partitions; disks return to primordial |
-| Dissolve button | Row under Execute |
+This is an Edit-lower projection rule only. It does not alter the Manage
+projection.
 
-If any of these is wrong, name the row. Do not expect another questionnaire.
+Conceptually:
 
-## 3. Implementation mapping
+```text
+Primordial
+├─ Physical Disk
+├─ Physical Disk
+└─ Physical Disk
+```
 
-This section is a mapping, not extra product scope.
+not:
 
-### 3.1 Working copy
+```text
+Primordial
+└─ Physical Disk
+   └─ Partition
+```
 
-While the active document is a simulation, Edit holds a working copy of the
-snapshot. Dragging disks updates that copy and the lower topology immediately.
-Execute commits the working copy through typed simulation operations.
-Switching away from Edit without Execute discards the working copy.
+### 2.3 Existing pools
 
-### 3.2 Projections
+Non-primordial pools retain the current Edit lower logical content unless this
+Plan explicitly changes it.
 
-- `ProjectPartitionWorkspace`: disk forest for the upper half. Unallocated
-  child nodes from offset gaps, including leading, trailing, and holes.
-- `ProjectPoolWorkspace`: primordial, named internal pools, optional SCM
-  tier when SCM is present, then the plus node. Manage
-  `TopologyProjector.Project` is unchanged.
+Existing tier, physical-disk, virtual-disk, and virtual-disk partition
+representation remains available.
 
-### 3.3 Lower-right row order
+This Plan does not change pool-editing semantics or simulation operations.
 
-1. Execute modify / create new pool
-2. Dissolve pool
-3. Pool name
-4. Virtual disk name
-5. Performance: resiliency, interleave, size, columns (read-only), data copies
-   or tolerated failures per §1.5
-6. Dedicated SCM (only if SCM is present): same field set
-7. Capacity: resiliency, interleave, size, columns, data copies or tolerated
-   failures per §1.5
-8. Partition file system
-9. Partition cluster size
-10. 64K + 64K helper text
+### 2.4 Synthetic plus pool
 
-### 3.4 Simulation operations that do not exist today
+A synthetic plus-pool remains the Edit lower affordance for adding a pool.
 
-Current simulation can create a pool (members required, no tiers), create a
-virtual disk, move a disk, and edit partitions. It cannot create storage
-tiers, and it refuses to move a disk that already belongs to a tier.
+It is:
 
-This stage must add, still simulation-only:
+- visually a pool peer;
+- logically synthetic;
+- always placed after the real pools;
+- therefore the rightmost pool when the pool row fits on one row;
+- ordered after all real and draft pools when packing requires more than one row.
 
-- create pool with performance / capacity (and SCM when needed) tiers;
-- create virtual disk + partition + format from Execute on a draft;
-- tier-aware disk membership on Execute;
-- rewrite pool / tier / virtual-disk parameters on Execute modify;
-- dissolve pool back to primordial.
+Conceptually:
 
-`StorageTierInfo` currently has `NumberOfColumns` and `Interleave` but not
-data-copies or tolerated-failure fields. Those become optional snapshot
-fields. Schema 14 and IPC protocol 4 stay unless implementation proves a
-wire or database change.
+```text
+Primordial | Pool A | Pool B | +
+```
 
-Physical-disk drag sources exist only on the Edit lower tree. Manage nodes
-stay non-draggable.
+The plus-pool continues to create only the existing local draft-pool working
+state. It does not create real storage.
 
-### 3.5 Upper-right actions
+### 2.5 Layout
 
-Keep the current simulation partition/disk actions, driven by the upper
-topology selection (disk or partition or unallocated node). Unallocated-node
-click uses the existing new-partition path.
+Edit lower uses the same weighted pool-layout rules as Manage unless an
+Edit-lower rule above changes the projected children.
 
-## 4. Work items after approval
+There is no separate Edit-lower packing algorithm.
 
-Do not start these until the Plan is confirmed and execution is requested.
+---
+
+## 3. Edit upper topology
+
+### 3.1 Two levels only
+
+The Edit upper topology contains exactly the disk/partition workspace needed for
+partition management.
+
+Visible logical levels are:
+
+```text
+Disk
+└─ Partition / Unallocated
+```
+
+The Edit upper topology does not show:
+
+- System;
+- Storage Pool;
+- Storage Tier;
+- pool group;
+- direct-disk group;
+- virtual-disk group;
+- network group;
+- other topology grouping containers.
+
+Any invisible root required to feed the unified engine is layout-only and does
+not constitute a visible third level.
+
+### 3.2 Eligible disks only
+
+Only disks that can be managed through the existing partition-management
+policy are projected.
+
+Continue to use the existing partitionability policy rather than duplicating
+eligibility rules in the page.
+
+The current product behavior remains:
+
+- eligible system/boot disks may be shown;
+- existing operation restrictions still apply;
+- virtual disks that are partitionable may be shown;
+- physical disks consumed by a non-primordial pool are not separately shown as
+  partitionable raw disks;
+- network mapped drives are not shown.
+
+This Plan does not widen the set of disks on which operations are permitted.
+
+### 3.3 Disk arrangement
+
+All Edit-upper disks are arranged vertically.
+
+Conceptually:
+
+```text
+Disk 0
+Disk 1
+Disk 2
+Disk 3
+```
+
+A disk does not share its horizontal row with another disk.
+
+The unified engine shall represent this as a vertical/Stack relationship rather
+than relying on an unrelated page-specific layout algorithm.
+
+### 3.4 Partition arrangement
+
+Partitions and visible unallocated regions inside one disk are arranged in one
+horizontal strip in disk-offset order.
+
+Conceptually:
+
+```text
+Disk 0
+[Partition 1][Unallocated][Partition 2][Partition 3]
+```
+
+The children of one disk do not wrap onto a second logical partition row.
+
+When their minimum total width exceeds the available topology width, the row
+keeps the minimum child widths and becomes horizontally wider than the
+viewport. The existing topology scroll surface handles the overflow.
+
+This keeps the disk map spatially coherent instead of moving later partitions
+onto an unrelated second row.
+
+### 3.5 Unallocated regions
+
+Existing Edit behavior for unallocated regions remains:
+
+- leading gaps are separate nodes;
+- interior gaps are separate nodes;
+- trailing gaps are separate nodes;
+- ordering follows disk offset;
+- the configured partition-gap ignore threshold still determines which gaps are
+  visible.
+
+A visible unallocated node participates in capacity-based width allocation using
+the size of that exact gap.
+
+Hidden gaps below the configured threshold do not receive a visible layout slot.
+
+---
+
+## 4. Capacity-proportional partition widths
+
+All widths in this Plan are WinUI device-independent units (DIP), not physical
+pixels.
+
+### 4.1 Minimum width
+
+Every visible partition or unallocated child starts with the topology leaf
+minimum width:
+
+`112 DIP`
+
+unless the existing shared engine minimum is intentionally changed in a
+separately approved stage.
+
+This Plan does not change the Manage minimum width.
+
+### 4.2 Remaining-width allocation
+
+For the Edit upper partition strip only, width remaining after all minimum
+widths and sibling spacing have been reserved is distributed according to the
+storage size represented by each visible child.
+
+For child `i`:
+
+```text
+assigned width
+    = minimum width
+    + remaining width × child size / total visible child size
+```
+
+Both partitions and visible unallocated regions use their actual byte size as
+the capacity weight.
+
+The allocation is therefore spatial rather than equal-fill.
+
+Example:
+
+```text
+Partition A = 100 GiB
+Partition B = 200 GiB
+
+minimum:
+A = 112 DIP
+B = 112 DIP
+
+remaining width = 333 DIP
+
+A extra = 333 × 100 / 300 = 111 DIP
+B extra = 333 × 200 / 300 = 222 DIP
+
+final:
+A = 223 DIP
+B = 334 DIP
+```
+
+The implementation may use floating-point layout widths. Any final rounding
+must be deterministic and the final child must absorb any residual rounding
+difference so the planned row width remains consistent.
+
+### 4.3 No remaining width
+
+If:
+
+```text
+available width <= minimum widths + spacing
+```
+
+no negative proportional adjustment occurs.
+
+Each child keeps at least its minimum width and the horizontal strip overflows
+the viewport when necessary.
+
+### 4.4 Scope of proportional sizing
+
+Capacity-proportional remaining-width allocation applies only to the Edit upper
+disk's partition/unallocated row.
+
+It does not replace Manage's existing weighted topology rules and does not
+change Edit lower pool weighting.
+
+The unified engine therefore supports the different extra-space distributions,
+but the selected distribution is supplied as layout input rather than
+implemented by a separate panel or engine.
+
+---
+
+## 5. Edit upper disk presentation
+
+The visible Edit-upper disk node uses a compact horizontal header instead of the
+standard multi-line topology card header.
+
+The information currently spread over the normal disk card's approximately
+three text lines is arranged horizontally where practical.
+
+Conceptually:
+
+```text
+Disk 0    Samsung SSD ...    GPT    1.82 TiB
+```
+
+Exact separators and truncation are presentation details, but the result must:
+
+- remain one compact disk header;
+- preserve the information required to identify the disk;
+- preserve accessibility names;
+- preserve selection and interaction behavior;
+- allow long device names to trim or wrap only when the available width makes
+  that unavoidable.
+
+This compact presentation applies to Edit upper disk nodes only.
+
+Manage topology cards remain the reference presentation and are not changed by
+this requirement.
+
+Edit lower cards remain on the normal topology presentation unless separately
+specified.
+
+The implementation should extend the shared `TopologyNodeControl` with a small
+explicit presentation variant rather than create a second disk-control tree.
+
+---
+
+## 6. Implementation mapping
+
+This section maps the confirmed requirements to the current implementation. It
+does not add product scope.
+
+### 6.1 Application layout engine
+
+Primary owner:
+
+`src/WinPool.Application/TopologyLayoutEngine.cs`
+
+Refactor the current engine so its result is sufficient for panels to perform
+final arrangement without inventing another width-allocation algorithm.
+
+The engine owns:
+
+- natural subtree measurement;
+- minimum leaf width;
+- ancestor chrome;
+- sibling spacing;
+- Stack layout;
+- Flow layout;
+- WeightedFlow layout;
+- sibling row formation;
+- shrink decisions;
+- row-height relaxation;
+- final child width assignment;
+- extra-space distribution;
+- no-wrap horizontal strip behavior required by Edit upper.
+
+Existing Manage calculations remain the baseline.
+
+If required, add minimal layout-input metadata to distinguish:
+
+- normal existing extra-space allocation;
+- capacity-proportional extra-space allocation;
+- wrap versus no-wrap child rows.
+
+Do not encode page names into `TopologyLayoutEngine`.
+
+### 6.2 Layout result
+
+The engine result must carry enough information for the WinUI panel to know the
+final row membership and final allocated width of each child.
+
+Do not leave final weighted or capacity-based stretch calculation in a specific
+WinUI panel.
+
+The final result may extend the existing `TopologyLayoutResult` with explicit
+row-slot width information or an equivalent representation.
+
+The exact data type is an implementation choice; the ownership boundary is not.
+
+### 6.3 WinUI topology panels
+
+Current relevant controls include:
+
+- `AdaptiveFlowPanel`
+- `WeightedPoolPanel`
+- `TopologyNodeControl`
+
+After this stage, any retained layout panels are thin adapters around
+`TopologyLayoutEngine`.
+
+They may:
+
+- obtain the actual available WinUI width;
+- convert the node ViewModel to engine input;
+- call the engine;
+- measure children using engine-assigned widths;
+- arrange children according to engine rows and slots.
+
+They may not independently decide:
+
+- how many children fit;
+- equal-fill versus weighted-fill;
+- capacity proportions;
+- row packing policy;
+- shrink priority.
+
+If a single common topology panel cleanly replaces both
+`AdaptiveFlowPanel` and `WeightedPoolPanel`, that replacement is allowed.
+
+The exact obsolete candidates authorized for removal by this Plan are:
+
+- `src/WinPool.App/Controls/AdaptiveFlowPanel.cs`
+- `src/WinPool.App/Controls/WeightedPoolPanel.cs`
+
+They may be deleted only after:
+
+1. the common replacement is present;
+2. all code references have been migrated;
+3. all XAML usage sites (including `MainPage.xaml` and `EditPage.xaml`) no
+   longer reference the removed panel types;
+4. Manage regression tests pass;
+5. Edit-upper and Edit-lower targeted layout tests pass.
+
+Deletion is not required merely for architectural neatness. Keeping thin
+adapters is acceptable if it is the smaller closed-loop change.
+
+### 6.4 Manage projection
+
+Primary owner:
+
+`src/WinPool.Application/Topology.cs`
+
+Do not redesign `TopologyProjector.Project`.
+
+Any changes required to supply the unified engine with layout metadata must
+preserve the projected Manage topology and current ordering.
+
+### 6.5 Edit projections
+
+Primary owner:
+
+`src/WinPool.Application/EditWorkspace.cs`
+
+#### Upper
+
+`ProjectPartitionWorkspace` remains responsible for selecting partitionable
+disks and building visible disk, partition, and unallocated nodes.
+
+Change its layout metadata so the unified engine receives:
+
+- a vertical disk collection;
+- one no-wrap horizontal partition strip per disk;
+- actual partition/gap size as the capacity stretch weight.
+
+Do not reproduce layout arithmetic inside `EditWorkspace`.
+
+#### Lower
+
+`ProjectPoolWorkspace` / `ProjectPoolWorkspaceRoot` remain responsible for the
+Edit-lower pool subset and the synthetic plus-pool.
+
+Ensure:
+
+- primordial physical disks have no partition children in the lower projection;
+- real pools retain the intended existing content;
+- the plus-pool is ordered last;
+- the tree uses the same weighted layout semantics consumed by Manage.
+
+### 6.6 ViewModel conversion
+
+`TopologyNodeViewModel` remains the shared presentation model.
+
+The mapping from application layout nodes to ViewModels must preserve the layout
+metadata needed by the unified engine.
+
+The current App-side conversion lives in
+`src/WinPool.App/Services/TopologyLayoutMapper.cs`; updating that mapping to
+carry engine layout metadata is part of this stage.
+
+Do not create separate Manage/Edit topology ViewModel hierarchies.
+
+### 6.7 Edit upper compact header
+
+Primary owners:
+
+- `src/WinPool.App/Controls/TopologyNodeControl.xaml`
+- `src/WinPool.App/Controls/TopologyNodeControl.xaml.cs`
+
+Add the smallest explicit presentation mode necessary for the compact
+Edit-upper disk header.
+
+The same control continues to own:
+
+- selection;
+- expansion where applicable;
+- keyboard interaction;
+- accessibility;
+- drag/drop hooks;
+- normal topology-card rendering.
+
+Do not duplicate those behaviors into an Edit-only disk control.
+
+### 6.8 Viewport ownership
+
+Edit upper and Edit lower must not overwrite a single shared global topology
+viewport width that can affect Manage layout.
+
+Prefer the actual width supplied to the WinUI layout panel during
+`MeasureOverride` / `ArrangeOverride`.
+
+Fallback viewport state may remain where WinUI infinite-width measurement
+requires it, but each topology surface must use its own host width.
+
+Edit upper, Edit lower, and Manage therefore must not race to set one shared
+`TopologyViewportWidth`.
+
+---
+
+## 7. Work items after approval
+
+Do not start these until the developer explicitly requests execution.
 
 | Id | Work |
 | --- | --- |
-| EP1 | Edit chrome: 50/50 halves, row splitter, one scrollbar per half, fixed-width controls, no half titles |
-| EP2 | Partition-workspace projection, unallocated gap nodes, upper `TopologyNodeControl` |
-| EP3 | Keep upper-right partition actions, bind them to the new selection |
-| EP4 | Pool-workspace projection, plus/draft pool, SCM tier hidden unless present |
-| EP5 | Pool-only drag on the working copy; auto-tier SSD/HDD/SCM; refuse unknown media |
-| EP6 | Simulation operations: tiered create, tier-aware membership, modify, dissolve |
-| EP7 | Lower two-column grid, recommended defaults, multi-vdisk lock + warning, Execute |
-| EP8 | Localization |
-| EP9 | Tests for the two projections, gap unallocated nodes, auto-tier, Manage non-regression |
-| EP10 | CHANGELOG after the developer accepts the implemented stage. Version stays V0.45 |
+| TL0 | Documentation rollover: archive the completed previous Plan and reading copy, update Archive index/copy, install this Plan and matching `Plan.zh-CN.md` (completed 2026-09-04) |
+| TL1 | Refactor `TopologyLayoutEngine` so final row and child-width allocation are engine-owned |
+| TL2 | Route normal Flow and WeightedFlow panel arrangement through the unified engine; preserve Manage output |
+| TL3 | Remove Edit-page dependence on a shared Manage viewport-width state, including the automatic viewport-isolation regression test |
+| TL4 | Refine Edit-upper projection: eligible disks only, two visible levels, vertical disks, no-wrap horizontal partition strips |
+| TL5 | Add Edit-upper capacity-proportional remaining-width allocation for partitions and visible unallocated gaps |
+| TL6 | Refine Edit-lower projection: primordial disks without partitions and synthetic plus-pool ordered last |
+| TL7 | Add compact horizontal Edit-upper disk presentation in the shared node control |
+| TL8 | Add targeted layout, projection, and architecture regression tests |
+| TL9 | After developer acceptance of implementation, record the important final result in CHANGELOG; version remains V0.45 |
 
-Commit split after execution: documentation, refactor, feature, visual.
+Commit split after execution:
 
-## 5. Out of scope
+1. documentation rollover;
+2. equivalent layout-engine refactor;
+3. Edit projection / layout behavior;
+4. compact visual presentation;
+5. final accepted documentation result if required.
 
-- Real disk, partition, volume, pool, tier, or virtual-disk mutation.
-- Changing Manage-page topology rules.
-- Network / external pool editing.
-- Test and Development workspace features.
-- Schema or IPC version changes unless implementation proves they are required.
-- Push, tag, Release, or binary upload.
-- Revising or publishing the V10 article.
-- Work outside `Program\WinPool`.
+This repository remains direct-to-`main`; do not create a feature branch or PR.
 
-## 6. Safety
+Do not push unless the developer explicitly asks.
 
-- Deny-by-default executor stays in force.
-- UAC or Real mode is not authorization.
-- Protected-machine policy continues to refuse `R4+` real structure mutation.
-- Hardware data stays behind the redaction boundary.
-- Inventory PowerShell stays embedded and read-only.
-- A development Agent must not perform a real mutation under this Plan.
+---
 
-## 7. Verification when this Plan is later executed
+## 8. Required targeted tests
 
-Documentation-only edits of this file do not run code tests.
+This is ordinary feature/refactor work, not an automatic full-quality-gate run.
 
-After a later approved implementation:
+Run the smallest directly related automatic tests during implementation.
 
-- Application tests for the two Edit projections, unallocated gaps, auto-tier,
-  multi-vdisk lock, and dissolve.
-- Existing Manage topology tests remain green without rewriting Manage rules.
-- Local simulation-only click-through of Edit. Real hardware is not a
-  verification method.
-- Full quality gate and OS-matrix evidence stay `not_required` until the
-  developer asks for formal testing.
+### 8.1 Unified layout engine
 
-## 8. Approval gate
+Extend the existing `TopologyLayoutEngineTests`.
 
-This Plan has been executed. Native Edit-page click-through remains
-`unverified` until the developer asks for that evidence.
+Required cases include:
+
+- current Manage reference cases continue to produce equivalent row packing;
+- current Manage weighted siblings retain their existing width behavior;
+- Stack children remain vertical;
+- Flow behavior still respects existing Manage expectations;
+- WeightedFlow behavior still respects current Manage expectations;
+- no-wrap horizontal strip does not create a second row;
+- when the no-wrap minimum width exceeds the viewport, minimum widths are
+  retained;
+- entering or leaving Edit, or resizing either Edit half, does not alter Manage
+  layout inputs (shared-viewport isolation).
+
+### 8.2 Capacity allocation
+
+Required deterministic cases:
+
+#### Case A
+
+```text
+sizes: 100 GiB, 200 GiB
+minimum width: 112 DIP each
+remaining width: 333 DIP
+expected final widths: 223 DIP, 334 DIP
+```
+
+#### Case B
+
+Three visible children including unallocated:
+
+```text
+100 GiB partition
+50 GiB unallocated
+200 GiB partition
+```
+
+Remaining width is distributed in the ratio:
+
+```text
+100 : 50 : 200
+```
+
+#### Case C
+
+No extra width:
+
+all children remain at minimum width and the row may exceed the viewport.
+
+#### Case D
+
+A hidden unallocated gap below the configured threshold receives no layout slot
+and no visible capacity share.
+
+### 8.3 Edit upper projection
+
+Extend `EditWorkspaceTests` to prove:
+
+- only partitionable disks are shown;
+- physical members of non-primordial pools are excluded from the raw
+  partitionable-disk list;
+- eligible virtual disks remain available;
+- network drives are absent;
+- disk ordering remains deterministic;
+- partitions and gaps stay in offset order;
+- leading, interior, and trailing visible gaps remain distinct;
+- upper topology has only visible disk and partition/unallocated levels.
+
+### 8.4 Edit lower projection
+
+Tests must prove:
+
+- primordial pool is present;
+- primordial physical disks have no partition children in Edit lower;
+- non-primordial pool structure remains available;
+- the synthetic plus-pool is present exactly once;
+- the synthetic plus-pool is ordered after all real/draft pools.
+
+### 8.5 Manage non-regression
+
+Existing Manage topology and layout tests must pass without rewriting their
+expected behavior merely to accommodate the refactor.
+
+A failing Manage expectation must be treated as a regression unless the
+developer explicitly changes the requirement.
+
+### 8.6 Presentation structure
+
+Add the smallest architecture/presentation test practical for:
+
+- Edit upper selecting the compact disk presentation mode;
+- Manage remaining on the standard presentation mode;
+- Edit lower remaining on the standard presentation mode;
+- all three still using the shared `TopologyNodeControl`.
+
+Do not claim visual appearance passed from an automatic structure test.
+
+---
+
+## 9. Manual verification after implementation
+
+Native visual evidence remains separate from automatic tests.
+
+A local simulation-only Edit click-through should check:
+
+1. Manage topology before and after entering Edit has equivalent packing.
+2. Resize Manage and confirm existing topology behavior is unchanged.
+3. Resize Edit upper and confirm Edit lower/Manage layout does not change because
+   of a shared viewport variable.
+4. Edit upper shows only eligible disks.
+5. Edit upper disks are vertically stacked.
+6. Each disk's partition map remains a single horizontal strip.
+7. Large and small partitions visibly receive proportionally different extra
+   widths.
+8. Unallocated space participates proportionally.
+9. Many partitions cause horizontal overflow rather than a second partition
+   row.
+10. Edit-upper disk identification is shown as a compact horizontal header.
+11. Edit lower primordial disks do not expose partitions.
+12. Edit lower plus-pool appears after the real pools.
+13. Existing Edit drag, draft, Execute, modify, and dissolve simulation behavior
+    still works.
+
+Until a human/native run is actually performed, this evidence is
+`unverified`.
+
+A full Quality gate is `not_required` for ordinary implementation of this Plan
+unless the developer explicitly requests formal testing.
+
+---
+
+## 10. Out of scope
+
+This stage does not include:
+
+- changing the Manage logical topology design;
+- redesigning Manage cards;
+- capacity-proportional pool widths;
+- changing storage-pool simulation semantics;
+- changing partition operation semantics;
+- new partition eligibility rules;
+- new storage operations;
+- real storage mutation;
+- database schema changes;
+- IPC protocol changes;
+- new persistence;
+- new settings other than preserving the existing unallocated-gap setting;
+- network/external pool editing;
+- packaging;
+- deployment;
+- unrelated visual redesign;
+- public layout APIs or plug-in architecture.
+
+If implementation appears to require one of these, stop that expansion and
+return to the developer instead of silently broadening this Plan.
+
+---
+
+## 11. Safety
+
+The existing deny-by-default execution boundary remains unchanged.
+
+- All storage-structure changes in this stage remain simulation-only.
+- Real disk, partition, volume, pool, tier, or virtual-disk mutation is not
+  authorized.
+- UAC elevation or Real mode is not authorization.
+- Hardware data remains behind the existing redaction boundary.
+- Inventory PowerShell remains embedded and read-only.
+- No real hardware mutation is an accepted test method under this Plan.
+
+---
+
+## 12. Acceptance gate
+
+Implementation is complete only when:
+
+- all three topology regions use `TopologyLayoutEngine` as the single layout
+  algorithm authority;
+- no Edit-specific panel independently performs equal-fill, weighted-fill, or
+  capacity-fill layout decisions;
+- Manage behavior remains equivalent;
+- Edit lower primordial disks do not display partitions;
+- Edit lower plus-pool is the final pool item;
+- Edit upper contains only eligible disk → partition/unallocated topology;
+- Edit upper disks are vertically stacked;
+- partitions inside one disk form one horizontal no-wrap strip;
+- spare horizontal width is distributed by partition/unallocated capacity;
+- the 100 GiB / 200 GiB / 333 DIP example produces 223 DIP / 334 DIP;
+- Edit upper disk cards use the compact horizontal presentation;
+- shared viewport state no longer allows Edit upper/lower resizing to mutate
+  Manage layout;
+- targeted automatic tests are `passed`;
+- native visual click-through remains `unverified` until actually performed.
+
+After implementation reaches this state, do not start formal acceptance
+automatically. Ask the developer whether to enter formal testing.

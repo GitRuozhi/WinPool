@@ -3,9 +3,9 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-The current product version is V0.45. There is no active Plan. V0.44 remains
-the latest archived stage: the original platform plan under `V0.44`, and
-shared-runtime staging under `V0.44-shared-runtime-staging`.
+The current product version is V0.45. The active Plan is the unified topology
+layout engine stage in `docs/Plan.md`, installed 2026-09-04. The latest
+archived stage is the V0.45 Edit-page topology workspace under `V0.45`.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
@@ -28,6 +28,7 @@ shared-runtime staging under `V0.44-shared-runtime-staging`.
 | [`V0.44-draft/`](V0.44-draft/) | archived source records; superseded by the V0.44 Plan | 2026-09-01 | handwritten input for V0.44 | Developer handwritten Chinese drafts for platform upgrade and distribution slimming; superseded by `V0.44/Plan.md` |
 | [`V0.44-shared-staging-draft/`](V0.44-shared-staging-draft/) | archived source records; superseded by `V0.44-shared-runtime-staging` | 2026-09-01 | informal follow-up for V0.44 | Developer English draft for App/Agent shared-runtime staging after alignment; superseded by `V0.44-shared-runtime-staging/Plan.md` |
 | [`V0.44-shared-runtime-staging/`](V0.44-shared-runtime-staging/) | implemented; automatic gates passed; targeted merged-directory process smoke passed; inherited OS-matrix and full human UI cases unverified | 2026-09-01 | V0.44; implementation `3e00633` | Flat App+Agent portable union; SHA-256 collision gate; 574 files / 231.58 MiB; alignment experiment archived with the Plan |
+| [`V0.45/`](V0.45/) | implemented; automatic gates passed; native Edit click-through developer-confirmed `passed`; stage accepted | 2026-09-04 | V0.45; implementation `a4e8f57`…`7bd21f2` plus fix `15215fd` on `origin/main` | Edit-page two-half topology workspace: partition-gap nodes, primordial disk-only display, plus-pool, drag auto-tiering, tiered create/modify/dissolve; also archives the superseded unified-layout proposal |
 | [`V0.39a-draft/`](V0.39a-draft/) | superseded; never approved or implemented | 2026-08-13 | invalid draft label, not a product version | Original broad correction proposal preserved as historical input; reusable observations moved to the V0.8–V0.9 technical-debt reference |
 | [`V0.33重构.md`](V0.33重构.md) and [`V0.33重构补充.md`](V0.33重构补充.md) | archived source records | 2026-08-11 | V0.33 | Original V0.33 reconstruction and supplement records, preserved unchanged after relocation from `docs/` |
 

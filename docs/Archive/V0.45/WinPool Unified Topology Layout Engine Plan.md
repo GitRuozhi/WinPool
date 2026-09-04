@@ -1,6 +1,10 @@
 # WinPool Unified Topology Layout Engine Plan
 
-[English](Plan.md) | [简体中文（仅供阅读）](Plan.zh-CN.md)
+> Archived source record, moved here from `docs/` on 2026-09-04 after the
+> amended Plan was installed as the active `docs/Plan.md`. This proposal is
+> historical input; the active Plan (installation baseline, DIP units,
+> viewport-isolation test, mapper scope, and XAML-migration precondition)
+> controls. Not a current requirement.
 
 ## 0. Status, authority, and baseline
 

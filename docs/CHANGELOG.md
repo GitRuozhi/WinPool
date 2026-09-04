@@ -26,10 +26,17 @@ are not rewritten for format consistency.
   multi-virtual-disk modify rejection.
 - Architecture tests require the Edit page to use those projections and the
   canonical simulation coordinator, and to keep two untitled halves.
+- 2026-09-04: the developer confirmed the native Edit click-through `passed`
+  (local, simulation-only). At acceptance the full Release automatic gate on
+  merged `main` passed 369 tests, 0 failed, 0 skipped, with a warning-free
+  Release build and no known vulnerable packages. The stage Plan is frozen
+  under `docs/Archive/V0.45`.
 
 ### Known Limitations
 - Real storage-structure mutation remains denied.
-- Native Edit-page click-through remains `unverified`.
+- Native Edit-page click-through: `unverified` when implemented;
+  developer-confirmed `passed` on 2026-09-04. Inherited device, UAC, DPI,
+  OS-matrix, and long-duration cases remain `unverified`.
 
 ## V0.45 shell-first startup — 2026-09-02
 
