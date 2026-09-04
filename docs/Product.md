@@ -78,6 +78,25 @@ nonzero iteration. Architecture milestones stop at `Va.b`; database schema
 revisions, algorithm IDs, and IPC compatibility identifiers are internal
 contracts and do not form additional project versions.
 
+### Internal engines
+
+Two internal engines are long-term product assets:
+
+- **Topology layout engine.** `TopologyLayoutEngine` plans topology layout in
+  integer width/height units. Structure decisions — sibling row packing,
+  column budgets, shrinking, row-height relaxation, and minimum widths such as
+  the two-unit floor for layered pools sharing a row — belong to the unit plan
+  and stay independent of pixels and DPI; pixel widths only stretch the
+  finished unit plan to the available width. The Manage topology is the
+  reference behavior. Before modifying this engine, read the execution pitfall
+  record under `docs/Reference` (2026-09-05).
+- **Hardware information engine.** The retained KS/StatSys-derived report
+  factory produces a structured hardware report of 13 categories and 154
+  defined items, each carrying Source, Status, and Warning evidence, collected
+  through the embedded read-only PowerShell inventory. It currently feeds
+  storage scans and storage-system documents and is a retained asset for a
+  future full-hardware surface.
+
 ## Confirmed development route
 
 The user confirmed the following product route on 2026-08-12. It defines phase
