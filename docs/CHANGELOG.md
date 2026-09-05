@@ -27,10 +27,17 @@ are not rewritten for format consistency.
 
 ### Verification
 - 2026-09-05: full Debug automatic gate passed 397 tests, 0 failed, 0
-  skipped. The Release run tree could not be rebuilt during verification
-  because a WinPool instance was running from it. Settings-page interaction,
-  the reset confirmation flow, and the new inputs remain `unverified` human
-  evidence.
+  skipped. The Release run tree could not be rebuilt during the first
+  verification pass because a WinPool instance was running from it.
+- 2026-09-05 (second pass): fixed the client response decoder missing
+  `AgentPreferenceSavedResponse` (every background-preference change failed on
+  the App side after the Agent had already persisted it), made reset use
+  revision-bumped documents for built-in simulations (the persistence layer
+  rejected fresh catalog documents), and made the numeric boxes select all on
+  focus and commit on Enter. Live UI verification passed: reset-all completed
+  with no error (foreground file, built-in simulations, and all four
+  background values including the 1024 MiB capacity default), and a typed
+  capacity change round-tripped into agent-settings.json.
 
 ### Known Limitations
 - Real storage-structure mutation remains denied.
