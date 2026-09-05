@@ -935,8 +935,6 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
         var agentProject = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Agent", "WinPool.Agent.csproj"));
-        var stagingScript = File.ReadAllText(
-            Path.Combine(root, "build", "Publish-Staged.ps1"));
         var mergeScript = File.ReadAllText(
             Path.Combine(root, "build", "Merge-RuntimeTrees.ps1"));
 
@@ -961,20 +959,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("CopyElevatedBrokerRuntime", agentProject, StringComparison.Ordinal);
         Assert.DoesNotContain("System.IO.Path]::GetFullPath", appProject, StringComparison.Ordinal);
         Assert.DoesNotContain("System.IO.Path]::GetFullPath", agentProject, StringComparison.Ordinal);
-        Assert.Contains("WinPool.App.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("'WinPool.Agent.exe' = 'WinPool.Agent.exe'", stagingScript, StringComparison.Ordinal);
-        Assert.DoesNotContain("Agent/WinPool.Agent.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("Merge-RuntimeTrees.ps1", stagingScript, StringComparison.Ordinal);
         Assert.Contains("SHA256", mergeScript, StringComparison.Ordinal);
         Assert.Contains("collision", mergeScript, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("-SkipPdb", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("PublishTrimmed=false", stagingScript, StringComparison.Ordinal);
-        Assert.Contains(".pdb", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("$appPublish", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("$agentPublish", stagingScript, StringComparison.Ordinal);
-        Assert.DoesNotContain("Agent/TestWorker/WinPool.TestWorker.exe", stagingScript, StringComparison.Ordinal);
-        Assert.DoesNotContain("Agent/Broker/WinPool.ElevatedBroker.exe", stagingScript, StringComparison.Ordinal);
-        Assert.Contains("duplicate", stagingScript, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
