@@ -104,14 +104,13 @@ Fifth-amendment decision (2026-09-05):
     Edit lower — primordial-pool members and storage-pool members alike —
     under one content-based state rule — §7.
 
-**Open confirmation required before coding (not yet given):**
+**Confirmations:**
 
-- The three-stage allocation rule (§2.4): the developer has not yet confirmed
-  understanding and agreement. TL5 must not start until the developer
-  explicitly confirms §2.4 (the worked "what you see" table is provided
-  there for that purpose).
+- The three-stage allocation rule (§2.4) was explicitly confirmed by the
+  developer on 2026-09-05. TL5 is unlocked.
 - The single-line header arrangement, header threshold, and equal-growth `t`
-  values — confirmed with a screenshot during implementation (§6, §2.7).
+  values remain open until confirmed with a screenshot during implementation
+  (§6, §2.7).
 
 ---
 
@@ -263,9 +262,8 @@ layer, outside any layout pass.
 
 ### 2.4 Three-stage strip allocation
 
-> **Confirmation gate:** the developer has not yet confirmed this section.
-> TL5 must not start until the developer explicitly confirms it. The "what
-> you see" table below exists for that confirmation.
+> **Confirmed by the developer on 2026-09-05.** The "what you see" table
+> below is the confirmed behavior.
 
 Plain-language behavior (this is exactly the developer's 2026-09-05
 description, made precise):
@@ -977,9 +975,8 @@ Do not start these until the developer explicitly requests execution.
 Execute one item at a time, in order. Each item completes only after its
 §12 verification. Do not batch multiple items before verification.
 
-**TL5 precondition:** the developer has explicitly confirmed §2.4 (the
-three-stage rule). Until then, skip nothing — simply stop before TL5 and
-obtain the confirmation.
+**TL5 precondition:** satisfied — the developer explicitly confirmed §2.4
+(the three-stage rule) on 2026-09-05.
 
 | Id | Work |
 | --- | --- |
@@ -987,7 +984,7 @@ obtain the confirmation.
 | TL2 | Route all three surfaces through one root adapter each; nested panels consume stored slots; preserve Manage output |
 | TL3 | Remove Edit-page dependence on the shared Manage viewport-width state; per-surface host width and named fallback; eliminate inline magic numbers (§2.7); automatic viewport-isolation regression test |
 | TL4 | Refine Edit-upper projection: eligible disks only, two visible levels, vertical disks through the engine Stack channel, no-wrap horizontal partition strips, enable + weights metadata |
-| TL5 | Three-stage strip allocation (§2.4) — **requires prior developer confirmation of §2.4** |
+| TL5 | Three-stage strip allocation (§2.4) — confirmed by the developer 2026-09-05 |
 | TL6 | Edit-lower projection alignment: snapshot-driven tier cards, tier-uncovered member Unallocated group, plus-pool single-draft rule (§3.3, §3.4) with projection tests |
 | TL7 | Edit-lower modifiability state, icon, drag guardrails, and Execute-blocking dialog (§7) |
 | TL8 | Width-adaptive presentation capability; enable for Edit-upper disks; screenshot confirmation of the single-line arrangement, header threshold, and `t` |
@@ -1191,8 +1188,8 @@ instructions.
   no-wrap width) is prohibited.
 - **Interactive questions without a received answer are not consent.** Re-ask
   in plain text before deciding.
-- **Unconfirmed rules are not implemented.** TL5 waits for explicit §2.4
-  confirmation.
+- **Unconfirmed rules are not implemented.** §2.4 confirmation was received
+  on 2026-09-05; the same gate applies to any future unconfirmed rule.
 - **After a crash**, read the crash log and Windows event log (1000/1026)
   before changing code; prefer instrumentation over guessing; report the root
   cause and wait for approval before fixing.
@@ -1264,9 +1261,8 @@ Implementation is complete only when:
   invokes the engine or re-plans a budget;
 - rows without the distribution enable option render exactly as today; no
   weight-based width differences appear anywhere by default;
-- the engine implements the three-stage enabled-strip allocation (§2.4) —
-  after the developer's explicit confirmation of §2.4 — with continuity at
-  `W1` and `W2`;
+- the engine implements the developer-confirmed (2026-09-05) three-stage
+  enabled-strip allocation (§2.4) with continuity at `W1` and `W2`;
 - stage 1 keeps minimum widths and overflows without negative adjustment;
   stage 2 grows all children equally; stage 3 distributes width above `t` by
   declared capacity weights, with the last child absorbing the rounding
