@@ -205,7 +205,6 @@ public static class EditWorkspace
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var nodes = new List<TopologyNode>();
-        var showScm = HasScmDisk(snapshot);
         var ignore = Math.Max(0, minUnallocatedBytes);
 
         foreach (var pool in snapshot.StoragePools
@@ -215,15 +214,21 @@ public static class EditWorkspace
                      .ThenBy(pool => IsDraftPool(pool.StableId) ? 1 : 0)
                      .ThenBy(pool => pool.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            nodes.Add(CreateEditPoolNode(pool, snapshot, showScm, ignore));
+            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore));
         }
 
-        nodes.Add(new TopologyNode(
-            new StorageUnitRef(PlusStableId, StorageUnitKind.StoragePool, "+", false),
-            "+",
-            isSelectable: true,
-            childrenLayout: TopologyChildrenLayout.Stack,
-            layoutWeight: 1));
+        // Single-draft rule: the plus-pool affordance is present only while
+        // no draft pool exists.
+        if (!nodes.Any(item => IsDraftPool(item.Unit.StableId)))
+        {
+            nodes.Add(new TopologyNode(
+                new StorageUnitRef(PlusStableId, StorageUnitKind.StoragePool, "+", false),
+                "+",
+                isSelectable: true,
+                childrenLayout: TopologyChildrenLayout.Stack,
+                layoutWeight: 1));
+        }
+
         return nodes;
     }
 
@@ -420,7 +425,6 @@ public static class EditWorkspace
     private static TopologyNode CreateEditPoolNode(
         StoragePoolInfo pool,
         StorageSnapshot snapshot,
-        bool showScm,
         long minUnallocatedBytes)
     {
         var members = snapshot.PhysicalDisks
@@ -472,42 +476,36 @@ public static class EditWorkspace
             }
         }
 
-        AddTierNode(poolNode, pool, snapshot, "SSD");
-        if (showScm)
+        // Snapshot-driven tier cards, ordered like Manage: a tier renders
+        // only when it exists and holds at least one member disk, so a draft
+        // pool shows its performance/capacity tiers only after disks of the
+        // matching media type join.
+        foreach (var tier in snapshot.StorageTiers
+                     .Where(item => item.PoolStableId == pool.StableId)
+                     .Where(item => item.MemberPhysicalDiskIds.Count > 0)
+                     .OrderBy(item => TopologyProjector.TierSortOrder(item.MediaType)))
         {
-            AddTierNode(poolNode, pool, snapshot, "SCM");
+            poolNode.Children.Add(CreateTierNode(pool, tier, snapshot));
         }
 
-        AddTierNode(poolNode, pool, snapshot, "HDD");
+        AddUnallocatedGroup(poolNode, pool, members, snapshot);
         return poolNode;
     }
 
-    private static void AddTierNode(
-        TopologyNode poolNode,
+    private static TopologyNode CreateTierNode(
         StoragePoolInfo pool,
-        StorageSnapshot snapshot,
-        string mediaType)
+        StorageTierInfo tier,
+        StorageSnapshot snapshot)
     {
-        var tier = snapshot.StorageTiers.FirstOrDefault(item =>
-            item.PoolStableId == pool.StableId
-            && NormalizeMedia(item.MediaType) == mediaType);
-        var memberIds = tier?.MemberPhysicalDiskIds ?? [];
         var members = snapshot.PhysicalDisks
-            .Where(disk => memberIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
+            .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
             .ToList();
-        var display = mediaType switch
-        {
-            "SSD" => "Performance",
-            "HDD" => "Capacity",
-            "SCM" => "Dedicated",
-            _ => mediaType
-        };
         var node = new TopologyNode(
             new StorageUnitRef(
-                tier?.StableId ?? $"{pool.StableId}:tier:{mediaType.ToLowerInvariant()}",
+                tier.StableId,
                 StorageUnitKind.StorageTier,
-                tier?.FriendlyName ?? display,
-                tier?.IsStable ?? false,
+                tier.FriendlyName,
+                tier.IsStable,
                 pool.StableId),
             TopologyProjector.JoinSummary(
                 $"{members.Count} physical disks",
@@ -518,7 +516,46 @@ public static class EditWorkspace
             node.Children.Add(PhysicalDiskNode(member));
         }
 
-        poolNode.Children.Add(node);
+        return node;
+    }
+
+    /// <summary>
+    /// Manage-equivalent Unallocated group: pool members not covered by any
+    /// tier stay visible, selectable, and draggable instead of disappearing.
+    /// </summary>
+    private static void AddUnallocatedGroup(
+        TopologyNode poolNode,
+        StoragePoolInfo pool,
+        IReadOnlyList<PhysicalDiskInfo> members,
+        StorageSnapshot snapshot)
+    {
+        var tierMemberIds = snapshot.StorageTiers
+            .Where(item => item.PoolStableId == pool.StableId)
+            .SelectMany(item => item.MemberPhysicalDiskIds)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var directMembers = members
+            .Where(item => !tierMemberIds.Contains(item.StableId))
+            .ToList();
+        if (directMembers.Count == 0)
+        {
+            return;
+        }
+
+        var group = new TopologyNode(
+            new StorageUnitRef(
+                $"group:direct:{pool.StableId}",
+                StorageUnitKind.DirectDiskGroup,
+                "Unallocated"),
+            TopologyProjector.JoinSummary(
+                $"{directMembers.Count} physical disks",
+                TopologyProjector.FormatBytes(directMembers.Sum(item => item.Size))),
+            childrenLayout: TopologyChildrenLayout.Flow);
+        foreach (var member in directMembers)
+        {
+            group.Children.Add(PhysicalDiskNode(member));
+        }
+
+        poolNode.Children.Add(group);
     }
 
     private static TopologyNode CreateVirtualDiskNode(

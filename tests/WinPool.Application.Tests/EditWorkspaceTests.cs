@@ -139,6 +139,99 @@ public sealed class EditWorkspaceTests
         Assert.Equal(disk.Children.Count, view.Children.Count);
     }
 
+    [Fact]
+    public void PoolRendersSnapshotTiersWithMembersOnly()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var pools = EditWorkspace.ProjectPoolWorkspace(snapshot, minUnallocatedBytes: 0);
+        var pool = pools.Single(node => node.Unit.StableId == "pool:t1");
+        var tierChildren = pool.Children
+            .Where(child => child.Unit.Kind == StorageUnitKind.StorageTier)
+            .ToArray();
+        var tier = Assert.Single(tierChildren);
+        Assert.Equal("tier:ssd", tier.Unit.StableId);
+        Assert.Single(tier.Children);
+    }
+
+    [Fact]
+    public void TierUncoveredMembersRenderInTheUnallocatedGroup()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var pools = EditWorkspace.ProjectPoolWorkspace(snapshot, minUnallocatedBytes: 0);
+        var pool = pools.Single(node => node.Unit.StableId == "pool:t1");
+        var group = Assert.Single(pool.Children, child => child.Unit.Kind == StorageUnitKind.DirectDiskGroup);
+        Assert.Equal("group:direct:pool:t1", group.Unit.StableId);
+        Assert.Equal(2, group.Children.Count);
+        Assert.Contains(group.Children, disk => disk.Unit.StableId == "physical:extra");
+        Assert.Contains(group.Children, disk => disk.Unit.StableId == "physical:hdd");
+    }
+
+    [Fact]
+    public void PlusPoolDisappearsWhileADraftExists()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        Assert.Contains(
+            EditWorkspace.ProjectPoolWorkspace(snapshot, 0),
+            node => EditWorkspace.IsPlus(node.Unit.StableId));
+
+        var drafted = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
+        var duringDraft = EditWorkspace.ProjectPoolWorkspace(drafted, 0);
+        Assert.DoesNotContain(duringDraft, node => EditWorkspace.IsPlus(node.Unit.StableId));
+        Assert.Single(duringDraft, node => EditWorkspace.IsDraftPool(node.Unit.StableId));
+
+        var discarded = EditWorkspace.DiscardDraftPool(drafted, duringDraft.Single(node => EditWorkspace.IsDraftPool(node.Unit.StableId)).Unit.StableId);
+        Assert.Contains(
+            EditWorkspace.ProjectPoolWorkspace(discarded, 0),
+            node => EditWorkspace.IsPlus(node.Unit.StableId));
+    }
+
+    private static StorageSnapshot TieredPoolSnapshot(bool withVirtualDisk)
+    {
+        var ssd = new PhysicalDiskInfo(
+            "physical:ssd", true, "SSD One", "Model", "SS0001", "SATA", "SSD",
+            1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 2,
+            false, false, false, false, "pool:t1");
+        var hdd = new PhysicalDiskInfo(
+            "physical:hdd", true, "HDD One", "Model", "HD0001", "SATA", "HDD",
+            2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 3,
+            false, false, false, false, "pool:t1");
+        var extra = new PhysicalDiskInfo(
+            "physical:extra", true, "Extra Disk", "Model", "EX0001", "SATA", "HDD",
+            2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 4,
+            false, false, false, false, "pool:t1");
+        var tiers = new List<StorageTierInfo>
+        {
+            new("tier:ssd", true, "Pool-t1 SSD", "SSD", "Mirror", 1_000_000_000,
+                1_000_000_000, "pool:t1", null, ["physical:ssd"]),
+            new("tier:hdd-empty", true, "Pool-t1 HDD", "HDD", "Parity", 0,
+                0, "pool:t1", null, [])
+        };
+        return new StorageSnapshot(
+            2, "test", DateTimeOffset.UtcNow,
+            new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
+            [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
+            [ssd, hdd, extra],
+            [
+                new StoragePoolInfo(
+                    "pool:primordial", true, "Primordial", true, "Healthy", "OK",
+                    0, 0, "subsystem:1", []),
+                new StoragePoolInfo(
+                    "pool:t1", true, "Pool01", false, "Healthy", "OK",
+                    5_000_000_000L, 0, "subsystem:1", ["physical:ssd", "physical:hdd", "physical:extra"])
+            ],
+            tiers,
+            withVirtualDisk
+                ? [new VirtualDiskInfo(
+                    "vdisk:1", true, "Pool01", "Healthy", "OK", "Simple", "Fixed",
+                    null, null, 1_000_000_000, 1_000_000_000, "pool:t1", ["tier:ssd"], [])]
+                : [],
+            [],
+            [],
+            [],
+            [],
+            []);
+    }
+
     private static StorageSnapshot TwoGapDiskSnapshot()
     {
         var osDisk = new OsDiskInfo(

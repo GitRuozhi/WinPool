@@ -426,7 +426,7 @@ public static class TopologyProjector
         }
     }
 
-    private static int TierSortOrder(string mediaType) =>
+    internal static int TierSortOrder(string mediaType) =>
         mediaType.Equals("SSD", StringComparison.OrdinalIgnoreCase)
         || mediaType.Equals("SCM", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
 
