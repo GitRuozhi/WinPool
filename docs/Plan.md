@@ -24,7 +24,10 @@
   indicator and guardrails);
   2026-09-05 (fourth amendment: Edit-lower projection aligned with Manage —
   tier cards render only from snapshot tiers with members; tier-uncovered
-  pool members gain the Manage-equivalent Unallocated group)
+  pool members gain the Manage-equivalent Unallocated group);
+  2026-09-05 (fifth amendment: the modifiability icon covers every physical
+  disk in Edit lower, primordial and pool members alike, under one state
+  rule)
 - **Baseline commit:** `563768efddbca17bdd6f831c11daaed573556ba3`
   (implementation baseline; the original installation baseline was `0ef6d22`)
 - **Working branch:** `main`
@@ -94,6 +97,12 @@ Fourth-amendment decisions (2026-09-05):
     The fixed three-tier calls and the missing direct-member branch were the
     verified projection gaps behind "visible in Manage, missing in Edit
     lower".
+
+Fifth-amendment decision (2026-09-05):
+
+13. The structure-modifiability icon covers every physical disk shown in
+    Edit lower — primordial-pool members and storage-pool members alike —
+    under one content-based state rule — §7.
 
 **Open confirmation required before coding (not yet given):**
 
@@ -689,14 +698,18 @@ Storage-object cards in Edit lower show a top-right icon with two states:
 modification**. The icon carries an accessibility name and is presented by
 the shared `TopologyNodeControl`.
 
-This stage defines the state for physical disks (primordial-pool members)
-and storage pools. Other object kinds show no icon.
+This stage defines the state for every physical disk shown in Edit lower —
+primordial-pool members and storage-pool members (tier cards and the
+Unallocated group) alike — and for storage pools. Other object kinds (tiers,
+virtual disks, groups) show no icon.
 
 ### 7.2 State rules
 
-- A physical disk in the primordial pool **supports** modification when it
-  has no partitions, or all its partitions hold no stored data; otherwise
-  **not supported**.
+- A physical disk, regardless of which pool holds it, **supports**
+  modification when it has no partitions, or all its partitions hold no
+  stored data; otherwise **not supported**. The rule is content-based and
+  applies identically to primordial-pool members and to disks inside
+  storage pools.
 - A storage pool (non-primordial) **supports** modification when all its
   virtual disks have no partitions, or their partitions hold no stored data;
   otherwise **not supported**.
@@ -922,7 +935,9 @@ Do not duplicate those behaviors into an Edit-only control.
 Primary owners:
 
 - projection state: `src/WinPool.Application/EditWorkspace.cs` (§7.2 rules);
-- icon: `TopologyNodeControl` (top-right, two states, accessible name);
+- icon: `TopologyNodeControl` (top-right, two states, accessible name) on
+  every physical disk card — primordial or pool member — and every pool
+  card;
 - drag rules: the Edit working-copy editing path — drag-out of a member
   physical disk from an unsupported pool is refused; drag-in remains allowed;
   unsupported disks remain draggable;
@@ -1067,8 +1082,9 @@ Tests must prove:
 - pool members not covered by any tier appear in the Unallocated group, are
   selectable and draggable, and can be dragged to another pool;
 - modifiability state: disk without partitions → supported; disk with empty
-  partitions → supported; disk with data → unsupported; pool whose virtual
-  disks have no partitions or hold no data → supported; otherwise
+  partitions → supported; disk with data → unsupported — for primordial-pool
+  disks and storage-pool member disks alike; pool whose virtual disks have
+  no partitions or hold no data → supported; otherwise
   unsupported; undeterminable data presence → unsupported.
 
 ### 10.5 Guardrails
@@ -1130,9 +1146,10 @@ A local simulation-only Edit click-through should check:
 12. Edit lower plus-pool: clicking it creates one draft and the plus
     disappears; it returns after execute or discard; a second draft cannot be
     created.
-13. Edit lower modifiability icon matches §7.2 for prepared scenarios (disk
-    with data; disk without partitions; pool with populated virtual disks;
-    pool with empty virtual disks).
+13. Edit lower modifiability icon matches §7.2 for prepared scenarios
+    (primordial disk with data; primordial disk without partitions; a disk
+    inside a pool's tier card or Unallocated group with and without data;
+    pool with populated virtual disks; pool with empty virtual disks).
 14. Unsupported disk: dragging still works; Execute is blocked with a dialog
     naming the disk, the problem, and the recommended action.
 15. Unsupported pool: member disks cannot be dragged out but can be dragged
@@ -1263,8 +1280,9 @@ Implementation is complete only when:
 - Edit lower shows the Unallocated group for tier-uncovered pool members,
   equivalent to Manage;
 - Edit lower plus-pool follows the single-draft rule (§3.4);
-- Edit lower disk and pool cards show the modifiability icon per §7.2, with
-  the conservative default for undeterminable data presence;
+- Edit lower disk and pool cards show the modifiability icon per §7.2 —
+  every physical disk, including storage-pool members — with the
+  conservative default for undeterminable data presence;
 - unsupported disks remain draggable with Execute blocked; unsupported pools
   refuse member drag-out, accept drag-in, and block Execute; the blocked
   Execute dialog names each object, problem, and recommended action;
