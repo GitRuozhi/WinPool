@@ -211,6 +211,63 @@ public sealed class TopologyLayoutEngineTests
         Assert.Equal(3, result.UnitWidth);
     }
 
+    [Fact]
+    public void WeightedRootRowSlotsStretchByUnitWeight()
+    {
+        var system = System(Primordial(), Pool01(1, 4));
+        var result = TopologyLayoutEngine.Layout(system, Wide);
+
+        var spacing = TopologyLayoutEngine.SiblingSpacing;
+        var mins = result.Children.Select(child => child.PixelWidth).ToArray();
+        var units = result.Children.Select(child => (double)child.UnitWidth).ToArray();
+        var unitSum = Math.Max(1d, units.Sum());
+        var extra = Wide - spacing - mins.Sum();
+        for (var i = 0; i < result.Children.Count; i++)
+        {
+            var expected = Math.Max(1, mins[i] + (extra > 0 ? extra * units[i] / unitSum : 0));
+            Assert.Equal(expected, result.ChildWidths[i], 6);
+        }
+    }
+
+    [Fact]
+    public void FlowRowSlotsFillEquallyAndStackChildrenTakeFullWidth()
+    {
+        var result = TopologyLayoutEngine.Layout(System(Primordial(), Pool01(1, 4)), Wide);
+
+        // Primordial pool is Flow: its row children receive equal widths
+        // that fill the pool's container (assigned slot minus chrome).
+        var poolSlot = result.ChildWidths[0];
+        var pool = result.Children[0];
+        var expectedItem = (poolSlot
+            - TopologyLayoutEngine.AncestorChrome
+            - (3 * TopologyLayoutEngine.SiblingSpacing)) / 4;
+        Assert.Equal(expectedItem, pool.ChildWidths[0], 6);
+        Assert.Equal(pool.ChildWidths[0], pool.ChildWidths[3], 6);
+
+        // The partition card inside is Stack: each of its five leaf
+        // children takes the full container width.
+        var partition = pool.Children[0];
+        var partitionContainer = pool.ChildWidths[0] - TopologyLayoutEngine.AncestorChrome;
+        Assert.Equal(partitionContainer, partition.ChildWidths[0], 6);
+
+        // Pool01 is Stack: its first child takes the full container width
+        // of the pool card.
+        var stackPoolSlot = result.ChildWidths[1];
+        var stackPool = result.Children[1];
+        Assert.Equal(
+            stackPoolSlot - TopologyLayoutEngine.AncestorChrome,
+            stackPool.ChildWidths[0],
+            6);
+
+        // The HDD tier of Pool01 is Flow: its four disk cards fill the
+        // tier container equally.
+        var hddTier = stackPool.Children[2];
+        var tierContainer = stackPool.ChildWidths[2] - TopologyLayoutEngine.AncestorChrome;
+        var expectedDisk = (tierContainer - (3 * TopologyLayoutEngine.SiblingSpacing)) / 4;
+        Assert.Equal(expectedDisk, hddTier.ChildWidths[0], 6);
+        Assert.Equal(hddTier.ChildWidths[0], hddTier.ChildWidths[3], 6);
+    }
+
     private static TopologyLayoutInput System(params TopologyLayoutInput[] children) =>
         new(true, true, TopologyChildrenLayout.WeightedFlow, children);
 

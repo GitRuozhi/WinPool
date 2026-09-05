@@ -99,36 +99,25 @@ public sealed class WeightedPoolPanel : Panel
             return new LayoutPlan(width, []);
         }
 
-        var result = TopologyLayoutEngine.Layout(
-            TopologyLayoutMapper.FromViewModel(owner),
-            width);
-        owner.ApplyLayout(result);
-        var slots = AllocateRows(result, width);
-        return new LayoutPlan(width, slots);
-    }
-
-    private static List<List<RowSlot>> AllocateRows(TopologyLayoutResult result, double availableWidth)
-    {
-        var rows = new List<List<RowSlot>>();
-        foreach (var row in result.Rows)
+        if (owner.IsLayoutRoot)
         {
-            var nodes = row.Select(index => result.Children[index]).ToList();
-            var spacing = TopologyLayoutEngine.SiblingSpacing * Math.Max(0, nodes.Count - 1);
-            var mins = nodes.Select(node => node.PixelWidth).ToList();
-            var minSum = mins.Sum();
-            var extra = availableWidth - spacing - minSum;
-            var unitSum = Math.Max(1, nodes.Sum(node => node.UnitWidth));
-            var slots = new List<RowSlot>();
-            for (var i = 0; i < row.Count; i++)
-            {
-                var stretch = extra > 0 ? extra * nodes[i].UnitWidth / unitSum : 0;
-                slots.Add(new RowSlot(row[i], Math.Max(1, mins[i] + stretch)));
-            }
-
-            rows.Add(slots);
+            var result = TopologyLayoutEngine.Layout(
+                TopologyLayoutMapper.FromViewModel(owner),
+                width);
+            owner.ApplyLayout(result);
         }
 
-        return rows;
+        if (owner.LayoutRows.Count == 0 || owner.LayoutChildWidths.Count != owner.Children.Count)
+        {
+            return new LayoutPlan(width, []);
+        }
+
+        var slots = owner.LayoutRows
+            .Select(row => row
+                .Select(index => new RowSlot(index, owner.LayoutChildWidths[index]))
+                .ToList())
+            .ToList();
+        return new LayoutPlan(width, slots);
     }
 
     private static double ResolveAvailableWidth(double availableWidth, TopologyNodeViewModel? owner)

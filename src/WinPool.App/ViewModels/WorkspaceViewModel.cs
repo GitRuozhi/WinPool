@@ -1301,7 +1301,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         return new TopologyNodeViewModel(
             root,
             this,
-            document.Snapshot);
+            document.Snapshot,
+            isLayoutRoot: true);
     }
 
     private void RebuildObjects(ManageSelectionKey? preferredSelection)

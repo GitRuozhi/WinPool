@@ -391,7 +391,8 @@ public sealed partial class EditPage : Page
                 EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
                 ViewModel,
                 _working,
-                _lowerInteraction)
+                _lowerInteraction,
+                isLayoutRoot: true)
         };
     }
 

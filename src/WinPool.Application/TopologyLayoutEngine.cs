@@ -12,7 +12,8 @@ public sealed record TopologyLayoutResult(
     double PixelWidth,
     int FlowColumns,
     IReadOnlyList<IReadOnlyList<int>> Rows,
-    IReadOnlyList<TopologyLayoutResult> Children);
+    IReadOnlyList<TopologyLayoutResult> Children,
+    IReadOnlyList<double> ChildWidths);
 
 public static class TopologyLayoutEngine
 {
@@ -31,23 +32,113 @@ public static class TopologyLayoutEngine
     {
         ArgumentNullException.ThrowIfNull(root);
         var avail = Math.Max(1, availableWidth);
+        Node rootNode;
         if (!root.IsExpanded || root.Children.Count == 0)
         {
-            return MeasureSubtree(root, int.MaxValue).ToResult();
+            rootNode = MeasureSubtree(root, int.MaxValue);
         }
-
-        if (root.ChildrenLayout == TopologyChildrenLayout.WeightedFlow)
+        else if (root.ChildrenLayout == TopologyChildrenLayout.WeightedFlow)
         {
-            return PackSiblings(root, avail).ToResult();
+            rootNode = PackSiblings(root, avail);
         }
-
-        var measured = MeasureSubtree(root, int.MaxValue);
-        if (measured.PixelWidth > avail)
+        else
         {
-            return ShrinkToFit(root, avail).ToResult();
+            var measured = MeasureSubtree(root, int.MaxValue);
+            rootNode = measured.PixelWidth > avail
+                ? ShrinkToFit(root, avail)
+                : measured;
         }
 
-        return measured.ToResult();
+        AllocateChildWidths(root, rootNode, avail);
+        return rootNode.ToResult();
+    }
+
+    /// <summary>
+    /// Assigns the final width of every child slot on the completed unit
+    /// plan. The root container is the available width supplied by the
+    /// calling surface adapter; every nested container is that node's
+    /// assigned width minus the ancestor chrome, which reproduces the
+    /// WinUI measure chain (card border padding plus items margin).
+    /// With no declared metadata the distribution reproduces the previous
+    /// panel arithmetic exactly: WeightedFlow slots stretch by unit
+    /// weight, Flow rows fill equally, Stack children take the full width.
+    /// </summary>
+    private static void AllocateChildWidths(
+        TopologyLayoutInput input,
+        Node node,
+        double containerWidth)
+    {
+        if (node.Children.Count == 0 || input.Children.Count != node.Children.Count)
+        {
+            node.ChildWidths = [];
+            return;
+        }
+
+        var widths = new double[node.Children.Count];
+        switch (input.ChildrenLayout)
+        {
+            case TopologyChildrenLayout.Stack:
+                for (var i = 0; i < node.Children.Count; i++)
+                {
+                    widths[i] = Math.Max(1, containerWidth);
+                    AllocateChildWidths(
+                        input.Children[i],
+                        node.Children[i],
+                        Math.Max(1, containerWidth - AncestorChrome));
+                }
+
+                break;
+
+            case TopologyChildrenLayout.WeightedFlow:
+                foreach (var row in node.Rows)
+                {
+                    var spacing = SiblingSpacing * Math.Max(0, row.Count - 1);
+                    var minSum = 0d;
+                    var unitSum = 0d;
+                    foreach (var index in row)
+                    {
+                        minSum += node.Children[index].PixelWidth;
+                        unitSum += node.Children[index].UnitWidth;
+                    }
+
+                    unitSum = Math.Max(1, unitSum);
+                    var extra = containerWidth - spacing - minSum;
+                    foreach (var index in row)
+                    {
+                        var child = node.Children[index];
+                        var stretch = extra > 0 ? extra * child.UnitWidth / unitSum : 0;
+                        var width = Math.Max(1, child.PixelWidth + stretch);
+                        widths[index] = width;
+                        AllocateChildWidths(
+                            input.Children[index],
+                            child,
+                            Math.Max(1, width - AncestorChrome));
+                    }
+                }
+
+                break;
+
+            default:
+                foreach (var row in node.Rows)
+                {
+                    var usable = Math.Max(
+                        1,
+                        containerWidth - (Math.Max(0, row.Count - 1) * SiblingSpacing));
+                    var itemWidth = usable / row.Count;
+                    foreach (var index in row)
+                    {
+                        widths[index] = itemWidth;
+                        AllocateChildWidths(
+                            input.Children[index],
+                            node.Children[index],
+                            Math.Max(1, itemWidth - AncestorChrome));
+                    }
+                }
+
+                break;
+        }
+
+        node.ChildWidths = widths;
     }
 
     private static Node PackSiblings(TopologyLayoutInput root, double availableWidth)
@@ -433,6 +524,7 @@ public static class TopologyLayoutEngine
         public int FlowColumns { get; init; }
         public List<List<int>> Rows { get; init; } = [];
         public List<Node> Children { get; init; } = [];
+        public IReadOnlyList<double> ChildWidths { get; set; } = [];
 
         public TopologyLayoutResult ToResult() =>
             new(
@@ -441,6 +533,7 @@ public static class TopologyLayoutEngine
                 PixelWidth,
                 FlowColumns,
                 Rows.Select(row => (IReadOnlyList<int>)row).ToList(),
-                Children.Select(child => child.ToResult()).ToList());
+                Children.Select(child => child.ToResult()).ToList(),
+                ChildWidths);
     }
 }

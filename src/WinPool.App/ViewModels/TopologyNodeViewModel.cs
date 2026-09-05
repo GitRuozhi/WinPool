@@ -25,12 +25,14 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         ManageTopologyNodeView node,
         WorkspaceViewModel owner,
         StorageSnapshot snapshot,
-        TopologyEditInteraction? edit = null)
+        TopologyEditInteraction? edit = null,
+        bool isLayoutRoot = false)
     {
         _owner = owner;
         _snapshot = snapshot;
         _occurrenceKey = node.OccurrenceKey;
         _edit = edit;
+        IsLayoutRoot = isLayoutRoot;
         var unit = ToStorageUnit(node, snapshot);
         ObjectId = node.Id;
         Role = node.Role;
@@ -195,7 +197,16 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public IReadOnlyList<IReadOnlyList<int>> LayoutRows { get; private set; } = [];
 
+    public IReadOnlyList<double> LayoutChildWidths { get; private set; } = [];
+
     public double HostViewportWidth => _owner.TopologyViewportWidth;
+
+    /// <summary>
+    /// True only for the root node of a topology surface (Manage system
+    /// root, Edit pool row). Only this node's panel runs the layout engine;
+    /// every nested panel consumes the cascaded slots.
+    /// </summary>
+    public bool IsLayoutRoot { get; }
 
     public void ApplyLayout(TopologyLayoutResult result)
     {
@@ -204,6 +215,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         LayoutFlowColumns = result.FlowColumns;
         LayoutPixelWidth = result.PixelWidth;
         LayoutRows = result.Rows;
+        LayoutChildWidths = result.ChildWidths;
         if (!IsExpanded)
         {
             return;
