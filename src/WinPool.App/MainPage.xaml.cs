@@ -813,11 +813,18 @@ public sealed partial class MainPage : Page
     private string Text(string zh, string en) =>
         ViewModel.Localization.IsChinese ? zh : en;
 
+    private const double MinTopologyWidth = 320;
+
+    private const double TopologyWidthMargin = 20;
+
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var width = Math.Max(320, e.NewSize.Width - 20);
+        var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
         TopologySystemsControl.Width = width;
-        ViewModel.UpdateTopologyViewportWidth(width);
+        foreach (var root in ViewModel.TopologySystems)
+        {
+            root.SetSurfaceViewportWidth(width);
+        }
     }
 
     private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e)

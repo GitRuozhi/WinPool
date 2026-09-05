@@ -120,6 +120,8 @@ public sealed class WeightedPoolPanel : Panel
         return new LayoutPlan(width, slots);
     }
 
+    private const double DesignTimeFallbackWidth = 1400;
+
     private static double ResolveAvailableWidth(double availableWidth, TopologyNodeViewModel? owner)
     {
         if (!double.IsInfinity(availableWidth) && !double.IsNaN(availableWidth) && availableWidth > 1)
@@ -127,7 +129,7 @@ public sealed class WeightedPoolPanel : Panel
             return availableWidth;
         }
 
-        var viewport = owner?.HostViewportWidth ?? 1400;
+        var viewport = owner?.HostViewportWidth ?? DesignTimeFallbackWidth;
         return Math.Max(1, viewport);
     }
 

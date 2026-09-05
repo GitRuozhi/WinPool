@@ -199,7 +199,25 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public IReadOnlyList<double> LayoutChildWidths { get; private set; } = [];
 
-    public double HostViewportWidth => _owner.TopologyViewportWidth;
+    public double HostViewportWidth => _surfaceViewportWidth;
+
+    private double _surfaceViewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
+
+    /// <summary>
+    /// Updates this surface's own fallback host width. Only surface roots
+    /// need to call this; there is no shared topology viewport state.
+    /// </summary>
+    public void SetSurfaceViewportWidth(double width)
+    {
+        var normalized = Math.Max(WorkspaceViewModel.MinSurfaceViewportWidth, width);
+        if (Math.Abs(_surfaceViewportWidth - normalized) < 1)
+        {
+            return;
+        }
+
+        _surfaceViewportWidth = normalized;
+        RefreshLayout();
+    }
 
     /// <summary>
     /// True only for the root node of a topology surface (Manage system

@@ -1105,22 +1105,15 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
     }
 
-    public double TopologyViewportWidth { get; private set; } = 1400;
+    /// <summary>
+    /// Per-surface viewport fallbacks. There is deliberately no shared
+    /// topology viewport width: Manage, Edit upper, and Edit lower each
+    /// keep their own host width on their root view models, so resizing
+    /// one surface can never mutate another surface's layout inputs.
+    /// </summary>
+    public const double DefaultSurfaceViewportWidth = 1400;
 
-    public void UpdateTopologyViewportWidth(double width)
-    {
-        var normalized = Math.Max(320, width);
-        if (Math.Abs(TopologyViewportWidth - normalized) < 1)
-        {
-            return;
-        }
-
-        TopologyViewportWidth = normalized;
-        foreach (var root in TopologySystems)
-        {
-            root.RefreshLayout();
-        }
-    }
+    public const double MinSurfaceViewportWidth = 320;
 
     public string CreateSelectedSummary()
     {

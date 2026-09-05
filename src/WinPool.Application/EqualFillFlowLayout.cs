@@ -4,10 +4,12 @@ public sealed record EqualFillFlowRow(int StartIndex, int Count, double ItemWidt
 
 public static class EqualFillFlowLayout
 {
+    public const double DefaultMinimumItemWidth = 150;
+
     public static IReadOnlyList<EqualFillFlowRow> CreateRows(
         int itemCount,
         double availableWidth,
-        double minimumItemWidth = 150,
+        double minimumItemWidth = DefaultMinimumItemWidth,
         double spacing = 6)
     {
         if (itemCount <= 0)

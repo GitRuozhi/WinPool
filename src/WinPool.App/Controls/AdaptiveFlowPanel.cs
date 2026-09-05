@@ -7,6 +7,8 @@ namespace WinPool_App.Controls;
 
 public sealed class AdaptiveFlowPanel : Panel
 {
+    private const double FallbackMeasureWidth = 1200;
+
     public double MinimumItemWidth { get; set; } = TopologyLayoutEngine.LeafMinWidth;
 
     public double HorizontalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
@@ -35,7 +37,7 @@ public sealed class AdaptiveFlowPanel : Panel
             desiredHeight -= VerticalSpacing;
         }
 
-        var width = double.IsInfinity(availableSize.Width) ? 1200 : Math.Max(0, availableSize.Width);
+        var width = double.IsInfinity(availableSize.Width) ? FallbackMeasureWidth : Math.Max(0, availableSize.Width);
         return new Size(width, desiredHeight);
     }
 
@@ -88,7 +90,7 @@ public sealed class AdaptiveFlowPanel : Panel
                 .ToList();
         }
 
-        var width = double.IsInfinity(availableSize.Width) ? 1200 : Math.Max(0, availableSize.Width);
+        var width = double.IsInfinity(availableSize.Width) ? FallbackMeasureWidth : Math.Max(0, availableSize.Width);
         var columns = owner is { LayoutFlowColumns: > 0 }
             ? owner.LayoutFlowColumns
             : Math.Max(1, Children.Count);

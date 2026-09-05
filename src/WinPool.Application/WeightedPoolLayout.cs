@@ -2,10 +2,12 @@ namespace WinPool.Application;
 
 public static class WeightedPoolLayout
 {
+    public const double DefaultSlotWidth = 150;
+
     public static IReadOnlyList<IReadOnlyList<int>> CreateRows(
         IReadOnlyList<int> weights,
         double availableWidth,
-        double slotWidth = 150,
+        double slotWidth = DefaultSlotWidth,
         double spacing = 6)
     {
         var width = Math.Max(1, availableWidth);

@@ -1230,6 +1230,41 @@ public sealed class ArchitectureBoundaryTests
         }
     }
 
+    [Fact]
+    public void TopologySurfacesKeepPerSurfaceViewportState()
+    {
+        var root = FindRepositoryRoot();
+        var appDirectory = Path.Combine(root, "src", "WinPool.App");
+        var sources = Directory.EnumerateFiles(appDirectory, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        // No shared topology viewport state may exist: Manage, Edit upper,
+        // and Edit lower each keep their own host width, so resizing one
+        // surface can never mutate another surface's layout inputs.
+        Assert.All(
+            sources,
+            source => Assert.DoesNotContain(
+                "TopologyViewportWidth",
+                File.ReadAllText(source),
+                StringComparison.Ordinal));
+
+        var workspace = File.ReadAllText(
+            Path.Combine(appDirectory, "ViewModels", "WorkspaceViewModel.cs"));
+        Assert.Contains("DefaultSurfaceViewportWidth", workspace, StringComparison.Ordinal);
+
+        var nodeViewModel = File.ReadAllText(
+            Path.Combine(appDirectory, "ViewModels", "TopologyNodeViewModel.cs"));
+        Assert.Contains("SetSurfaceViewportWidth", nodeViewModel, StringComparison.Ordinal);
+
+        // The Edit page keeps its own lower-surface width and applies it to
+        // each recreated pool-row root.
+        var editPage = File.ReadAllText(Path.Combine(appDirectory, "EditPage.xaml.cs"));
+        Assert.Contains("_lowerViewportWidth", editPage, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         for (DirectoryInfo? directory = new(AppContext.BaseDirectory);

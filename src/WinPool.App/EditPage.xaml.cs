@@ -350,18 +350,28 @@ public sealed partial class EditPage : Page
     private long UnallocatedIgnoreBytes =>
         Math.Max(0, ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
 
+    private const double MinTopologyWidth = 320;
+
+    private const double TopologyWidthMargin = 20;
+
+    private double _lowerViewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
+
     private void UpperScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var width = Math.Max(320, e.NewSize.Width - 20);
+        var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
         UpperTopologyControl.Width = width;
-        ViewModel.UpdateTopologyViewportWidth(width);
     }
 
     private void LowerScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var width = Math.Max(320, e.NewSize.Width - 20);
+        var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
         LowerTopologyControl.Width = width;
-        ViewModel.UpdateTopologyViewportWidth(width);
+        _lowerViewportWidth = width;
+        if (LowerTopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
+            && roots.Count > 0)
+        {
+            roots[0].SetSurfaceViewportWidth(width);
+        }
     }
 
     private void RefreshUpper()
@@ -385,15 +395,14 @@ public sealed partial class EditPage : Page
     private void RefreshLower()
     {
         var root = EditWorkspace.ProjectPoolWorkspaceRoot(_working, UnallocatedIgnoreBytes);
-        LowerTopologyControl.ItemsSource = new[]
-        {
-            new TopologyNodeViewModel(
-                EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
-                ViewModel,
-                _working,
-                _lowerInteraction,
-                isLayoutRoot: true)
-        };
+        var rootViewModel = new TopologyNodeViewModel(
+            EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
+            ViewModel,
+            _working,
+            _lowerInteraction,
+            isLayoutRoot: true);
+        rootViewModel.SetSurfaceViewportWidth(_lowerViewportWidth);
+        LowerTopologyControl.ItemsSource = [rootViewModel];
     }
 
     private StoragePoolInfo? SelectedPool() =>
