@@ -50,7 +50,10 @@ internal static class Program
             var productRoot = ResolveProductRoot();
             var dataRoot = StorageDataLocations.ResolveCurrentRoot(productRoot);
             var preferencesService = new LocalUserPreferencesService(dataRoot);
-            using var context = new TrayApplicationContext(preferencesService);
+            var agentPreferencesStore = new LocalAgentPreferencesService(dataRoot);
+            using var context = new TrayApplicationContext(
+                preferencesService,
+                agentPreferencesStore);
             WorkerProcessRepository workerProcesses = null!;
             var agentEvents = new AgentEventHub();
             var processIncarnationVerifier = new WindowsProcessIncarnationVerifier();
@@ -147,7 +150,7 @@ internal static class Program
                 initialStorageHealthEvents,
                 agentEvents,
                 lifecycle,
-                preferencesService);
+                agentPreferencesStore);
             var shutdown = new AgentShutdownWorkflow(runtime, processRegistry);
             coordinator.AttachRuntime(runtime, shutdown);
             context.AttachCoordinator(coordinator);

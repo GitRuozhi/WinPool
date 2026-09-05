@@ -498,6 +498,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public UserPreferences CurrentPreferences { get; private set; } = new();
 
+    /// <summary>
+    /// Background preferences owned by the Agent. Read-only here: changes go
+    /// through the typed Agent request and come back through
+    /// ApplyAgentPreferences or the saved-response snapshot.
+    /// </summary>
+    public AgentPreferences CurrentAgentPreferences { get; private set; } = new();
+
+    public void ApplyAgentPreferences(AgentPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        CurrentAgentPreferences = preferences;
+        OnPropertyChanged(nameof(CurrentAgentPreferences));
+    }
+
     public double TopologyHorizontalOffset { get; set; }
 
     public double TopologyVerticalOffset { get; set; }
@@ -566,11 +580,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public async Task SetContinuousMonitoringAsync(bool enabled)
     {
-        CurrentPreferences = CurrentPreferences with
-        {
-            ContinuousMonitoringEnabled = enabled
-        };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await SendAgentPreferenceAsync(
+            AgentPreferenceField.ContinuousMonitoringEnabled,
+            enabled,
+            null);
     }
 
     public async Task SetMonitoringSampleRateAsync(double rateHz)
@@ -580,14 +593,47 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             throw new ArgumentOutOfRangeException(nameof(rateHz));
         }
 
-        CurrentPreferences = CurrentPreferences with { MonitoringSampleRateHz = rateHz };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await SendAgentPreferenceAsync(
+            AgentPreferenceField.MonitoringSampleRateHz,
+            null,
+            rateHz);
     }
 
     public async Task SetStartAgentAtLoginAsync(bool enabled)
     {
-        CurrentPreferences = CurrentPreferences with { StartAgentAtLogin = enabled };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await SendAgentPreferenceAsync(
+            AgentPreferenceField.StartAgentAtLogin,
+            enabled,
+            null);
+    }
+
+    private async Task SendAgentPreferenceAsync(
+        AgentPreferenceField field,
+        bool? booleanValue,
+        double? numberValue)
+    {
+        if (_agentConnection is null)
+        {
+            throw new InvalidOperationException(
+                "The WinPool tray Agent is unavailable; background settings cannot be changed.");
+        }
+
+        var result = await _agentConnection.SendAsync(
+            new SetAgentPreferenceRequest(
+                field,
+                booleanValue,
+                numberValue,
+                CorrelationId.New()),
+            CancellationToken.None);
+        if (!result.IsSuccess
+            || result.Value is not AgentPreferenceSavedResponse saved)
+        {
+            var code = result.Messages.FirstOrDefault()?.Code ?? "agent.preference.request_failed";
+            throw new InvalidOperationException($"Agent preference change failed: {code}");
+        }
+
+        CurrentAgentPreferences = saved.Preferences;
+        OnPropertyChanged(nameof(CurrentAgentPreferences));
     }
 
     public string FormatSerial(string? serial) =>

@@ -89,6 +89,8 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<LoadAgentManageInventoryRequest>(envelope),
                 AgentControlMessageTypes.ExportMonitorCsv =>
                     Deserialize<ExportAgentMonitorCsvRequest>(envelope),
+                AgentControlMessageTypes.SetAgentPreference =>
+                    Deserialize<SetAgentPreferenceRequest>(envelope),
                 AgentControlMessageTypes.Shutdown =>
                     Deserialize<RequestAgentShutdownRequest>(envelope),
                 _ => null

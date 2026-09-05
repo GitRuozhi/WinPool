@@ -370,6 +370,30 @@ public sealed class AgentControlProtocolCodecTests
         Assert.Equal("ipc.request.correlation_mismatch", decoded.Code);
     }
 
+    [Fact]
+    public void CodecDecodesSetAgentPreferenceRequest()
+    {
+        var codec = new AgentControlProtocolCodec();
+        var correlationId = CorrelationId.New();
+        var request = new SetAgentPreferenceRequest(
+            AgentPreferenceField.MonitoringSampleRateHz,
+            BooleanValue: null,
+            NumberValue: 7.5,
+            CorrelationId: correlationId);
+        var envelope = Envelope(
+            AgentControlMessageTypes.SetAgentPreference,
+            correlationId,
+            JsonSerializer.SerializeToElement(request, SerializerOptions));
+
+        var decoded = codec.DecodeRequest(envelope);
+
+        Assert.True(decoded.IsAccepted);
+        var typed = Assert.IsType<SetAgentPreferenceRequest>(decoded.Request);
+        Assert.Equal(AgentPreferenceField.MonitoringSampleRateHz, typed.Field);
+        Assert.Null(typed.BooleanValue);
+        Assert.Equal(7.5, typed.NumberValue);
+    }
+
     private static IpcEnvelope Envelope(
         string messageType,
         CorrelationId correlationId,

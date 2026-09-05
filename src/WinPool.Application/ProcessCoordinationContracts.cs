@@ -120,6 +120,50 @@ public sealed record RequestAgentShutdownRequest(
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
+public enum AgentPreferenceField
+{
+    ContinuousMonitoringEnabled,
+    MonitoringSampleRateHz,
+    StartAgentAtLogin
+}
+
+/// <summary>
+/// The only way the App changes a background preference. The Agent owns the
+/// file, applies the value, persists it, and answers with the saved snapshot.
+/// </summary>
+public sealed record SetAgentPreferenceRequest(
+    AgentPreferenceField Field,
+    bool? BooleanValue,
+    double? NumberValue,
+    CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
+public static class AgentPreferenceRequests
+{
+    /// <summary>
+    /// Applies one typed value with full range validation. Returns null when
+    /// the value is missing or out of range; callers reject such requests.
+    /// </summary>
+    public static AgentPreferences? Apply(
+        AgentPreferences preferences,
+        AgentPreferenceField field,
+        bool? booleanValue,
+        double? numberValue) =>
+        field switch
+        {
+            AgentPreferenceField.ContinuousMonitoringEnabled when booleanValue.HasValue =>
+                preferences with { ContinuousMonitoringEnabled = booleanValue.Value },
+            AgentPreferenceField.StartAgentAtLogin when booleanValue.HasValue =>
+                preferences with { StartAgentAtLogin = booleanValue.Value },
+            AgentPreferenceField.MonitoringSampleRateHz
+                when numberValue.HasValue
+                     && double.IsFinite(numberValue.Value)
+                     && numberValue.Value is >= 0.2 and <= 20 =>
+                preferences with { MonitoringSampleRateHz = numberValue.Value },
+            _ => null
+        };
+}
+
 public abstract record AgentResponse;
 
 public sealed record AgentAcknowledgement : AgentResponse;
@@ -174,6 +218,9 @@ public sealed record ExportArtifactResponse(
 
 public sealed record ShutdownResponse(ShutdownResult Result) : AgentResponse;
 
+public sealed record AgentPreferenceSavedResponse(AgentPreferences Preferences)
+    : AgentResponse;
+
 public enum AgentLifecycleState
 {
     Starting,
@@ -218,6 +265,13 @@ public sealed record AgentProcessStateEvent(
 public sealed record AgentShutdownEvent(
     ShutdownReason Reason,
     DateTimeOffset OccurredAtUtc)
+    : AgentEvent(OccurredAtUtc);
+
+/// <summary>
+/// Data-less notification that agent-settings.json changed. Recipients read
+/// the file themselves and deduplicate by its SavedAtUtc label.
+/// </summary>
+public sealed record AgentPreferencesChangedEvent(DateTimeOffset OccurredAtUtc)
     : AgentEvent(OccurredAtUtc);
 
 /// <summary>

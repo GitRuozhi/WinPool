@@ -27,7 +27,6 @@ public sealed partial class SettingsPage : Page
     private bool _updatingHardwareIds;
     private bool _updatingStartup;
     private bool _updatingPartitionIgnore;
-    private readonly AgentStartupRegistration _agentStartup = new();
 
     public SettingsPage()
     {
@@ -51,7 +50,7 @@ public sealed partial class SettingsPage : Page
         ShowHardwareIdsSwitch.IsOn = ViewModel.CurrentPreferences.ShowHardwareIds;
         _updatingHardwareIds = false;
         _updatingStartup = true;
-        StartupAgentSwitch.IsOn = ViewModel.CurrentPreferences.StartAgentAtLogin;
+        StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
         _updatingStartup = false;
         _updatingPartitionIgnore = true;
         PartitionIgnoreBox.Value = ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes / (1024d * 1024d);
@@ -518,17 +517,16 @@ public sealed partial class SettingsPage : Page
 
         try
         {
-            var enabled = StartupAgentSwitch.IsOn;
-            _agentStartup.SetEnabled(enabled);
-            await ViewModel.SetStartAgentAtLoginAsync(enabled);
+            await ViewModel.SetStartAgentAtLoginAsync(StartupAgentSwitch.IsOn);
         }
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
-                or System.Security.SecurityException)
+                or System.Security.SecurityException
+                or InvalidOperationException)
         {
             _updatingStartup = true;
-            StartupAgentSwitch.IsOn = ViewModel.CurrentPreferences.StartAgentAtLogin;
+            StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
             _updatingStartup = false;
             await ShowMessageDialogAsync(exception.Message);
         }
@@ -539,6 +537,12 @@ public sealed partial class SettingsPage : Page
         if (e.PropertyName == nameof(WorkspaceViewModel.IsRealMode))
         {
             SyncExecutionMode();
+        }
+        else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentAgentPreferences))
+        {
+            _updatingStartup = true;
+            StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
+            _updatingStartup = false;
         }
     }
 

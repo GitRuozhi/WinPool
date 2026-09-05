@@ -80,6 +80,7 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
     private static readonly SemaphoreSlim SaveLock = new(1, 1);
 
     private readonly string? dataRoot;
+    private bool writesBlocked;
 
     public LocalUserPreferencesService(string? dataRoot = null)
     {
@@ -90,33 +91,45 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
 
     public string SettingsPath => Path.Combine(
         dataRoot ?? StorageDataLocations.CurrentRoot,
-        "settings.json");
+        "app-settings.json");
 
-    public async Task<UserPreferences> LoadAsync(CancellationToken cancellationToken = default)
+    public Task<UserPreferences> LoadAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             if (!File.Exists(SettingsPath))
             {
-                return new UserPreferences();
+                writesBlocked = false;
+                return Task.FromResult(new UserPreferences());
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             var preferences = JsonSerializer.Deserialize<UserPreferences>(
                 File.ReadAllText(SettingsPath),
                 JsonOptions);
-            return preferences is { FormatVersion: CurrentFormatVersion }
-                ? Normalize(preferences)
-                : new UserPreferences();
+            writesBlocked = false;
+            return Task.FromResult(
+                preferences is { FormatVersion: CurrentFormatVersion }
+                    ? Normalize(preferences)
+                    : new UserPreferences());
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return new UserPreferences();
+            // The file exists but cannot be read. Returning defaults is safe only
+            // as long as nothing persists them over the unreadable original.
+            writesBlocked = true;
+            return Task.FromResult(new UserPreferences());
         }
     }
 
     public async Task SaveAsync(UserPreferences preferences, CancellationToken cancellationToken = default)
     {
+        if (writesBlocked)
+        {
+            throw new InvalidOperationException(
+                $"User preferences could not be read; writing '{Path.GetFileName(SettingsPath)}' is blocked until the file is readable again.");
+        }
+
         await SaveLock.WaitAsync(cancellationToken);
         try
         {
@@ -159,11 +172,127 @@ public sealed class LocalUserPreferencesService : IUserPreferencesService
         preferences with
         {
             FormatVersion = CurrentFormatVersion,
-            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20),
             PartitionIgnoreSizeBytes = Math.Clamp(
                 preferences.PartitionIgnoreSizeBytes,
                 0,
                 1024L * 1024 * 1024)
+        };
+}
+
+public sealed class LocalAgentPreferencesService : IAgentPreferencesStore
+{
+    public const int CurrentFormatVersion = 1;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static readonly SemaphoreSlim SaveLock = new(1, 1);
+
+    private readonly string? dataRoot;
+    private bool writesBlocked;
+
+    public LocalAgentPreferencesService(string? dataRoot = null)
+    {
+        this.dataRoot = string.IsNullOrWhiteSpace(dataRoot)
+            ? null
+            : Path.GetFullPath(dataRoot);
+    }
+
+    public string AgentSettingsPath => Path.Combine(
+        dataRoot ?? StorageDataLocations.CurrentRoot,
+        "agent-settings.json");
+
+    public Task<AgentPreferences> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!File.Exists(AgentSettingsPath))
+            {
+                writesBlocked = false;
+                return Task.FromResult(new AgentPreferences());
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var preferences = JsonSerializer.Deserialize<AgentPreferences>(
+                File.ReadAllText(AgentSettingsPath),
+                JsonOptions);
+            writesBlocked = false;
+            return Task.FromResult(
+                preferences is { FormatVersion: CurrentFormatVersion }
+                    ? Normalize(preferences)
+                    : new AgentPreferences());
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            // Same unreadable-file rule as the user preferences: defaults in
+            // memory, but never persist defaults over a file we could not read.
+            writesBlocked = true;
+            return Task.FromResult(new AgentPreferences());
+        }
+    }
+
+    public async Task<AgentPreferences> SaveAsync(
+        AgentPreferences preferences,
+        CancellationToken cancellationToken = default)
+    {
+        if (writesBlocked)
+        {
+            throw new InvalidOperationException(
+                $"Agent preferences could not be read; writing '{Path.GetFileName(AgentSettingsPath)}' is blocked until the file is readable again.");
+        }
+
+        await SaveLock.WaitAsync(cancellationToken);
+        try
+        {
+            var directory = Path.GetDirectoryName(AgentSettingsPath)!;
+            Directory.CreateDirectory(directory);
+            var temporaryPath = AgentSettingsPath + ".tmp-" + Guid.NewGuid().ToString("N");
+            var saved = Normalize(preferences) with
+            {
+                FormatVersion = CurrentFormatVersion,
+                SavedAtUtc = DateTimeOffset.UtcNow
+            };
+            await using (var stream = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 4096,
+                             FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    saved,
+                    JsonOptions,
+                    cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(AgentSettingsPath))
+            {
+                File.Replace(temporaryPath, AgentSettingsPath, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(temporaryPath, AgentSettingsPath);
+            }
+
+            return saved;
+        }
+        finally
+        {
+            SaveLock.Release();
+        }
+    }
+
+    private static AgentPreferences Normalize(AgentPreferences preferences) =>
+        preferences with
+        {
+            FormatVersion = CurrentFormatVersion,
+            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20)
         };
 }
 

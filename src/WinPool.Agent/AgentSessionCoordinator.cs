@@ -66,6 +66,10 @@ public interface IAgentRequestOperations
     Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
         ExportAgentMonitorCsvRequest request,
         CancellationToken cancellationToken);
+
+    Task<ApplicationResult<AgentResponse>> SetAgentPreferenceAsync(
+        SetAgentPreferenceRequest request,
+        CancellationToken cancellationToken);
 }
 
 public sealed class AgentSessionCoordinator
@@ -191,6 +195,8 @@ public sealed class AgentSessionCoordinator
                 operations.LoadManageInventoryAsync(typed, cancellationToken),
             ExportAgentMonitorCsvRequest typed =>
                 operations.ExportMonitorCsvAsync(typed, cancellationToken),
+            SetAgentPreferenceRequest typed =>
+                operations.SetAgentPreferenceAsync(typed, cancellationToken),
             _ => Task.FromResult(RejectUnsupportedRequest(request.CorrelationId))
         };
     }

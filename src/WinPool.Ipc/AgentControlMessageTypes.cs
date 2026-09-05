@@ -28,6 +28,7 @@ public static class AgentControlMessageTypes
     public const string LoadManageInventory =
         "agent.request.load_manage_inventory";
     public const string ExportMonitorCsv = "agent.request.export_monitor_csv";
+    public const string SetAgentPreference = "agent.request.set_agent_preference";
     public const string Shutdown = "agent.request.shutdown";
     public const string Response = "agent.response";
 }

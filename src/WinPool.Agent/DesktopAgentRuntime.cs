@@ -28,7 +28,8 @@ internal sealed class DesktopAgentRuntime :
     private readonly StorageHealthEventRepository storageHealthEventRepository;
     private readonly AgentEventHub agentEvents;
     private readonly AgentLifecycleStateStore lifecycle;
-    private readonly IUserPreferencesService preferencesService;
+    private readonly IAgentPreferencesStore agentPreferences;
+    private readonly AgentStartupRegistration startupRegistration;
     private readonly IProcessIncarnationVerifier processIncarnationVerifier;
     private readonly string mainApplicationExecutablePath;
     private readonly CancellationTokenSource storageHealthEventCancellation = new();
@@ -59,7 +60,8 @@ internal sealed class DesktopAgentRuntime :
         IReadOnlyList<StorageHealthEvent> initialStorageHealthEvents,
         AgentEventHub agentEvents,
         AgentLifecycleStateStore lifecycle,
-        IUserPreferencesService preferencesService,
+        IAgentPreferencesStore agentPreferences,
+        AgentStartupRegistration? startupRegistration = null,
         IPhysicalDiskDeviceResolver? physicalDiskDeviceResolver = null)
     {
         this.tray = tray ?? throw new ArgumentNullException(nameof(tray));
@@ -100,8 +102,9 @@ internal sealed class DesktopAgentRuntime :
             ?? throw new ArgumentNullException(nameof(storageHealthEventRepository));
         this.agentEvents = agentEvents ?? throw new ArgumentNullException(nameof(agentEvents));
         this.lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
-        this.preferencesService = preferencesService
-            ?? throw new ArgumentNullException(nameof(preferencesService));
+        this.agentPreferences = agentPreferences
+            ?? throw new ArgumentNullException(nameof(agentPreferences));
+        this.startupRegistration = startupRegistration ?? new AgentStartupRegistration();
         ArgumentNullException.ThrowIfNull(initialStorageHealthEvents);
         foreach (var storageEvent in initialStorageHealthEvents.TakeLast(200))
         {
@@ -193,7 +196,7 @@ internal sealed class DesktopAgentRuntime :
     public async Task RestoreContinuousMonitoringAsync(
         CancellationToken cancellationToken = default)
     {
-        var preferences = await preferencesService.LoadAsync(cancellationToken);
+        var preferences = await agentPreferences.LoadAsync(cancellationToken);
         if (!preferences.ContinuousMonitoringEnabled)
         {
             return;
@@ -337,6 +340,80 @@ internal sealed class DesktopAgentRuntime :
         CaptureAgentInventoryRequest request,
         CancellationToken cancellationToken) =>
         inventoryCoordinator.CaptureComparisonAsync(request, cancellationToken);
+
+    public async Task<ApplicationResult<AgentResponse>> SetAgentPreferenceAsync(
+        SetAgentPreferenceRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var current = await agentPreferences.LoadAsync(cancellationToken);
+        var updated = AgentPreferenceRequests.Apply(
+            current,
+            request.Field,
+            request.BooleanValue,
+            request.NumberValue);
+        if (updated is null)
+        {
+            return Reject(request.CorrelationId, "agent.preference.value_invalid");
+        }
+
+        if (request.Field == AgentPreferenceField.StartAgentAtLogin
+            && request.BooleanValue is { } enabled
+            && enabled != current.StartAgentAtLogin)
+        {
+            try
+            {
+                startupRegistration.SetEnabled(enabled);
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or UnauthorizedAccessException
+                    or System.Security.SecurityException
+                    or InvalidOperationException
+                    or FileNotFoundException)
+            {
+                return Reject(request.CorrelationId, "agent.preference.startup_registry_failed");
+            }
+        }
+
+        try
+        {
+            var saved = await agentPreferences.SaveAsync(updated, cancellationToken);
+            agentEvents.Publish(new AgentPreferencesChangedEvent(DateTimeOffset.UtcNow));
+            return await SuccessAsync(
+                new AgentPreferenceSavedResponse(saved),
+                request.CorrelationId);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or JsonException
+                or InvalidOperationException)
+        {
+            if (request.Field == AgentPreferenceField.StartAgentAtLogin
+                && request.BooleanValue is { } registered
+                && registered != current.StartAgentAtLogin)
+            {
+                try
+                {
+                    startupRegistration.SetEnabled(current.StartAgentAtLogin);
+                }
+                catch (Exception rollbackException) when (
+                    rollbackException is IOException
+                        or UnauthorizedAccessException
+                        or System.Security.SecurityException
+                        or InvalidOperationException
+                        or FileNotFoundException)
+                {
+                    // The preference file and the registry stay inconsistent
+                    // until the next successful save; the rollback attempt is
+                    // best-effort and reported through the failure below.
+                }
+            }
+
+            return Reject(request.CorrelationId, "agent.preference.save_failed");
+        }
+    }
 
     public async Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
         ExportAgentMonitorCsvRequest request,
@@ -646,7 +723,7 @@ internal sealed class DesktopAgentRuntime :
             request.CorrelationId);
     }
 
-    private static MonitorRequest CreateDefaultMonitorRequest(double rateHz)
+    internal static MonitorRequest CreateDefaultMonitorRequest(double rateHz)
     {
         var systemId = SystemId.New();
         return new MonitorRequest(

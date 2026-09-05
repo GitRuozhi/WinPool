@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window
     private readonly AccessibilitySettings _accessibilitySettings = new();
     private readonly IElevationRestartService _elevationRestartService;
     private readonly IWorkspaceStateService _workspaceStateService;
+    private readonly AgentPreferencesSynchronizer _agentPreferencesSynchronizer;
     private readonly DispatcherTimer _notificationDismissTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
     private WelcomeWindow? _welcomeWindow;
@@ -116,9 +117,15 @@ public sealed partial class MainWindow : Window
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
         Closed += MainWindow_Closed;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        ViewModel.WorkspaceSelectionChanged += ViewModel_WorkspaceSelectionChanged;
         _uiSettings.ColorValuesChanged += UiSettings_ColorValuesChanged;
         BuildShellNavigation();
         RegisterShellKeyboardAccelerators();
+        _agentPreferencesSynchronizer = new AgentPreferencesSynchronizer(
+            ViewModel,
+            agentConnection,
+            DispatcherQueue);
+        _agentPreferencesSynchronizer.Start();
     }
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
@@ -204,6 +211,35 @@ public sealed partial class MainWindow : Window
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         App.StopActivationChannel();
+        _agentPreferencesSynchronizer.Dispose();
+
+        // Persistence runs before the monitoring detach and each segment owns
+        // its failure: the process may not stay alive long, so the cheapest,
+        // most important writes happen first and cannot starve each other.
+        try
+        {
+            await _workspaceStateService.SaveAsync(
+                ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+        }
+
+        try
+        {
+            await ViewModel.SetLastActivePageAsync(
+                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+        }
+
         try
         {
             if (ViewModel.Monitoring.UsesAgent)
@@ -215,12 +251,11 @@ public sealed partial class MainWindow : Window
                 await ViewModel.Monitoring.StopAsync();
             }
             ViewModel.Monitoring.Dispose();
-            await _workspaceStateService.SaveAsync(
-                ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
-            await ViewModel.SetLastActivePageAsync(
-                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidOperationException
+                or ObjectDisposedException)
         {
         }
     }
@@ -581,6 +616,8 @@ public sealed partial class MainWindow : Window
         _updatingNavigation = false;
         UpdateShellNavigationAccent();
         UpdateActiveSystemName();
+        PersistLastActivePage(page);
+        PersistWorkspaceState();
 
         if (page == ShellPageKind.Manage)
         {
@@ -646,8 +683,37 @@ public sealed partial class MainWindow : Window
         else if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSystem))
         {
             UpdateActiveSystemName();
+            PersistWorkspaceState();
         }
     }
+
+    private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e) =>
+        PersistWorkspaceState();
+
+    /// <summary>
+    /// Saves-on-change run fire-and-forget on UI-driven triggers. The awaited
+    /// close-time fallback in MainWindow_Closed remains the safety net.
+    /// </summary>
+    private static async void FireAndForget(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+        }
+    }
+
+    private void PersistWorkspaceState() =>
+        FireAndForget(() => _workspaceStateService.SaveAsync(
+            ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString())));
+
+    private void PersistLastActivePage(ShellPageKind page) =>
+        FireAndForget(() => ViewModel.SetLastActivePageAsync(page.ToString()));
 
     private void UiSettings_ColorValuesChanged(UISettings sender, object args)
     {

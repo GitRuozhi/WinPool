@@ -8,6 +8,8 @@ namespace WinPool.Agent;
 /// <summary>
 /// The tray is a small projection of the Agent's durable state. Its command
 /// collection is intentionally fixed so that configuration stays in the main UI.
+/// The tray never writes settings; preference changes are routed through the
+/// Agent session coordinator like any other typed request.
 /// </summary>
 internal sealed class TrayApplicationContext : ApplicationContext
 {
@@ -17,28 +19,36 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem showMainWindowItem;
     private readonly ToolStripMenuItem pauseMonitoringItem;
     private readonly ToolStripMenuItem exitItem;
-    private readonly IUserPreferencesService preferencesService;
+    private readonly IUserPreferencesReader userPreferencesReader;
+    private readonly IAgentPreferencesReader agentPreferencesReader;
     private readonly FileSystemWatcher preferencesWatcher;
     private readonly SynchronizationContext uiContext;
     private AgentSessionCoordinator? coordinator;
     private UserPreferences preferences = new();
     private MonitoringSession? monitoringSession;
 
-    public TrayApplicationContext(IUserPreferencesService preferencesService)
+    public TrayApplicationContext(
+        IUserPreferencesReader userPreferencesReader,
+        IAgentPreferencesReader agentPreferencesReader)
     {
-        this.preferencesService = preferencesService
-            ?? throw new ArgumentNullException(nameof(preferencesService));
+        this.userPreferencesReader = userPreferencesReader
+            ?? throw new ArgumentNullException(nameof(userPreferencesReader));
+        this.agentPreferencesReader = agentPreferencesReader
+            ?? throw new ArgumentNullException(nameof(agentPreferencesReader));
         uiContext = SynchronizationContext.Current
             ?? new WindowsFormsSynchronizationContext();
 
         welcomeItem = new ToolStripMenuItem { Name = "welcome" };
-        welcomeItem.Click += (_, _) => OpenApp("Welcome");
+        welcomeItem.Click += (_, _) =>
+            GuardTrayAction("welcome", () => RunSynchronous(() => OpenApp("Welcome")));
         showMainWindowItem = new ToolStripMenuItem { Name = "show-main-window" };
-        showMainWindowItem.Click += (_, _) => OpenApp();
+        showMainWindowItem.Click += (_, _) =>
+            GuardTrayAction("show-main-window", () => RunSynchronous(() => OpenApp()));
         pauseMonitoringItem = new ToolStripMenuItem { Name = "pause-monitoring" };
-        pauseMonitoringItem.Click += async (_, _) => await ToggleMonitoringAsync();
+        pauseMonitoringItem.Click += (_, _) =>
+            GuardTrayAction("pause-monitoring", ToggleMonitoringAsync);
         exitItem = new ToolStripMenuItem { Name = "exit" };
-        exitItem.Click += async (_, _) => await BeginCompleteExitAsync();
+        exitItem.Click += (_, _) => GuardTrayAction("exit", BeginCompleteExitAsync);
 
         menu.Items.Add(welcomeItem);
         menu.Items.Add(showMainWindowItem);
@@ -58,9 +68,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             throw new InvalidOperationException("The tray icon could not be made visible.");
         }
 
-        var settingsPath = this.preferencesService is WinPool.Infrastructure.Windows.LocalUserPreferencesService local
+        var settingsPath = userPreferencesReader is WinPool.Infrastructure.Windows.LocalUserPreferencesService local
             ? local.SettingsPath
-            : Path.Combine(WinPool.Infrastructure.Windows.StorageDataLocations.CurrentRoot, "settings.json");
+            : Path.Combine(WinPool.Infrastructure.Windows.StorageDataLocations.CurrentRoot, "app-settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
         preferencesWatcher = new FileSystemWatcher(
             Path.GetDirectoryName(settingsPath)!,
@@ -122,7 +132,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             try
             {
-                var loaded = await preferencesService.LoadAsync();
+                var loaded = await userPreferencesReader.LoadAsync();
                 preferences = loaded;
                 uiContext.Post(_ => RefreshPresentation(), null);
             }
@@ -133,6 +143,36 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
             }
         });
+    }
+
+    private static Task RunSynchronous(Action action)
+    {
+        action();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Menu click handlers are async void at the WinForms boundary. An
+    /// unhandled exception would take down the Agent message loop, so every
+    /// tray command runs through this guard.
+    /// </summary>
+    private static async void GuardTrayAction(
+        string name,
+        Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or System.Runtime.InteropServices.COMException)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"WinPool tray action '{name}' failed: {exception.Message}");
+        }
     }
 
     private void RefreshPresentation()
@@ -191,27 +231,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
+        var agentPreferences = await agentPreferencesReader.LoadAsync();
         var session = monitoringSession;
-        if (session is not null && session.State is MonitoringSessionState.Starting
-            or MonitoringSessionState.Running or MonitoringSessionState.Stopping)
+        var monitoringActive = session is not null && session.State is MonitoringSessionState.Starting
+            or MonitoringSessionState.Running or MonitoringSessionState.Stopping;
+        var enable = !monitoringActive;
+        await coordinator.HandleAsync(new SetAgentPreferenceRequest(
+            AgentPreferenceField.ContinuousMonitoringEnabled,
+            enable,
+            null,
+            CorrelationId.New()));
+        if (!enable)
         {
-            await coordinator.HandleAsync(new StopAgentMonitoringRequest(
-                session.SessionId, CorrelationId.New()));
-            await preferencesService.SaveAsync(preferences with { ContinuousMonitoringEnabled = false });
+            if (session is not null)
+            {
+                await coordinator.HandleAsync(new StopAgentMonitoringRequest(
+                    session.SessionId, CorrelationId.New()));
+            }
+
             return;
         }
 
-        await preferencesService.SaveAsync(preferences with { ContinuousMonitoringEnabled = true });
-        var systemId = SystemId.New();
-        var request = new MonitorRequest(
-            SessionId.New(), systemId,
-            [new MonitorTarget(new StorageObjectId(systemId, StorageObjectKind.PhysicalDisk, "pdh-wildcard"), "*"),
-             new MonitorTarget(new StorageObjectId(systemId, StorageObjectKind.VirtualDisk, "pdh-storage-spaces-wildcard"), "*")],
-            [MonitorMetricKind.ActiveTimePercent, MonitorMetricKind.ReadBytesPerSecond,
-             MonitorMetricKind.WriteBytesPerSecond, MonitorMetricKind.AverageQueueLength],
-            TimeSpan.FromSeconds(1 / Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20)),
-            ContinueWhenUiCloses: true);
-        await coordinator.HandleAsync(new StartAgentMonitoringRequest(request, CorrelationId.New()));
+        await coordinator.HandleAsync(new StartAgentMonitoringRequest(
+            DesktopAgentRuntime.CreateDefaultMonitorRequest(
+                agentPreferences.MonitoringSampleRateHz),
+            CorrelationId.New()));
     }
 
     private async Task BeginCompleteExitAsync()

@@ -83,11 +83,37 @@ public interface IPrivilegeService
     PrivilegeState Current { get; }
 }
 
-public interface IUserPreferencesService
+public interface IUserPreferencesReader
 {
     Task<UserPreferences> LoadAsync(CancellationToken cancellationToken = default);
+}
 
+/// <summary>
+/// Write access to app-settings.json. Only the App process composes this
+/// interface; the Agent reads user preferences through IUserPreferencesReader.
+/// </summary>
+public interface IUserPreferencesService : IUserPreferencesReader
+{
     Task SaveAsync(UserPreferences preferences, CancellationToken cancellationToken = default);
+}
+
+public interface IAgentPreferencesReader
+{
+    Task<AgentPreferences> LoadAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Write access to agent-settings.json. Only the Agent process composes this
+/// interface; the App reads background preferences through
+/// IAgentPreferencesReader and changes them through the typed Agent request.
+/// SaveAsync returns the persisted snapshot including its fresh SavedAtUtc
+/// label so callers never have to re-read the file.
+/// </summary>
+public interface IAgentPreferencesStore : IAgentPreferencesReader
+{
+    Task<AgentPreferences> SaveAsync(
+        AgentPreferences preferences,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IExportService

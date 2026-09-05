@@ -129,13 +129,10 @@ public sealed partial class MonitorPage : Page
         Guard("UpdateText", UpdateText);
         Guard("BuildRows", BuildRows);
         RestoreExistingGraphSeries();
-        Monitoring.SetRate(_viewModel.CurrentPreferences.MonitoringSampleRateHz);
+        Monitoring.SetRate(_viewModel.CurrentAgentPreferences.MonitoringSampleRateHz);
         Guard("PopulateRateOptions", PopulateRateOptions);
-        _updatingContinuousMonitoring = true;
-        ContinuousMonitoringSwitch.IsOn =
-            _viewModel.CurrentPreferences.ContinuousMonitoringEnabled;
-        _updatingContinuousMonitoring = false;
-        if (_viewModel.CurrentPreferences.ContinuousMonitoringEnabled)
+        SyncContinuousMonitoringSwitch();
+        if (_viewModel.CurrentAgentPreferences.ContinuousMonitoringEnabled)
         {
             try
             {
@@ -239,11 +236,8 @@ public sealed partial class MonitorPage : Page
 
         try
         {
-            await _viewModel.RefreshPreferencesAsync(refreshLocalizedContent: false);
-            var enabled = _viewModel.CurrentPreferences.ContinuousMonitoringEnabled;
-            _updatingContinuousMonitoring = true;
-            ContinuousMonitoringSwitch.IsOn = enabled;
-            _updatingContinuousMonitoring = false;
+            SyncContinuousMonitoringSwitch();
+            var enabled = _viewModel.CurrentAgentPreferences.ContinuousMonitoringEnabled;
             if (enabled && !Monitoring.IsRunning)
             {
                 await Monitoring.StartAsync(SelectedRate());
@@ -261,6 +255,14 @@ public sealed partial class MonitorPage : Page
         {
             LogMonitorFailure("PreferenceSync", exception);
         }
+    }
+
+    private void SyncContinuousMonitoringSwitch()
+    {
+        _updatingContinuousMonitoring = true;
+        ContinuousMonitoringSwitch.IsOn =
+            _viewModel.CurrentAgentPreferences.ContinuousMonitoringEnabled;
+        _updatingContinuousMonitoring = false;
     }
 
     private void UpdateText()

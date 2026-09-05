@@ -248,8 +248,8 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "WinPool.App.csproj"));
         var appStartup = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "App.xaml.cs"));
-        var startupRegistration = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "Services", "AgentStartupRegistration.cs"));
+        var agentStartupRegistration = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Agent", "AgentStartupRegistration.cs"));
         var agentStartup = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Agent", "Program.cs"));
         var tray = File.ReadAllText(
@@ -328,8 +328,12 @@ public sealed class ArchitectureBoundaryTests
             appStartup.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "Path.Combine(AppContext.BaseDirectory, \"WinPool.Agent.exe\")",
-            startupRegistration,
+            "Environment.ProcessPath",
+            agentStartupRegistration,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "AppContext.BaseDirectory, \"WinPool.Agent.exe\"",
+            agentStartupRegistration,
             StringComparison.Ordinal);
         Assert.Contains(
             "Path.Combine(\n                    AppContext.BaseDirectory,\n                    \"WinPool.App.exe\")",
@@ -343,6 +347,47 @@ public sealed class ArchitectureBoundaryTests
             "Path.Combine(AppContext.BaseDirectory, \"WinPool.App.exe\")",
             tray,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreferenceFilesHaveExactlyOneWriterProcessEach()
+    {
+        var root = FindRepositoryRoot();
+        string ReadSources(string project) => string.Join(
+            '\n',
+            Directory.EnumerateFiles(
+                    Path.Combine(root, "src", project),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Where(path => !path.Contains(
+                    $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(File.ReadAllText));
+
+        var agentSource = ReadSources("WinPool.Agent");
+        var appSource = ReadSources("WinPool.App");
+
+        // app-settings.json: only the App persists user preferences; the Agent
+        // (tray language projection) reads through IUserPreferencesReader.
+        Assert.DoesNotContain("IUserPreferencesService", agentSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SaveAsync",
+            File.ReadAllText(Path.Combine(
+                root,
+                "src",
+                "WinPool.Agent",
+                "TrayApplicationContext.cs")),
+            StringComparison.Ordinal);
+
+        // agent-settings.json: only the Agent persists background preferences;
+        // the App reads through IAgentPreferencesReader and changes values only
+        // through the typed SetAgentPreferenceRequest.
+        Assert.DoesNotContain("IAgentPreferencesStore", appSource, StringComparison.Ordinal);
+
+        // The HKCU Run autostart entry belongs to the Agent, which registers
+        // its own executable path; the App never touches that registry key.
+        Assert.DoesNotContain("CurrentVersion\\Run", appSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("Registry.CurrentUser", appSource, StringComparison.Ordinal);
     }
 
     [Fact]

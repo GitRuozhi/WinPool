@@ -862,6 +862,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 payload.Event.Deserialize<AgentShutdownEvent>(JsonOptions),
             nameof(AgentStateReseedEvent) =>
                 payload.Event.Deserialize<AgentStateReseedEvent>(JsonOptions),
+            nameof(AgentPreferencesChangedEvent) =>
+                payload.Event.Deserialize<AgentPreferencesChangedEvent>(JsonOptions),
             _ => null
         };
 
@@ -891,6 +893,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             LoadAgentManageInventoryRequest =>
                 AgentControlMessageTypes.LoadManageInventory,
             ExportAgentMonitorCsvRequest => AgentControlMessageTypes.ExportMonitorCsv,
+            SetAgentPreferenceRequest => AgentControlMessageTypes.SetAgentPreference,
             RequestAgentShutdownRequest => AgentControlMessageTypes.Shutdown,
             _ => throw new NotSupportedException(
                 $"Unsupported Agent request {request.GetType().Name}.")

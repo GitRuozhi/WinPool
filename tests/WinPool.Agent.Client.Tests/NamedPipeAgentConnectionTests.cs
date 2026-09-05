@@ -980,6 +980,14 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken cancellationToken) =>
             Acknowledge(request);
 
+        public Task<ApplicationResult<AgentResponse>> SetAgentPreferenceAsync(
+            SetAgentPreferenceRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(
+                ApplicationResult<AgentResponse>.Succeeded(
+                    new AgentPreferenceSavedResponse(new WinPool.Domain.AgentPreferences()),
+                    request.CorrelationId));
+
         private static LocalInventoryDocumentPayload LocalInventory() =>
             new(
                 "local:test",

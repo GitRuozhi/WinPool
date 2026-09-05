@@ -221,9 +221,7 @@ public sealed class LocalizationService : ObservableObject
             ["WelcomeMessage"] = (
                 "~~最好的~~ 开源免费的 Win 平台存储系统工具。\n原生 WinUI 应用，旨在替代 Windows 老旧的磁盘管理和存储空间的图形界面，支持win 原生软 Raid 和高性能分层存储池。",
                 "~~The best~~ free and open-source storage system tool for the Win platform.\nA native WinUI application that aims to replace Windows' dated Disk Management and Storage Spaces graphical interfaces, supporting native Windows software RAID and high-performance tiered storage pools."),
-            ["ShowWelcomeAtStart"] = ("启动时显示欢迎页面", "Show the welcome page at startup"),
-            ["OpenWelcome"] = ("打开欢迎内容", "Open welcome"),
-            ["WelcomeConfirm"] = ("我知道啦", "Got it"),
+            ["OpenWelcome"] = ("打开欢迎内容", "Open welcome"),            ["WelcomeConfirm"] = ("我知道啦", "Got it"),
             ["Unhealthy"] = ("不健康", "Unhealthy"),
             ["DataLocation"] = ("数据存储位置", "Data location"),
             ["StandardLocation"] = ("标准位置", "Standard location"),

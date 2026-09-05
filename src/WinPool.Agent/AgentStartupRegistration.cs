@@ -1,7 +1,12 @@
 using Microsoft.Win32;
 
-namespace WinPool.App.Services;
+namespace WinPool.Agent;
 
+/// <summary>
+/// HKCU Run registration owned by the Agent. It always registers the Agent's
+/// own executable path, so a moved portable installation cannot leave the
+/// stored preference and the real autostart entry pointing at different files.
+/// </summary>
 internal sealed class AgentStartupRegistration
 {
     private const string RunKey =
@@ -9,8 +14,10 @@ internal sealed class AgentStartupRegistration
     private const string ValueName = "WinPool";
     private const string LegacyAgentValueName = "WinPool.Agent";
 
-    public string AgentExecutablePath => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "WinPool.Agent.exe"));
+    public string AgentExecutablePath { get; } =
+        Environment.ProcessPath
+        ?? throw new InvalidOperationException(
+            "The Agent executable path could not be determined.");
 
     public bool IsEnabled()
     {
@@ -51,6 +58,5 @@ internal sealed class AgentStartupRegistration
         }
     }
 
-    private string CommandValue() =>
-        $"\"{AgentExecutablePath}\"";
+    private string CommandValue() => $"\"{AgentExecutablePath}\"";
 }

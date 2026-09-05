@@ -487,6 +487,11 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
+        public Task<ApplicationResult<AgentResponse>> SetAgentPreferenceAsync(
+            SetAgentPreferenceRequest request,
+            CancellationToken cancellationToken) =>
+            Succeed(request);
+
         private Task<ApplicationResult<AgentResponse>> Succeed(AgentRequest request)
         {
             RequestCount++;

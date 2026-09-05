@@ -8,7 +8,7 @@ public sealed class WelcomeMascotSelectionTests
     [Fact]
     public void MonitoringPreferencesDefaultToDisabledAtFiveHertz()
     {
-        var preferences = new UserPreferences();
+        var preferences = new AgentPreferences();
 
         Assert.False(preferences.ContinuousMonitoringEnabled);
         Assert.Equal(5, preferences.MonitoringSampleRateHz);

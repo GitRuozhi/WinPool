@@ -23,7 +23,23 @@ public sealed class LocalUserPreferencesServiceTests
 
         var saved = await service.LoadAsync();
         Assert.Equal(LanguagePreference.EnUs, saved.Language);
-        Assert.Empty(Directory.EnumerateFiles(location.Root, "settings.json.tmp-*"));
+        Assert.Empty(Directory.EnumerateFiles(location.Root, "app-settings.json.tmp-*"));
+    }
+
+    [Fact]
+    public async Task UnreadableFileBlocksWritesUntilItBecomesReadable()
+    {
+        using var location = TemporaryLocation.Create();
+        var service = new LocalUserPreferencesService(location.Root);
+        await service.SaveAsync(new UserPreferences(Language: LanguagePreference.ZhCn));
+
+        await File.WriteAllTextAsync(service.SettingsPath, "{ broken");
+
+        var loaded = await service.LoadAsync();
+        Assert.Equal(LanguagePreference.SystemDefault, loaded.Language);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.SaveAsync(new UserPreferences(Language: LanguagePreference.EnUs)));
+        Assert.Equal("{ broken", await File.ReadAllTextAsync(service.SettingsPath));
     }
 
     private sealed class TemporaryLocation(string root) : IDisposable

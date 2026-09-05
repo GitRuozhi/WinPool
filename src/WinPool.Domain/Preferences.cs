@@ -31,6 +31,10 @@ public enum StorageLocationMode
     Portable
 }
 
+/// <summary>
+/// App-session preferences. Only the App writes them (app-settings.json);
+/// the Agent may read them for tray presentation.
+/// </summary>
 public sealed record UserPreferences(
     ThemePreference Theme = ThemePreference.System,
     AccentColorPreference AccentColor = AccentColorPreference.System,
@@ -38,11 +42,22 @@ public sealed record UserPreferences(
     bool ShowHardwareIds = false,
     bool CreateMsrOnInitialize = true,
     long PartitionIgnoreSizeBytes = 8L * 1024 * 1024,
-    bool ShowWelcomeAtStart = true,
-    bool StartAgentAtLogin = false,
-    bool ContinueMonitoringWhenUiCloses = false,
-    bool HasShownWelcome = false,
-    bool ContinuousMonitoringEnabled = false,
-    double MonitoringSampleRateHz = 5,
     string LastActivePage = "Manage",
     int FormatVersion = 1);
+
+/// <summary>
+/// Background preferences whose effect must survive App closure
+/// (agent-settings.json). Only the Agent writes them. SavedAtUtc is a
+/// content-generation label: consumers compare it by inequality, never by
+/// ordering, so a system clock step can never hide a real change.
+/// </summary>
+public sealed record AgentPreferences(
+    bool ContinuousMonitoringEnabled = false,
+    double MonitoringSampleRateHz = 5,
+    bool StartAgentAtLogin = false,
+    DateTimeOffset SavedAtUtc = default,
+    int FormatVersion = 1)
+{
+    public AgentPreferences StampSavedAtUtc(DateTimeOffset savedAtUtc) =>
+        this with { SavedAtUtc = savedAtUtc };
+}
