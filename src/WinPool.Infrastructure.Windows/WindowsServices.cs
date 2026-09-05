@@ -292,7 +292,11 @@ public sealed class LocalAgentPreferencesService : IAgentPreferencesStore
         preferences with
         {
             FormatVersion = CurrentFormatVersion,
-            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20)
+            MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20),
+            DataCapacityLimitBytes = Math.Clamp(
+                preferences.DataCapacityLimitBytes,
+                1024L * 1024,
+                1024L * 1024 * 1024 * 1024)
         };
 }
 

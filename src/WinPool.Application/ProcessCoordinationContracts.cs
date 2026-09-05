@@ -124,7 +124,8 @@ public enum AgentPreferenceField
 {
     ContinuousMonitoringEnabled,
     MonitoringSampleRateHz,
-    StartAgentAtLogin
+    StartAgentAtLogin,
+    DataCapacityLimitMiB
 }
 
 /// <summary>
@@ -160,6 +161,15 @@ public static class AgentPreferenceRequests
                      && double.IsFinite(numberValue.Value)
                      && numberValue.Value is >= 0.2 and <= 20 =>
                 preferences with { MonitoringSampleRateHz = numberValue.Value },
+            AgentPreferenceField.DataCapacityLimitMiB
+                when numberValue.HasValue
+                     && double.IsFinite(numberValue.Value)
+                     && numberValue.Value is >= 1 and <= 1_048_576 =>
+                preferences with
+                {
+                    DataCapacityLimitBytes = (long)Math.Round(
+                        numberValue.Value * 1024d * 1024d)
+                },
             _ => null
         };
 }

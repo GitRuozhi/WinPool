@@ -202,7 +202,22 @@ public sealed class LocalizationService : ObservableObject
                 "When enabled, mainboard, memory, disk, and volume serial numbers and MAC addresses are shown in plain text and may leak through screenshots or sharing. Continue?"),
             ["InitializeDisk"] = ("初始化磁盘", "Disk initialization"),
             ["CreateMsrOnInitialize"] = ("初始化磁盘时创建微软保留分区", "Create a Microsoft Reserved Partition when initializing disks"),
-            ["PartitionIgnoreSize"] = ("分区忽略大小 (MiB)", "Ignored partition gap (MiB)"),
+            ["PartitionGapThreshold"] = ("分区缝隙隐藏阈值", "Partition gap hiding threshold"),
+            ["DataCapacityLimit"] = ("数据容量限制", "Data capacity limit"),
+            ["DataCapacityLimitHint"] = (
+                "与数据压缩相关；将在监控与测试功能中完整生效。",
+                "Related to data compression; takes full effect with the monitoring and test features."),
+            ["ResetAllTitle"] = ("恢复默认", "Reset to defaults"),
+            ["ResetAllButton"] = ("全部恢复默认", "Reset all to defaults"),
+            ["ResetAllConfirmTitle"] = ("确认恢复默认", "Confirm reset to defaults"),
+            ["ResetAllConfirmMessage"] = (
+                "所有设置将恢复默认值，内置模拟系统将恢复初始状态；你自建的模拟系统不受影响。",
+                "All settings return to their defaults and the built-in simulation systems return to their initial state. Your own simulation systems are not affected."),
+            ["ResetAllConfirm"] = ("确认重置", "Reset now"),
+            ["ResetAllDone"] = ("已全部恢复默认。", "All settings were reset to defaults."),
+            ["ResetAllBackgroundFailed"] = (
+                "后台设置未能重置：WinPool 托盘 Agent 不可用。",
+                "Background settings were not reset: the WinPool tray Agent is unavailable."),
             ["ExtendVolume"] = ("扩展卷", "Extend volume"),
             ["ShrinkVolume"] = ("压缩卷", "Shrink volume"),
             ["DeleteVolume"] = ("删除卷", "Delete volume"),

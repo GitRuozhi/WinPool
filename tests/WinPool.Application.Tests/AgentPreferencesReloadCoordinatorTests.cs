@@ -233,4 +233,54 @@ public sealed class AgentPreferenceRequestsTests
             booleanValue: null,
             numberValue: double.PositiveInfinity));
     }
+
+    [Fact]
+    public void BackgroundPreferencesDefaultTo1024MiBDataCapacity()
+    {
+        var preferences = new AgentPreferences();
+
+        Assert.Equal(1024L * 1024 * 1024, preferences.DataCapacityLimitBytes);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(1024)]
+    [InlineData(1_048_576)]
+    public void DataCapacityAcceptsMiBValuesAndConvertsToBytes(double mib)
+    {
+        var updated = AgentPreferenceRequests.Apply(
+            new AgentPreferences(),
+            AgentPreferenceField.DataCapacityLimitMiB,
+            booleanValue: null,
+            numberValue: mib);
+
+        Assert.NotNull(updated);
+        Assert.Equal(
+            (long)Math.Round(mib * 1024d * 1024d),
+            updated!.DataCapacityLimitBytes);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.9)]
+    [InlineData(-1)]
+    [InlineData(1_048_577)]
+    public void DataCapacityRejectsValuesOutsideItsRange(double mib)
+    {
+        Assert.Null(AgentPreferenceRequests.Apply(
+            new AgentPreferences(),
+            AgentPreferenceField.DataCapacityLimitMiB,
+            booleanValue: null,
+            numberValue: mib));
+    }
+
+    [Fact]
+    public void DataCapacityRejectsNonFiniteValues()
+    {
+        Assert.Null(AgentPreferenceRequests.Apply(
+            new AgentPreferences(),
+            AgentPreferenceField.DataCapacityLimitMiB,
+            booleanValue: null,
+            numberValue: double.NaN));
+    }
 }

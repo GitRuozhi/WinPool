@@ -99,6 +99,8 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -187,31 +189,71 @@
                         OnContent=""
                         Toggled="MsrSwitch_Toggled" />
                     <TextBlock
-                        x:Name="PartitionIgnoreTitle"
+                        x:Name="PartitionGapTitle"
                         Grid.Row="5"
                         Style="{StaticResource SettingsFieldLabel}"
-                        Text="分区忽略大小 (MiB)" />
-                    <NumberBox
-                        x:Name="PartitionIgnoreBox"
+                        Text="分区缝隙隐藏阈值" />
+                    <StackPanel
                         Grid.Row="5"
                         Grid.Column="1"
-                        MinWidth="220"
-                        MinHeight="32"
-                        HorizontalAlignment="Left"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        VerticalAlignment="Center">
+                        <TextBox
+                            x:Name="PartitionGapBox"
+                            MinWidth="120"
+                            MinHeight="32"
+                            MaxLength="4"
+                            InputScope="Number"
+                            TextAlignment="Left"
+                            TextChanged="PartitionGapBox_TextChanged"
+                            LostFocus="PartitionGapBox_LostFocus" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="14"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="MiB" />
+                    </StackPanel>
+                    <TextBlock
+                        x:Name="DataCapacityTitle"
+                        Grid.Row="6"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="数据容量限制" />
+                    <StackPanel
+                        Grid.Row="6"
+                        Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
                         VerticalAlignment="Center"
-                        Minimum="0"
-                        Maximum="1024"
-                        SmallChange="1"
-                        LargeChange="8"
-                        SpinButtonPlacementMode="Inline"
-                        ValueChanged="PartitionIgnoreBox_ValueChanged" />
+                        ToolTipService.ToolTip="{Binding Text, ElementName=DataCapacityHint}">
+                        <TextBox
+                            x:Name="DataCapacityBox"
+                            MinWidth="120"
+                            MinHeight="32"
+                            MaxLength="7"
+                            InputScope="Number"
+                            TextAlignment="Left"
+                            TextChanged="DataCapacityBox_TextChanged"
+                            LostFocus="DataCapacityBox_LostFocus" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="14"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="MiB" />
+                        <TextBlock
+                            x:Name="DataCapacityHint"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
                     <TextBlock
                         x:Name="DataLocationTitle"
-                        Grid.Row="6"
+                        Grid.Row="7"
                         Style="{StaticResource SettingsFieldLabel}"
                         Text="数据存储位置" />
                     <Grid
-                        Grid.Row="6"
+                        Grid.Row="7"
                         Grid.Column="1"
                         ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
@@ -235,6 +277,30 @@
                             TextTrimming="CharacterEllipsis"
                             ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </Grid>
+                    <TextBlock
+                        x:Name="ResetAllTitle"
+                        Grid.Row="8"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="恢复默认" />
+                    <Button
+                        x:Name="ResetAllButton"
+                        Grid.Row="8"
+                        Grid.Column="1"
+                        MinWidth="220"
+                        MinHeight="32"
+                        FontSize="14"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Click="ResetAllButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE74E;" />
+                            <TextBlock
+                                x:Name="ResetAllButtonText"
+                                VerticalAlignment="Center"
+                                FontSize="14"
+                                Text="全部恢复默认" />
+                        </StackPanel>
+                    </Button>
                 </Grid>
             </Border>
 

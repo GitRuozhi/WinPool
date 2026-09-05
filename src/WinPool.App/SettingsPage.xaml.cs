@@ -26,7 +26,9 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMsr;
     private bool _updatingHardwareIds;
     private bool _updatingStartup;
-    private bool _updatingPartitionIgnore;
+    private bool _updatingPartitionGap;
+    private bool _updatingDataCapacity;
+    private bool _resetAllRunning;
 
     public SettingsPage()
     {
@@ -52,9 +54,14 @@ public sealed partial class SettingsPage : Page
         _updatingStartup = true;
         StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
         _updatingStartup = false;
-        _updatingPartitionIgnore = true;
-        PartitionIgnoreBox.Value = ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes / (1024d * 1024d);
-        _updatingPartitionIgnore = false;
+        _updatingPartitionGap = true;
+        PartitionGapBox.Text = MiBText(
+            ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
+        _updatingPartitionGap = false;
+        _updatingDataCapacity = true;
+        DataCapacityBox.Text = MiBText(
+            ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
+        _updatingDataCapacity = false;
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
@@ -388,16 +395,25 @@ public sealed partial class SettingsPage : Page
         ((MainWindow)App.Window).RefreshChrome();
     }
 
-    private async void PartitionIgnoreBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    private void PartitionGapBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        KeepDigitsOnly(PartitionGapBox);
+
+    private async void PartitionGapBox_LostFocus(object sender, RoutedEventArgs e)
     {
-        if (!_ready || _updatingPartitionIgnore)
+        if (!_ready || _updatingPartitionGap)
         {
+            return;
+        }
+
+        if (!TryReadMib(PartitionGapBox, out var mib))
+        {
+            RevertPartitionGap();
             return;
         }
 
         try
         {
-            await ViewModel.SetPartitionIgnoreSizeMibAsync(sender.Value);
+            await ViewModel.SetPartitionIgnoreSizeMibAsync(mib);
         }
         catch (Exception exception) when (
             exception is IOException
@@ -405,10 +421,138 @@ public sealed partial class SettingsPage : Page
                 or InvalidOperationException
                 or ArgumentOutOfRangeException)
         {
-            _updatingPartitionIgnore = true;
-            PartitionIgnoreBox.Value = ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes / (1024d * 1024d);
-            _updatingPartitionIgnore = false;
+            RevertPartitionGap();
             PublishPreferenceFailure(exception);
+        }
+    }
+
+    private void RevertPartitionGap()
+    {
+        _updatingPartitionGap = true;
+        PartitionGapBox.Text = MiBText(
+            ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
+        _updatingPartitionGap = false;
+    }
+
+    private void DataCapacityBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        KeepDigitsOnly(DataCapacityBox);
+
+    private async void DataCapacityBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || _updatingDataCapacity)
+        {
+            return;
+        }
+
+        if (!TryReadMib(DataCapacityBox, out var mib))
+        {
+            RevertDataCapacity();
+            return;
+        }
+
+        try
+        {
+            await ViewModel.SetDataCapacityLimitMibAsync(mib);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentOutOfRangeException)
+        {
+            RevertDataCapacity();
+            PublishPreferenceFailure(exception);
+        }
+    }
+
+    private void RevertDataCapacity()
+    {
+        _updatingDataCapacity = true;
+        DataCapacityBox.Text = MiBText(
+            ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
+        _updatingDataCapacity = false;
+    }
+
+    /// <summary>
+    /// Strips everything except digits so the box always holds a pure number;
+    /// the MiB unit is displayed beside the box instead of inside it.
+    /// </summary>
+    private static void KeepDigitsOnly(TextBox box)
+    {
+        var digits = new string(box.Text?.Where(char.IsDigit).ToArray() ?? []);
+        if (!string.Equals(box.Text, digits, StringComparison.Ordinal))
+        {
+            box.Text = digits;
+            box.SelectionStart = digits.Length;
+        }
+    }
+
+    private static bool TryReadMib(TextBox box, out double mib)
+    {
+        mib = 0;
+        return double.TryParse(box.Text, out mib) && mib >= 0;
+    }
+
+    private async void ResetAllButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || _resetAllRunning)
+        {
+            return;
+        }
+
+        var l = ViewModel.Localization;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
+            Title = l["ResetAllConfirmTitle"],
+            Content = l["ResetAllConfirmMessage"],
+            PrimaryButtonText = l["ResetAllConfirm"],
+            CloseButtonText = l["Cancel"],
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        _resetAllRunning = true;
+        try
+        {
+            bool backgroundResetFailed;
+            try
+            {
+                backgroundResetFailed = await ViewModel.ResetAllToDefaultsAsync();
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or UnauthorizedAccessException
+                    or InvalidOperationException)
+            {
+                await ShowMessageDialogAsync(exception.Message);
+                return;
+            }
+
+            if (App.Window is MainWindow mainWindow)
+            {
+                mainWindow.ApplyTheme(ViewModel.CurrentPreferences.Theme);
+                mainWindow.ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
+                mainWindow.RefreshChrome();
+            }
+
+            UpdateText();
+            RefreshPreferenceControls();
+            ViewModel.NotificationService.PublishInfo(
+                l["ResetAllTitle"],
+                backgroundResetFailed
+                    ? l["ResetAllBackgroundFailed"]
+                    : l["ResetAllDone"],
+                "settings",
+                "settings-reset-all");
+        }
+        finally
+        {
+            _resetAllRunning = false;
         }
     }
 
@@ -543,8 +687,45 @@ public sealed partial class SettingsPage : Page
             _updatingStartup = true;
             StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
             _updatingStartup = false;
+            _updatingDataCapacity = true;
+            DataCapacityBox.Text = MiBText(
+                ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
+            _updatingDataCapacity = false;
+        }
+        else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
+        {
+            RefreshPreferenceControls();
         }
     }
+
+    private void RefreshPreferenceControls()
+    {
+        var wasReady = _ready;
+        _ready = false;
+        try
+        {
+            var preferences = ViewModel.CurrentPreferences;
+            ThemeOptions.SelectedIndex = (int)preferences.Theme;
+            AccentOptions.SelectedIndex = (int)preferences.AccentColor;
+            LanguageOptions.SelectedIndex = (int)preferences.Language;
+            _updatingMsr = true;
+            MsrSwitch.IsOn = preferences.CreateMsrOnInitialize;
+            _updatingMsr = false;
+            _updatingHardwareIds = true;
+            ShowHardwareIdsSwitch.IsOn = preferences.ShowHardwareIds;
+            _updatingHardwareIds = false;
+            _updatingPartitionGap = true;
+            PartitionGapBox.Text = MiBText(preferences.PartitionIgnoreSizeBytes);
+            _updatingPartitionGap = false;
+        }
+        finally
+        {
+            _ready = wasReady;
+        }
+    }
+
+    private static string MiBText(long bytes) =>
+        (bytes / (1024d * 1024d)).ToString("0.##");
 
     private void SyncExecutionMode()
     {
@@ -568,7 +749,14 @@ public sealed partial class SettingsPage : Page
         LanguageTitle.Text = l["Language"];
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
-        PartitionIgnoreTitle.Text = l["PartitionIgnoreSize"];
+        PartitionGapTitle.Text = l["PartitionGapThreshold"];
+        DataCapacityTitle.Text = l["DataCapacityLimit"];
+        DataCapacityHint.Text = l["DataCapacityLimitHint"];
+        ToolTipService.SetToolTip(
+            DataCapacityBox,
+            l["DataCapacityLimitHint"]);
+        ResetAllTitle.Text = l["ResetAllTitle"];
+        ResetAllButtonText.Text = l["ResetAllButton"];
         PrivacyTitle.Text = l["ShowHardwareIds"];
         WelcomeTitle.Text = l["Welcome"];
         WelcomeButtonText.Text = l["OpenWelcome"];

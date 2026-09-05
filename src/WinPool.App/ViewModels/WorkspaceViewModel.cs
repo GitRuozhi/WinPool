@@ -607,6 +607,76 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             null);
     }
 
+    public async Task SetDataCapacityLimitMibAsync(double mib)
+    {
+        if (!double.IsFinite(mib) || mib is < 1 or > 1_048_576)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mib));
+        }
+
+        await SendAgentPreferenceAsync(
+            AgentPreferenceField.DataCapacityLimitMiB,
+            null,
+            mib);
+    }
+
+    /// <summary>
+    /// Resets every preference and every built-in simulation document to its
+    /// initial state. User-created simulation documents are preserved.
+    /// Background preferences are also reset; when the Agent is unavailable
+    /// they are skipped and the caller is told through the return value.
+    /// </summary>
+    public async Task<bool> ResetAllToDefaultsAsync(CancellationToken cancellationToken = default)
+    {
+        var defaults = new UserPreferences();
+        await _preferencesService.SaveAsync(defaults, cancellationToken);
+        CurrentPreferences = defaults;
+        Localization.Language = defaults.Language;
+        RefreshLocalizedContent();
+        OnPropertyChanged(nameof(CurrentPreferences));
+
+        var selectedSystemWasReset = false;
+        foreach (var builtin in SimulationCatalog.CreateDocuments())
+        {
+            await _systemRepository.SaveSimulationAsync(builtin, cancellationToken);
+            SystemCatalog.Update(builtin);
+            if (SelectedSystem.Id.Equals(builtin.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedSystem = builtin;
+                selectedSystemWasReset = true;
+            }
+        }
+
+        if (selectedSystemWasReset)
+        {
+            OnPropertyChanged(nameof(SelectedSystem));
+            OnPropertyChanged(nameof(ActiveDocument));
+            OnPropertyChanged(nameof(ActiveSnapshot));
+            RebuildTopology();
+            RebuildObjects(_selectedSelection);
+            BuildDetails();
+            RebuildComparisonColumns();
+        }
+
+        var backgroundResetFailed = false;
+        try
+        {
+            await SetContinuousMonitoringAsync(false);
+            await SetMonitoringSampleRateAsync(5);
+            await SetDataCapacityLimitMibAsync(1024);
+            await SetStartAgentAtLoginAsync(false);
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or IOException
+                or UnauthorizedAccessException)
+        {
+            backgroundResetFailed = true;
+        }
+
+        return backgroundResetFailed;
+    }
+
     private async Task SendAgentPreferenceAsync(
         AgentPreferenceField field,
         bool? booleanValue,
