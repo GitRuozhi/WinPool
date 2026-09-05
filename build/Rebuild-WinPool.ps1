@@ -27,90 +27,6 @@ function Invoke-Native([string]$fileName, [string[]]$arguments) {
     }
 }
 
-function Stop-WinPoolProcesses {
-    $names = @('WinPool.App', 'WinPool.Agent')
-    $running = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-    $propertiesHosts = @(Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
-        Where-Object { $_.CommandLine -like '*DeviceProperties_RunDLL*' })
-    if ($running.Count -eq 0 -and $propertiesHosts.Count -eq 0) {
-        return
-    }
-
-    if ($running.Count -gt 0) {
-        Write-Output "Stopping $($running.Count) WinPool process(es)."
-        $running | Stop-Process -Force
-    }
-    if ($propertiesHosts.Count -gt 0) {
-        Write-Output "Stopping $($propertiesHosts.Count) leftover device-properties host(s)."
-        $propertiesHosts | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    }
-    $deadline = [datetime]::UtcNow.AddSeconds(10)
-    do {
-        Start-Sleep -Milliseconds 200
-        $running = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
-        $propertiesHosts = @(Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
-            Where-Object { $_.CommandLine -like '*DeviceProperties_RunDLL*' })
-    } while (($running.Count -gt 0 -or $propertiesHosts.Count -gt 0) -and [datetime]::UtcNow -lt $deadline)
-
-    if ($running.Count -gt 0) {
-        throw "WinPool processes are still running: $($running.ProcessName -join ', ')."
-    }
-    if ($propertiesHosts.Count -gt 0) {
-        throw "Device-properties hosts are still running: $($propertiesHosts.ProcessId -join ', ')."
-    }
-}
-
-function Remove-DirectoryTree([string]$path) {
-    if (-not (Test-Path -LiteralPath $path)) {
-        return
-    }
-
-    $attempt = 0
-    while ($true) {
-        try {
-            Remove-Item -LiteralPath $path -Recurse -Force
-            return
-        }
-        catch {
-            $attempt += 1
-            if ($attempt -ge 8) {
-                throw
-            }
-            Start-Sleep -Milliseconds 250
-        }
-    }
-}
-
-function Get-ProjectOutputDirectories {
-    $areas = @(
-        (Join-Path $repositoryRoot 'src'),
-        (Join-Path $repositoryRoot 'workers'),
-        (Join-Path $repositoryRoot 'tests')
-    )
-    foreach ($area in $areas) {
-        if (-not (Test-Path -LiteralPath $area)) {
-            continue
-        }
-
-        Get-ChildItem -LiteralPath $area -Directory -Recurse |
-            Where-Object { $_.Name -eq 'bin' -or $_.Name -eq 'obj' } |
-            Where-Object {
-                @(Get-ChildItem -LiteralPath $_.Parent.FullName -Filter '*.csproj' -File).Count -gt 0
-            }
-    }
-}
-
-function Clear-GeneratedOutput {
-    Write-Output "Removing regenerable output under $artifactsRoot"
-    Remove-DirectoryTree $artifactsRoot
-
-    $leftovers = @(Get-ProjectOutputDirectories)
-    foreach ($directory in $leftovers) {
-        Write-Output "Removing leftover $($directory.FullName.Substring($repositoryRoot.Length + 1))"
-        Remove-DirectoryTree $directory.FullName
-    }
-}
-
 function Assert-RunTree {
     foreach ($entry in $requiredExecutables.GetEnumerator()) {
         $path = Join-Path $runRoot $entry.Value
@@ -142,8 +58,7 @@ if (-not (Test-Path -LiteralPath $solutionPath)) {
 }
 
 Set-Location -LiteralPath $repositoryRoot
-Stop-WinPoolProcesses
-Clear-GeneratedOutput
+& (Join-Path $PSScriptRoot 'Clean-WinPool.ps1')
 
 Invoke-Native 'dotnet' @('restore', $solutionPath)
 Invoke-Native 'dotnet' @(
