@@ -103,17 +103,37 @@ modification. The current schema revision is 14 and the IPC protocol is 4; these
 are recorded in [CHANGELOG](CHANGELOG.md) Compatibility notes, not as extra
 project versions.
 
-User preferences do not live in SQLite: `settings.json` is their sole durable
-authority. JSON stores remain only for explicitly supported no-Agent development
-fallbacks.
+User preferences do not live in SQLite. They are split into two JSON files by
+one criterion: **whether the value is still consumed after the App closes.**
+Each file has exactly one writer process, enforced by architecture tests.
 
-The persistence ownership policy has two durable authorities:
+The persistence ownership policy has three durable authorities:
 
-- `settings.json` owns user preferences, including visual and language choices,
-  startup intent, and monitoring preferences.
+- `app-settings.json` owns App-session user preferences (visual and language
+  choices, hardware-ID display, partition-ignore threshold, last active page).
+  The App is its only writer; the Agent reads it through
+  `IUserPreferencesReader` for tray presentation only.
+- `agent-settings.json` owns background preferences whose effect survives App
+  closure (continuous monitoring, monitoring sample rate, Agent login startup).
+  The Agent is its only writer through `IAgentPreferencesStore`; the App reads
+  it through `IAgentPreferencesReader` and changes values only through the
+  typed `SetAgentPreferenceRequest`. The Agent also owns the HKCU Run autostart
+  entry and registers its own executable path, so the file and the registry
+  cannot drift apart after a portable move.
 - `winpool.db` owns inventory and workspace cache, simulation documents,
   monitoring, and process/session history. The Agent remains its only normal
   writer.
+
+Every save to a preferences file is atomic (temporary file plus replace) and
+event-driven; foreground preferences save on each change. A load failure on an
+existing file blocks writes for that file until it becomes readable again, so
+defaults are never persisted over unreadable content. `agent-settings.json`
+carries a `SavedAtUtc` content label stamped on every save. Consumers compare
+it by inequality only, never by ordering: the Agent's data-less
+`AgentPreferencesChangedEvent` notification, the reconnect reseed, and the
+App's file watcher all funnel into one serialized reload pipeline that
+deduplicates by that label. JSON stores remain only for explicitly supported
+no-Agent development fallbacks.
 
 Product code must not silently erase an unknown data root.
 `storage-location.json` is the one durable bootstrap exception because WinPool

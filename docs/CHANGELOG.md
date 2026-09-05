@@ -7,6 +7,51 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.45 split preference persistence — 2026-09-05
+
+### Changed
+- User preferences are split into `app-settings.json` (App-session values,
+  written only by the App) and `agent-settings.json` (background values that
+  survive App closure: continuous monitoring, monitoring sample rate, Agent
+  login startup; written only by the Agent). The split criterion is whether a
+  value is still consumed after the App closes.
+- The App changes background preferences only through the new typed
+  `SetAgentPreferenceRequest`; the Agent applies the value, registers its own
+  executable in the HKCU Run key (autostart moved from App to Agent), stamps
+  `SavedAtUtc`, persists atomically, and emits a data-less
+  `AgentPreferencesChangedEvent`. The App refreshes from the Agent event, a
+  reconnect reseed, and a file watcher, all funneled into one serialized
+  reload that deduplicates by `SavedAtUtc` inequality. The tray no longer
+  writes any settings file and routes its monitoring toggle through the same
+  typed request.
+- All foreground preferences save on change: the last active page persists on
+  page switch, and workspace UI state persists on selection change. The
+  close-time saves remain as a fallback and now run before the monitoring
+  detach, each in its own exception scope.
+- A preference file that exists but cannot be read blocks writes to itself
+  until it becomes readable again, so defaults can never be persisted over
+  unreadable content.
+
+### Compatibility
+- IPC adds the `agent.request.set_agent_preference` control message and the
+  `AgentPreferencesChangedEvent` event type; the protocol version stays 4.
+- Old `settings.json` content is not migrated (development stage). Background
+  values reset to defaults once.
+- With the Agent unavailable, changing continuous monitoring, the sample
+  rate, or login startup now fails visibly with a control rollback instead of
+  silently writing a file.
+
+### Verification
+- 2026-09-05: full Release automatic gate passed 388 tests, 0 failed, 0
+  skipped, with a warning-free Release build and no known vulnerable packages.
+  Architecture tests enforce the one-writer-per-file rule, tray zero-write,
+  and App-side absence of the Agent preferences store and Run-key access.
+  Tray lifecycle, settings-page interaction, and live tray-to-App preference
+  sync remain `unverified` human evidence.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+
 ## V0.45 Edit-page topology workspace — 2026-09-02
 
 ### Changed

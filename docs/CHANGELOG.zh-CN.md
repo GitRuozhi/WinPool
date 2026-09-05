@@ -8,6 +8,40 @@
 本文件记录重要最终结果。活动阶段的计划工作保留在 `Plan.md`，历史计划保留在
 `Archive`。施工过程由 Git 保存。新条目使用结果分段；不为格式一致而重写全部旧历史。
 
+## V0.45 偏好持久化拆分 — 2026-09-05
+
+### Changed
+- 用户偏好拆分为 `app-settings.json`（App 会话内取值，仅 App 可写）与
+  `agent-settings.json`（App 关闭后仍生效的后台取值：持续监控、监控采样率、
+  Agent 开机自启；仅 Agent 可写）。拆分判据是该值在 App 关闭后是否仍被消费。
+- App 只能通过新的类型化 `SetAgentPreferenceRequest` 修改后台偏好；Agent 应用
+  取值、把自身可执行路径注册进 HKCU Run 键（自启注册从 App 移交 Agent）、打
+  `SavedAtUtc` 标签、原子落盘，并发出不带数据的
+  `AgentPreferencesChangedEvent`。App 从 Agent 事件、重连 reseed 和文件
+  watcher 三路触发汇入同一条串行重载管线，按 `SavedAtUtc` 不等比较去重。托盘
+  不再写任何设置文件，其监控开关也走同一类型化请求。
+- 所有前台偏好改为即改即存：最后活动页面在切页时保存，工作区 UI 状态在选择
+  变化时保存。关窗保存保留为兜底，并提前到监控分离之前执行，各段独立异常
+  作用域。
+- 已存在但读不出的偏好文件会禁止对自身的写入，直到重新可读，默认值永远不会
+  覆盖读不出的内容。
+
+### Compatibility
+- IPC 新增 `agent.request.set_agent_preference` 控制消息与
+  `AgentPreferencesChangedEvent` 事件类型；协议版本保持 4。
+- 旧 `settings.json` 内容不迁移（开发阶段）。后台取值一次性回到默认。
+- Agent 不可用时，修改持续监控、采样率或开机自启现在会显式失败并回滚控件，
+  不再静默写文件。
+
+### Verification
+- 2026-09-05：完整 Release 自动门禁通过 388 个测试，0 失败，0 跳过；Release
+  构建无警告，无已知漏洞包。架构测试强制每文件唯一写者、托盘零写、App 侧不
+  出现 Agent 偏好写接口与 Run 键访问。托盘生命周期、设置页交互、托盘到 App
+  的实时偏好同步仍为 `unverified` 人工证据。
+
+### Known Limitations
+- 真实存储结构变更仍被拒绝。
+
 ## V0.45 编辑页拓扑工作区 — 2026-09-02
 
 ### Changed

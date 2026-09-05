@@ -81,14 +81,17 @@ tests/
 
 正常启动使用 Agent 独占的 SQLite 保存采集、工作区状态、模拟文档、监控和进程/会话历史。只创建或打开当前 schema；更旧 schema 会被拒绝且不迁移、不改写。当前 schema 修订号为 14，IPC 协议为 4；二者记录在 [变更记录](CHANGELOG.zh-CN.md) 的 Compatibility 中，不构成额外项目版本。
 
-用户偏好不进入 SQLite，`settings.json` 是其唯一耐久权威。JSON 仅用于明确支持的无 Agent 开发回退。
+用户偏好不进入 SQLite。它们按一个判据拆成两个 JSON 文件：**该值在 App 关闭后是否仍被消费**。每个文件只有一个写者进程，由架构测试强制。
 
-持久化所有权只允许两个耐久权威来源：
+持久化所有权只允许三个耐久权威来源：
 
-- `settings.json` 保存用户偏好，包括视觉与语言选择、开机启动期望和监控偏好。
+- `app-settings.json` 保存 App 会话内用户偏好（视觉与语言选择、硬件 ID 显示、分区忽略阈值、最后活动页面）。只有 App 可以写入；Agent 仅为托盘展示通过 `IUserPreferencesReader` 读取。
+- `agent-settings.json` 保存 App 关闭后仍生效的后台偏好（持续监控、监控采样率、Agent 开机自启）。只有 Agent 可以通过 `IAgentPreferencesStore` 写入；App 通过 `IAgentPreferencesReader` 读取，且只能通过类型化的 `SetAgentPreferenceRequest` 修改值。Agent 同时拥有 HKCU Run 自启注册表项并注册自身可执行路径，因此便携目录移动后文件与注册表不会分叉。
 - `winpool.db` 保存库存和工作区缓存、模拟文档、监控和进程/会话历史；正常运行仍只有 Agent 可以写入。
 
-产品代码不得静默擦除未知数据根。`storage-location.json` 是唯一耐久启动例外，因为 WinPool 必须先定位活动数据根，才能打开前述两个权威来源。IPC endpoint 是可重建运行状态，不是新的状态权威。
+偏好文件的每次保存都是原子的（临时文件加替换），且全部事件驱动；前台偏好每改即存。已存在的文件读取失败会禁止该文件的后续写入，直到重新可读，因此默认值永远不会覆盖读不出的内容。`agent-settings.json` 每次保存都会打上 `SavedAtUtc` 内容标签；消费方只做不等比较、绝不比较先后：Agent 的不带数据通知事件 `AgentPreferencesChangedEvent`、重连 reseed 和 App 的文件 watcher 汇入同一条串行重载管线，按该标签去重。JSON 仅用于明确支持的无 Agent 开发回退。
+
+产品代码不得静默擦除未知数据根。`storage-location.json` 是唯一耐久启动例外，因为 WinPool 必须先定位活动数据根，才能打开前述权威来源。IPC endpoint 是可重建运行状态，不是新的状态权威。
 
 WinPool 通过 Windows App SDK 应用生命周期实现单实例。普通重复启动激活已有窗口。批准的提权交接在提权后继进程占用实例键前等待旧进程退出。执行模式永不持久化。
 
