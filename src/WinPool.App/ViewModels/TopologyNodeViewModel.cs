@@ -52,6 +52,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         NoWrapChildren = node.NoWrapChildren;
         DistributeByCapacity = node.DistributeByCapacity;
         CapacityWeights = node.CapacityWeights;
+        StructureModifiable = node.StructureModifiable;
         _isExpanded = unit.Kind == StorageUnitKind.VirtualDiskGroup
             ? true
             : owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
@@ -196,6 +197,21 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public bool DistributeByCapacity { get; }
 
     public IReadOnlyList<double>? CapacityWeights { get; }
+
+    public bool? StructureModifiable { get; }
+
+    public Visibility ModifiabilityIconVisibility =>
+        StructureModifiable is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility ModifiableOkVisibility =>
+        StructureModifiable == true ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ModifiableNoVisibility =>
+        StructureModifiable == false ? Visibility.Visible : Visibility.Collapsed;
+
+    public string ModifiableOkName => _owner.Localization["StructureModifiable"];
+
+    public string ModifiableNoName => _owner.Localization["StructureNotModifiable"];
 
     public int LayoutUnitWidth { get; private set; } = 1;
 

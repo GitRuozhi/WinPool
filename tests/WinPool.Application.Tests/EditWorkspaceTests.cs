@@ -185,6 +185,71 @@ public sealed class EditWorkspaceTests
             node => EditWorkspace.IsPlus(node.Unit.StableId));
     }
 
+    [Fact]
+    public void ModifiabilityRulesFollowDataPresence()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+
+        // The virtual disk carries a data-bearing NTFS partition.
+        Assert.False(EditWorkspace.PoolSupportsStructureModification(snapshot, "pool:t1"));
+        Assert.False(EditWorkspace.DiskSupportsStructureModification(snapshot, "vdisk:1", isVirtualDisk: true));
+
+        // Tier member disks have no partitions of their own.
+        Assert.True(EditWorkspace.DiskSupportsStructureModification(snapshot, "physical:ssd", isVirtualDisk: false));
+
+        // A raw disk with a data partition is unsupported; an empty
+        // (unformatted) partition keeps the disk supported.
+        var withRaw = snapshot with
+        {
+            OsDisks =
+            [
+                new OsDiskInfo(
+                    "osdisk:raw", "Raw Disk", 5, "GPT", 2_000_000_000, false, false, false,
+                    "physical:extra", null)
+            ],
+            Partitions =
+            [
+                new PartitionInfo(
+                    "partition:raw", true, 5, 1, "Primary", 0, 2_000_000_000, false, false,
+                    string.Empty, string.Empty, "RAW", null, 2_000_000_000, "Healthy", "OK",
+                    string.Empty, "osdisk:raw")
+            ]
+        };
+        Assert.True(EditWorkspace.DiskSupportsStructureModification(withRaw, "physical:extra", isVirtualDisk: false));
+
+        var withData = withRaw with
+        {
+            Partitions =
+            [
+                new PartitionInfo(
+                    "partition:raw", true, 5, 1, "Primary", 0, 2_000_000_000, false, false,
+                    "F", "Data", "NTFS", 65536, 1_000_000_000, "Healthy", "OK",
+                    string.Empty, "osdisk:raw")
+            ]
+        };
+        Assert.False(EditWorkspace.DiskSupportsStructureModification(withData, "physical:extra", isVirtualDisk: false));
+        Assert.Equal(
+            withData.Partitions.Single().SizeRemaining < withData.Partitions.Single().Size,
+            EditWorkspace.PartitionHoldsStoredData(withData.Partitions.Single()));
+    }
+
+    [Fact]
+    public void CollectStructureProblemsNamesThePoolAndItsDataBearingDisks()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var problems = EditWorkspace.CollectStructureProblems(snapshot, "pool:t1");
+
+        Assert.Contains(problems, problem =>
+            problem.StableId == "pool:t1"
+            && problem.Kind == EditWorkspace.StructureProblemKind.PoolVirtualDiskData);
+        Assert.Contains(problems, problem =>
+            problem.StableId == "vdisk:1"
+            && problem.Kind == EditWorkspace.StructureProblemKind.DiskHoldsData);
+
+        // A pool without virtual disks has nothing data-bearing to report.
+        Assert.Empty(EditWorkspace.CollectStructureProblems(snapshot, "pool:primordial"));
+    }
+
     private static StorageSnapshot TieredPoolSnapshot(bool withVirtualDisk)
     {
         var ssd = new PhysicalDiskInfo(
@@ -225,8 +290,17 @@ public sealed class EditWorkspaceTests
                     "vdisk:1", true, "Pool01", "Healthy", "OK", "Simple", "Fixed",
                     null, null, 1_000_000_000, 1_000_000_000, "pool:t1", ["tier:ssd"], [])]
                 : [],
-            [],
-            [],
+            withVirtualDisk
+                ? [new OsDiskInfo(
+                    "osdisk:vd", "Pool01 Disk", 9, "GPT", 1_000_000_000, false, false, false,
+                    null, "vdisk:1")]
+                : [],
+            withVirtualDisk
+                ? [new PartitionInfo(
+                    "partition:vd", true, 9, 1, "Primary", 0, 1_000_000_000, false, false,
+                    "H", "Pool01", "NTFS", 65536, 100_000, "Healthy", "OK",
+                    string.Empty, "osdisk:vd")]
+                : [],
             [],
             [],
             []);

@@ -69,7 +69,8 @@ public sealed record ManageTopologyNodeView(
     IReadOnlyList<ManageTopologyNodeView> Children,
     bool NoWrapChildren = false,
     bool DistributeByCapacity = false,
-    IReadOnlyList<double>? CapacityWeights = null);
+    IReadOnlyList<double>? CapacityWeights = null,
+    bool? StructureModifiable = null);
 
 public sealed record ManageSystemProjection(
     SystemId SystemId,

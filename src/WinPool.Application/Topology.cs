@@ -53,6 +53,12 @@ public sealed class TopologyNode
     public bool NoWrapChildren { get; }
     public bool DistributeByCapacity { get; }
     public IReadOnlyList<double>? CapacityWeights { get; }
+
+    /// <summary>
+    /// Edit-lower structure-modifiability indicator state. Null hides the
+    /// icon (objects the state is not defined for).
+    /// </summary>
+    public bool? StructureModifiable { get; set; }
 }
 
 public static class WorkspaceMapper

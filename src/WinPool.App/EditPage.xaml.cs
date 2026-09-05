@@ -318,6 +318,18 @@ public sealed partial class EditPage : Page
             return;
         }
 
+        // An unsupported pool refuses member drag-out while still
+        // accepting drag-in (Plan §7.3).
+        var diskSourcePoolId = _working.PhysicalDisks
+            .FirstOrDefault(disk => disk.StableId == diskId)?.PoolStableId;
+        if (!string.IsNullOrEmpty(diskSourcePoolId)
+            && _working.StoragePools.FirstOrDefault(candidate =>
+                candidate.StableId == diskSourcePoolId) is { IsPrimordial: false } sourcePoolInfo
+            && !EditWorkspace.PoolSupportsStructureModification(_working, sourcePoolInfo.StableId))
+        {
+            return;
+        }
+
         var selected = SelectedPool();
         if (selected is not null && EditWorkspace.HasMultipleVirtualDisks(_working, selected.StableId))
         {
@@ -657,11 +669,27 @@ public sealed partial class EditPage : Page
         return $"Pool{index:00}";
     }
 
+    private const string NL = "\n";
+
     private async void Execute_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
         if (pool is null || !ViewModel.IsUsingSimulatedInventory)
         {
+            return;
+        }
+
+        var problems = EditWorkspace.CollectStructureProblems(_working, pool.StableId);
+        if (problems.Count > 0)
+        {
+            await ShowMessageAsync(
+                Text("无法执行修改", "Structure modification blocked"),
+                Text("以下存储对象不支持结构修改：", "The following storage objects do not support structure modification:")
+                + NL
+                + NL
+                + string.Join(
+                    NL,
+                    problems.Select(problem => "· " + problem.DisplayName + " — " + DescribeStructureProblem(problem.Kind))));
             return;
         }
 
@@ -1153,6 +1181,15 @@ public sealed partial class EditPage : Page
         };
         await dialog.ShowAsync();
     }
+
+    private string DescribeStructureProblem(WinPool.Application.EditWorkspace.StructureProblemKind kind) =>
+        kind == WinPool.Application.EditWorkspace.StructureProblemKind.PoolVirtualDiskData
+            ? Text(
+                "其虚拟磁盘存在含数据的分区，请先备份并清空相关卷后重试",
+                "a virtual disk contains data-bearing partitions; back up and empty the volumes, then retry")
+            : Text(
+                "该磁盘存在含数据的分区，请先备份并清空相关卷后重试",
+                "the disk contains data-bearing partitions; back up and empty the volumes, then retry");
 
     private string Text(string zh, string en) =>
         ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;

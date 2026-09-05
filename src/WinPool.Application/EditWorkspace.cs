@@ -232,6 +232,106 @@ public static class EditWorkspace
         return nodes;
     }
 
+    /// <summary>
+    /// A partition holds stored data when it carries a file system and any
+    /// of its capacity is consumed. When the snapshot cannot prove the
+    /// partition empty, the conservative "holds data" answer applies
+    /// (Plan §7.2).
+    /// </summary>
+    public static bool PartitionHoldsStoredData(PartitionInfo partition) =>
+        !string.IsNullOrWhiteSpace(partition.FileSystem)
+        && !string.Equals(partition.FileSystem, "RAW", StringComparison.OrdinalIgnoreCase)
+        && partition.SizeRemaining < partition.Size;
+
+    public static bool DiskSupportsStructureModification(
+        StorageSnapshot snapshot,
+        string stableId,
+        bool isVirtualDisk)
+    {
+        var osDisks = isVirtualDisk
+            ? snapshot.OsDisks.Where(item => item.VirtualDiskStableId == stableId)
+            : snapshot.OsDisks.Where(item => item.PhysicalDiskStableId == stableId);
+        return !osDisks.Any(osDisk => snapshot.Partitions.Any(
+            partition => partition.OsDiskStableId == osDisk.StableId
+                && PartitionHoldsStoredData(partition)));
+    }
+
+    public static bool PoolSupportsStructureModification(StorageSnapshot snapshot, string poolId) =>
+        snapshot.VirtualDisks
+            .Where(item => item.PoolStableId == poolId)
+            .All(item => DiskSupportsStructureModification(snapshot, item.StableId, isVirtualDisk: true));
+
+public enum StructureProblemKind
+{
+    PoolVirtualDiskData,
+    DiskHoldsData
+}
+
+public sealed record StructureProblem(
+    string StableId,
+    string DisplayName,
+    StructureProblemKind Kind);
+
+    /// <summary>
+    /// Lists every storage object involved in executing the pool that does
+    /// not support structure modification (Plan §7.3).
+    /// </summary>
+    public static IReadOnlyList<StructureProblem> CollectStructureProblems(
+        StorageSnapshot snapshot,
+        string poolId)
+    {
+        var problems = new List<StructureProblem>();
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == poolId);
+        if (pool is null || pool.IsPrimordial)
+        {
+            return problems;
+        }
+
+        if (!PoolSupportsStructureModification(snapshot, poolId))
+        {
+            problems.Add(new StructureProblem(
+                pool.StableId,
+                pool.FriendlyName,
+                StructureProblemKind.PoolVirtualDiskData));
+        }
+
+        foreach (var virtualDisk in snapshot.VirtualDisks
+                     .Where(item => item.PoolStableId == poolId))
+        {
+            if (!DiskSupportsStructureModification(snapshot, virtualDisk.StableId, isVirtualDisk: true))
+            {
+                problems.Add(new StructureProblem(
+                    virtualDisk.StableId,
+                    virtualDisk.FriendlyName,
+                    StructureProblemKind.DiskHoldsData));
+            }
+        }
+
+        foreach (var member in snapshot.PhysicalDisks
+                     .Where(item => pool.MemberPhysicalDiskIds.Contains(
+                         item.StableId, StringComparer.OrdinalIgnoreCase)))
+        {
+            if (!DiskSupportsStructureModification(snapshot, member.StableId, isVirtualDisk: false))
+            {
+                problems.Add(new StructureProblem(
+                    member.StableId,
+                    member.FriendlyName,
+                    StructureProblemKind.DiskHoldsData));
+            }
+        }
+
+        return problems;
+    }
+
+    public static bool DiskHasPartitions(StorageSnapshot snapshot, string stableId, bool isVirtualDisk)
+    {
+        var osDisks = isVirtualDisk
+            ? snapshot.OsDisks.Where(item => item.VirtualDiskStableId == stableId)
+            : snapshot.OsDisks.Where(item => item.PhysicalDiskStableId == stableId);
+        return osDisks.Any(osDisk => snapshot.Partitions.Any(
+            partition => partition.OsDiskStableId == osDisk.StableId));
+    }
+
     public static StorageSnapshot InsertDraftPool(StorageSnapshot snapshot, string poolName)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -448,11 +548,16 @@ public static class EditWorkspace
         {
             foreach (var member in members)
             {
-                poolNode.Children.Add(PhysicalDiskNode(member));
+                var diskNode = PhysicalDiskNode(member);
+                diskNode.StructureModifiable = DiskSupportsStructureModification(
+                    snapshot, member.StableId, isVirtualDisk: false);
+                poolNode.Children.Add(diskNode);
             }
 
             return poolNode;
         }
+
+        poolNode.StructureModifiable = PoolSupportsStructureModification(snapshot, pool.StableId);
 
         var virtualDisks = snapshot.VirtualDisks
             .Where(disk => disk.PoolStableId == pool.StableId)
@@ -513,7 +618,10 @@ public static class EditWorkspace
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in members)
         {
-            node.Children.Add(PhysicalDiskNode(member));
+            var diskNode = PhysicalDiskNode(member);
+            diskNode.StructureModifiable = DiskSupportsStructureModification(
+                snapshot, member.StableId, isVirtualDisk: false);
+            node.Children.Add(diskNode);
         }
 
         return node;
@@ -552,7 +660,10 @@ public static class EditWorkspace
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in directMembers)
         {
-            group.Children.Add(PhysicalDiskNode(member));
+            var diskNode = PhysicalDiskNode(member);
+            diskNode.StructureModifiable = DiskSupportsStructureModification(
+                snapshot, member.StableId, isVirtualDisk: false);
+            group.Children.Add(diskNode);
         }
 
         poolNode.Children.Add(group);
@@ -743,7 +854,8 @@ public static class EditWorkspace
             children,
             node.NoWrapChildren,
             node.DistributeByCapacity,
-            node.CapacityWeights);
+            node.CapacityWeights,
+            node.StructureModifiable);
     }
 
     private static ManageObjectRole MapRole(StorageUnitKind kind) => kind switch

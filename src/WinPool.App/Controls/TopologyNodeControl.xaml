@@ -102,17 +102,33 @@
                                 FontWeight="SemiBold"
                                 Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}"
                                 TextWrapping="Wrap" />
-                            <Border
+                            <StackPanel
                                 Grid.Column="1"
-                                Padding="5,1"
-                                VerticalAlignment="Top"
-                                Background="{ThemeResource SystemFillColorCautionBrush}"
-                                CornerRadius="3"
-                                Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
-                                <TextBlock
-                                    FontSize="10"
-                                    Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
-                            </Border>
+                                Orientation="Horizontal"
+                                Spacing="6"
+                                VerticalAlignment="Top">
+                                <Border
+                                    Padding="5,1"
+                                    Background="{ThemeResource SystemFillColorCautionBrush}"
+                                    CornerRadius="3"
+                                    Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
+                                    <TextBlock
+                                        FontSize="10"
+                                        Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
+                                </Border>
+                                <FontIcon
+                                    FontSize="14"
+                                    Glyph="&#xE73E;"
+                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                    Visibility="{x:Bind ViewModel.ModifiableOkVisibility, Mode=OneWay}"
+                                    AutomationProperties.Name="{x:Bind ViewModel.ModifiableOkName, Mode=OneWay}" />
+                                <FontIcon
+                                    FontSize="14"
+                                    Glyph="&#xE711;"
+                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                    Visibility="{x:Bind ViewModel.ModifiableNoVisibility, Mode=OneWay}"
+                                    AutomationProperties.Name="{x:Bind ViewModel.ModifiableNoName, Mode=OneWay}" />
+                            </StackPanel>
                         </Grid>
                         <Grid Margin="0,2,0,0" ColumnSpacing="5">
                             <Grid.ColumnDefinitions>
