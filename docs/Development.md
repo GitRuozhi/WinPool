@@ -165,7 +165,7 @@ From the repository root:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 ```
 
-The rebuild script stops running WinPool processes, removes regenerable `artifacts` output and leftover project `bin`/`obj` folders, rebuilds the two-process tree, and writes `WinPool.lnk` in the repository root and on the current-user Desktop. It does not touch Tests evidence, Research material, `%LocalAppData%\WinPool` data, `Old`, or `Rubbish`.
+The rebuild script stops running WinPool processes, removes regenerable `artifacts` output and leftover project `bin`/`obj` folders, rebuilds the two-process tree, and writes `WinPool.lnk` in the repository root and on the current-user Desktop. It does not touch Tests evidence, Research material, `%LocalAppData%\WinPool` data, `Old`, or `Rubbish`. The stop-and-clean phase lives in `build\Clean-WinPool.ps1`; run that script alone with `-WhatIf` to preview a clean without building.
 
 During development, preview or reset the current user's standard WinPool data
 root with:

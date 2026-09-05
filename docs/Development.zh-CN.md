@@ -109,7 +109,7 @@ WinPool 通过 Windows App SDK 应用生命周期实现单实例。普通重复�
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 ```
 
-该脚本会停止正在运行的 WinPool 进程，删除可再生成的 `artifacts` 以及残留的项目 `bin`/`obj`，重新编译两进程树，并在仓库根目录和当前用户桌面写入 `WinPool.lnk`。它不会触碰 Tests 证据、Research 材料、`%LocalAppData%\WinPool` 数据、`Old` 或 `Rubbish`。
+该脚本会停止正在运行的 WinPool 进程，删除可再生成的 `artifacts` 以及残留的项目 `bin`/`obj`，重新编译两进程树，并在仓库根目录和当前用户桌面写入 `WinPool.lnk`。它不会触碰 Tests 证据、Research 材料、`%LocalAppData%\WinPool` 数据、`Old` 或 `Rubbish`。停止与清理阶段独立在 `build\Clean-WinPool.ps1` 中；单独运行该脚本（可加 `-WhatIf` 预览）即可只清理、不构建。
 
 开发阶段可用以下命令预览或重置当前用户的 WinPool 标准数据根目录：
 
