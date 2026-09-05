@@ -46,9 +46,9 @@ docs/
   Reference/
   Archive/
 build/
-  Publish-Staged.ps1
+  Clean-WinPool.ps1
+  Merge-RuntimeTrees.ps1
   Rebuild-WinPool.ps1
-  Reset-WinPoolLocalData.ps1
 assets/                           纳入 Git 的软件引用资源
 OriginArtWork/                    忽略的用户手动艺术源文件
 local-assets/                     忽略的开发者本地资源
@@ -111,18 +111,6 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 
 该脚本会停止正在运行的 WinPool 进程，删除可再生成的 `artifacts` 以及残留的项目 `bin`/`obj`，重新编译两进程树，并在仓库根目录和当前用户桌面写入 `WinPool.lnk`。它不会触碰 Tests 证据、Research 材料、`%LocalAppData%\WinPool` 数据、`Old` 或 `Rubbish`。停止与清理阶段独立在 `build\Clean-WinPool.ps1` 中；单独运行该脚本（可加 `-WhatIf` 预览）即可只清理、不构建。
 
-开发阶段可用以下命令预览或重置当前用户的 WinPool 标准数据根目录：
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Reset-WinPoolLocalData.ps1 -WhatIf
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Reset-WinPoolLocalData.ps1
-```
-
-重置脚本会停止 WinPool 进程，并把 `%LocalAppData%\WinPool` 移入父项目
-`Rubbish` 下带时间戳且可恢复的目录。脚本会验证源目录已经移走，并核对归档前后的
-文件数和字节数。它不会直接删除数据，也不会跟随已选择的自定义数据根目录；标准
-根目录中的位置指针被移走后，下次启动会创建采用当前 schema 的全新标准数据根目录。
-
 手动构建为：
 
 ```powershell
@@ -148,15 +136,9 @@ artifacts\build\                         类库和测试输出
 
 测试命令及何时运行由 [质量规则](Quality.zh-CN.md) 定义。
 
-可复现自包含 staging 必须使用仓库外的新路径，并拒绝覆盖已有路径：
-
-```powershell
-.\build\Publish-Staged.ps1 `
-  -OutputPath ..\..\Rubbish\YYYYMMDD_winpool_staging\Program\WinPool `
-  -Configuration Release
-```
-
-必需布局为：
+独立的正式 staging 脚本已移除。每次构建已经在 `artifacts\$(Configuration)` 产出该
+便携布局；未来如需正式 staging，必须把该布局复现到仓库外的新路径，并拒绝覆盖
+已有路径。必需布局为：
 
 ```text
 WinPool.App.exe

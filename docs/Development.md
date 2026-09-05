@@ -56,9 +56,9 @@ docs/
   Reference/
   Archive/
 build/
-  Publish-Staged.ps1
+  Clean-WinPool.ps1
+  Merge-RuntimeTrees.ps1
   Rebuild-WinPool.ps1
-  Reset-WinPoolLocalData.ps1
 assets/                           tracked software-consumed resources
 OriginArtWork/                    ignored user-managed source artwork
 local-assets/                     ignored developer-local resources
@@ -167,21 +167,6 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
 
 The rebuild script stops running WinPool processes, removes regenerable `artifacts` output and leftover project `bin`/`obj` folders, rebuilds the two-process tree, and writes `WinPool.lnk` in the repository root and on the current-user Desktop. It does not touch Tests evidence, Research material, `%LocalAppData%\WinPool` data, `Old`, or `Rubbish`. The stop-and-clean phase lives in `build\Clean-WinPool.ps1`; run that script alone with `-WhatIf` to preview a clean without building.
 
-During development, preview or reset the current user's standard WinPool data
-root with:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Reset-WinPoolLocalData.ps1 -WhatIf
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Reset-WinPoolLocalData.ps1
-```
-
-The reset script stops WinPool processes and moves `%LocalAppData%\WinPool` to
-a timestamped, recoverable directory under the parent project's `Rubbish` tree.
-It verifies that the source is gone and that the archived file count and byte
-count match. It does not directly delete data or follow a selected custom data
-root; removing the standard-root location pointer makes the next launch create
-a fresh current-schema standard data root.
-
 A manual build is:
 
 ```powershell
@@ -208,16 +193,10 @@ executables are self-contained in that shared root, so launching
 
 Test commands and when to run them are defined in [Quality](Quality.md).
 
-The reproducible self-contained staging command requires a new path outside the
-repository and refuses to overwrite an existing path:
-
-```powershell
-.\build\Publish-Staged.ps1 `
-  -OutputPath ..\..\Rubbish\YYYYMMDD_winpool_staging\Program\WinPool `
-  -Configuration Release
-```
-
-The required layout is:
+The separate formal staging script is retired. Every build already produces
+the portable layout as `artifacts\$(Configuration)`, and any future formal
+staging must reproduce that layout into a new path outside the repository and
+refuse to overwrite an existing path. The required layout is:
 
 ```text
 WinPool.App.exe
