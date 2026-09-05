@@ -7,6 +7,34 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.45 settings reset, gap threshold, and data capacity — 2026-09-05
+
+### Changed
+- New "Reset all to defaults" action in Settings. A confirmation dialog is
+  required; it never runs directly. It restores every preference (foreground
+  and, through the Agent, background), resets every built-in simulation
+  document to its initial state, and leaves user-created simulation documents
+  untouched. When the Agent is unavailable the background part is skipped and
+  a warning notification reports it.
+- The partition ignore size setting is renamed "partition gap hiding
+  threshold" and is now a digits-only input with a static MiB unit beside the
+  value; the numeric up/down spinner buttons are gone. Invalid or empty input
+  reverts to the stored value on focus loss.
+- New background preference "data capacity limit", default 1024 MiB, range
+  1 MiB–1 TiB, stored in agent-settings.json. It is related to data
+  compression and currently has no consuming behavior; the monitoring and
+  test features will implement it.
+
+### Verification
+- 2026-09-05: full Debug automatic gate passed 397 tests, 0 failed, 0
+  skipped. The Release run tree could not be rebuilt during verification
+  because a WinPool instance was running from it. Settings-page interaction,
+  the reset confirmation flow, and the new inputs remain `unverified` human
+  evidence.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+
 ## V0.45 split preference persistence — 2026-09-05
 
 ### Changed
