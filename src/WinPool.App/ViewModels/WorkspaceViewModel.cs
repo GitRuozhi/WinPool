@@ -636,13 +636,31 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentPreferences));
 
         var selectedSystemWasReset = false;
+        var currentById = SystemCatalog.Systems.ToDictionary(
+            system => system.Id,
+            StringComparer.OrdinalIgnoreCase);
         foreach (var builtin in SimulationCatalog.CreateDocuments())
         {
-            await _systemRepository.SaveSimulationAsync(builtin, cancellationToken);
-            SystemCatalog.Update(builtin);
+            // The persistence layer rejects a fresh catalog document over an
+            // existing revision, so the reset follows the startup merge
+            // pattern: take the current document and restore its content
+            // with a bumped revision.
+            var reset = currentById.TryGetValue(builtin.Id, out var existing)
+                ? existing with
+                {
+                    DisplayName = builtin.DisplayName,
+                    Snapshot = builtin.Snapshot,
+                    HardwareReport = builtin.HardwareReport,
+                    Jobs = [],
+                    Revision = checked(existing.Revision + 1),
+                    UpdatedAt = DateTimeOffset.Now
+                }
+                : builtin;
+            await _systemRepository.SaveSimulationAsync(reset, cancellationToken);
+            SystemCatalog.Update(reset);
             if (SelectedSystem.Id.Equals(builtin.Id, StringComparison.OrdinalIgnoreCase))
             {
-                SelectedSystem = builtin;
+                SelectedSystem = reset;
                 selectedSystemWasReset = true;
             }
         }

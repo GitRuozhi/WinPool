@@ -4,6 +4,7 @@ using System.Security.Principal;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.Agent.Client;
 using WinPool.Application;
@@ -398,7 +399,18 @@ public sealed partial class SettingsPage : Page
     private void PartitionGapBox_TextChanged(object sender, TextChangedEventArgs e) =>
         KeepDigitsOnly(PartitionGapBox);
 
-    private async void PartitionGapBox_LostFocus(object sender, RoutedEventArgs e)
+    private void PartitionGapBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            CommitPartitionGapAsync();
+        }
+    }
+
+    private void PartitionGapBox_LostFocus(object sender, RoutedEventArgs e) =>
+        CommitPartitionGapAsync();
+
+    private async void CommitPartitionGapAsync()
     {
         if (!_ready || _updatingPartitionGap)
         {
@@ -437,7 +449,18 @@ public sealed partial class SettingsPage : Page
     private void DataCapacityBox_TextChanged(object sender, TextChangedEventArgs e) =>
         KeepDigitsOnly(DataCapacityBox);
 
-    private async void DataCapacityBox_LostFocus(object sender, RoutedEventArgs e)
+    private void DataCapacityBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            CommitDataCapacityAsync();
+        }
+    }
+
+    private void DataCapacityBox_LostFocus(object sender, RoutedEventArgs e) =>
+        CommitDataCapacityAsync();
+
+    private async void CommitDataCapacityAsync()
     {
         if (!_ready || _updatingDataCapacity)
         {
@@ -471,6 +494,18 @@ public sealed partial class SettingsPage : Page
         DataCapacityBox.Text = MiBText(
             ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
         _updatingDataCapacity = false;
+    }
+
+    /// <summary>
+    /// Numeric boxes select their whole value on focus so a typed digit
+    /// replaces the old number instead of appending to it.
+    /// </summary>
+    private void NumericBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox box)
+        {
+            box.SelectAll();
+        }
     }
 
     /// <summary>

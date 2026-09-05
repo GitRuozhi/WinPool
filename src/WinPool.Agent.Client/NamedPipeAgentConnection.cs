@@ -934,6 +934,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<ManageInventoryLoadedResponse>(JsonOptions),
             nameof(ExportArtifactResponse) =>
                 response.Deserialize<ExportArtifactResponse>(JsonOptions),
+            nameof(AgentPreferenceSavedResponse) =>
+                response.Deserialize<AgentPreferenceSavedResponse>(JsonOptions),
             nameof(ShutdownResponse) =>
                 response.Deserialize<ShutdownResponse>(JsonOptions),
             _ => throw new InvalidDataException(

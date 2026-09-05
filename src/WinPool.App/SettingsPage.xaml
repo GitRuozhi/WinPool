@@ -206,6 +206,8 @@
                             MaxLength="4"
                             InputScope="Number"
                             TextAlignment="Left"
+                            GotFocus="NumericBox_GotFocus"
+                            KeyDown="PartitionGapBox_KeyDown"
                             TextChanged="PartitionGapBox_TextChanged"
                             LostFocus="PartitionGapBox_LostFocus" />
                         <TextBlock
@@ -233,6 +235,8 @@
                             MaxLength="7"
                             InputScope="Number"
                             TextAlignment="Left"
+                            GotFocus="NumericBox_GotFocus"
+                            KeyDown="DataCapacityBox_KeyDown"
                             TextChanged="DataCapacityBox_TextChanged"
                             LostFocus="DataCapacityBox_LostFocus" />
                         <TextBlock
