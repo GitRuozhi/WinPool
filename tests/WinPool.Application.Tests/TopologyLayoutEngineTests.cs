@@ -268,6 +268,84 @@ public sealed class TopologyLayoutEngineTests
         Assert.Equal(hddTier.ChildWidths[0], hddTier.ChildWidths[3], 6);
     }
 
+    [Fact]
+    public void StripStageOneKeepsMinimumWidthsWhenTheRowDoesNotFit()
+    {
+        var strip = Strip(weights: [100, 200]);
+        var result = TopologyLayoutEngine.Layout(strip, availableWidth: 200);
+        Assert.Equal(2, result.Rows.Count == 0 ? 0 : result.Rows[0].Count);
+        Assert.Equal(TopologyLayoutEngine.LeafMinWidth, result.ChildWidths[0], 6);
+        Assert.Equal(TopologyLayoutEngine.LeafMinWidth, result.ChildWidths[1], 6);
+    }
+
+    [Fact]
+    public void StripStageTwoGrowsAllChildrenEqually()
+    {
+        var strip = Strip(weights: [100, 200]);
+        var result = TopologyLayoutEngine.Layout(strip, availableWidth: 320);
+        var growth = (320 - 230d) / 2;
+        Assert.Equal(TopologyLayoutEngine.LeafMinWidth + growth, result.ChildWidths[0], 6);
+        Assert.Equal(TopologyLayoutEngine.LeafMinWidth + growth, result.ChildWidths[1], 6);
+    }
+
+    [Fact]
+    public void StripStageThreeDistributesSpareWidthByCapacity()
+    {
+        var strip = Strip(weights: [100, 200]);
+        var result = TopologyLayoutEngine.Layout(strip, availableWidth: 563);
+        var expectedA = 200d + (157d * 100 / 300);
+        Assert.Equal(expectedA, result.ChildWidths[0], 3);
+        Assert.Equal(563d - 6 - expectedA, result.ChildWidths[1], 3);
+        Assert.True(result.ChildWidths[1] > result.ChildWidths[0]);
+    }
+
+    [Fact]
+    public void StripStagesAreContinuousAtTheComfortBoundary()
+    {
+        var strip = Strip(weights: [100, 200]);
+        var atBoundary = TopologyLayoutEngine.Layout(strip, availableWidth: 406);
+        Assert.Equal(200d, atBoundary.ChildWidths[0], 6);
+        Assert.Equal(200d, atBoundary.ChildWidths[1], 6);
+    }
+
+    [Fact]
+    public void StripStageThreeSpreadsThreeChildrenInWeightRatio()
+    {
+        var strip = Strip(weights: [100, 50, 200]);
+        var result = TopologyLayoutEngine.Layout(strip, availableWidth: 769.5);
+        var spare = 769.5 - (3 * 200d) - 12d;
+        Assert.Equal(200d + (spare * 100 / 350), result.ChildWidths[0], 3);
+        Assert.Equal(200d + (spare * 50 / 350), result.ChildWidths[1], 3);
+        Assert.Equal(769.5 - 12 - result.ChildWidths[0] - result.ChildWidths[1], result.ChildWidths[2], 3);
+    }
+
+    [Fact]
+    public void StripWithoutWeightsKeepsTheDefaultEqualFill()
+    {
+        var strip = new TopologyLayoutInput(
+            true,
+            true,
+            TopologyChildrenLayout.Flow,
+            [Leaf(), Leaf()],
+            NoWrapChildren: true);
+        var result = TopologyLayoutEngine.Layout(strip, availableWidth: 320);
+        Assert.Equal(result.ChildWidths[0], result.ChildWidths[1], 6);
+        Assert.Equal((320 - 6) / 2, result.ChildWidths[0], 6);
+    }
+
+    private static TopologyLayoutInput Strip(IReadOnlyList<double> weights)
+    {
+        var leaves = new List<TopologyLayoutInput> { Leaf(), Leaf(), Leaf() };
+        return new TopologyLayoutInput(
+            true,
+            true,
+            TopologyChildrenLayout.Flow,
+            leaves.GetRange(0, weights.Count),
+            NoWrapChildren: true,
+            DistributeByCapacity: true,
+            CapacityWeights: weights);
+    }
+
     private static TopologyLayoutInput System(params TopologyLayoutInput[] children) =>
         new(true, true, TopologyChildrenLayout.WeightedFlow, children);
 

@@ -49,6 +49,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             _ => throw new ArgumentOutOfRangeException(nameof(node))
         };
         LayoutWeight = node.LayoutWeight;
+        NoWrapChildren = node.NoWrapChildren;
+        DistributeByCapacity = node.DistributeByCapacity;
+        CapacityWeights = node.CapacityWeights;
         _isExpanded = unit.Kind == StorageUnitKind.VirtualDiskGroup
             ? true
             : owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
@@ -186,6 +189,13 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public TopologyChildrenLayout ChildrenLayout { get; }
 
     public int LayoutWeight { get; }
+
+    /// <summary>Strip metadata forwarded to the layout engine (Plan §2).</summary>
+    public bool NoWrapChildren { get; }
+
+    public bool DistributeByCapacity { get; }
+
+    public IReadOnlyList<double>? CapacityWeights { get; }
 
     public int LayoutUnitWidth { get; private set; } = 1;
 

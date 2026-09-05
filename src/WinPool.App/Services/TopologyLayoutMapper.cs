@@ -11,5 +11,8 @@ public static class TopologyLayoutMapper
             viewModel.HeaderVisibility == Visibility.Visible,
             viewModel.IsExpanded,
             viewModel.ChildrenLayout,
-            viewModel.Children.Select(FromViewModel).ToList());
+            viewModel.Children.Select(FromViewModel).ToList(),
+            viewModel.NoWrapChildren,
+            viewModel.DistributeByCapacity,
+            viewModel.CapacityWeights);
 }

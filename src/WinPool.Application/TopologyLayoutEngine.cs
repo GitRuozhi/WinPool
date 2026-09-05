@@ -4,7 +4,10 @@ public sealed record TopologyLayoutInput(
     bool ShowHeader,
     bool IsExpanded,
     TopologyChildrenLayout ChildrenLayout,
-    IReadOnlyList<TopologyLayoutInput> Children);
+    IReadOnlyList<TopologyLayoutInput> Children,
+    bool NoWrapChildren = false,
+    bool DistributeByCapacity = false,
+    IReadOnlyList<double>? CapacityWeights = null);
 
 public sealed record TopologyLayoutResult(
     int UnitWidth,
@@ -21,6 +24,14 @@ public static class TopologyLayoutEngine
     public const int AncestorChrome = 26;
     public const int SiblingSpacing = 6;
     public const int MinimumSiblingUnitWidth = 2;
+
+    /// <summary>
+    /// Equal-growth threshold t of the three-stage strip allocation: every
+    /// child grows equally up to this width before capacity distribution
+    /// starts. Indicative value pending the implementation screenshot
+    /// confirmation (Plan §2.7).
+    /// </summary>
+    public const double EqualGrowthWidth = 200;
 
     public static int RelaxedRowHeightCap(int rowHeight)
     {
@@ -121,6 +132,13 @@ public static class TopologyLayoutEngine
             default:
                 foreach (var row in node.Rows)
                 {
+                    if (input.DistributeByCapacity
+                        && input.CapacityWeights is { Count: > 0 })
+                    {
+                        AllocateCapacityStripRow(input, node, row, containerWidth, widths);
+                        continue;
+                    }
+
                     var usable = Math.Max(
                         1,
                         containerWidth - (Math.Max(0, row.Count - 1) * SiblingSpacing));
@@ -139,6 +157,89 @@ public static class TopologyLayoutEngine
         }
 
         node.ChildWidths = widths;
+    }
+
+    /// <summary>
+    /// Three-stage strip allocation (Plan §2.4): keep every child at its
+    /// minimum while the row does not fit; grow all children equally until
+    /// each reaches the comfort width; distribute any further width by the
+    /// declared capacity weights. The row's last child absorbs the rounding
+    /// residual; zero-weight children stop at the comfort width; a
+    /// non-positive total weight falls back to an equal split.
+    /// </summary>
+    private static void AllocateCapacityStripRow(
+        TopologyLayoutInput input,
+        Node node,
+        IReadOnlyList<int> row,
+        double containerWidth,
+        double[] widths)
+    {
+        var count = row.Count;
+        var spacing = SiblingSpacing * Math.Max(0, count - 1);
+        var minimumSum = 0d;
+        for (var i = 0; i < count; i++)
+        {
+            minimumSum += node.Children[row[i]].PixelWidth;
+        }
+
+        var declaredWeights = input.CapacityWeights!;
+        var weights = new double[count];
+        var positiveWeightSum = 0d;
+        for (var i = 0; i < count; i++)
+        {
+            var childIndex = row[i];
+            var weight = childIndex < declaredWeights.Count
+                ? Math.Max(0, declaredWeights[childIndex])
+                : 0;
+            weights[i] = weight;
+            positiveWeightSum += weight;
+        }
+
+        void Assign(int position, double width)
+        {
+            var index = row[position];
+            widths[index] = width;
+            AllocateChildWidths(
+                input.Children[index],
+                node.Children[index],
+                Math.Max(1, width - AncestorChrome));
+        }
+
+        var rowMinimum = minimumSum + spacing;
+        if (containerWidth <= rowMinimum)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                Assign(i, Math.Max(1, node.Children[row[i]].PixelWidth));
+            }
+
+            return;
+        }
+
+        var rowComfortable = (count * EqualGrowthWidth) + spacing;
+        if (containerWidth <= rowComfortable)
+        {
+            var growth = (containerWidth - rowMinimum) / count;
+            for (var i = 0; i < count; i++)
+            {
+                Assign(i, node.Children[row[i]].PixelWidth + growth);
+            }
+
+            return;
+        }
+
+        var distributed = 0d;
+        var weightSum = positiveWeightSum > 0 ? positiveWeightSum : count;
+        for (var i = 0; i < count - 1; i++)
+        {
+            var weight = positiveWeightSum > 0 ? weights[i] : 1;
+            var width = EqualGrowthWidth
+                + ((containerWidth - rowComfortable) * weight / weightSum);
+            Assign(i, width);
+            distributed += width;
+        }
+
+        Assign(count - 1, Math.Max(EqualGrowthWidth, containerWidth - spacing - distributed));
     }
 
     private static Node PackSiblings(TopologyLayoutInput root, double availableWidth)
@@ -458,7 +559,9 @@ public static class TopologyLayoutEngine
         }
 
         var n = input.Children.Count;
-        var columns = Math.Clamp(columnBudget, 1, n);
+        var columns = input.NoWrapChildren
+            ? Math.Max(1, n)
+            : Math.Clamp(columnBudget, 1, n);
         var measured = input.Children
             .Select(child => MeasureSubtree(child, columnBudget))
             .ToList();

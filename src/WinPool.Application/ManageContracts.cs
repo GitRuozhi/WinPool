@@ -66,7 +66,10 @@ public sealed record ManageTopologyNodeView(
     bool IsSelectable,
     ManageTopologyLayout ChildrenLayout,
     int LayoutWeight,
-    IReadOnlyList<ManageTopologyNodeView> Children);
+    IReadOnlyList<ManageTopologyNodeView> Children,
+    bool NoWrapChildren = false,
+    bool DistributeByCapacity = false,
+    IReadOnlyList<double>? CapacityWeights = null);
 
 public sealed record ManageSystemProjection(
     SystemId SystemId,

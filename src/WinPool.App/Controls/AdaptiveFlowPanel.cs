@@ -19,17 +19,25 @@ public sealed class AdaptiveFlowPanel : Panel
     {
         var plan = ResolvePlan(availableSize);
         var desiredHeight = 0d;
+        var widestRow = 0d;
         foreach (var row in plan)
         {
             var rowHeight = 0d;
-            foreach (var slot in row)
+            var rowWidth = 0d;
+            for (var i = 0; i < row.Count; i++)
             {
-                var child = Children[slot.Index];
-                child.Measure(new Size(slot.Width, double.PositiveInfinity));
+                var child = Children[row[i].Index];
+                child.Measure(new Size(row[i].Width, double.PositiveInfinity));
                 rowHeight = Math.Max(rowHeight, child.DesiredSize.Height);
+                rowWidth += row[i].Width;
+                if (i > 0)
+                {
+                    rowWidth += HorizontalSpacing;
+                }
             }
 
             desiredHeight += rowHeight + VerticalSpacing;
+            widestRow = Math.Max(widestRow, rowWidth);
         }
 
         if (plan.Count > 0)
@@ -37,7 +45,11 @@ public sealed class AdaptiveFlowPanel : Panel
             desiredHeight -= VerticalSpacing;
         }
 
-        var width = double.IsInfinity(availableSize.Width) ? FallbackMeasureWidth : Math.Max(0, availableSize.Width);
+        // A no-wrap strip may overflow its card: report the full row width
+        // so the hosting scroll surface scrolls instead of clipping.
+        var width = double.IsInfinity(availableSize.Width)
+            ? Math.Max(FallbackMeasureWidth, widestRow)
+            : Math.Max(Math.Max(0, availableSize.Width), widestRow);
         return new Size(width, desiredHeight);
     }
 
@@ -50,15 +62,19 @@ public sealed class AdaptiveFlowPanel : Panel
         {
             var x = 0d;
             var lineHeight = 0d;
+            var rowWidth = 0d;
             foreach (var slot in row)
             {
                 lineHeight = Math.Max(lineHeight, Children[slot.Index].DesiredSize.Height);
+                rowWidth += slot.Width;
             }
 
+            rowWidth += HorizontalSpacing * Math.Max(0, row.Count - 1);
+            var rowFits = rowWidth <= width + 0.5;
             foreach (var slot in row)
             {
                 var isLastInRow = ReferenceEquals(slot, row[^1]);
-                var itemWidth = isLastInRow
+                var itemWidth = isLastInRow && rowFits
                     ? Math.Max(0, width - x)
                     : slot.Width;
                 Children[slot.Index].Arrange(new Rect(x, y, itemWidth, lineHeight));

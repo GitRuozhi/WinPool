@@ -17,7 +17,10 @@ public sealed class TopologyNode
         bool isExpanded = true,
         bool isSelectable = true,
         TopologyChildrenLayout childrenLayout = TopologyChildrenLayout.Stack,
-        int layoutWeight = 1)
+        int layoutWeight = 1,
+        bool noWrapChildren = false,
+        bool distributeByCapacity = false,
+        IReadOnlyList<double>? capacityWeights = null)
     {
         Unit = unit;
         Summary = summary;
@@ -27,6 +30,9 @@ public sealed class TopologyNode
         IsSelectable = isSelectable;
         ChildrenLayout = childrenLayout;
         LayoutWeight = Math.Max(1, layoutWeight);
+        NoWrapChildren = noWrapChildren;
+        DistributeByCapacity = distributeByCapacity;
+        CapacityWeights = capacityWeights;
     }
 
     public StorageUnitRef Unit { get; }
@@ -37,6 +43,16 @@ public sealed class TopologyNode
     public bool IsExpanded { get; set; }
     public TopologyChildrenLayout ChildrenLayout { get; }
     public int LayoutWeight { get; }
+
+    /// <summary>
+    /// Layout-only strip metadata (Edit-upper partition strips): the
+    /// children form one no-wrap horizontal row, and their spare width is
+    /// distributed by the declared capacity weights through the engine's
+    /// three-stage rule.
+    /// </summary>
+    public bool NoWrapChildren { get; }
+    public bool DistributeByCapacity { get; }
+    public IReadOnlyList<double>? CapacityWeights { get; }
 }
 
 public static class WorkspaceMapper

@@ -6,6 +6,7 @@ public static class EditWorkspace
 {
     public const string PlusStableId = "edit:plus";
     public const string PoolRowStableId = "edit:pool-row";
+    public const string PartitionRowStableId = "edit:partition-row";
     public const string DraftPrefix = "edit:draft:";
     public const string UnallocatedPrefix = "unallocated:";
     public const string PendingVirtualPrefix = "edit:pending-vdisk:";
@@ -169,6 +170,19 @@ public static class EditWorkspace
             .ToArray();
 
         return disks.Select(disk => CreatePartitionableDiskNode(disk, snapshot, ignore)).ToArray();
+    }
+
+    public static TopologyNode ProjectPartitionWorkspaceRoot(
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
+    {
+        var children = ProjectPartitionWorkspace(snapshot, minUnallocatedBytes);
+        return new TopologyNode(
+            new StorageUnitRef(PartitionRowStableId, StorageUnitKind.VirtualDiskGroup, string.Empty, false),
+            string.Empty,
+            children,
+            isSelectable: false,
+            childrenLayout: TopologyChildrenLayout.Stack);
     }
 
     public static TopologyNode ProjectPoolWorkspaceRoot(
@@ -339,19 +353,24 @@ public static class EditWorkspace
             .Where(item => item.OsDiskStableId == disk.StableId)
             .OrderBy(item => item.Offset)
             .ToArray();
+        var capacityWeights = new List<double>();
         var node = new TopologyNode(
             new StorageUnitRef(disk.StableId, StorageUnitKind.OsDisk, disk.FriendlyName),
             TopologyProjector.JoinSummary(disk.PartitionStyle, TopologyProjector.FormatBytes(disk.Size)),
-            childrenLayout: TopologyChildrenLayout.Flow);
-        foreach (var child in InterleavePartitionsAndGaps(disk, partitions, minUnallocatedBytes))
+            childrenLayout: TopologyChildrenLayout.Flow,
+            noWrapChildren: true,
+            distributeByCapacity: true,
+            capacityWeights: capacityWeights);
+        foreach (var (child, capacityBytes) in InterleavePartitionsAndGaps(disk, partitions, minUnallocatedBytes))
         {
             node.Children.Add(child);
+            capacityWeights.Add(capacityBytes);
         }
 
         return node;
     }
 
-    private static IEnumerable<TopologyNode> InterleavePartitionsAndGaps(
+    private static IEnumerable<(TopologyNode Node, double CapacityBytes)> InterleavePartitionsAndGaps(
         OsDiskInfo disk,
         IReadOnlyList<PartitionInfo> partitions,
         long minUnallocatedBytes)
@@ -363,26 +382,28 @@ public static class EditWorkspace
             var gap = partition.Offset - cursor;
             if (gap >= minUnallocatedBytes && gap > 0)
             {
-                yield return UnallocatedNode(disk, cursor, gap);
+                yield return (UnallocatedNode(disk, cursor, gap), gap);
             }
 
-            yield return new TopologyNode(
-                new StorageUnitRef(
-                    partition.StableId,
-                    StorageUnitKind.Partition,
-                    TopologyProjector.PartitionDisplayName(partition),
-                    partition.IsStable,
-                    disk.StableId),
-                TopologyProjector.JoinSummary(
-                    string.IsNullOrWhiteSpace(partition.FileSystem) ? "Unknown" : partition.FileSystem,
-                    TopologyProjector.FormatBytes(partition.Size)));
+            yield return (
+                new TopologyNode(
+                    new StorageUnitRef(
+                        partition.StableId,
+                        StorageUnitKind.Partition,
+                        TopologyProjector.PartitionDisplayName(partition),
+                        partition.IsStable,
+                        disk.StableId),
+                    TopologyProjector.JoinSummary(
+                        string.IsNullOrWhiteSpace(partition.FileSystem) ? "Unknown" : partition.FileSystem,
+                        TopologyProjector.FormatBytes(partition.Size))),
+                partition.Size);
             cursor = Math.Max(cursor, partition.Offset + partition.Size);
         }
 
         var tail = disk.Size - cursor;
         if (tail >= minUnallocatedBytes && tail > 0)
         {
-            yield return UnallocatedNode(disk, cursor, tail);
+            yield return (UnallocatedNode(disk, cursor, tail), tail);
         }
     }
 
@@ -511,7 +532,7 @@ public static class EditWorkspace
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var osDisk in snapshot.OsDisks.Where(item => item.VirtualDiskStableId == disk.StableId))
         {
-            foreach (var child in InterleavePartitionsAndGaps(
+            foreach (var (child, _) in InterleavePartitionsAndGaps(
                          osDisk,
                          snapshot.Partitions.Where(item => item.OsDiskStableId == osDisk.StableId).ToArray(),
                          minUnallocatedBytes))
@@ -682,7 +703,10 @@ public static class EditWorkspace
                 _ => throw new ArgumentOutOfRangeException(nameof(node))
             },
             node.LayoutWeight,
-            children);
+            children,
+            node.NoWrapChildren,
+            node.DistributeByCapacity,
+            node.CapacityWeights);
     }
 
     private static ManageObjectRole MapRole(StorageUnitKind kind) => kind switch

@@ -356,10 +356,18 @@ public sealed partial class EditPage : Page
 
     private double _lowerViewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
 
+    private double _upperViewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
+
     private void UpperScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
         UpperTopologyControl.Width = width;
+        _upperViewportWidth = width;
+        if (UpperTopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
+            && roots.Count > 0)
+        {
+            roots[0].SetSurfaceViewportWidth(width);
+        }
     }
 
     private void LowerScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -376,14 +384,15 @@ public sealed partial class EditPage : Page
 
     private void RefreshUpper()
     {
-        var nodes = EditWorkspace.ProjectPartitionWorkspace(_working, UnallocatedIgnoreBytes);
-        UpperTopologyControl.ItemsSource = nodes
-            .Select(node => new TopologyNodeViewModel(
-                EditWorkspace.ToManageView(node, ViewModel.ActiveDocument.SystemId, $"edit-disk:{node.Unit.StableId}"),
-                ViewModel,
-                _working,
-                _upperInteraction))
-            .ToArray();
+        var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, UnallocatedIgnoreBytes);
+        var rootViewModel = new TopologyNodeViewModel(
+            EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId),
+            ViewModel,
+            _working,
+            _upperInteraction,
+            isLayoutRoot: true);
+        rootViewModel.SetSurfaceViewportWidth(_upperViewportWidth);
+        UpperTopologyControl.ItemsSource = new[] { rootViewModel };
         var selected = _working.Partitions.FirstOrDefault(item => item.StableId == _selectedPartitionId);
         SelectedPartitionInfo.Text = selected is null
             ? _selectedUnallocatedOffset is null
@@ -402,7 +411,7 @@ public sealed partial class EditPage : Page
             _lowerInteraction,
             isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_lowerViewportWidth);
-        LowerTopologyControl.ItemsSource = [rootViewModel];
+        LowerTopologyControl.ItemsSource = new[] { rootViewModel };
     }
 
     private StoragePoolInfo? SelectedPool() =>
