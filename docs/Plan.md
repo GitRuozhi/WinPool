@@ -21,7 +21,10 @@
   levels; constants allowed, magic numbers not; three-stage rule gated on
   explicit developer confirmation; distribution requires an explicit enable
   option; plus-pool single-draft rule; Edit-lower structure-modifiability
-  indicator and guardrails)
+  indicator and guardrails);
+  2026-09-05 (fourth amendment: Edit-lower projection aligned with Manage —
+  tier cards render only from snapshot tiers with members; tier-uncovered
+  pool members gain the Manage-equivalent Unallocated group)
 - **Baseline commit:** `563768efddbca17bdd6f831c11daaed573556ba3`
   (implementation baseline; the original installation baseline was `0ef6d22`)
 - **Working branch:** `main`
@@ -79,6 +82,18 @@ Third-amendment decisions (2026-09-05):
    it only for the Edit-upper disk level — §6.
 9. Plus-pool single-draft rule — §3.4.
 10. Edit-lower structure-modifiability indicator and guardrails — §7.
+
+Fourth-amendment decisions (2026-09-05):
+
+11. Edit-lower tier cards are snapshot-driven like Manage; no fixed
+    performance/capacity placeholder cards; a draft pool's pre-created tier
+    records stay parameter carriers and render only once they hold member
+    disks — §3.3.
+12. Pool members not covered by any tier render in the Manage-equivalent
+    Unallocated group, restoring visibility, selection, and drag — §3.3.
+    The fixed three-tier calls and the missing direct-member branch were the
+    verified projection gaps behind "visible in Manage, missing in Edit
+    lower".
 
 **Open confirmation required before coding (not yet given):**
 
@@ -388,14 +403,32 @@ Primordial
 
 ### 3.3 Existing pools
 
-Non-primordial pools retain the current Edit lower logical content unless this
-Plan explicitly changes it.
+Non-primordial pools render the same logical content as the Manage
+projection, subject to the Edit-lower rules of this Plan. The developer
+confirmed on 2026-09-05 that the Edit-lower projection must be aligned with
+Manage:
 
-Existing tier, physical-disk, virtual-disk, and virtual-disk partition
-representation remains available.
+- **Tier cards are snapshot-driven.** A pool shows the tiers that exist in
+  the snapshot **and have at least one member disk**, ordered like Manage.
+  There are no fixed performance/capacity placeholder cards; a tier with no
+  member disks renders no card. Non-SSD/SCM/HDD media types render as-is.
+- **Draft pools behave the same.** `InsertDraftPool` keeps pre-creating the
+  SSD/HDD (and SCM when present) tier records as parameter carriers for the
+  pool form; they are not render placeholders. The performance or capacity
+  tier card appears only after a disk of that media type has been dragged
+  into the draft pool — `MoveDiskToPool` already attaches disks to (or
+  creates) the matching tier, so no simulation change is required.
+- **Tier-uncovered members are visible.** Pool members not covered by any
+  tier render in a DirectDiskGroup "Unallocated" group exactly like Manage
+  (same kind, same `group:direct:{pool}` stable-id convention,
+  non-selectable group, selectable and draggable disk children). This
+  restores the objects that the previous Edit-lower projection silently
+  dropped.
+- Existing virtual-disk representation (including the "Not created"
+  placeholder) and virtual-disk partition strips remain available.
 
 This Plan does not change pool-editing semantics or simulation operations
-beyond §3.4 and §7.
+beyond §3.4 and §7; the alignment above changes projection only.
 
 ### 3.4 Synthetic plus pool (single draft)
 
@@ -840,13 +873,16 @@ The only arithmetic permitted in `EditWorkspace` is assigning
 `ProjectPoolWorkspace` / `ProjectPoolWorkspaceRoot` remain responsible for the
 Edit-lower pool subset and the synthetic plus-pool, with:
 
-- primordial physical disks without partition children (already true; keep
-  and cover with tests);
+- primordial physical disks without partition children (keep and cover with
+  tests);
+- snapshot-driven tier cards per §3.3: tiers with at least one member, Manage
+  ordering, no fixed placeholder cards;
+- a Manage-equivalent DirectDiskGroup "Unallocated" group for tier-uncovered
+  pool members (§3.3);
 - the single-draft plus-pool rule of §3.4 (plus-pool node present only while
   no draft exists);
 - the structure-modifiability state of §7.2 computed from the read-only
   snapshot and attached to disk and pool nodes as projection data;
-- real pools retaining the intended existing content;
 - the tree using the same weighted layout semantics consumed by Manage.
 
 ### 8.6 ViewModel conversion
@@ -937,7 +973,7 @@ obtain the confirmation.
 | TL3 | Remove Edit-page dependence on the shared Manage viewport-width state; per-surface host width and named fallback; eliminate inline magic numbers (§2.7); automatic viewport-isolation regression test |
 | TL4 | Refine Edit-upper projection: eligible disks only, two visible levels, vertical disks through the engine Stack channel, no-wrap horizontal partition strips, enable + weights metadata |
 | TL5 | Three-stage strip allocation (§2.4) — **requires prior developer confirmation of §2.4** |
-| TL6 | Edit-lower plus-pool single-draft rule (§3.4) with projection tests |
+| TL6 | Edit-lower projection alignment: snapshot-driven tier cards, tier-uncovered member Unallocated group, plus-pool single-draft rule (§3.3, §3.4) with projection tests |
 | TL7 | Edit-lower modifiability state, icon, drag guardrails, and Execute-blocking dialog (§7) |
 | TL8 | Width-adaptive presentation capability; enable for Edit-upper disks; screenshot confirmation of the single-line arrangement, header threshold, and `t` |
 | TL9 | Add targeted layout, projection, distribution, presentation, and architecture regression tests |
@@ -1024,6 +1060,12 @@ Tests must prove:
 - plus-pool: present exactly once while no draft exists; absent while a draft
   exists; reappears after execute or discard; a second draft cannot be
   created;
+- tier cards follow the snapshot: a tier with members renders; a tier without
+  members renders no card; a non-standard media tier renders as-is;
+- a draft pool shows no tier cards until a disk is dragged in, then shows
+  exactly the tiers that gained members;
+- pool members not covered by any tier appear in the Unallocated group, are
+  selectable and draggable, and can be dragged to another pool;
 - modifiability state: disk without partitions → supported; disk with empty
   partitions → supported; disk with data → unsupported; pool whose virtual
   disks have no partitions or hold no data → supported; otherwise
@@ -1101,6 +1143,12 @@ A local simulation-only Edit click-through should check:
     flicker loop, and stable idle CPU after release (§2.6).
 18. The screenshot confirming the single-line header, the header threshold,
     and `t` is recorded (TL8).
+19. A pool whose members are not fully covered by tiers shows the
+    Unallocated group with those disks in Edit lower, matching Manage, and
+    the disks can be dragged out.
+20. Draft and newly created pools show performance/capacity tier cards only
+    after disks of the matching media type are dragged in; no empty
+    "0 physical disks" tier card appears anywhere.
 
 Until a human/native run is actually performed, this evidence is
 `unverified`.
@@ -1148,6 +1196,8 @@ This stage does not include:
 - enabling the adaptive single-line presentation for levels other than the
   Edit-upper disk level;
 - multiple simultaneous draft pools;
+- changing `InsertDraftPool` or `MoveDiskToPool` simulation semantics
+  (pre-created draft tier records remain parameter carriers);
 - real data clearing, backup execution, or any destructive recovery
   operation (the Execute dialog only explains what to do);
 - new storage operations;
@@ -1208,6 +1258,10 @@ Implementation is complete only when:
   capacity-fill layout decisions;
 - Manage behavior remains equivalent;
 - Edit lower primordial disks do not display partitions;
+- Edit lower tier cards are snapshot-driven: tiers without member disks
+  render no card, and non-standard media tiers render like Manage (§3.3);
+- Edit lower shows the Unallocated group for tier-uncovered pool members,
+  equivalent to Manage;
 - Edit lower plus-pool follows the single-draft rule (§3.4);
 - Edit lower disk and pool cards show the modifiability icon per §7.2, with
   the conservative default for undeterminable data presence;
