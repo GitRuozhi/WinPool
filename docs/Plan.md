@@ -10,12 +10,16 @@
 - **Created:** 2026-09-03
 - **Updated:** 2026-09-04 (installed; units clarified as DIP; viewport
   isolation, mapper mapping, and XAML-migration deletion preconditions added);
-  2026-09-05 (amendment after the reverted execution attempt: engine
-  invariants promoted to §1.0; the single-weight distribution model of §2
-  confirmed; §7.2/§7.8 ambiguity removed; capacity allocation fenced;
-  stepped native verification mandated)
+  2026-09-05 (first amendment: engine invariants promoted to §1.0;
+  single-weight distribution model; §7.2/§7.8 disambiguation; capacity
+  fence; stepped native verification);
+  2026-09-05 (second amendment: distribution made opt-in with the current
+  Manage behavior as the unchanged default; three-stage Edit-upper strip
+  growth — equal minimum, equal growth to the no-wrap width, then capacity
+  distribution; all layout thresholds as named variables; width-adaptive
+  compact disk header)
 - **Baseline commit:** `563768efddbca17bdd6f831c11daaed573556ba3`
-  (amendment baseline; original installation baseline was `0ef6d22`)
+  (implementation baseline; the original installation baseline was `0ef6d22`)
 - **Working branch:** `main`
 - **Current product version:** V0.45
 - **Target product version:** V0.45
@@ -49,18 +53,30 @@ and confirmations required before a new attempt.
 
 ### Amendment status against the pitfall-record prerequisites
 
-The pitfall record §7 lists five prerequisites for a new attempt. This
-amendment fulfills them as follows:
+The pitfall record §7 lists five prerequisites for a new attempt. The
+amendments fulfill them as follows:
 
-1. Unit-thought principles written as controlling invariants — §1.0 below.
-2. §6.2/§6.8 disambiguation — §7.2 and §7.8 below.
-3. §4.2 fence around capacity allocation — §2.4–§2.5 and §5 below.
-4. Three algorithm boundaries confirmed by the developer — the distribution
-   model, the no-wrap rule, and the insufficient-width rule were settled in
-   the developer's 2026-09-05 design conversation and are recorded in §2 and
-   §4. The exact compact-header arrangement remains a presentation detail to
-   be confirmed with a screenshot during implementation (§6).
-5. Stepped execution with per-step native verification — §11 below.
+1. Unit-thought principles written as controlling invariants — §1.0.
+2. §6.2/§6.8 disambiguation — §7.2 and §7.8.
+3. §4.2 fence around capacity allocation — §2.4–§2.5 and §5.
+4. Algorithm boundaries confirmed by the developer — the insufficient-width
+   rule is stage 1 of §2.4; the no-wrap rule is §4.4 with the W2 boundary of
+   §2.4; the compact header is width-adaptive (§6). The threshold values
+   (equal-growth `t`, header single-line width) are confirmed with a
+   screenshot during implementation.
+5. Stepped execution with per-step native verification — §11.
+
+The second amendment (2026-09-05) records four further developer decisions:
+
+6. Same-row width differences are opt-in; the default is the current Manage
+   behavior, unchanged — §2.1.
+7. Edit-upper strips grow in three stages: equal minimum widths; equal
+   growth to the no-wrap width; then capacity distribution — §2.4.
+8. All layout thresholds are named variables; existing inline literals are
+   listed for elimination — §2.7.
+9. The Edit-upper disk header collapses to one line only when the assigned
+   width is sufficient; the standard multi-line presentation remains
+   otherwise — §6.
 
 ---
 
@@ -168,34 +184,40 @@ the unified engine.
 
 ## 2. Distribution model
 
-This section is the developer-confirmed design (2026-09-05) for final
-child-width allocation. It replaces any reading of "capacity allocation" as a
-new engine mode.
+This section records the developer-confirmed design for final child-width
+allocation (2026-09-05 conversations). It replaces any reading of "capacity
+allocation" as a new universal or default engine mode.
 
-### 2.1 One distribution rule
+### 2.1 Opt-in, not default
 
-The engine owns final slot-width allocation through exactly one rule. Each
-child in a row receives its natural minimum width plus a proportional share of
-the row's remaining width:
+Same-row width differences through distribution metadata are **optional**.
+The default, when a node declares no distribution metadata, is the current
+Manage-page behavior, preserved bit-exactly for every layout kind:
 
-```text
-width_i = minimum_i + extra × weight_i / Σ weight
-```
+- Flow children keep the current equal fill (equal widths within a row).
+- WeightedFlow rows keep the current unit-proportional stretch
+  (`WeightedPoolPanel.AllocateRows` arithmetic, unchanged).
+- Stack children are unaffected.
+- No byte-capacity weight exists anywhere by default.
 
-The weight is resolved per node (§2.2). There is no other weight source, no
-distribution-mode enum, and no page-name branch in the engine.
+Developer clarification recorded 2026-09-05: within today's Manage behavior,
+Flow children are equal-width while WeightedFlow pool rows stretch in
+proportion to unit widths. Both are "current behavior"; neither changes in
+this stage. Making pool rows strictly equal-width would be a Manage behavior
+change outside this Plan.
 
-### 2.2 Weight sources and fallback
+The engine performs declared-weight distribution only where distribution
+metadata is present (§2.2–§2.3), and only on the Edit-upper leaf strips
+(§2.5).
 
-- A node may declare an optional **distribution weight** as layout input
-  metadata.
-- When no weight is declared, the engine uses the node's measured
-  **UnitWidth**.
-- Manage compatibility: Manage nodes declare no weight. The UnitWidth
-  fallback must reproduce the arithmetic currently performed by
-  `WeightedPoolPanel.AllocateRows` exactly, so Manage output is unchanged and
-  existing regression expectations remain valid.
-- Edit-upper partition strips declare the capacity weight (§2.3).
+### 2.2 Weight sources
+
+- A node may declare an optional **capacity weight** as layout input metadata.
+- Declared weights activate the three-stage allocation (§2.4) for that strip.
+- No other weight source exists. There is no distribution-mode enum and no
+  page-name branch in the engine.
+- Manage compatibility: Manage declares nothing; its rows render exactly as
+  today, so existing regression expectations remain valid.
 
 ### 2.3 Capacity weight conversion
 
@@ -217,39 +239,79 @@ weight_i = byte size of child i, as a double
 The conversion is a pure function of snapshot data and runs in the projection
 layer, outside any layout pass.
 
-### 2.4 Normative row allocation
+### 2.4 Three-stage strip allocation (normative)
 
-For one row with `n` visible children, spacing `s` (6 DIP), and per-child
-minimum widths `minimum_i` (leaf minimum 112 DIP):
-
-```text
-reserved = Σ minimum_i + s × (n − 1)
-extra    = available width − reserved
-```
-
-- If `extra ≤ 0`: every child keeps `minimum_i`. No negative adjustment
-  occurs; the strip overflows the viewport when necessary.
-- If `extra > 0`: children `1 … n−1` receive
-  `minimum_i + extra × weight_i / Σ weight`. Fractional DIP widths are
-  allowed; an integer variant floors.
-- The row's **last child deterministically absorbs the rounding residual**:
+For one opt-in strip row with `n` visible children, spacing `s` (6 DIP), leaf
+minimum `m` (112 DIP), equal-growth threshold `t` (a named variable, §2.7),
+and declared weights `w_i`:
 
 ```text
-width_n = available width − s × (n − 1) − Σ_{i<n} width_i, clamped ≥ minimum_n
+W1 = n × m + s × (n − 1)     row minimum width
+W2 = n × t + s × (n − 1)     row no-wrap width (equal-growth boundary)
 ```
 
-- A zero-weight child stays at its minimum width.
-- If `Σ weight ≤ 0` (no positive weights), distribute the extra equally by
-  count instead.
-- The absorbing child must remain "the row's last child"; do not switch the
-  residual to the largest child, which would jump between recomputations.
+**Stage 1 — `available ≤ W1` (insufficient width):**
+
+```text
+width_i = m
+```
+
+Every child keeps the minimum width. No negative adjustment occurs; the strip
+overflows the viewport (§4.4).
+
+**Stage 2 — `W1 < available ≤ W2` (equal growth):**
+
+all children grow together by the same absolute amount:
+
+```text
+g = (available − W1) / n
+width_i = m + g
+```
+
+With equal minimums, every child in the row has the same width.
+
+**Stage 3 — `available > W2` (capacity distribution):**
+
+every child first reaches `t`, then the remaining width is distributed by
+capacity:
+
+```text
+width_i = t + (available − W2) × w_i / Σw        for children 1 … n−1
+width_n = available − s × (n − 1) − Σ_{i<n} width_i, clamped ≥ t
+```
+
+Required properties:
+
+- **Continuity:** at `available = W1` stages 1→2 agree (`g = 0`); at
+  `available = W2` stages 2→3 agree (every child equals `t`). Crossing a
+  threshold causes no visual jump.
+- The row's **last child deterministically absorbs the rounding residual** in
+  stages 2 and 3.
+- Zero-weight children stop at `m` (stages 1–2) or `t` (stage 3).
+- If `Σw ≤ 0`, stage 3 distributes the remaining width equally by count.
+- `t` is input data (a named constant, §2.7), never a value measured during
+  layout. Labels may still wrap visually inside a tile; exact label fit is a
+  presentation concern confirmed with a screenshot, not a layout input.
+
+Worked example (indicative, assuming `t = 200 DIP`; recompute with the
+confirmed value):
+
+```text
+n = 2, m = 112, s = 6, t = 200, weights 100 GiB : 200 GiB
+W1 = 230, W2 = 406
+
+available = 320  → stage 2: both children 112 + 45 = 157 DIP
+available = 563  → stage 3: A = 200 + 157 × 100/300 = 252.33 DIP
+                              B = 563 − 6 − 252.33   = 304.67 DIP
+```
 
 ### 2.5 Fence
 
-Capacity weights are legal only on the Edit-upper leaf partition/unallocated
-strips. The engine contains no byte or capacity concept. This stage may not
-generalize capacity weighting to pools, tiers, or any other node, and may not
-introduce a second distribution formula.
+Declared-capacity distribution is legal only on the Edit-upper leaf
+partition/unallocated strips. The engine contains no byte or capacity
+concept. This stage may not generalize capacity weighting to pools, tiers, or
+any other node, may not introduce a second distribution formula, and may not
+make same-row width differences the default anywhere.
 
 ### 2.6 Resize behavior
 
@@ -259,15 +321,31 @@ pure function over immutable input records plus a width; it never touches a
 UIElement and never measures a child to derive a decision. The `ApplyLayout`
 write-back invalidates arrangement only and must not write any width-affecting
 property. Width changes smaller than 1 DIP do not re-plan (idempotence guard,
-§1.0 item 5).
+§1.0 item 5). Stage transitions are continuous (§2.4), so dragging across
+`W1`/`W2` produces no jump.
 
-Worked example (also the acceptance case, §14):
+### 2.7 Named threshold variables
 
-```text
-Partition A = 100 GiB, Partition B = 200 GiB, remaining width = 333 DIP
-A = 112 + 333 × 100/300 = 223 DIP
-B = 112 + 333 × 200/300 = 334 DIP
-```
+All layout thresholds are named variables with exactly one owner. Panels and
+pages contain no width literals.
+
+| Variable | Owner | Value |
+| --- | --- | --- |
+| Leaf minimum `m` | `TopologyLayoutEngine` | 112 DIP (unchanged) |
+| Sibling spacing `s` | `TopologyLayoutEngine` | 6 DIP (unchanged) |
+| Ancestor chrome | `TopologyLayoutEngine` | 26 DIP (unchanged) |
+| Equal-growth threshold `t` | `TopologyLayoutEngine` | confirmed at implementation with a screenshot; indicative 200 DIP |
+| Compact-header single-line threshold | `TopologyNodeControl` presentation | confirmed at implementation with a screenshot |
+| Per-surface fallback viewport width | each surface's own state | named per surface; replaces the inline 1400 |
+
+Current inline literals this stage eliminates: `1400` (panel fallback and
+ViewModel default viewport), `320` and `20` (page `SizeChanged` handlers),
+`150` (default parameters of `EqualFillFlowLayout` / `WeightedPoolLayout`).
+They become named variables or disappear with their owners. The existing
+engine constants (112/6/26) do not change value in this stage.
+
+Named variables are code constants with a single owner, not user-facing
+settings; settings remain out of scope (§12).
 
 ---
 
@@ -435,10 +513,9 @@ The no-wrap rule (developer-confirmed 2026-09-05):
 
 - the strip is always a single row;
 - each visible child keeps at least its minimum width;
-- when the minimum total width exceeds the available topology width, the row
-  keeps the minimum widths and becomes horizontally wider than the viewport;
-  the existing topology scroll surface handles the overflow (§2.4
-  `extra ≤ 0` branch);
+- when the available width is at or below the row minimum `W1`, children keep
+  minimum widths and the row becomes horizontally wider than the viewport; the
+  existing topology scroll surface handles the overflow (stage 1, §2.4);
 - the strip's target width is input data only; nothing measured during layout
   may become the target width.
 
@@ -464,13 +541,13 @@ slot.
 
 ---
 
-## 5. Capacity-proportional partition widths
+## 5. Edit-upper strip width allocation
 
 All widths in this Plan are WinUI device-independent units (DIP), not physical
 pixels.
 
-The allocation itself is defined normatively in §2. This section records its
-scope and acceptance numbers.
+The allocation itself is defined normatively in §2.4. This section records its
+scope and acceptance cases.
 
 ### 5.1 Minimum width
 
@@ -481,74 +558,91 @@ This Plan does not change the Manage minimum width.
 
 ### 5.2 Scope
 
-Capacity-proportional remaining-width allocation applies only to the Edit
-upper disk's partition/unallocated row.
+The three-stage allocation (§2.4) applies only to the Edit upper disk's
+partition/unallocated strips, and only because those strips declare capacity
+weights.
 
-It does not replace Manage's existing weighted topology rules (§2.2 fallback)
-and does not change Edit lower pool weighting.
+It does not replace Manage's existing layout rules (§2.1) and does not change
+Edit lower pool weighting.
 
-The distribution is supplied as layout input (declared weights), never as a
-separate panel or engine mode (§2.5).
+### 5.3 Acceptance cases
 
-### 5.3 Acceptance example
+Values below assume the indicative `t = 200 DIP`; recompute with the confirmed
+value. `m = 112`, `s = 6`.
 
-```text
-Partition A = 100 GiB
-Partition B = 200 GiB
-
-minimum: A = 112 DIP, B = 112 DIP
-remaining width = 333 DIP
-
-A extra = 333 × 100 / 300 = 111 DIP
-B extra = 333 × 200 / 300 = 222 DIP
-
-final: A = 223 DIP, B = 334 DIP
-```
-
-The implementation may use floating-point layout widths. Any final rounding
-must be deterministic, and the final child must absorb any residual rounding
-difference so the planned row width remains consistent (§2.4).
-
-### 5.4 No remaining width
-
-If:
+#### Case A1 — stage 1 (insufficient width)
 
 ```text
-available width ≤ minimum widths + spacing
+n = 2, available = 200 (< W1 = 230)
+expected: both children 112 DIP; row overflows the viewport
 ```
 
-no negative proportional adjustment occurs.
+#### Case A2 — stage 2 (equal growth)
 
-Each child keeps at least its minimum width and the horizontal strip overflows
-the viewport when necessary.
+```text
+n = 2, available = 320, W1 = 230, W2 = 406
+expected: both children 112 + 45 = 157 DIP (equal widths)
+```
+
+#### Case A3 — stage 3 (capacity distribution)
+
+```text
+n = 2, weights 100 GiB : 200 GiB, available = 563, W2 = 406
+expected: A = 200 + 157 × 100/300 = 252.33 DIP
+          B = 563 − 6 − 252.33   = 304.67 DIP (absorbs residual)
+```
+
+#### Case A4 — continuity
+
+At `available = W2` both stage 2 and stage 3 formulas produce `t` for every
+child.
+
+#### Case B — three children including unallocated (stage 3)
+
+```text
+100 GiB partition, 50 GiB unallocated, 200 GiB partition
+```
+
+The width above `t` is distributed in the ratio `100 : 50 : 200`; the last
+child absorbs the residual.
+
+#### Case C — hidden gap
+
+A hidden unallocated gap below the configured threshold receives no layout
+slot and no visible capacity share.
+
+### 5.4 Determinism
+
+Any final rounding is deterministic; the row's last child absorbs residual
+differences so the planned row width remains consistent (§2.4).
 
 ---
 
-## 6. Edit upper disk presentation
+## 6. Edit upper disk presentation (width-adaptive)
 
-The visible Edit-upper disk node uses a compact horizontal header instead of
-the standard multi-line topology card header.
+The Edit-upper disk header is **width-adaptive**:
 
-The information currently spread over the normal disk card's approximately
-three text lines is arranged horizontally where practical.
+- when the disk node's engine-assigned width reaches the named single-line
+  threshold (§2.7), the approximately three text lines of the normal disk
+  card merge into one compact horizontal line;
+- when narrower, the current standard multi-line presentation remains.
 
-Conceptually:
+Conceptually (wide case):
 
 ```text
 Disk 0    Samsung SSD ...    GPT    1.82 TiB
 ```
 
-Exact separators and truncation are presentation details, to be confirmed with
-a screenshot during implementation (pitfall-record §7 item 4). The result must:
+The result must:
 
-- remain one compact disk header;
+- be driven by the engine-assigned slot width (deterministic render-time
+  input), not by measured text;
+- use a named threshold variable (§2.7), not a literal;
 - preserve the information required to identify the disk;
 - preserve accessibility names;
 - preserve selection and interaction behavior;
-- allow long device names to trim or wrap only when the available width makes
-  that unavoidable.
-
-This compact presentation applies to Edit upper disk nodes only.
+- remain the shared `TopologyNodeControl` with an explicit presentation mode;
+  do not create a second disk-control tree.
 
 Manage topology cards remain the reference presentation and are not changed by
 this requirement.
@@ -556,8 +650,8 @@ this requirement.
 Edit lower cards remain on the normal topology presentation unless separately
 specified.
 
-The implementation should extend the shared `TopologyNodeControl` with a small
-explicit presentation variant rather than create a second disk-control tree.
+The exact single-line arrangement, the threshold value, and the equal-growth
+`t` are confirmed together with a screenshot during implementation.
 
 ---
 
@@ -587,17 +681,17 @@ The engine owns:
 - sibling row formation;
 - shrink decisions;
 - row-height relaxation;
-- final child width assignment through the single distribution rule (§2.1);
-- extra-space distribution by declared weight with UnitWidth fallback (§2.2);
-- no-wrap horizontal strip behavior required by Edit upper (§4.4).
+- final child width assignment, preserving current default behavior (§2.1)
+  and implementing the three-stage declared-strip allocation (§2.4);
+- no-wrap horizontal strip behavior required by Edit upper (§4.4);
+- the named threshold variables (§2.7).
 
 Existing Manage calculations remain the baseline; the unit-planning phase is
-not redesigned, and the UnitWidth fallback must reproduce the current
-`WeightedPoolPanel.AllocateRows` arithmetic exactly.
+not redesigned, and default-row output must remain bit-identical to today.
 
 If required, add minimal layout-input metadata for:
 
-- the optional distribution weight (§2.2);
+- the optional capacity weight (§2.2–§2.3);
 - wrap versus no-wrap child rows.
 
 Do not encode page names into `TopologyLayoutEngine`.
@@ -649,7 +743,8 @@ They may not:
 - choose equal-fill versus weighted-fill;
 - choose capacity proportions;
 - choose row packing policy;
-- choose shrink priority.
+- choose shrink priority;
+- contain width literals (§2.7).
 
 If a single common topology panel cleanly replaces both `AdaptiveFlowPanel`
 and `WeightedPoolPanel`, that replacement is allowed.
@@ -697,7 +792,7 @@ Change its layout metadata so the unified engine receives:
 
 - a vertical disk collection (Stack);
 - one no-wrap horizontal partition strip per disk;
-- the actual partition/gap byte size as the declared distribution weight
+- the actual partition/gap byte size as the declared capacity weight
   (§2.3).
 
 The only arithmetic permitted in `EditWorkspace` is assigning
@@ -721,27 +816,28 @@ Ensure:
 `TopologyNodeViewModel` remains the shared presentation model.
 
 The mapping from application layout nodes to ViewModels must preserve the
-layout metadata needed by the unified engine, including the optional
-distribution weight.
+layout metadata needed by the unified engine, including the optional capacity
+weight.
 
 The current App-side conversion lives in
 `src/WinPool.App/Services/TopologyLayoutMapper.cs`; updating that mapping to
 carry engine layout metadata is part of this stage.
 
-`TopologyLayoutInput` gains the optional distribution weight; absent weight
-falls back to UnitWidth inside the engine.
+`TopologyLayoutInput` gains the optional capacity weight; absent weight keeps
+the current default behavior inside the engine (§2.1).
 
 Do not create separate Manage/Edit topology ViewModel hierarchies.
 
-### 7.7 Edit upper compact header
+### 7.7 Edit upper adaptive header
 
 Primary owners:
 
 - `src/WinPool.App/Controls/TopologyNodeControl.xaml`
 - `src/WinPool.App/Controls/TopologyNodeControl.xaml.cs`
 
-Add the smallest explicit presentation mode necessary for the compact
-Edit-upper disk header.
+Add the smallest explicit presentation mode necessary for the single-line
+Edit-upper disk header, switching on the engine-assigned width against the
+named threshold (§6, §2.7).
 
 The same control continues to own:
 
@@ -767,8 +863,8 @@ Prefer the actual width supplied to the WinUI layout panel during
 `MeasureOverride` / `ArrangeOverride`.
 
 Fallback viewport state may remain where WinUI infinite-width measurement
-requires it, but each surface must use its own host width and its own
-fallback value.
+requires it, but each surface must use its own host width and its own named
+fallback value (§2.7); the inline `1400` disappears.
 
 Edit upper, Edit lower, and Manage therefore must not race to set one shared
 `TopologyViewportWidth`; the shared state is removed and replaced by
@@ -785,28 +881,26 @@ Execute one item at a time, in order. Each item completes only after its
 
 | Id | Work |
 | --- | --- |
-| TL1 | Refactor `TopologyLayoutEngine`: engine-owned final row and slot-width allocation through the single distribution rule (§2), UnitWidth fallback reproducing current Manage arithmetic |
+| TL1 | Refactor `TopologyLayoutEngine`: engine-owned final row and slot-width allocation preserving current default behavior bit-exactly; three-stage declared-strip allocation (§2.4); named threshold variables (§2.7) |
 | TL2 | Route all three surfaces through one root adapter each; nested panels consume stored slots; preserve Manage output |
-| TL3 | Remove Edit-page dependence on the shared Manage viewport-width state; per-surface host width and fallback; automatic viewport-isolation regression test |
+| TL3 | Remove Edit-page dependence on the shared Manage viewport-width state; per-surface host width and named fallback; eliminate inline width literals (§2.7); automatic viewport-isolation regression test |
 | TL4 | Refine Edit-upper projection: eligible disks only, two visible levels, vertical disks through the engine Stack channel, no-wrap horizontal partition strips |
-| TL5 | Add Edit-upper capacity weights (declared byte-size weights, §2.3) and no-wrap allocation (§2.4) |
+| TL5 | Add Edit-upper declared capacity weights (§2.3) activating the three-stage allocation (§2.4) |
 | TL6 | Cover Edit-lower projection with tests: primordial disks without partitions, plus-pool ordered last (behavior already present) |
-| TL7 | Add compact horizontal Edit-upper disk presentation in the shared node control; confirm exact form with a screenshot |
+| TL7 | Add the width-adaptive Edit-upper disk header in the shared node control; confirm the single-line arrangement, header threshold, and `t` with a screenshot |
 | TL8 | Add targeted layout, projection, distribution, and architecture regression tests |
 | TL9 | After developer acceptance of implementation, record the important final result in CHANGELOG; version remains V0.45 |
 
-TL0 (documentation rollover: archive the previous Plan, install this Plan and
-its Chinese reading copy) was completed 2026-09-04; this 2026-09-05 amendment
-is a separate documentation work item.
+TL0 (documentation rollover) was completed 2026-09-04; the 2026-09-05
+amendments are separate documentation work items.
 
 Commit split after execution:
 
-1. documentation (this amendment, already a separate work item);
+1. documentation (amendments, already separate work items);
 2. equivalent layout-engine refactor (TL1–TL2);
 3. Edit projection / layout behavior (TL3–TL6);
-4. compact visual presentation (TL7);
-5. final accepted documentation result if required (TL8 evidence belongs with
-   its items; TL9 is its own documentation commit).
+4. adaptive visual presentation (TL7);
+5. final accepted documentation result if required.
 
 This repository remains direct-to-`main`; do not create a feature branch or PR.
 
@@ -829,59 +923,28 @@ Required cases include:
 
 - current Manage reference cases continue to produce equivalent row packing;
 - current Manage weighted siblings retain their existing width behavior
-  (UnitWidth fallback is bit-compatible with the current panel arithmetic);
+  (default rows are bit-compatible with today's panel arithmetic);
+- rows without declared metadata produce **no** weight-based width differences
+  (§2.1);
 - Stack children remain vertical;
-- Flow behavior still respects existing Manage expectations;
+- Flow behavior still respects existing Manage expectations (equal fill);
 - WeightedFlow behavior still respects current Manage expectations;
 - no-wrap horizontal strip does not create a second row;
-- when the no-wrap minimum width exceeds the viewport, minimum widths are
-  retained and no negative adjustment occurs;
-- declared-weight distribution follows `min + extra × w/Σw` exactly, with the
-  last child absorbing the rounding residual;
-- zero-weight children stay at minimum; non-positive total weight falls back
-  to equal split;
+- stage 1 keeps minimum widths with no negative adjustment when available
+  width is at or below `W1`;
+- stage 2 grows all children by the same absolute amount;
+- stage 3 distributes width above `t` by declared weight, with the last child
+  absorbing the rounding residual;
+- continuity: at `available = W1` and `available = W2` adjacent stages agree;
+- zero-weight children stop at `m` (stages 1–2) or `t` (stage 3);
+  non-positive total weight falls back to equal split in stage 3;
 - entering or leaving Edit, or resizing either Edit half, does not alter
   Manage layout inputs (shared-viewport isolation).
 
 ### 9.2 Distribution acceptance cases
 
-Required deterministic cases:
-
-#### Case A
-
-```text
-sizes: 100 GiB, 200 GiB
-minimum width: 112 DIP each
-remaining width: 333 DIP
-expected final widths: 223 DIP, 334 DIP
-```
-
-#### Case B
-
-Three visible children including unallocated:
-
-```text
-100 GiB partition
-50 GiB unallocated
-200 GiB partition
-```
-
-Remaining width is distributed in the ratio:
-
-```text
-100 : 50 : 200
-```
-
-#### Case C
-
-No extra width:
-
-all children remain at minimum width and the row may exceed the viewport.
-
-#### Case D
-
-A hidden unallocated gap below the configured threshold receives no layout
-slot and no visible capacity share.
+The deterministic cases of §5.3 (A1, A2, A3, A4, B, C), recomputed with the
+confirmed `t` value.
 
 ### 9.3 Edit upper projection
 
@@ -919,7 +982,8 @@ developer explicitly changes the requirement.
 
 Add the smallest architecture/presentation test practical for:
 
-- Edit upper selecting the compact disk presentation mode;
+- Edit upper selecting the single-line presentation when the assigned width
+  reaches the named threshold, and the standard presentation when narrower;
 - Manage remaining on the standard presentation mode;
 - Edit lower remaining on the standard presentation mode;
 - all three still using the shared `TopologyNodeControl`.
@@ -941,18 +1005,22 @@ A local simulation-only Edit click-through should check:
 4. Edit upper shows only eligible disks.
 5. Edit upper disks are vertically stacked.
 6. Each disk's partition map remains a single horizontal strip.
-7. Large and small partitions visibly receive proportionally different extra
-   widths.
-8. Unallocated space participates proportionally.
+7. Widening Edit upper shows the three stages in order: all children at equal
+   minimum width; equal growth; then capacity-proportional differences, with
+   no visual jump at the stage boundaries.
+8. Unallocated space participates proportionally in stage 3.
 9. Many partitions cause horizontal overflow rather than a second partition
    row.
-10. Edit-upper disk identification is shown as a compact horizontal header.
+10. Edit-upper disk headers collapse to one line when wide enough and expand
+    to the standard presentation when narrower.
 11. Edit lower primordial disks do not expose partitions.
 12. Edit lower plus-pool appears after the real pools.
 13. Existing Edit drag, draft, Execute, modify, and dissolve simulation
     behavior still works.
 14. Dragging the Edit splitter continuously produces no crash, no layout
     flicker loop, and stable idle CPU after release (§2.6).
+15. The screenshot confirming the single-line header, the header threshold,
+    and `t` is recorded (TL7).
 
 Until a human/native run is actually performed, this evidence is
 `unverified`.
@@ -992,6 +1060,7 @@ This stage does not include:
 
 - changing the Manage logical topology design;
 - redesigning Manage cards;
+- making pool rows equal-width or otherwise changing Manage distribution;
 - capacity-proportional pool widths;
 - changing storage-pool simulation semantics;
 - changing partition operation semantics;
@@ -1001,7 +1070,8 @@ This stage does not include:
 - database schema changes;
 - IPC protocol changes;
 - new persistence;
-- new settings other than preserving the existing unallocated-gap setting;
+- new settings other than preserving the existing unallocated-gap setting
+  (named threshold variables are code constants, not settings);
 - network/external pool editing;
 - packaging;
 - deployment;
@@ -1035,8 +1105,14 @@ Implementation is complete only when:
   algorithm authority;
 - each surface runs exactly one root-level engine layout; no nested panel
   invokes the engine or re-plans a budget;
-- the engine has exactly one distribution rule with declared-weight fallback
-  to UnitWidth, and contains no byte or capacity concept;
+- rows without declared distribution metadata render exactly as today; no
+  weight-based width differences appear anywhere by default;
+- the engine implements the three-stage declared-strip allocation (§2.4) with
+  continuity at `W1` and `W2`;
+- stage 1 keeps minimum widths and overflows without negative adjustment;
+  stage 2 grows all children equally; stage 3 distributes width above `t` by
+  declared capacity weights, with the last child absorbing the rounding
+  residual;
 - no Edit-specific panel independently performs equal-fill, weighted-fill, or
   capacity-fill layout decisions;
 - Manage behavior remains equivalent;
@@ -1045,12 +1121,12 @@ Implementation is complete only when:
 - Edit upper contains only eligible disk → partition/unallocated topology;
 - Edit upper disks are vertically stacked through the engine Stack channel;
 - partitions inside one disk form one horizontal no-wrap strip;
-- spare horizontal width is distributed by declared capacity weights;
-- the 100 GiB / 200 GiB / 333 DIP example produces 223 DIP / 334 DIP;
-- the row's last child deterministically absorbs the rounding residual;
-- when remaining width is insufficient, children keep minimum widths and the
-  strip overflows the viewport without negative adjustment;
-- Edit upper disk cards use the compact horizontal presentation;
+- the equal-growth threshold `t` and the header single-line threshold are
+  named variables with confirmed values;
+- no width literals remain in panels or pages (§2.7);
+- Edit upper disk cards use the single-line presentation when their assigned
+  width reaches the named threshold, and the standard presentation when
+  narrower;
 - shared viewport state no longer allows Edit upper/lower resizing to mutate
   Manage layout;
 - targeted automatic tests are `passed`;
