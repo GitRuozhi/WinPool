@@ -86,15 +86,10 @@ public sealed partial class MainWindow : Window
         // Persist the selected system and manage object whenever the
         // selection changes, so the next launch restores it (the close-path
         // save alone races process exit).
-        ViewModel.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName
-                is nameof(WorkspaceViewModel.SelectedWorkspaceItem)
-                or nameof(WorkspaceViewModel.SelectedSystem))
-            {
-                PersistWorkspaceState();
-            }
-        };
+        // WorkspaceSelectionChanged fires after the selection bookkeeping
+        // (_categorySelections) has been written, so the persisted state
+        // always captures the latest object selection.
+        ViewModel.WorkspaceSelectionChanged += () => PersistWorkspaceState();
 
         if (startupOptions.EnterRealModeAfterElevation)
         {
