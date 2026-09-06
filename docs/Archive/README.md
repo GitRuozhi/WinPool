@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-The current product version is V0.45. No active Plan exists right now: the
+The current product version is V0.46. No active Plan exists right now: the
 unified topology layout engine stage was implemented and archived under
 `V0.45-layout-engine` on 2026-09-06. The previous archived stage is the V0.45
 Edit-page topology workspace under `V0.45`.

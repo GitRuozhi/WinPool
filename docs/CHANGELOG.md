@@ -7,6 +7,37 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.46 edit-lower structure tools and workspace restore — 2026-09-06
+
+### Changed
+- Product version is **V0.46**.
+- The Manage page restores the last storage system and selected object on the
+  next UI session. When the Agent is already running, a cached local inventory
+  is shown and the UI does not start another full scan.
+- Edit-lower cards show independent marks, overlaid at the top-right so narrow
+  disks keep their title width: pending change (accent dot), pinned (Segoe
+  Fluent `E840`), stored data (`ED43` TreeFolderFolderOpen). A pool virtual
+  disk that holds data shows the data mark. The "Not created" virtual-disk
+  placeholder is gone.
+- The Edit-lower control column is split into Storage structure (execute or
+  create, dissolve, evict disk) and Pool properties (confirm, then the
+  parameter fields). Execute persists membership only. Confirm persists names
+  and parameters. When a pool or virtual disk holds data, Confirm still allows
+  rename and refuses rebuild fields with a reminder.
+- A dedicated evict check controls leaving a tier. System and boot disks are
+  refused with a reminder. Page-file and crash-dump disks ask to drop that
+  role first, then move to the pool's unallocated layer. After eviction the pin
+  is gone and the disk can be dragged. Simulation only.
+
+### Verification
+- 2026-09-06: EditWorkspace and simulation-operation tests for eviction and
+  status flags passed; the architecture check for the new submit kind passed;
+  Release rebuild launched a WinPool window.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+- Evict dialogs and membership persist are simulation-only.
+
 ## V0.45 settings reset, gap threshold, and data capacity — 2026-09-05
 
 ### Changed
