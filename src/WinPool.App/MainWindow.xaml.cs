@@ -83,6 +83,19 @@ public sealed partial class MainWindow : Window
             new GlobalCommandLogService(),
             _workspaceStateService,
             agentConnection);
+        // Persist the selected system and manage object whenever the
+        // selection changes, so the next launch restores it (the close-path
+        // save alone races process exit).
+        ViewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName
+                is nameof(WorkspaceViewModel.SelectedWorkspaceItem)
+                or nameof(WorkspaceViewModel.SelectedSystem))
+            {
+                PersistWorkspaceState();
+            }
+        };
+
         if (startupOptions.EnterRealModeAfterElevation)
         {
             ViewModel.TrySetExecutionMode(ExecutionMode.Real);
