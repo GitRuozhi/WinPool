@@ -1261,7 +1261,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Categories.Add(new CategoryItem(ManageWorkspaceCategory.Volume, Localization["Volume"], "\uE7C3"));
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == category);
         OnPropertyChanged(nameof(SelectedCategoryTitle));
-        RebuildObjects(RememberedSelection(SelectedCategory) ?? _selectedSelection);
+        RebuildObjects(
+            RememberedSelection(SelectedCategory)
+            ?? _selectedSelection
+            ?? SelectionForCurrentSystemList());
         RebuildTopology();
         BuildDetails();
     }
@@ -1450,8 +1453,29 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     preferredSelection.Id.ProviderKey,
                     StringComparison.OrdinalIgnoreCase)
                 && item.Projection.Category == preferredSelection.Category);
+        if (preferredMatch is null
+            && preferredSelection is null
+            && SelectedCategory == ManageWorkspaceCategory.System)
+        {
+            preferredMatch = Objects.FirstOrDefault(item =>
+                item.StorageSystemId is not null
+                && item.StorageSystemId.Equals(SelectedSystem.Id, StringComparison.OrdinalIgnoreCase));
+        }
+
         SelectedWorkspaceItem = preferredMatch
             ?? (preferredSelection is null ? Objects.FirstOrDefault() : null);
+    }
+
+    private ManageSelectionKey? SelectionForCurrentSystemList()
+    {
+        if (SelectedCategory != ManageWorkspaceCategory.System)
+        {
+            return _selectedSelection;
+        }
+
+        var item = _manageProjector.Project(SelectedSystem).WorkspaceObjects.FirstOrDefault(
+            candidate => candidate.Category == ManageWorkspaceCategory.System);
+        return item is null ? null : SelectionFor(item);
     }
 
     private IEnumerable<WorkspaceItem> CreateWorkspaceItems(ManageWorkspaceCategory category)
@@ -1700,7 +1724,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveSnapshot));
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         RebuildTopology();
-        RebuildObjects(preferredSelection ?? RememberedSelection(SelectedCategory));
+        RebuildObjects(preferredSelection ?? RememberedSelection(SelectedCategory) ?? SelectionForCurrentSystemList());
+        if (identityChanged)
+        {
+            RaiseWorkspaceSelectionChanged();
+        }
+
         return identityChanged;
     }
 

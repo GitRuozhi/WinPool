@@ -45,6 +45,29 @@ public sealed class AgentBackedWorkspaceStateServiceTests
         Assert.Equal(ManageWorkspaceCategory.Pool, request.State.ActiveCategory);
         Assert.Equal("pool:test", request.State.RememberedProviderKeys[ManageWorkspaceCategory.Pool]);
         Assert.Equal("pool:highlighted", request.State.HighlightedTopologyProviderKey);
+        Assert.Equal("simulation:test", request.State.ActiveDocumentId);
+    }
+
+    [Fact]
+    public void EncodeRoundTripsABuiltinSimulationAndDiskSelection()
+    {
+        var state = new WorkspaceUiState(
+            "Manage",
+            "simulation:builtin:layout-triple-tier",
+            ManageWorkspaceCategory.Disk,
+            new Dictionary<ManageWorkspaceCategory, string>
+            {
+                [ManageWorkspaceCategory.Disk] = "physical:ssd"
+            },
+            "physical:ssd");
+
+        var decoded = AgentBackedWorkspaceStateService.Decode(
+            AgentBackedWorkspaceStateService.Encode(state));
+
+        Assert.Equal(state.ActiveSystemId, decoded.ActiveSystemId);
+        Assert.Equal(state.Category, decoded.Category);
+        Assert.Equal("physical:ssd", decoded.CategorySelections![ManageWorkspaceCategory.Disk]);
+        Assert.Equal("physical:ssd", decoded.HighlightedTopologyStableId);
     }
 
     private static WorkspaceSessionState State() =>
