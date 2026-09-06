@@ -88,9 +88,11 @@
                 </Button>
                 <Grid
                     Grid.Column="1"
-                    MinHeight="42"
                     Padding="8,4">
-                    <StackPanel IsHitTestVisible="False" Visibility="{x:Bind ViewModel.MultiLineHeaderVisibility, Mode=OneWay}">
+                    <StackPanel
+                        IsHitTestVisible="False"
+                        MinHeight="42"
+                        Visibility="{x:Bind ViewModel.MultiLineHeaderVisibility, Mode=OneWay}">
                         <Grid ColumnSpacing="6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -196,15 +198,14 @@
                         VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.SingleLineHeaderVisibility, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock
                             Grid.Column="0"
                             VerticalAlignment="Center"
                             FontSize="13"
                             FontWeight="SemiBold"
-                            TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap"
                             Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}" />
                         <TextBlock
