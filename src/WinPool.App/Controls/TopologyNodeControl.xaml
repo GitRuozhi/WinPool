@@ -102,42 +102,20 @@
                             <TextBlock
                                 x:Name="DisplayNameText"
                                 MinHeight="18"
+                                Margin="0,0,10,0"
                                 FontWeight="SemiBold"
                                 Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}"
                                 TextWrapping="Wrap" />
-                            <StackPanel
+                            <Border
                                 Grid.Column="1"
-                                Orientation="Horizontal"
-                                Spacing="6"
-                                VerticalAlignment="Top">
-                                <Border
-                                    Padding="5,1"
-                                    Background="{ThemeResource SystemFillColorCautionBrush}"
-                                    CornerRadius="3"
-                                    Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
-                                    <TextBlock
-                                        FontSize="10"
-                                        Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
-                                </Border>
-                                <FontIcon
-                                    FontSize="14"
-                                    Glyph="&#xE8A5;"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Visibility="{x:Bind ViewModel.HasStoredDataVisibility, Mode=OneWay}"
-                                    AutomationProperties.Name="{x:Bind ViewModel.HasStoredDataName, Mode=OneWay}" />
-                                <FontIcon
-                                    FontSize="14"
-                                    Glyph="&#xE718;"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Visibility="{x:Bind ViewModel.CannotLeaveVisibility, Mode=OneWay}"
-                                    AutomationProperties.Name="{x:Bind ViewModel.CannotLeaveName, Mode=OneWay}" />
-                                <shapes:Ellipse
-                                    Width="8"
-                                    Height="8"
-                                    Fill="{StaticResource WinPoolAccentBrush}"
-                                    Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}"
-                                    AutomationProperties.Name="{x:Bind ViewModel.PendingModificationName, Mode=OneWay}" />
-                            </StackPanel>
+                                Padding="5,1"
+                                Background="{ThemeResource SystemFillColorCautionBrush}"
+                                CornerRadius="3"
+                                Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
+                                <TextBlock
+                                    FontSize="10"
+                                    Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
+                            </Border>
                         </Grid>
                         <Grid Margin="0,2,0,0" ColumnSpacing="5">
                             <Grid.ColumnDefinitions>
@@ -300,6 +278,39 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Overlay, not a title column: 112 DIP disks keep their name width. -->
+            <StackPanel
+                Grid.RowSpan="2"
+                Margin="0,6,6,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Spacing="6"
+                IsHitTestVisible="False">
+                <shapes:Ellipse
+                    x:Name="PendingMark"
+                    Width="6"
+                    Height="6"
+                    Margin="0,2,0,0"
+                    HorizontalAlignment="Center"
+                    Fill="{StaticResource WinPoolAccentBrush}"
+                    Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}"
+                    AutomationProperties.Name="{x:Bind ViewModel.PendingModificationName, Mode=OneWay}" />
+                <FontIcon
+                    x:Name="CannotLeaveMark"
+                    FontSize="12"
+                    Glyph="&#xE840;"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Visibility="{x:Bind ViewModel.CannotLeaveVisibility, Mode=OneWay}"
+                    AutomationProperties.Name="{x:Bind ViewModel.CannotLeaveName, Mode=OneWay}" />
+                <FontIcon
+                    x:Name="StoredDataMark"
+                    FontSize="12"
+                    Glyph="&#xED43;"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Visibility="{x:Bind ViewModel.HasStoredDataVisibility, Mode=OneWay}"
+                    AutomationProperties.Name="{x:Bind ViewModel.HasStoredDataName, Mode=OneWay}" />
+            </StackPanel>
 
             </Grid>
         </Border>

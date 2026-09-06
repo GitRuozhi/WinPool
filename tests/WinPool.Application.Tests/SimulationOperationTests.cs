@@ -247,6 +247,31 @@ public sealed class SimulationOperationTests
     }
 
     [Fact]
+    public void EvictPhysicalDiskFromTiersKeepsPoolMembership()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            VirtualDiskName: "SpaceA",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            FileSystem: "NTFS",
+            AllocationUnitSize: 65536));
+        var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.EvictPhysicalDiskFromTiers,
+            "physical:p1"));
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
+        Assert.Contains(
+            "physical:p1",
+            document.Snapshot.StoragePools.Single(item => item.StableId == pool.StableId).MemberPhysicalDiskIds);
+        Assert.Equal(
+            pool.StableId,
+            document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:p1").PoolStableId);
+    }
+
+    [Fact]
     public void DissolveStoragePoolReturnsDisksToPrimordial()
     {
         var document = Apply(CreateDocument(), new SimulationOperationRequest(

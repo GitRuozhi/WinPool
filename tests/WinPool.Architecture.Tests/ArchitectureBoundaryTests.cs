@@ -467,6 +467,10 @@ public sealed class ArchitectureBoundaryTests
             editPage,
             StringComparison.Ordinal);
         Assert.Contains(
+            "SimulationOperationKind.EvictPhysicalDiskFromTiers",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "_simulationEditCoordinator.ExecuteAsync",
             workspace,
             StringComparison.Ordinal);

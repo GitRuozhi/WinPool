@@ -150,6 +150,7 @@ public sealed partial class TopologyNodeControl : UserControl
         WindowsMarkerSquare2.Fill = iconBrush;
         WindowsMarkerSquare3.Fill = iconBrush;
         WindowsMarkerSquare4.Fill = iconBrush;
+        ApplyStatusMarkBrushes(iconBrush, Brush("WinPoolAccentBrush"));
     }
 
     private static Brush Brush(string key) =>
@@ -166,6 +167,16 @@ public sealed partial class TopologyNodeControl : UserControl
         WindowsMarkerSquare2.Fill = brush;
         WindowsMarkerSquare3.Fill = brush;
         WindowsMarkerSquare4.Fill = brush;
+        ApplyStatusMarkBrushes(
+            brush,
+            ViewModel.IsSelected ? brush : Brush("WinPoolAccentBrush"));
+    }
+
+    private void ApplyStatusMarkBrushes(Brush presenceBrush, Brush pendingBrush)
+    {
+        StoredDataMark.Foreground = presenceBrush;
+        CannotLeaveMark.Foreground = presenceBrush;
+        PendingMark.Fill = pendingBrush;
     }
 
     private void TopologyNodeControl_PointerEntered(object sender, PointerRoutedEventArgs e)

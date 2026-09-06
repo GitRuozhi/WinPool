@@ -18,6 +18,7 @@ public enum SimulationEditKind
     CreateStoragePool,
     CreateVirtualDisk,
     MovePhysicalDisk,
+    EvictPhysicalDiskFromTiers,
     OptimizeDrive,
     ResetDocument,
     CreateTieredPool,

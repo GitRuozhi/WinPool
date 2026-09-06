@@ -308,17 +308,22 @@ public sealed class EditWorkspaceTests
         Assert.True(pool.HasStoredData);
         Assert.False(pool.CannotLeave);
 
+        var virtualDisk = Assert.Single(
+            pool.Children,
+            child => child.Unit.Kind == StorageUnitKind.VirtualDisk);
+        Assert.True(virtualDisk.ShowsEditStatus);
+        Assert.True(virtualDisk.HasStoredData);
+        Assert.False(virtualDisk.CannotLeave);
+
         var memberDisks = pool.Children
             .SelectMany(child => child.Unit.Kind == StorageUnitKind.PhysicalDisk
                 ? [child]
                 : child.Children.Where(item => item.Unit.Kind == StorageUnitKind.PhysicalDisk))
             .ToArray();
         Assert.NotEmpty(memberDisks);
-        Assert.All(memberDisks, disk =>
-        {
-            Assert.True(disk.ShowsEditStatus);
-            Assert.True(disk.CannotLeave);
-        });
+        Assert.All(memberDisks, disk => Assert.True(disk.ShowsEditStatus));
+        Assert.Contains(memberDisks, disk => disk.Unit.StableId == "physical:ssd" && disk.CannotLeave);
+        Assert.Contains(memberDisks, disk => disk.Unit.StableId == "physical:extra" && !disk.CannotLeave);
         Assert.Contains(memberDisks, disk => disk.Unit.StableId == "physical:ssd" && !disk.HasStoredData);
 
         var draft = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
@@ -334,6 +339,76 @@ public sealed class EditWorkspaceTests
             .Single(item => item.Unit.StableId == "physical:extra");
         Assert.False(extra.CannotLeave);
         Assert.False(extra.HasStoredData);
+        Assert.DoesNotContain(draftNode.Children, child => child.Unit.Kind == StorageUnitKind.VirtualDisk);
+    }
+
+    [Fact]
+    public void ClassifyDiskEvictSeparatesSystemPageFileAndOrdinaryDisks()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var ssd = snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd");
+        Assert.Equal(EditWorkspace.DiskEvictCheck.Allowed, EditWorkspace.ClassifyDiskEvict(ssd));
+
+        var page = ssd with { IsPageFile = true };
+        Assert.Equal(EditWorkspace.DiskEvictCheck.ConfirmPageFile, EditWorkspace.ClassifyDiskEvict(page));
+
+        var dump = ssd with { IsCrashDump = true };
+        Assert.Equal(EditWorkspace.DiskEvictCheck.ConfirmCrashDump, EditWorkspace.ClassifyDiskEvict(dump));
+
+        var system = ssd with { IsSystem = true };
+        Assert.Equal(EditWorkspace.DiskEvictCheck.DeniedSystem, EditWorkspace.ClassifyDiskEvict(system));
+
+        var boot = ssd with { IsBoot = true };
+        Assert.Equal(EditWorkspace.DiskEvictCheck.DeniedSystem, EditWorkspace.ClassifyDiskEvict(boot));
+    }
+
+    [Fact]
+    public void EvictDiskToUnallocatedLeavesPoolAndClearsPin()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var ssd = snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd");
+        Assert.True(EditWorkspace.DiskCannotLeave(snapshot, snapshot, ssd));
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(snapshot, ssd.StableId));
+
+        var evicted = EditWorkspace.EvictDiskToUnallocated(snapshot, ssd.StableId);
+        var moved = evicted.PhysicalDisks.Single(item => item.StableId == ssd.StableId);
+        Assert.Equal("pool:t1", moved.PoolStableId);
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(evicted, ssd.StableId));
+        Assert.False(EditWorkspace.DiskCannotLeave(evicted, snapshot, moved));
+        Assert.True(EditWorkspace.HasPendingModifications(evicted, snapshot, ssd.StableId));
+        Assert.True(EditWorkspace.HasPendingModifications(evicted, snapshot, "pool:t1"));
+
+        var pool = EditWorkspace.ProjectPoolWorkspace(evicted, 0, snapshot)
+            .Single(node => node.Unit.StableId == "pool:t1");
+        var unallocated = Assert.Single(
+            pool.Children,
+            child => child.Unit.Kind == StorageUnitKind.DirectDiskGroup);
+        Assert.Contains(unallocated.Children, disk => disk.Unit.StableId == ssd.StableId && !disk.CannotLeave);
+    }
+
+    [Fact]
+    public void EvictDiskToUnallocatedRefusesSystemDisks()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var system = snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd")
+            with { IsSystem = true };
+        snapshot = snapshot with
+        {
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(item => item.StableId == system.StableId ? system : item)
+                .ToArray()
+        };
+        Assert.Throws<InvalidOperationException>(
+            () => EditWorkspace.EvictDiskToUnallocated(snapshot, system.StableId));
+    }
+
+    [Fact]
+    public void PoolWithoutVirtualDiskOmitsPlaceholderCard()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0)
+            .Single(node => node.Unit.StableId == "pool:t1");
+        Assert.DoesNotContain(pool.Children, child => child.Unit.Kind == StorageUnitKind.VirtualDisk);
     }
 
     [Fact]

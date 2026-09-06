@@ -292,6 +292,7 @@ public enum SimulationOperationKind
     CreateStoragePool,
     CreateVirtualDisk,
     MovePhysicalDisk,
+    EvictPhysicalDiskFromTiers,
     OptimizeDrive,
     CreateTieredPool,
     UpdateStoragePool,
@@ -369,6 +370,8 @@ public static class SimulatedCommandText
              $"New-Partition -AssignDriveLetter | Format-Volume -FileSystem NTFS -AllocationUnitSize {request.AllocationUnitSize ?? 65536} -Confirm:$false"],
         SimulationOperationKind.MovePhysicalDisk =>
             ["Add-PhysicalDisk / Remove-PhysicalDisk (move between pools)"],
+        SimulationOperationKind.EvictPhysicalDiskFromTiers =>
+            ["Remove-PhysicalDisk from storage tiers; keep the disk in the pool unallocated"],
         SimulationOperationKind.OptimizeDrive =>
             [$"Optimize-Volume"],
         SimulationOperationKind.CreateTieredPool =>
@@ -429,6 +432,8 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 SimulationOperationKind.CreateStoragePool => CreateStoragePool(document.Snapshot, request),
                 SimulationOperationKind.CreateVirtualDisk => CreateVirtualDisk(document.Snapshot, request),
                 SimulationOperationKind.MovePhysicalDisk => MovePhysicalDisk(document.Snapshot, request),
+                SimulationOperationKind.EvictPhysicalDiskFromTiers =>
+                    EvictPhysicalDiskFromTiers(document.Snapshot, request),
                 SimulationOperationKind.CreateTieredPool => CreateTieredPool(document.Snapshot, request),
                 SimulationOperationKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
                 SimulationOperationKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
@@ -986,6 +991,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
             ? primordial.StableId
             : request.Name.Trim();
         return EditWorkspace.MoveDiskToPool(snapshot, request.TargetStableId, targetId);
+    }
+
+    private static StorageSnapshot EvictPhysicalDiskFromTiers(
+        StorageSnapshot snapshot,
+        SimulationOperationRequest request)
+    {
+        var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetStableId);
+        return EditWorkspace.EvictDiskToUnallocated(cleared, request.TargetStableId);
     }
 
     private static StorageSnapshot CreateTieredPool(StorageSnapshot snapshot, SimulationOperationRequest request)

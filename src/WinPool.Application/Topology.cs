@@ -58,8 +58,9 @@ public sealed class TopologyNode
 
     /// <summary>
     /// Edit-lower status indicators. False hides the whole cluster
-    /// (tiers, virtual disks, groups, plus-pool, primordial pool card).
-    /// HasStoredData, CannotLeave, and pending are independent flags.
+    /// (tiers, groups, plus-pool, primordial pool card). Virtual disks
+    /// may show HasStoredData. HasStoredData, CannotLeave, and pending
+    /// are independent.
     /// </summary>
     public bool ShowsEditStatus { get; set; }
 

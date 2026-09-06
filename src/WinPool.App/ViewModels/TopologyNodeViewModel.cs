@@ -518,7 +518,6 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             _ when EditWorkspace.IsPlus(unit.StableId) => "+",
             _ when EditWorkspace.IsPoolRow(unit.StableId) => string.Empty,
             _ when EditWorkspace.IsUnallocated(unit.StableId) => owner.Localization["Unallocated"],
-            _ when EditWorkspace.IsPendingVirtualDisk(unit.StableId) => owner.Localization["NotCreated"],
             _ when unit.Kind == StorageUnitKind.NetworkDiskGroup => owner.Localization["Network"],
             _ when unit.Kind == StorageUnitKind.OtherDiskGroup => owner.Localization["Other"],
             _ when unit.Kind == StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],
@@ -549,7 +548,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(physical.Sum(x => x.Size)));
         }
 
-        if (EditWorkspace.IsPlus(unit.StableId) || EditWorkspace.IsPendingVirtualDisk(unit.StableId))
+        if (EditWorkspace.IsPlus(unit.StableId))
         {
             return string.Empty;
         }
@@ -611,7 +610,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             var disk = snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == unit.StableId);
             if (disk is null)
             {
-                return owner.Localization["NotCreated"];
+                return node.Summary;
             }
 
             return TopologyProjector.JoinSummary(
@@ -718,10 +717,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             StorageUnitKind.PhysicalDisk =>
                 snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == key)?.PoolStableId,
             StorageUnitKind.VirtualDisk =>
-                snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == key)?.PoolStableId
-                ?? (EditWorkspace.IsPendingVirtualDisk(key)
-                    ? key[EditWorkspace.PendingVirtualPrefix.Length..]
-                    : null),
+                snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == key)?.PoolStableId,
             StorageUnitKind.Partition =>
                 snapshot.Partitions.FirstOrDefault(item => item.StableId == key)?.OsDiskStableId
                 ?? (EditWorkspace.TryParseUnallocated(key, out var osDisk, out _, out _) ? osDisk : null),

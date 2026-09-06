@@ -9,7 +9,6 @@ public static class EditWorkspace
     public const string PartitionRowStableId = "edit:partition-row";
     public const string DraftPrefix = "edit:draft:";
     public const string UnallocatedPrefix = "unallocated:";
-    public const string PendingVirtualPrefix = "edit:pending-vdisk:";
     public const long DefaultUnallocatedIgnoreBytes = 8L * 1024 * 1024;
 
     public static bool IsPlus(string? id) =>
@@ -23,9 +22,6 @@ public static class EditWorkspace
 
     public static bool IsUnallocated(string? id) =>
         id is not null && id.StartsWith(UnallocatedPrefix, StringComparison.OrdinalIgnoreCase);
-
-    public static bool IsPendingVirtualDisk(string? id) =>
-        id is not null && id.StartsWith(PendingVirtualPrefix, StringComparison.OrdinalIgnoreCase);
 
     public static bool TryParseUnallocated(
         string id,
@@ -288,16 +284,114 @@ public static class EditWorkspace
                         && PartitionHoldsStoredData(partition))));
     }
 
-    public static bool DiskHoldsStoredData(StorageSnapshot snapshot, string physicalDiskId) =>
-        !DiskSupportsStructureModification(snapshot, physicalDiskId, isVirtualDisk: false);
+    public static bool DiskHoldsStoredData(
+        StorageSnapshot snapshot,
+        string stableId,
+        bool isVirtualDisk = false) =>
+        !DiskSupportsStructureModification(snapshot, stableId, isVirtualDisk);
 
     public static bool PoolHoldsStoredData(StorageSnapshot snapshot, string poolId) =>
         !PoolSupportsStructureModification(snapshot, poolId);
 
+    public enum DiskEvictCheck
+    {
+        Allowed,
+        ConfirmPageFile,
+        ConfirmCrashDump,
+        DeniedSystem
+    }
+
+    public static DiskEvictCheck ClassifyDiskEvict(PhysicalDiskInfo disk)
+    {
+        ArgumentNullException.ThrowIfNull(disk);
+        if (disk.IsBoot || disk.IsSystem)
+        {
+            return DiskEvictCheck.DeniedSystem;
+        }
+
+        if (disk.IsPageFile)
+        {
+            return DiskEvictCheck.ConfirmPageFile;
+        }
+
+        if (disk.IsCrashDump)
+        {
+            return DiskEvictCheck.ConfirmCrashDump;
+        }
+
+        return DiskEvictCheck.Allowed;
+    }
+
+    public static bool DiskIsAssignedToTier(StorageSnapshot snapshot, string diskId) =>
+        snapshot.StorageTiers.Any(tier =>
+            tier.MemberPhysicalDiskIds.Contains(diskId, StringComparer.OrdinalIgnoreCase));
+
+    private static HashSet<string> TierMemberIds(StorageSnapshot snapshot, string poolId) =>
+        snapshot.StorageTiers
+            .Where(tier => string.Equals(tier.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(tier => tier.MemberPhysicalDiskIds)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public static StorageSnapshot ClearEvictableSpecialRoles(StorageSnapshot snapshot, string diskId)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return snapshot with
+        {
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(item => item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase)
+                    ? item with { IsPageFile = false, IsCrashDump = false }
+                    : item)
+                .ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Keeps the disk in its pool and removes it from every tier so it
+    /// appears under 未划层. Boot and system disks are refused.
+    /// </summary>
+    public static StorageSnapshot EvictDiskToUnallocated(StorageSnapshot snapshot, string diskId)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var disk = snapshot.PhysicalDisks.FirstOrDefault(item =>
+            item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected physical disk was not found.");
+        if (disk.IsBoot || disk.IsSystem)
+        {
+            throw new InvalidOperationException("Boot and system disks cannot leave a pool.");
+        }
+
+        if (string.IsNullOrEmpty(disk.PoolStableId))
+        {
+            throw new InvalidOperationException("The selected physical disk is not in a pool.");
+        }
+
+        var pool = snapshot.StoragePools.FirstOrDefault(item =>
+            item.StableId.Equals(disk.PoolStableId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected pool was not found.");
+        if (pool.IsPrimordial)
+        {
+            throw new InvalidOperationException("Disks cannot be evicted from the primordial pool.");
+        }
+
+        return snapshot with
+        {
+            StorageTiers = snapshot.StorageTiers
+                .Select(tier => tier with
+                {
+                    MemberPhysicalDiskIds = tier.MemberPhysicalDiskIds
+                        .Where(id => !id.Equals(diskId, StringComparison.OrdinalIgnoreCase))
+                        .ToArray()
+                })
+                .ToArray()
+        };
+    }
+
     /// <summary>
     /// A disk cannot leave its current pool when it is a boot/system disk,
-    /// or when it is an original member of a data-bearing real pool.
-    /// Draft pools and disks moved in this session can still leave.
+    /// still holds a page-file or crash-dump role, or is an original member
+    /// of a data-bearing real pool that is still assigned to a tier.
+    /// Disks already in 未划层, draft members, and disks moved in this
+    /// session can still leave.
     /// </summary>
     public static bool DiskCannotLeave(
         StorageSnapshot working,
@@ -321,6 +415,11 @@ public static class EditWorkspace
         var pool = working.StoragePools.FirstOrDefault(item =>
             item.StableId.Equals(poolId, StringComparison.OrdinalIgnoreCase));
         if (pool is null || pool.IsPrimordial || !PoolHoldsStoredData(working, poolId))
+        {
+            return false;
+        }
+
+        if (!DiskIsAssignedToTier(working, disk.StableId))
         {
             return false;
         }
@@ -407,8 +506,18 @@ public sealed record StructureProblem(
         if (workingDisk is not null)
         {
             var committedDisk = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == stableId);
-            return committedDisk is null
-                || !string.Equals(committedDisk.PoolStableId, workingDisk.PoolStableId, StringComparison.OrdinalIgnoreCase);
+            if (committedDisk is null
+                || !string.Equals(
+                    committedDisk.PoolStableId,
+                    workingDisk.PoolStableId,
+                    StringComparison.OrdinalIgnoreCase)
+                || committedDisk.IsPageFile != workingDisk.IsPageFile
+                || committedDisk.IsCrashDump != workingDisk.IsCrashDump)
+            {
+                return true;
+            }
+
+            return DiskIsAssignedToTier(working, stableId) != DiskIsAssignedToTier(committed, stableId);
         }
 
         var workingPool = working.StoragePools.FirstOrDefault(item => item.StableId == stableId);
@@ -439,7 +548,14 @@ public sealed record StructureProblem(
                 .Where(item => item.PoolStableId == stableId)
                 .Select(item => item.StableId)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return !workingVirtualDisks.SetEquals(committedVirtualDisks);
+            if (!workingVirtualDisks.SetEquals(committedVirtualDisks))
+            {
+                return true;
+            }
+
+            var workingTierMembers = TierMemberIds(working, stableId);
+            var committedTierMembers = TierMemberIds(committed, stableId);
+            return !workingTierMembers.SetEquals(committedTierMembers);
         }
 
         return false;
@@ -686,26 +802,10 @@ public sealed record StructureProblem(
         poolNode.ShowsEditStatus = true;
         poolNode.HasStoredData = PoolHoldsStoredData(snapshot, pool.StableId);
 
-        var virtualDisks = snapshot.VirtualDisks
-            .Where(disk => disk.PoolStableId == pool.StableId)
-            .ToList();
-        if (virtualDisks.Count == 0)
+        foreach (var virtualDisk in snapshot.VirtualDisks
+                     .Where(disk => disk.PoolStableId == pool.StableId))
         {
-            poolNode.Children.Add(new TopologyNode(
-                new StorageUnitRef(
-                    $"{PendingVirtualPrefix}{pool.StableId}",
-                    StorageUnitKind.VirtualDisk,
-                    "Not created",
-                    false,
-                    pool.StableId),
-                "Not created"));
-        }
-        else
-        {
-            foreach (var virtualDisk in virtualDisks)
-            {
-                poolNode.Children.Add(CreateVirtualDiskNode(virtualDisk, snapshot, minUnallocatedBytes));
-            }
+            poolNode.Children.Add(CreateVirtualDiskNode(virtualDisk, snapshot, minUnallocatedBytes));
         }
 
         // Snapshot-driven tier cards, ordered like Manage: a tier renders
@@ -800,9 +900,13 @@ public sealed record StructureProblem(
         var node = new TopologyNode(
             new StorageUnitRef(disk.StableId, StorageUnitKind.VirtualDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
             TopologyProjector.JoinSummary("Virtual", TopologyProjector.FormatBytes(disk.Size)),
-            childrenLayout: TopologyChildrenLayout.Flow);
+            childrenLayout: TopologyChildrenLayout.Flow)
+        {
+            ShowsEditStatus = true,
+            HasStoredData = DiskHoldsStoredData(snapshot, disk.StableId, isVirtualDisk: true)
+        };
         // Edit lower shows no partition strips anywhere (Plan §3): virtual
-        // disks render as bare cards.
+        // disks render as bare cards. Data / pending marks still apply.
         return node;
     }
 
