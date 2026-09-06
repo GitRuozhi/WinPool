@@ -444,7 +444,10 @@ public sealed partial class EditPage : Page
 
     private void RefreshLower()
     {
-        var root = EditWorkspace.ProjectPoolWorkspaceRoot(_working, UnallocatedIgnoreBytes);
+        var root = EditWorkspace.ProjectPoolWorkspaceRoot(
+            _working,
+            UnallocatedIgnoreBytes,
+            ViewModel.ActiveSnapshot);
         var rootViewModel = new TopologyNodeViewModel(
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
             ViewModel,
@@ -464,7 +467,7 @@ public sealed partial class EditPage : Page
         while (queue.Count > 0)
         {
             var node = queue.Dequeue();
-            if (node.StructureModifiable is not null)
+            if (node.ShowsEditStatus)
             {
                 node.SetPendingModifications(
                     EditWorkspace.HasPendingModifications(_working, committed, node.Unit.StableId));

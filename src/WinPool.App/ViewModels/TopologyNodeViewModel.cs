@@ -52,7 +52,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         NoWrapChildren = node.NoWrapChildren;
         DistributeByCapacity = node.DistributeByCapacity;
         CapacityWeights = node.CapacityWeights;
-        StructureModifiable = node.StructureModifiable;
+        ShowsEditStatus = node.ShowsEditStatus;
+        HasStoredData = node.HasStoredData;
+        CannotLeave = node.CannotLeave;
         AdaptiveHeaderEnabled = node.AdaptiveHeaderEnabled;
         _isExpanded = unit.Kind == StorageUnitKind.VirtualDiskGroup
             ? true
@@ -199,27 +201,28 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public IReadOnlyList<double>? CapacityWeights { get; }
 
-    public bool? StructureModifiable { get; }
+    public bool ShowsEditStatus { get; }
 
-    public Visibility ModifiabilityIconVisibility =>
-        StructureModifiable is null ? Visibility.Collapsed : Visibility.Visible;
+    public bool HasStoredData { get; }
+
+    public bool CannotLeave { get; }
 
     private bool _hasPendingModifications;
 
-    public Visibility ModifiableOkVisibility =>
-        StructureModifiable == true && !_hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HasStoredDataVisibility =>
+        ShowsEditStatus && HasStoredData ? Visibility.Visible : Visibility.Collapsed;
 
-    public Visibility ModifiableNoVisibility =>
-        StructureModifiable == false ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility CannotLeaveVisibility =>
+        ShowsEditStatus && CannotLeave ? Visibility.Visible : Visibility.Collapsed;
 
-    public Visibility ModifiablePendingVisibility =>
-        _hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility PendingModificationVisibility =>
+        ShowsEditStatus && _hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
 
-    public string ModifiableOkName => _owner.Localization["StructureModifiable"];
+    public string HasStoredDataName => _owner.Localization["StructureHasStoredData"];
 
-    public string ModifiableNoName => _owner.Localization["StructureNotModifiable"];
+    public string CannotLeaveName => _owner.Localization["StructureCannotLeave"];
 
-    public string ModifiablePendingName => _owner.Localization["StructurePendingModification"];
+    public string PendingModificationName => _owner.Localization["StructurePendingModification"];
 
     /// <summary>Call outside layout passes; raises the icon notifications.</summary>
     public void SetPendingModifications(bool value)
@@ -230,9 +233,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         }
 
         _hasPendingModifications = value;
-        OnPropertyChanged(nameof(ModifiableOkVisibility));
-        OnPropertyChanged(nameof(ModifiableNoVisibility));
-        OnPropertyChanged(nameof(ModifiablePendingVisibility));
+        OnPropertyChanged(nameof(PendingModificationVisibility));
     }
 
     /// <summary>

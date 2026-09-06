@@ -187,9 +187,10 @@ public static class EditWorkspace
 
     public static TopologyNode ProjectPoolWorkspaceRoot(
         StorageSnapshot snapshot,
-        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
+        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
+        StorageSnapshot? committed = null)
     {
-        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes);
+        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed);
         return new TopologyNode(
             new StorageUnitRef(PoolRowStableId, StorageUnitKind.VirtualDiskGroup, string.Empty, false),
             string.Empty,
@@ -201,9 +202,11 @@ public static class EditWorkspace
 
     public static IReadOnlyList<TopologyNode> ProjectPoolWorkspace(
         StorageSnapshot snapshot,
-        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
+        long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
+        StorageSnapshot? committed = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        var baseline = committed ?? snapshot;
         var nodes = new List<TopologyNode>();
         var ignore = Math.Max(0, minUnallocatedBytes);
 
@@ -214,7 +217,7 @@ public static class EditWorkspace
                      .ThenBy(pool => IsDraftPool(pool.StableId) ? 1 : 0)
                      .ThenBy(pool => pool.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore));
+            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline));
         }
 
         // Single-draft rule: the plus-pool affordance is present only while
@@ -283,6 +286,49 @@ public static class EditWorkspace
                 .Any(osDisk => snapshot.Partitions.Any(
                     partition => partition.OsDiskStableId == osDisk.StableId
                         && PartitionHoldsStoredData(partition))));
+    }
+
+    public static bool DiskHoldsStoredData(StorageSnapshot snapshot, string physicalDiskId) =>
+        !DiskSupportsStructureModification(snapshot, physicalDiskId, isVirtualDisk: false);
+
+    public static bool PoolHoldsStoredData(StorageSnapshot snapshot, string poolId) =>
+        !PoolSupportsStructureModification(snapshot, poolId);
+
+    /// <summary>
+    /// A disk cannot leave its current pool when it is a boot/system disk,
+    /// or when it is an original member of a data-bearing real pool.
+    /// Draft pools and disks moved in this session can still leave.
+    /// </summary>
+    public static bool DiskCannotLeave(
+        StorageSnapshot working,
+        StorageSnapshot committed,
+        PhysicalDiskInfo disk)
+    {
+        ArgumentNullException.ThrowIfNull(working);
+        ArgumentNullException.ThrowIfNull(committed);
+        ArgumentNullException.ThrowIfNull(disk);
+        if (disk.IsBoot || disk.IsSystem || disk.IsPageFile || disk.IsCrashDump)
+        {
+            return true;
+        }
+
+        var poolId = disk.PoolStableId;
+        if (string.IsNullOrEmpty(poolId) || IsDraftPool(poolId))
+        {
+            return false;
+        }
+
+        var pool = working.StoragePools.FirstOrDefault(item =>
+            item.StableId.Equals(poolId, StringComparison.OrdinalIgnoreCase));
+        if (pool is null || pool.IsPrimordial || !PoolHoldsStoredData(working, poolId))
+        {
+            return false;
+        }
+
+        var committedDisk = committed.PhysicalDisks.FirstOrDefault(item =>
+            item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+        return committedDisk is not null
+            && string.Equals(committedDisk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase);
     }
 
 public enum StructureProblemKind
@@ -607,7 +653,8 @@ public sealed record StructureProblem(
     private static TopologyNode CreateEditPoolNode(
         StoragePoolInfo pool,
         StorageSnapshot snapshot,
-        long minUnallocatedBytes)
+        long minUnallocatedBytes,
+        StorageSnapshot committed)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -630,17 +677,14 @@ public sealed record StructureProblem(
         {
             foreach (var member in members)
             {
-                var diskNode = PhysicalDiskNode(member);
-                diskNode.StructureModifiable = DiskSupportsStructureModification(
-                    snapshot, member.StableId, isVirtualDisk: false);
-                poolNode.Children.Add(diskNode);
+                poolNode.Children.Add(PhysicalDiskNode(member, snapshot, committed));
             }
 
             return poolNode;
         }
 
-        var poolModifiable = PoolSupportsStructureModification(snapshot, pool.StableId);
-        poolNode.StructureModifiable = poolModifiable;
+        poolNode.ShowsEditStatus = true;
+        poolNode.HasStoredData = PoolHoldsStoredData(snapshot, pool.StableId);
 
         var virtualDisks = snapshot.VirtualDisks
             .Where(disk => disk.PoolStableId == pool.StableId)
@@ -673,10 +717,10 @@ public sealed record StructureProblem(
                      .Where(item => item.MemberPhysicalDiskIds.Count > 0)
                      .OrderBy(item => TopologyProjector.TierSortOrder(item.MediaType)))
         {
-            poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, poolModifiable));
+            poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, committed));
         }
 
-        AddUnallocatedGroup(poolNode, pool, members, snapshot);
+        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed);
         return poolNode;
     }
 
@@ -684,7 +728,7 @@ public sealed record StructureProblem(
         StoragePoolInfo pool,
         StorageTierInfo tier,
         StorageSnapshot snapshot,
-        bool poolModifiable)
+        StorageSnapshot committed)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -702,10 +746,7 @@ public sealed record StructureProblem(
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in members)
         {
-            var diskNode = PhysicalDiskNode(member);
-            diskNode.StructureModifiable = poolModifiable && DiskSupportsStructureModification(
-                snapshot, member.StableId, isVirtualDisk: false);
-            node.Children.Add(diskNode);
+            node.Children.Add(PhysicalDiskNode(member, snapshot, committed));
         }
 
         return node;
@@ -719,7 +760,8 @@ public sealed record StructureProblem(
         TopologyNode poolNode,
         StoragePoolInfo pool,
         IReadOnlyList<PhysicalDiskInfo> members,
-        StorageSnapshot snapshot)
+        StorageSnapshot snapshot,
+        StorageSnapshot committed)
     {
         var tierMemberIds = snapshot.StorageTiers
             .Where(item => item.PoolStableId == pool.StableId)
@@ -744,11 +786,7 @@ public sealed record StructureProblem(
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in directMembers)
         {
-            var diskNode = PhysicalDiskNode(member);
-            diskNode.StructureModifiable = PoolSupportsStructureModification(
-                snapshot, pool.StableId)
-                && DiskSupportsStructureModification(snapshot, member.StableId, isVirtualDisk: false);
-            group.Children.Add(diskNode);
+            group.Children.Add(PhysicalDiskNode(member, snapshot, committed));
         }
 
         poolNode.Children.Add(group);
@@ -768,10 +806,21 @@ public sealed record StructureProblem(
         return node;
     }
 
-    private static TopologyNode PhysicalDiskNode(PhysicalDiskInfo disk) =>
-        new(
+    private static TopologyNode PhysicalDiskNode(
+        PhysicalDiskInfo disk,
+        StorageSnapshot working,
+        StorageSnapshot committed)
+    {
+        var node = new TopologyNode(
             new StorageUnitRef(disk.StableId, StorageUnitKind.PhysicalDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
-            TopologyProjector.JoinSummary(NormalizeMedia(disk.MediaType), TopologyProjector.FormatBytes(disk.Size)));
+            TopologyProjector.JoinSummary(NormalizeMedia(disk.MediaType), TopologyProjector.FormatBytes(disk.Size)))
+        {
+            ShowsEditStatus = true,
+            HasStoredData = DiskHoldsStoredData(working, disk.StableId),
+            CannotLeave = DiskCannotLeave(working, committed, disk)
+        };
+        return node;
+    }
 
     public static StorageSnapshot MoveDiskToPool(StorageSnapshot snapshot, string diskId, string poolId)
     {
@@ -931,7 +980,9 @@ public sealed record StructureProblem(
             node.NoWrapChildren,
             node.DistributeByCapacity,
             node.CapacityWeights,
-            node.StructureModifiable,
+            node.ShowsEditStatus,
+            node.HasStoredData,
+            node.CannotLeave,
             node.AdaptiveHeaderEnabled);
     }
 

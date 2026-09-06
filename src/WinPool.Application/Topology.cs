@@ -57,10 +57,19 @@ public sealed class TopologyNode
     public IReadOnlyList<double>? CapacityWeights { get; }
 
     /// <summary>
-    /// Edit-lower structure-modifiability indicator state. Null hides the
-    /// icon (objects the state is not defined for).
+    /// Edit-lower status indicators. False hides the whole cluster
+    /// (tiers, virtual disks, groups, plus-pool, primordial pool card).
+    /// HasStoredData, CannotLeave, and pending are independent flags.
     /// </summary>
-    public bool? StructureModifiable { get; set; }
+    public bool ShowsEditStatus { get; set; }
+
+    public bool HasStoredData { get; set; }
+
+    /// <summary>
+    /// Disks only: boot/system disks, or original members of a data-bearing
+    /// real pool. Never set on pool cards.
+    /// </summary>
+    public bool CannotLeave { get; set; }
 
     /// <summary>
     /// Width-adaptive header capability (Plan §6): the node may collapse its

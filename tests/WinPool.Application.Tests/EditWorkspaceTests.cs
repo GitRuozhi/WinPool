@@ -260,6 +260,25 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
+    public void DiskCannotLeavePinsOriginalMembersAndSystemDisks()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var ssd = snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd");
+        Assert.True(EditWorkspace.DiskCannotLeave(snapshot, snapshot, ssd));
+        Assert.False(EditWorkspace.DiskHoldsStoredData(snapshot, "physical:ssd"));
+
+        var extra = snapshot.PhysicalDisks.Single(item => item.StableId == "physical:extra");
+        var drafted = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
+        var moved = EditWorkspace.MoveDiskToPool(drafted, extra.StableId, drafted.StoragePools.Last(
+            item => EditWorkspace.IsDraftPool(item.StableId)).StableId);
+        var movedExtra = moved.PhysicalDisks.Single(item => item.StableId == extra.StableId);
+        Assert.False(EditWorkspace.DiskCannotLeave(moved, snapshot, movedExtra));
+
+        var boot = extra with { StableId = "physical:boot", IsBoot = true, PoolStableId = "pool:primordial" };
+        Assert.True(EditWorkspace.DiskCannotLeave(snapshot, snapshot, boot));
+    }
+
+    [Fact]
     public void PendingModificationRulesFollowWorkingCopyChanges()
     {
         var committed = TieredPoolSnapshot(withVirtualDisk: true);
@@ -280,25 +299,41 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
-    public void PoolMemberDisksFollowThePoolModifiability()
+    public void PoolAndDiskEditStatusAreIndependent()
     {
-        // The pool is unsupported: its virtual disk holds a data partition,
-        // so every member disk must show the locked state as well.
         var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
         var pools = EditWorkspace.ProjectPoolWorkspace(snapshot, minUnallocatedBytes: 0);
         var pool = pools.Single(node => node.Unit.StableId == "pool:t1");
-        Assert.False(pool.StructureModifiable);
-        Assert.All(
-            pool.Children.Where(child => child.Unit.Kind == StorageUnitKind.PhysicalDisk),
-            child => Assert.False(child.StructureModifiable));
+        Assert.True(pool.ShowsEditStatus);
+        Assert.True(pool.HasStoredData);
+        Assert.False(pool.CannotLeave);
 
-        // A supported pool keeps its members modifiable.
+        var memberDisks = pool.Children
+            .SelectMany(child => child.Unit.Kind == StorageUnitKind.PhysicalDisk
+                ? [child]
+                : child.Children.Where(item => item.Unit.Kind == StorageUnitKind.PhysicalDisk))
+            .ToArray();
+        Assert.NotEmpty(memberDisks);
+        Assert.All(memberDisks, disk =>
+        {
+            Assert.True(disk.ShowsEditStatus);
+            Assert.True(disk.CannotLeave);
+        });
+        Assert.Contains(memberDisks, disk => disk.Unit.StableId == "physical:ssd" && !disk.HasStoredData);
+
         var draft = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
         var moved = EditWorkspace.MoveDiskToPool(draft, "physical:extra", draft.StoragePools.Last(
             item => EditWorkspace.IsDraftPool(item.StableId)).StableId);
-        var draftNode = EditWorkspace.ProjectPoolWorkspace(moved, 0).Single(
+        var draftNode = EditWorkspace.ProjectPoolWorkspace(moved, 0, snapshot).Single(
             node => EditWorkspace.IsDraftPool(node.Unit.StableId));
-        Assert.True(draftNode.StructureModifiable);
+        Assert.True(draftNode.ShowsEditStatus);
+        Assert.False(draftNode.HasStoredData);
+        Assert.False(draftNode.CannotLeave);
+        var extra = draftNode.Children
+            .SelectMany(child => child.Children.Append(child))
+            .Single(item => item.Unit.StableId == "physical:extra");
+        Assert.False(extra.CannotLeave);
+        Assert.False(extra.HasStoredData);
     }
 
     [Fact]
@@ -333,9 +368,15 @@ public sealed class EditWorkspaceTests
         };
         var withDisk = EditWorkspace.MoveDiskToPool(withDiskSource, "physical:data", draftId);
         Assert.False(EditWorkspace.PoolSupportsStructureModification(withDisk, draftId));
-        var node = EditWorkspace.ProjectPoolWorkspace(withDisk, 0).Single(
+        var node = EditWorkspace.ProjectPoolWorkspace(withDisk, 0, snapshot).Single(
             item => item.Unit.StableId == draftId);
-        Assert.False(node.StructureModifiable);
+        Assert.True(node.HasStoredData);
+        Assert.False(node.CannotLeave);
+        var dataMember = node.Children
+            .SelectMany(child => child.Children.Append(child))
+            .Single(item => item.Unit.StableId == "physical:data");
+        Assert.True(dataMember.HasStoredData);
+        Assert.False(dataMember.CannotLeave);
 
         // Dragging the data disk back out unlocks the draft (no deadlock).
         var recovered = EditWorkspace.MoveDiskToPool(withDisk, "physical:data", "pool:primordial");
