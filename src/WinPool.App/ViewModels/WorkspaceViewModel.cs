@@ -454,6 +454,28 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             _selectedTopologyTarget = ResolveTopologyTarget(
                 SelectedSystem,
                 RestoredUiState.HighlightedTopologyStableId);
+
+            // SwitchSystem no-ops when the restored system is already the
+            // default selection, so rebuild with the remembered selection
+            // explicitly and re-select the remembered object.
+            var remembered = RememberedSelection(SelectedCategory);
+            RebuildObjects(remembered);
+            if (remembered is not null)
+            {
+                var match = Objects.FirstOrDefault(item =>
+                    item.Projection is not null
+                    && ManageSelectionRules.SameSelection(
+                        SelectionFor(item.Projection),
+                        remembered));
+                if (match is not null)
+                {
+                    _selectedWorkspaceItem = match;
+                    OnPropertyChanged(nameof(SelectedWorkspaceItem));
+                    SetSelectionState(
+                        remembered,
+                        ManageSelectionRules.TopologyTargetFor(remembered));
+                }
+            }
         }
         RefreshLocalizedContent();
     }
