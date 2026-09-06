@@ -763,17 +763,8 @@ public sealed record StructureProblem(
             new StorageUnitRef(disk.StableId, StorageUnitKind.VirtualDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
             TopologyProjector.JoinSummary("Virtual", TopologyProjector.FormatBytes(disk.Size)),
             childrenLayout: TopologyChildrenLayout.Flow);
-        foreach (var osDisk in snapshot.OsDisks.Where(item => item.VirtualDiskStableId == disk.StableId))
-        {
-            foreach (var (child, _) in InterleavePartitionsAndGaps(
-                         osDisk,
-                         snapshot.Partitions.Where(item => item.OsDiskStableId == osDisk.StableId).ToArray(),
-                         minUnallocatedBytes))
-            {
-                node.Children.Add(child);
-            }
-        }
-
+        // Edit lower shows no partition strips anywhere (Plan §3): virtual
+        // disks render as bare cards.
         return node;
     }
 

@@ -127,8 +127,11 @@ public partial class App : Application
             return;
         }
 
-        var agentConnection = EnsureAgentConnection();
+        // The exit-signal listener must run for the welcome window too:
+        // a tray exit while the welcome is open has to close this process.
         StartExitSignalListener();
+
+        var agentConnection = EnsureAgentConnection();
         Window = new MainWindow(startupOptions, agentConnection);
         Window.Activate();
         if (startupOptions.Target == ApplicationStartupTarget.None
