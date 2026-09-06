@@ -615,7 +615,8 @@ public sealed record StructureProblem(
             return poolNode;
         }
 
-        poolNode.StructureModifiable = PoolSupportsStructureModification(snapshot, pool.StableId);
+        var poolModifiable = PoolSupportsStructureModification(snapshot, pool.StableId);
+        poolNode.StructureModifiable = poolModifiable;
 
         var virtualDisks = snapshot.VirtualDisks
             .Where(disk => disk.PoolStableId == pool.StableId)
@@ -648,7 +649,7 @@ public sealed record StructureProblem(
                      .Where(item => item.MemberPhysicalDiskIds.Count > 0)
                      .OrderBy(item => TopologyProjector.TierSortOrder(item.MediaType)))
         {
-            poolNode.Children.Add(CreateTierNode(pool, tier, snapshot));
+            poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, poolModifiable));
         }
 
         AddUnallocatedGroup(poolNode, pool, members, snapshot);
@@ -658,7 +659,8 @@ public sealed record StructureProblem(
     private static TopologyNode CreateTierNode(
         StoragePoolInfo pool,
         StorageTierInfo tier,
-        StorageSnapshot snapshot)
+        StorageSnapshot snapshot,
+        bool poolModifiable)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -677,7 +679,7 @@ public sealed record StructureProblem(
         foreach (var member in members)
         {
             var diskNode = PhysicalDiskNode(member);
-            diskNode.StructureModifiable = DiskSupportsStructureModification(
+            diskNode.StructureModifiable = poolModifiable && DiskSupportsStructureModification(
                 snapshot, member.StableId, isVirtualDisk: false);
             node.Children.Add(diskNode);
         }
@@ -719,8 +721,9 @@ public sealed record StructureProblem(
         foreach (var member in directMembers)
         {
             var diskNode = PhysicalDiskNode(member);
-            diskNode.StructureModifiable = DiskSupportsStructureModification(
-                snapshot, member.StableId, isVirtualDisk: false);
+            diskNode.StructureModifiable = PoolSupportsStructureModification(
+                snapshot, pool.StableId)
+                && DiskSupportsStructureModification(snapshot, member.StableId, isVirtualDisk: false);
             group.Children.Add(diskNode);
         }
 

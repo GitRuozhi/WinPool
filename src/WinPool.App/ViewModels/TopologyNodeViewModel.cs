@@ -747,7 +747,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 ? owner.Localization["Unallocated"]
                 : owner.PartitionTypeName(
                     snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId)?.Type ?? "Unknown"),
-            StorageUnitKind.OsDisk => owner.Localization["OtherDisk"],
+            StorageUnitKind.OsDisk => snapshot.OsDisks.FirstOrDefault(
+                    item => item.StableId == unit.StableId) is { } osDisk
+                ? string.IsNullOrWhiteSpace(osDisk.VirtualDiskStableId)
+                    ? owner.Localization["PhysicalDisk"]
+                    : owner.Localization["VirtualDisk"]
+                : owner.Localization["OtherDisk"],
             StorageUnitKind.NetworkDiskGroup => owner.Localization["NetworkStorageGroup"],
             StorageUnitKind.OtherDiskGroup => owner.Localization["OtherStorageGroup"],
             StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],

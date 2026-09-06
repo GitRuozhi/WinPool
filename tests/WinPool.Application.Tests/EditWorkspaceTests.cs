@@ -259,6 +259,48 @@ public sealed class EditWorkspaceTests
             () => EditWorkspace.InsertDraftPool(drafted, "Pool Y"));
     }
 
+    [Fact]
+    public void PendingModificationRulesFollowWorkingCopyChanges()
+    {
+        var committed = TieredPoolSnapshot(withVirtualDisk: true);
+        var working = EditWorkspace.InsertDraftPool(committed, "Pool X");
+
+        // a draft pool is pending by definition
+        var draftId = working.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+        Assert.True(EditWorkspace.HasPendingModifications(working, committed, draftId));
+
+        // moving a disk marks both the disk and the receiving pool pending
+        var moved = EditWorkspace.MoveDiskToPool(working, "physical:extra", draftId);
+        Assert.True(EditWorkspace.HasPendingModifications(moved, committed, "physical:extra"));
+        Assert.False(EditWorkspace.HasPendingModifications(committed, committed, "physical:extra"));
+
+        // untouched committed objects are not pending
+        Assert.False(EditWorkspace.HasPendingModifications(committed, committed, "pool:t1"));
+        Assert.False(EditWorkspace.HasPendingModifications(committed, committed, "physical:ssd"));
+    }
+
+    [Fact]
+    public void PoolMemberDisksFollowThePoolModifiability()
+    {
+        // The pool is unsupported: its virtual disk holds a data partition,
+        // so every member disk must show the locked state as well.
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var pools = EditWorkspace.ProjectPoolWorkspace(snapshot, minUnallocatedBytes: 0);
+        var pool = pools.Single(node => node.Unit.StableId == "pool:t1");
+        Assert.False(pool.StructureModifiable);
+        Assert.All(
+            pool.Children.Where(child => child.Unit.Kind == StorageUnitKind.PhysicalDisk),
+            child => Assert.False(child.StructureModifiable));
+
+        // A supported pool keeps its members modifiable.
+        var draft = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
+        var moved = EditWorkspace.MoveDiskToPool(draft, "physical:extra", draft.StoragePools.Last(
+            item => EditWorkspace.IsDraftPool(item.StableId)).StableId);
+        var draftNode = EditWorkspace.ProjectPoolWorkspace(moved, 0).Single(
+            node => EditWorkspace.IsDraftPool(node.Unit.StableId));
+        Assert.True(draftNode.StructureModifiable);
+    }
+
     private static StorageSnapshot TieredPoolSnapshot(bool withVirtualDisk)
     {
         var ssd = new PhysicalDiskInfo(
