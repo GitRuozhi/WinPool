@@ -210,7 +210,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         StructureModifiable == true && !_hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility ModifiableNoVisibility =>
-        StructureModifiable == false && !_hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
+        StructureModifiable == false ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility ModifiablePendingVisibility =>
         _hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;

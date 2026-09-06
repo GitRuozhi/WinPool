@@ -301,6 +301,47 @@ public sealed class EditWorkspaceTests
         Assert.True(draftNode.StructureModifiable);
     }
 
+    [Fact]
+    public void DraftPoolWithDataBearingMemberIsUnsupported()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var drafted = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
+        var draftId = drafted.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+
+        // Empty draft stays supported.
+        Assert.True(EditWorkspace.PoolSupportsStructureModification(drafted, draftId));
+
+        // Dragging in a data-bearing physical disk locks the draft.
+        var dataDisk = new PhysicalDiskInfo(
+            "physical:data", true, "Data Disk", "Model", "DA0001", "SATA", "HDD",
+            1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 9,
+            false, false, false, false, "pool:primordial");
+        var withDiskSource = drafted with
+        {
+            PhysicalDisks = drafted.PhysicalDisks.Append(dataDisk).ToArray(),
+            StoragePools = drafted.StoragePools.Select(pool => pool.IsPrimordial
+                ? pool with { MemberPhysicalDiskIds =
+                    [.. pool.MemberPhysicalDiskIds, "physical:data"] }
+                : pool).ToArray(),
+            OsDisks = drafted.OsDisks.Append(new OsDiskInfo(
+                "osdisk:data", "Data Disk", 9, "GPT", 1_000_000_000, false, false, false,
+                "physical:data", null)).ToArray(),
+            Partitions = drafted.Partitions.Append(new PartitionInfo(
+                "partition:data", true, 9, 1, "Primary", 0, 1_000_000_000, false, false,
+                "Z", "Data", "NTFS", 65536, 100_000, "Healthy", "OK", string.Empty,
+                "osdisk:data")).ToArray()
+        };
+        var withDisk = EditWorkspace.MoveDiskToPool(withDiskSource, "physical:data", draftId);
+        Assert.False(EditWorkspace.PoolSupportsStructureModification(withDisk, draftId));
+        var node = EditWorkspace.ProjectPoolWorkspace(withDisk, 0).Single(
+            item => item.Unit.StableId == draftId);
+        Assert.False(node.StructureModifiable);
+
+        // Dragging the data disk back out unlocks the draft (no deadlock).
+        var recovered = EditWorkspace.MoveDiskToPool(withDisk, "physical:data", "pool:primordial");
+        Assert.True(EditWorkspace.PoolSupportsStructureModification(recovered, draftId));
+    }
+
     private static StorageSnapshot TieredPoolSnapshot(bool withVirtualDisk)
     {
         var ssd = new PhysicalDiskInfo(

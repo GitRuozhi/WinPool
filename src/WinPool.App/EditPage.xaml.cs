@@ -333,10 +333,14 @@ public sealed partial class EditPage : Page
         var diskSourcePoolId = _working.PhysicalDisks
             .FirstOrDefault(disk => disk.StableId == diskId)?.PoolStableId;
         if (!string.IsNullOrEmpty(diskSourcePoolId)
+            && !EditWorkspace.IsDraftPool(diskSourcePoolId)
             && _working.StoragePools.FirstOrDefault(candidate =>
                 candidate.StableId == diskSourcePoolId) is { IsPrimordial: false } sourcePoolInfo
             && !EditWorkspace.PoolSupportsStructureModification(_working, sourcePoolInfo.StableId))
         {
+            // A real unsupported pool refuses member drag-out; a draft pool
+            // must allow it, or dragging in a data-bearing disk deadlocks
+            // the draft (Plan §7.3).
             return;
         }
 

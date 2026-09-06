@@ -256,10 +256,34 @@ public static class EditWorkspace
                 && PartitionHoldsStoredData(partition)));
     }
 
-    public static bool PoolSupportsStructureModification(StorageSnapshot snapshot, string poolId) =>
-        snapshot.VirtualDisks
-            .Where(item => item.PoolStableId == poolId)
-            .All(item => DiskSupportsStructureModification(snapshot, item.StableId, isVirtualDisk: true));
+    public static bool PoolSupportsStructureModification(StorageSnapshot snapshot, string poolId)
+    {
+        // Every virtual disk must be data-free...
+        if (!snapshot.VirtualDisks
+                .Where(item => item.PoolStableId == poolId)
+                .All(item => DiskSupportsStructureModification(snapshot, item.StableId, isVirtualDisk: true)))
+        {
+            return false;
+        }
+
+        // ...and so must every member disk: a draft pool into which a
+        // data-bearing disk was dragged can never be executed, and the pool
+        // icon must say so instead of hiding behind the (empty) virtual-disk
+        // check.
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == poolId);
+        if (pool is null)
+        {
+            return true;
+        }
+
+        return !snapshot.PhysicalDisks
+            .Where(item => pool.MemberPhysicalDiskIds.Contains(item.StableId, StringComparer.OrdinalIgnoreCase))
+            .Any(item => snapshot.OsDisks
+                .Where(osDisk => osDisk.PhysicalDiskStableId == item.StableId)
+                .Any(osDisk => snapshot.Partitions.Any(
+                    partition => partition.OsDiskStableId == osDisk.StableId
+                        && PartitionHoldsStoredData(partition))));
+    }
 
 public enum StructureProblemKind
 {
