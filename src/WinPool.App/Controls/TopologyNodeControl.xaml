@@ -217,7 +217,7 @@
                     <ItemsPanelTemplate>
                         <controls:AdaptiveFlowPanel
                             HorizontalAlignment="Stretch"
-                            MinimumItemWidth="112" />
+                            />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>

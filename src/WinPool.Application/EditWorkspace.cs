@@ -335,6 +335,11 @@ public sealed record StructureProblem(
     public static StorageSnapshot InsertDraftPool(StorageSnapshot snapshot, string poolName)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.StoragePools.Any(item => IsDraftPool(item.StableId)))
+        {
+            throw new InvalidOperationException("Only one draft pool can exist at a time.");
+        }
+
         var name = string.IsNullOrWhiteSpace(poolName) ? "Pool" : poolName.Trim();
         var draftId = $"{DraftPrefix}{Guid.NewGuid():N}";
         var subsystem = snapshot.StoragePools.FirstOrDefault(pool => pool.IsPrimordial)?.SubsystemStableId

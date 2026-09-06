@@ -333,6 +333,15 @@ public sealed class TopologyLayoutEngineTests
         Assert.Equal((320 - 6) / 2, result.ChildWidths[0], 6);
     }
 
+    [Fact]
+    public void StripStageTwoKeepsZeroWeightChildrenAtMinimum()
+    {
+        var strip = Strip(weights: [0, 100]);
+        var result = TopologyLayoutEngine.Layout(strip, availableWidth: 320);
+        Assert.Equal(TopologyLayoutEngine.LeafMinWidth, result.ChildWidths[0], 6);
+        Assert.Equal(TopologyLayoutEngine.LeafMinWidth + 45, result.ChildWidths[1], 6);
+    }
+
     private static TopologyLayoutInput Strip(IReadOnlyList<double> weights)
     {
         var leaves = new List<TopologyLayoutInput> { Leaf(), Leaf(), Leaf() };

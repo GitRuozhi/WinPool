@@ -13,9 +13,12 @@ public sealed class WeightedPoolPanel : Panel
     public double HorizontalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
     public double VerticalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
 
+    private LayoutPlan? _measuredPlan;
+
     protected override Size MeasureOverride(Size availableSize)
     {
-        var plan = PlanLayout(availableSize.Width);
+        _measuredPlan = PlanLayout(availableSize.Width);
+        var plan = _measuredPlan;
         var children = Children.Cast<UIElement>().ToList();
         if (children.Count == 0)
         {
@@ -53,7 +56,9 @@ public sealed class WeightedPoolPanel : Panel
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        var plan = PlanLayout(finalSize.Width);
+        // The engine ran once during measure; arrange consumes the same
+        // engine-owned slots (Plan §1.0 item 2).
+        var plan = _measuredPlan ?? PlanLayout(finalSize.Width);
         var children = Children.Cast<UIElement>().ToList();
         var y = 0d;
         var arranged = new bool[children.Count];

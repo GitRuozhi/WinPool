@@ -222,7 +222,13 @@ public static class TopologyLayoutEngine
             var growth = (containerWidth - rowMinimum) / count;
             for (var i = 0; i < count; i++)
             {
-                Assign(i, node.Children[row[i]].PixelWidth + growth);
+                // Zero-weight children stay at the minimum through the
+                // equal-growth stage (Plan §2.4).
+                Assign(
+                    i,
+                    weights[i] > 0
+                        ? node.Children[row[i]].PixelWidth + growth
+                        : node.Children[row[i]].PixelWidth);
             }
 
             return;

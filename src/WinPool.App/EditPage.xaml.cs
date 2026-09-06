@@ -295,6 +295,16 @@ public sealed partial class EditPage : Page
     {
         if (EditWorkspace.IsPlus(node.Unit.StableId))
         {
+            var existingDraft = _working.StoragePools.LastOrDefault(item => EditWorkspace.IsDraftPool(item.StableId));
+            if (existingDraft is not null)
+            {
+                _selectedPoolId = existingDraft.StableId;
+                RefreshLower();
+                FillPoolForm();
+                UpdateButtonState();
+                return;
+            }
+
             _working = EditWorkspace.InsertDraftPool(_working, NextPoolName());
             _selectedPoolId = _working.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
             RefreshLower();
@@ -341,8 +351,14 @@ public sealed partial class EditPage : Page
         {
             if (EditWorkspace.IsPlus(poolId))
             {
-                _working = EditWorkspace.InsertDraftPool(_working, NextPoolName());
-                poolId = _working.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+                var existingDraft = _working.StoragePools.LastOrDefault(item => EditWorkspace.IsDraftPool(item.StableId));
+                if (existingDraft is null)
+                {
+                    _working = EditWorkspace.InsertDraftPool(_working, NextPoolName());
+                    existingDraft = _working.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId));
+                }
+
+                poolId = existingDraft.StableId;
                 _selectedPoolId = poolId;
             }
 
@@ -743,8 +759,12 @@ public sealed partial class EditPage : Page
                     && _working.StoragePools.Any(candidate =>
                         candidate.IsPrimordial && candidate.MemberPhysicalDiskIds.Contains(id))))
                 .ToArray();
-            if (members.Length == 0)
+            if (members.Length == 0
+                || _working.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId)))
             {
+                // Single-draft rule: leftover members stay in the primordial
+                // pool (visible in its Unallocated group) instead of
+                // silently creating another draft.
                 continue;
             }
 

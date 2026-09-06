@@ -250,6 +250,15 @@ public sealed class EditWorkspaceTests
         Assert.Empty(EditWorkspace.CollectStructureProblems(snapshot, "pool:primordial"));
     }
 
+    [Fact]
+    public void InsertDraftPoolRefusesWhenADraftAlreadyExists()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var drafted = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
+        Assert.Throws<InvalidOperationException>(
+            () => EditWorkspace.InsertDraftPool(drafted, "Pool Y"));
+    }
+
     private static StorageSnapshot TieredPoolSnapshot(bool withVirtualDisk)
     {
         var ssd = new PhysicalDiskInfo(

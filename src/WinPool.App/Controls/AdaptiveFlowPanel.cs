@@ -9,8 +9,6 @@ public sealed class AdaptiveFlowPanel : Panel
 {
     private const double FallbackMeasureWidth = 1200;
 
-    public double MinimumItemWidth { get; set; } = TopologyLayoutEngine.LeafMinWidth;
-
     public double HorizontalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
 
     public double VerticalSpacing { get; set; } = TopologyLayoutEngine.SiblingSpacing;
@@ -106,17 +104,12 @@ public sealed class AdaptiveFlowPanel : Panel
                 .ToList();
         }
 
-        var width = double.IsInfinity(availableSize.Width) ? FallbackMeasureWidth : Math.Max(0, availableSize.Width);
-        var columns = owner is { LayoutFlowColumns: > 0 }
-            ? owner.LayoutFlowColumns
-            : Math.Max(1, Children.Count);
-        return EqualFillFlowLayout
-            .CreateRowsForColumnCount(Children.Count, columns, width, HorizontalSpacing)
-            .Select(row => Enumerable
-                .Range(row.StartIndex, row.Count)
-                .Select(index => new RowSlot(index, row.ItemWidth))
-                .ToList())
-            .ToList();
+        // Cascade-missing fallback: a single row at the mechanical leaf
+        // minimum. The panel makes no width-distribution decision here
+        // (Plan §8.3); the next engine pass at the surface root corrects it.
+        return [Children
+            .Select((_, index) => new RowSlot(index, TopologyLayoutEngine.LeafMinWidth))
+            .ToList()];
     }
 
     private sealed record RowSlot(int Index, double Width);
