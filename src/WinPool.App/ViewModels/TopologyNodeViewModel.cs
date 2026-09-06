@@ -239,7 +239,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public string SingleLineHeaderText =>
         string.Join(
-          "  ·  ",
+          "  ",
           new[] { TypeLabel, Summary }
               .Where(text => !string.IsNullOrWhiteSpace(text)));
 
