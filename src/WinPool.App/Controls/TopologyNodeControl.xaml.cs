@@ -30,6 +30,7 @@ public sealed partial class TopologyNodeControl : UserControl
         ActualThemeChanged += (_, _) => UpdateSelectionVisual();
         DragStarting += TopologyNodeControl_DragStarting;
         DragOver += TopologyNodeControl_DragOver;
+        DragLeave += TopologyNodeControl_DragLeave;
         Drop += TopologyNodeControl_Drop;
     }
 
@@ -297,15 +298,46 @@ public sealed partial class TopologyNodeControl : UserControl
         e.Data.RequestedOperation = DataPackageOperation.Move;
     }
 
+    private static TopologyNodeControl? s_highlightedDropTarget;
+
     private void TopologyNodeControl_DragOver(object sender, DragEventArgs e)
     {
-        if (!e.DataView.Contains(StandardDataFormats.Text) || FindPoolDropTarget() is null)
+        if (!e.DataView.Contains(StandardDataFormats.Text))
+        {
+            return;
+        }
+
+        var target = FindPoolDropTargetControl();
+        if (target is null)
         {
             return;
         }
 
         e.AcceptedOperation = DataPackageOperation.Move;
         e.Handled = true;
+        if (!ReferenceEquals(s_highlightedDropTarget, target))
+        {
+            s_highlightedDropTarget?.ShowDropTargetVisual(false);
+            target.ShowDropTargetVisual(true);
+            s_highlightedDropTarget = target;
+        }
+    }
+
+    private void TopologyNodeControl_DragLeave(object sender, DragEventArgs e)
+    {
+        if (ReferenceEquals(s_highlightedDropTarget, this))
+        {
+            ShowDropTargetVisual(false);
+            s_highlightedDropTarget = null;
+        }
+    }
+
+    private void ShowDropTargetVisual(bool on)
+    {
+        if (DropTargetBorder is not null)
+        {
+            DropTargetBorder.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private async void TopologyNodeControl_Drop(object sender, DragEventArgs e)
@@ -322,14 +354,27 @@ public sealed partial class TopologyNodeControl : UserControl
             ViewModel.EditInteraction?.OnDiskDropped?.Invoke(diskId, poolId);
         }
 
+        s_highlightedDropTarget?.ShowDropTargetVisual(false);
+        s_highlightedDropTarget = null;
         e.Handled = true;
     }
 
     private string? FindPoolDropTarget()
     {
+        var target = FindPoolDropTargetControl();
+        return target?.ViewModel?.Unit.StableId;
+    }
+
+    /// <summary>
+    /// Resolves the pool card under the pointer. Only pool-kind nodes are
+    /// drop targets — never the source pool via a fallback, and never a
+    /// tier card (which previously lit up as a false target).
+    /// </summary>
+    private TopologyNodeControl? FindPoolDropTargetControl()
+    {
         if (ViewModel?.IsDropTarget == true)
         {
-            return ViewModel.Unit.StableId;
+            return this;
         }
 
         for (var ancestor = FindParentTopologyNode();
@@ -338,13 +383,11 @@ public sealed partial class TopologyNodeControl : UserControl
         {
             if (ancestor.ViewModel?.IsDropTarget == true)
             {
-                return ancestor.ViewModel.Unit.StableId;
+                return ancestor;
             }
         }
 
-        return ViewModel?.EditInteraction?.AllowDiskDrag == true
-            ? ViewModel.ResolvePoolDropId()
-            : null;
+        return null;
     }
 
     private void TopologyNodeControl_KeyDown(object sender, KeyRoutedEventArgs e)

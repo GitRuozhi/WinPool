@@ -353,6 +353,22 @@ public sealed partial class EditPage : Page
 
         try
         {
+            var targetPool = _working.StoragePools.FirstOrDefault(item => item.StableId == poolId);
+            if (targetPool is { IsPrimordial: false }
+                && !EditWorkspace.IsDraftPool(poolId)
+                && !EditWorkspace.PoolSupportsStructureModification(_working, poolId))
+            {
+                // Moving a disk into a locked pool deadlocks: the pool
+                // refuses drag-out and Execute is blocked. Refuse the move
+                // instead; empty the pool's virtual disks first.
+                _ = ShowMessageAsync(
+                    ViewModel.Localization["Warning"],
+                    Text(
+                        "该池当前不支持结构修改（其虚拟磁盘含数据分区），磁盘移入后将无法移出。请先备份并清空相关卷。",
+                        "This pool does not currently support structure modification (a virtual disk holds data partitions); the disk could never be moved out again. Back up and empty the volumes first."));
+                return;
+            }
+
             if (EditWorkspace.IsPlus(poolId))
             {
                 var existingDraft = _working.StoragePools.LastOrDefault(item => EditWorkspace.IsDraftPool(item.StableId));

@@ -125,7 +125,7 @@
                                     AutomationProperties.Name="{x:Bind ViewModel.ModifiableOkName, Mode=OneWay}" />
                                 <FontIcon
                                     FontSize="14"
-                                    Glyph="&#xE72E;"
+                                    Glyph="&#xE841;"
                                     Visibility="{x:Bind ViewModel.ModifiableNoVisibility, Mode=OneWay}"
                                     AutomationProperties.Name="{x:Bind ViewModel.ModifiableNoName, Mode=OneWay}" />
                                 <FontIcon
@@ -300,6 +300,13 @@
             </Grid>
         </Border>
 
+        <Border
+            x:Name="DropTargetBorder"
+            BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
+            BorderThickness="2"
+            CornerRadius="2"
+            IsHitTestVisible="False"
+            Visibility="Collapsed" />
         <Border
             x:Name="InteractionBorder"
             BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
