@@ -408,28 +408,42 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         await InitializePreferencesAsync();
-        var cachedLocal = await _machineRecordService.LoadLocalScanAsync();
+        var cachedLocal = await TryLoadCachedLocalAsync();
         if (cachedLocal is not null)
         {
             SystemCatalog.ReplaceLocal(cachedLocal);
-            if (SelectedSystem.IsLocal)
-            {
-                SelectedSystem = cachedLocal;
-                OnPropertyChanged(nameof(SelectedSystem));
-                OnPropertyChanged(nameof(ActiveDocument));
-                OnPropertyChanged(nameof(ActiveSnapshot));
-            }
-
             OnPropertyChanged(nameof(Snapshot));
         }
+
         var persisted = (await _systemRepository.LoadSimulationsAsync()).ToList();
         var merged = await MergeBuiltInSimulationsAsync(persisted);
         var selectedId = SelectedSystem.Id;
         SystemCatalog.ReplaceSimulations(merged);
         SelectedSystem = SystemCatalog.Find(selectedId)
+            ?? SystemCatalog.Find(cachedLocal?.Id ?? string.Empty)
             ?? SystemCatalog.Systems.FirstOrDefault(system => system.IsLocal)
             ?? SystemCatalog.Systems.First(x => !x.IsLocal);
+        // Publish the cached local snapshot immediately. Restore only adjusts
+        // which system/object is selected; it must not be what makes the
+        // last inventory visible.
+        RefreshLocalizedContent();
         await RestoreWorkspaceUiStateAsync();
+    }
+
+    private async Task<StorageSystemDocument?> TryLoadCachedLocalAsync()
+    {
+        try
+        {
+            return await _machineRecordService.LoadLocalScanAsync();
+        }
+        catch (Exception exception) when (
+            exception is InventoryScanException
+                or IOException
+                or InvalidDataException
+                or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private bool _restoreInProgress;
@@ -995,29 +1009,30 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             }
             SystemCatalog.ReplaceLocal(localDocument);
             OnPropertyChanged(nameof(Snapshot));
-            if (SelectedSystem.IsLocal)
+            BindSelectedSystemToCatalog();
+            _restoreInProgress = true;
+            try
             {
-                SelectedSystem = localDocument;
-                OnPropertyChanged(nameof(SelectedSystem));
-                OnPropertyChanged(nameof(ActiveSnapshot));
-                OnPropertyChanged(nameof(ActiveDocument));
-                OnPropertyChanged(nameof(CanOpenSelectedPartition));
+                RebuildTopology();
+                if (!_persistAllowed)
+                {
+                    ApplyRestoredUiState();
+                }
+                else if (SelectedSystem.IsLocal)
+                {
+                    var keep = _selectedSelection ?? previous;
+                    RebuildObjects(
+                        keep is null
+                            ? null
+                            : ResolveSelection(
+                                localDocument,
+                                SelectedCategory,
+                                keep.Id.ProviderKey));
+                }
             }
-
-            RebuildTopology();
-            if (!_persistAllowed)
+            finally
             {
-                await RestoreWorkspaceUiStateAsync();
-            }
-            else if (SelectedSystem.IsLocal)
-            {
-                var preferredSelection = previous is null
-                    ? null
-                    : ResolveSelection(
-                        localDocument,
-                        SelectedCategory,
-                        previous.Id.ProviderKey);
-                RebuildObjects(preferredSelection);
+                _restoreInProgress = false;
             }
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
             _notificationService.DismissByKey(ScanningNotificationKey);
@@ -1625,11 +1640,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return false;
         }
         var system = SystemCatalog.Find(systemId);
-        if (system is null || system.Id == SelectedSystem.Id)
+        if (system is null)
         {
             return false;
         }
 
+        if (ReferenceEquals(system, SelectedSystem))
+        {
+            return false;
+        }
+
+        var identityChanged = !string.Equals(system.Id, SelectedSystem.Id, StringComparison.OrdinalIgnoreCase);
         SelectedSystem = system;
         _contextUnit = null;
         OnPropertyChanged(nameof(SelectedSystem));
@@ -1641,7 +1662,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         RebuildTopology();
         RebuildObjects(preferredSelection ?? RememberedSelection(SelectedCategory));
-        return true;
+        return identityChanged;
     }
 
     private void ApplySystemRootExpansion()
@@ -1703,12 +1724,32 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private void RaiseWorkspaceSelectionChanged()
     {
-        if (!_restoreInProgress)
+        if (WorkspaceUiRestorePolicy.CanArmPersistFromUserSelection(
+                _restoreInProgress,
+                _workspaceStateLoadAttempted))
         {
             _persistAllowed = true;
         }
 
         WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void BindSelectedSystemToCatalog()
+    {
+        var current = SystemCatalog.Find(SelectedSystem.Id);
+        if (current is null || ReferenceEquals(current, SelectedSystem))
+        {
+            return;
+        }
+
+        SelectedSystem = current;
+        OnPropertyChanged(nameof(SelectedSystem));
+        OnPropertyChanged(nameof(ActiveDocument));
+        OnPropertyChanged(nameof(ActiveSnapshot));
+        OnPropertyChanged(nameof(IsLocalSystem));
+        OnPropertyChanged(nameof(IsSelectedSystemLocalConsistent));
+        OnPropertyChanged(nameof(IsUsingSimulatedInventory));
+        OnPropertyChanged(nameof(CanOpenSelectedPartition));
     }
 
 }

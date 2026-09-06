@@ -13,6 +13,20 @@ public sealed class WorkspaceUiRestorePolicyTests
     }
 
     [Fact]
+    public void ConstructorRebuildDoesNotArmPersistBeforeWorkspaceStateHasLoaded()
+    {
+        Assert.False(WorkspaceUiRestorePolicy.CanArmPersistFromUserSelection(
+            restoreInProgress: false,
+            workspaceStateLoadAttempted: false));
+        Assert.False(WorkspaceUiRestorePolicy.CanArmPersistFromUserSelection(
+            restoreInProgress: true,
+            workspaceStateLoadAttempted: true));
+        Assert.True(WorkspaceUiRestorePolicy.CanArmPersistFromUserSelection(
+            restoreInProgress: false,
+            workspaceStateLoadAttempted: true));
+    }
+
+    [Fact]
     public void EmptyOrMissingStateIsSatisfiedSoFirstLaunchCanPersist()
     {
         Assert.True(WorkspaceUiRestorePolicy.IsRestoreSatisfied(null, "simulation:one", true, false));

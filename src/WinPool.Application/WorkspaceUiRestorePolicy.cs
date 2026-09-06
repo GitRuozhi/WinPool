@@ -10,6 +10,16 @@ public static class WorkspaceUiRestorePolicy
     public static bool ShouldPersist(bool restoreInProgress, bool persistAllowed) =>
         !restoreInProgress && persistAllowed;
 
+    /// <summary>
+    /// Constructor and cache publish rebuild the object list before the
+    /// persisted state has been loaded. Those rebuilds must not arm persist,
+    /// or they save the startup default over the remembered selection.
+    /// </summary>
+    public static bool CanArmPersistFromUserSelection(
+        bool restoreInProgress,
+        bool workspaceStateLoadAttempted) =>
+        !restoreInProgress && workspaceStateLoadAttempted;
+
     public static string? WantedObjectKey(WorkspaceUiState state)
     {
         ArgumentNullException.ThrowIfNull(state);
