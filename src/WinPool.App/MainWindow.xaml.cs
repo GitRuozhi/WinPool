@@ -89,7 +89,7 @@ public sealed partial class MainWindow : Window
         // WorkspaceSelectionChanged fires after the selection bookkeeping
         // (_categorySelections) has been written, so the persisted state
         // always captures the latest object selection.
-        ViewModel.WorkspaceSelectionChanged += () => PersistWorkspaceState();
+        ViewModel.WorkspaceSelectionChanged += (_, _) => PersistWorkspaceState();
 
         if (startupOptions.EnterRealModeAfterElevation)
         {
