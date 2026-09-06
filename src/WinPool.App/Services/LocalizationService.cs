@@ -273,6 +273,7 @@ public sealed class LocalizationService : ObservableObject
             ["DissolvePool"] = ("解散池", "Dissolve pool"),
             ["StructureModifiable"] = ("支持存储结构修改", "Supports structure modification"),
             ["StructureNotModifiable"] = ("不支持存储结构修改", "Does not support structure modification"),
+            ["StructurePendingModification"] = ("已有修改未执行", "Has modifications pending execution"),
             ["PoolName"] = ("池名", "Pool name"),
             ["VirtualDiskName"] = ("虚拟磁盘名", "Virtual disk name"),
             ["PerformanceResiliency"] = ("性能层复原类型", "Performance resiliency"),

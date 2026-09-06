@@ -120,16 +120,19 @@
                                 </Border>
                                 <FontIcon
                                     FontSize="14"
-                                    Glyph="&#xE73E;"
-                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                    Glyph="&#xE70F;"
                                     Visibility="{x:Bind ViewModel.ModifiableOkVisibility, Mode=OneWay}"
                                     AutomationProperties.Name="{x:Bind ViewModel.ModifiableOkName, Mode=OneWay}" />
                                 <FontIcon
                                     FontSize="14"
-                                    Glyph="&#xE711;"
-                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                    Glyph="&#xE72E;"
                                     Visibility="{x:Bind ViewModel.ModifiableNoVisibility, Mode=OneWay}"
                                     AutomationProperties.Name="{x:Bind ViewModel.ModifiableNoName, Mode=OneWay}" />
+                                <FontIcon
+                                    FontSize="14"
+                                    Glyph="&#xE823;"
+                                    Visibility="{x:Bind ViewModel.ModifiablePendingVisibility, Mode=OneWay}"
+                                    AutomationProperties.Name="{x:Bind ViewModel.ModifiablePendingName, Mode=OneWay}" />
                             </StackPanel>
                         </Grid>
                         <Grid Margin="0,2,0,0" ColumnSpacing="5">

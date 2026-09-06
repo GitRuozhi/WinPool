@@ -323,6 +323,58 @@ public sealed record StructureProblem(
         return problems;
     }
 
+    /// <summary>
+    /// True when the working copy holds unexecuted modifications for the
+    /// object: a moved disk, a draft pool, or a pool whose membership or
+    /// virtual-disk set differs from the committed snapshot (Plan §7).
+    /// </summary>
+    public static bool HasPendingModifications(
+        StorageSnapshot working,
+        StorageSnapshot committed,
+        string stableId)
+    {
+        var workingDisk = working.PhysicalDisks.FirstOrDefault(item => item.StableId == stableId);
+        if (workingDisk is not null)
+        {
+            var committedDisk = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == stableId);
+            return committedDisk is null
+                || !string.Equals(committedDisk.PoolStableId, workingDisk.PoolStableId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var workingPool = working.StoragePools.FirstOrDefault(item => item.StableId == stableId);
+        if (workingPool is not null)
+        {
+            if (IsDraftPool(stableId))
+            {
+                return true;
+            }
+
+            var committedPool = committed.StoragePools.FirstOrDefault(item => item.StableId == stableId);
+            if (committedPool is null)
+            {
+                return true;
+            }
+
+            if (!workingPool.MemberPhysicalDiskIds.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                .SetEquals(committedPool.MemberPhysicalDiskIds))
+            {
+                return true;
+            }
+
+            var workingVirtualDisks = working.VirtualDisks
+                .Where(item => item.PoolStableId == stableId)
+                .Select(item => item.StableId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var committedVirtualDisks = committed.VirtualDisks
+                .Where(item => item.PoolStableId == stableId)
+                .Select(item => item.StableId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return !workingVirtualDisks.SetEquals(committedVirtualDisks);
+        }
+
+        return false;
+    }
+
     public static bool DiskHasPartitions(StorageSnapshot snapshot, string stableId, bool isVirtualDisk)
     {
         var osDisks = isVirtualDisk

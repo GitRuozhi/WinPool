@@ -439,7 +439,29 @@ public sealed partial class EditPage : Page
             _lowerInteraction,
             isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_lowerViewportWidth);
+        ApplyPendingModificationStates(rootViewModel);
         LowerTopologyControl.ItemsSource = new[] { rootViewModel };
+    }
+
+    private void ApplyPendingModificationStates(TopologyNodeViewModel root)
+    {
+        var committed = ViewModel.ActiveSnapshot;
+        var queue = new Queue<TopologyNodeViewModel>();
+        queue.Enqueue(root);
+        while (queue.Count > 0)
+        {
+            var node = queue.Dequeue();
+            if (node.StructureModifiable is not null)
+            {
+                node.SetPendingModifications(
+                    EditWorkspace.HasPendingModifications(_working, committed, node.Unit.StableId));
+            }
+
+            foreach (var child in node.Children)
+            {
+                queue.Enqueue(child);
+            }
+        }
     }
 
     private StoragePoolInfo? SelectedPool() =>

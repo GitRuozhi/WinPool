@@ -204,15 +204,36 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public Visibility ModifiabilityIconVisibility =>
         StructureModifiable is null ? Visibility.Collapsed : Visibility.Visible;
 
+    private bool _hasPendingModifications;
+
     public Visibility ModifiableOkVisibility =>
-        StructureModifiable == true ? Visibility.Visible : Visibility.Collapsed;
+        StructureModifiable == true && !_hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility ModifiableNoVisibility =>
-        StructureModifiable == false ? Visibility.Visible : Visibility.Collapsed;
+        StructureModifiable == false && !_hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ModifiablePendingVisibility =>
+        _hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
 
     public string ModifiableOkName => _owner.Localization["StructureModifiable"];
 
     public string ModifiableNoName => _owner.Localization["StructureNotModifiable"];
+
+    public string ModifiablePendingName => _owner.Localization["StructurePendingModification"];
+
+    /// <summary>Call outside layout passes; raises the icon notifications.</summary>
+    public void SetPendingModifications(bool value)
+    {
+        if (_hasPendingModifications == value)
+        {
+            return;
+        }
+
+        _hasPendingModifications = value;
+        OnPropertyChanged(nameof(ModifiableOkVisibility));
+        OnPropertyChanged(nameof(ModifiableNoVisibility));
+        OnPropertyChanged(nameof(ModifiablePendingVisibility));
+    }
 
     /// <summary>
     /// Named single-line header threshold (Plan §2.7): the assigned width at
