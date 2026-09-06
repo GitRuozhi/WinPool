@@ -83,15 +83,6 @@ public sealed partial class MainWindow : Window
             new GlobalCommandLogService(),
             _workspaceStateService,
             agentConnection);
-        // Persist the selected system and manage object whenever the
-        // selection changes, so the next launch restores it (the close-path
-        // save alone races process exit).
-        // WorkspaceSelectionChanged fires after the selection bookkeeping
-        // (_categorySelections) has been written, so the persisted state
-        // always captures the latest object selection.
-        ViewModel.WorkspaceSelectionChanged += (_, _) => PersistWorkspaceState();
-        _ = ViewModel.RestoreWorkspaceUiStateAsync();
-
         if (startupOptions.EnterRealModeAfterElevation)
         {
             ViewModel.TrySetExecutionMode(ExecutionMode.Real);
@@ -126,6 +117,9 @@ public sealed partial class MainWindow : Window
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
         Closed += MainWindow_Closed;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        // Persist on selection change after restore is complete. The close-path
+        // save alone races process exit; restore itself must not persist the
+        // empty startup placeholder over a remembered local object.
         ViewModel.WorkspaceSelectionChanged += ViewModel_WorkspaceSelectionChanged;
         _uiSettings.ColorValuesChanged += UiSettings_ColorValuesChanged;
         BuildShellNavigation();
@@ -227,8 +221,11 @@ public sealed partial class MainWindow : Window
         // most important writes happen first and cannot starve each other.
         try
         {
-            await _workspaceStateService.SaveAsync(
-                ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+            if (ViewModel.CanPersistWorkspaceUiState)
+            {
+                await _workspaceStateService.SaveAsync(
+                    ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+            }
         }
         catch (Exception exception) when (
             exception is IOException
@@ -717,9 +714,16 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void PersistWorkspaceState() =>
+    private void PersistWorkspaceState()
+    {
+        if (!ViewModel.CanPersistWorkspaceUiState)
+        {
+            return;
+        }
+
         FireAndForget(() => _workspaceStateService.SaveAsync(
             ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString())));
+    }
 
     private void PersistLastActivePage(ShellPageKind page) =>
         FireAndForget(() => ViewModel.SetLastActivePageAsync(page.ToString()));

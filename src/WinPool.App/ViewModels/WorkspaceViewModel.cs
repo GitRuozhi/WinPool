@@ -313,7 +313,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             RebuildComparisonColumns();
             RefreshTopologySelection();
             NotifySelectionState();
-            WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
+            RaiseWorkspaceSelectionChanged();
             return;
         }
 
@@ -324,7 +324,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             RebuildComparisonColumns();
             RefreshTopologySelection();
             NotifySelectionState();
-            WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
+            RaiseWorkspaceSelectionChanged();
             return;
         }
 
@@ -342,7 +342,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         RefreshTopologySelection();
         ExpandSelectedTopologyPath();
         NotifySelectionState();
-        WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
+        RaiseWorkspaceSelectionChanged();
     }
 
     partial void OnSelectedComparisonColumnChanged(ComparisonColumn? value)
@@ -432,130 +432,111 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await RestoreWorkspaceUiStateAsync();
     }
 
-    private bool _uiStateRestored;
+    private bool _restoreInProgress;
 
-    private static void RestoreDebug(string message)
-    {
-        try
-        {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "WinPool",
-                "Diagnostics");
-            Directory.CreateDirectory(directory);
-            File.AppendAllText(
-                Path.Combine(directory, "restore-debug.jsonl"),
-                $"{DateTimeOffset.UtcNow:O} {message}\n");
-        }
-        catch
-        {
-        }
-    }
+    private bool _persistAllowed;
+
+    private bool _workspaceStateLoadAttempted;
 
     /// <summary>
-    /// Applies the persisted workspace selection once the system catalog
-    /// is populated. Safe to call repeatedly; runs at most once.
+    /// Persist only after restore has finished applying, or after the user
+    /// makes a selection. Saving earlier overwrites a remembered local
+    /// object with the empty startup placeholder.
+    /// </summary>
+    public bool CanPersistWorkspaceUiState =>
+        WorkspaceUiRestorePolicy.ShouldPersist(_restoreInProgress, _persistAllowed);
+
+    /// <summary>
+    /// Loads persisted Manage-page system/object selection once the catalog
+    /// is populated. Call again after the local inventory becomes real so
+    /// objects that were missing on the startup placeholder can resolve.
     /// </summary>
     public async Task RestoreWorkspaceUiStateAsync()
     {
-        if (_uiStateRestored)
+        if (_restoreInProgress)
         {
             return;
         }
 
-        _uiStateRestored = true;
-        for (var attempt = 0; ; attempt++)
+        _restoreInProgress = true;
+        try
         {
-            RestoreDebug($"load attempt {attempt} begins");
-            try
-            {
-                var loadTask = _workspaceStateService.LoadAsync();
-                if (await Task.WhenAny(loadTask, Task.Delay(TimeSpan.FromSeconds(10))) != loadTask)
-                {
-                    RestoreDebug($"load attempt {attempt} timed out after 10s");
-                    if (attempt >= 4)
-                    {
-                        RestoreDebug("restore aborted: load kept timing out");
-                        return;
-                    }
+            await EnsureWorkspaceUiStateLoadedAsync();
+            ApplyRestoredUiState();
+        }
+        finally
+        {
+            _restoreInProgress = false;
+        }
+    }
 
-                    await Task.Delay(TimeSpan.FromSeconds(1 + attempt));
-                    continue;
-                }
-
-                RestoredUiState = loadTask.Result;
-                RestoreDebug($"load ok on attempt {attempt}");
-                break;
-            }
-            catch (Exception exception)
-            {
-                RestoreDebug($"load attempt {attempt} failed: {exception.Message}");
-                if (attempt >= 4)
-                {
-                    RestoreDebug("restore aborted: load kept failing");
-                    return;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(1 + attempt));
-            }
+    private async Task EnsureWorkspaceUiStateLoadedAsync()
+    {
+        if (_workspaceStateLoadAttempted)
+        {
+            return;
         }
 
+        _workspaceStateLoadAttempted = true;
+        try
+        {
+            RestoredUiState = await _workspaceStateService.LoadAsync();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidDataException
+                or InvalidOperationException)
+        {
+            RestoredUiState = null;
+        }
+    }
+
+    private void ApplyRestoredUiState()
+    {
         if (RestoredUiState is null)
         {
-            RestoreDebug("load returned null; nothing to restore");
+            _persistAllowed = true;
             return;
         }
 
-        if (RestoredUiState is not null)
+        var state = RestoredUiState;
+        if (!string.IsNullOrWhiteSpace(state.ActiveSystemId))
         {
-            if (!string.IsNullOrWhiteSpace(RestoredUiState.ActiveSystemId))
-            {
-                var switched = SwitchSystem(RestoredUiState.ActiveSystemId);
-                RestoreDebug($"switch to {RestoredUiState.ActiveSystemId}: {switched}");
-            }
-            if (RestoredUiState.CategorySelections is not null)
-            {
-                foreach (var pair in RestoredUiState.CategorySelections)
-                {
-                    var restored = ResolveSelection(
-                        SelectedSystem,
-                        pair.Key,
-                        pair.Value);
-                    if (restored is not null)
-                    {
-                        _categorySelections[(restored.Id.System, restored.Category)] = restored;
-                    }
-                }
-            }
-            SelectedCategory = RestoredUiState.Category;
-            _selectedTopologyTarget = ResolveTopologyTarget(
-                SelectedSystem,
-                RestoredUiState.HighlightedTopologyStableId);
+            SwitchSystem(state.ActiveSystemId);
+        }
 
-            // SwitchSystem no-ops when the restored system is already the
-            // default selection, so rebuild with the remembered selection
-            // explicitly and re-select the remembered object.
-            var remembered = RememberedSelection(SelectedCategory);
-            RestoreDebug($"remembered={remembered?.Id.ProviderKey ?? "none"}");
-            RebuildObjects(remembered);
-            if (remembered is not null)
+        if (state.CategorySelections is not null)
+        {
+            foreach (var pair in state.CategorySelections)
             {
-                var match = Objects.FirstOrDefault(item =>
-                    item.Projection is not null
-                    && ManageSelectionRules.SameSelection(
-                        SelectionFor(item.Projection),
-                        remembered));
-                if (match is not null)
+                var restored = ResolveSelection(SelectedSystem, pair.Key, pair.Value);
+                if (restored is not null)
                 {
-                    _selectedWorkspaceItem = match;
-                    OnPropertyChanged(nameof(SelectedWorkspaceItem));
-                    SetSelectionState(
-                        remembered,
-                        ManageSelectionRules.TopologyTargetFor(remembered));
+                    _categorySelections[(restored.Id.System, restored.Category)] = restored;
                 }
             }
         }
-        RefreshLocalizedContent();
+
+        if (SelectedCategory != state.Category)
+        {
+            SelectedCategory = state.Category;
+        }
+
+        var topologyTarget = ResolveTopologyTarget(
+            SelectedSystem,
+            state.HighlightedTopologyStableId);
+        if (topologyTarget is not null)
+        {
+            _selectedTopologyTarget = topologyTarget;
+        }
+
+        var remembered = RememberedSelection(SelectedCategory);
+        RebuildObjects(remembered);
+        _persistAllowed = WorkspaceUiRestorePolicy.IsRestoreSatisfied(
+            state,
+            SelectedSystem.Id,
+            SystemCatalog.Find(state.ActiveSystemId) is not null,
+            remembered is not null);
     }
 
     public async Task InitializePreferencesAsync()
@@ -1014,11 +995,21 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             }
             SystemCatalog.ReplaceLocal(localDocument);
             OnPropertyChanged(nameof(Snapshot));
-            if (!IsLocalSystem)
+            if (SelectedSystem.IsLocal)
             {
-                RebuildTopology();
+                SelectedSystem = localDocument;
+                OnPropertyChanged(nameof(SelectedSystem));
+                OnPropertyChanged(nameof(ActiveSnapshot));
+                OnPropertyChanged(nameof(ActiveDocument));
+                OnPropertyChanged(nameof(CanOpenSelectedPartition));
             }
-            else
+
+            RebuildTopology();
+            if (!_persistAllowed)
+            {
+                await RestoreWorkspaceUiStateAsync();
+            }
+            else if (SelectedSystem.IsLocal)
             {
                 var preferredSelection = previous is null
                     ? null
@@ -1026,12 +1017,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                         localDocument,
                         SelectedCategory,
                         previous.Id.ProviderKey);
-                SelectedSystem = localDocument;
-                OnPropertyChanged(nameof(SelectedSystem));
-                OnPropertyChanged(nameof(ActiveSnapshot));
-                OnPropertyChanged(nameof(ActiveDocument));
-                OnPropertyChanged(nameof(CanOpenSelectedPartition));
-                RebuildTopology();
                 RebuildObjects(preferredSelection);
             }
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
@@ -1714,6 +1699,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         OnPropertyChanged(nameof(HasRelatedTarget));
+    }
+
+    private void RaiseWorkspaceSelectionChanged()
+    {
+        if (!_restoreInProgress)
+        {
+            _persistAllowed = true;
+        }
+
+        WorkspaceSelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
 }
