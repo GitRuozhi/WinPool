@@ -70,7 +70,8 @@ public sealed record ManageTopologyNodeView(
     bool NoWrapChildren = false,
     bool DistributeByCapacity = false,
     IReadOnlyList<double>? CapacityWeights = null,
-    bool? StructureModifiable = null);
+    bool? StructureModifiable = null,
+    bool AdaptiveHeaderEnabled = false);
 
 public sealed record ManageSystemProjection(
     SystemId SystemId,

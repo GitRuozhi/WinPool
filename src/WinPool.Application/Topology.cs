@@ -20,7 +20,8 @@ public sealed class TopologyNode
         int layoutWeight = 1,
         bool noWrapChildren = false,
         bool distributeByCapacity = false,
-        IReadOnlyList<double>? capacityWeights = null)
+        IReadOnlyList<double>? capacityWeights = null,
+        bool adaptiveHeaderEnabled = false)
     {
         Unit = unit;
         Summary = summary;
@@ -33,6 +34,7 @@ public sealed class TopologyNode
         NoWrapChildren = noWrapChildren;
         DistributeByCapacity = distributeByCapacity;
         CapacityWeights = capacityWeights;
+        AdaptiveHeaderEnabled = adaptiveHeaderEnabled;
     }
 
     public StorageUnitRef Unit { get; }
@@ -59,6 +61,13 @@ public sealed class TopologyNode
     /// icon (objects the state is not defined for).
     /// </summary>
     public bool? StructureModifiable { get; set; }
+
+    /// <summary>
+    /// Width-adaptive header capability (Plan §6): the node may collapse its
+    /// multi-line header to one line when its assigned width allows. Enabled
+    /// per level; this stage enables it only for Edit-upper disks.
+    /// </summary>
+    public bool AdaptiveHeaderEnabled { get; }
 }
 
 public static class WorkspaceMapper

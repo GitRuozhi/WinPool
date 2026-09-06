@@ -53,6 +53,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         DistributeByCapacity = node.DistributeByCapacity;
         CapacityWeights = node.CapacityWeights;
         StructureModifiable = node.StructureModifiable;
+        AdaptiveHeaderEnabled = node.AdaptiveHeaderEnabled;
         _isExpanded = unit.Kind == StorageUnitKind.VirtualDiskGroup
             ? true
             : owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
@@ -213,6 +214,35 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public string ModifiableNoName => _owner.Localization["StructureNotModifiable"];
 
+    /// <summary>
+    /// Named single-line header threshold (Plan §2.7): the assigned width at
+    /// or above which an adaptive header collapses to one line. The exact
+    /// value is confirmed with a screenshot during acceptance.
+    /// </summary>
+    public const double SingleLineHeaderThreshold = 420;
+
+    /// <summary>Width this node's slot received from its parent row.</summary>
+    public double AssignedWidth { get; private set; } = double.NaN;
+
+    public bool AdaptiveHeaderEnabled { get; }
+
+    public bool SingleLineHeader =>
+        AdaptiveHeaderEnabled
+        && !double.IsNaN(AssignedWidth)
+        && AssignedWidth >= SingleLineHeaderThreshold;
+
+    public Visibility SingleLineHeaderVisibility =>
+        SingleLineHeader ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility MultiLineHeaderVisibility =>
+        SingleLineHeader ? Visibility.Collapsed : Visibility.Visible;
+
+    public string SingleLineHeaderText =>
+        string.Join(
+            "  ·  ",
+            new[] { Unit.DisplayName, TypeLabel, Summary }
+                .Where(text => !string.IsNullOrWhiteSpace(text)));
+
     public int LayoutUnitWidth { get; private set; } = 1;
 
     public int LayoutUnitHeight { get; private set; } = 1;
@@ -252,7 +282,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     /// </summary>
     public bool IsLayoutRoot { get; }
 
-    public void ApplyLayout(TopologyLayoutResult result)
+    public void ApplyLayout(TopologyLayoutResult result, double assignedWidth = double.NaN)
     {
         LayoutUnitWidth = result.UnitWidth;
         LayoutUnitHeight = result.UnitHeight;
@@ -260,6 +290,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         LayoutPixelWidth = result.PixelWidth;
         LayoutRows = result.Rows;
         LayoutChildWidths = result.ChildWidths;
+        AssignedWidth = assignedWidth;
         if (!IsExpanded)
         {
             return;
@@ -267,7 +298,34 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
         for (var i = 0; i < Children.Count && i < result.Children.Count; i++)
         {
-            Children[i].ApplyLayout(result.Children[i]);
+            Children[i].ApplyLayout(result.Children[i], result.ChildWidths[i]);
+        }
+    }
+
+    private bool? _lastSingleLine;
+
+    /// <summary>
+    /// Raises the header presentation notifications for this subtree.
+    /// Must be called OUTSIDE the layout pass (deferred dispatch), never
+    /// from within Measure/Arrange: changing visibility mid-layout
+    /// re-enters layout and crashes WinUI.
+    /// Change-guarded so repeated identical layouts raise nothing.
+    /// </summary>
+    public void NotifyLayoutApplied()
+    {
+        var singleLine = SingleLineHeader;
+        if (_lastSingleLine != singleLine)
+        {
+            _lastSingleLine = singleLine;
+            OnPropertyChanged(nameof(SingleLineHeader));
+            OnPropertyChanged(nameof(SingleLineHeaderVisibility));
+            OnPropertyChanged(nameof(MultiLineHeaderVisibility));
+            OnPropertyChanged(nameof(SingleLineHeaderText));
+        }
+
+        foreach (var child in Children)
+        {
+            child.NotifyLayoutApplied();
         }
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Foundation;
@@ -105,6 +106,10 @@ public sealed class WeightedPoolPanel : Panel
                 TopologyLayoutMapper.FromViewModel(owner),
                 width);
             owner.ApplyLayout(result);
+            var dispatcher = DispatcherQueue.GetForCurrentThread();
+            dispatcher.TryEnqueue(
+                DispatcherQueuePriority.Low,
+                () => owner.NotifyLayoutApplied());
         }
 
         if (owner.LayoutRows.Count == 0 || owner.LayoutChildWidths.Count != owner.Children.Count)

@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Foundation;
@@ -34,6 +35,7 @@ public sealed class SurfaceStackPanel : Panel
                 TopologyLayoutMapper.FromViewModel(owner),
                 width);
             owner.ApplyLayout(result);
+            DeferLayoutNotifications(owner);
         }
 
         var desiredHeight = 0d;
@@ -52,6 +54,14 @@ public sealed class SurfaceStackPanel : Panel
             ? FallbackMeasureWidth
             : Math.Max(0, availableSize.Width);
         return new Size(measuredWidth, Math.Max(0, desiredHeight));
+    }
+
+    private void DeferLayoutNotifications(TopologyNodeViewModel root)
+    {
+        var dispatcher = DispatcherQueue.GetForCurrentThread();
+        dispatcher.TryEnqueue(
+            DispatcherQueuePriority.Low,
+            () => root.NotifyLayoutApplied());
     }
 
     protected override Size ArrangeOverride(Size finalSize)

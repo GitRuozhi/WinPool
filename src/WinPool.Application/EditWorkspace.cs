@@ -465,7 +465,8 @@ public sealed record StructureProblem(
             childrenLayout: TopologyChildrenLayout.Flow,
             noWrapChildren: true,
             distributeByCapacity: true,
-            capacityWeights: capacityWeights);
+            capacityWeights: capacityWeights,
+            adaptiveHeaderEnabled: true);
         foreach (var (child, capacityBytes) in InterleavePartitionsAndGaps(disk, partitions, minUnallocatedBytes))
         {
             node.Children.Add(child);
@@ -855,7 +856,8 @@ public sealed record StructureProblem(
             node.NoWrapChildren,
             node.DistributeByCapacity,
             node.CapacityWeights,
-            node.StructureModifiable);
+            node.StructureModifiable,
+            node.AdaptiveHeaderEnabled);
     }
 
     private static ManageObjectRole MapRole(StorageUnitKind kind) => kind switch

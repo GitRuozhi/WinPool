@@ -90,7 +90,7 @@
                     Grid.Column="1"
                     MinHeight="42"
                     Padding="8,4">
-                    <StackPanel IsHitTestVisible="False">
+                    <StackPanel IsHitTestVisible="False" Visibility="{x:Bind ViewModel.MultiLineHeaderVisibility, Mode=OneWay}">
                         <Grid ColumnSpacing="6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -190,6 +190,14 @@
                                 TextWrapping="Wrap" />
                         </Grid>
                     </StackPanel>
+                    <TextBlock
+                        IsHitTestVisible="False"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap"
+                        Text="{x:Bind ViewModel.SingleLineHeaderText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.SingleLineHeaderVisibility, Mode=OneWay}" />
                 </Grid>
             </Grid>
 
