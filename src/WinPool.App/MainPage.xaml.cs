@@ -116,7 +116,10 @@ public sealed partial class MainPage : Page
         if (!ViewModel.AutoScanAttempted && !ViewModel.IsScanning)
         {
             ViewModel.AutoScanAttempted = true;
-            _ = RefreshLocalInventoryAsync();
+            if (WorkspaceUiRestorePolicy.ShouldAutoScanOnStartup(ViewModel.HasCachedLocalInventory))
+            {
+                _ = RefreshLocalInventoryAsync();
+            }
         }
     }
 

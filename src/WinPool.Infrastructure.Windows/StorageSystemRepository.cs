@@ -222,7 +222,7 @@ public static class LocalInventoryDocumentCodec
             || document.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion
             || !StringComparer.Ordinal.Equals(document.Id, payload.DocumentId)
             || !StringComparer.Ordinal.Equals(document.DisplayName, payload.DisplayName)
-            || document.UpdatedAt != payload.CapturedAtUtc)
+            || document.UpdatedAt.ToUnixTimeMilliseconds() != payload.CapturedAtUtc.ToUnixTimeMilliseconds())
         {
             throw new InvalidDataException("The Agent local inventory metadata is inconsistent.");
         }
@@ -231,6 +231,45 @@ public static class LocalInventoryDocumentCodec
         {
             Revision = 0
         };
+    }
+
+    /// <summary>
+    /// Cache load must still show the last local inventory when the envelope
+    /// hash or DateTimeOffset offset does not round-trip. Capture stays on
+    /// <see cref="Decode"/>.
+    /// </summary>
+    public static StorageSystemDocument? TryDecodeCached(LocalInventoryDocumentPayload? payload)
+    {
+        if (payload is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Decode(payload);
+        }
+        catch (InvalidDataException)
+        {
+        }
+
+        try
+        {
+            var document = JsonSerializer.Deserialize<StorageSystemDocument>(
+                payload.SanitizedJson,
+                JsonOptions);
+            return document is
+            {
+                Kind: StorageSystemKind.Local,
+                SchemaVersion: StorageSystemDocument.CurrentSchemaVersion
+            }
+                ? StorageSystemDocumentSanitizer.RedactSensitiveData(document) with { Revision = 0 }
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string Hash(byte[] bytes) =>

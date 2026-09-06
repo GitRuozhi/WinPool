@@ -409,6 +409,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     {
         await InitializePreferencesAsync();
         var cachedLocal = await TryLoadCachedLocalAsync();
+        HasCachedLocalInventory = cachedLocal is not null;
         if (cachedLocal is not null)
         {
             SystemCatalog.ReplaceLocal(cachedLocal);
@@ -514,16 +515,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         var state = RestoredUiState;
-        if (!string.IsNullOrWhiteSpace(state.ActiveSystemId))
+        var target = string.IsNullOrWhiteSpace(state.ActiveSystemId)
+            ? null
+            : SystemCatalog.Find(state.ActiveSystemId);
+        if (target is not null)
         {
             SwitchSystem(state.ActiveSystemId);
         }
 
+        var resolveDocument = target ?? SelectedSystem;
         if (state.CategorySelections is not null)
         {
             foreach (var pair in state.CategorySelections)
             {
-                var restored = ResolveSelection(SelectedSystem, pair.Key, pair.Value);
+                var restored = ResolveSelection(resolveDocument, pair.Key, pair.Value);
                 if (restored is not null)
                 {
                     _categorySelections[(restored.Id.System, restored.Category)] = restored;
@@ -544,7 +549,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             _selectedTopologyTarget = topologyTarget;
         }
 
-        var remembered = RememberedSelection(SelectedCategory);
+        var remembered = RememberedSelection(SelectedCategory)
+            ?? ResolveSelection(
+                resolveDocument,
+                state.Category,
+                WorkspaceUiRestorePolicy.WantedObjectKey(state));
         RebuildObjects(remembered);
         _persistAllowed = WorkspaceUiRestorePolicy.IsRestoreSatisfied(
             state,
@@ -612,6 +621,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public double TopologyVerticalOffset { get; set; }
 
     public bool AutoScanAttempted { get; set; }
+
+    public bool HasCachedLocalInventory { get; private set; }
 
     public async Task SetThemeAsync(ThemePreference theme)
     {
@@ -1322,11 +1333,29 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return null;
         }
 
-        var item = _manageProjector.Project(document).WorkspaceObjects.FirstOrDefault(candidate =>
-            candidate.Category == category
-            && candidate.Id.ProviderKey.Equals(providerKey, StringComparison.OrdinalIgnoreCase));
+        if (category == ManageWorkspaceCategory.System)
+        {
+            foreach (var system in SystemCatalog.Systems)
+            {
+                var systemItem = MatchWorkspaceObject(system, category, providerKey);
+                if (systemItem is not null)
+                {
+                    return SelectionFor(systemItem);
+                }
+            }
+        }
+
+        var item = MatchWorkspaceObject(document, category, providerKey);
         return item is null ? null : SelectionFor(item);
     }
+
+    private ManageObjectListItemView? MatchWorkspaceObject(
+        StorageSystemDocument document,
+        ManageWorkspaceCategory category,
+        string providerKey) =>
+        _manageProjector.Project(document).WorkspaceObjects.FirstOrDefault(candidate =>
+            candidate.Category == category
+            && candidate.Id.ProviderKey.Equals(providerKey, StringComparison.OrdinalIgnoreCase));
 
     private ManageObjectTarget? ResolveTopologyTarget(
         StorageSystemDocument document,
@@ -1406,13 +1435,23 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             Objects.Add(item);
         }
 
-        SelectedWorkspaceItem =
-            Objects.FirstOrDefault(x =>
-                x.Projection is not null
+        var preferredMatch = preferredSelection is null
+            ? null
+            : Objects.FirstOrDefault(item =>
+                item.Projection is not null
                 && ManageSelectionRules.SameSelection(
-                    SelectionFor(x.Projection),
-                    preferredSelection))
-            ?? Objects.FirstOrDefault();
+                    SelectionFor(item.Projection),
+                    preferredSelection));
+        preferredMatch ??= preferredSelection is null
+            ? null
+            : Objects.FirstOrDefault(item =>
+                item.Projection is not null
+                && item.Projection.Id.ProviderKey.Equals(
+                    preferredSelection.Id.ProviderKey,
+                    StringComparison.OrdinalIgnoreCase)
+                && item.Projection.Category == preferredSelection.Category);
+        SelectedWorkspaceItem = preferredMatch
+            ?? (preferredSelection is null ? Objects.FirstOrDefault() : null);
     }
 
     private IEnumerable<WorkspaceItem> CreateWorkspaceItems(ManageWorkspaceCategory category)

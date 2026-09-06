@@ -27,6 +27,13 @@ public sealed class WorkspaceUiRestorePolicyTests
     }
 
     [Fact]
+    public void StartupDoesNotRescanWhenCachedLocalInventoryIsPresent()
+    {
+        Assert.False(WorkspaceUiRestorePolicy.ShouldAutoScanOnStartup(hasCachedLocalInventory: true));
+        Assert.True(WorkspaceUiRestorePolicy.ShouldAutoScanOnStartup(hasCachedLocalInventory: false));
+    }
+
+    [Fact]
     public void EmptyOrMissingStateIsSatisfiedSoFirstLaunchCanPersist()
     {
         Assert.True(WorkspaceUiRestorePolicy.IsRestoreSatisfied(null, "simulation:one", true, false));

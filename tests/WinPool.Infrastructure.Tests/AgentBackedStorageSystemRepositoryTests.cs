@@ -71,6 +71,41 @@ public sealed class AgentBackedStorageSystemRepositoryTests
                 payload with { SanitizedJson = payload.SanitizedJson + " " }));
     }
 
+    [Fact]
+    public void LocalInventoryCodecAcceptsUnixMillisecondCapturedAtWithADifferentOffset()
+    {
+        var document = Document(StorageSystemKind.Local);
+        var payload = LocalInventoryDocumentCodec.Encode(document);
+        var shifted = payload with
+        {
+            CapturedAtUtc = DateTimeOffset.FromUnixTimeMilliseconds(
+                    payload.CapturedAtUtc.ToUnixTimeMilliseconds())
+                .ToOffset(TimeSpan.FromHours(8))
+        };
+
+        var decoded = LocalInventoryDocumentCodec.Decode(shifted);
+        Assert.Equal(document.Id, decoded.Id);
+        Assert.Equal(
+            payload.CapturedAtUtc.ToUnixTimeMilliseconds(),
+            decoded.UpdatedAt.ToUnixTimeMilliseconds());
+    }
+
+    [Fact]
+    public void TryDecodeCachedStillReturnsALocalDocumentWhenTheEnvelopeHashDoesNotMatch()
+    {
+        var document = Document(StorageSystemKind.Local);
+        var payload = LocalInventoryDocumentCodec.Encode(document) with
+        {
+            Sha256 = new string('a', 64)
+        };
+
+        Assert.Throws<InvalidDataException>(() => LocalInventoryDocumentCodec.Decode(payload));
+        var cached = LocalInventoryDocumentCodec.TryDecodeCached(payload);
+        Assert.NotNull(cached);
+        Assert.Equal(document.Id, cached.Id);
+        Assert.Equal(StorageSystemKind.Local, cached.Kind);
+    }
+
     private static StorageSystemDocument Document(StorageSystemKind kind)
     {
         var snapshot = StorageSnapshot.Empty("Test");

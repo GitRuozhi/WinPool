@@ -97,9 +97,7 @@ public sealed class AgentBackedMachineRecordService(IAgentConnection connection)
                 result.Messages.FirstOrDefault()?.Code ?? string.Empty);
         }
 
-        return response.Document is null
-            ? null
-            : LocalInventoryDocumentCodec.Decode(response.Document);
+        return LocalInventoryDocumentCodec.TryDecodeCached(response.Document);
     }
 }
 
