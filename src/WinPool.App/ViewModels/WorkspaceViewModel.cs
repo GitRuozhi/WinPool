@@ -429,7 +429,29 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         SelectedSystem = SystemCatalog.Find(selectedId)
             ?? SystemCatalog.Systems.FirstOrDefault(system => system.IsLocal)
             ?? SystemCatalog.Systems.First(x => !x.IsLocal);
+        await RestoreWorkspaceUiStateAsync();
+    }
+
+    private bool _uiStateRestored;
+
+    /// <summary>
+    /// Applies the persisted workspace selection once the system catalog
+    /// is populated. Safe to call repeatedly; runs at most once.
+    /// </summary>
+    public async Task RestoreWorkspaceUiStateAsync()
+    {
+        if (_uiStateRestored)
+        {
+            return;
+        }
+
+        _uiStateRestored = true;
         RestoredUiState = await _workspaceStateService.LoadAsync();
+        if (RestoredUiState is null)
+        {
+            return;
+        }
+
         if (RestoredUiState is not null)
         {
             if (!string.IsNullOrWhiteSpace(RestoredUiState.ActiveSystemId))

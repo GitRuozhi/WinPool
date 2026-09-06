@@ -90,6 +90,7 @@ public sealed partial class MainWindow : Window
         // (_categorySelections) has been written, so the persisted state
         // always captures the latest object selection.
         ViewModel.WorkspaceSelectionChanged += (_, _) => PersistWorkspaceState();
+        _ = ViewModel.RestoreWorkspaceUiStateAsync();
 
         if (startupOptions.EnterRealModeAfterElevation)
         {
