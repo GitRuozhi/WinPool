@@ -549,11 +549,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             _selectedTopologyTarget = topologyTarget;
         }
 
-        var remembered = RememberedSelection(SelectedCategory)
+        var remembered = RememberedSelection(state.Category)
             ?? ResolveSelection(
                 resolveDocument,
                 state.Category,
                 WorkspaceUiRestorePolicy.WantedObjectKey(state));
+        if (remembered is null && state.Category == ManageWorkspaceCategory.System)
+        {
+            remembered = SelectionForCurrentSystemList();
+        }
+
         RebuildObjects(remembered);
         _persistAllowed = WorkspaceUiRestorePolicy.IsRestoreSatisfied(
             state,
