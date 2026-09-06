@@ -190,14 +190,32 @@
                                 TextWrapping="Wrap" />
                         </Grid>
                     </StackPanel>
-                    <TextBlock
+                    <Grid
                         IsHitTestVisible="False"
+                        ColumnSpacing="10"
                         VerticalAlignment="Center"
-                        FontSize="12"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="NoWrap"
-                        Text="{x:Bind ViewModel.SingleLineHeaderText, Mode=OneWay}"
-                        Visibility="{x:Bind ViewModel.SingleLineHeaderVisibility, Mode=OneWay}" />
+                        Visibility="{x:Bind ViewModel.SingleLineHeaderVisibility, Mode=OneWay}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap"
+                            Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}" />
+                        <TextBlock
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            FontSize="11"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap"
+                            Text="{x:Bind ViewModel.SingleLineHeaderText, Mode=OneWay}" />
+                    </Grid>
                 </Grid>
             </Grid>
 

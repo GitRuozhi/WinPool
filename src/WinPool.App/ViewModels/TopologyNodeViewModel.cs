@@ -239,9 +239,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public string SingleLineHeaderText =>
         string.Join(
-            "  ·  ",
-            new[] { Unit.DisplayName, TypeLabel, Summary }
-                .Where(text => !string.IsNullOrWhiteSpace(text)));
+          "  ·  ",
+          new[] { TypeLabel, Summary }
+              .Where(text => !string.IsNullOrWhiteSpace(text)));
 
     public int LayoutUnitWidth { get; private set; } = 1;
 
