@@ -328,20 +328,29 @@ public sealed partial class EditPage : Page
             return;
         }
 
-        // An unsupported pool refuses member drag-out while still
-        // accepting drag-in (Plan §7.3).
-        var diskSourcePoolId = _working.PhysicalDisks
-            .FirstOrDefault(disk => disk.StableId == diskId)?.PoolStableId;
-        if (!string.IsNullOrEmpty(diskSourcePoolId)
-            && !EditWorkspace.IsDraftPool(diskSourcePoolId)
+        // Drag-out rule (Plan §7.3, refined): a real pool whose structure
+        // modification is unsupported freezes its ORIGINAL committed
+        // members. A disk moved in during this session can always be
+        // dragged back out, otherwise the move-in would deadlock.
+        var workingDisk = _working.PhysicalDisks.FirstOrDefault(disk => disk.StableId == diskId);
+        var sourcePoolId = workingDisk?.PoolStableId;
+        if (!string.IsNullOrEmpty(sourcePoolId)
+            && !EditWorkspace.IsDraftPool(sourcePoolId)
             && _working.StoragePools.FirstOrDefault(candidate =>
-                candidate.StableId == diskSourcePoolId) is { IsPrimordial: false } sourcePoolInfo
+                candidate.StableId == sourcePoolId) is { IsPrimordial: false } sourcePoolInfo
             && !EditWorkspace.PoolSupportsStructureModification(_working, sourcePoolInfo.StableId))
         {
-            // A real unsupported pool refuses member drag-out; a draft pool
-            // must allow it, or dragging in a data-bearing disk deadlocks
-            // the draft (Plan §7.3).
-            return;
+            var committedDisk = ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(
+                item => item.StableId == diskId);
+            var wasOriginalMember = committedDisk is not null
+                && string.Equals(
+                    committedDisk.PoolStableId,
+                    sourcePoolId,
+                    StringComparison.OrdinalIgnoreCase);
+            if (wasOriginalMember)
+            {
+                return;
+            }
         }
 
         var selected = SelectedPool();
@@ -353,22 +362,6 @@ public sealed partial class EditPage : Page
 
         try
         {
-            var targetPool = _working.StoragePools.FirstOrDefault(item => item.StableId == poolId);
-            if (targetPool is { IsPrimordial: false }
-                && !EditWorkspace.IsDraftPool(poolId)
-                && !EditWorkspace.PoolSupportsStructureModification(_working, poolId))
-            {
-                // Moving a disk into a locked pool deadlocks: the pool
-                // refuses drag-out and Execute is blocked. Refuse the move
-                // instead; empty the pool's virtual disks first.
-                _ = ShowMessageAsync(
-                    ViewModel.Localization["Warning"],
-                    Text(
-                        "该池当前不支持结构修改（其虚拟磁盘含数据分区），磁盘移入后将无法移出。请先备份并清空相关卷。",
-                        "This pool does not currently support structure modification (a virtual disk holds data partitions); the disk could never be moved out again. Back up and empty the volumes first."));
-                return;
-            }
-
             if (EditWorkspace.IsPlus(poolId))
             {
                 var existingDraft = _working.StoragePools.LastOrDefault(item => EditWorkspace.IsDraftPool(item.StableId));
