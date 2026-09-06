@@ -434,6 +434,24 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private bool _uiStateRestored;
 
+    private static void RestoreDebug(string message)
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinPool",
+                "Diagnostics");
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(
+                Path.Combine(directory, "restore-debug.jsonl"),
+                $"{DateTimeOffset.UtcNow:O} {message}\n");
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>
     /// Applies the persisted workspace selection once the system catalog
     /// is populated. Safe to call repeatedly; runs at most once.
@@ -446,9 +464,45 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         _uiStateRestored = true;
-        RestoredUiState = await _workspaceStateService.LoadAsync();
+        for (var attempt = 0; ; attempt++)
+        {
+            RestoreDebug($"load attempt {attempt} begins");
+            try
+            {
+                var loadTask = _workspaceStateService.LoadAsync();
+                if (await Task.WhenAny(loadTask, Task.Delay(TimeSpan.FromSeconds(10))) != loadTask)
+                {
+                    RestoreDebug($"load attempt {attempt} timed out after 10s");
+                    if (attempt >= 4)
+                    {
+                        RestoreDebug("restore aborted: load kept timing out");
+                        return;
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(1 + attempt));
+                    continue;
+                }
+
+                RestoredUiState = loadTask.Result;
+                RestoreDebug($"load ok on attempt {attempt}");
+                break;
+            }
+            catch (Exception exception)
+            {
+                RestoreDebug($"load attempt {attempt} failed: {exception.Message}");
+                if (attempt >= 4)
+                {
+                    RestoreDebug("restore aborted: load kept failing");
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1 + attempt));
+            }
+        }
+
         if (RestoredUiState is null)
         {
+            RestoreDebug("load returned null; nothing to restore");
             return;
         }
 
@@ -456,7 +510,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             if (!string.IsNullOrWhiteSpace(RestoredUiState.ActiveSystemId))
             {
-                SwitchSystem(RestoredUiState.ActiveSystemId);
+                var switched = SwitchSystem(RestoredUiState.ActiveSystemId);
+                RestoreDebug($"switch to {RestoredUiState.ActiveSystemId}: {switched}");
             }
             if (RestoredUiState.CategorySelections is not null)
             {
@@ -481,6 +536,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             // default selection, so rebuild with the remembered selection
             // explicitly and re-select the remembered object.
             var remembered = RememberedSelection(SelectedCategory);
+            RestoreDebug($"remembered={remembered?.Id.ProviderKey ?? "none"}");
             RebuildObjects(remembered);
             if (remembered is not null)
             {
