@@ -7,6 +7,19 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.46 edit-lower multi virtual-disk row — 2026-09-07
+
+### Changed
+- Edit-lower uses the same hidden `VirtualDiskGroup` Flow as Manage when a
+  pool has more than one virtual disk, so those cards sit in a horizontal
+  row instead of stacking inside the pool.
+
+### Verification
+- 2026-09-07: `EditWorkspaceTests` passed 28, 0 failed, 0 skipped.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+
 ## V0.46 same-pool unallocated re-tier persist — 2026-09-07
 
 ### Changed
