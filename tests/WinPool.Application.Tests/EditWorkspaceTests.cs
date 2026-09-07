@@ -460,6 +460,33 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
+    public void MultipleVirtualDisksUseTheHiddenHorizontalFlowGroup()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
+        var first = snapshot.VirtualDisks[0];
+        var second = first with { StableId = "vdisk:2", FriendlyName = "Pool01-B" };
+        snapshot = snapshot with { VirtualDisks = [first, second] };
+
+        var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0)
+            .Single(node => node.Unit.StableId == "pool:t1");
+        var group = Assert.Single(
+            pool.Children,
+            child => child.Unit.Kind == StorageUnitKind.VirtualDiskGroup);
+        Assert.Equal(TopologyChildrenLayout.Flow, group.ChildrenLayout);
+        Assert.False(group.IsSelectable);
+        Assert.Equal(2, group.Children.Count);
+        Assert.All(
+            group.Children,
+            child =>
+            {
+                Assert.Equal(StorageUnitKind.VirtualDisk, child.Unit.Kind);
+                Assert.True(child.ShowsEditStatus);
+            });
+        Assert.DoesNotContain(pool.Children, child => child.Unit.Kind == StorageUnitKind.VirtualDisk);
+        Assert.Equal(TopologyChildrenLayout.Stack, pool.ChildrenLayout);
+    }
+
+    [Fact]
     public void PoolWithoutVirtualDiskOmitsPlaceholderCard()
     {
         var snapshot = TieredPoolSnapshot(withVirtualDisk: false);

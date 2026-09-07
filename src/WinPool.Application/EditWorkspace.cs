@@ -802,11 +802,7 @@ public sealed record StructureProblem(
         poolNode.ShowsEditStatus = true;
         poolNode.HasStoredData = PoolHoldsStoredData(snapshot, pool.StableId);
 
-        foreach (var virtualDisk in snapshot.VirtualDisks
-                     .Where(disk => disk.PoolStableId == pool.StableId))
-        {
-            poolNode.Children.Add(CreateVirtualDiskNode(virtualDisk, snapshot, minUnallocatedBytes));
-        }
+        AddVirtualDisks(poolNode, pool, snapshot, minUnallocatedBytes);
 
         // Snapshot-driven tier cards, ordered like Manage: a tier renders
         // only when it exists and holds at least one member disk, so a draft
@@ -822,6 +818,45 @@ public sealed record StructureProblem(
 
         AddUnallocatedGroup(poolNode, pool, members, snapshot, committed);
         return poolNode;
+    }
+
+    /// <summary>
+    /// Manage-equivalent virtual-disk row: one disk stays a direct stack
+    /// child; two or more sit in a headerless VirtualDiskGroup so they
+    /// share a horizontal Flow instead of stacking in the pool.
+    /// </summary>
+    private static void AddVirtualDisks(
+        TopologyNode poolNode,
+        StoragePoolInfo pool,
+        StorageSnapshot snapshot,
+        long minUnallocatedBytes)
+    {
+        var virtualNodes = snapshot.VirtualDisks
+            .Where(disk => disk.PoolStableId == pool.StableId)
+            .Select(disk => CreateVirtualDiskNode(disk, snapshot, minUnallocatedBytes))
+            .ToList();
+        if (virtualNodes.Count == 1)
+        {
+            poolNode.Children.Add(virtualNodes[0]);
+            return;
+        }
+
+        if (virtualNodes.Count == 0)
+        {
+            return;
+        }
+
+        var virtualGroup = new TopologyNode(
+            new StorageUnitRef(
+                $"group:vdisk:{pool.StableId}",
+                StorageUnitKind.VirtualDiskGroup,
+                "Virtual disks"),
+            TopologyProjector.JoinSummary($"{virtualNodes.Count} virtual disks"),
+            isSelectable: false,
+            childrenLayout: TopologyChildrenLayout.Flow,
+            layoutWeight: virtualNodes.Count);
+        virtualGroup.Children.AddRange(virtualNodes);
+        poolNode.Children.Add(virtualGroup);
     }
 
     private static TopologyNode CreateTierNode(
