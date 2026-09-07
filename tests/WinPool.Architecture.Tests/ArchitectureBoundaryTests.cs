@@ -438,45 +438,51 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void EditPageSubmitsCanonicalApplicationSimulationOperations()
+    public void EditorPagesSubmitCanonicalApplicationSimulationOperations()
     {
         var root = FindRepositoryRoot();
-        var editPage = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "EditPage.xaml.cs"));
+        var structurePage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
+        var diskPartitionPage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml.cs"));
         var workspace = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "ViewModels", "WorkspaceViewModel.cs"));
 
         Assert.Contains(
             "WinPool.Application.SimulationEditRequest",
-            editPage,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "EditWorkspace.ProjectPartitionWorkspace",
-            editPage,
+            structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
             "EditWorkspace.ProjectPoolWorkspace",
-            editPage,
+            structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
             "SimulationOperationKind.CreateTieredPool",
-            editPage,
+            structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
             "SimulationOperationKind.DissolveStoragePool",
-            editPage,
+            structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
             "SimulationOperationKind.EvictPhysicalDiskFromTiers",
-            editPage,
+            structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
             "EditWorkspace.DiskNeedsSamePoolTierAssignment",
-            editPage,
+            structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
             "EditWorkspace.RestoreWorkingMembership",
-            editPage,
+            structurePage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EditWorkspace.ProjectPartitionWorkspace",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SimulationOperationKind.CreateTieredPool",
+            diskPartitionPage,
             StringComparison.Ordinal);
         Assert.Contains(
             "_simulationEditCoordinator.ExecuteAsync",
@@ -489,21 +495,21 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void EditPageSplitsHalvesWithoutSectionTitles()
+    public void EditorPagesOwnTheirSurfacesWithoutSectionTitles()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "EditPage.xaml"));
-        Assert.Contains("Height=\"*\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("GridSplitter", xaml, StringComparison.Ordinal);
-        Assert.Contains("UpperTopologyControl", xaml, StringComparison.Ordinal);
-        Assert.Contains("LowerTopologyControl", xaml, StringComparison.Ordinal);
-        Assert.Contains("Width=\"280\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Width=\"320\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("DiskSectionTitle", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("PoolSectionTitle", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("磁盘与分区", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("存储池与虚拟磁盘", xaml, StringComparison.Ordinal);
+        var structureXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml"));
+        var diskPartitionXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml"));
+        Assert.Contains("TopologyControl", structureXaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"320\"", structureXaml, StringComparison.Ordinal);
+        Assert.Contains("PoolFormGrid", structureXaml, StringComparison.Ordinal);
+        Assert.Contains("TopologyControl", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"280\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DiskSectionTitle", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("磁盘与分区", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("存储池与虚拟磁盘", structureXaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -727,11 +733,12 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("RegisterShellKeyboardAccelerators();", mainWindow);
         Assert.Contains("VirtualKeyModifiers.Control", mainWindow);
         Assert.Contains("(VirtualKey.Number1, ShellPageKind.Manage)", mainWindow);
-        Assert.Contains("(VirtualKey.Number2, ShellPageKind.Create)", mainWindow);
-        Assert.Contains("(VirtualKey.Number3, ShellPageKind.Test)", mainWindow);
-        Assert.Contains("(VirtualKey.Number4, ShellPageKind.Monitor)", mainWindow);
-        Assert.Contains("(VirtualKey.Number5, ShellPageKind.Development)", mainWindow);
-        Assert.Contains("(VirtualKey.Number6, ShellPageKind.Settings)", mainWindow);
+        Assert.Contains("(VirtualKey.Number2, ShellPageKind.StorageStructure)", mainWindow);
+        Assert.Contains("(VirtualKey.Number3, ShellPageKind.DiskPartition)", mainWindow);
+        Assert.Contains("(VirtualKey.Number4, ShellPageKind.Test)", mainWindow);
+        Assert.Contains("(VirtualKey.Number5, ShellPageKind.Monitor)", mainWindow);
+        Assert.Contains("(VirtualKey.Number6, ShellPageKind.Development)", mainWindow);
+        Assert.Contains("(VirtualKey.Number7, ShellPageKind.Settings)", mainWindow);
         Assert.Contains("args.Handled = true;", mainWindow);
     }
 
@@ -752,7 +759,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>4</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>6</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>7</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
@@ -1253,9 +1260,10 @@ public sealed class ArchitectureBoundaryTests
                 StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
-        // No shared topology viewport state may exist: Manage, Edit upper,
-        // and Edit lower each keep their own host width, so resizing one
-        // surface can never mutate another surface's layout inputs.
+        // No shared topology viewport state may exist: Manage, the storage
+        // structure editor, and the disk/partition editor each keep their own
+        // host width, so resizing one surface can never mutate another
+        // surface's layout inputs.
         Assert.All(
             sources,
             source => Assert.DoesNotContain(
@@ -1271,10 +1279,28 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(appDirectory, "ViewModels", "TopologyNodeViewModel.cs"));
         Assert.Contains("SetSurfaceViewportWidth", nodeViewModel, StringComparison.Ordinal);
 
-        // The Edit page keeps its own lower-surface width and applies it to
-        // each recreated pool-row root.
-        var editPage = File.ReadAllText(Path.Combine(appDirectory, "EditPage.xaml.cs"));
-        Assert.Contains("_lowerViewportWidth", editPage, StringComparison.Ordinal);
+        // Each editor page keeps its own surface width and applies it to
+        // each recreated topology root.
+        var structurePage = File.ReadAllText(
+            Path.Combine(appDirectory, "StorageStructurePage.xaml.cs"));
+        var diskPartitionPage = File.ReadAllText(
+            Path.Combine(appDirectory, "DiskPartitionPage.xaml.cs"));
+        Assert.Contains("_viewportWidth", structurePage, StringComparison.Ordinal);
+        Assert.Contains("_viewportWidth", diskPartitionPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StructureEditorNeverCreatesASecondVirtualDisk()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
+        // One virtual disk is the 1.0 contract: the structure page only
+        // creates a pool (which yields one virtual disk) and can delete an
+        // extra one to reduce a multi-virtual-disk pool back to one.
+        Assert.DoesNotContain("CreateVirtualDisk", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationOperationKind.CreateTieredPool", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationOperationKind.DeleteVirtualDisk", page, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
