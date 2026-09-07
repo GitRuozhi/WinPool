@@ -280,7 +280,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
         switch (control)
         {
             case TextBox box:
-                box.TextChanged += (_, _) => { if (!_filling) { _formDirty = true; } };
+                box.TextChanged += (_, _) =>
+                {
+                    if (!_filling)
+                    {
+                        _formDirty = true;
+                        // Save / Apply-all / Discard-all enablement depends on
+                        // the dirty flag; refresh it on every edit.
+                        UpdateButtonState();
+                    }
+                };
                 break;
             case ComboBox combo:
                 combo.SelectionChanged += (_, _) =>
@@ -289,6 +298,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     {
                         _formDirty = true;
                         UpdateLinkedFields();
+                        UpdateButtonState();
                     }
                 };
                 break;
