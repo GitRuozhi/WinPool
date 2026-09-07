@@ -340,6 +340,31 @@ public sealed class SimulationOperationTests
         var primordial = document.Snapshot.StoragePools.Single(item => item.IsPrimordial);
         Assert.Contains("physical:p1", primordial.MemberPhysicalDiskIds);
         Assert.Contains("physical:p2", primordial.MemberPhysicalDiskIds);
+        // Freed member disks regain an uninitialized OS-disk view so the
+        // Disk partition editor can initialize and partition them.
+        var freed = document.Snapshot.OsDisks.Single(item => item.PhysicalDiskStableId == "physical:p2");
+        Assert.Equal("RAW", freed.PartitionStyle);
+    }
+
+    [Fact]
+    public void MovingAMemberBackToPrimordialRestoresItsOsDiskView()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            FileSystem: "NTFS"));
+        var primordial = document.Snapshot.StoragePools.Single(item => item.IsPrimordial);
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.MovePhysicalDisk,
+            "physical:p2",
+            Name: primordial.StableId));
+        Assert.Equal(
+            primordial.StableId,
+            document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:p2").PoolStableId);
+        var restored = document.Snapshot.OsDisks.Single(item => item.PhysicalDiskStableId == "physical:p2");
+        Assert.Equal("RAW", restored.PartitionStyle);
     }
 
     [Fact]

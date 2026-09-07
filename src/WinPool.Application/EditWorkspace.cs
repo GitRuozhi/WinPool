@@ -1042,9 +1042,80 @@ public sealed record StructureProblem(
             StoragePools = pools,
             StorageTiers = tiers
         };
-        return IsDraftPool(target.StableId)
+        var result = IsDraftPool(target.StableId)
             ? RefreshDraftRecommendations(moved, target.StableId)
             : moved;
+        return target.IsPrimordial
+            ? EnsureFreeDisksHaveOsDisks(result, [disk.StableId])
+            : result;
+    }
+
+    /// <summary>
+    /// A physical disk that has left a pool (dissolved pool, or a member
+    /// dragged back to the primordial pool) is a free Windows disk and must
+    /// expose an uninitialized OS-disk view so the Disk partition editor can
+    /// show and initialize it. Pooled member disks stay invisible there
+    /// (V0.47 design §11).
+    /// </summary>
+    public static StorageSnapshot EnsureFreeDisksHaveOsDisks(
+        StorageSnapshot snapshot,
+        IReadOnlyCollection<string> physicalDiskIds)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (physicalDiskIds.Count == 0)
+        {
+            return snapshot;
+        }
+
+        var primordial = snapshot.StoragePools.FirstOrDefault(item => item.IsPrimordial);
+        if (primordial is null)
+        {
+            return snapshot;
+        }
+
+        var freeMembers = new HashSet<string>(
+            primordial.MemberPhysicalDiskIds,
+            StringComparer.OrdinalIgnoreCase);
+        var alreadyMapped = snapshot.OsDisks
+            .Where(item => !string.IsNullOrWhiteSpace(item.PhysicalDiskStableId))
+            .Select(item => item.PhysicalDiskStableId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var usedNumbers = snapshot.OsDisks.Select(item => item.Number).ToHashSet();
+        var nextNumber = usedNumbers.Count > 0 ? usedNumbers.Max() + 1 : 0;
+        var added = new List<OsDiskInfo>();
+        foreach (var diskId in physicalDiskIds)
+        {
+            if (!freeMembers.Contains(diskId) || alreadyMapped.Contains(diskId))
+            {
+                continue;
+            }
+
+            var disk = snapshot.PhysicalDisks.FirstOrDefault(item =>
+                item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase));
+            if (disk is null)
+            {
+                continue;
+            }
+
+            var candidate = disk.DeviceId ?? nextNumber;
+            var number = usedNumbers.Contains(candidate) ? nextNumber++ : candidate;
+            usedNumbers.Add(number);
+            added.Add(new OsDiskInfo(
+                $"{disk.StableId}:os",
+                disk.FriendlyName,
+                number,
+                "RAW",
+                disk.Size,
+                false,
+                false,
+                false,
+                disk.StableId,
+                null));
+        }
+
+        return added.Count == 0
+            ? snapshot
+            : snapshot with { OsDisks = snapshot.OsDisks.Concat(added).ToArray() };
     }
 
     /// <summary>

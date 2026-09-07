@@ -1261,7 +1261,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             .Select(item => item.StableId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var members = pool.MemberPhysicalDiskIds;
-        return snapshot with
+        var dissolved = snapshot with
         {
             StoragePools = snapshot.StoragePools
                 .Where(item => item.StableId != pool.StableId)
@@ -1283,6 +1283,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     : disk)
                 .ToArray()
         };
+        return EditWorkspace.EnsureFreeDisksHaveOsDisks(dissolved, members);
     }
 
     private static StorageSnapshot DeleteVirtualDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
