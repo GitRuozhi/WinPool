@@ -826,6 +826,24 @@ public sealed partial class EditPage : Page
             }
         }
 
+        committed = ViewModel.ActiveSnapshot;
+        foreach (var disk in _working.PhysicalDisks)
+        {
+            if (!EditWorkspace.DiskNeedsSamePoolTierAssignment(_working, committed, disk.StableId)
+                || string.IsNullOrEmpty(disk.PoolStableId))
+            {
+                continue;
+            }
+
+            if (await ApplyAsync(new SimulationOperationRequest(
+                    SimulationOperationKind.MovePhysicalDisk,
+                    disk.StableId,
+                    Name: disk.PoolStableId)) is null)
+            {
+                return;
+            }
+        }
+
         if (EditWorkspace.IsDraftPool(pool.StableId))
         {
             if (await ApplyAsync(
@@ -838,6 +856,7 @@ public sealed partial class EditPage : Page
         var leftover = _working.StoragePools
             .Where(item => EditWorkspace.IsDraftPool(item.StableId) && item.StableId != pool.StableId)
             .ToArray();
+        var preserveForm = !EditWorkspace.IsDraftPool(pool.StableId);
         _working = ViewModel.ActiveSnapshot;
         foreach (var draft in leftover)
         {
@@ -867,7 +886,16 @@ public sealed partial class EditPage : Page
         _selectedPoolId = EditWorkspace.IsDraftPool(pool.StableId)
             ? _working.StoragePools.LastOrDefault(item => !item.IsPrimordial)?.StableId
             : pool.StableId;
-        RefreshAll();
+        if (preserveForm)
+        {
+            RefreshUpper();
+            RefreshLower();
+            UpdateButtonState();
+        }
+        else
+        {
+            RefreshAll();
+        }
     }
 
     private SimulationOperationRequest BuildPoolRequest(
@@ -979,12 +1007,13 @@ public sealed partial class EditPage : Page
                 Name: _poolNameBox.Text.Trim(),
                 VirtualDiskName: _virtualDiskNameBox.Text.Trim())
             : BuildPoolRequest(SimulationOperationKind.UpdateStoragePool, pool.StableId, pool);
+        var pending = _working;
         if (await ApplyAsync(request) is null)
         {
             return;
         }
 
-        _working = ViewModel.ActiveSnapshot;
+        _working = EditWorkspace.RestoreWorkingMembership(ViewModel.ActiveSnapshot, pending);
         RefreshAll();
     }
 

@@ -471,6 +471,14 @@ public sealed class ArchitectureBoundaryTests
             editPage,
             StringComparison.Ordinal);
         Assert.Contains(
+            "EditWorkspace.DiskNeedsSamePoolTierAssignment",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EditWorkspace.RestoreWorkingMembership",
+            editPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "_simulationEditCoordinator.ExecuteAsync",
             workspace,
             StringComparison.Ordinal);

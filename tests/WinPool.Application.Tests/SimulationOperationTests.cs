@@ -247,6 +247,36 @@ public sealed class SimulationOperationTests
     }
 
     [Fact]
+    public void MovePhysicalDiskOntoSamePoolAssignsUnallocatedDiskToMatchingTier()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            VirtualDiskName: "SpaceA",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            FileSystem: "NTFS",
+            AllocationUnitSize: 65536));
+        var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.EvictPhysicalDiskFromTiers,
+            "physical:p1"));
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
+
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.MovePhysicalDisk,
+            "physical:p1",
+            Name: pool.StableId));
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
+        var ssdTier = document.Snapshot.StorageTiers.Single(tier =>
+            tier.PoolStableId == pool.StableId && tier.MediaType == "SSD");
+        Assert.Contains("physical:p1", ssdTier.MemberPhysicalDiskIds);
+        Assert.Equal(
+            pool.StableId,
+            document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:p1").PoolStableId);
+    }
+
+    [Fact]
     public void EvictPhysicalDiskFromTiersKeepsPoolMembership()
     {
         var document = Apply(CreateDocument(), new SimulationOperationRequest(

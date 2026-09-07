@@ -387,6 +387,63 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
+    public void MoveDiskToPoolOntoSamePoolAssignsUnallocatedMemberToMatchingTier()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var evicted = EditWorkspace.EvictDiskToUnallocated(snapshot, "physical:ssd");
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(evicted, "physical:ssd"));
+
+        var restored = EditWorkspace.MoveDiskToPool(evicted, "physical:ssd", "pool:t1");
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(restored, "physical:ssd"));
+        var ssdTier = restored.StorageTiers.Single(tier =>
+            tier.PoolStableId == "pool:t1" && EditWorkspace.NormalizeMedia(tier.MediaType) == "SSD");
+        Assert.Contains("physical:ssd", ssdTier.MemberPhysicalDiskIds);
+        Assert.True(EditWorkspace.DiskNeedsSamePoolTierAssignment(restored, evicted, "physical:ssd"));
+        Assert.False(EditWorkspace.DiskNeedsSamePoolTierAssignment(evicted, evicted, "physical:ssd"));
+    }
+
+    [Fact]
+    public void RestoreWorkingMembershipKeepsSamePoolTierAssignmentAndDraft()
+    {
+        var committed = TieredPoolSnapshot(withVirtualDisk: true);
+        committed = EditWorkspace.EvictDiskToUnallocated(committed, "physical:ssd");
+        var renamed = committed with
+        {
+            StoragePools = committed.StoragePools
+                .Select(pool => pool.StableId == "pool:t1" ? pool with { FriendlyName = "Renamed" } : pool)
+                .ToArray()
+        };
+
+        var working = EditWorkspace.MoveDiskToPool(committed, "physical:ssd", "pool:t1");
+        working = EditWorkspace.InsertDraftPool(working, "Pool X");
+        var draftId = working.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+        working = EditWorkspace.MoveDiskToPool(working, "physical:extra", draftId);
+
+        var restored = EditWorkspace.RestoreWorkingMembership(renamed, working);
+        Assert.Equal("Renamed", restored.StoragePools.Single(item => item.StableId == "pool:t1").FriendlyName);
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(restored, "physical:ssd"));
+        var draft = Assert.Single(restored.StoragePools, item => EditWorkspace.IsDraftPool(item.StableId));
+        Assert.Equal("Pool X", draft.FriendlyName);
+        Assert.Contains("physical:extra", draft.MemberPhysicalDiskIds);
+        Assert.Equal(
+            draft.StableId,
+            restored.PhysicalDisks.Single(item => item.StableId == "physical:extra").PoolStableId);
+    }
+
+    [Fact]
+    public void RestoreWorkingMembershipIsIdentityWhenMembershipMatches()
+    {
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var restored = EditWorkspace.RestoreWorkingMembership(snapshot, snapshot);
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(restored, "physical:ssd"));
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(restored, "physical:hdd"));
+        Assert.Equal(
+            snapshot.StoragePools.Select(item => item.StableId),
+            restored.StoragePools.Select(item => item.StableId));
+        Assert.DoesNotContain(restored.StoragePools, item => EditWorkspace.IsDraftPool(item.StableId));
+    }
+
+    [Fact]
     public void EvictDiskToUnallocatedRefusesSystemDisks()
     {
         var snapshot = TieredPoolSnapshot(withVirtualDisk: true);

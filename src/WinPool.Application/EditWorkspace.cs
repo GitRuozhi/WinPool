@@ -1012,6 +1012,101 @@ public sealed record StructureProblem(
             : moved;
     }
 
+    /// <summary>
+    /// True when the working copy put a still-resident pool member back
+    /// onto a tier and the committed snapshot still has it unallocated.
+    /// </summary>
+    public static bool DiskNeedsSamePoolTierAssignment(
+        StorageSnapshot working,
+        StorageSnapshot committed,
+        string diskId)
+    {
+        ArgumentNullException.ThrowIfNull(working);
+        ArgumentNullException.ThrowIfNull(committed);
+        var workingDisk = working.PhysicalDisks.FirstOrDefault(item =>
+            item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase));
+        var committedDisk = committed.PhysicalDisks.FirstOrDefault(item =>
+            item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase));
+        return workingDisk is not null
+            && committedDisk is not null
+            && !string.IsNullOrEmpty(workingDisk.PoolStableId)
+            && !IsDraftPool(workingDisk.PoolStableId)
+            && string.Equals(
+                workingDisk.PoolStableId,
+                committedDisk.PoolStableId,
+                StringComparison.OrdinalIgnoreCase)
+            && DiskIsAssignedToTier(working, diskId)
+            && !DiskIsAssignedToTier(committed, diskId);
+    }
+
+    /// <summary>
+    /// Reapplies working-copy pool membership, including same-pool
+    /// unallocated-to-tier moves and a leftover draft, onto a newer
+    /// committed snapshot such as one produced by a properties-only
+    /// confirm.
+    /// </summary>
+    public static StorageSnapshot RestoreWorkingMembership(
+        StorageSnapshot committed,
+        StorageSnapshot working)
+    {
+        ArgumentNullException.ThrowIfNull(committed);
+        ArgumentNullException.ThrowIfNull(working);
+        var result = committed;
+        var draftIdMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var draft in working.StoragePools.Where(pool => IsDraftPool(pool.StableId)))
+        {
+            if (!result.StoragePools.Any(pool => IsDraftPool(pool.StableId)))
+            {
+                result = InsertDraftPool(result, draft.FriendlyName);
+            }
+
+            var created = result.StoragePools.Last(pool => IsDraftPool(pool.StableId));
+            draftIdMap[draft.StableId] = created.StableId;
+        }
+
+        foreach (var disk in working.PhysicalDisks)
+        {
+            var current = result.PhysicalDisks.FirstOrDefault(item =>
+                item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+            if (current is null)
+            {
+                continue;
+            }
+
+            var targetPoolId = disk.PoolStableId;
+            if (targetPoolId is not null && draftIdMap.TryGetValue(targetPoolId, out var mapped))
+            {
+                targetPoolId = mapped;
+            }
+
+            if (string.IsNullOrEmpty(targetPoolId))
+            {
+                continue;
+            }
+
+            var samePool = string.Equals(
+                current.PoolStableId,
+                targetPoolId,
+                StringComparison.OrdinalIgnoreCase);
+            var wantAssigned = DiskIsAssignedToTier(working, disk.StableId);
+            var haveAssigned = DiskIsAssignedToTier(result, disk.StableId);
+            if (!samePool)
+            {
+                result = MoveDiskToPool(result, disk.StableId, targetPoolId);
+            }
+            else if (wantAssigned && !haveAssigned)
+            {
+                result = MoveDiskToPool(result, disk.StableId, targetPoolId);
+            }
+            else if (!wantAssigned && haveAssigned)
+            {
+                result = EvictDiskToUnallocated(result, disk.StableId);
+            }
+        }
+
+        return result;
+    }
+
     public static StorageSnapshot RefreshDraftRecommendations(StorageSnapshot snapshot, string poolId)
     {
         if (!IsDraftPool(poolId))
