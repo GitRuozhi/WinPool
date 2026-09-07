@@ -781,3 +781,30 @@ public sealed class EditWorkspaceLayerTests
         Assert.DoesNotContain(removed.VirtualDisks, vdisk => vdisk.StableId == draft.StableId);
     }
 }
+
+public sealed class NormalizeTierCapacityTests
+{
+    [Fact]
+    public void UnsetTierCapacityNormalizesToMemberCapacity()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        // Factory tier has a size; zero it to simulate legacy documents.
+        var zeroed = snapshot with
+        {
+            StorageTiers = snapshot.StorageTiers
+                .Select(tier => tier with { Size = 0, FootprintOnPool = 0 })
+                .ToArray()
+        };
+        var normalized = EditWorkspace.NormalizeTierCapacities(zeroed);
+        var tier = normalized.StorageTiers.Single();
+        Assert.Equal(2_000_000, tier.Size);
+    }
+
+    [Fact]
+    public void ExplicitCapacityIsNeverOverwritten()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var normalized = EditWorkspace.NormalizeTierCapacities(snapshot);
+        Assert.Equal(1_000_000, normalized.StorageTiers.Single().Size);
+    }
+}

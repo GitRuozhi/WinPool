@@ -1323,6 +1323,39 @@ public sealed record StructureProblem(
     }
 
     /// <summary>
+    /// A tier whose capacity was never set (Size <= 0) means "the member
+    /// capacity": its recommended maximum. Normalizes the working copy so the
+    /// form shows and edits a real number instead of a bare zero.
+    /// </summary>
+    public static StorageSnapshot NormalizeTierCapacities(StorageSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var changed = false;
+        var tiers = snapshot.StorageTiers
+            .Select(tier =>
+            {
+                if (tier.Size > 0 || tier.MemberPhysicalDiskIds.Count == 0)
+                {
+                    return tier;
+                }
+
+                var capacity = snapshot.PhysicalDisks
+                    .Where(disk => tier.MemberPhysicalDiskIds.Contains(
+                        disk.StableId, StringComparer.OrdinalIgnoreCase))
+                    .Sum(disk => disk.Size);
+                if (capacity <= 0)
+                {
+                    return tier;
+                }
+
+                changed = true;
+                return tier with { Size = capacity, FootprintOnPool = capacity };
+            })
+            .ToArray();
+        return changed ? snapshot with { StorageTiers = tiers } : snapshot;
+    }
+
+    /// <summary>
     /// True when the working copy holds any structural draft change against
     /// the committed snapshot: pool or virtual-disk existence, disk pool
     /// membership, simulated-layer role, or real-tier membership.
