@@ -226,7 +226,7 @@
                         <Grid
                             x:Name="PoolFormGrid"
                             ColumnSpacing="6"
-                            RowSpacing="6">
+                            RowSpacing="0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
