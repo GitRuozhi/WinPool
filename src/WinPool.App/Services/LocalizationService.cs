@@ -12,7 +12,10 @@ public sealed class LocalizationService : ObservableObject
         new Dictionary<string, (string Zh, string En)>(StringComparer.Ordinal)
         {
             ["Manage"] = ("管理", "Manage"),
-            ["Create"] = ("创建", "Create"),
+            ["StorageStructure"] = ("存储结构", "Storage structure"),
+            ["DiskPartition"] = ("磁盘/分区", "Disk/partition"),
+            ["DiskActionsSection"] = ("磁盘操作", "Disk actions"),
+            ["PartitionActionsSection"] = ("分区操作", "Partition actions"),
             ["Test"] = ("测试", "Test"),
             ["Monitor"] = ("监控", "Monitor"),
             ["Development"] = ("开发", "Development"),
@@ -270,10 +273,10 @@ public sealed class LocalizationService : ObservableObject
             ["ExecuteModify"] = ("执行修改", "Execute modify"),
             ["CreateNewPool"] = ("创建新池", "Create new pool"),
             ["DissolvePool"] = ("解散池", "Dissolve pool"),
-            ["StructureSection"] = ("存储结构", "Storage structure"),
+            ["StructureOperationsSection"] = ("结构操作", "Structure operations"),
             ["PoolPropertiesSection"] = ("池属性", "Pool properties"),
             ["EvictDisk"] = ("退出磁盘", "Remove disk from tiers"),
-            ["ConfirmPoolProperties"] = ("确认池属性", "Confirm pool properties"),
+            ["DeleteVirtualDisk"] = ("删除虚拟磁盘", "Delete virtual disk"),
             ["SystemDiskCannotEvictTitle"] = ("无法退出", "Cannot remove"),
             ["SystemDiskCannotEvictMessage"] = ("系统盘无法退出。", "The system disk cannot leave the pool."),
             ["RemovePageFileTitle"] = ("移除页面文件", "Remove page file"),
@@ -317,7 +320,11 @@ public sealed class LocalizationService : ObservableObject
             ["DissolvePoolMessage"] = (
                 "将删除该池、存储层、虚拟磁盘和分区，物理磁盘回到原始池。确定继续？",
                 "This removes the pool, tiers, virtual disks, and partitions, and returns physical disks to the primordial pool. Continue?"),
-            ["SizeGbPlaceholder"] = ("GB，留空为成员容量", "GB, blank = member capacity")
+            ["SizeGbPlaceholder"] = ("GB，留空为成员容量", "GB, blank = member capacity"),
+            ["ApplyPreviewTitle"] = ("应用预览", "Apply preview"),
+            ["AutoCreatePartition"] = (
+                "创建磁盘时创建分区",
+                "Create a partition when creating the disk")
         };
 
     public LanguagePreference Language

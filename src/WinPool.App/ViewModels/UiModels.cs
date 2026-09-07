@@ -22,14 +22,15 @@ public sealed record ComparisonColumn(
     string Name,
     IReadOnlyList<DetailRow> Rows);
 
-public sealed record EditNavigationParameter(
+public sealed record EditorNavigationParameter(
     WorkspaceViewModel ViewModel,
     string? TargetStableId);
 
 public enum ShellPageKind
 {
     Manage,
-    Create,
+    StorageStructure,
+    DiskPartition,
     Test,
     Monitor,
     Development,

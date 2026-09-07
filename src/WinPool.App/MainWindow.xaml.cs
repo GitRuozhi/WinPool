@@ -178,12 +178,13 @@ public sealed partial class MainWindow : Window
         finally
         {
             ViewModel.CompleteWorkspacePrepare();
-            // The Edit page captures the active snapshot once at navigation.
-            // When the workspace finished loading after a startup navigation,
-            // re-create it so the page does not stay on the pre-init snapshot.
-            if (SelectedShellItem?.Page == ShellPageKind.Create)
+            // The editor pages capture the active snapshot once at
+            // navigation. When the workspace finished loading after a startup
+            // navigation, re-create the visible editor so the page does not
+            // stay on the pre-init snapshot.
+            if (SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
             {
-                SelectShellPage(ShellPageKind.Create);
+                SelectShellPage(SelectedShellItem.Page);
             }
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
@@ -300,7 +301,8 @@ public sealed partial class MainWindow : Window
 
         SelectShellPage(target switch
         {
-            ApplicationStartupTarget.Edit => ShellPageKind.Create,
+            ApplicationStartupTarget.Edit => ShellPageKind.StorageStructure,
+            ApplicationStartupTarget.DiskAndPartition => ShellPageKind.DiskPartition,
             ApplicationStartupTarget.Test => ShellPageKind.Test,
             ApplicationStartupTarget.Monitor => ShellPageKind.Monitor,
             ApplicationStartupTarget.Development => ShellPageKind.Development,
@@ -319,11 +321,14 @@ public sealed partial class MainWindow : Window
         SelectShellPage(ShellPageKind.Settings);
     }
 
-    public void ShowCreate() => ShowEdit(null);
-
-    public void ShowEdit(string? targetStableId)
+    public void ShowStorageStructure(string? targetStableId)
     {
-        SelectShellPage(ShellPageKind.Create, targetStableId);
+        SelectShellPage(ShellPageKind.StorageStructure, targetStableId);
+    }
+
+    public void ShowDiskPartition()
+    {
+        SelectShellPage(ShellPageKind.DiskPartition);
     }
 
     public void ApplyTheme(ThemePreference preference)
@@ -559,7 +564,8 @@ public sealed partial class MainWindow : Window
     private void BuildShellNavigation()
     {
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Manage, string.Empty, "\uE80F"));
-        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Create, string.Empty, "\uE710"));
+        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.StorageStructure, string.Empty, "\uE710"));
+        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.DiskPartition, string.Empty, "\uEDA2"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Test, string.Empty, "\uE768"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Monitor, string.Empty, "\uE9D9"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Development, string.Empty, "\uE943"));
@@ -572,11 +578,12 @@ public sealed partial class MainWindow : Window
         var shortcuts = new (VirtualKey Key, ShellPageKind Page)[]
         {
             (VirtualKey.Number1, ShellPageKind.Manage),
-            (VirtualKey.Number2, ShellPageKind.Create),
-            (VirtualKey.Number3, ShellPageKind.Test),
-            (VirtualKey.Number4, ShellPageKind.Monitor),
-            (VirtualKey.Number5, ShellPageKind.Development),
-            (VirtualKey.Number6, ShellPageKind.Settings)
+            (VirtualKey.Number2, ShellPageKind.StorageStructure),
+            (VirtualKey.Number3, ShellPageKind.DiskPartition),
+            (VirtualKey.Number4, ShellPageKind.Test),
+            (VirtualKey.Number5, ShellPageKind.Monitor),
+            (VirtualKey.Number6, ShellPageKind.Development),
+            (VirtualKey.Number7, ShellPageKind.Settings)
         };
 
         foreach (var (key, page) in shortcuts)
@@ -600,7 +607,8 @@ public sealed partial class MainWindow : Window
         var keys = new Dictionary<ShellPageKind, string>
         {
             [ShellPageKind.Manage] = "Manage",
-            [ShellPageKind.Create] = "Edit",
+            [ShellPageKind.StorageStructure] = "StorageStructure",
+            [ShellPageKind.DiskPartition] = "DiskPartition",
             [ShellPageKind.Test] = "Test",
             [ShellPageKind.Monitor] = "Monitor",
             [ShellPageKind.Development] = "Development",
@@ -613,7 +621,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void SelectShellPage(ShellPageKind page, string? editTargetStableId = null)
+    private void SelectShellPage(ShellPageKind page, string? editorTargetStableId = null)
     {
         var item = ShellNavigationItems.First(candidate => candidate.Page == page);
         _updatingNavigation = true;
@@ -647,10 +655,15 @@ public sealed partial class MainWindow : Window
 
         switch (page)
         {
-            case ShellPageKind.Create:
+            case ShellPageKind.StorageStructure:
                 RootFrame.Navigate(
-                    typeof(EditPage),
-                    new EditNavigationParameter(ViewModel, editTargetStableId));
+                    typeof(StorageStructurePage),
+                    new EditorNavigationParameter(ViewModel, editorTargetStableId));
+                break;
+            case ShellPageKind.DiskPartition:
+                RootFrame.Navigate(
+                    typeof(DiskPartitionPage),
+                    new EditorNavigationParameter(ViewModel, editorTargetStableId));
                 break;
             case ShellPageKind.Test:
                 RootFrame.Navigate(typeof(TestPage), ViewModel);

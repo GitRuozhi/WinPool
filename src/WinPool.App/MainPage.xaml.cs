@@ -442,45 +442,45 @@ public sealed partial class MainPage : Page
             ManageCommandKind.DeleteSimulation =>
                 Spec("删除模拟系统", "Delete simulation", "\uE74D", command, DeleteSimulationAsync),
             ManageCommandKind.RenamePool =>
-                Spec("重命名存储池", "Rename pool", "\uE8AC", command, NavigateEditAsync),
+                Spec("重命名存储池", "Rename pool", "\uE8AC", command, NavigateStructureAsync),
             ManageCommandKind.CreatePool =>
-                Spec("创建存储池", "Create pool", "\uE710", command, NavigateEditAsync),
+                Spec("创建存储池", "Create pool", "\uE710", command, NavigateStructureAsync),
             ManageCommandKind.EditPool =>
-                Spec("编辑存储池", "Edit pool", "\uE90F", command, NavigateEditAsync),
+                Spec("编辑存储池", "Edit pool", "\uE90F", command, NavigateStructureAsync),
             ManageCommandKind.OptimizePoolUsage =>
-                Spec("优化磁盘使用率", "Optimize disk usage", "\uE945", command, NavigateEditAsync),
+                Spec("优化磁盘使用率", "Optimize disk usage", "\uE945", command, NavigateStructureAsync),
             ManageCommandKind.RenameTier =>
-                Spec("重命名存储层", "Rename tier", "\uE8AC", command, NavigateEditAsync),
+                Spec("重命名存储层", "Rename tier", "\uE8AC", command, NavigateStructureAsync),
             ManageCommandKind.CreateTier =>
-                Spec("创建存储层", "Create tier", "\uE710", command, NavigateEditAsync),
+                Spec("创建存储层", "Create tier", "\uE710", command, NavigateStructureAsync),
             ManageCommandKind.EditTier =>
-                Spec("编辑存储层", "Edit tier", "\uE90F", command, NavigateEditAsync),
+                Spec("编辑存储层", "Edit tier", "\uE90F", command, NavigateStructureAsync),
             ManageCommandKind.RenameDisk =>
-                Spec("重命名磁盘", "Rename disk", "\uE8AC", command, NavigateEditAsync),
+                Spec("重命名磁盘", "Rename disk", "\uE8AC", command, NavigateStructureAsync),
             ManageCommandKind.InitializeDisk =>
-                Spec("初始化磁盘", "Initialize disk", "\uE9CE", command, NavigateEditAsync),
+                Spec("初始化磁盘", "Initialize disk", "\uE9CE", command, NavigatePartitionAsync),
             ManageCommandKind.CreatePartition =>
-                Spec("新建分区", "New partition", "\uE710", command, NavigateEditAsync),
+                Spec("新建分区", "New partition", "\uE710", command, NavigatePartitionAsync),
             ManageCommandKind.ConvertDiskStyle =>
-                Spec("转换到其他类型", "Convert to another style", "\uE8AB", command, NavigateEditAsync),
+                Spec("转换到其他类型", "Convert to another style", "\uE8AB", command, NavigatePartitionAsync),
             ManageCommandKind.OnlineDisk =>
-                Spec("联机", "Online", "\uEDA2", command, NavigateEditAsync),
+                Spec("联机", "Online", "\uEDA2", command, NavigatePartitionAsync),
             ManageCommandKind.OfflineDisk =>
-                Spec("脱机", "Offline", "\uEDA2", command, NavigateEditAsync),
+                Spec("脱机", "Offline", "\uEDA2", command, NavigatePartitionAsync),
             ManageCommandKind.ShowSystemProperties =>
                 Spec("系统属性对话框", "System properties dialog", "\uE90A", command, PropertiesAsync),
             ManageCommandKind.OpenExplorer =>
                 Spec("打开资源管理器", "Open in File Explorer", "\uE838", command, OpenPartitionAsync),
             ManageCommandKind.ChangeDriveLetter =>
-                Spec("修改盘符和路径", "Change drive letter and paths", "\uE8B7", command, NavigateEditAsync),
+                Spec("修改盘符和路径", "Change drive letter and paths", "\uE8B7", command, NavigatePartitionAsync),
             ManageCommandKind.RenamePartition =>
-                Spec("重命名分区", "Rename partition", "\uE8AC", command, NavigateEditAsync),
+                Spec("重命名分区", "Rename partition", "\uE8AC", command, NavigatePartitionAsync),
             ManageCommandKind.FormatPartition =>
-                Spec("格式化分区", "Format partition", "\uE9CE", command, NavigateEditAsync),
+                Spec("格式化分区", "Format partition", "\uE9CE", command, NavigatePartitionAsync),
             ManageCommandKind.EditPartition =>
-                Spec("编辑分区", "Edit partition", "\uE90F", command, NavigateEditAsync),
+                Spec("编辑分区", "Edit partition", "\uE90F", command, NavigatePartitionAsync),
             ManageCommandKind.DeletePartition =>
-                Spec("删除分区", "Delete partition", "\uE74D", command, NavigateEditAsync),
+                Spec("删除分区", "Delete partition", "\uE74D", command, NavigatePartitionAsync),
             ManageCommandKind.OptimizeDrive =>
                 Spec("优化驱动器", "Optimize drive", "\uE945", command, OptimizeDrivesAsync),
             ManageCommandKind.ExportCategory =>
@@ -660,10 +660,16 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private Task NavigateEditAsync()
+    private Task NavigateStructureAsync()
     {
-        ((MainWindow)App.Window).ShowEdit(
+        ((MainWindow)App.Window).ShowStorageStructure(
             ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey);
+        return Task.CompletedTask;
+    }
+
+    private Task NavigatePartitionAsync()
+    {
+        ((MainWindow)App.Window).ShowDiskPartition();
         return Task.CompletedTask;
     }
 

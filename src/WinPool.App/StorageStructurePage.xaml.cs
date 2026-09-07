@@ -7,29 +7,25 @@ using WinPool.Application;
 using WinPool.Domain;
 using SimulationOperationKind = WinPool.Application.SimulationEditKind;
 using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
-using SimulationOperationResult = WinPool.Application.SimulationEditReceipt;
 
 namespace WinPool_App;
 
-public sealed partial class EditPage : Page
+/// <summary>
+/// Storage structure editor (V0.47): the former Edit lower half. Shows the
+/// pool topology with a working draft, structure operations, and pool /
+/// virtual-disk / partition properties.
+/// </summary>
+public sealed partial class StorageStructurePage : EditorPageBase
 {
-    private WorkspaceViewModel ViewModel { get; set; } = null!;
-    private StorageSnapshot _working = StorageSnapshot.Empty("edit");
-    private string? _selectedDiskId;
-    private string? _selectedPartitionId;
-    private long? _selectedUnallocatedOffset;
-    private long? _selectedUnallocatedSize;
     private string? _selectedPoolId;
-    private string? _selectedLowerDiskId;
-    private TopologyEditInteraction _upperInteraction = null!;
-    private TopologyEditInteraction _lowerInteraction = null!;
+    private string? _selectedPoolDiskId;
+    private string? _selectedPoolVdiskId;
+    private TopologyEditInteraction _interaction = null!;
     private bool _formBuilt;
-    private bool _fillingForm;
+    private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
 
-    private readonly Button _executeButton = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly Button _dissolveButton = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly Button _evictButton = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly Button _confirmPropertiesButton = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly CheckBox _autoPartitionBox = new() { IsChecked = true, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly List<FrameworkElement> _autoPartitionRows = [];
     private readonly TextBox _poolNameBox = new();
     private readonly TextBox _virtualDiskNameBox = new();
     private readonly ComboBox _performanceResiliencyBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -64,7 +60,7 @@ public sealed partial class EditPage : Page
     };
     private readonly List<FrameworkElement> _scmRows = [];
 
-    public EditPage()
+    public StorageStructurePage()
     {
         InitializeComponent();
     }
@@ -72,10 +68,9 @@ public sealed partial class EditPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        if (e.Parameter is EditNavigationParameter parameter)
+        if (e.Parameter is EditorNavigationParameter parameter)
         {
             ViewModel = parameter.ViewModel;
-            _selectedDiskId = ResolveOsDiskId(parameter.TargetStableId);
             _selectedPoolId = ResolvePoolId(parameter.TargetStableId);
         }
         else
@@ -84,10 +79,9 @@ public sealed partial class EditPage : Page
         }
 
         _working = ViewModel.ActiveSnapshot;
-        _upperInteraction = new TopologyEditInteraction(IsUpperSelected, OnUpperSelected, false);
-        _lowerInteraction = new TopologyEditInteraction(
-            IsLowerSelected,
-            OnLowerSelected,
+        _interaction = new TopologyEditInteraction(
+            IsTopologyNodeSelected,
+            OnTopologySelected,
             ViewModel.IsUsingSimulatedInventory,
             OnDiskDropped);
         LocalizeChrome();
@@ -97,13 +91,7 @@ public sealed partial class EditPage : Page
 
     private void LocalizeChrome()
     {
-        ExtendButton.Content = ViewModel.Localization["ExtendVolume"];
-        ShrinkButton.Content = ViewModel.Localization["ShrinkVolume"];
-        DeletePartitionButton.Content = ViewModel.Localization["DeleteVolume"];
-        FormatButton.Content = ViewModel.Localization["Format"];
-        NewPartitionButton.Content = ViewModel.Localization["NewPartition"];
-        InitializeButton.Content = ViewModel.Localization["InitializeDisk"];
-        OfflineButton.Content = Text("脱机 / 联机", "Offline / Online");
+        StructureOperationsTitle.Text = ViewModel.Localization["StructureOperationsSection"];
         _researchNote.Text = ViewModel.Localization["ResearchNote64k"];
         _multiVdiskWarning.Text = ViewModel.Localization["MultipleVirtualDiskWarning"];
         _performanceSizeBox.PlaceholderText = ViewModel.Localization["SizeGbPlaceholder"];
@@ -133,20 +121,12 @@ public sealed partial class EditPage : Page
         _performanceCopiesBox.LostFocus += (_, _) => UpdateLinkedFields();
         _capacityFailuresBox.LostFocus += (_, _) => UpdateLinkedFields();
         _scmCopiesBox.LostFocus += (_, _) => UpdateLinkedFields();
-        _executeButton.Click += Execute_Click;
-        _dissolveButton.Click += Dissolve_Click;
-        _evictButton.Click += Evict_Click;
-        _confirmPropertiesButton.Click += ConfirmProperties_Click;
 
         var row = 0;
-        AddSectionHeader(row++, "StructureSection");
-        AddFormRow(row++, string.Empty, _executeButton);
-        AddFormRow(row++, string.Empty, _dissolveButton);
-        AddFormRow(row++, string.Empty, _evictButton);
         AddSectionHeader(row++, "PoolPropertiesSection");
-        AddFormRow(row++, string.Empty, _confirmPropertiesButton);
         AddFormRow(row++, "PoolName", _poolNameBox);
         AddFormRow(row++, "VirtualDiskName", _virtualDiskNameBox);
+        AddAutoPartitionRow(row++, "AutoCreatePartition", _autoPartitionBox);
         AddFormRow(row++, "PerformanceResiliency", _performanceResiliencyBox);
         AddFormRow(row++, "PerformanceInterleave", _performanceInterleaveBox);
         AddFormRow(row++, "PerformanceSize", _performanceSizeBox);
@@ -185,6 +165,13 @@ public sealed partial class EditPage : Page
         var label = AddFormRow(row, key, value);
         _scmRows.Add(label);
         _scmRows.Add(value);
+    }
+
+    private void AddAutoPartitionRow(int row, string key, FrameworkElement value)
+    {
+        var label = AddFormRow(row, key, value);
+        _autoPartitionRows.Add(label);
+        _autoPartitionRows.Add(value);
     }
 
     private void AddSectionHeader(int row, string key)
@@ -230,25 +217,6 @@ public sealed partial class EditPage : Page
         box.SelectedIndex = selected;
     }
 
-    private string? ResolveOsDiskId(string? stableId)
-    {
-        if (stableId is null)
-        {
-            return null;
-        }
-
-        var snapshot = ViewModel.ActiveSnapshot;
-        if (snapshot.OsDisks.Any(x => x.StableId == stableId))
-        {
-            return stableId;
-        }
-
-        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == stableId);
-        return partition?.OsDiskStableId
-            ?? snapshot.OsDisks.FirstOrDefault(x =>
-                x.PhysicalDiskStableId == stableId || x.VirtualDiskStableId == stableId)?.StableId;
-    }
-
     private string? ResolvePoolId(string? stableId)
     {
         if (stableId is null)
@@ -268,57 +236,23 @@ public sealed partial class EditPage : Page
 
     private void RefreshAll()
     {
-        RefreshUpper();
-        RefreshLower();
+        RefreshTopology();
         FillPoolForm();
         UpdateButtonState();
     }
 
-    private bool IsUpperSelected(TopologyNodeViewModel node) =>
-        node.Unit.StableId == _selectedDiskId
-        || node.Unit.StableId == _selectedPartitionId
-        || (EditWorkspace.IsUnallocated(node.Unit.StableId)
-            && EditWorkspace.TryParseUnallocated(node.Unit.StableId, out var disk, out var offset, out _)
-            && disk == _selectedDiskId
-            && offset == _selectedUnallocatedOffset);
-
-    private bool IsLowerSelected(TopologyNodeViewModel node) =>
-        node.Unit.Kind == StorageUnitKind.PhysicalDisk
-            ? node.Unit.StableId == _selectedLowerDiskId
-            : node.Unit.Kind == StorageUnitKind.StoragePool && node.Unit.StableId == _selectedPoolId
-                && string.IsNullOrEmpty(_selectedLowerDiskId);
-
-    private void OnUpperSelected(TopologyNodeViewModel node)
-    {
-        if (node.Unit.Kind == StorageUnitKind.OsDisk)
+    private bool IsTopologyNodeSelected(TopologyNodeViewModel node) =>
+        node.Unit.Kind switch
         {
-            _selectedDiskId = node.Unit.StableId;
-            _selectedPartitionId = null;
-            _selectedUnallocatedOffset = null;
-            _selectedUnallocatedSize = null;
-        }
-        else if (EditWorkspace.IsUnallocated(node.Unit.StableId)
-                 && EditWorkspace.TryParseUnallocated(node.Unit.StableId, out var disk, out var offset, out var size))
-        {
-            _selectedDiskId = disk;
-            _selectedPartitionId = null;
-            _selectedUnallocatedOffset = offset;
-            _selectedUnallocatedSize = size;
-        }
-        else if (node.Unit.Kind == StorageUnitKind.Partition)
-        {
-            _selectedPartitionId = node.Unit.StableId;
-            _selectedUnallocatedOffset = null;
-            _selectedUnallocatedSize = null;
-            var partition = _working.Partitions.FirstOrDefault(item => item.StableId == node.Unit.StableId);
-            _selectedDiskId = partition?.OsDiskStableId ?? node.Unit.ParentStableId;
-        }
+            StorageUnitKind.PhysicalDisk => node.Unit.StableId == _selectedPoolDiskId,
+            StorageUnitKind.VirtualDisk => node.Unit.StableId == _selectedPoolVdiskId,
+            StorageUnitKind.StoragePool => node.Unit.StableId == _selectedPoolId
+                && string.IsNullOrEmpty(_selectedPoolDiskId)
+                && string.IsNullOrEmpty(_selectedPoolVdiskId),
+            _ => false
+        };
 
-        RefreshUpper();
-        UpdateButtonState();
-    }
-
-    private void OnLowerSelected(TopologyNodeViewModel node)
+    private void OnTopologySelected(TopologyNodeViewModel node)
     {
         if (EditWorkspace.IsPlus(node.Unit.StableId))
         {
@@ -326,8 +260,9 @@ public sealed partial class EditPage : Page
             if (existingDraft is not null)
             {
                 _selectedPoolId = existingDraft.StableId;
-                _selectedLowerDiskId = null;
-                RefreshLower();
+                _selectedPoolDiskId = null;
+                _selectedPoolVdiskId = null;
+                RefreshTopology();
                 FillPoolForm();
                 UpdateButtonState();
                 return;
@@ -335,28 +270,40 @@ public sealed partial class EditPage : Page
 
             _working = EditWorkspace.InsertDraftPool(_working, NextPoolName());
             _selectedPoolId = _working.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
-            _selectedLowerDiskId = null;
-            RefreshLower();
+            _selectedPoolDiskId = null;
+            _selectedPoolVdiskId = null;
+            RefreshTopology();
             FillPoolForm();
             UpdateButtonState();
             return;
         }
 
-        if (node.Unit.Kind == StorageUnitKind.PhysicalDisk)
+        switch (node.Unit.Kind)
         {
-            _selectedLowerDiskId = node.Unit.StableId;
-            _selectedPoolId = node.Unit.ParentStableId
-                ?? _working.PhysicalDisks.FirstOrDefault(item => item.StableId == node.Unit.StableId)?.PoolStableId;
-        }
-        else
-        {
-            _selectedLowerDiskId = null;
-            _selectedPoolId = node.Unit.Kind == StorageUnitKind.StoragePool
-                ? node.Unit.StableId
-                : node.Unit.ParentStableId;
+            case StorageUnitKind.PhysicalDisk:
+                _selectedPoolDiskId = node.Unit.StableId;
+                _selectedPoolVdiskId = null;
+                _selectedPoolId = node.Unit.ParentStableId
+                    ?? _working.PhysicalDisks.FirstOrDefault(item =>
+                        item.StableId == node.Unit.StableId)?.PoolStableId;
+                break;
+            case StorageUnitKind.VirtualDisk:
+                _selectedPoolVdiskId = node.Unit.StableId;
+                _selectedPoolDiskId = null;
+                _selectedPoolId = node.Unit.ParentStableId
+                    ?? _working.VirtualDisks.FirstOrDefault(item =>
+                        item.StableId == node.Unit.StableId)?.PoolStableId;
+                break;
+            default:
+                _selectedPoolVdiskId = null;
+                _selectedPoolDiskId = null;
+                _selectedPoolId = node.Unit.Kind == StorageUnitKind.StoragePool
+                    ? node.Unit.StableId
+                    : node.Unit.ParentStableId;
+                break;
         }
 
-        RefreshLower();
+        RefreshTopology();
         FillPoolForm();
         UpdateButtonState();
     }
@@ -423,66 +370,24 @@ public sealed partial class EditPage : Page
             return;
         }
 
-        RefreshLower();
+        RefreshTopology();
         FillPoolForm();
         UpdateButtonState();
     }
 
-    private long UnallocatedIgnoreBytes =>
-        Math.Max(0, ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
-
-    private const double MinTopologyWidth = 320;
-
-    private const double TopologyWidthMargin = 20;
-
-    private double _lowerViewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
-
-    private double _upperViewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
-
-    private void UpperScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
-        UpperTopologyControl.Width = width;
-        _upperViewportWidth = width;
-        if (UpperTopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
+        TopologyControl.Width = width;
+        _viewportWidth = width;
+        if (TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
             && roots.Count > 0)
         {
             roots[0].SetSurfaceViewportWidth(width);
         }
     }
 
-    private void LowerScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
-        LowerTopologyControl.Width = width;
-        _lowerViewportWidth = width;
-        if (LowerTopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
-            && roots.Count > 0)
-        {
-            roots[0].SetSurfaceViewportWidth(width);
-        }
-    }
-
-    private void RefreshUpper()
-    {
-        var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, UnallocatedIgnoreBytes);
-        var rootViewModel = new TopologyNodeViewModel(
-            EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId),
-            ViewModel,
-            _working,
-            _upperInteraction,
-            isLayoutRoot: true);
-        rootViewModel.SetSurfaceViewportWidth(_upperViewportWidth);
-        UpperTopologyControl.ItemsSource = new[] { rootViewModel };
-        var selected = _working.Partitions.FirstOrDefault(item => item.StableId == _selectedPartitionId);
-        SelectedPartitionInfo.Text = selected is null
-            ? _selectedUnallocatedOffset is null
-                ? string.Empty
-                : $"{ViewModel.Localization["Unallocated"]} · {TopologyProjector.FormatBytes(_selectedUnallocatedSize ?? 0)}"
-            : $"{ViewModel.PartitionTypeName(selected.Type)} · {(string.IsNullOrWhiteSpace(selected.FileSystem) ? "RAW" : selected.FileSystem)} · {TopologyProjector.FormatBytes(selected.Size)}";
-    }
-
-    private void RefreshLower()
+    private void RefreshTopology()
     {
         var root = EditWorkspace.ProjectPoolWorkspaceRoot(
             _working,
@@ -492,11 +397,11 @@ public sealed partial class EditPage : Page
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
             ViewModel,
             _working,
-            _lowerInteraction,
+            _interaction,
             isLayoutRoot: true);
-        rootViewModel.SetSurfaceViewportWidth(_lowerViewportWidth);
+        rootViewModel.SetSurfaceViewportWidth(_viewportWidth);
         ApplyPendingModificationStates(rootViewModel);
-        LowerTopologyControl.ItemsSource = new[] { rootViewModel };
+        TopologyControl.ItemsSource = new[] { rootViewModel };
     }
 
     private void ApplyPendingModificationStates(TopologyNodeViewModel root)
@@ -525,7 +430,6 @@ public sealed partial class EditPage : Page
 
     private void FillPoolForm()
     {
-        _fillingForm = true;
         PoolFormGrid.Visibility = Visibility.Visible;
         var pool = SelectedPool();
         var showScm = EditWorkspace.HasScmDisk(_working);
@@ -534,10 +438,15 @@ public sealed partial class EditPage : Page
             element.Visibility = showScm ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        var isCreateContext = pool is null || EditWorkspace.IsDraftPool(pool.StableId);
+        foreach (var element in _autoPartitionRows)
+        {
+            element.Visibility = isCreateContext ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         if (pool is null || pool.IsPrimordial)
         {
             FillRecommendedDefaults();
-            _fillingForm = false;
             return;
         }
 
@@ -591,13 +500,13 @@ public sealed partial class EditPage : Page
         }
 
         UpdateLinkedFields();
-        _fillingForm = false;
     }
 
     private void FillRecommendedDefaults()
     {
         _poolNameBox.Text = NextPoolName();
         _virtualDiskNameBox.Text = _poolNameBox.Text;
+        _autoPartitionBox.IsChecked = true;
         SetResiliency(_performanceResiliencyBox, "Mirror");
         SetResiliency(_capacityResiliencyBox, "Parity");
         SetResiliency(_scmResiliencyBox, "Mirror");
@@ -660,14 +569,6 @@ public sealed partial class EditPage : Page
 
     private void UpdateLinkedFields()
     {
-        if (_fillingForm)
-        {
-            LinkResiliency(_performanceResiliencyBox, _performanceCopiesBox, _performanceFailuresBox, copiesMaster: true);
-            LinkResiliency(_capacityResiliencyBox, _capacityCopiesBox, _capacityFailuresBox, copiesMaster: false);
-            LinkResiliency(_scmResiliencyBox, _scmCopiesBox, _scmFailuresBox, copiesMaster: true);
-            return;
-        }
-
         LinkResiliency(_performanceResiliencyBox, _performanceCopiesBox, _performanceFailuresBox, copiesMaster: true);
         LinkResiliency(_capacityResiliencyBox, _capacityCopiesBox, _capacityFailuresBox, copiesMaster: false);
         LinkResiliency(_scmResiliencyBox, _scmCopiesBox, _scmFailuresBox, copiesMaster: true);
@@ -711,44 +612,46 @@ public sealed partial class EditPage : Page
     private void UpdateButtonState()
     {
         var simulated = ViewModel.IsUsingSimulatedInventory;
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        var primary = partition?.Type == "Primary" && partition is { IsBoot: false, IsSystem: false };
-        var disk = _working.OsDisks.FirstOrDefault(x => x.StableId == _selectedDiskId);
-        var diskEditable = simulated && disk is { IsBoot: false, IsSystem: false };
-        ExtendButton.IsEnabled = simulated && primary == true;
-        ShrinkButton.IsEnabled = simulated && primary == true;
-        DeletePartitionButton.IsEnabled = simulated && primary == true;
-        FormatButton.IsEnabled = simulated && primary == true;
-        NewPartitionButton.IsEnabled = simulated && disk is { IsOffline: false };
-        InitializeButton.IsEnabled = diskEditable;
-        OfflineButton.IsEnabled = simulated && disk is not null;
-
         var pool = SelectedPool();
         var multi = pool is not null && EditWorkspace.HasMultipleVirtualDisks(_working, pool.StableId);
         _multiVdiskWarning.Visibility = multi ? Visibility.Visible : Visibility.Collapsed;
         var isDraft = pool is not null && EditWorkspace.IsDraftPool(pool.StableId);
-        _executeButton.Content = isDraft
+        ExecuteButton.Content = isDraft
             ? ViewModel.Localization["CreateNewPool"]
             : ViewModel.Localization["ExecuteModify"];
-        _dissolveButton.Content = ViewModel.Localization["DissolvePool"];
-        _evictButton.Content = ViewModel.Localization["EvictDisk"];
-        _confirmPropertiesButton.Content = ViewModel.Localization["ConfirmPoolProperties"];
-        _executeButton.IsEnabled = simulated
+        DissolveButton.Content = ViewModel.Localization["DissolvePool"];
+        EvictButton.Content = ViewModel.Localization["EvictDisk"];
+        DeleteVdiskButton.Content = ViewModel.Localization["DeleteVirtualDisk"];
+        ExecuteButton.IsEnabled = simulated
             && pool is { IsPrimordial: false }
             && !multi
             && (!isDraft || pool.MemberPhysicalDiskIds.Count > 0);
-        _dissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false };
-        var selectedDisk = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedLowerDiskId);
-        _evictButton.IsEnabled = simulated
+        DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false };
+        var selectedVdisk = _working.VirtualDisks.FirstOrDefault(item => item.StableId == _selectedPoolVdiskId);
+        DeleteVdiskButton.IsEnabled = simulated
+            && selectedVdisk is not null
+            && pool is { IsPrimordial: false }
+            && EditWorkspace.HasMultipleVirtualDisks(_working, pool.StableId)
+            && string.Equals(
+                selectedVdisk.PoolStableId,
+                pool.StableId,
+                StringComparison.OrdinalIgnoreCase);
+        var selectedDisk = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedPoolDiskId);
+        EvictButton.IsEnabled = simulated
             && pool is { IsPrimordial: false }
             && selectedDisk is not null
             && string.Equals(selectedDisk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
             && EditWorkspace.DiskIsAssignedToTier(_working, selectedDisk.StableId);
-        _confirmPropertiesButton.IsEnabled = simulated
-            && pool is { IsPrimordial: false }
-            && !isDraft
-            && !multi;
         var formEnabled = simulated && pool is { IsPrimordial: false } && !multi;
+        if (_formBuilt)
+        {
+            var isCreateContext = pool is null || EditWorkspace.IsDraftPool(pool.StableId);
+            foreach (var element in _autoPartitionRows)
+            {
+                element.Visibility = isCreateContext ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
         foreach (var control in new Control[]
                  {
                      _poolNameBox, _virtualDiskNameBox, _performanceResiliencyBox, _performanceInterleaveBox,
@@ -775,10 +678,250 @@ public sealed partial class EditPage : Page
         return $"Pool{index:00}";
     }
 
+    /// <summary>
+    /// The research defaults are changeable, but 256K interleave and ReFS are
+    /// outside the tested recommendation and are never applied silently
+    /// (V0.47 design §8).
+    /// </summary>
+    private async Task<bool> ConfirmUnrecommendedAsync()
+    {
+        if (new[] { _performanceInterleaveBox, _capacityInterleaveBox, _scmInterleaveBox }
+                .Any(box => (box.SelectedItem as string) == "256K")
+            && !await ConfirmAsync(
+                Text("256K 交织警告", "256K interleave warning"),
+                Text(
+                    "256K 交织不在当前测试推荐中。当前测试推荐为 64K 交织 + 64K NTFS 簇。确定继续？",
+                    "256K interleave is outside the tested recommendation (64K interleave + 64K NTFS cluster). Continue anyway?")))
+        {
+            return false;
+        }
+
+        if (string.Equals(_fileSystemBox.SelectedItem as string, "ReFS", StringComparison.OrdinalIgnoreCase)
+            && !await ConfirmAsync(
+                Text("ReFS 提示", "ReFS notice"),
+                Text(
+                    "ReFS 没有与 NTFS 64K 同等的长期测试证据。确定继续？",
+                    "ReFS has no long-run evidence equivalent to NTFS 64K. Continue anyway?")))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Human-language apply preview (V0.47 design §5.3, §7): the single
+    /// Apply shows the user a step list in the UI language and never dumps raw
+    /// commands on the structure page.
+    /// </summary>
+    private async Task<bool> ConfirmApplyPreviewAsync(StoragePoolInfo pool, bool isDraft)
+    {
+        var steps = BuildApplyPreviewSteps(pool, isDraft);
+        if (steps.Count == 0)
+        {
+            return false;
+        }
+
+        var lines = string.Join("\n", steps.Select(step => "• " + step));
+        return await ConfirmAsync(ViewModel.Localization["ApplyPreviewTitle"], lines);
+    }
+
+    private IReadOnlyList<string> BuildApplyPreviewSteps(StoragePoolInfo pool, bool isDraft)
+    {
+        var steps = new List<string>();
+        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        var committed = ViewModel.ActiveSnapshot;
+        var poolName = _poolNameBox.Text.Trim();
+
+        if (isDraft)
+        {
+            var memberCount = pool.MemberPhysicalDiskIds.Count;
+            steps.Add(zh
+                ? $"创建存储池“{poolName}”，加入 {memberCount} 个物理磁盘。"
+                : $"Create storage pool \"{poolName}\" and join {memberCount} physical disk(s).");
+            foreach (var (media, resiliency, interleave) in TierPreviewLines(pool))
+            {
+                var tierName = zh
+                    ? media switch
+                    {
+                        "SSD" => "SSD 性能层",
+                        "HDD" => "HDD 容量层",
+                        _ => "SCM 专用层"
+                    }
+                    : media switch
+                    {
+                        "SSD" => "SSD performance tier",
+                        "HDD" => "HDD capacity tier",
+                        _ => "SCM dedicated tier"
+                    };
+                steps.Add(zh
+                    ? $"{tierName}：{ResiliencyName(resiliency)}，交织 {interleave}。"
+                    : $"{tierName}: {resiliency}, {interleave} interleave.");
+            }
+
+            var draftVirtualName = _virtualDiskNameBox.Text.Trim();
+            steps.Add(zh
+                ? $"在该池上创建虚拟磁盘“{draftVirtualName}”。"
+                : $"Create virtual disk \"{draftVirtualName}\" on the pool.");
+            var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
+            if (_autoPartitionBox.IsChecked == true)
+            {
+                steps.Add(zh
+                    ? $"创建 {fileSystem} 用户分区并格式化（簇 {_clusterBox.SelectedItem}）。"
+                    : $"Create and format a {fileSystem} user partition ({_clusterBox.SelectedItem} cluster).");
+            }
+            else
+            {
+                steps.Add(zh
+                    ? "虚拟磁盘保持未初始化（RAW），稍后在磁盘/分区页初始化。"
+                    : "Leave the virtual disk RAW; initialize it on the Disk/partition page.");
+            }
+
+            return steps;
+        }
+
+        foreach (var disk in _working.PhysicalDisks)
+        {
+            if (EditWorkspace.IsDraftPool(disk.PoolStableId))
+            {
+                continue;
+            }
+
+            var name = disk.FriendlyName;
+            var committedDisk = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.StableId);
+            var joined = string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase);
+            var wasInPool = committedDisk is not null
+                && string.Equals(committedDisk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase);
+            if (joined && !wasInPool)
+            {
+                steps.Add(zh ? $"将磁盘“{name}”加入该池。" : $"Add disk \"{name}\" to this pool.");
+                continue;
+            }
+
+            if (wasInPool && !joined)
+            {
+                steps.Add(zh ? $"将磁盘“{name}”移出该池。" : $"Remove disk \"{name}\" from this pool.");
+                continue;
+            }
+
+            var assigned = EditWorkspace.DiskIsAssignedToTier(_working, disk.StableId);
+            var wasAssigned = committedDisk is not null
+                && EditWorkspace.DiskIsAssignedToTier(committed, disk.StableId);
+            if (wasInPool && wasAssigned && !assigned)
+            {
+                steps.Add(zh ? $"将磁盘“{name}”退层，保留在池的未分配区域。" : $"Remove disk \"{name}\" from its tier, keeping it unallocated in the pool.");
+            }
+            else if (wasInPool && !wasAssigned && assigned)
+            {
+                steps.Add(zh ? $"将磁盘“{name}”重新加入匹配层。" : $"Reassign disk \"{name}\" to its matching tier.");
+            }
+        }
+
+        var vdisk = _working.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool.StableId);
+        var committedVdisk = committed.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool.StableId);
+        if (!string.Equals(poolName, pool.FriendlyName, StringComparison.OrdinalIgnoreCase))
+        {
+            steps.Add(zh
+                ? $"将存储池重命名为“{poolName}”。"
+                : $"Rename the pool to \"{poolName}\".");
+        }
+
+        var virtualName = _virtualDiskNameBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(virtualName)
+            && (committedVdisk is null
+                || !string.Equals(virtualName, committedVdisk.FriendlyName, StringComparison.OrdinalIgnoreCase)))
+        {
+            steps.Add(zh
+                ? $"将虚拟磁盘重命名为“{virtualName}”。"
+                : $"Rename the virtual disk to \"{virtualName}\".");
+        }
+
+        if (FormRebuildsPool(pool))
+        {
+            steps.Add(zh
+                ? "重建存储层参数（冗余、交织、容量、列数）。"
+                : "Rebuild tier parameters (resiliency, interleave, capacity, columns).");
+            if (vdisk is not null && !string.IsNullOrWhiteSpace(vdisk.FriendlyName))
+            {
+                var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
+                steps.Add(zh
+                    ? $"将虚拟磁盘“{vdisk.FriendlyName}”的分区格式化为 {fileSystem}（簇 {_clusterBox.SelectedItem}）。"
+                    : $"Format the partition on \"{vdisk.FriendlyName}\" as {fileSystem} ({_clusterBox.SelectedItem} cluster).");
+            }
+        }
+
+        return steps;
+    }
+
+    private IEnumerable<(string Media, string Resiliency, string Interleave)> TierPreviewLines(StoragePoolInfo pool)
+    {
+        foreach (var (media, resiliencyBox, interleaveBox) in new[]
+                 {
+                     ("SSD", _performanceResiliencyBox, _performanceInterleaveBox),
+                     ("HDD", _capacityResiliencyBox, _capacityInterleaveBox),
+                     ("SCM", _scmResiliencyBox, _scmInterleaveBox)
+                 })
+        {
+            var memberCount = pool.MemberPhysicalDiskIds.Count(id =>
+            {
+                var disk = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == id);
+                return disk is not null && EditWorkspace.NormalizeMedia(disk.MediaType) == media;
+            });
+            if (memberCount == 0)
+            {
+                continue;
+            }
+
+            yield return (media, resiliencyBox.SelectedItem as string ?? "Mirror",
+                interleaveBox.SelectedItem as string ?? "64K");
+        }
+    }
+
+    private string ResiliencyName(string resiliency) =>
+        resiliency switch
+        {
+            "Simple" => "无冗余 (Simple)",
+            "Mirror" => "镜像 (Mirror)",
+            "Parity" => "奇偶校验 (Parity)",
+            _ => resiliency
+        };
+
     private async void Execute_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
         if (pool is null || !ViewModel.IsUsingSimulatedInventory)
+        {
+            return;
+        }
+
+        var isDraftPool = EditWorkspace.IsDraftPool(pool.StableId);
+        var appliedUpdate = false;
+        var hasData = false;
+        var formChanged = false;
+        if (!isDraftPool)
+        {
+            hasData = EditWorkspace.PoolHoldsStoredData(_working, pool.StableId);
+            if (hasData && FormRebuildsPool(pool))
+            {
+                await ShowMessageAsync(
+                    ViewModel.Localization["RebuildBlockedTitle"],
+                    ViewModel.Localization["RebuildBlockedMessage"]);
+                return;
+            }
+
+            formChanged = PoolFormHasAnyChange(pool);
+            // A data-free pool may be rebuilt from the property form; never
+            // apply an unrecommended 256K or ReFS choice to that rebuild
+            // silently.
+            if (!hasData && formChanged && !await ConfirmUnrecommendedAsync())
+            {
+                return;
+            }
+        }
+
+        // One apply, one human-language preview: show what will change before
+        // anything is persisted to the simulation document.
+        if (!await ConfirmApplyPreviewAsync(pool, isDraftPool))
         {
             return;
         }
@@ -844,7 +987,7 @@ public sealed partial class EditPage : Page
             }
         }
 
-        if (EditWorkspace.IsDraftPool(pool.StableId))
+        if (isDraftPool)
         {
             if (await ApplyAsync(
                     BuildPoolRequest(SimulationOperationKind.CreateTieredPool, "primordial", pool)) is null)
@@ -852,11 +995,32 @@ public sealed partial class EditPage : Page
                 return;
             }
         }
+        else if (formChanged)
+        {
+            // One apply covers structure and parameters: property edits on an
+            // existing pool are submitted together with the membership
+            // changes already applied above.
+            var pending = _working;
+            var request = hasData
+                ? new SimulationOperationRequest(
+                    SimulationOperationKind.UpdateStoragePool,
+                    pool.StableId,
+                    Name: _poolNameBox.Text.Trim(),
+                    VirtualDiskName: _virtualDiskNameBox.Text.Trim())
+                : BuildPoolRequest(SimulationOperationKind.UpdateStoragePool, pool.StableId, pool);
+            if (await ApplyAsync(request) is null)
+            {
+                return;
+            }
+
+            _working = EditWorkspace.RestoreWorkingMembership(ViewModel.ActiveSnapshot, pending);
+            appliedUpdate = true;
+        }
 
         var leftover = _working.StoragePools
             .Where(item => EditWorkspace.IsDraftPool(item.StableId) && item.StableId != pool.StableId)
             .ToArray();
-        var preserveForm = !EditWorkspace.IsDraftPool(pool.StableId);
+        var preserveForm = !isDraftPool;
         _working = ViewModel.ActiveSnapshot;
         foreach (var draft in leftover)
         {
@@ -888,14 +1052,92 @@ public sealed partial class EditPage : Page
             : pool.StableId;
         if (preserveForm)
         {
-            RefreshUpper();
-            RefreshLower();
-            UpdateButtonState();
+            if (appliedUpdate)
+            {
+                RefreshAll();
+            }
+            else
+            {
+                RefreshTopology();
+                UpdateButtonState();
+            }
         }
         else
         {
             RefreshAll();
         }
+    }
+
+    private bool PoolFormHasAnyChange(StoragePoolInfo pool)
+    {
+        var vdisk = _working.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool.StableId);
+        if (!string.Equals(
+                _poolNameBox.Text.Trim(),
+                pool.FriendlyName.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var currentVirtualName = vdisk?.FriendlyName ?? pool.FriendlyName;
+        if (!string.Equals(
+                _virtualDiskNameBox.Text.Trim(),
+                currentVirtualName.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return FormRebuildsPool(pool);
+    }
+
+    private async void DeleteVdisk_Click(object sender, RoutedEventArgs e)
+    {
+        var vdisk = _working.VirtualDisks.FirstOrDefault(item => item.StableId == _selectedPoolVdiskId);
+        var pool = vdisk is null
+            ? null
+            : _working.StoragePools.FirstOrDefault(item => item.StableId == vdisk.PoolStableId);
+        if (vdisk is null
+            || pool is null
+            || pool.IsPrimordial
+            || !EditWorkspace.HasMultipleVirtualDisks(_working, pool.StableId)
+            || !ViewModel.IsUsingSimulatedInventory)
+        {
+            return;
+        }
+
+        var holdsData = EditWorkspace.DiskHoldsStoredData(_working, vdisk.StableId, isVirtualDisk: true);
+        if (holdsData)
+        {
+            if (!await ConfirmAsync(
+                    Text("删除虚拟磁盘", "Delete virtual disk"),
+                    Text(
+                        "该虚拟磁盘上有已使用的数据。删除会移除该虚拟磁盘及其卷。1.0 界面不会再提供创建第二个虚拟磁盘的操作。确定继续？",
+                        "This virtual disk holds used data. Deleting removes the virtual disk and its volume, and 1.0 will not create a second virtual disk again. Continue anyway?")))
+            {
+                return;
+            }
+        }
+        else if (!await ConfirmAsync(
+                     Text("删除虚拟磁盘", "Delete virtual disk"),
+                     Text(
+                         "从该池删除此虚拟磁盘及其卷？池中其它虚拟磁盘不受影响。",
+                         "Remove this virtual disk and its volumes from the pool? Other virtual disks in the pool are not affected.")))
+        {
+            return;
+        }
+
+        _selectedPoolVdiskId = null;
+        if (await ApplyAsync(new SimulationOperationRequest(
+                SimulationOperationKind.DeleteVirtualDisk,
+                vdisk.StableId)) is null)
+        {
+            return;
+        }
+
+        _working = ViewModel.ActiveSnapshot;
+        _selectedPoolId = pool.StableId;
+        RefreshAll();
     }
 
     private SimulationOperationRequest BuildPoolRequest(
@@ -925,12 +1167,13 @@ public sealed partial class EditPage : Page
             CapacityToleratedFailures: ParseInt(_capacityFailuresBox.Text),
             ScmResiliency: _scmResiliencyBox.SelectedItem as string,
             ScmInterleaveBytes: ParseSize(_scmInterleaveBox.SelectedItem as string ?? "64K"),
-            ScmDataCopies: ParseInt(_scmCopiesBox.Text));
+            ScmDataCopies: ParseInt(_scmCopiesBox.Text),
+            CreatePartition: _autoPartitionBox.IsChecked);
     }
 
     private async void Evict_Click(object sender, RoutedEventArgs e)
     {
-        var disk = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedLowerDiskId);
+        var disk = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedPoolDiskId);
         if (disk is null || !ViewModel.IsUsingSimulatedInventory)
         {
             return;
@@ -975,46 +1218,9 @@ public sealed partial class EditPage : Page
             return;
         }
 
-        RefreshLower();
+        RefreshTopology();
         FillPoolForm();
         UpdateButtonState();
-    }
-
-    private async void ConfirmProperties_Click(object sender, RoutedEventArgs e)
-    {
-        var pool = SelectedPool();
-        if (pool is null
-            || pool.IsPrimordial
-            || EditWorkspace.IsDraftPool(pool.StableId)
-            || !ViewModel.IsUsingSimulatedInventory)
-        {
-            return;
-        }
-
-        var hasData = EditWorkspace.PoolHoldsStoredData(_working, pool.StableId);
-        if (hasData && FormRebuildsPool(pool))
-        {
-            await ShowMessageAsync(
-                ViewModel.Localization["RebuildBlockedTitle"],
-                ViewModel.Localization["RebuildBlockedMessage"]);
-            return;
-        }
-
-        var request = hasData
-            ? new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
-                pool.StableId,
-                Name: _poolNameBox.Text.Trim(),
-                VirtualDiskName: _virtualDiskNameBox.Text.Trim())
-            : BuildPoolRequest(SimulationOperationKind.UpdateStoragePool, pool.StableId, pool);
-        var pending = _working;
-        if (await ApplyAsync(request) is null)
-        {
-            return;
-        }
-
-        _working = EditWorkspace.RestoreWorkingMembership(ViewModel.ActiveSnapshot, pending);
-        RefreshAll();
     }
 
     private bool FormRebuildsPool(StoragePoolInfo pool)
@@ -1069,7 +1275,8 @@ public sealed partial class EditPage : Page
         {
             _working = EditWorkspace.DiscardDraftPool(_working, pool.StableId);
             _selectedPoolId = null;
-            _selectedLowerDiskId = null;
+            _selectedPoolDiskId = null;
+            _selectedPoolVdiskId = null;
             RefreshAll();
             return;
         }
@@ -1090,365 +1297,8 @@ public sealed partial class EditPage : Page
 
         _working = ViewModel.ActiveSnapshot;
         _selectedPoolId = null;
-        _selectedLowerDiskId = null;
+        _selectedPoolDiskId = null;
+        _selectedPoolVdiskId = null;
         RefreshAll();
     }
-
-    private async void Extend_Click(object sender, RoutedEventArgs e) => await ResizeAsync(extend: true);
-
-    private async void Shrink_Click(object sender, RoutedEventArgs e) => await ResizeAsync(extend: false);
-
-    private async Task ResizeAsync(bool extend)
-    {
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        if (partition is null)
-        {
-            return;
-        }
-
-        var title = extend
-            ? Text("扩展卷（新大小 GB）", "Extend volume (new size in GB)")
-            : Text("压缩卷（新大小 GB）", "Shrink volume (new size in GB)");
-        var input = await PromptAsync(title, $"{partition.Size / 1024 / 1024 / 1024}");
-        if (input is null || !double.TryParse(input, out var gb) || gb <= 0)
-        {
-            return;
-        }
-
-        await ApplyAsync(new SimulationOperationRequest(
-            extend ? SimulationOperationKind.ExtendPartition : SimulationOperationKind.ShrinkPartition,
-            partition.StableId,
-            SizeBytes: (long)(gb * 1024 * 1024 * 1024)));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private async void DeletePartition_Click(object sender, RoutedEventArgs e)
-    {
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        if (partition is null || !await ConfirmAsync(
-                Text("删除模拟分区", "Delete simulated partition"),
-                Text("确定从模拟系统中删除这个分区？", "Remove this partition from the simulation?")))
-        {
-            return;
-        }
-
-        _selectedPartitionId = null;
-        await ApplyAsync(new SimulationOperationRequest(
-            SimulationOperationKind.DeletePartition,
-            partition.StableId));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private async void Format_Click(object sender, RoutedEventArgs e)
-    {
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        if (partition is null)
-        {
-            return;
-        }
-
-        var osDisk = _working.OsDisks.FirstOrDefault(x => x.StableId == partition.OsDiskStableId);
-        var isPlainPhysicalDisk = osDisk is { VirtualDiskStableId: null, IsBoot: false, IsSystem: false };
-        var primaryCount = _working.Partitions.Count(
-            x => x.OsDiskStableId == partition.OsDiskStableId && x.Type == "Primary");
-        if (isPlainPhysicalDisk && primaryCount == 1)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = Text("推荐初始化磁盘", "Disk initialization recommended"),
-                Content = Text(
-                    "该分区不是系统盘、不是虚拟磁盘，且磁盘上只有一个主分区。初始化磁盘比格式化更底层，推荐先初始化。",
-                    "This partition is the only primary partition on a non-system physical disk. Initializing the disk is lower-level than formatting and is recommended."),
-                PrimaryButtonText = Text("跳转到初始化磁盘", "Go to disk initialization"),
-                SecondaryButtonText = Text("仅格式化当前分区", "Format this partition only"),
-                CloseButtonText = Text("取消", "Cancel"),
-                DefaultButton = ContentDialogButton.Primary
-            };
-            var choice = await dialog.ShowAsync();
-            if (choice == ContentDialogResult.Primary)
-            {
-                await InitializeAsync();
-                return;
-            }
-
-            if (choice != ContentDialogResult.Secondary)
-            {
-                return;
-            }
-        }
-
-        await FormatAsync(partition);
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private async Task FormatAsync(PartitionInfo partition)
-    {
-        var fileSystemBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, SelectedIndex = 0 };
-        fileSystemBox.Items.Add("NTFS");
-        fileSystemBox.Items.Add("ReFS");
-        fileSystemBox.Items.Add("exFAT");
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = Text("模拟格式化", "Simulated format"),
-            Content = fileSystemBox,
-            PrimaryButtonText = Text("确定", "OK"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        await ApplyAsync(new SimulationOperationRequest(
-            SimulationOperationKind.FormatPartition,
-            partition.StableId,
-            FileSystem: fileSystemBox.SelectedItem as string ?? "NTFS",
-            AllocationUnitSize: 65536));
-    }
-
-    private async void NewPartition_Click(object sender, RoutedEventArgs e) => await NewPartitionAsync();
-
-    private async Task NewPartitionAsync()
-    {
-        if (_selectedDiskId is null)
-        {
-            return;
-        }
-
-        var size = await PromptAsync(
-            Text("新建分区大小 GB（留空为全部剩余）", "New partition size in GB (blank = all free space)"),
-            string.Empty);
-        if (size is null)
-        {
-            return;
-        }
-
-        long? bytes = null;
-        if (!string.IsNullOrWhiteSpace(size) && TryParseGigabytes(size, out var gb))
-        {
-            bytes = checked((long)(gb * 1024L * 1024L * 1024L));
-        }
-        else if (!string.IsNullOrWhiteSpace(size))
-        {
-            await ShowMessageAsync(
-                Text("输入无效", "Invalid input"),
-                Text("请输入大于 0 的 GB 数值，或留空使用全部剩余空间。",
-                    "Enter a size in GB greater than zero, or leave the field blank to use all free space."));
-            return;
-        }
-
-        await ApplyAsync(new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
-            _selectedDiskId,
-            SizeBytes: bytes ?? _selectedUnallocatedSize,
-            OffsetBytes: _selectedUnallocatedOffset));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private async void Initialize_Click(object sender, RoutedEventArgs e) => await InitializeAsync();
-
-    private async Task InitializeAsync()
-    {
-        var disk = _working.OsDisks.FirstOrDefault(x => x.StableId == _selectedDiskId);
-        if (disk is null)
-        {
-            return;
-        }
-
-        var styleBox = new ComboBox { SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
-        styleBox.Items.Add("GPT");
-        styleBox.Items.Add("MBR");
-        var msrBox = new ToggleSwitch
-        {
-            IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize,
-            OnContent = string.Empty,
-            OffContent = string.Empty,
-            Header = ViewModel.Localization["CreateMsrOnInitialize"]
-        };
-        var preview = new TextBlock
-        {
-            FontFamily = new FontFamily("Consolas"),
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap
-        };
-        void UpdatePreview()
-        {
-            var lines = new List<string> { "clean", $"convert {(string)styleBox.SelectedItem}".ToLowerInvariant() };
-            if (msrBox.IsOn && (string)styleBox.SelectedItem == "GPT")
-            {
-                lines.Add("create partition msr size=16");
-            }
-
-            lines.Add("create partition primary");
-            lines.Add("format fs=ntfs quick");
-            preview.Text = "DISKPART> " + string.Join("\nDISKPART> ", lines);
-        }
-
-        styleBox.SelectionChanged += (_, _) => UpdatePreview();
-        msrBox.Toggled += (_, _) => UpdatePreview();
-        UpdatePreview();
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = Text("初始化模拟磁盘", "Initialize simulated disk"),
-            Content = new StackPanel
-            {
-                Spacing = 10,
-                MinWidth = 380,
-                Children = { styleBox, msrBox, preview }
-            },
-            PrimaryButtonText = Text("初始化", "Initialize"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        _selectedPartitionId = null;
-        await ApplyAsync(new SimulationOperationRequest(
-            SimulationOperationKind.InitializeDisk,
-            disk.StableId,
-            Name: (string)styleBox.SelectedItem,
-            CreateMsr: msrBox.IsOn && (string)styleBox.SelectedItem == "GPT"));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private async void Offline_Click(object sender, RoutedEventArgs e)
-    {
-        var disk = _working.OsDisks.FirstOrDefault(x => x.StableId == _selectedDiskId);
-        if (disk is null)
-        {
-            return;
-        }
-
-        await ApplyAsync(new SimulationOperationRequest(
-            SimulationOperationKind.SetDiskOffline,
-            disk.StableId,
-            Offline: !disk.IsOffline));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private static long ParseSize(string token) =>
-        token.TrimEnd('K', 'k') is var digits && long.TryParse(digits, out var value)
-            ? value * 1024
-            : 65536;
-
-    private static int? ParseInt(string text) =>
-        int.TryParse(text, out var value) ? value : null;
-
-    private static long? ParseGigabytes(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text) || !TryParseGigabytes(text, out var gb))
-        {
-            return null;
-        }
-
-        return (long)(gb * 1024L * 1024L * 1024L);
-    }
-
-    private static bool TryParseGigabytes(string text, out double gigabytes)
-    {
-        gigabytes = 0;
-        if (!double.TryParse(
-                text,
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var parsed)
-            || !double.IsFinite(parsed)
-            || parsed <= 0)
-        {
-            return false;
-        }
-
-        gigabytes = parsed;
-        return true;
-    }
-
-    private async Task<SimulationOperationResult?> ApplyAsync(SimulationOperationRequest request)
-    {
-        WinPool.Application.ApplicationResult<SimulationOperationResult> result;
-        try
-        {
-            result = await ViewModel.ApplySimulationOperationAsync(request);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or ArgumentException)
-        {
-            await ShowMessageAsync(Text("操作失败", "Operation failed"), exception.Message);
-            return null;
-        }
-
-        if (!result.IsSuccess || result.Value is null)
-        {
-            await ShowMessageAsync(
-                Text("操作不可用", "Operation unavailable"),
-                result.Messages.FirstOrDefault()?.UserTextKey
-                    ?? Text("模拟操作未完成。", "The simulation operation did not complete."));
-            return null;
-        }
-
-        return result.Value;
-    }
-
-    private async Task<string?> PromptAsync(string title, string value)
-    {
-        var input = new TextBox { Text = value, MinWidth = 320 };
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = input,
-            PrimaryButtonText = Text("确定", "OK"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary ? input.Text.Trim() : null;
-    }
-
-    private async Task<bool> ConfirmAsync(string title, string message)
-    {
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = message,
-            PrimaryButtonText = Text("确定", "OK"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
-    }
-
-    private async Task ShowMessageAsync(string title, string message)
-    {
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = new ScrollViewer
-            {
-                MaxHeight = 500,
-                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }
-            },
-            CloseButtonText = Text("关闭", "Close")
-        };
-        await dialog.ShowAsync();
-    }
-
-    private string Text(string zh, string en) =>
-        ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;
 }

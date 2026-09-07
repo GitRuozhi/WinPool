@@ -7,6 +7,7 @@ public enum ApplicationStartupTarget
     None,
     Manage,
     Edit,
+    DiskAndPartition,
     Test,
     Monitor,
     Development,
