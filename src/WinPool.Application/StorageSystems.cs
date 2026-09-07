@@ -1283,7 +1283,13 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray(),
             PhysicalDisks = snapshot.PhysicalDisks
                 .Select(disk => members.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)
-                    ? disk with { PoolStableId = primordial.StableId, CanPool = true }
+                    ? disk with
+                    {
+                        PoolStableId = primordial.StableId,
+                        CanPool = true,
+                        IsRetired = false,
+                        IsHotSpare = false
+                    }
                     : disk)
                 .ToArray()
         };

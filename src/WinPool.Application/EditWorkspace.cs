@@ -1299,6 +1299,84 @@ public sealed record StructureProblem(
     /// the committed snapshot: pool or virtual-disk existence, disk pool
     /// membership, simulated-layer role, or real-tier membership.
     /// </summary>
+    /// <summary>
+    /// True when the working copy changed pool-level property values that a
+    /// structural diff does not see: pool name, virtual-disk names, or tier
+    /// parameters. Partition-level form values are not object-backed and are
+    /// tracked by the page's own dirty flag.
+    /// </summary>
+    public static bool HasPoolPropertyChanges(
+        StorageSnapshot working,
+        StorageSnapshot committed,
+        string poolId)
+    {
+        ArgumentNullException.ThrowIfNull(working);
+        ArgumentNullException.ThrowIfNull(committed);
+        var workingPool = working.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase));
+        var committedPool = committed.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase));
+        if (workingPool is null
+            || committedPool is null
+            || workingPool.IsPrimordial
+            || IsDraftPool(poolId))
+        {
+            return false;
+        }
+
+        if (!string.Equals(
+                workingPool.FriendlyName,
+                committedPool.FriendlyName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var workingNames = working.VirtualDisks
+            .Where(item => string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
+                && !IsDraftVirtualDisk(item.StableId))
+            .ToDictionary(item => item.StableId, item => item.FriendlyName, StringComparer.OrdinalIgnoreCase);
+        var committedNames = committed.VirtualDisks
+            .Where(item => string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(item => item.StableId, item => item.FriendlyName, StringComparer.OrdinalIgnoreCase);
+        if (!workingNames.OrderBy(pair => pair.Key).SequenceEqual(
+                committedNames.OrderBy(pair => pair.Key)))
+        {
+            return true;
+        }
+
+        foreach (var workingTier in working.StorageTiers.Where(item =>
+                     string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)))
+        {
+            var committedTier = committed.StorageTiers.FirstOrDefault(item =>
+                string.Equals(item.StableId, workingTier.StableId, StringComparison.OrdinalIgnoreCase));
+            if (committedTier is null)
+            {
+                continue;
+            }
+
+            if (!string.Equals(
+                    workingTier.ResiliencySettingName,
+                    committedTier.ResiliencySettingName,
+                    StringComparison.OrdinalIgnoreCase)
+                || workingTier.Interleave != committedTier.Interleave
+                || workingTier.NumberOfDataCopies != committedTier.NumberOfDataCopies
+                || workingTier.PhysicalDiskRedundancy != committedTier.PhysicalDiskRedundancy
+                || workingTier.NumberOfColumns != committedTier.NumberOfColumns
+                || workingTier.Size != committedTier.Size)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool HasAnyPoolPropertyChanges(StorageSnapshot working, StorageSnapshot committed) =>
+        working.StoragePools
+            .Where(pool => !pool.IsPrimordial && !IsDraftPool(pool.StableId))
+            .Any(pool => HasPoolPropertyChanges(working, committed, pool.StableId));
+
     public static bool HasStructuralChanges(StorageSnapshot working, StorageSnapshot committed)
     {
         ArgumentNullException.ThrowIfNull(working);

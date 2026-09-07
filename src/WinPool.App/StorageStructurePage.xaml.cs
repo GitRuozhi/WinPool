@@ -213,6 +213,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HookFormField(_volumeNameBox);
         HookFormField(_virtualDiskNameBox);
         HookFormField(_poolNameBox);
+        foreach (var group in TierGroups())
+        {
+            // Re-link tolerated failures (Mirror) on commit of the typed
+            // copies number; Parity keeps its own failures box editable.
+            group.CopiesBox.LostFocus += (_, _) => UpdateLinkedFields();
+        }
         _autoPartitionSwitch.Toggled += (_, _) =>
         {
             _formDirty = true;
@@ -240,15 +246,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         AddFormRow(row++, "AllocationUnit", _clusterBox);
 
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _savePoolPropertiesButton.Margin = new Thickness(0, 10, 0, 0);
-        _savePoolPropertiesButton.Click += SavePoolProperties_Click;
-        Grid.SetRow(_savePoolPropertiesButton, row);
-        Grid.SetColumn(_savePoolPropertiesButton, 0);
-        Grid.SetColumnSpan(_savePoolPropertiesButton, 2);
-        PoolFormGrid.Children.Add(_savePoolPropertiesButton);
-        row++;
-
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(_multiVdiskWarning, row);
         Grid.SetColumn(_multiVdiskWarning, 0);
         Grid.SetColumnSpan(_multiVdiskWarning, 2);
@@ -259,6 +256,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Grid.SetColumn(_researchNote, 0);
         Grid.SetColumnSpan(_researchNote, 2);
         PoolFormGrid.Children.Add(_researchNote);
+        row++;
+
+        // Last row is the full-width Save row (V0.47 spec §3).
+        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _savePoolPropertiesButton.Margin = new Thickness(0, 10, 0, 0);
+        _savePoolPropertiesButton.Click += SavePoolProperties_Click;
+        Grid.SetRow(_savePoolPropertiesButton, row);
+        Grid.SetColumn(_savePoolPropertiesButton, 0);
+        Grid.SetColumnSpan(_savePoolPropertiesButton, 2);
+        PoolFormGrid.Children.Add(_savePoolPropertiesButton);
     }
 
     private IEnumerable<TierFields> TierGroups()
@@ -530,7 +537,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var layerPoolId = targetLayerId[(targetLayerId.LastIndexOf(':') + 1)..];
+        var layerPoolId = EditWorkspace.IsRetiredLayer(targetLayerId)
+            ? targetLayerId[EditWorkspace.RetiredLayerPrefix.Length..]
+            : targetLayerId[EditWorkspace.HotSpareLayerPrefix.Length..];
         var selected = SelectedPool();
         if (selected is null || !selected.StableId.Equals(layerPoolId, StringComparison.OrdinalIgnoreCase))
         {
@@ -600,6 +609,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+        var role = EditWorkspace.DiskUsage(workingDisk);
+        if (role.Length > 0)
+        {
+            // Dropping a retired / hot-spare disk onto the Unallocated group
+            // leaves the simulated layer and stays unallocated in the pool.
+            try
+            {
+                CommitWorkingStep(EditWorkspace.SetDiskUsage(_working, diskId, string.Empty));
+            }
+            catch (InvalidOperationException exception)
+            {
+                _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            }
+
+            return;
+        }
+
         if (!EditWorkspace.DiskIsAssignedToTier(_working, diskId))
         {
             return;
@@ -650,20 +676,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             {
                 return;
             }
-        }
-
-        var target = _working.StoragePools.FirstOrDefault(item =>
-            item.StableId.Equals(poolId, StringComparison.OrdinalIgnoreCase));
-        if (target is not null
-            && !target.IsPrimordial
-            && EditWorkspace.IsDraftPool(target.StableId)
-            && _working.VirtualDisks.Any(item =>
-                string.Equals(item.PoolStableId, target.StableId, StringComparison.OrdinalIgnoreCase)))
-        {
-            _ = ShowMessageAsync(
-                ViewModel.Localization["Warning"],
-                ViewModel.Localization["MultipleVirtualDiskWarning"]);
-            return;
         }
 
         try
@@ -914,6 +926,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
             .ToArray();
     }
 
+    private PartitionInfo? CommittedPrimaryPartition(string poolId)
+    {
+        var committed = ViewModel.ActiveSnapshot;
+        var vdisk = committed.VirtualDisks.FirstOrDefault(item =>
+            string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase));
+        if (vdisk is null)
+        {
+            return null;
+        }
+
+        var osDisk = committed.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
+        return committed.Partitions
+            .Where(item => item.OsDiskStableId == osDisk?.StableId && item.Type == "Primary")
+            .OrderBy(item => item.Offset)
+            .FirstOrDefault();
+    }
+
     private static void SetResiliency(ComboBox box, string value)
     {
         var match = box.Items.OfType<string>().FirstOrDefault(item =>
@@ -942,6 +971,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         LinkResiliency(Dedicated);
     }
 
+    /// <summary>
+    /// One linking rule for every tier group: Mirror keeps the data-copies
+    /// number (min 2) and derives tolerated failures from it; Parity fixes
+    /// one data copy and keeps the editable tolerated-failure number; Simple
+    /// fixes both at 1 / 0. Media type does not change these rules.
+    /// </summary>
     private void LinkResiliency(TierFields group)
     {
         var resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
@@ -954,48 +989,86 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase))
         {
-            if (group.Media != "HDD")
-            {
-                group.CopiesBox.IsEnabled = true;
-                group.FailuresBox.IsEnabled = false;
-            }
-
             if (!int.TryParse(group.CopiesBox.Text, out var copies) || copies < 2)
             {
                 copies = 2;
                 group.CopiesBox.Text = "2";
             }
 
-            if (group.Media != "HDD")
-            {
-                group.FailuresBox.Text = Math.Max(0, copies - 1).ToString();
-            }
-
+            group.FailuresBox.Text = Math.Max(0, copies - 1).ToString();
             return;
         }
 
-        if (group.Media == "HDD")
+        group.CopiesBox.Text = "1";
+        if (!int.TryParse(group.FailuresBox.Text, out var tolerated) || tolerated < 1)
         {
-            group.CopiesBox.IsEnabled = false;
-            group.FailuresBox.IsEnabled = true;
-            group.CopiesBox.Text = "1";
-            if (!int.TryParse(group.FailuresBox.Text, out var tolerated) || tolerated < 1)
-            {
-                group.FailuresBox.Text = "1";
-            }
+            group.FailuresBox.Text = "1";
         }
+    }
+
+    private (IReadOnlyList<VirtualDiskInfo> All, VirtualDiskInfo? DeleteTarget) PoolVirtualDiskState(
+        StoragePoolInfo? pool)
+    {
+        if (pool is null || pool.IsPrimordial)
+        {
+            return ([], null);
+        }
+
+        var all = _working.VirtualDisks
+            .Where(item => string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        VirtualDiskInfo? target = null;
+        if (all.Length > 0)
+        {
+            target = _selectedPoolVdiskId is not null
+                ? all.FirstOrDefault(item =>
+                    item.StableId.Equals(_selectedPoolVdiskId, StringComparison.OrdinalIgnoreCase))
+                : all.Length == 1 ? all[0] : null;
+        }
+
+        return (all, target);
+    }
+
+    /// <summary>
+    /// Any uncommitted draft content: structural draft steps, object-backed
+    /// property saves, form-level partition edits, or plain dirty fields.
+    /// </summary>
+    private bool HasUncommittedChanges() =>
+        _formDirty
+        || EditWorkspace.HasStructuralChanges(_working, ViewModel.ActiveSnapshot)
+        || EditWorkspace.HasAnyPoolPropertyChanges(_working, ViewModel.ActiveSnapshot)
+        || PartitionFormDiffersFromCommitted();
+
+    private bool PartitionFormDiffersFromCommitted()
+    {
+        var poolId = _selectedPoolId;
+        if (poolId is null || EditWorkspace.IsDraftPool(poolId))
+        {
+            return false;
+        }
+
+        var partition = CommittedPrimaryPartition(poolId);
+        if (partition is null)
+        {
+            return false;
+        }
+
+        var volumeName = _volumeNameBox.Text.Trim();
+        var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
+        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64K");
+        return !string.Equals(volumeName, partition.FileSystemLabel, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(fileSystem, partition.FileSystem, StringComparison.OrdinalIgnoreCase)
+            || cluster != partition.AllocationUnitSize;
     }
 
     private void UpdateButtonState()
     {
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
-        var hasStructural = _working is not null
-            && EditWorkspace.HasStructuralChanges(_working, ViewModel.ActiveSnapshot);
+        var hasUnapplied = HasUncommittedChanges();
 
         UndoButton.IsEnabled = _undoStack.Count > 0;
         RedoButton.IsEnabled = _redoStack.Count > 0;
-        var hasUnapplied = hasStructural || _formDirty;
         DiscardAllButton.IsEnabled = hasUnapplied;
         ApplyAllButton.IsEnabled = simulated && hasUnapplied;
         CreatePoolButton.IsEnabled = simulated
@@ -1014,25 +1087,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RetireButton.IsEnabled = canLayerDisk && !selectedDisk!.IsRetired;
         HotSpareButton.IsEnabled = canLayerDisk && !selectedDisk!.IsHotSpare;
 
-        var vdisk = _working.VirtualDisks.FirstOrDefault(item =>
-            string.Equals(item.PoolStableId, pool?.StableId, StringComparison.OrdinalIgnoreCase));
-        var hasVdisk = vdisk is not null;
-        CreateVdiskButton.IsEnabled = simulated
+        var (poolVdisks, deleteTarget) = PoolVirtualDiskState(pool);
+        var canEditPool = simulated
             && pool is { IsPrimordial: false }
-            && !EditWorkspace.IsDraftPool(pool.StableId)
-            && !hasVdisk
-            && DataDiskCount(pool, "SSD") + DataDiskCount(pool, "HDD") + DataDiskCount(pool, "SCM") > 0;
-        DeleteVdiskButton.IsEnabled = simulated
-            && pool is { IsPrimordial: false }
-            && !EditWorkspace.IsDraftPool(pool.StableId)
-            && hasVdisk
-            && (_selectedPoolVdiskId is null
-                || string.Equals(_selectedPoolVdiskId, vdisk!.StableId, StringComparison.OrdinalIgnoreCase));
+            && !EditWorkspace.IsDraftPool(pool.StableId);
+        CreateVdiskButton.IsEnabled = canEditPool
+            && poolVdisks.Count == 0
+            && DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD") + DataDiskCount(pool!, "SCM") > 0;
+        DeleteVdiskButton.IsEnabled = canEditPool && deleteTarget is not null;
 
         var formEnabled = simulated
             && pool is { IsPrimordial: false }
-            && !EditWorkspace.HasMultipleVirtualDisks(_working, pool.StableId);
-        UpdateFormStates(formEnabled, pool, vdisk, hasVdisk);
+            && poolVdisks.Count <= 1;
+        UpdateFormStates(formEnabled, pool, poolVdisks.FirstOrDefault(), poolVdisks.Count > 0);
     }
 
     private void UpdateFormStates(
@@ -1091,54 +1158,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var editable = tierVisible && !holdsData && tier is not null;
             group.SizeBox.IsEnabled = editable;
             group.ResiliencyBox.IsEnabled = editable;
-            group.CopiesBox.IsEnabled = editable;
-            group.FailuresBox.IsEnabled = editable;
-            group.ColumnsBox.IsEnabled = editable;
             group.InterleaveBox.IsEnabled = editable;
             group.SizeBox.IsReadOnly = false;
+            group.DiskCountBox.IsReadOnly = true;
             if (!tierVisible)
             {
                 continue;
             }
 
             var resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
+            var isMirror = resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase);
+            var isSimple = resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase);
+            LinkResiliency(group);
             group.DiskCountBox.Text = tier?.MemberPhysicalDiskIds.Count.ToString() ?? "0";
-            if (resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase))
+            group.CopiesBox.IsEnabled = editable && isMirror;
+            group.FailuresBox.IsEnabled = editable && !isMirror && !isSimple;
+            group.ColumnsBox.IsEnabled = editable && !isMirror && !isSimple;
+            if (isMirror || isSimple)
             {
-                group.CopiesBox.Text = "1";
-                group.FailuresBox.Text = "0";
-                group.CopiesBox.IsEnabled = false;
-                group.FailuresBox.IsEnabled = false;
                 group.ColumnsBox.Text = "auto";
-                group.ColumnsBox.IsEnabled = false;
             }
-            else if (resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase))
-            {
-                if (group.Media != "HDD")
-                {
-                    group.CopiesBox.IsEnabled = editable;
-                    group.FailuresBox.IsEnabled = false;
-                    group.ColumnsBox.IsEnabled = false;
-                    group.ColumnsBox.Text = "auto";
-                    group.FailuresBox.Text = Math.Max(0, (int.TryParse(group.CopiesBox.Text, out var copies) ? copies : 2) - 1).ToString();
-                }
-                else
-                {
-                    group.CopiesBox.Text = "1";
-                    group.CopiesBox.IsEnabled = false;
-                    group.FailuresBox.IsEnabled = false;
-                    group.ColumnsBox.IsEnabled = editable;
-                }
-            }
-            else
-            {
-                group.CopiesBox.Text = "1";
-                group.CopiesBox.IsEnabled = false;
-                group.FailuresBox.IsEnabled = editable;
-                group.ColumnsBox.IsEnabled = editable;
-            }
-
-            group.DiskCountBox.IsReadOnly = true;
         }
 
         // Disk and partition group.
@@ -1206,6 +1245,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         if (ReferenceEquals(next, _working))
         {
+            // Nothing object-backed changed (e.g. Save with only form-level
+            // partition fields edited, which Apply consumes directly). Keep
+            // the form text untouched and treat the edit as saved.
+            _formDirty = false;
+            UpdateButtonState();
             return;
         }
 
@@ -1288,7 +1332,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async void DiscardAll_Click(object sender, RoutedEventArgs e)
     {
-        if (!EditWorkspace.HasStructuralChanges(_working, ViewModel.ActiveSnapshot) && !_formDirty)
+        if (!HasUncommittedChanges())
         {
             return;
         }
@@ -1519,15 +1563,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         MergeFormIntoWorking();
-        var vdisk = _working.VirtualDisks.FirstOrDefault(item =>
-            string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
-        if (vdisk is null
-            || (_selectedPoolVdiskId is not null
-                && !string.Equals(_selectedPoolVdiskId, vdisk.StableId, StringComparison.OrdinalIgnoreCase)))
+        var (_, deleteTarget) = PoolVirtualDiskState(pool);
+        if (deleteTarget is null)
         {
             return;
         }
 
+        var vdisk = deleteTarget;
         var holdsData = EditWorkspace.DiskHoldsStoredData(_working, vdisk.StableId, isVirtualDisk: true);
         var committedVdisk = ViewModel.ActiveSnapshot.VirtualDisks.FirstOrDefault(item =>
             string.Equals(item.StableId, vdisk.StableId, StringComparison.OrdinalIgnoreCase));
@@ -1565,8 +1607,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var structural = EditWorkspace.HasStructuralChanges(_working, ViewModel.ActiveSnapshot);
-        if (!structural && !_formDirty)
+        if (!HasUncommittedChanges())
         {
             await ShowMessageAsync(
                 ViewModel.Localization["NoApplyChangesTitle"],
@@ -1580,6 +1621,25 @@ public sealed partial class StorageStructurePage : EditorPageBase
             pending = ApplyFormToWorking(pending);
         }
 
+        // Reject property rebuilds on data-bearing pools before anything is
+        // executed, so a mid-sequence rejection cannot leave the draft half
+        // applied and then duplicated by a second Apply.
+        foreach (var pool in pending.StoragePools.Where(item =>
+                     !item.IsPrimordial && !EditWorkspace.IsDraftPool(item.StableId)))
+        {
+            if (!EditWorkspace.HasPoolPropertyChanges(pending, ViewModel.ActiveSnapshot, pool.StableId)
+                || !EditWorkspace.PoolHoldsStoredData(ViewModel.ActiveSnapshot, pool.StableId)
+                || !RebuildsTierParameters(pending, ViewModel.ActiveSnapshot, pool.StableId))
+            {
+                continue;
+            }
+
+            await ShowMessageAsync(
+                ViewModel.Localization["RebuildBlockedTitle"],
+                ViewModel.Localization["RebuildBlockedMessage"]);
+            return;
+        }
+
         var preview = BuildApplyPreviewSteps(pending, ViewModel.ActiveSnapshot);
         if (preview.Count == 0)
         {
@@ -1591,15 +1651,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var createsDraftPool = pending.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
         var createsVdisk = pending.VirtualDisks.Any(item => EditWorkspace.IsDraftVirtualDisk(item.StableId));
-        var workingReFs = string.Equals(
+        var reFsInvolved = string.Equals(
             _fileSystemBox.SelectedItem as string,
             "ReFS",
-            StringComparison.OrdinalIgnoreCase);
+            StringComparison.OrdinalIgnoreCase)
+            && (createsDraftPool || createsVdisk || ReFsWouldChangeOnApply());
         var touchesUnrecommended = pending.StorageTiers.Any(tier =>
                 (tier.Interleave ?? 0) == 256 * 1024)
             || createsDraftPool
             || createsVdisk
-            || workingReFs;
+            || reFsInvolved;
         if (touchesUnrecommended && !await ConfirmUnrecommendedAsync())
         {
             return;
@@ -1637,6 +1698,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (!await ApplyPendingSequenceAsync(pending))
         {
+            // A mid-sequence rejection leaves some edits already applied.
+            // Sync the working copy to the committed snapshot and drop the
+            // draft, so it can never be applied a second time (which would
+            // duplicate a pool or virtual disk).
+            _undoStack.Clear();
+            _redoStack.Clear();
+            _working = ViewModel.ActiveSnapshot;
+            _formDirty = false;
+            NormalizeSelection();
+            ResetLayerSwitchesForSelection();
+            RefreshAll();
             return;
         }
 
@@ -1904,56 +1976,96 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
         }
 
-        // Property changes on committed pools.
-        var propertyPoolId = _selectedPoolId;
-        if (propertyPoolId is not null)
+        // Property changes on committed pools (object-backed names and tier
+        // parameters), for every pool whose saved draft differs.
+        foreach (var pool in working.StoragePools.Where(item =>
+                     !item.IsPrimordial && !EditWorkspace.IsDraftPool(item.StableId)))
         {
-            var workingPool = working.StoragePools.FirstOrDefault(item => item.StableId == propertyPoolId);
-            var committedPool = committed.StoragePools.FirstOrDefault(item => item.StableId == propertyPoolId);
-            if (workingPool is not null
-                && committedPool is not null
-                && !workingPool.IsPrimordial
-                && !EditWorkspace.IsDraftPool(propertyPoolId))
+            if (!EditWorkspace.HasPoolPropertyChanges(working, committed, pool.StableId))
             {
-                if (!workingPool.FriendlyName.Equals(committedPool.FriendlyName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            }
+
+            var committedPool = committed.StoragePools.FirstOrDefault(item =>
+                string.Equals(item.StableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
+            if (committedPool is null)
+            {
+                continue;
+            }
+
+            if (!pool.FriendlyName.Equals(committedPool.FriendlyName, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(zh
+                    ? $"将存储池重命名为“{pool.FriendlyName}”。"
+                    : $"Rename the pool to \"{pool.FriendlyName}\".");
+            }
+
+            var workingVdisk = working.VirtualDisks.FirstOrDefault(item =>
+                string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+                && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
+            var committedVdisk = committed.VirtualDisks.FirstOrDefault(item =>
+                string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
+            if (workingVdisk is not null
+                && committedVdisk is not null
+                && !workingVdisk.FriendlyName.Equals(
+                    committedVdisk.FriendlyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(zh
+                    ? $"将虚拟磁盘重命名为“{workingVdisk.FriendlyName}”。"
+                    : $"Rename the virtual disk to \"{workingVdisk.FriendlyName}\".");
+            }
+
+            foreach (var group in TierGroups())
+            {
+                var workingTier = working.StorageTiers.FirstOrDefault(item =>
+                    string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+                    && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
+                var committedTier = committed.StorageTiers.FirstOrDefault(item =>
+                    string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+                    && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
+                if (workingTier is null || committedTier is null
+                    || TierSpecsEqual(workingTier, committedTier))
                 {
-                    steps.Add(zh
-                        ? $"将存储池重命名为“{workingPool.FriendlyName}”。"
-                        : $"Rename the pool to \"{workingPool.FriendlyName}\".");
+                    continue;
                 }
 
-                var workingVdisk = working.VirtualDisks.FirstOrDefault(item =>
-                    item.PoolStableId == propertyPoolId && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
-                var committedVdisk = committed.VirtualDisks.FirstOrDefault(item =>
-                    item.PoolStableId == propertyPoolId);
-                if (workingVdisk is not null
-                    && committedVdisk is not null
-                    && !workingVdisk.FriendlyName.Equals(
-                        committedVdisk.FriendlyName,
-                        StringComparison.OrdinalIgnoreCase))
+                steps.Add(zh
+                    ? $"重建“{group.TitleKey}”层参数（冗余、交织、容量、列数）。"
+                    : $"Rebuild {TierFriendly(group)} tier parameters (resiliency, interleave, capacity, columns).");
+            }
+        }
+
+        // Form-level edits on the selected pool's user partition.
+        var propertyPoolId = _selectedPoolId;
+        if (propertyPoolId is not null && !EditWorkspace.IsDraftPool(propertyPoolId))
+        {
+            var committedPartition = CommittedPrimaryPartition(propertyPoolId);
+            if (committedPartition is not null)
+            {
+                var volumeName = _volumeNameBox.Text.Trim();
+                var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
+                var fsChanged = !string.Equals(
+                    fileSystem,
+                    committedPartition.FileSystem,
+                    StringComparison.OrdinalIgnoreCase);
+                var clusterChanged = ParseSize(_clusterBox.SelectedItem as string ?? "64K")
+                    != committedPartition.AllocationUnitSize;
+                var labelChanged = !string.Equals(
+                    volumeName,
+                    committedPartition.FileSystemLabel,
+                    StringComparison.OrdinalIgnoreCase);
+                if (fsChanged || clusterChanged)
                 {
                     steps.Add(zh
-                        ? $"将虚拟磁盘重命名为“{workingVdisk.FriendlyName}”。"
-                        : $"Rename the virtual disk to \"{workingVdisk.FriendlyName}\".");
+                        ? $"将用户卷重新格式化为 {fileSystem}（簇 {_clusterBox.SelectedItem}）。"
+                        : $"Reformat the user volume as {fileSystem} ({_clusterBox.SelectedItem} cluster).");
                 }
-
-                foreach (var group in TierGroups())
+                else if (labelChanged)
                 {
-                    var workingTier = working.StorageTiers.FirstOrDefault(item =>
-                        item.PoolStableId == propertyPoolId
-                        && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-                    var committedTier = committed.StorageTiers.FirstOrDefault(item =>
-                        item.PoolStableId == propertyPoolId
-                        && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-                    if (workingTier is null || committedTier is null
-                        || TierSpecsEqual(workingTier, committedTier))
-                    {
-                        continue;
-                    }
-
                     steps.Add(zh
-                        ? $"重建“{group.TitleKey}”层参数（冗余、交织、容量、列数）。"
-                        : $"Rebuild {TierFriendly(group)} tier parameters (resiliency, interleave, capacity, columns).");
+                        ? $"将卷重命名为“{volumeName}”。"
+                        : $"Rename the volume to \"{volumeName}\".");
                 }
             }
         }
@@ -1989,6 +2101,36 @@ public sealed partial class StorageStructurePage : EditorPageBase
         "DedicatedTier" => "dedicated",
         _ => "capacity"
     };
+
+    private bool RebuildsTierParameters(
+        StorageSnapshot working,
+        StorageSnapshot committed,
+        string poolId) =>
+        TierGroups().Any(group =>
+        {
+            var workingTier = working.StorageTiers.FirstOrDefault(item =>
+                string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
+                && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
+            var committedTier = committed.StorageTiers.FirstOrDefault(item =>
+                string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
+                && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
+            return workingTier is not null
+                && committedTier is not null
+                && !TierSpecsEqual(workingTier, committedTier);
+        });
+
+    private bool ReFsWouldChangeOnApply()
+    {
+        var poolId = _selectedPoolId;
+        if (poolId is null || EditWorkspace.IsDraftPool(poolId))
+        {
+            return false;
+        }
+
+        var partition = CommittedPrimaryPartition(poolId);
+        return partition is not null
+            && !string.Equals(partition.FileSystem, "ReFS", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool TierSpecsEqual(StorageTierInfo left, StorageTierInfo right) =>
         string.Equals(left.ResiliencySettingName, right.ResiliencySettingName, StringComparison.OrdinalIgnoreCase)
@@ -2216,68 +2358,40 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         committed = ViewModel.ActiveSnapshot;
 
-        // 9. Property edits on the selected committed pool (names and tier
-        // parameters that were saved into the draft).
-        var propertyPoolId = _selectedPoolId;
-        if (propertyPoolId is not null && !EditWorkspace.IsDraftPool(propertyPoolId))
+        // 9. Property edits on committed pools (names and tier parameters
+        // that were saved into the draft), for every pool with a difference.
+        foreach (var pool in pending.StoragePools.Where(item =>
+                     !item.IsPrimordial && !EditWorkspace.IsDraftPool(item.StableId)))
         {
-            var workingPool = pending.StoragePools.FirstOrDefault(item => item.StableId == propertyPoolId);
-            var committedPool = committed.StoragePools.FirstOrDefault(item => item.StableId == propertyPoolId);
-            if (workingPool is not null && committedPool is not null)
+            if (!EditWorkspace.HasPoolPropertyChanges(pending, committed, pool.StableId))
             {
-                var vdisk = pending.VirtualDisks.FirstOrDefault(item =>
-                    item.PoolStableId == propertyPoolId && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
-                var committedVdisk = committed.VirtualDisks.FirstOrDefault(item =>
-                    item.PoolStableId == propertyPoolId);
-                var poolNameChanged = !workingPool.FriendlyName.Equals(
-                    committedPool.FriendlyName,
-                    StringComparison.OrdinalIgnoreCase);
-                var vdiskNameChanged = vdisk is not null
-                    && committedVdisk is not null
-                    && !vdisk.FriendlyName.Equals(committedVdisk.FriendlyName, StringComparison.OrdinalIgnoreCase);
-                var tierChanged = TierGroups().Any(group =>
-                {
-                    var workingTier = pending.StorageTiers.FirstOrDefault(item =>
-                        item.PoolStableId == propertyPoolId
-                        && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-                    var committedTier = committed.StorageTiers.FirstOrDefault(item =>
-                        item.PoolStableId == propertyPoolId
-                        && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-                    return workingTier is not null
-                        && committedTier is not null
-                        && !TierSpecsEqual(workingTier, committedTier);
-                });
+                continue;
+            }
 
-                if (poolNameChanged || vdiskNameChanged || tierChanged)
-                {
-                    var hasData = EditWorkspace.PoolHoldsStoredData(committed, propertyPoolId);
-                    if (hasData && tierChanged)
-                    {
-                        await ShowMessageAsync(
-                            ViewModel.Localization["RebuildBlockedTitle"],
-                            ViewModel.Localization["RebuildBlockedMessage"]);
-                        return false;
-                    }
+            var hasData = EditWorkspace.PoolHoldsStoredData(committed, pool.StableId);
+            var tierChanged = RebuildsTierParameters(pending, committed, pool.StableId);
+            if (hasData && tierChanged)
+            {
+                await ShowMessageAsync(
+                    ViewModel.Localization["RebuildBlockedTitle"],
+                    ViewModel.Localization["RebuildBlockedMessage"]);
+                return false;
+            }
 
-                    if (await ApplyAsync(BuildPoolUpdateRequest(
-                            workingPool,
-                            vdiskNameChanged || poolNameChanged || tierChanged)) is null)
-                    {
-                        return false;
-                    }
-                }
+            if (await ApplyAsync(BuildPoolPropertyRequest(pool, pending)) is null)
+            {
+                return false;
+            }
 
-                // Volume label / file system / cluster on the user partition.
-                if (await ApplyPartitionChangesAsync(
-                        pending,
-                        committed,
-                        propertyPoolId,
-                        vdiskNameChanged,
-                        poolNameChanged,
-                        tierChanged))
-                {
-                    return false;
-                }
+            // Form-level partition edits belong to the selected pool, whose
+            // form is on screen.
+            if (string.Equals(pool.StableId, _selectedPoolId, StringComparison.OrdinalIgnoreCase)
+                && await ApplyPartitionChangesAsync(
+                    pending,
+                    ViewModel.ActiveSnapshot,
+                    pool.StableId))
+            {
+                return false;
             }
         }
 
@@ -2292,10 +2406,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private async Task<bool> ApplyPartitionChangesAsync(
         StorageSnapshot pending,
         StorageSnapshot committed,
-        string poolId,
-        bool vdiskRenamed,
-        bool poolRenamed,
-        bool tierRebuilt)
+        string poolId)
     {
         var committedVdisk = committed.VirtualDisks.FirstOrDefault(item => item.PoolStableId == poolId);
         if (committedVdisk is null)
@@ -2401,35 +2512,41 @@ public sealed partial class StorageStructurePage : EditorPageBase
             CreatePartition: _autoPartitionSwitch.IsOn);
     }
 
-    private SimulationOperationRequest BuildPoolUpdateRequest(
+    /// <summary>
+    /// Builds the property update request from the working-copy OBJECTS, not
+    /// the form: Apply may commit property drafts of pools other than the
+    /// currently selected one, whose form shows a different pool.
+    /// </summary>
+    private SimulationOperationRequest BuildPoolPropertyRequest(
         StoragePoolInfo pool,
-        bool includeTierParameters)
+        StorageSnapshot working)
     {
-        var request = new SimulationOperationRequest(
+        var vdisk = working.VirtualDisks.FirstOrDefault(item =>
+            string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+            && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
+        StorageTierInfo? TierOf(string media) => working.StorageTiers.FirstOrDefault(item =>
+            string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+            && EditWorkspace.NormalizeMedia(item.MediaType) == media);
+        var performance = TierOf("SSD");
+        var capacity = TierOf("HDD");
+        var dedicated = TierOf("SCM");
+        return new SimulationOperationRequest(
             SimulationOperationKind.UpdateStoragePool,
             pool.StableId,
             Name: pool.FriendlyName,
-            VirtualDiskName: _virtualDiskNameBox.Text.Trim());
-        if (!includeTierParameters)
-        {
-            return request;
-        }
-
-        return request with
-        {
-            PerformanceResiliency = Performance.ResiliencyBox.SelectedItem as string,
-            PerformanceInterleaveBytes = ParseSize(Performance.InterleaveBox.SelectedItem as string ?? "64K"),
-            PerformanceSizeBytes = ParseGigabytes(Performance.SizeBox.Text),
-            PerformanceDataCopies = ParseInt(Performance.CopiesBox.Text),
-            CapacityResiliency = Capacity.ResiliencyBox.SelectedItem as string,
-            CapacityInterleaveBytes = ParseSize(Capacity.InterleaveBox.SelectedItem as string ?? "64K"),
-            CapacitySizeBytes = ParseGigabytes(Capacity.SizeBox.Text),
-            CapacityColumns = ParseInt(Capacity.ColumnsBox.Text),
-            CapacityToleratedFailures = ParseInt(Capacity.FailuresBox.Text),
-            ScmResiliency = Dedicated.ResiliencyBox.SelectedItem as string,
-            ScmInterleaveBytes = ParseSize(Dedicated.InterleaveBox.SelectedItem as string ?? "64K"),
-            ScmDataCopies = ParseInt(Dedicated.CopiesBox.Text)
-        };
+            VirtualDiskName: vdisk?.FriendlyName,
+            PerformanceResiliency: performance?.ResiliencySettingName,
+            PerformanceInterleaveBytes: performance?.Interleave,
+            PerformanceSizeBytes: performance is { Size: > 0 } ? performance.Size : null,
+            PerformanceDataCopies: performance?.NumberOfDataCopies,
+            CapacityResiliency: capacity?.ResiliencySettingName,
+            CapacityInterleaveBytes: capacity?.Interleave,
+            CapacitySizeBytes: capacity is { Size: > 0 } ? capacity.Size : null,
+            CapacityColumns: capacity?.NumberOfColumns,
+            CapacityToleratedFailures: capacity?.PhysicalDiskRedundancy,
+            ScmResiliency: dedicated?.ResiliencySettingName,
+            ScmInterleaveBytes: dedicated?.Interleave,
+            ScmDataCopies: dedicated?.NumberOfDataCopies);
     }
 
     private async Task<bool> ApplyDraftVirtualDiskAsync(
@@ -2503,6 +2620,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64K"))) is not null;
     }
 
+    /// <summary>
+    /// Save pool properties persists the property form immediately: pool and
+    /// virtual-disk names, tier parameters, and the user-partition volume
+    /// label / file system / cluster are written to the simulation document
+    /// now. Structural draft steps survive the save (RestoreWorkingMembership
+    /// replays them) but the undo history is checkpointed away, because the
+    /// property values are no longer part of the draft. Apply-all covers the
+    /// same property diff for users who skip Save.
+    /// </summary>
     private async void SavePoolProperties_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
@@ -2519,34 +2645,95 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var holdsData = EditWorkspace.PoolHoldsStoredData(_working, pool.StableId);
-        if (holdsData)
+        var merged = ApplyFormToWorking(_working);
+        var committed = ViewModel.ActiveSnapshot;
+        var objectChanged = EditWorkspace.HasPoolPropertyChanges(merged, committed, pool.StableId);
+        var tierChanged = objectChanged && RebuildsTierParameters(merged, committed, pool.StableId);
+        var hasData = EditWorkspace.PoolHoldsStoredData(committed, pool.StableId);
+        if (hasData && tierChanged)
         {
-            var rebuilds = TierGroups().Any(group =>
+            await ShowMessageAsync(
+                ViewModel.Localization["RebuildBlockedTitle"],
+                ViewModel.Localization["RebuildBlockedMessage"]);
+            return;
+        }
+
+        var partitionChanged = FormPartitionDiffers(committed, pool.StableId, out var reformatsPartition);
+        if (hasData && partitionChanged && reformatsPartition)
+        {
+            await ShowMessageAsync(
+                ViewModel.Localization["RebuildBlockedTitle"],
+                ViewModel.Localization["RebuildBlockedMessage"]);
+            return;
+        }
+
+        if (!objectChanged && !partitionChanged)
+        {
+            await ShowMessageAsync(
+                Text("没有可保存的属性修改", "No pool properties to save"),
+                Text(
+                    "当前表单没有可保存的池属性修改。",
+                    "The property form holds no changes to save."));
+            _formDirty = true;
+            return;
+        }
+
+        if (tierChanged || reformatsPartition)
+        {
+            if (!await ConfirmUnrecommendedAsync())
             {
-                var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
-                return tier is not null
-                    && (!SameToken(group.ResiliencyBox, tier.ResiliencySettingName)
-                        || InterleaveToken(tier.Interleave) != (group.InterleaveBox.SelectedItem as string)
-                        || group.SizeBox.Text.Trim() != ToGigabytes(tier.Size)
-                        || group.CopiesBox.Text.Trim() != (tier.NumberOfDataCopies ?? 1).ToString()
-                        || group.FailuresBox.Text.Trim() != (tier.PhysicalDiskRedundancy ?? 1).ToString());
-            });
-            if (rebuilds)
-            {
-                await ShowMessageAsync(
-                    ViewModel.Localization["RebuildBlockedTitle"],
-                    ViewModel.Localization["RebuildBlockedMessage"]);
                 return;
             }
         }
 
-        if (!await ConfirmUnrecommendedAsync())
+        if (objectChanged)
         {
-            return;
+            if (await ApplyAsync(BuildPoolPropertyRequest(pool, merged)) is null)
+            {
+                return;
+            }
         }
 
-        CommitWorkingStep(ApplyFormToWorking(_working));
+        if (partitionChanged)
+        {
+            if (await ApplyPartitionChangesAsync(merged, ViewModel.ActiveSnapshot, pool.StableId))
+            {
+                return;
+            }
+        }
+
+        // Keep structural draft steps on the new committed snapshot; the
+        // saved property values are checkpointed, so undo history ends here.
+        _working = EditWorkspace.RestoreWorkingMembership(ViewModel.ActiveSnapshot, merged);
+        _undoStack.Clear();
+        _redoStack.Clear();
+        _formDirty = false;
+        RefreshAll();
+    }
+
+    private bool FormPartitionDiffers(
+        StorageSnapshot committed,
+        string poolId,
+        out bool reformatsPartition)
+    {
+        reformatsPartition = false;
+        var partition = CommittedPrimaryPartition(poolId);
+        if (partition is null)
+        {
+            return false;
+        }
+
+        var volumeName = _volumeNameBox.Text.Trim();
+        var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
+        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64K");
+        var fsChanged = !string.Equals(
+            fileSystem,
+            partition.FileSystem,
+            StringComparison.OrdinalIgnoreCase);
+        var clusterChanged = cluster != partition.AllocationUnitSize;
+        reformatsPartition = fsChanged || clusterChanged;
+        return reformatsPartition
+            || !string.Equals(volumeName, partition.FileSystemLabel, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool SameToken(ComboBox box, string value) =>
