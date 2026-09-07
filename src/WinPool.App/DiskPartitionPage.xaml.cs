@@ -85,13 +85,28 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         UpdateButtonState();
     }
 
-    private bool IsTopologyNodeSelected(TopologyNodeViewModel node) =>
-        node.Unit.StableId == _selectedDiskId
-        || node.Unit.StableId == _selectedPartitionId
-        || (EditWorkspace.IsUnallocated(node.Unit.StableId)
-            && EditWorkspace.TryParseUnallocated(node.Unit.StableId, out var disk, out var offset, out _)
-            && disk == _selectedDiskId
-            && offset == _selectedUnallocatedOffset);
+    // Exactly one object is highlighted at a time, matching Manage: a disk
+    // node, a partition node, or an unallocated gap. Selecting a partition
+    // must not also light its owning disk.
+    private bool IsTopologyNodeSelected(TopologyNodeViewModel node)
+    {
+        if (_selectedPartitionId is not null)
+        {
+            return node.Unit.Kind == StorageUnitKind.Partition
+                && node.Unit.StableId == _selectedPartitionId;
+        }
+
+        if (_selectedUnallocatedOffset is not null)
+        {
+            return EditWorkspace.IsUnallocated(node.Unit.StableId)
+                && EditWorkspace.TryParseUnallocated(node.Unit.StableId, out var disk, out var offset, out _)
+                && disk == _selectedDiskId
+                && offset == _selectedUnallocatedOffset;
+        }
+
+        return node.Unit.Kind == StorageUnitKind.OsDisk
+            && node.Unit.StableId == _selectedDiskId;
+    }
 
     private void OnTopologySelected(TopologyNodeViewModel node)
     {
