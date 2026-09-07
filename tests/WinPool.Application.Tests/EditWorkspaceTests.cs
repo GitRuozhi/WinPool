@@ -782,6 +782,66 @@ public sealed class EditWorkspaceLayerTests
     }
 }
 
+public sealed class TierCardCapacityTests
+{
+    private static TopologyNode? FindNode(TopologyNode root, StorageUnitKind kind)
+    {
+        if (root.Unit.Kind == kind)
+        {
+            return root;
+        }
+
+        foreach (var child in root.Children)
+        {
+            var found = FindNode(child, kind);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    [Fact]
+    public void TierCardSummaryShowsTierCapacityNotMemberDiskSum()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        // The factory tier reserves 1_000_000 while its member disk holds
+        // 2_000_000: the card must show the RESERVATION, not the disk sum.
+        var reserved = snapshot with
+        {
+            StorageTiers = snapshot.StorageTiers
+                .Select(tier => tier with { Size = 700L * 1024 * 1024 * 1024, FootprintOnPool = 700L * 1024 * 1024 * 1024 })
+                .ToArray()
+        };
+        var root = EditWorkspace.ProjectPoolWorkspaceRoot(reserved);
+        var tierNode = FindNode(root, StorageUnitKind.StorageTier);
+        Assert.NotNull(tierNode);
+        Assert.Contains("700 GiB", tierNode.Summary, StringComparison.Ordinal);
+        // 2_000_000 bytes formats to "1.91 MiB": the member-disk total must
+        // not be what the card reports.
+        Assert.DoesNotContain("1.91 MiB", tierNode.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnsetTierCapacityFallsBackToMemberDiskSum()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var unset = snapshot with
+        {
+            StorageTiers = snapshot.StorageTiers
+                .Select(tier => tier with { Size = 0, FootprintOnPool = 0 })
+                .ToArray()
+        };
+        var root = EditWorkspace.ProjectPoolWorkspaceRoot(unset);
+        var tierNode = FindNode(root, StorageUnitKind.StorageTier);
+        Assert.NotNull(tierNode);
+        // 2_000_000 bytes -> "1.91 MiB": the member-disk fallback.
+        Assert.Contains("1.91 MiB", tierNode.Summary, StringComparison.Ordinal);
+    }
+}
+
 public sealed class NormalizeTierCapacityTests
 {
     [Fact]

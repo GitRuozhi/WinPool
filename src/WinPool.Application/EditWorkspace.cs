@@ -969,6 +969,10 @@ public sealed record StructureProblem(
         var members = snapshot.PhysicalDisks
             .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
             .ToList();
+        // The tier card shows the tier's CAPACITY reservation: an unset
+        // capacity means "member capacity", so capacity edits made in the
+        // property panel are reflected here after every save.
+        var tierCapacity = tier.Size > 0 ? tier.Size : members.Sum(item => item.Size);
         var node = new TopologyNode(
             new StorageUnitRef(
                 tier.StableId,
@@ -978,7 +982,7 @@ public sealed record StructureProblem(
                 pool.StableId),
             TopologyProjector.JoinSummary(
                 $"{members.Count} physical disks",
-                TopologyProjector.FormatBytes(members.Sum(item => item.Size))),
+                TopologyProjector.FormatBytes(tierCapacity)),
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in members)
         {
