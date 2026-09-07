@@ -466,7 +466,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var line = new Border
             {
                 Height = 1,
-                Margin = new Thickness(0, 8, 0, 6),
+                Margin = new Thickness(0, 6, 0, 3),
                 Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
             };
             Grid.SetRow(line, row);
@@ -480,7 +480,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var label = new TextBlock
         {
-            Margin = new Thickness(0, first ? 0 : 2, 0, 6),
+            Margin = new Thickness(0, first ? 0 : 2, 0, 2),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = 12,
             Text = ViewModel.Localization[key]
