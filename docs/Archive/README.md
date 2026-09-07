@@ -3,13 +3,14 @@
 [English](README.md) | [简体中文（仅供阅读）](README.zh-CN.md)
 
 Archive content records historical state and does not define current requirements.
-The current product version is V0.46. No active Plan exists right now: the
-unified topology layout engine stage was implemented and archived under
-`V0.45-layout-engine` on 2026-09-06. The previous archived stage is the V0.45
-Edit-page topology workspace under `V0.45`.
+The current product version is V0.47. The active Plan is `docs/Plan.md` (V0.47
+storage-structure and disk-partition editors). The accepted product design is
+archived under `V0.47-standalone-pool-editor`. The previous implemented stage
+is the unified topology layout engine under `V0.45-layout-engine`.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
+| [`V0.47-standalone-pool-editor/`](V0.47-standalone-pool-editor/) | accepted product design; Plan installed; implementation not started | 2026-09-07 | V0.47 | Standalone storage-pool editor: retire Edit; Storage structure editor + Disk/partition editor; one virtual disk; NTFS and ReFS |
 | [`V0.2/`](V0.2/) | archived | 2026-08-10 | V0.2; source baseline `ec8b34a` | 15 architecture, implementation, acceptance, and manual-test plans plus their frozen index |
 | [`V0.31-pre-correction/`](V0.31-pre-correction/) | superseded / invalid | 2026-08-10 | `6cf68e3`, `8d7fb25` | The Plan and Plan index that incorrectly overrode the user's `docs/Archive` decision |
 | [`V0.32/`](V0.32/) | accepted; manual cases unverified | 2026-08-10 | V0.32; `dc5e263`, `7b7a798` | Final V0.31 correction state and the user's V0.32 version decision |

@@ -63,6 +63,12 @@ Disk-test, external-tool, and Development/AI diagnostics subsystems have been
 removed from the 1.0 release path and are deferred to 1.x/2.0; they are not part
 of the supported 1.x product surface.
 
+The 1.x editing surface is two pages: Storage structure editor (pools, tiers,
+one virtual disk, optional one volume) and Disk/partition editor. Creating a
+second virtual disk is outside 1.0; an existing multi-virtual-disk pool may be
+reduced to one. The accepted design is
+[Archive/V0.47-standalone-pool-editor](Archive/V0.47-standalone-pool-editor/Storage-Pool-Editor-Design.md).
+
 ## Architecture line
 
 The V0.4 product line retains the accepted V0.13 visual baseline and the V0.2

@@ -6,7 +6,7 @@ WinPool is a third-party WinUI 3 desktop application for understanding,
 monitoring, managing, and safely planning operations across Windows storage
 systems.
 
-The current product version is **V0.46**. The version source is
+The current product version is **V0.47**. The version source is
 `Directory.Build.props`. Final results are in the [changelog](docs/CHANGELOG.md).
 
 ## Capabilities
@@ -39,6 +39,7 @@ That command cleans regenerable local output, rebuilds, and writes a `WinPool.ln
 - [Development](docs/Development.md): architecture, environment, build, staging,
   and version rules.
 - [Quality](docs/Quality.md): test and acceptance rules.
+- [Plan](docs/Plan.md): current formal stage, when one exists.
 - [Changelog](docs/CHANGELOG.md): important final results.
 - [Archive](docs/Archive/README.md): frozen historical plans and state.
 - [Agent rules](AGENTS.md): operational, safety, Git, and release rules.
