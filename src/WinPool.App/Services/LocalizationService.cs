@@ -12,8 +12,8 @@ public sealed class LocalizationService : ObservableObject
         new Dictionary<string, (string Zh, string En)>(StringComparer.Ordinal)
         {
             ["Manage"] = ("管理", "Manage"),
-            ["StorageStructure"] = ("存储结构", "Storage structure"),
-            ["DiskPartition"] = ("磁盘/分区", "Disk/partition"),
+            ["StorageStructure"] = ("存储结构编辑", "Storage structure editor"),
+            ["DiskPartition"] = ("磁盘分区编辑", "Disk/partition editor"),
             ["DiskActionsSection"] = ("磁盘操作", "Disk actions"),
             ["PartitionActionsSection"] = ("分区操作", "Partition actions"),
             ["Test"] = ("测试", "Test"),
