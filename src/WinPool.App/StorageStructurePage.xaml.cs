@@ -44,7 +44,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         NumberBox ColumnsBox,
         TextBox DiskCountBox,
         TextBlock ProvisioningText,
-        List<FrameworkElement> Rows);
+        List<FrameworkElement> Rows,
+        List<int> RowIndices);
 
     /// <summary>Reset button shown only while its field differs from the
     /// committed state (it replaces the former dot marker).</summary>
@@ -97,6 +98,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
                 VerticalAlignment = VerticalAlignment.Center
             },
+            [],
             []);
 
     public StorageStructurePage()
@@ -393,8 +395,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         TierFields group,
         string key,
         FrameworkElement value,
-        Action? reset) =>
-        AddFormRow(row, key, value, reset, TierRowChanged(group, key), group.Rows);
+        Action? reset)
+    {
+        group.RowIndices.Add(row);
+        return AddFormRow(row, key, value, reset, TierRowChanged(group, key), group.Rows);
+    }
 
     private int AddPartitionRow(
         int row,
@@ -959,6 +964,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 foreach (var element in group.Rows)
                 {
                     element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+                }
+
+                // Fixed 40px rows keep their height when hidden; zero them so
+                // a hidden tier never leaves a tall blank block in the form.
+                foreach (var index in group.RowIndices)
+                {
+                    if (index < PoolFormGrid.RowDefinitions.Count)
+                    {
+                        PoolFormGrid.RowDefinitions[index].Height =
+                            new GridLength(visible ? 40 : 0);
+                    }
                 }
             }
 

@@ -638,3 +638,73 @@ public sealed class CreateTieredPoolSkipVdiskTests
         Assert.Empty(result.Document.Snapshot.Partitions);
     }
 }
+
+public sealed class UpdateStoragePoolSizeTests
+{
+    private static StorageSystemDocument CreateDocument()
+    {
+        var disks = new[]
+        {
+            new PhysicalDiskInfo(
+                "physical:p1", true, "Disk A", "M", "S1", "SATA", "SSD",
+                2_000_000_000_000, 512, 4096, "Healthy", "OK", false, string.Empty, 1,
+                false, false, false, false, "pool:1"),
+            new PhysicalDiskInfo(
+                "physical:p2", true, "Disk B", "M", "S2", "SATA", "HDD",
+                4_000_000_000_000, 512, 4096, "Healthy", "OK", false, string.Empty, 2,
+                false, false, false, false, "pool:1")
+        };
+        var pool = new StoragePoolInfo(
+            "pool:1", true, "Pool01", false, "Healthy", "OK",
+            6_000_000_000_000, 5_000_000_000_000, "subsystem:1",
+            ["physical:p1", "physical:p2"]);
+        var ssdTier = new StorageTierInfo(
+            "pool:1:tier:ssd", true, "Performance", "SSD", "Mirror",
+            2_000_000_000_000, 2_000_000_000_000, "pool:1", null,
+            ["physical:p1"], null, 65536, 2, 1);
+        var hddTier = new StorageTierInfo(
+            "pool:1:tier:hdd", true, "Capacity", "HDD", "Parity",
+            4_000_000_000_000, 4_000_000_000_000, "pool:1", null,
+            ["physical:p2"], 1, 65536, 1, 1);
+        var snapshot = new StorageSnapshot(
+            2, "test", DateTimeOffset.UtcNow,
+            new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
+            [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
+            disks,
+            [pool],
+            [ssdTier, hddTier],
+            [],
+            [],
+            [],
+            [],
+            [],
+            []);
+        return new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:test",
+            StorageSystemKind.Simulation,
+            "Test",
+            snapshot,
+            HardwareInventoryReport.Empty(DateTimeOffset.Now),
+            [],
+            DateTimeOffset.Now);
+    }
+
+    [Fact]
+    public void UpdateStoragePoolResizesThePerformanceTier()
+    {
+        var document = CreateDocument();
+        var result = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.UpdateStoragePool,
+                "pool:1",
+                Name: "Pool01",
+                PerformanceSizeBytes: 1_500_000_000_000));
+        Assert.True(result.Succeeded, result.Error);
+        var tier = result.Document.Snapshot.StorageTiers.Single(item => item.StableId == "pool:1:tier:ssd");
+        Assert.Equal(1_500_000_000_000, tier.Size);
+        var hdd = result.Document.Snapshot.StorageTiers.Single(item => item.StableId == "pool:1:tier:hdd");
+        Assert.Equal(4_000_000_000_000, hdd.Size);
+    }
+}
