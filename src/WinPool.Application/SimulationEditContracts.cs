@@ -23,7 +23,8 @@ public enum SimulationEditKind
     ResetDocument,
     CreateTieredPool,
     UpdateStoragePool,
-    DissolveStoragePool
+    DissolveStoragePool,
+    DeleteVirtualDisk
 }
 
 /// <summary>
@@ -57,7 +58,8 @@ public sealed record SimulationEditRequest(
     string? ScmResiliency = null,
     long? ScmInterleaveBytes = null,
     int? ScmDataCopies = null,
-    long? OffsetBytes = null);
+    long? OffsetBytes = null,
+    bool? CreatePartition = null);
 
 public sealed record SimulationEditReceipt(
     OperationId OperationId,

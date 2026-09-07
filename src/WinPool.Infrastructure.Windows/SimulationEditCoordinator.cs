@@ -271,6 +271,7 @@ public sealed class SimulationEditCoordinator(
         Add(values, "ScmInterleaveBytes", request.ScmInterleaveBytes);
         Add(values, "ScmDataCopies", request.ScmDataCopies);
         Add(values, "OffsetBytes", request.OffsetBytes);
+        Add(values, "CreatePartition", request.CreatePartition);
         return values;
     }
 
@@ -437,6 +438,7 @@ public sealed class SimulationEditCoordinator(
                 request.ScmResiliency,
                 request.ScmInterleaveBytes,
                 request.ScmDataCopies,
-                request.OffsetBytes);
+                request.OffsetBytes,
+                request.CreatePartition);
     }
 }

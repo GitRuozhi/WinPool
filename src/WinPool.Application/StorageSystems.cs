@@ -296,7 +296,8 @@ public enum SimulationOperationKind
     OptimizeDrive,
     CreateTieredPool,
     UpdateStoragePool,
-    DissolveStoragePool
+    DissolveStoragePool,
+    DeleteVirtualDisk
 }
 
 public sealed record SimulationOperationRequest(
@@ -325,7 +326,8 @@ public sealed record SimulationOperationRequest(
     string? ScmResiliency = null,
     long? ScmInterleaveBytes = null,
     int? ScmDataCopies = null,
-    long? OffsetBytes = null);
+    long? OffsetBytes = null,
+    bool? CreatePartition = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -383,6 +385,8 @@ public static class SimulatedCommandText
             [$"Set-StoragePool / Set-StorageTier / Set-VirtualDisk '{request.Name}'"],
         SimulationOperationKind.DissolveStoragePool =>
             ["Dissolve simulated pool and return member disks to primordial"],
+        SimulationOperationKind.DeleteVirtualDisk =>
+            ["Remove-VirtualDisk -Confirm:$false (removes the simulated virtual disk and its partitions)"],
         _ => []
     };
 
@@ -437,6 +441,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 SimulationOperationKind.CreateTieredPool => CreateTieredPool(document.Snapshot, request),
                 SimulationOperationKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
                 SimulationOperationKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
+                SimulationOperationKind.DeleteVirtualDisk => DeleteVirtualDisk(document.Snapshot, request),
                 SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive => document.Snapshot,
                 _ => throw new ArgumentOutOfRangeException(nameof(request))
             };
@@ -1058,6 +1063,13 @@ public sealed class SimulationOperationService : ISimulationOperationService
             InterleaveBytes: request.PerformanceInterleaveBytes ?? 65536,
             SizeBytes: request.SizeBytes,
             AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+        if (request.CreatePartition == false)
+        {
+            // Auto-create partition is off: the virtual disk stays RAW and
+            // is initialized on the Disk/partition editor (V0.47 design §6).
+            return created;
+        }
+
         var osDisk = created.OsDisks.Last(item => item.VirtualDiskStableId is not null);
         created = CreatePartition(created, new SimulationOperationRequest(
             SimulationOperationKind.CreatePartition,
@@ -1270,6 +1282,35 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     ? disk with { PoolStableId = primordial.StableId, CanPool = true }
                     : disk)
                 .ToArray()
+        };
+    }
+
+    private static StorageSnapshot DeleteVirtualDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
+    {
+        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == request.TargetStableId)
+            ?? throw new InvalidOperationException("The simulated virtual disk was not found.");
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == vdisk.PoolStableId)
+            ?? throw new InvalidOperationException("The simulated pool was not found.");
+        if (pool.IsPrimordial)
+        {
+            throw new InvalidOperationException("The primordial pool has no virtual disk to delete.");
+        }
+
+        var osDiskIds = snapshot.OsDisks
+            .Where(item => item.VirtualDiskStableId == vdisk.StableId)
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return snapshot with
+        {
+            StoragePools = snapshot.StoragePools
+                .Select(item => item.StableId == pool.StableId
+                    ? item with { AllocatedSize = Math.Max(0, item.AllocatedSize - vdisk.Size) }
+                    : item)
+                .ToArray(),
+            VirtualDisks = snapshot.VirtualDisks.Where(item => item.StableId != vdisk.StableId).ToArray(),
+            OsDisks = snapshot.OsDisks.Where(item => !osDiskIds.Contains(item.StableId)).ToArray(),
+            Partitions = snapshot.Partitions.Where(item =>
+                item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray()
         };
     }
 

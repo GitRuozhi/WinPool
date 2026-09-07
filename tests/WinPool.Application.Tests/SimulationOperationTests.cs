@@ -223,6 +223,26 @@ public sealed class SimulationOperationTests
     }
 
     [Fact]
+    public void CreateTieredPoolCanSkipUserPartition()
+    {
+        var document = Apply(CreateDocument(), new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "primordial",
+            Name: "PoolA",
+            VirtualDiskName: "SpaceA",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            PerformanceResiliency: "Mirror",
+            CapacityResiliency: "Parity",
+            FileSystem: "NTFS",
+            AllocationUnitSize: 65536,
+            CreatePartition: false));
+        var pool = Assert.Single(document.Snapshot.StoragePools, item => !item.IsPrimordial);
+        Assert.Single(document.Snapshot.VirtualDisks);
+        Assert.Empty(document.Snapshot.Partitions);
+        Assert.Contains(document.Snapshot.OsDisks, disk => disk.VirtualDiskStableId is not null);
+    }
+
+    [Fact]
     public void MovePhysicalDiskLeavesSourceTierAndEntersMatchingTargetTier()
     {
         var document = Apply(CreateDocument(), new SimulationOperationRequest(
@@ -335,6 +355,19 @@ public sealed class SimulationOperationTests
                 Name: "Renamed"));
         Assert.False(result.Succeeded);
         Assert.Contains("more than one virtual disk", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeleteVirtualDiskRemovesOneVirtualDiskAndKeepsTheOther()
+    {
+        var document = CreateBusyPoolDocument();
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.DeleteVirtualDisk,
+            "vdisk:2"));
+        var pool = document.Snapshot.StoragePools.Single(item => item.StableId == "pool:busy");
+        var remaining = Assert.Single(document.Snapshot.VirtualDisks, item => item.PoolStableId == "pool:busy");
+        Assert.Equal("vdisk:1", remaining.StableId);
+        Assert.Equal(500_000_000, pool.AllocatedSize);
     }
 
     private static StorageSystemDocument CreateBusyPoolDocument()
