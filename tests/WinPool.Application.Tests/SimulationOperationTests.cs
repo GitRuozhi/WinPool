@@ -422,3 +422,157 @@ public sealed class SimulationOperationTests
         };
     }
 }
+
+public sealed class SetDiskUsageTests
+{
+    private static StorageSystemDocument CreateDocument()
+    {
+        var disks = new[]
+        {
+            new PhysicalDiskInfo(
+                "physical:p1", true, "Free Disk One", "Model", "AA0001", "SATA", "SSD",
+                1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
+                false, false, false, false, "pool:primordial"),
+            new PhysicalDiskInfo(
+                "physical:p2", true, "Free Disk Two", "Model", "AA0002", "SATA", "HDD",
+                2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
+                false, false, false, false, "pool:primordial")
+        };
+        var primordial = new StoragePoolInfo(
+            "pool:primordial", true, "Primordial", true, "Healthy", "OK",
+            3_000_000_000L, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
+        var osDisk = new OsDiskInfo(
+            "osdisk:5", "Free Disk One", 5, "RAW", 1_000_000_000, false, false, false, "physical:p1", null);
+        var snapshot = new StorageSnapshot(
+            2, "test", DateTimeOffset.UtcNow,
+            new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
+            [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
+            disks,
+            [primordial],
+            [],
+            [],
+            [osDisk],
+            [],
+            [],
+            [],
+            []);
+        return new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:test",
+            StorageSystemKind.Simulation,
+            "Test",
+            snapshot,
+            HardwareInventoryReport.Empty(DateTimeOffset.Now),
+            [],
+            DateTimeOffset.Now);
+    }
+
+    private static StorageSystemDocument Apply(
+        StorageSystemDocument document,
+        SimulationOperationRequest request)
+    {
+        var result = new SimulationOperationService().Apply(document, request);
+        Assert.True(result.Succeeded, result.Error);
+        Assert.NotEmpty(result.Commands);
+        return result.Document;
+    }
+
+    [Fact]
+    public void SetDiskUsagePersistsLayerRolesOnACommittedPool()
+    {
+        var document = CreateDocument();
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "pool:primordial",
+            Name: "Pool01",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            VirtualDiskName: "Pool01"));
+        var pool = document.Snapshot.StoragePools.First(item => item.FriendlyName == "Pool01");
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
+
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.SetDiskUsage,
+            "physical:p1",
+            Name: "Retired"));
+        var retiredDisk = document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p1");
+        Assert.True(retiredDisk.IsRetired);
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p2"));
+
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.SetDiskUsage,
+            "physical:p1",
+            Name: "HotSpare"));
+        var hotDisk = document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p1");
+        Assert.False(hotDisk.IsRetired);
+        Assert.True(hotDisk.IsHotSpare);
+
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.SetDiskUsage,
+            "physical:p1",
+            Name: string.Empty));
+        var clearDisk = document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p1");
+        Assert.False(clearDisk.IsRetired);
+        Assert.False(clearDisk.IsHotSpare);
+        Assert.Equal(pool.StableId, clearDisk.PoolStableId);
+    }
+
+    [Fact]
+    public void SetDiskUsageRefusesPrimordialMembersAndUnknownTargets()
+    {
+        var document = CreateDocument();
+        var primordialResult = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskUsage,
+                "physical:p1",
+                Name: "Retired"));
+        Assert.False(primordialResult.Succeeded);
+        Assert.Contains("Primordial", primordialResult.Error, StringComparison.OrdinalIgnoreCase);
+
+        var missing = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskUsage,
+                "physical:missing",
+                Name: "Retired"));
+        Assert.False(missing.Succeeded);
+
+        var invalid = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskUsage,
+                "physical:p1",
+                Name: "Journal"));
+        Assert.False(invalid.Succeeded);
+    }
+
+    [Fact]
+    public void SetDiskUsageClearsPageFileRoleAfterConfirmationGate()
+    {
+        var document = CreateDocument();
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.CreateTieredPool,
+            "pool:primordial",
+            Name: "Pool01",
+            MemberDiskIds: ["physical:p1", "physical:p2"],
+            VirtualDiskName: "Pool01"));
+        var withRole = document.Snapshot with
+        {
+            PhysicalDisks = document.Snapshot.PhysicalDisks
+                .Select(item => item.StableId == "physical:p2" ? item with { IsPageFile = true } : item)
+                .ToArray()
+        };
+        document = document with { Snapshot = withRole };
+        var result = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskUsage,
+                "physical:p2",
+                Name: "HotSpare"));
+        Assert.True(result.Succeeded, result.Error);
+        var disk = result.Document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p2");
+        Assert.True(disk.IsHotSpare);
+        Assert.False(disk.IsPageFile);
+    }
+}

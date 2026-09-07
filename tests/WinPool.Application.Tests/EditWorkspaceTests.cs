@@ -658,3 +658,126 @@ public sealed class EditWorkspaceTests
             []);
     }
 }
+
+public sealed class EditWorkspaceLayerTests
+{
+    [Fact]
+    public void SetDiskUsageMovesPooledDiskBetweenSimulatedLayers()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        Assert.False(EditWorkspace.DiskUsage(snapshot.PhysicalDisks.Single(x => x.StableId == "physical:1")).Length > 0);
+
+        var retired = EditWorkspace.SetDiskUsage(snapshot, "physical:1", "Retired");
+        var disk = retired.PhysicalDisks.Single(x => x.StableId == "physical:1");
+        Assert.True(disk.IsRetired);
+        Assert.False(disk.IsHotSpare);
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(retired, "physical:1"));
+
+        var hotSpare = EditWorkspace.SetDiskUsage(retired, "physical:1", "HotSpare");
+        disk = hotSpare.PhysicalDisks.Single(x => x.StableId == "physical:1");
+        Assert.False(disk.IsRetired);
+        Assert.True(disk.IsHotSpare);
+
+        var cleared = EditWorkspace.SetDiskUsage(hotSpare, "physical:1", string.Empty);
+        disk = cleared.PhysicalDisks.Single(x => x.StableId == "physical:1");
+        Assert.False(disk.IsRetired);
+        Assert.False(disk.IsHotSpare);
+        Assert.Equal("pool:1", disk.PoolStableId);
+    }
+
+    [Fact]
+    public void SetDiskUsageRefusesBootSystemAndPrimordialDisks()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var boot = snapshot with
+        {
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(item => item.StableId == "physical:1" ? item with { IsBoot = true } : item)
+                .ToArray()
+        };
+        Assert.Throws<InvalidOperationException>(() => EditWorkspace.SetDiskUsage(boot, "physical:1", "Retired"));
+        Assert.Throws<InvalidOperationException>(() => EditWorkspace.SetDiskUsage(snapshot, "missing", "Retired"));
+        Assert.Throws<InvalidOperationException>(() => EditWorkspace.SetDiskUsage(snapshot, "physical:1", "Journal"));
+    }
+
+    [Fact]
+    public void MoveDiskBackIntoDataTierClearsSimulatedLayerRole()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var retired = EditWorkspace.SetDiskUsage(snapshot, "physical:1", "Retired");
+        var reassigned = EditWorkspace.MoveDiskToPool(retired, "physical:1", "pool:1");
+        var disk = reassigned.PhysicalDisks.Single(x => x.StableId == "physical:1");
+        Assert.False(disk.IsRetired);
+        Assert.False(disk.IsHotSpare);
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(reassigned, "physical:1"));
+    }
+
+    [Fact]
+    public void DissolvePoolInWorkingReturnsMembersAndRemovesObjects()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var primordial = new StoragePoolInfo(
+            "pool:primordial", true, "Primordial", true, "Healthy", "OK", 0, 0,
+            "subsystem:1", []);
+        var withPrimordial = snapshot with
+        {
+            StoragePools = new[] { primordial }.Concat(snapshot.StoragePools).ToArray()
+        };
+        var dissolved = EditWorkspace.DissolvePoolInWorking(withPrimordial, "pool:1");
+        Assert.DoesNotContain(dissolved.StoragePools, pool => pool.StableId == "pool:1");
+        var disk = dissolved.PhysicalDisks.Single(x => x.StableId == "physical:1");
+        Assert.Equal("pool:primordial", disk.PoolStableId);
+        Assert.DoesNotContain(dissolved.StorageTiers, tier => tier.PoolStableId == "pool:1");
+        Assert.DoesNotContain(dissolved.VirtualDisks, vdisk => vdisk.PoolStableId == "pool:1");
+        Assert.Empty(dissolved.Partitions);
+    }
+
+    [Fact]
+    public void StructuralChangesDetectPoolsRolesAndVirtualDisks()
+    {
+        var baseline = TestSnapshotFactory.Create();
+        var twin = TestSnapshotFactory.Create();
+        Assert.False(EditWorkspace.HasStructuralChanges(baseline, twin));
+
+        var retired = EditWorkspace.SetDiskUsage(baseline, "physical:1", "Retired");
+        Assert.True(EditWorkspace.HasStructuralChanges(baseline, retired));
+
+        var noVdisk = baseline with
+        {
+            VirtualDisks = [],
+            OsDisks = [],
+            Partitions = [],
+            StoragePools = baseline.StoragePools
+                .Select(item => item with { AllocatedSize = 0 })
+                .ToArray()
+        };
+        Assert.True(EditWorkspace.HasStructuralChanges(baseline, noVdisk));
+
+        var noPool = baseline with { StoragePools = baseline.StoragePools.Where(item => item.StableId != "pool:1").ToArray() };
+        Assert.True(EditWorkspace.HasStructuralChanges(baseline, noPool));
+    }
+
+    [Fact]
+    public void DraftVirtualDiskInsertAndDeleteStayOnTheWorkingCopy()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        // The factory pool already owns one virtual disk; remove it first to
+        // reach the create-one-virtual-disk state.
+        var existing = snapshot.VirtualDisks.Single(x => x.PoolStableId == "pool:1");
+        var withoutVdisk = snapshot with
+        {
+            VirtualDisks = [],
+            OsDisks = snapshot.OsDisks.Where(item => item.VirtualDiskStableId != existing.StableId).ToArray(),
+            Partitions = snapshot.Partitions.Where(item => item.OsDiskStableId != "osdisk:3").ToArray()
+        };
+        var next = EditWorkspace.InsertDraftVirtualDisk(withoutVdisk, "pool:1", "Draft01", "Parity", 65536);
+        var draft = next.VirtualDisks.Single(vdisk => EditWorkspace.IsDraftVirtualDisk(vdisk.StableId));
+        Assert.Equal("pool:1", draft.PoolStableId);
+        Assert.True(EditWorkspace.HasStructuralChanges(withoutVdisk, next));
+        Assert.Throws<InvalidOperationException>(
+            () => EditWorkspace.InsertDraftVirtualDisk(next, "pool:1", "Second", "Simple", 65536));
+
+        var removed = EditWorkspace.DeleteVirtualDiskFromWorking(next, draft.StableId);
+        Assert.DoesNotContain(removed.VirtualDisks, vdisk => vdisk.StableId == draft.StableId);
+    }
+}

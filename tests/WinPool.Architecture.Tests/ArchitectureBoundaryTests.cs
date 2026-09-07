@@ -473,7 +473,7 @@ public sealed class ArchitectureBoundaryTests
             structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
-            "EditWorkspace.RestoreWorkingMembership",
+            "SimulationOperationKind.SetDiskUsage",
             structurePage,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -1295,12 +1295,15 @@ public sealed class ArchitectureBoundaryTests
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
-        // One virtual disk is the 1.0 contract: the structure page only
-        // creates a pool (which yields one virtual disk) and can delete an
-        // extra one to reduce a multi-virtual-disk pool back to one.
-        Assert.DoesNotContain("CreateVirtualDisk", page, StringComparison.Ordinal);
-        Assert.Contains("SimulationOperationKind.CreateTieredPool", page, StringComparison.Ordinal);
+        // One virtual disk is the 1.0 contract: the structure page can
+        // create the one virtual disk only while the pool has none (SC4),
+        // and Delete removes the selected virtual disk including the last
+        // one. A pool that arrives with several may only be reduced to one;
+        // there is no path that adds a second disk to a pool that has one.
+        Assert.Contains("SimulationOperationKind.CreateVirtualDisk", page, StringComparison.Ordinal);
         Assert.Contains("SimulationOperationKind.DeleteVirtualDisk", page, StringComparison.Ordinal);
+        Assert.Contains("EditWorkspace.HasMultipleVirtualDisks", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationOperationKind.CreateTieredPool", page, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
