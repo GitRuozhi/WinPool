@@ -82,8 +82,21 @@ to have the same long-run evidence as NTFS 64K. A single-SSD Mirror is allowed
 with an explicit no-redundancy warning. That is intentional opposition to
 “wizard next step” defaults.
 
+## Outdated disk formats are refused; the pool carries the complexity
+
+Disk Management still creates MBR, converts disks to dynamic, and offers
+spanned, striped, mirrored, and RAID-5 volumes. Those are superseded disk
+formats. WinPool does not provide creating MBR, dynamic disks, or those volume
+types. Complexity that used to live there is carried by the storage pool.
+
+## Virtual hard disks are out
+
+Disk Management can create, attach, and detach VHD and VHDX. WinPool does not
+support virtual-hard-disk features.
+
 ## Out of this product path
 
 A second virtual disk; Manual allocation; Journal disks as a designed path;
-free-form storage commands on this surface; treating the structure editor as
-Manage.
+creating MBR; dynamic disks and spanned / striped / mirrored / RAID-5 volumes;
+VHD and similar virtual-hard-disk features; free-form storage commands on this
+surface; treating the structure editor as Manage.
