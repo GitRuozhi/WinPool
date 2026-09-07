@@ -145,15 +145,17 @@ public static class SimulationCatalog
     {
         var b = new LayoutBuilder("w16");
         b.PartitionedPhysical(0, "Boot", "SSD", "primordial", 2, system: true);
-        var members = new int[16];
+        var free = new int[17];
+        free[0] = 0;
         for (var i = 1; i <= 16; i++)
         {
-            b.Disk(i, $"JBOD-{i:00}", i <= 4 ? "SSD" : "HDD", "pool");
-            members[i - 1] = i;
+            b.Disk(i, $"JBOD-{i:00}", i <= 4 ? "SSD" : "HDD", "primordial");
+            free[i] = i;
         }
 
-        b.Primordial(0);
-        b.Pool("pool", "FlatPool", members);
+        // Sixteen JBOD disks as free primordial disks, not a pooled flat
+        // array: the Disk partition editor then shows every one of them.
+        b.Primordial(free);
         return b.Build("16盘无层", "layout-wide-16-v1");
     }
 
