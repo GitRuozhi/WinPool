@@ -145,23 +145,20 @@ public static class EditWorkspace
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var ignore = Math.Max(0, minUnallocatedBytes);
-        var nonPrimordialMembers = snapshot.StoragePools
-            .Where(pool => !pool.IsPrimordial)
-            .SelectMany(pool => pool.MemberPhysicalDiskIds)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // One rule drives this page: the OS-disk view of every physical disk
+        // that is free in the primordial pool, plus the OS-disk view of every
+        // virtual disk in any pool. Pooled physical disks, network disks, and
+        // other external groups do not appear here.
+        var primordialMembers = snapshot.StoragePools
+            .FirstOrDefault(pool => pool.IsPrimordial)
+            ?.MemberPhysicalDiskIds
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
 
         var disks = snapshot.OsDisks
-            .Where(PartitionableDiskPolicy.IsEligible)
-            .Where(disk =>
-            {
-                if (!string.IsNullOrWhiteSpace(disk.VirtualDiskStableId))
-                {
-                    return true;
-                }
-
-                return string.IsNullOrWhiteSpace(disk.PhysicalDiskStableId)
-                    || !nonPrimordialMembers.Contains(disk.PhysicalDiskStableId);
-            })
+            .Where(disk => !string.IsNullOrWhiteSpace(disk.VirtualDiskStableId)
+                || (!string.IsNullOrWhiteSpace(disk.PhysicalDiskStableId)
+                    && primordialMembers.Contains(disk.PhysicalDiskStableId)))
             .OrderBy(disk => disk.Number)
             .ToArray();
 
@@ -1048,6 +1045,19 @@ public sealed record StructureProblem(
         return target.IsPrimordial
             ? EnsureFreeDisksHaveOsDisks(result, [disk.StableId])
             : result;
+    }
+
+    /// <summary>
+    /// Ensures every free physical disk (a primordial member) exposes an
+    /// OS-disk view, so the Disk partition editor can always show and
+    /// initialize a disk that is not currently pooled.
+    /// </summary>
+    public static StorageSnapshot EnsureFreeDisksHaveOsDisks(StorageSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return snapshot.StoragePools.FirstOrDefault(pool => pool.IsPrimordial) is { } primordial
+            ? EnsureFreeDisksHaveOsDisks(snapshot, primordial.MemberPhysicalDiskIds)
+            : snapshot;
     }
 
     /// <summary>

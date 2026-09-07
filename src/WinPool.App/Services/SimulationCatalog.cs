@@ -64,8 +64,13 @@ public static class SimulationCatalog
         string id,
         string name,
         StorageSnapshot snapshot,
-        HardwareInventoryReport? hardwareReport = null) =>
-        new(
+        HardwareInventoryReport? hardwareReport = null)
+    {
+        // Keep the built-in documents consistent with the runtime invariant:
+        // every free physical disk has an OS-disk view, and every virtual disk
+        // already carries one from its layout.
+        snapshot = EditWorkspace.EnsureFreeDisksHaveOsDisks(snapshot);
+        return new StorageSystemDocument(
             StorageSystemDocument.CurrentSchemaVersion,
             id,
             StorageSystemKind.Simulation,
@@ -74,6 +79,7 @@ public static class SimulationCatalog
             hardwareReport ?? HardwareInventoryReport.Empty(snapshot.ScannedAt),
             [],
             snapshot.ScannedAt);
+    }
 
     private static StorageSnapshot TripleTier()
     {
