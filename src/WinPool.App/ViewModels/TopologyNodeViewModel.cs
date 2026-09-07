@@ -599,9 +599,18 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 .Where(x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
                 .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            // The tier card mirrors every spec the property panel saves:
+            // resiliency / stripe and the tier's capacity reservation (an
+            // unset capacity means "member capacity"). Saved edits are
+            // therefore visible on the left after each save.
+            var capacity = tier.Size > 0 ? tier.Size : members.Sum(x => x.Size);
+            var spec = tier.Interleave is { } interleave and > 0
+                ? $"{tier.ResiliencySettingName} {interleave / 1024}K"
+                : tier.ResiliencySettingName;
             return TopologyProjector.JoinSummary(
+                spec,
                 $"{members.Count} {owner.Localization["PhysicalDisk"]}",
-                TopologyProjector.FormatBytes(members.Sum(x => x.Size)));
+                TopologyProjector.FormatBytes(capacity));
         }
 
         if (unit.Kind == StorageUnitKind.PhysicalDisk)
