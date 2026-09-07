@@ -29,7 +29,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _formDirty;
 
     // Structural draft history. Every topology drag or structure-button
-    // change (and every Save of the property form) commits one step.
+    // change commits one step; Save checkpoints the history away.
     private readonly Stack<StorageSnapshot> _undoStack = [];
     private readonly Stack<StorageSnapshot> _redoStack = [];
 
@@ -38,31 +38,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
         string TitleKey,
         ComboBox ResiliencyBox,
         ComboBox InterleaveBox,
-        TextBox SizeBox,
-        TextBox CopiesBox,
-        TextBox FailuresBox,
-        TextBox ColumnsBox,
+        NumberBox SizeBox,
+        NumberBox CopiesBox,
+        NumberBox FailuresBox,
+        NumberBox ColumnsBox,
         TextBox DiskCountBox,
         TextBlock ProvisioningText,
         List<FrameworkElement> Rows);
 
-    private readonly List<FrameworkElement> _allRows = [];
+    /// <summary>Dot + its reset button + a live "changed vs committed" check.</summary>
+    private sealed record FieldDot(TextBlock Dot, Button? ResetButton, Func<bool> IsChanged);
 
+    private readonly List<FieldDot> _fieldDots = [];
     private readonly TextBox _poolNameBox = new();
     private readonly TextBox _virtualDiskNameBox = new();
     private readonly TextBox _volumeNameBox = new();
+    private readonly ToggleSwitch _autoVdiskSwitch = new() { IsOn = true };
     private readonly ToggleSwitch _autoPartitionSwitch = new() { IsOn = true };
-    private readonly ToggleSwitch _showHotSpareSwitch = new();
-    private readonly ToggleSwitch _showRetiredSwitch = new();
     private readonly ComboBox _partitionStyleBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _fileSystemBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _clusterBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly Button _savePoolPropertiesButton = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly TextBlock _researchNote = new()
-    {
-        TextWrapping = TextWrapping.Wrap,
-        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
-    };
     private readonly TextBlock _multiVdiskWarning = new()
     {
         TextWrapping = TextWrapping.Wrap,
@@ -73,16 +68,27 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private TierFields Capacity { get; set; } = null!;
     private TierFields Dedicated { get; set; } = null!;
 
+    private static NumberBox CreateNumberField(double minimum = double.NaN, double maximum = double.NaN) =>
+        new()
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden,
+            SmallChange = 1,
+            Minimum = minimum,
+            Maximum = maximum,
+            ValidationMode = NumberBoxValidationMode.InvalidInputOverwritten
+        };
+
     private static TierFields CreateTierFields(string media, string titleKey) =>
         new(
             media,
             titleKey,
             new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch },
             new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch },
-            new TextBox(),
-            new TextBox(),
-            new TextBox(),
-            new TextBox(),
+            CreateNumberField(minimum: 0),
+            CreateNumberField(minimum: 1, maximum: 16),
+            CreateNumberField(minimum: 0, maximum: 16),
+            CreateNumberField(minimum: 1, maximum: 64),
             new TextBox { IsReadOnly = true },
             new TextBlock
             {
@@ -117,7 +123,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _undoStack.Clear();
         _redoStack.Clear();
         _formDirty = false;
-        ResetLayerSwitchesForSelection();
         _interaction = new TopologyEditInteraction(
             IsTopologyNodeSelected,
             OnTopologySelected,
@@ -128,22 +133,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RefreshAll();
     }
 
-    private void ResetLayerSwitchesForSelection()
-    {
-        var pool = SelectedPool();
-        if (pool is null || pool.IsPrimordial)
-        {
-            _showHotSpareSwitch.IsOn = false;
-            _showRetiredSwitch.IsOn = false;
-            return;
-        }
-
-        // A layer that holds disks is always shown; the switch can hide
-        // only an empty simulated layer.
-        _showHotSpareSwitch.IsOn = HasRoleDisks(pool.StableId, "HotSpare");
-        _showRetiredSwitch.IsOn = HasRoleDisks(pool.StableId, "Retired");
-    }
-
     private bool HasRoleDisks(string poolId, string usage) =>
         _working.PhysicalDisks.Any(disk =>
             string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
@@ -151,7 +140,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void LocalizeChrome()
     {
-        StructureOperationsTitle.Text = ViewModel.Localization["StructureOperationsSection"];
         UndoButton.Content = ViewModel.Localization["Undo"];
         RedoButton.Content = ViewModel.Localization["Redo"];
         DiscardAllButton.Content = ViewModel.Localization["DiscardAll"];
@@ -162,14 +150,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HotSpareButton.Content = ViewModel.Localization["HotSpareDisk"];
         CreateVdiskButton.Content = ViewModel.Localization["CreateVirtualDisk"];
         DeleteVdiskButton.Content = ViewModel.Localization["DeleteVirtualDisk"];
-        _researchNote.Text = ViewModel.Localization["ResearchNote64k"];
+        SavePoolPropertiesButton.Content = ViewModel.Localization["SavePoolProperties"];
+        ShowHotSpareLabel.Text = ViewModel.Localization["ShowHotSpareLayer"];
+        ShowRetiredLabel.Text = ViewModel.Localization["ShowRetiredLayer"];
         _multiVdiskWarning.Text = ViewModel.Localization["MultipleVirtualDiskWarning"];
-        _savePoolPropertiesButton.Content = ViewModel.Localization["SavePoolProperties"];
         _volumeNameBox.PlaceholderText = ViewModel.Localization["VolumeName"];
-        foreach (var group in TierGroups())
-        {
-            group.SizeBox.PlaceholderText = ViewModel.Localization["SizeGbPlaceholder"];
-        }
     }
 
     private void EnsureForm()
@@ -180,6 +165,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         _formBuilt = true;
+        PoolFormGrid.ColumnDefinitions.Clear();
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
         FillCombo(_clusterBox, ["4K", "8K", "16K", "32K", "64K"], 4);
@@ -189,83 +179,64 @@ public sealed partial class StorageStructurePage : EditorPageBase
             FillCombo(group.InterleaveBox, ["16K", "32K", "64K", "128K", "256K"], 2);
         }
 
-        HookFormField(Performance.ResiliencyBox);
-        HookFormField(Performance.InterleaveBox);
-        HookFormField(Performance.SizeBox);
-        HookFormField(Performance.CopiesBox);
-        HookFormField(Performance.FailuresBox);
-        HookFormField(Performance.ColumnsBox);
-        HookFormField(Capacity.ResiliencyBox);
-        HookFormField(Capacity.InterleaveBox);
-        HookFormField(Capacity.SizeBox);
-        HookFormField(Capacity.CopiesBox);
-        HookFormField(Capacity.FailuresBox);
-        HookFormField(Capacity.ColumnsBox);
-        HookFormField(Dedicated.ResiliencyBox);
-        HookFormField(Dedicated.InterleaveBox);
-        HookFormField(Dedicated.SizeBox);
-        HookFormField(Dedicated.CopiesBox);
-        HookFormField(Dedicated.FailuresBox);
-        HookFormField(Dedicated.ColumnsBox);
-        HookFormField(_partitionStyleBox);
-        HookFormField(_fileSystemBox);
-        HookFormField(_clusterBox);
+        foreach (var group in TierGroups())
+        {
+            HookFormField(group.ResiliencyBox, isCombo: true);
+            HookFormField(group.InterleaveBox, isCombo: true);
+            HookFormField(group.SizeBox);
+            HookFormField(group.CopiesBox);
+            HookFormField(group.FailuresBox);
+            HookFormField(group.ColumnsBox);
+            HookEnterCommit(group.SizeBox);
+            HookEnterCommit(group.CopiesBox);
+            HookEnterCommit(group.FailuresBox);
+            HookEnterCommit(group.ColumnsBox);
+        }
+
+        HookFormField(_partitionStyleBox, isCombo: true);
+        HookFormField(_fileSystemBox, isCombo: true);
+        HookFormField(_clusterBox, isCombo: true);
         HookFormField(_volumeNameBox);
         HookFormField(_virtualDiskNameBox);
         HookFormField(_poolNameBox);
-        foreach (var group in TierGroups())
+        HookEnterCommit(_poolNameBox);
+        HookEnterCommit(_virtualDiskNameBox);
+        HookEnterCommit(_volumeNameBox);
+        _autoVdiskSwitch.Toggled += (_, _) =>
         {
-            // Re-link tolerated failures (Mirror) on commit of the typed
-            // copies number; Parity keeps its own failures box editable.
-            group.CopiesBox.LostFocus += (_, _) => UpdateLinkedFields();
-        }
+            _formDirty = true;
+            UpdateButtonState();
+            SyncAutoVirtualDiskPlaceholder();
+        };
         _autoPartitionSwitch.Toggled += (_, _) =>
         {
             _formDirty = true;
             UpdateButtonState();
         };
-        _showHotSpareSwitch.Toggled += (_, _) => OnSimulatedLayerSwitchToggled("HotSpare", _showHotSpareSwitch);
-        _showRetiredSwitch.Toggled += (_, _) => OnSimulatedLayerSwitchToggled("Retired", _showRetiredSwitch);
 
         var row = 0;
         AddSectionHeader(row++, "PoolPropertiesSection");
-        AddFormRow(row++, "PoolName", _poolNameBox);
-        AddFormRow(row++, "VirtualDiskName", _virtualDiskNameBox);
-        AddFormRow(row++, "VolumeName", _volumeNameBox);
-        AddFormRow(row++, "AutoCreatePartition", _autoPartitionSwitch);
-        AddFormRow(row++, "ShowHotSpareLayer", _showHotSpareSwitch);
-        AddFormRow(row++, "ShowRetiredLayer", _showRetiredSwitch);
+        AddFormRow(row++, "PoolName", _poolNameBox, changed: PoolNameChanged);
+        AddFormRow(row++, "VirtualDiskName", _virtualDiskNameBox, changed: VirtualDiskNameChanged);
+        AddFormRow(row++, "VolumeName", _volumeNameBox, changed: VolumeNameChanged);
+        AddFormRow(row++, "AutoCreateVirtualDisk", _autoVdiskSwitch, changed: () => false);
+        AddFormRow(row++, "AutoCreatePartition", _autoPartitionSwitch, changed: () => false);
         foreach (var group in TierGroups())
         {
             row = AddTierGroup(row, group);
         }
 
         AddSectionHeader(row++, "DiskAndPartitionSection");
-        AddFormRow(row++, "PartitionTableStyle", _partitionStyleBox);
-        AddFormRow(row++, "FileSystem", _fileSystemBox);
-        AddFormRow(row++, "AllocationUnit", _clusterBox);
+        AddFormRow(row++, "PartitionTableStyle", _partitionStyleBox, changed: PartitionStyleChanged, reset: () => ResetPartitionField("PartitionStyle"));
+        AddFormRow(row++, "FileSystem", _fileSystemBox, changed: FileSystemChanged, reset: () => ResetPartitionField("FileSystem"));
+        AddFormRow(row++, "AllocationUnit", _clusterBox, changed: AllocationUnitChanged, reset: () => ResetPartitionField("AllocationUnit"));
 
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _multiVdiskWarning.Margin = new Thickness(0, 4, 0, 0);
         Grid.SetRow(_multiVdiskWarning, row);
         Grid.SetColumn(_multiVdiskWarning, 0);
-        Grid.SetColumnSpan(_multiVdiskWarning, 2);
+        Grid.SetColumnSpan(_multiVdiskWarning, 4);
         PoolFormGrid.Children.Add(_multiVdiskWarning);
-        row++;
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Grid.SetRow(_researchNote, row);
-        Grid.SetColumn(_researchNote, 0);
-        Grid.SetColumnSpan(_researchNote, 2);
-        PoolFormGrid.Children.Add(_researchNote);
-        row++;
-
-        // Last row is the full-width Save row (V0.47 spec §3).
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _savePoolPropertiesButton.Margin = new Thickness(0, 10, 0, 0);
-        _savePoolPropertiesButton.Click += SavePoolProperties_Click;
-        Grid.SetRow(_savePoolPropertiesButton, row);
-        Grid.SetColumn(_savePoolPropertiesButton, 0);
-        Grid.SetColumnSpan(_savePoolPropertiesButton, 2);
-        PoolFormGrid.Children.Add(_savePoolPropertiesButton);
     }
 
     private IEnumerable<TierFields> TierGroups()
@@ -275,7 +246,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         yield return Dedicated;
     }
 
-    private void HookFormField(Control control)
+    /// <summary>Marks the form dirty and refreshes buttons and field dots.</summary>
+    private void HookFormField(Control control, bool isCombo = false)
     {
         switch (control)
         {
@@ -285,13 +257,21 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     if (!_filling)
                     {
                         _formDirty = true;
-                        // Save / Apply-all / Discard-all enablement depends on
-                        // the dirty flag; refresh it on every edit.
                         UpdateButtonState();
                     }
                 };
                 break;
-            case ComboBox combo:
+            case NumberBox number:
+                number.ValueChanged += (_, _) =>
+                {
+                    if (!_filling)
+                    {
+                        _formDirty = true;
+                        UpdateButtonState();
+                    }
+                };
+                break;
+            case ComboBox combo when isCombo:
                 combo.SelectionChanged += (_, _) =>
                 {
                     if (!_filling)
@@ -305,62 +285,230 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
     }
 
+    /// <summary>Enter commits the field and moves focus away from it.</summary>
+    private void HookEnterCommit(FrameworkElement field)
+    {
+        field.KeyDown += (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Enter)
+            {
+                return;
+            }
+
+            args.Handled = true;
+            if (field is NumberBox number)
+            {
+                NormalizeTierNumber(number);
+            }
+
+            Focus(FocusState.Programmatic);
+            UpdateButtonState();
+        };
+    }
+
+    /// <summary>Empty tier numbers restore the committed tier value on commit.</summary>
+    private void NormalizeTierNumber(NumberBox number)
+    {
+        if (NumValue(number) is not null)
+        {
+            return;
+        }
+
+        foreach (var group in TierGroups())
+        {
+            var tier = SelectedTier(group.Media);
+            if (tier is null)
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(group.SizeBox, number))
+            {
+                SetNum(number, tier.Size > 0 ? Math.Round(tier.Size / 1024d / 1024d / 1024d, 2) : 0);
+                return;
+            }
+
+            if (ReferenceEquals(group.CopiesBox, number))
+            {
+                SetNum(number, tier.NumberOfDataCopies ?? 1);
+                return;
+            }
+
+            if (ReferenceEquals(group.FailuresBox, number))
+            {
+                SetNum(number, tier.PhysicalDiskRedundancy ?? 0);
+                return;
+            }
+
+            if (ReferenceEquals(group.ColumnsBox, number))
+            {
+                SetNum(number, tier.NumberOfColumns ?? 1);
+                return;
+            }
+        }
+    }
+
+    private StorageTierInfo? SelectedTier(string media)
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return null;
+        }
+
+        return TierMap(pool.StableId).GetValueOrDefault(media);
+    }
+
     private int AddTierGroup(int row, TierFields group)
     {
-        var header = AddSectionHeader(row++, group.TitleKey);
-        group.Rows.Add(header);
-        row = AddGroupRow(row, "TierSize", group.SizeBox, group);
-        row = AddGroupRow(row, "TierProvisioning", group.ProvisioningText, group);
-        row = AddGroupRow(row, "TierResiliency", group.ResiliencyBox, group);
-        row = AddGroupRow(row, "TierDataCopies", group.CopiesBox, group);
-        row = AddGroupRow(row, "TierToleratedFailures", group.FailuresBox, group);
-        row = AddGroupRow(row, "TierDiskCount", group.DiskCountBox, group);
-        row = AddGroupRow(row, "TierColumns", group.ColumnsBox, group);
-        row = AddGroupRow(row, "TierStripeSize", group.InterleaveBox, group);
+        AddSectionHeader(row++, group.TitleKey);
+        row = AddTierRow(row, group, "TierSize", group.SizeBox, () => ResetTierField(group, "Size"));
+        row = AddTierRow(row, group, "TierProvisioning", group.ProvisioningText, null);
+        row = AddTierRow(row, group, "TierResiliency", group.ResiliencyBox, () => ResetTierField(group, "Resiliency"));
+        row = AddTierRow(row, group, "TierDataCopies", group.CopiesBox, () => ResetTierField(group, "Copies"));
+        row = AddTierRow(row, group, "TierToleratedFailures", group.FailuresBox, () => ResetTierField(group, "Failures"));
+        row = AddTierRow(row, group, "TierDiskCount", group.DiskCountBox, null);
+        row = AddTierRow(row, group, "TierColumns", group.ColumnsBox, () => ResetTierField(group, "Columns"));
+        row = AddTierRow(row, group, "TierStripeSize", group.InterleaveBox, () => ResetTierField(group, "Stripe"));
         return row;
     }
 
-    private int AddGroupRow(int row, string key, FrameworkElement value, TierFields group)
+    private int AddTierRow(
+        int row,
+        TierFields group,
+        string key,
+        FrameworkElement value,
+        Action? reset) =>
+        AddFormRow(row, key, value, reset, TierRowChanged(group, key), group.Rows) + 1;
+
+    /// <summary>Live "changed vs committed" check for a tier parameter row.</summary>
+    private Func<bool> TierRowChanged(TierFields group, string key)
     {
-        var label = AddFormRow(row, key, value);
-        group.Rows.Add(label);
-        group.Rows.Add(value);
-        return row + 1;
+        var (field, media) = key switch
+        {
+            "TierSize" => (TierFieldKind.Size, group.Media),
+            "TierProvisioning" => (TierFieldKind.Provisioning, group.Media),
+            "TierResiliency" => (TierFieldKind.Resiliency, group.Media),
+            "TierDataCopies" => (TierFieldKind.Copies, group.Media),
+            "TierToleratedFailures" => (TierFieldKind.Failures, group.Media),
+            "TierDiskCount" => (TierFieldKind.DiskCount, group.Media),
+            "TierColumns" => (TierFieldKind.Columns, group.Media),
+            _ => (TierFieldKind.Stripe, group.Media)
+        };
+        return () => TierFieldChanged(field, media);
+    }
+
+    private Button CreateResetButton(Action reset)
+    {
+        var button = new Button
+        {
+            Width = 24,
+            Height = 26,
+            Padding = new Thickness(4),
+            Content = new FontIcon
+            {
+                Glyph = "\uE777",
+                FontSize = 12
+            }
+        };
+        ToolTipService.SetToolTip(button, ViewModel.Localization["ResetRecommended"]);
+        button.Click += (_, _) =>
+        {
+            if (_filling)
+            {
+                return;
+            }
+
+            reset();
+            _formDirty = true;
+            UpdateLinkedFields();
+            UpdateButtonState();
+        };
+        return button;
     }
 
     private TextBlock AddSectionHeader(int row, string key)
     {
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var line = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(0, row == 0 ? 0 : 10, 0, 6),
+            Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
+        };
+        Grid.SetRow(line, row);
+        Grid.SetColumn(line, 0);
+        Grid.SetColumnSpan(line, 4);
+        PoolFormGrid.Children.Add(line);
+        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var label = new TextBlock
         {
-            Margin = new Thickness(0, row == 0 ? 0 : 12, 0, 4),
+            Margin = new Thickness(0, 0, 0, 4),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 12,
             Text = ViewModel.Localization[key]
         };
-        Grid.SetRow(label, row);
+        Grid.SetRow(label, row + 1);
         Grid.SetColumn(label, 0);
-        Grid.SetColumnSpan(label, 2);
+        Grid.SetColumnSpan(label, 4);
         PoolFormGrid.Children.Add(label);
         return label;
     }
 
-    private TextBlock AddFormRow(int row, string key, FrameworkElement value)
+    /// <summary>
+    /// Builds one uniform-height label / dot / value / reset row. The dot
+    /// marks a value that differs from the committed state; reset restores
+    /// the recommended value for parameter rows.
+    /// </summary>
+    private int AddFormRow(
+        int row,
+        string key,
+        FrameworkElement value,
+        Action? reset = null,
+        Func<bool>? changed = null,
+        List<FrameworkElement>? visibilityGroup = null)
     {
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
         var label = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
             Text = ViewModel.Localization[key]
         };
+        var dot = new TextBlock
+        {
+            Text = "\u25CF",
+            FontSize = 7,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 2, 0),
+            Foreground = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
+            Visibility = Visibility.Collapsed
+        };
+        value.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetRow(label, row);
         Grid.SetColumn(label, 0);
+        Grid.SetRow(dot, row);
+        Grid.SetColumn(dot, 1);
         Grid.SetRow(value, row);
-        Grid.SetColumn(value, 1);
+        Grid.SetColumn(value, 2);
         PoolFormGrid.Children.Add(label);
+        PoolFormGrid.Children.Add(dot);
         PoolFormGrid.Children.Add(value);
-        _allRows.Add(label);
-        _allRows.Add(value);
-        return label;
+        visibilityGroup?.Add(label);
+        visibilityGroup?.Add(dot);
+        visibilityGroup?.Add(value);
+        Button? resetButton = null;
+        if (reset is not null)
+        {
+            resetButton = CreateResetButton(reset);
+            resetButton.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetRow(resetButton, row);
+            Grid.SetColumn(resetButton, 3);
+            PoolFormGrid.Children.Add(resetButton);
+            visibilityGroup?.Add(resetButton);
+        }
+
+        _fieldDots.Add(new FieldDot(dot, resetButton, changed ?? (() => false)));
+        return row;
     }
 
     private static void FillCombo(ComboBox box, IReadOnlyList<string> items, int selected)
@@ -373,6 +521,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         box.SelectedIndex = selected;
     }
+
 
     private string? ResolvePoolId(string? stableId)
     {
@@ -401,12 +550,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private void RefreshTopology()
     {
         var visible = new List<string>();
-        if (_showHotSpareSwitch.IsOn)
+        if (ShowHotSpareSwitch.IsOn)
         {
             visible.Add("HotSpare");
         }
 
-        if (_showRetiredSwitch.IsOn)
+        if (ShowRetiredSwitch.IsOn)
         {
             visible.Add("Retired");
         }
@@ -586,11 +735,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var next = EditWorkspace.SetDiskUsage(_working, diskId, usage);
             if (usage == "Retired")
             {
-                _showRetiredSwitch.IsOn = true;
             }
             else
             {
-                _showHotSpareSwitch.IsOn = true;
             }
 
             CommitWorkingStep(next);
@@ -852,15 +999,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             SetResiliency(group.ResiliencyBox, "Mirror");
             SetInterleave(group.InterleaveBox, 65536);
-            group.SizeBox.Text = string.Empty;
-            group.ColumnsBox.Text = "auto";
-            group.CopiesBox.Text = "2";
-            group.FailuresBox.Text = "1";
+            SetNum(group.SizeBox, null);
+            SetNum(group.ColumnsBox, null);
+            SetNum(group.CopiesBox, 2);
+            SetNum(group.FailuresBox, 1);
             group.DiskCountBox.Text = string.Empty;
         }
 
         SetResiliency(Capacity.ResiliencyBox, "Parity");
-        Capacity.CopiesBox.Text = "1";
+        SetNum(Capacity.CopiesBox, 1);
         _partitionStyleBox.SelectedItem = "GPT";
         _fileSystemBox.SelectedItem = "NTFS";
         _clusterBox.SelectedItem = "64K";
@@ -873,20 +1020,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             SetResiliency(group.ResiliencyBox, group.Media == "HDD" ? "Parity" : "Mirror");
             SetInterleave(group.InterleaveBox, 65536);
-            group.SizeBox.Text = string.Empty;
-            group.ColumnsBox.Text = "auto";
-            group.CopiesBox.Text = "2";
-            group.FailuresBox.Text = "1";
+            SetNum(group.SizeBox, null);
+            SetNum(group.ColumnsBox, null);
+            SetNum(group.CopiesBox, 2);
+            SetNum(group.FailuresBox, 1);
             group.DiskCountBox.Text = "0";
             return;
         }
 
         SetResiliency(group.ResiliencyBox, tier.ResiliencySettingName);
         SetInterleave(group.InterleaveBox, tier.Interleave ?? 65536);
-        group.SizeBox.Text = ToGigabytes(tier.Size);
-        group.ColumnsBox.Text = tier.NumberOfColumns?.ToString() ?? "auto";
-        group.CopiesBox.Text = (tier.NumberOfDataCopies ?? 1).ToString();
-        group.FailuresBox.Text = (tier.PhysicalDiskRedundancy ?? 1).ToString();
+        SetNum(group.SizeBox, tier.Size > 0 ? Math.Round(tier.Size / 1024d / 1024d / 1024d, 2) : null);
+        SetNum(group.ColumnsBox, tier.NumberOfColumns);
+        SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? 1);
+        SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? 1);
         group.DiskCountBox.Text = tier.MemberPhysicalDiskIds.Count.ToString();
     }
 
@@ -992,28 +1139,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
         if (resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase))
         {
-            group.CopiesBox.Text = "1";
-            group.FailuresBox.Text = "0";
+            SetNum(group.CopiesBox, 1);
+            SetNum(group.FailuresBox, 0);
             return;
         }
 
         if (resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase))
         {
-            if (!int.TryParse(group.CopiesBox.Text, out var copies) || copies < 2)
-            {
-                copies = 2;
-                group.CopiesBox.Text = "2";
-            }
-
-            group.FailuresBox.Text = Math.Max(0, copies - 1).ToString();
+            var copies = NumValue(group.CopiesBox) is { } existing && existing >= 2
+                ? (int)existing
+                : 2;
+            SetNum(group.CopiesBox, copies);
+            SetNum(group.FailuresBox, Math.Max(0, copies - 1));
             return;
         }
 
-        group.CopiesBox.Text = "1";
-        if (!int.TryParse(group.FailuresBox.Text, out var tolerated) || tolerated < 1)
-        {
-            group.FailuresBox.Text = "1";
-        }
+        SetNum(group.CopiesBox, 1);
+        var tolerated = NumValue(group.FailuresBox) is { } failures && failures >= 1
+            ? (int)failures
+            : 1;
+        SetNum(group.FailuresBox, tolerated);
     }
 
     private (IReadOnlyList<VirtualDiskInfo> All, VirtualDiskInfo? DeleteTarget) PoolVirtualDiskState(
@@ -1084,7 +1229,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         CreatePoolButton.IsEnabled = simulated
             && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
         DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false };
-        _savePoolPropertiesButton.IsEnabled = simulated
+        SavePoolPropertiesButton.IsEnabled = simulated
             && _formDirty
             && pool is { IsPrimordial: false } && !EditWorkspace.IsDraftPool(pool.StableId);
 
@@ -1098,18 +1243,22 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HotSpareButton.IsEnabled = canLayerDisk && !selectedDisk!.IsHotSpare;
 
         var (poolVdisks, deleteTarget) = PoolVirtualDiskState(pool);
+        var realVdisk = poolVdisks.FirstOrDefault(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId));
         var canEditPool = simulated
             && pool is { IsPrimordial: false }
             && !EditWorkspace.IsDraftPool(pool.StableId);
         CreateVdiskButton.IsEnabled = canEditPool
-            && poolVdisks.Count == 0
+            && realVdisk is null
             && DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD") + DataDiskCount(pool!, "SCM") > 0;
         DeleteVdiskButton.IsEnabled = canEditPool && deleteTarget is not null;
 
         var formEnabled = simulated
             && pool is { IsPrimordial: false }
-            && poolVdisks.Count <= 1;
-        UpdateFormStates(formEnabled, pool, poolVdisks.FirstOrDefault(), poolVdisks.Count > 0);
+            && poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)) <= 1;
+        ShowHotSpareSwitch.IsEnabled = simulated;
+        ShowRetiredSwitch.IsEnabled = simulated;
+        UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
+        UpdateFieldDots();
     }
 
     private void UpdateFormStates(
@@ -1151,9 +1300,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
             : null;
         _volumeNameBox.IsEnabled = formEnabled
             && (vdisk is null || volumePartition is not null);
-        _autoPartitionSwitch.IsEnabled = formEnabled && !hasVdisk;
-        _showHotSpareSwitch.IsEnabled = formEnabled && !isDraft;
-        _showRetiredSwitch.IsEnabled = formEnabled && !isDraft;
+        // Auto-create virtual disk only matters while a draft pool is being
+        // put together; committed pools create through the upper-right
+        // button and never auto-create.
+        _autoVdiskSwitch.IsEnabled = formEnabled && isDraft;
+        // Auto-create partition applies whenever a virtual disk can still be
+        // created here: a draft with auto-vdisk on, or an empty committed
+        // pool before its first virtual disk.
+        var creationContext = formEnabled && !hasVdisk;
+        _autoPartitionSwitch.IsEnabled = creationContext
+            && (!isDraft || _autoVdiskSwitch.IsOn);
 
         if (!formEnabled || pool is null)
         {
@@ -1169,7 +1325,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             group.SizeBox.IsEnabled = editable;
             group.ResiliencyBox.IsEnabled = editable;
             group.InterleaveBox.IsEnabled = editable;
-            group.SizeBox.IsReadOnly = false;
             group.DiskCountBox.IsReadOnly = true;
             if (!tierVisible)
             {
@@ -1186,14 +1341,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
             group.ColumnsBox.IsEnabled = editable && !isMirror && !isSimple;
             if (isMirror || isSimple)
             {
-                group.ColumnsBox.Text = "auto";
+                SetNum(group.ColumnsBox, null);
             }
         }
 
         // Disk and partition group.
         var partition = PrimaryPartition(pool.StableId);
         var userPartitions = UserPartitions(pool.StableId);
-        var canEditPartition = !hasVdisk && _autoPartitionSwitch.IsOn && !isDraft && !holdsData;
+        var canEditPartition = !hasVdisk
+            && _autoPartitionSwitch.IsOn
+            && _autoPartitionSwitch.IsEnabled
+            && !holdsData;
         var partitionHasData = hasVdisk && EditWorkspace.DiskHoldsStoredData(
             _working,
             vdisk!.StableId,
@@ -1207,22 +1365,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _clusterBox.IsEnabled = fsEditable;
     }
 
-    private void OnSimulatedLayerSwitchToggled(string usage, ToggleSwitch sw)
+    private void ShowHotSpareSwitch_Toggled(object sender, RoutedEventArgs e)
     {
-        if (sw.IsOn)
-        {
-            RefreshTopology();
-            return;
-        }
+        // The switch only previews an empty hot-spare layer for dragging;
+        // a layer that holds disks is drawn regardless.
+        RefreshTopology();
+    }
 
-        // Cannot hide a layer that still holds disks.
-        var pool = SelectedPool();
-        if (pool is not null && HasRoleDisks(pool.StableId, usage))
-        {
-            sw.IsOn = true;
-            return;
-        }
-
+    private void ShowRetiredSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
         RefreshTopology();
     }
 
@@ -1282,7 +1433,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         try
         {
             var next = CreateDraftPoolStep(_working);
-            _selectedPoolId = next.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+            var draftId = next.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+            if (_autoVdiskSwitch.IsOn)
+            {
+                next = EditWorkspace.InsertDraftVirtualDisk(
+                    next,
+                    draftId,
+                    ViewModel.Localization["NotCreatedVirtualDisk"],
+                    "Simple",
+                    65536);
+            }
+
+            _selectedPoolId = draftId;
             _selectedPoolDiskId = null;
             _selectedPoolVdiskId = null;
             ResetLayerSwitchesForSelection();
@@ -1491,11 +1653,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var next = EditWorkspace.SetDiskUsage(_working, disk.StableId, usage);
             if (usage == "Retired")
             {
-                _showRetiredSwitch.IsOn = true;
             }
             else
             {
-                _showHotSpareSwitch.IsOn = true;
             }
 
             CommitWorkingStep(next);
@@ -1794,10 +1954,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
             var resiliency = group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
             var interleave = ParseSize(group.InterleaveBox.SelectedItem as string ?? "64K");
-            var copies = ParseInt(group.CopiesBox.Text) ?? tier.NumberOfDataCopies ?? 1;
-            var failures = ParseInt(group.FailuresBox.Text) ?? tier.PhysicalDiskRedundancy ?? 1;
-            var columns = ParseInt(group.ColumnsBox.Text) ?? tier.NumberOfColumns;
-            var size = ParseGigabytes(group.SizeBox.Text);
+            var copies = NumValue(group.CopiesBox) is { } copyValue
+                ? Math.Max(1, (int)copyValue)
+                : tier.NumberOfDataCopies ?? 1;
+            var failures = NumValue(group.FailuresBox) is { } failureValue
+                ? Math.Max(0, (int)failureValue)
+                : tier.PhysicalDiskRedundancy ?? 1;
+            var columns = NumValue(group.ColumnsBox) is { } columnValue
+                ? (int)columnValue
+                : tier.NumberOfColumns;
+            var size = NumValue(group.SizeBox) is { } sizeValue
+                ? (long)(sizeValue * 1024L * 1024L * 1024L)
+                : (long?)null;
             var changed = !string.Equals(resiliency, tier.ResiliencySettingName, StringComparison.OrdinalIgnoreCase)
                 || interleave != (tier.Interleave ?? 0)
                 || copies != tier.NumberOfDataCopies
@@ -2242,9 +2410,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         committed = ViewModel.ActiveSnapshot;
 
-        // 4. Create draft virtual disks on committed pools.
+        // 4. Create draft virtual disks on committed pools. A draft-pool
+        // placeholder was already materialized by CreateTieredPool above.
         foreach (var draftVdisk in pending.VirtualDisks.Where(item =>
-                     EditWorkspace.IsDraftVirtualDisk(item.StableId)))
+                     EditWorkspace.IsDraftVirtualDisk(item.StableId)
+                     && !EditWorkspace.IsDraftPool(item.PoolStableId ?? string.Empty)))
         {
             if (!await ApplyDraftVirtualDiskAsync(pending, draftVdisk))
             {
@@ -2509,17 +2679,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
             VirtualDiskName: virtualName,
             PerformanceResiliency: Performance.ResiliencyBox.SelectedItem as string,
             PerformanceInterleaveBytes: ParseSize(Performance.InterleaveBox.SelectedItem as string ?? "64K"),
-            PerformanceSizeBytes: ParseGigabytes(Performance.SizeBox.Text),
-            PerformanceDataCopies: ParseInt(Performance.CopiesBox.Text),
+            PerformanceSizeBytes: SizeBytes(Performance.SizeBox),
+            PerformanceDataCopies: CopiesCount(Performance.CopiesBox),
             CapacityResiliency: Capacity.ResiliencyBox.SelectedItem as string,
             CapacityInterleaveBytes: ParseSize(Capacity.InterleaveBox.SelectedItem as string ?? "64K"),
-            CapacitySizeBytes: ParseGigabytes(Capacity.SizeBox.Text),
-            CapacityColumns: ParseInt(Capacity.ColumnsBox.Text),
-            CapacityToleratedFailures: ParseInt(Capacity.FailuresBox.Text),
+            CapacitySizeBytes: SizeBytes(Capacity.SizeBox),
+            CapacityColumns: ColumnsCount(Capacity.ColumnsBox),
+            CapacityToleratedFailures: FailuresCount(Capacity.FailuresBox),
             ScmResiliency: Dedicated.ResiliencyBox.SelectedItem as string,
             ScmInterleaveBytes: ParseSize(Dedicated.InterleaveBox.SelectedItem as string ?? "64K"),
-            ScmDataCopies: ParseInt(Dedicated.CopiesBox.Text),
-            CreatePartition: _autoPartitionSwitch.IsOn);
+            ScmDataCopies: CopiesCount(Dedicated.CopiesBox),
+            CreatePartition: _autoPartitionSwitch.IsOn,
+            CreateVirtualDisk: _autoVdiskSwitch.IsOn);
     }
 
     /// <summary>
@@ -2761,4 +2932,364 @@ public sealed partial class StorageStructurePage : EditorPageBase
             32768 => "32K",
             _ => "64K"
         };
+    // ---- Field dirty dots, recommended resets, and change checks ------
+
+    private enum TierFieldKind
+    {
+        Size,
+        Provisioning,
+        Resiliency,
+        Copies,
+        Failures,
+        DiskCount,
+        Columns,
+        Stripe
+    }
+
+    private void ResetLayerSwitchesForSelection()
+    {
+        // Simulated-layer switches are session preview tools only; they are
+        // never reset by selection, and layers with disks show themselves.
+    }
+
+    /// <summary>NumberBox stores its empty state as NaN, not null.</summary>
+    private static double? NumValue(NumberBox box) =>
+        double.IsNaN(box.Value) ? null : box.Value;
+
+    private static void SetNum(NumberBox box, double? value) =>
+        box.Value = value ?? double.NaN;
+
+    private static bool NumberEquals(double? actual, int? expected) =>
+        actual is null
+            ? expected is null
+            : expected is not null && Math.Abs(actual.Value - expected.Value) < 0.001;
+
+    private TierFields? GroupFor(string media) =>
+        TierGroups().FirstOrDefault(group => group.Media == media);
+
+    private void UpdateFieldDots()
+    {
+        foreach (var field in _fieldDots)
+        {
+            var changed = false;
+            try
+            {
+                changed = field.IsChanged();
+            }
+            catch
+            {
+                changed = false;
+            }
+
+            field.Dot.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private long TierCapacityMaxBytes(string media)
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return 0;
+        }
+
+        return _working.PhysicalDisks
+            .Where(disk => string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+                && !disk.IsRetired
+                && !disk.IsHotSpare
+                && EditWorkspace.NormalizeMedia(disk.MediaType) == media)
+            .Sum(disk => disk.Size);
+    }
+
+    private int TierDataDiskCount(string media)
+    {
+        var pool = SelectedPool();
+        if (pool is null)
+        {
+            return 0;
+        }
+
+        return _working.PhysicalDisks.Count(disk =>
+            string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+            && !disk.IsRetired
+            && !disk.IsHotSpare
+            && EditWorkspace.NormalizeMedia(disk.MediaType) == media);
+    }
+
+    private IReadOnlyList<PhysicalDiskInfo> TierDataDisks(string media)
+    {
+        var pool = SelectedPool();
+        if (pool is null)
+        {
+            return [];
+        }
+
+        return _working.PhysicalDisks
+            .Where(disk => string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+                && !disk.IsRetired
+                && !disk.IsHotSpare
+                && EditWorkspace.NormalizeMedia(disk.MediaType) == media)
+            .ToArray();
+    }
+
+    private bool TierFieldChanged(TierFieldKind field, string media)
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        var tier = TierMap(pool.StableId).GetValueOrDefault(media);
+        var group = GroupFor(media);
+        if (tier is null || group is null)
+        {
+            return false;
+        }
+
+        return field switch
+        {
+            TierFieldKind.Size => Math.Abs(((NumValue(group.SizeBox) ?? 0) * 1024d * 1024d * 1024d) - tier.Size) > 1,
+            TierFieldKind.Resiliency => !SameToken(group.ResiliencyBox, tier.ResiliencySettingName),
+            TierFieldKind.Copies => !NumberEquals(NumValue(group.CopiesBox), tier.NumberOfDataCopies),
+            TierFieldKind.Failures => !NumberEquals(NumValue(group.FailuresBox), tier.PhysicalDiskRedundancy),
+            TierFieldKind.Columns => !NumberEquals(NumValue(group.ColumnsBox), tier.NumberOfColumns),
+            TierFieldKind.Stripe => InterleaveToken(tier.Interleave) != (group.InterleaveBox.SelectedItem as string),
+            _ => false
+        };
+    }
+
+    /// <summary>Restores one parameter field to its recommended value.</summary>
+    private void ResetTierField(TierFields group, string kind)
+    {
+        var media = group.Media;
+        var count = TierDataDiskCount(media);
+        switch (kind)
+        {
+            case "Size":
+                var max = TierCapacityMaxBytes(media);
+                SetNum(group.SizeBox, max > 0 ? Math.Round(max / 1024d / 1024d / 1024d, 2) : 0);
+                break;
+            case "Resiliency":
+                SetResiliency(group.ResiliencyBox, EditWorkspace.RecommendedResiliency(media, count));
+                break;
+            case "Copies":
+                var resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
+                SetNum(group.CopiesBox, EditWorkspace.RecommendedDataCopies(resiliency, count));
+                break;
+            case "Failures":
+                resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
+                var copies = NumValue(group.CopiesBox) is { } copyValue ? (int)copyValue : 1;
+                SetNum(group.FailuresBox, EditWorkspace.RecommendedToleratedFailures(resiliency, copies));
+                break;
+            case "Columns":
+                // Mirror and Simple keep an automatic, read-only column
+                // count; only Parity exposes an editable column number.
+                var columnResiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
+                if (!columnResiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase)
+                    && !columnResiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase))
+                {
+                    SetNum(group.ColumnsBox, EditWorkspace.RecommendedCapacityColumns(TierDataDisks(media)));
+                }
+
+                break;
+            case "Stripe":
+                group.InterleaveBox.SelectedItem = "64K";
+                break;
+        }
+    }
+
+    private static long? SizeBytes(NumberBox box) =>
+        NumValue(box) is { } gb ? (long)(gb * 1024L * 1024L * 1024L) : null;
+
+    private static int? CopiesCount(NumberBox box) =>
+        NumValue(box) is { } value ? Math.Max(1, (int)value) : null;
+
+    private static int? FailuresCount(NumberBox box) =>
+        NumValue(box) is { } value ? Math.Max(0, (int)value) : null;
+
+    private static int? ColumnsCount(NumberBox box) =>
+        NumValue(box) is { } value ? (int)value : null;
+
+    private VirtualDiskInfo? RealVdiskOf(StorageSnapshot snapshot, string poolId) =>
+        snapshot.VirtualDisks.FirstOrDefault(item =>
+            string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
+            && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
+
+    private bool PoolNameChanged()
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        return !string.Equals(
+            _poolNameBox.Text.Trim(),
+            pool.FriendlyName,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool VirtualDiskNameChanged()
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        var vdisk = RealVdiskOf(_working, pool.StableId);
+        var baseline = vdisk?.FriendlyName ?? pool.FriendlyName;
+        return !string.Equals(
+            _virtualDiskNameBox.Text.Trim(),
+            baseline,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool VolumeNameChanged()
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        var partition = PrimaryPartition(pool.StableId);
+        var vdisk = RealVdiskOf(_working, pool.StableId);
+        var baseline = partition is not null
+            ? partition.FileSystemLabel
+            : vdisk?.FriendlyName ?? pool.FriendlyName;
+        return !string.Equals(
+            _volumeNameBox.Text.Trim(),
+            baseline,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool PartitionStyleChanged()
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        var vdisk = RealVdiskOf(_working, pool.StableId);
+        if (vdisk is null)
+        {
+            return false;
+        }
+
+        var osDisk = _working.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
+        if (osDisk is null)
+        {
+            return false;
+        }
+
+        var style = osDisk.PartitionStyle.Trim().ToUpperInvariant();
+        return style is "MBR" or "GPT"
+            && !SameToken(_partitionStyleBox, style);
+    }
+
+    private bool FileSystemChanged()
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        var partition = PrimaryPartition(pool.StableId);
+        var baseline = partition is not null && !string.IsNullOrWhiteSpace(partition.FileSystem)
+            ? partition.FileSystem
+            : "NTFS";
+        return !string.Equals(
+            _fileSystemBox.SelectedItem as string,
+            baseline,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool AllocationUnitChanged()
+    {
+        var pool = SelectedPool();
+        if (pool is null || pool.IsPrimordial)
+        {
+            return false;
+        }
+
+        var partition = PrimaryPartition(pool.StableId);
+        var baseline = partition?.AllocationUnitSize is { } bytes
+            ? ClusterToken(bytes)
+            : "64K";
+        return !string.Equals(
+            _clusterBox.SelectedItem as string,
+            baseline,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ResetPartitionField(string kind)
+    {
+        switch (kind)
+        {
+            case "PartitionStyle":
+                if (_partitionStyleBox.IsEnabled)
+                {
+                    _partitionStyleBox.SelectedItem = "GPT";
+                }
+
+                break;
+            case "FileSystem":
+                if (_fileSystemBox.IsEnabled)
+                {
+                    _fileSystemBox.SelectedItem = "NTFS";
+                }
+
+                break;
+            case "AllocationUnit":
+                if (_clusterBox.IsEnabled)
+                {
+                    _clusterBox.SelectedItem = "64K";
+                }
+
+                break;
+        }
+    }
+
+    private void SyncAutoVirtualDiskPlaceholder()
+    {
+        var pool = SelectedPool();
+        if (pool is null
+            || !EditWorkspace.IsDraftPool(pool.StableId)
+            || !ViewModel.IsUsingSimulatedInventory)
+        {
+            return;
+        }
+
+        var poolId = pool.StableId;
+        var placeholder = _working.VirtualDisks.FirstOrDefault(item =>
+            string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
+            && EditWorkspace.IsDraftVirtualDisk(item.StableId));
+        try
+        {
+            if (_autoVdiskSwitch.IsOn && placeholder is null)
+            {
+                var next = EditWorkspace.InsertDraftVirtualDisk(
+                    _working,
+                    poolId,
+                    ViewModel.Localization["NotCreatedVirtualDisk"],
+                    "Simple",
+                    65536);
+                CommitWorkingStep(next);
+            }
+            else if (!_autoVdiskSwitch.IsOn && placeholder is not null)
+            {
+                var next = EditWorkspace.DeleteVirtualDiskFromWorking(_working, placeholder.StableId);
+                CommitWorkingStep(next);
+            }
+        }
+        catch (InvalidOperationException exception)
+        {
+            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+        }
+    }
+
 }
