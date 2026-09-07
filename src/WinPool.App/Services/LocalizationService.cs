@@ -324,7 +324,60 @@ public sealed class LocalizationService : ObservableObject
             ["ApplyPreviewTitle"] = ("应用预览", "Apply preview"),
             ["AutoCreatePartition"] = (
                 "创建磁盘时创建分区",
-                "Create a partition when creating the disk")
+                "Create a partition when creating the disk"),
+            ["Undo"] = ("撤销", "Undo"),
+            ["Redo"] = ("重做", "Redo"),
+            ["DiscardAll"] = ("放弃全部修改", "Discard all"),
+            ["ApplyAll"] = ("应用全部修改", "Apply all"),
+            ["CreatePool"] = ("创建池", "Create pool"),
+            ["RetireDisk"] = ("退役物理磁盘", "Retire physical disk"),
+            ["HotSpareDisk"] = ("热备物理磁盘", "Hot-spare physical disk"),
+            ["RetiredLayer"] = ("退役层", "Retired"),
+            ["HotSpareLayer"] = ("热备层", "Hot spare"),
+            ["SavePoolProperties"] = ("保存池属性修改", "Save pool properties"),
+            ["PoolSection"] = ("池", "Pool"),
+            ["VolumeName"] = ("卷名", "Volume name"),
+            ["ShowHotSpareLayer"] = ("显示热备层", "Show hot-spare layer"),
+            ["ShowRetiredLayer"] = ("显示退役层", "Show retired layer"),
+            ["TierSize"] = ("容量（GB）", "Size (GB)"),
+            ["TierProvisioning"] = ("预配类型", "Provisioning"),
+            ["TierResiliency"] = ("弹性", "Resiliency"),
+            ["TierDataCopies"] = ("冗余副本数", "Data copies"),
+            ["TierToleratedFailures"] = ("容灾故障数", "Tolerated failures"),
+            ["TierDiskCount"] = ("物理磁盘数", "Physical disk count"),
+            ["TierColumns"] = ("列数", "Columns"),
+            ["TierStripeSize"] = ("条带大小", "Stripe size"),
+            ["DiskAndPartitionSection"] = ("磁盘与分区", "Disk and partition"),
+            ["PartitionTableStyle"] = ("分区表", "Partition table"),
+            ["FileSystem"] = ("文件系统", "File system"),
+            ["RetireDiskConfirmTitle"] = ("退役物理磁盘", "Retire physical disk"),
+            ["RetireDiskConfirmMessage"] = (
+                "该盘将从数据层移入退役模拟层。确定继续？",
+                "This disk leaves the data tiers and enters the retired simulated layer. Continue?"),
+            ["HotSpareDiskConfirmTitle"] = ("热备物理磁盘", "Hot-spare physical disk"),
+            ["HotSpareDiskConfirmMessage"] = (
+                "该盘将从数据层移入热备模拟层，不再参与数据读写。确定继续？",
+                "This disk leaves the data tiers and becomes a hot spare; it no longer carries data. Continue?"),
+            ["SimulatedLayerRestrictedTitle"] = ("无法操作", "Not available"),
+            ["SimulatedLayerRestrictedMessage"] = (
+                "退役与热备模拟层仅对已提交池的成员可用。",
+                "Retired and hot-spare layers are available only to members of a committed pool."),
+            ["DraftPoolDiscardConfirmTitle"] = ("放弃草稿池", "Discard draft pool"),
+            ["DraftPoolDiscardConfirmMessage"] = (
+                "将丢弃当前草稿池及其中的拖入磁盘。确定继续？",
+                "This discards the draft pool and the disks dragged into it. Continue?"),
+            ["NoApplyChangesTitle"] = ("没有可应用的修改", "No changes to apply"),
+            ["NoApplyChangesMessage"] = (
+                "当前没有未应用的草稿修改。",
+                "There are no unapplied draft changes."),
+            ["UndoStepTitle"] = ("撤销不可用", "Undo unavailable"),
+            ["UndoStepMessage"] = (
+                "没有可撤销的草稿步骤。",
+                "There is no draft step to undo."),
+            ["RedoStepTitle"] = ("重做不可用", "Redo unavailable"),
+            ["RedoStepMessage"] = (
+                "没有可重做的草稿步骤。",
+                "There is no draft step to redo.")
         };
 
     public LanguagePreference Language

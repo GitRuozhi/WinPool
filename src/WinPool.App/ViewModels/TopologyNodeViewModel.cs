@@ -68,7 +68,11 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         IsDragSource = edit?.AllowDiskDrag == true
             && unit.Kind == StorageUnitKind.PhysicalDisk
             && physical is { IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false };
-        IsDropTarget = edit?.AllowDiskDrag == true && unit.Kind == StorageUnitKind.StoragePool;
+        IsDropTarget = edit?.AllowDiskDrag == true
+            && (unit.Kind == StorageUnitKind.StoragePool
+                || (unit.Kind == StorageUnitKind.StorageTier
+                    && (EditWorkspace.IsRetiredLayer(unit.StableId)
+                        || EditWorkspace.IsHotSpareLayer(unit.StableId))));
     }
 
     public bool IsDragSource { get; }
@@ -518,6 +522,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             _ when EditWorkspace.IsPlus(unit.StableId) => "+",
             _ when EditWorkspace.IsPoolRow(unit.StableId) => string.Empty,
             _ when EditWorkspace.IsUnallocated(unit.StableId) => owner.Localization["Unallocated"],
+            _ when EditWorkspace.IsRetiredLayer(unit.StableId) => owner.Localization["RetiredLayer"],
+            _ when EditWorkspace.IsHotSpareLayer(unit.StableId) => owner.Localization["HotSpareLayer"],
             _ when unit.Kind == StorageUnitKind.NetworkDiskGroup => owner.Localization["Network"],
             _ when unit.Kind == StorageUnitKind.OtherDiskGroup => owner.Localization["Other"],
             _ when unit.Kind == StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],

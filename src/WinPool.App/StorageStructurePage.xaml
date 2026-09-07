@@ -64,10 +64,31 @@
                     <TextBlock
                         x:Name="StructureOperationsTitle"
                         FontWeight="SemiBold" />
-                    <Button x:Name="ExecuteButton" HorizontalAlignment="Stretch" Click="Execute_Click" />
-                    <Button x:Name="DeleteVdiskButton" HorizontalAlignment="Stretch" Click="DeleteVdisk_Click" />
-                    <Button x:Name="DissolveButton" HorizontalAlignment="Stretch" Click="Dissolve_Click" />
-                    <Button x:Name="EvictButton" HorizontalAlignment="Stretch" Click="Evict_Click" />
+                    <Grid
+                        ColumnSpacing="8"
+                        RowSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Button x:Name="UndoButton" HorizontalAlignment="Stretch" Click="Undo_Click" />
+                        <Button x:Name="RedoButton" Grid.Column="1" HorizontalAlignment="Stretch" Click="Redo_Click" />
+                        <Button x:Name="DiscardAllButton" Grid.Row="1" HorizontalAlignment="Stretch" Click="DiscardAll_Click" />
+                        <Button x:Name="ApplyAllButton" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" Click="ApplyAll_Click" />
+                        <Button x:Name="CreatePoolButton" Grid.Row="2" HorizontalAlignment="Stretch" Click="CreatePool_Click" />
+                        <Button x:Name="DissolveButton" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Stretch" Click="Dissolve_Click" />
+                        <Button x:Name="RetireButton" Grid.Row="3" HorizontalAlignment="Stretch" Click="Retire_Click" />
+                        <Button x:Name="HotSpareButton" Grid.Row="3" Grid.Column="1" HorizontalAlignment="Stretch" Click="HotSpare_Click" />
+                        <Button x:Name="CreateVdiskButton" Grid.Row="4" HorizontalAlignment="Stretch" Click="CreateVdisk_Click" />
+                        <Button x:Name="DeleteVdiskButton" Grid.Row="4" Grid.Column="1" HorizontalAlignment="Stretch" Click="DeleteVdisk_Click" />
+                    </Grid>
                 </StackPanel>
             </Border>
             <Border
