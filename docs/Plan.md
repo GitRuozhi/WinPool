@@ -42,17 +42,18 @@ re-opening product debate.
    bar. Undo, redo, discard-all, and apply-all live in the upper right.
 3. Disk/partition editor: one control group for the disk, one for the
    partition (or unallocated gap).
-4. One working copy. Upper-right apply-all writes it. No second submit
-   button for properties.
+4. Working copy for structure: upper-right apply-all writes membership and
+   create/dissolve/delete. Lower-right **Save pool properties** writes the
+   property form.
 5. Real tiers follow disks; there is no Add-tier button. Empty real tiers
    are not drawn. Hot spare and retired are optional simulated layers
    shown by pool switches.
 6. Hide the PowerShell template-tier ritual: spec on the pool, size on the
    virtual disk.
-7. **One virtual disk is the 1.0 contract.** Do not create a second. A pool
-   that already has several may be reduced to one (delete extras; confirm if
-   they hold data; no silent merge). Other cases wait for the Development
-   command line and are outside 1.0.
+7. **At most one virtual disk per pool on this page.** Create virtual disk
+   is enabled only when the current pool has none. Delete virtual disk is
+   allowed for the last remaining disk (confirm if it holds data). Do not
+   create a second.
 8. Create/modify on the structure page supports one user partition. Checkbox
    **Create a partition when creating the disk**, default on. Extra partitions
    go to Disk/partition editor.
@@ -96,10 +97,10 @@ current item has passed, unless the developer changes the order.
 | --- | --- | --- |
 | PE1 | Navigation: remove Edit; add Storage structure editor and Disk/partition editor; bilingual labels; last-page restore still works | App starts; both pages open; Edit is gone; process stays alive |
 | PE2 | Disk/partition editor: move the former Edit-upper topology; split disk vs partition control groups | Selecting a disk enables only disk actions; selecting a partition enables only partition actions |
-| PE3 | Storage structure chrome: left topology; upper-right operations in the order undo/redo/discard-all/apply-all, create/dissolve pool, retire/hot-spare disk, create/delete virtual disk; lower-right properties as named in the control spec; listed controls visible except a real-tier field group only when that tier exists | Layout matches §1; empty real tiers are not drawn |
+| PE3 | Storage structure chrome: left topology; upper-right buttons wrap by group (undo/redo/discard-all/apply-all, then create/dissolve pool, retire/hot-spare disk, create/delete virtual disk); lower-right label-value rows with gaps between groups and a full-row Save pool properties button; real-tier groups only when that tier exists | Layout matches §1; empty real tiers are not drawn |
 | PE4 | Create composition: select disks, correct media type, roles, tiers, one virtual disk, auto-partition checkbox, NTFS/ReFS, research prefills | Simulated create yields one pool, one virtual disk, optional one user volume; 256K warns |
 | PE5 | Modify: join/evict/unallocated→tier, add-tier without drawing an empty strip, one apply for structure and parameters | All-Unallocated re-tier persists; forms do not silently revert |
-| PE6 | Reduce several virtual disks to one; refuse creating a second | No create-second control; extras can be removed with confirmation when they hold data |
+| PE6 | Create virtual disk only when the pool has none; delete allowed including the last disk | Create disabled when a virtual disk exists; last disk can be deleted with confirmation if it holds data |
 | PE7 | Apply-all from the upper right writes the simulation only | Real systems stay read-only; dangerous cases still use a confirmation dialog |
 | PE8 | Tests for the new pages' projection and simulation operations; native open of both pages | Named tests pass; native: start → each new page → process alive → no new crash log |
 
