@@ -70,16 +70,31 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private TierFields Capacity { get; set; } = null!;
     private TierFields Dedicated { get; set; } = null!;
 
-    private static NumberBox CreateNumberField(double minimum = double.NaN, double maximum = double.NaN) =>
-        new()
+    private static NumberBox CreateNumberField(double minimum = double.NaN, double maximum = double.NaN)
+    {
+        var box = new NumberBox
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
             SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden,
             SmallChange = 1,
-            Minimum = minimum,
-            Maximum = maximum,
             ValidationMode = NumberBoxValidationMode.InvalidInputOverwritten
         };
+        // A NaN bound is "unset", never an actual Minimum/Maximum value:
+        // NumberBox coerces Value into [Minimum, Maximum], and a NaN
+        // maximum corrupts that range and clamps every value to Minimum
+        // (the capacity field showed 0 no matter what was set).
+        if (!double.IsNaN(minimum))
+        {
+            box.Minimum = minimum;
+        }
+
+        if (!double.IsNaN(maximum))
+        {
+            box.Maximum = maximum;
+        }
+
+        return box;
+    }
 
     private static TierFields CreateTierFields(string media, string titleKey) =>
         new(
@@ -302,6 +317,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
             args.Handled = true;
             if (field is NumberBox number)
             {
+                // Marking Enter handled suppresses the NumberBox's own
+                // commit, so fold the typed text into Value explicitly.
+                if (double.TryParse(
+                        number.Text,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.CurrentCulture,
+                        out var committed)
+                    && double.IsFinite(committed))
+                {
+                    number.Value = committed;
+                }
+
                 NormalizeTierNumber(number);
             }
 
@@ -3047,9 +3074,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
         // never reset by selection, and layers with disks show themselves.
     }
 
-    /// <summary>NumberBox stores its empty state as NaN, not null.</summary>
-    private static double? NumValue(NumberBox box) =>
-        double.IsNaN(box.Value) ? null : box.Value;
+    /// <summary>
+    /// NumberBox stores its empty state as NaN, not null. The visible text
+    /// is the user's truth when the Value has not been committed yet, so a
+    /// typed number is never read back as empty.
+    /// </summary>
+    private static double? NumValue(NumberBox box)
+    {
+        if (double.IsNaN(box.Value)
+            && double.TryParse(
+                box.Text,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.CurrentCulture,
+                out var typed)
+            && double.IsFinite(typed))
+        {
+            return typed;
+        }
+
+        return double.IsNaN(box.Value) ? null : box.Value;
+    }
 
     private static void SetNum(NumberBox box, double? value) =>
         box.Value = value ?? double.NaN;
