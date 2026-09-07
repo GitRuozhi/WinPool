@@ -9,10 +9,35 @@ public static class EditWorkspace
     public const string PartitionRowStableId = "edit:partition-row";
     public const string DraftPrefix = "edit:draft:";
     public const string UnallocatedPrefix = "unallocated:";
+    public const string RetiredLayerPrefix = "edit:retired-layer:";
+    public const string HotSpareLayerPrefix = "edit:hotspare-layer:";
     public const long DefaultUnallocatedIgnoreBytes = 8L * 1024 * 1024;
 
     public static bool IsPlus(string? id) =>
         string.Equals(id, PlusStableId, StringComparison.OrdinalIgnoreCase);
+
+    public const string DraftVirtualDiskPrefix = "edit:draft-vdisk:";
+
+    public static bool IsDraftVirtualDisk(string? id) =>
+        id is not null && id.StartsWith(DraftVirtualDiskPrefix, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsRetiredLayer(string? id) =>
+        id is not null && id.StartsWith(RetiredLayerPrefix, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsHotSpareLayer(string? id) =>
+        id is not null && id.StartsWith(HotSpareLayerPrefix, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsSimulatedLayer(string? id) => IsRetiredLayer(id) || IsHotSpareLayer(id);
+
+    public static string SimulatedLayerId(string poolId, string usage) => usage switch
+    {
+        "Retired" => $"{RetiredLayerPrefix}{poolId}",
+        "HotSpare" => $"{HotSpareLayerPrefix}{poolId}",
+        _ => throw new ArgumentOutOfRangeException(nameof(usage))
+    };
+
+    public static string DiskUsage(PhysicalDiskInfo disk) =>
+        disk.IsRetired ? "Retired" : disk.IsHotSpare ? "HotSpare" : string.Empty;
 
     public static bool IsPoolRow(string? id) =>
         string.Equals(id, PoolRowStableId, StringComparison.OrdinalIgnoreCase);
@@ -181,9 +206,10 @@ public static class EditWorkspace
     public static TopologyNode ProjectPoolWorkspaceRoot(
         StorageSnapshot snapshot,
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
-        StorageSnapshot? committed = null)
+        StorageSnapshot? committed = null,
+        IReadOnlyCollection<string>? visibleSimulatedLayers = null)
     {
-        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed);
+        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed, visibleSimulatedLayers);
         return new TopologyNode(
             new StorageUnitRef(PoolRowStableId, StorageUnitKind.VirtualDiskGroup, string.Empty, false),
             string.Empty,
@@ -196,7 +222,8 @@ public static class EditWorkspace
     public static IReadOnlyList<TopologyNode> ProjectPoolWorkspace(
         StorageSnapshot snapshot,
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
-        StorageSnapshot? committed = null)
+        StorageSnapshot? committed = null,
+        IReadOnlyCollection<string>? visibleSimulatedLayers = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var baseline = committed ?? snapshot;
@@ -210,7 +237,7 @@ public static class EditWorkspace
                      .ThenBy(pool => IsDraftPool(pool.StableId) ? 1 : 0)
                      .ThenBy(pool => pool.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline));
+            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline, visibleSimulatedLayers));
         }
 
         // Single-draft rule: the plus-pool affordance is present only while
@@ -380,6 +407,81 @@ public static class EditWorkspace
                         .ToArray()
                 })
                 .ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Moves a pooled physical disk into or out of the retired / hot-spare
+    /// simulated layer (V0.47 control spec §A). The disk stays in its pool
+    /// and leaves every real tier. Usage is "", "Retired", or "HotSpare".
+    /// Boot, system, page-file, and crash-dump disks are refused; the page
+    /// confirms dropping a page-file / crash-dump role before calling this.
+    /// </summary>
+    public static StorageSnapshot SetDiskUsage(StorageSnapshot snapshot, string diskId, string usage)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (usage is not ("" or "Retired" or "HotSpare"))
+        {
+            throw new InvalidOperationException(
+                $"Unknown simulated layer usage '{usage}'.");
+        }
+
+        var disk = snapshot.PhysicalDisks.FirstOrDefault(item =>
+            item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected physical disk was not found.");
+        if (disk.IsBoot || disk.IsSystem || disk.IsPageFile || disk.IsCrashDump)
+        {
+            throw new InvalidOperationException(
+                "Boot, system, page-file, and crash-dump disks cannot enter a simulated layer.");
+        }
+
+        if (string.IsNullOrEmpty(disk.PoolStableId))
+        {
+            throw new InvalidOperationException("The selected physical disk is not in a pool.");
+        }
+
+        var pool = snapshot.StoragePools.FirstOrDefault(item =>
+            item.StableId.Equals(disk.PoolStableId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected pool was not found.");
+        if (pool.IsPrimordial)
+        {
+            throw new InvalidOperationException("Primordial disks cannot enter a simulated layer.");
+        }
+
+        if (IsDraftPool(pool.StableId))
+        {
+            throw new InvalidOperationException(
+                "Draft pool members cannot enter a simulated layer; apply the pool first.");
+        }
+
+        var current = DiskUsage(disk);
+        if (current == usage)
+        {
+            return snapshot;
+        }
+
+        var wantLayer = usage.Length > 0;
+        return snapshot with
+        {
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(item => item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase)
+                    ? item with
+                    {
+                        IsRetired = usage == "Retired",
+                        IsHotSpare = usage == "HotSpare"
+                    }
+                    : item)
+                .ToArray(),
+            StorageTiers = wantLayer
+                ? snapshot.StorageTiers
+                    .Select(tier => tier with
+                    {
+                        MemberPhysicalDiskIds = tier.MemberPhysicalDiskIds
+                            .Where(id => !id.Equals(diskId, StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    })
+                    .ToArray()
+                : snapshot.StorageTiers
         };
     }
 
@@ -767,7 +869,8 @@ public sealed record StructureProblem(
         StoragePoolInfo pool,
         StorageSnapshot snapshot,
         long minUnallocatedBytes,
-        StorageSnapshot committed)
+        StorageSnapshot committed,
+        IReadOnlyCollection<string>? visibleSimulatedLayers)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -813,7 +916,8 @@ public sealed record StructureProblem(
             poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, committed));
         }
 
-        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed);
+        AddSimulatedLayers(poolNode, pool, members, snapshot, committed, visibleSimulatedLayers);
+        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed, visibleSimulatedLayers);
         return poolNode;
     }
 
@@ -887,20 +991,25 @@ public sealed record StructureProblem(
     /// <summary>
     /// Manage-equivalent Unallocated group: pool members not covered by any
     /// tier stay visible, selectable, and draggable instead of disappearing.
+    /// Retired and hot-spare disks belong to their simulated layers, never
+    /// to this group.
     /// </summary>
     private static void AddUnallocatedGroup(
         TopologyNode poolNode,
         StoragePoolInfo pool,
         IReadOnlyList<PhysicalDiskInfo> members,
         StorageSnapshot snapshot,
-        StorageSnapshot committed)
+        StorageSnapshot committed,
+        IReadOnlyCollection<string>? visibleSimulatedLayers)
     {
         var tierMemberIds = snapshot.StorageTiers
             .Where(item => item.PoolStableId == pool.StableId)
             .SelectMany(item => item.MemberPhysicalDiskIds)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var directMembers = members
-            .Where(item => !tierMemberIds.Contains(item.StableId))
+            .Where(item => !tierMemberIds.Contains(item.StableId)
+                && (!item.IsRetired || visibleSimulatedLayers?.Contains("Retired", StringComparer.OrdinalIgnoreCase) != true)
+                && (!item.IsHotSpare || visibleSimulatedLayers?.Contains("HotSpare", StringComparer.OrdinalIgnoreCase) != true))
             .ToList();
         if (directMembers.Count == 0)
         {
@@ -922,6 +1031,55 @@ public sealed record StructureProblem(
         }
 
         poolNode.Children.Add(group);
+    }
+
+    /// <summary>
+    /// Retired and hot-spare simulated layers (V0.47 control spec §3, §4):
+    /// drawn only while the page switch shows that layer, and drawn even
+    /// when empty so disks can be dropped into it. The layer node itself is
+    /// a drop target; its id is recognized by <see cref="IsSimulatedLayer"/>.
+    /// </summary>
+    private static void AddSimulatedLayers(
+        TopologyNode poolNode,
+        StoragePoolInfo pool,
+        IReadOnlyList<PhysicalDiskInfo> members,
+        StorageSnapshot snapshot,
+        StorageSnapshot committed,
+        IReadOnlyCollection<string>? visibleSimulatedLayers)
+    {
+        if (pool.IsPrimordial || visibleSimulatedLayers is null)
+        {
+            return;
+        }
+
+        foreach (var usage in new[] { "HotSpare", "Retired" })
+        {
+            if (!visibleSimulatedLayers.Contains(usage, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var layerMembers = members
+                .Where(item => usage == "Retired" ? item.IsRetired : item.IsHotSpare)
+                .ToList();
+            var node = new TopologyNode(
+                new StorageUnitRef(
+                    SimulatedLayerId(pool.StableId, usage),
+                    StorageUnitKind.StorageTier,
+                    usage == "HotSpare" ? "Hot spare" : "Retired",
+                    false,
+                    pool.StableId),
+                TopologyProjector.JoinSummary(
+                    $"{layerMembers.Count} physical disks",
+                    TopologyProjector.FormatBytes(layerMembers.Sum(item => item.Size))),
+                childrenLayout: TopologyChildrenLayout.Flow);
+            foreach (var member in layerMembers)
+            {
+                node.Children.Add(PhysicalDiskNode(member, snapshot, committed));
+            }
+
+            poolNode.Children.Add(node);
+        }
     }
 
     private static TopologyNode CreateVirtualDiskNode(
@@ -1033,7 +1191,15 @@ public sealed record StructureProblem(
         {
             PhysicalDisks = snapshot.PhysicalDisks
                 .Select(item => item.StableId == disk.StableId
-                    ? item with { PoolStableId = target.StableId, CanPool = target.IsPrimordial }
+                    ? item with
+                    {
+                        PoolStableId = target.StableId,
+                        CanPool = target.IsPrimordial,
+                        // Leaving a simulated layer returns the disk to the
+                        // data path; a moved disk never keeps a layer role.
+                        IsRetired = false,
+                        IsHotSpare = false
+                    }
                     : item)
                 .ToArray(),
             StoragePools = pools,
@@ -1126,6 +1292,273 @@ public sealed record StructureProblem(
         return added.Count == 0
             ? snapshot
             : snapshot with { OsDisks = snapshot.OsDisks.Concat(added).ToArray() };
+    }
+
+    /// <summary>
+    /// True when the working copy holds any structural draft change against
+    /// the committed snapshot: pool or virtual-disk existence, disk pool
+    /// membership, simulated-layer role, or real-tier membership.
+    /// </summary>
+    public static bool HasStructuralChanges(StorageSnapshot working, StorageSnapshot committed)
+    {
+        ArgumentNullException.ThrowIfNull(working);
+        ArgumentNullException.ThrowIfNull(committed);
+        var workingPools = working.StoragePools
+            .Where(pool => !pool.IsPrimordial)
+            .Select(pool => pool.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var committedPools = committed.StoragePools
+            .Where(pool => !pool.IsPrimordial)
+            .Select(pool => pool.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!workingPools.SetEquals(committedPools))
+        {
+            return true;
+        }
+
+        var workingVdisks = working.VirtualDisks
+            .Select(disk => disk.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var committedVdisks = committed.VirtualDisks
+            .Select(disk => disk.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!workingVdisks.SetEquals(committedVdisks))
+        {
+            return true;
+        }
+
+        foreach (var disk in working.PhysicalDisks)
+        {
+            var committedDisk = committed.PhysicalDisks.FirstOrDefault(item =>
+                item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+            if (committedDisk is null)
+            {
+                return true;
+            }
+
+            if (!string.Equals(committedDisk.PoolStableId, disk.PoolStableId, StringComparison.OrdinalIgnoreCase)
+                || committedDisk.IsRetired != disk.IsRetired
+                || committedDisk.IsHotSpare != disk.IsHotSpare
+                || committedDisk.IsPageFile != disk.IsPageFile
+                || committedDisk.IsCrashDump != disk.IsCrashDump)
+            {
+                return true;
+            }
+
+            var workingTiers = TierIdsContaining(working, disk.StableId);
+            var committedTiers = TierIdsContaining(committed, disk.StableId);
+            if (!workingTiers.SetEquals(committedTiers))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static HashSet<string> TierIdsContaining(StorageSnapshot snapshot, string diskId) =>
+        snapshot.StorageTiers
+            .Where(tier => tier.MemberPhysicalDiskIds.Contains(diskId, StringComparer.OrdinalIgnoreCase))
+            .Select(tier => tier.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public static bool HasStructuralChanges(StorageSnapshot working, StorageSnapshot committed, string poolId)
+    {
+        ArgumentNullException.ThrowIfNull(working);
+        ArgumentNullException.ThrowIfNull(committed);
+        var workingPool = working.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase));
+        var committedPool = committed.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase));
+        if ((workingPool is null) != (committedPool is null))
+        {
+            return true;
+        }
+
+        if (workingPool is null)
+        {
+            return false;
+        }
+
+        var workingVdisks = working.VirtualDisks
+            .Where(disk => string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+            .Select(disk => disk.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var committedVdisks = committed.VirtualDisks
+            .Where(disk => string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+            .Select(disk => disk.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!workingVdisks.SetEquals(committedVdisks))
+        {
+            return true;
+        }
+
+        foreach (var disk in working.PhysicalDisks.Where(disk =>
+                     string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)))
+        {
+            var committedDisk = committed.PhysicalDisks.FirstOrDefault(item =>
+                item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+            if (committedDisk is null
+                || committedDisk.IsRetired != disk.IsRetired
+                || committedDisk.IsHotSpare != disk.IsHotSpare)
+            {
+                return true;
+            }
+
+            var workingTiers = TierIdsContaining(working, disk.StableId)
+                .Where(id => id.StartsWith(poolId, StringComparison.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var committedTiers = TierIdsContaining(committed, disk.StableId)
+                .Where(id => id.StartsWith(poolId, StringComparison.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!workingTiers.SetEquals(committedTiers))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Inserts a draft virtual disk card on the working copy of a committed
+    /// pool. The pool already exists; the card disappears on undo, discard,
+    /// or a delete step, and Apply materializes it through the simulation
+    /// operation sequence.
+    /// </summary>
+    public static StorageSnapshot InsertDraftVirtualDisk(
+        StorageSnapshot snapshot,
+        string poolId,
+        string name,
+        string resiliency,
+        long interleave)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var pool = snapshot.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected pool was not found.");
+        if (pool.IsPrimordial)
+        {
+            throw new InvalidOperationException("A simulated virtual disk requires a non-primordial pool.");
+        }
+
+        if (IsDraftPool(pool.StableId))
+        {
+            throw new InvalidOperationException("A draft pool cannot receive a separate virtual-disk draft.");
+        }
+
+        if (snapshot.VirtualDisks.Any(item =>
+                string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("The pool already has a virtual disk.");
+        }
+
+        var diskName = string.IsNullOrWhiteSpace(name) ? pool.FriendlyName : name.Trim();
+        var free = Math.Max(0, pool.Size - pool.AllocatedSize);
+        var vdisk = new VirtualDiskInfo(
+            $"{DraftVirtualDiskPrefix}{Guid.NewGuid():N}",
+            false,
+            diskName,
+            "Healthy",
+            "OK",
+            resiliency,
+            "Fixed",
+            1,
+            interleave,
+            free,
+            free,
+            pool.StableId,
+            [],
+            []);
+        return snapshot with
+        {
+            VirtualDisks = snapshot.VirtualDisks.Append(vdisk).ToArray()
+        };
+    }
+
+    public static StorageSnapshot DeleteVirtualDiskFromWorking(StorageSnapshot snapshot, string vdiskId)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (!snapshot.VirtualDisks.Any(item =>
+                item.StableId.Equals(vdiskId, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("The selected virtual disk was not found.");
+        }
+
+        return snapshot with
+        {
+            VirtualDisks = snapshot.VirtualDisks
+                .Where(item => !item.StableId.Equals(vdiskId, StringComparison.OrdinalIgnoreCase))
+                .ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Dissolves a committed pool inside the working copy only: tiers,
+    /// virtual disks, OS disks, and partitions go away and member disks
+    /// return to the primordial pool. Apply later materializes the same
+    /// removal through DissolveStoragePool.
+    /// </summary>
+    public static StorageSnapshot DissolvePoolInWorking(StorageSnapshot snapshot, string poolId)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var pool = snapshot.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected pool was not found.");
+        if (pool.IsPrimordial || IsDraftPool(pool.StableId))
+        {
+            throw new InvalidOperationException("Only a committed non-primordial pool can be dissolved.");
+        }
+
+        var primordial = snapshot.StoragePools.FirstOrDefault(item => item.IsPrimordial)
+            ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
+        var vdiskIds = snapshot.VirtualDisks
+            .Where(item => string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var osDiskIds = snapshot.OsDisks
+            .Where(item => item.VirtualDiskStableId is not null
+                && vdiskIds.Contains(item.VirtualDiskStableId))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var members = pool.MemberPhysicalDiskIds;
+        return snapshot with
+        {
+            StoragePools = snapshot.StoragePools
+                .Where(item => !string.Equals(item.StableId, poolId, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.IsPrimordial
+                    ? item with
+                    {
+                        MemberPhysicalDiskIds = item.MemberPhysicalDiskIds.Concat(members).ToArray()
+                    }
+                    : item)
+                .ToArray(),
+            StorageTiers = snapshot.StorageTiers
+                .Where(item => !string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+                .ToArray(),
+            VirtualDisks = snapshot.VirtualDisks
+                .Where(item => !string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+                .ToArray(),
+            OsDisks = snapshot.OsDisks
+                .Where(item => item.VirtualDiskStableId is null
+                    || !osDiskIds.Contains(item.VirtualDiskStableId))
+                .ToArray(),
+            Partitions = snapshot.Partitions
+                .Where(item => item.OsDiskStableId is null
+                    || !osDiskIds.Contains(item.OsDiskStableId))
+                .ToArray(),
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(item => members.Contains(item.StableId, StringComparer.OrdinalIgnoreCase)
+                    ? item with
+                    {
+                        PoolStableId = primordial.StableId,
+                        CanPool = true,
+                        IsRetired = false,
+                        IsHotSpare = false
+                    }
+                    : item)
+                .ToArray()
+        };
     }
 
     /// <summary>

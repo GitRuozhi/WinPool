@@ -297,7 +297,8 @@ public enum SimulationOperationKind
     CreateTieredPool,
     UpdateStoragePool,
     DissolveStoragePool,
-    DeleteVirtualDisk
+    DeleteVirtualDisk,
+    SetDiskUsage
 }
 
 public sealed record SimulationOperationRequest(
@@ -387,6 +388,8 @@ public static class SimulatedCommandText
             ["Dissolve simulated pool and return member disks to primordial"],
         SimulationOperationKind.DeleteVirtualDisk =>
             ["Remove-VirtualDisk -Confirm:$false (removes the simulated virtual disk and its partitions)"],
+        SimulationOperationKind.SetDiskUsage =>
+            [$"Set-PhysicalDisk -Usage {(string.IsNullOrWhiteSpace(request.Name) ? "AutoSelect" : request.Name)} (simulated retired / hot-spare layer)"],
         _ => []
     };
 
@@ -442,6 +445,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 SimulationOperationKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
                 SimulationOperationKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
                 SimulationOperationKind.DeleteVirtualDisk => DeleteVirtualDisk(document.Snapshot, request),
+                SimulationOperationKind.SetDiskUsage => SetDiskUsage(document.Snapshot, request),
                 SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive => document.Snapshot,
                 _ => throw new ArgumentOutOfRangeException(nameof(request))
             };
@@ -1313,6 +1317,13 @@ public sealed class SimulationOperationService : ISimulationOperationService
             Partitions = snapshot.Partitions.Where(item =>
                 item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray()
         };
+    }
+
+    private static StorageSnapshot SetDiskUsage(StorageSnapshot snapshot, SimulationOperationRequest request)
+    {
+        var usage = request.Name?.Trim() ?? string.Empty;
+        var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetStableId);
+        return EditWorkspace.SetDiskUsage(cleared, request.TargetStableId, usage);
     }
 
     private static string NextFreeDriveLetter(StorageSnapshot snapshot)

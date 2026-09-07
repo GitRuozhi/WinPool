@@ -24,7 +24,8 @@ public enum SimulationEditKind
     CreateTieredPool,
     UpdateStoragePool,
     DissolveStoragePool,
-    DeleteVirtualDisk
+    DeleteVirtualDisk,
+    SetDiskUsage
 }
 
 /// <summary>

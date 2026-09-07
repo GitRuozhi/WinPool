@@ -93,7 +93,9 @@ public sealed record PhysicalDiskInfo(
     string FirmwareVersion = "",
     string InterfaceType = "",
     string ProvisioningType = "",
-    string PnpDeviceId = "");
+    string PnpDeviceId = "",
+    bool IsRetired = false,
+    bool IsHotSpare = false);
 
 public sealed record StoragePoolInfo(
     string StableId,
