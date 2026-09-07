@@ -117,6 +117,10 @@ public sealed partial class TopologyNodeControl : UserControl
             return;
         }
 
+        NodeBorder.BorderThickness = new Thickness(1);
+        NodeBorder.Padding = new Thickness(6);
+        NodeBorder.CornerRadius = new CornerRadius(2);
+
         if (ViewModel.IsSelected)
         {
             NodeBorder.Background = Brush("WinPoolAccentBrush");
@@ -138,7 +142,7 @@ public sealed partial class TopologyNodeControl : UserControl
         }
 
         NodeBorder.Background = Brush("LayerFillColorDefaultBrush");
-        NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
+        NodeBorder.BorderBrush = Brush("ControlStrokeColorSecondaryBrush");
         InteractionBorder.Visibility = Visibility.Collapsed;
         DisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
         TypeLabelText.Foreground = Brush("TextFillColorSecondaryBrush");
