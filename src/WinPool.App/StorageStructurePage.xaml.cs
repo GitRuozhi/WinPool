@@ -357,7 +357,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 var maxBytes = TierCapacityMaxBytes(group.Media);
                 if (NumValue(number) is null)
                 {
-                    SetNum(number, tier.Size > 0 ? Math.Round(tier.Size / 1024d / 1024d / 1024d, 2) : 0);
+                    var restoreBytes = tier.Size > 0 ? tier.Size : maxBytes;
+                    SetNum(number, restoreBytes > 0
+                        ? Math.Round(restoreBytes / 1024d / 1024d / 1024d, 2)
+                        : null);
                 }
                 else if (maxBytes > 0
                     && NumValue(number) is { } sizeGb
@@ -1013,8 +1016,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
             var tierCache = TierMap(pool.StableId);
             _poolNameBox.Text = pool.FriendlyName;
-            var vdisk = _working.VirtualDisks.FirstOrDefault(item =>
-                string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
+            var vdisk = RealVdiskOf(_working, pool.StableId);
             _virtualDiskNameBox.Text = vdisk?.FriendlyName ?? pool.FriendlyName;
             var partition = PrimaryPartition(pool.StableId);
             _volumeNameBox.Text = partition is not null
@@ -2053,6 +2055,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var size = NumValue(group.SizeBox) is { } sizeValue
                 ? (long)(sizeValue * 1024L * 1024L * 1024L)
                 : (long?)null;
+            var sizeMax = TierCapacityMaxBytes(group.Media);
+            if (size is { } typedSize && sizeMax > 0 && typedSize > sizeMax)
+            {
+                size = sizeMax;
+            }
             var changed = !string.Equals(resiliency, tier.ResiliencySettingName, StringComparison.OrdinalIgnoreCase)
                 || interleave != (tier.Interleave ?? 0)
                 || copies != tier.NumberOfDataCopies
@@ -2289,15 +2296,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 var committedTier = committed.StorageTiers.FirstOrDefault(item =>
                     string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
                     && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-                if (workingTier is null || committedTier is null
-                    || TierSpecsEqual(workingTier, committedTier))
+                if (workingTier is null || committedTier is null)
+                {
+                    continue;
+                }
+
+                if (workingTier.Size != committedTier.Size)
+                {
+                    steps.Add(zh
+                        ? $"将该层容量调整为 {Math.Round(workingTier.Size / 1024d / 1024d / 1024d, 2)} GB。"
+                        : $"Adjust the tier capacity to {Math.Round(workingTier.Size / 1024d / 1024d / 1024d, 2)} GB.");
+                }
+
+                if (TierSpecsEqual(workingTier, committedTier))
                 {
                     continue;
                 }
 
                 steps.Add(zh
-                    ? $"重建“{group.TitleKey}”层参数（冗余、交织、容量、列数）。"
-                    : $"Rebuild {TierFriendly(group)} tier parameters (resiliency, interleave, capacity, columns).");
+                    ? $"重建“{group.TitleKey}”层参数（冗余、交织、副本、列数）。"
+                    : $"Rebuild {TierFriendly(group)} tier parameters (resiliency, interleave, copies, columns).");
             }
         }
 
@@ -2417,8 +2435,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         && left.Interleave == right.Interleave
         && left.NumberOfDataCopies == right.NumberOfDataCopies
         && left.PhysicalDiskRedundancy == right.PhysicalDiskRedundancy
-        && left.NumberOfColumns == right.NumberOfColumns
-        && left.Size == right.Size;
+        && left.NumberOfColumns == right.NumberOfColumns;
 
     private string ResiliencyName(string resiliency) =>
         resiliency switch
@@ -2833,10 +2850,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return memberBytes > 0 ? memberBytes : null;
         }
 
+        var workingPool = working.StoragePools.FirstOrDefault(item =>
+            string.Equals(item.StableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
         return new SimulationOperationRequest(
             SimulationOperationKind.UpdateStoragePool,
             pool.StableId,
-            Name: pool.FriendlyName,
+            Name: workingPool?.FriendlyName ?? pool.FriendlyName,
             VirtualDiskName: vdisk?.FriendlyName,
             PerformanceResiliency: performance?.ResiliencySettingName,
             PerformanceInterleaveBytes: performance?.Interleave,
@@ -3099,9 +3118,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         box.Value = value ?? double.NaN;
 
     private static bool NumberEquals(double? actual, int? expected) =>
-        actual is null
-            ? expected is null
-            : expected is not null && Math.Abs(actual.Value - expected.Value) < 0.001;
+        expected is not null
+        && actual is not null
+        && Math.Abs(actual.Value - expected.Value) < 0.001;
 
     private TierFields? GroupFor(string media) =>
         TierGroups().FirstOrDefault(group => group.Media == media);
@@ -3185,9 +3204,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             TierFieldKind.Size => Math.Abs(((NumValue(group.SizeBox) ?? 0) * 1024d * 1024d * 1024d) - tier.Size) > 1,
             TierFieldKind.Resiliency => !SameToken(group.ResiliencyBox, tier.ResiliencySettingName),
-            TierFieldKind.Copies => !NumberEquals(NumValue(group.CopiesBox), tier.NumberOfDataCopies),
-            TierFieldKind.Failures => !NumberEquals(NumValue(group.FailuresBox), tier.PhysicalDiskRedundancy),
-            TierFieldKind.Columns => !NumberEquals(NumValue(group.ColumnsBox), tier.NumberOfColumns),
+            TierFieldKind.Copies => group.CopiesBox.IsEnabled
+                && !NumberEquals(NumValue(group.CopiesBox), tier.NumberOfDataCopies),
+            TierFieldKind.Failures => group.FailuresBox.IsEnabled
+                && !NumberEquals(NumValue(group.FailuresBox), tier.PhysicalDiskRedundancy),
+            TierFieldKind.Columns => group.ColumnsBox.IsEnabled
+                && !NumberEquals(NumValue(group.ColumnsBox), tier.NumberOfColumns),
             TierFieldKind.Stripe => InterleaveToken(tier.Interleave) != (group.InterleaveBox.SelectedItem as string),
             _ => false
         };
