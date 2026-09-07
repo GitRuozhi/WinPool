@@ -576,3 +576,65 @@ public sealed class SetDiskUsageTests
         Assert.False(disk.IsPageFile);
     }
 }
+
+public sealed class CreateTieredPoolSkipVdiskTests
+{
+    private static StorageSystemDocument CreateDocument()
+    {
+        var disks = new[]
+        {
+            new PhysicalDiskInfo(
+                "physical:p1", true, "Free Disk One", "Model", "AA0001", "SATA", "SSD",
+                1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
+                false, false, false, false, "pool:primordial"),
+            new PhysicalDiskInfo(
+                "physical:p2", true, "Free Disk Two", "Model", "AA0002", "SATA", "HDD",
+                2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
+                false, false, false, false, "pool:primordial")
+        };
+        var primordial = new StoragePoolInfo(
+            "pool:primordial", true, "Primordial", true, "Healthy", "OK",
+            3_000_000_000L, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
+        var snapshot = new StorageSnapshot(
+            2, "test", DateTimeOffset.UtcNow,
+            new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
+            [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
+            disks,
+            [primordial],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            []);
+        return new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:test",
+            StorageSystemKind.Simulation,
+            "Test",
+            snapshot,
+            HardwareInventoryReport.Empty(DateTimeOffset.Now),
+            [],
+            DateTimeOffset.Now);
+    }
+
+    [Fact]
+    public void CreateTieredPoolCanSkipTheVirtualDisk()
+    {
+        var document = CreateDocument();
+        var result = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "pool:primordial",
+                Name: "Pool01",
+                MemberDiskIds: ["physical:p1", "physical:p2"],
+                CreateVirtualDisk: false));
+        Assert.True(result.Succeeded, result.Error);
+        var pool = result.Document.Snapshot.StoragePools.First(item => item.FriendlyName == "Pool01");
+        Assert.Empty(result.Document.Snapshot.VirtualDisks.Where(item => item.PoolStableId == pool.StableId));
+        Assert.NotEmpty(result.Document.Snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId));
+        Assert.Empty(result.Document.Snapshot.Partitions);
+    }
+}

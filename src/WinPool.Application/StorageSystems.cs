@@ -328,7 +328,8 @@ public sealed record SimulationOperationRequest(
     long? ScmInterleaveBytes = null,
     int? ScmDataCopies = null,
     long? OffsetBytes = null,
-    bool? CreatePartition = null);
+    bool? CreatePartition = null,
+    bool? CreateVirtualDisk = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -1059,6 +1060,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var virtualName = string.IsNullOrWhiteSpace(request.VirtualDiskName)
             ? pool.FriendlyName
             : request.VirtualDiskName.Trim();
+        if (request.CreateVirtualDisk == false)
+        {
+            // Auto-create virtual disk is off: the pool is created with its
+            // media tiers only and stays empty until the user creates a
+            // virtual disk on it.
+            return created;
+        }
+
         created = CreateVirtualDisk(created, new SimulationOperationRequest(
             SimulationOperationKind.CreateVirtualDisk,
             pool.StableId,

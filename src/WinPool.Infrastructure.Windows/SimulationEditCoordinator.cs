@@ -272,6 +272,7 @@ public sealed class SimulationEditCoordinator(
         Add(values, "ScmDataCopies", request.ScmDataCopies);
         Add(values, "OffsetBytes", request.OffsetBytes);
         Add(values, "CreatePartition", request.CreatePartition);
+        Add(values, "CreateVirtualDisk", request.CreateVirtualDisk);
         return values;
     }
 
@@ -439,6 +440,7 @@ public sealed class SimulationEditCoordinator(
                 request.ScmInterleaveBytes,
                 request.ScmDataCopies,
                 request.OffsetBytes,
-                request.CreatePartition);
+                request.CreatePartition,
+                request.CreateVirtualDisk);
     }
 }

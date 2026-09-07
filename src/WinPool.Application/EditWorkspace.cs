@@ -917,7 +917,7 @@ public sealed record StructureProblem(
         }
 
         AddSimulatedLayers(poolNode, pool, members, snapshot, committed, visibleSimulatedLayers);
-        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed, visibleSimulatedLayers);
+        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed);
         return poolNode;
     }
 
@@ -999,17 +999,18 @@ public sealed record StructureProblem(
         StoragePoolInfo pool,
         IReadOnlyList<PhysicalDiskInfo> members,
         StorageSnapshot snapshot,
-        StorageSnapshot committed,
-        IReadOnlyCollection<string>? visibleSimulatedLayers)
+        StorageSnapshot committed)
     {
         var tierMemberIds = snapshot.StorageTiers
             .Where(item => item.PoolStableId == pool.StableId)
             .SelectMany(item => item.MemberPhysicalDiskIds)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Role disks always belong to their simulated layer, which is drawn
+        // whenever it holds disks; they never appear here.
         var directMembers = members
             .Where(item => !tierMemberIds.Contains(item.StableId)
-                && (!item.IsRetired || visibleSimulatedLayers?.Contains("Retired", StringComparer.OrdinalIgnoreCase) != true)
-                && (!item.IsHotSpare || visibleSimulatedLayers?.Contains("HotSpare", StringComparer.OrdinalIgnoreCase) != true))
+                && !item.IsRetired
+                && !item.IsHotSpare)
             .ToList();
         if (directMembers.Count == 0)
         {
@@ -1054,14 +1055,17 @@ public sealed record StructureProblem(
 
         foreach (var usage in new[] { "HotSpare", "Retired" })
         {
-            if (!visibleSimulatedLayers.Contains(usage, StringComparer.OrdinalIgnoreCase))
+            var layerMembers = members
+                .Where(item => usage == "Retired" ? item.IsRetired : item.IsHotSpare)
+                .ToList();
+            // A layer that holds disks is always drawn; the switch only
+            // previews an empty layer so disks can be dropped into it.
+            var switchVisible = visibleSimulatedLayers?.Contains(usage, StringComparer.OrdinalIgnoreCase) == true;
+            if (layerMembers.Count == 0 && !switchVisible)
             {
                 continue;
             }
 
-            var layerMembers = members
-                .Where(item => usage == "Retired" ? item.IsRetired : item.IsHotSpare)
-                .ToList();
             var node = new TopologyNode(
                 new StorageUnitRef(
                     SimulatedLayerId(pool.StableId, usage),
@@ -1089,7 +1093,11 @@ public sealed record StructureProblem(
     {
         var node = new TopologyNode(
             new StorageUnitRef(disk.StableId, StorageUnitKind.VirtualDisk, disk.FriendlyName, disk.IsStable, disk.PoolStableId),
-            TopologyProjector.JoinSummary("Virtual", TopologyProjector.FormatBytes(disk.Size)),
+            // Draft placeholders show no size: the virtual disk does not
+            // exist yet and its capacity is not decided.
+            IsDraftVirtualDisk(disk.StableId)
+                ? TopologyProjector.JoinSummary("Virtual", "unknown size")
+                : TopologyProjector.JoinSummary("Virtual", TopologyProjector.FormatBytes(disk.Size)),
             childrenLayout: TopologyChildrenLayout.Flow)
         {
             ShowsEditStatus = true,
@@ -1522,7 +1530,37 @@ public sealed record StructureProblem(
 
         if (IsDraftPool(pool.StableId))
         {
-            throw new InvalidOperationException("A draft pool cannot receive a separate virtual-disk draft.");
+            // Draft-pool placeholder: the pool is not applied yet, so the
+            // virtual disk card only previews the coming creation. Apply
+            // materializes the pool together with its one virtual disk.
+            if (snapshot.VirtualDisks.Any(item =>
+                    string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException("The pool already has a virtual disk.");
+            }
+
+            var placeholderSize = pool.MemberPhysicalDiskIds
+                .Select(id => snapshot.PhysicalDisks.FirstOrDefault(disk => disk.StableId == id)?.Size ?? 0)
+                .Sum();
+            var placeholder = new VirtualDiskInfo(
+                $"{DraftVirtualDiskPrefix}{Guid.NewGuid():N}",
+                false,
+                string.IsNullOrWhiteSpace(name) ? pool.FriendlyName : name.Trim(),
+                "Healthy",
+                "OK",
+                resiliency,
+                "Fixed",
+                1,
+                interleave,
+                placeholderSize,
+                placeholderSize,
+                pool.StableId,
+                [],
+                []);
+            return snapshot with
+            {
+                VirtualDisks = snapshot.VirtualDisks.Append(placeholder).ToArray()
+            };
         }
 
         if (snapshot.VirtualDisks.Any(item =>

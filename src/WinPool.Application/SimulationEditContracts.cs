@@ -60,7 +60,8 @@ public sealed record SimulationEditRequest(
     long? ScmInterleaveBytes = null,
     int? ScmDataCopies = null,
     long? OffsetBytes = null,
-    bool? CreatePartition = null);
+    bool? CreatePartition = null,
+    bool? CreateVirtualDisk = null);
 
 public sealed record SimulationEditReceipt(
     OperationId OperationId,
