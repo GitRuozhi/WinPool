@@ -7,6 +7,24 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.46 same-pool unallocated re-tier persist — 2026-09-07
+
+### Changed
+- Execute now persists dragging an unallocated pool member back onto a
+  matching-media tier of the same pool. Confirm keeps those pending
+  membership edits after it writes names and parameters, instead of
+  reverting the working copy to the last committed snapshot.
+
+### Verification
+- 2026-09-07: EditWorkspace and simulation-operation tests for same-pool
+  re-tier and membership restore passed 37, 0 failed, 0 skipped. The
+  architecture check for the Edit submit path passed.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+- Confirm still does not create membership. Unallocated disks join a tier
+  only after they are dropped onto the pool and Execute runs.
+
 ## V0.46 relaxed row-height floor — 2026-09-07
 
 ### Changed
