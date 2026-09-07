@@ -24,6 +24,7 @@ public static class TopologyLayoutEngine
     public const int AncestorChrome = 26;
     public const int SiblingSpacing = 6;
     public const int MinimumSiblingUnitWidth = 2;
+    public const int MinimumRelaxedRowHeight = 5;
 
     /// <summary>
     /// Equal-growth threshold t of the three-stage strip allocation: every
@@ -36,7 +37,9 @@ public static class TopologyLayoutEngine
     public static int RelaxedRowHeightCap(int rowHeight)
     {
         var height = Math.Max(1, rowHeight);
-        return Math.Max(height + 1, (int)Math.Ceiling(height * 1.3));
+        return Math.Max(
+            MinimumRelaxedRowHeight,
+            Math.Max(height + 1, (int)Math.Ceiling(height * 1.3)));
     }
 
     public static TopologyLayoutResult Layout(TopologyLayoutInput root, double availableWidth)

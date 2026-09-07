@@ -95,11 +95,13 @@ public sealed class TopologyLayoutEngineTests
     }
 
     [Fact]
-    public void RelaxedHeightCapTakesTheLargerOfPlusOneAndOnePointThree()
+    public void RelaxedHeightCapTakesTheLargestOfFivePlusOneAndOnePointThree()
     {
+        Assert.Equal(5, TopologyLayoutEngine.RelaxedRowHeightCap(1));
+        Assert.Equal(5, TopologyLayoutEngine.RelaxedRowHeightCap(2));
+        Assert.Equal(5, TopologyLayoutEngine.RelaxedRowHeightCap(3));
         Assert.Equal(6, TopologyLayoutEngine.RelaxedRowHeightCap(4));
         Assert.Equal(10, TopologyLayoutEngine.RelaxedRowHeightCap(7));
-        Assert.Equal(2, TopologyLayoutEngine.RelaxedRowHeightCap(1));
     }
 
     [Fact]
