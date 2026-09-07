@@ -1183,14 +1183,34 @@ public sealed record StructureProblem(
                         "HDD" => "Capacity",
                         _ => "Dedicated"
                     });
-                tiers.Add(created with { MemberPhysicalDiskIds = [disk.StableId] });
+                // A tier starts sized to its member capacity, never at zero:
+                // the capacity field means "max usable size" (recommended
+                // value = sum of member disks).
+                tiers.Add(created with
+                {
+                    MemberPhysicalDiskIds = [disk.StableId],
+                    Size = disk.Size,
+                    FootprintOnPool = disk.Size
+                });
             }
             else
             {
                 var index = tiers.FindIndex(item => item.StableId == existing.StableId);
+                var nextMembers = existing.MemberPhysicalDiskIds.Append(disk.StableId).ToArray();
+                var sizeNeedsReset = existing.Size <= 0 || existing.MemberPhysicalDiskIds.Count == 0;
                 tiers[index] = existing with
                 {
-                    MemberPhysicalDiskIds = existing.MemberPhysicalDiskIds.Append(disk.StableId).ToArray()
+                    MemberPhysicalDiskIds = nextMembers,
+                    Size = sizeNeedsReset
+                        ? snapshot.PhysicalDisks
+                            .Where(item => nextMembers.Contains(item.StableId, StringComparer.OrdinalIgnoreCase))
+                            .Sum(item => item.Size)
+                        : existing.Size,
+                    FootprintOnPool = sizeNeedsReset
+                        ? snapshot.PhysicalDisks
+                            .Where(item => nextMembers.Contains(item.StableId, StringComparer.OrdinalIgnoreCase))
+                            .Sum(item => item.Size)
+                        : existing.FootprintOnPool
                 };
             }
         }

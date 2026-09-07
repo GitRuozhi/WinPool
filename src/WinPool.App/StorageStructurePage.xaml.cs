@@ -46,10 +46,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         TextBlock ProvisioningText,
         List<FrameworkElement> Rows);
 
-    /// <summary>Dot + its reset button + a live "changed vs committed" check.</summary>
-    private sealed record FieldDot(TextBlock Dot, Button? ResetButton, Func<bool> IsChanged);
+    /// <summary>Reset button shown only while its field differs from the
+    /// committed state (it replaces the former dot marker).</summary>
+    private sealed record FieldReset(Button ResetButton, Func<bool> IsChanged);
 
-    private readonly List<FieldDot> _fieldDots = [];
+    private readonly List<FieldReset> _fieldResets = [];
     private readonly TextBox _poolNameBox = new();
     private readonly TextBox _virtualDiskNameBox = new();
     private readonly TextBox _volumeNameBox = new();
@@ -140,17 +141,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void LocalizeChrome()
     {
-        UndoButton.Content = ViewModel.Localization["Undo"];
-        RedoButton.Content = ViewModel.Localization["Redo"];
-        DiscardAllButton.Content = ViewModel.Localization["DiscardAll"];
-        ApplyAllButton.Content = ViewModel.Localization["ApplyAll"];
-        CreatePoolButton.Content = ViewModel.Localization["CreatePool"];
-        DissolveButton.Content = ViewModel.Localization["DissolvePool"];
-        RetireButton.Content = ViewModel.Localization["RetireDisk"];
-        HotSpareButton.Content = ViewModel.Localization["HotSpareDisk"];
-        CreateVdiskButton.Content = ViewModel.Localization["CreateVirtualDisk"];
-        DeleteVdiskButton.Content = ViewModel.Localization["DeleteVirtualDisk"];
-        SavePoolPropertiesButton.Content = ViewModel.Localization["SavePoolProperties"];
+        UndoButtonLabel.Text = ViewModel.Localization["Undo"];
+        RedoButtonLabel.Text = ViewModel.Localization["Redo"];
+        DiscardAllButtonLabel.Text = ViewModel.Localization["DiscardAll"];
+        ApplyAllButtonLabel.Text = ViewModel.Localization["ApplyAll"];
+        CreatePoolButtonLabel.Text = ViewModel.Localization["CreatePool"];
+        DissolveButtonLabel.Text = ViewModel.Localization["DissolvePool"];
+        RetireButtonLabel.Text = ViewModel.Localization["RetireDisk"];
+        HotSpareButtonLabel.Text = ViewModel.Localization["HotSpareDisk"];
+        CreateVdiskButtonLabel.Text = ViewModel.Localization["CreateVirtualDisk"];
+        DeleteVdiskButtonLabel.Text = ViewModel.Localization["DeleteVirtualDisk"];
+        SavePoolPropertiesButtonLabel.Text = ViewModel.Localization["SavePoolProperties"];
         ShowHotSpareLabel.Text = ViewModel.Localization["ShowHotSpareLayer"];
         ShowRetiredLabel.Text = ViewModel.Localization["ShowRetiredLayer"];
         _multiVdiskWarning.Text = ViewModel.Localization["MultipleVirtualDiskWarning"];
@@ -167,9 +168,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _formBuilt = true;
         PoolFormGrid.ColumnDefinitions.Clear();
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
         FillCombo(_clusterBox, ["4K", "8K", "16K", "32K", "64K"], 4);
@@ -215,35 +215,37 @@ public sealed partial class StorageStructurePage : EditorPageBase
         };
 
         var row = 0;
-        AddSectionHeader(row++, "PoolPropertiesSection");
-        AddFormRow(row++, "PoolName", _poolNameBox, changed: PoolNameChanged);
-        AddFormRow(row++, "VirtualDiskName", _virtualDiskNameBox, changed: VirtualDiskNameChanged);
-        AddFormRow(row++, "VolumeName", _volumeNameBox, changed: VolumeNameChanged);
-        AddFormRow(row++, "AutoCreateVirtualDisk", _autoVdiskSwitch, changed: () => false);
-        AddFormRow(row++, "AutoCreatePartition", _autoPartitionSwitch, changed: () => false);
+        row = AddSectionHeader(row, "PoolPropertiesSection", first: true);
+        row = AddFormRow(row, "PoolName", _poolNameBox);
+        row = AddFormRow(row, "VirtualDiskName", _virtualDiskNameBox);
+        row = AddFormRow(row, "VolumeName", _volumeNameBox);
+        row = AddFormRow(row, "AutoCreateVirtualDisk", _autoVdiskSwitch);
+        row = AddFormRow(row, "AutoCreatePartition", _autoPartitionSwitch);
         foreach (var group in TierGroups())
         {
             row = AddTierGroup(row, group);
         }
 
-        AddSectionHeader(row++, "DiskAndPartitionSection");
-        AddFormRow(row++, "PartitionTableStyle", _partitionStyleBox, changed: PartitionStyleChanged, reset: () => ResetPartitionField("PartitionStyle"));
-        AddFormRow(row++, "FileSystem", _fileSystemBox, changed: FileSystemChanged, reset: () => ResetPartitionField("FileSystem"));
-        AddFormRow(row++, "AllocationUnit", _clusterBox, changed: AllocationUnitChanged, reset: () => ResetPartitionField("AllocationUnit"));
+        row = AddSectionHeader(row, "DiskAndPartitionSection");
+        row = AddPartitionRow(row, "PartitionTableStyle", _partitionStyleBox, PartitionStyleChanged, () => ResetPartitionField("PartitionStyle"));
+        row = AddPartitionRow(row, "FileSystem", _fileSystemBox, FileSystemChanged, () => ResetPartitionField("FileSystem"));
+        row = AddPartitionRow(row, "AllocationUnit", _clusterBox, AllocationUnitChanged, () => ResetPartitionField("AllocationUnit"));
 
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _multiVdiskWarning.Margin = new Thickness(0, 4, 0, 0);
         Grid.SetRow(_multiVdiskWarning, row);
         Grid.SetColumn(_multiVdiskWarning, 0);
-        Grid.SetColumnSpan(_multiVdiskWarning, 4);
+        Grid.SetColumnSpan(_multiVdiskWarning, 3);
         PoolFormGrid.Children.Add(_multiVdiskWarning);
     }
 
+    /// <summary>Order of tier groups on the property form: dedicated (SCM /
+    /// Optane) first, then performance, then capacity.</summary>
     private IEnumerable<TierFields> TierGroups()
     {
+        yield return Dedicated;
         yield return Performance;
         yield return Capacity;
-        yield return Dedicated;
     }
 
     /// <summary>Marks the form dirty and refreshes buttons and field dots.</summary>
@@ -361,7 +363,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private int AddTierGroup(int row, TierFields group)
     {
-        AddSectionHeader(row++, group.TitleKey);
+        row = AddSectionHeader(row, group.TitleKey, visibilityGroup: group.Rows);
         row = AddTierRow(row, group, "TierSize", group.SizeBox, () => ResetTierField(group, "Size"));
         row = AddTierRow(row, group, "TierProvisioning", group.ProvisioningText, null);
         row = AddTierRow(row, group, "TierResiliency", group.ResiliencyBox, () => ResetTierField(group, "Resiliency"));
@@ -379,7 +381,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         string key,
         FrameworkElement value,
         Action? reset) =>
-        AddFormRow(row, key, value, reset, TierRowChanged(group, key), group.Rows) + 1;
+        AddFormRow(row, key, value, reset, TierRowChanged(group, key), group.Rows);
+
+    private int AddPartitionRow(
+        int row,
+        string key,
+        FrameworkElement value,
+        Func<bool> changed,
+        Action reset) =>
+        AddFormRow(row, key, value, reset, changed, null);
 
     /// <summary>Live "changed vs committed" check for a tier parameter row.</summary>
     private Func<bool> TierRowChanged(TierFields group, string key)
@@ -427,38 +437,49 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return button;
     }
 
-    private TextBlock AddSectionHeader(int row, string key)
+    /// <summary>
+    /// Adds a section separator line plus its title. Every call consumes two
+    /// grid rows; the separator is skipped for the first form section.
+    /// </summary>
+    private int AddSectionHeader(
+        int row,
+        string key,
+        bool first = false,
+        List<FrameworkElement>? visibilityGroup = null)
     {
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var line = new Border
         {
             Height = 1,
-            Margin = new Thickness(0, row == 0 ? 0 : 10, 0, 6),
+            Margin = new Thickness(0, first ? 0 : 8, 0, 6),
             Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
         };
         Grid.SetRow(line, row);
         Grid.SetColumn(line, 0);
-        Grid.SetColumnSpan(line, 4);
+        Grid.SetColumnSpan(line, 3);
         PoolFormGrid.Children.Add(line);
+        visibilityGroup?.Add(line);
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var label = new TextBlock
         {
-            Margin = new Thickness(0, 0, 0, 4),
+            Margin = new Thickness(0, first ? 0 : 2, 0, 6),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = 12,
             Text = ViewModel.Localization[key]
         };
         Grid.SetRow(label, row + 1);
         Grid.SetColumn(label, 0);
-        Grid.SetColumnSpan(label, 4);
+        Grid.SetColumnSpan(label, 3);
         PoolFormGrid.Children.Add(label);
-        return label;
+        visibilityGroup?.Add(label);
+        return row + 2;
     }
 
     /// <summary>
-    /// Builds one uniform-height label / dot / value / reset row. The dot
-    /// marks a value that differs from the committed state; reset restores
-    /// the recommended value for parameter rows.
+    /// One uniform-height row: label (col 0), a fixed reset-button lane
+    /// (col 1, blank on rows without one), value (col 2). Parameter rows
+    /// show their reset button only while the field differs from the
+    /// committed state.
     /// </summary>
     private int AddFormRow(
         int row,
@@ -468,47 +489,40 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Func<bool>? changed = null,
         List<FrameworkElement>? visibilityGroup = null)
     {
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
+        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
         var label = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
             Text = ViewModel.Localization[key]
         };
-        var dot = new TextBlock
-        {
-            Text = "\u25CF",
-            FontSize = 7,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 2, 0),
-            Foreground = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
-            Visibility = Visibility.Collapsed
-        };
         value.VerticalAlignment = VerticalAlignment.Center;
+        if (value is not ToggleSwitch)
+        {
+            value.Height = 32;
+        }
+
         Grid.SetRow(label, row);
         Grid.SetColumn(label, 0);
-        Grid.SetRow(dot, row);
-        Grid.SetColumn(dot, 1);
         Grid.SetRow(value, row);
         Grid.SetColumn(value, 2);
         PoolFormGrid.Children.Add(label);
-        PoolFormGrid.Children.Add(dot);
         PoolFormGrid.Children.Add(value);
         visibilityGroup?.Add(label);
-        visibilityGroup?.Add(dot);
         visibilityGroup?.Add(value);
-        Button? resetButton = null;
-        if (reset is not null)
+        if (reset is null)
         {
-            resetButton = CreateResetButton(reset);
-            resetButton.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetRow(resetButton, row);
-            Grid.SetColumn(resetButton, 3);
-            PoolFormGrid.Children.Add(resetButton);
-            visibilityGroup?.Add(resetButton);
+            return row + 1;
         }
 
-        _fieldDots.Add(new FieldDot(dot, resetButton, changed ?? (() => false)));
-        return row;
+        var button = CreateResetButton(reset);
+        button.VerticalAlignment = VerticalAlignment.Center;
+        button.Visibility = Visibility.Collapsed;
+        Grid.SetRow(button, row);
+        Grid.SetColumn(button, 1);
+        PoolFormGrid.Children.Add(button);
+        visibilityGroup?.Add(button);
+        _fieldResets.Add(new FieldReset(button, changed ?? (() => false)));
+        return row + 1;
     }
 
     private static void FillCombo(ComboBox box, IReadOnlyList<string> items, int selected)
@@ -923,7 +937,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             {
                 var visible = pool is not null
                     && !pool.IsPrimordial
-                    && DataDiskCount(pool, group.Media) > 0;
+                    && TierVisible(pool.StableId, group.Media);
                 foreach (var element in group.Rows)
                 {
                     element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
@@ -1050,6 +1064,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !disk.IsRetired
             && !disk.IsHotSpare
             && EditWorkspace.NormalizeMedia(disk.MediaType) == media);
+
+    /// <summary>True when the tier object exists and holds member disks.</summary>
+    private bool TierVisible(string poolId, string media) =>
+        TierMap(poolId).GetValueOrDefault(media) is { MemberPhysicalDiskIds.Count: > 0 };
+
+    /// <summary>Member disk count of the tier (0 when the tier does not exist).</summary>
+    private int TierMemberCount(string poolId, string media) =>
+        TierMap(poolId).GetValueOrDefault(media)?.MemberPhysicalDiskIds.Count ?? 0;
 
     private PartitionInfo? PrimaryPartition(string poolId)
     {
@@ -1258,7 +1280,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ShowHotSpareSwitch.IsEnabled = simulated;
         ShowRetiredSwitch.IsEnabled = simulated;
         UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
-        UpdateFieldDots();
+        UpdateFieldResets();
     }
 
     private void UpdateFormStates(
@@ -1320,7 +1342,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         foreach (var group in TierGroups())
         {
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
-            var tierVisible = DataDiskCount(pool, group.Media) > 0;
+            var tierVisible = TierVisible(pool.StableId, group.Media);
             var editable = tierVisible && !holdsData && tier is not null;
             group.SizeBox.IsEnabled = editable;
             group.ResiliencyBox.IsEnabled = editable;
@@ -1335,7 +1357,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var isMirror = resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase);
             var isSimple = resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase);
             LinkResiliency(group);
-            group.DiskCountBox.Text = tier?.MemberPhysicalDiskIds.Count.ToString() ?? "0";
+            group.DiskCountBox.Text = TierMemberCount(pool.StableId, group.Media).ToString();
             group.CopiesBox.IsEnabled = editable && isMirror;
             group.FailuresBox.IsEnabled = editable && !isMirror && !isSimple;
             group.ColumnsBox.IsEnabled = editable && !isMirror && !isSimple;
@@ -2967,9 +2989,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private TierFields? GroupFor(string media) =>
         TierGroups().FirstOrDefault(group => group.Media == media);
 
-    private void UpdateFieldDots()
+    private void UpdateFieldResets()
     {
-        foreach (var field in _fieldDots)
+        foreach (var field in _fieldResets)
         {
             var changed = false;
             try
@@ -2981,7 +3003,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 changed = false;
             }
 
-            field.Dot.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+            field.ResetButton.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -2993,43 +3015,38 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return 0;
         }
 
-        return _working.PhysicalDisks
-            .Where(disk => string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
-                && !disk.IsRetired
-                && !disk.IsHotSpare
-                && EditWorkspace.NormalizeMedia(disk.MediaType) == media)
-            .Sum(disk => disk.Size);
+        var tier = TierMap(pool.StableId).GetValueOrDefault(media);
+        return tier is null
+            ? 0
+            : _working.PhysicalDisks
+                .Where(disk => tier.MemberPhysicalDiskIds.Contains(
+                    disk.StableId, StringComparer.OrdinalIgnoreCase))
+                .Sum(disk => disk.Size);
     }
 
     private int TierDataDiskCount(string media)
     {
         var pool = SelectedPool();
-        if (pool is null)
-        {
-            return 0;
-        }
-
-        return _working.PhysicalDisks.Count(disk =>
-            string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
-            && !disk.IsRetired
-            && !disk.IsHotSpare
-            && EditWorkspace.NormalizeMedia(disk.MediaType) == media);
+        return pool is null || pool.IsPrimordial
+            ? 0
+            : TierMap(pool.StableId).GetValueOrDefault(media)?.MemberPhysicalDiskIds.Count ?? 0;
     }
 
     private IReadOnlyList<PhysicalDiskInfo> TierDataDisks(string media)
     {
         var pool = SelectedPool();
-        if (pool is null)
+        if (pool is null || pool.IsPrimordial)
         {
             return [];
         }
 
-        return _working.PhysicalDisks
-            .Where(disk => string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
-                && !disk.IsRetired
-                && !disk.IsHotSpare
-                && EditWorkspace.NormalizeMedia(disk.MediaType) == media)
-            .ToArray();
+        var tier = TierMap(pool.StableId).GetValueOrDefault(media);
+        return tier is null
+            ? []
+            : _working.PhysicalDisks
+                .Where(disk => tier.MemberPhysicalDiskIds.Contains(
+                    disk.StableId, StringComparer.OrdinalIgnoreCase))
+                .ToArray();
     }
 
     private bool TierFieldChanged(TierFieldKind field, string media)

@@ -6,24 +6,6 @@
     xmlns:controls="using:WinPool_App.Controls"
     xmlns:editors="using:WinPool_App">
 
-    <editors:EditorPageBase.Resources>
-        <DataTemplate x:Key="IconActionButtonTemplate">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <FontIcon
-                    Glyph="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
-                    FontSize="14" />
-                <TextBlock
-                    VerticalAlignment="Center"
-                    Text="{Binding}" />
-            </StackPanel>
-        </DataTemplate>
-        <Style
-            x:Key="IconActionButton"
-            TargetType="Button">
-            <Setter Property="ContentTemplate" Value="{StaticResource IconActionButtonTemplate}" />
-        </Style>
-    </editors:EditorPageBase.Resources>
-
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -78,105 +60,88 @@
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="4">
-                <StackPanel Spacing="6">
-                    <Grid
-                        ColumnSpacing="8"
-                        RowSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Button
-                            x:Name="UndoButton"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE7A7;"
-                            HorizontalAlignment="Stretch"
-                            Click="Undo_Click" />
-                        <Button
-                            x:Name="RedoButton"
-                            Grid.Column="1"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE7A6;"
-                            HorizontalAlignment="Stretch"
-                            Click="Redo_Click" />
-                        <Button
-                            x:Name="DiscardAllButton"
-                            Grid.Row="1"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE711;"
-                            HorizontalAlignment="Stretch"
-                            Click="DiscardAll_Click" />
-                        <Button
-                            x:Name="ApplyAllButton"
-                            Grid.Row="1"
-                            Grid.Column="1"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE73E;"
-                            HorizontalAlignment="Stretch"
-                            Click="ApplyAll_Click" />
-                        <Button
-                            x:Name="CreatePoolButton"
-                            Grid.Row="2"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE710;"
-                            HorizontalAlignment="Stretch"
-                            Click="CreatePool_Click" />
-                        <Button
-                            x:Name="DissolveButton"
-                            Grid.Row="2"
-                            Grid.Column="1"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE74D;"
-                            HorizontalAlignment="Stretch"
-                            Click="Dissolve_Click" />
-                        <Button
-                            x:Name="RetireButton"
-                            Grid.Row="3"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE7E8;"
-                            HorizontalAlignment="Stretch"
-                            Click="Retire_Click" />
-                        <Button
-                            x:Name="HotSpareButton"
-                            Grid.Row="3"
-                            Grid.Column="1"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE72C;"
-                            HorizontalAlignment="Stretch"
-                            Click="HotSpare_Click" />
-                        <Button
-                            x:Name="CreateVdiskButton"
-                            Grid.Row="4"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE710;"
-                            HorizontalAlignment="Stretch"
-                            Click="CreateVdisk_Click" />
-                        <Button
-                            x:Name="DeleteVdiskButton"
-                            Grid.Row="4"
-                            Grid.Column="1"
-                            Style="{StaticResource IconActionButton}"
-                            Tag="&#xE74D;"
-                            HorizontalAlignment="Stretch"
-                            Click="DeleteVdisk_Click" />
-                    </Grid>
-                    <Grid
-                        Margin="0,2,0,0"
-                        ColumnSpacing="8">
+                <Grid
+                    ColumnSpacing="8"
+                    RowSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Button
+                        x:Name="UndoButton"
+                        HorizontalAlignment="Stretch"
+                        Click="Undo_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE7A7;" FontSize="14" />
+                            <TextBlock x:Name="UndoButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="RedoButton"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Click="Redo_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE7A6;" FontSize="14" />
+                            <TextBlock x:Name="RedoButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="DiscardAllButton"
+                        Grid.Row="1"
+                        HorizontalAlignment="Stretch"
+                        Click="DiscardAll_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE711;" FontSize="14" />
+                            <TextBlock x:Name="DiscardAllButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="ApplyAllButton"
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Click="ApplyAll_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE73E;" FontSize="14" />
+                            <TextBlock x:Name="ApplyAllButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="CreatePoolButton"
+                        Grid.Row="2"
+                        HorizontalAlignment="Stretch"
+                        Click="CreatePool_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE710;" FontSize="14" />
+                            <TextBlock x:Name="CreatePoolButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="DissolveButton"
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Click="Dissolve_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                            <TextBlock x:Name="DissolveButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Grid Grid.Row="3" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock
-                            x:Name="ShowHotSpareLabel"
-                            VerticalAlignment="Center" />
+                        <TextBlock x:Name="ShowHotSpareLabel" VerticalAlignment="Center" />
                         <ToggleSwitch
                             x:Name="ShowHotSpareSwitch"
                             Grid.Column="1"
@@ -186,14 +151,12 @@
                             OnContent=""
                             Toggled="ShowHotSpareSwitch_Toggled" />
                     </Grid>
-                    <Grid ColumnSpacing="8">
+                    <Grid Grid.Row="3" Grid.Column="1" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock
-                            x:Name="ShowRetiredLabel"
-                            VerticalAlignment="Center" />
+                        <TextBlock x:Name="ShowRetiredLabel" VerticalAlignment="Center" />
                         <ToggleSwitch
                             x:Name="ShowRetiredSwitch"
                             Grid.Column="1"
@@ -203,7 +166,49 @@
                             OnContent=""
                             Toggled="ShowRetiredSwitch_Toggled" />
                     </Grid>
-                </StackPanel>
+                    <Button
+                        x:Name="RetireButton"
+                        Grid.Row="4"
+                        HorizontalAlignment="Stretch"
+                        Click="Retire_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE7E8;" FontSize="14" />
+                            <TextBlock x:Name="RetireButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="HotSpareButton"
+                        Grid.Row="4"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Click="HotSpare_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                            <TextBlock x:Name="HotSpareButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="CreateVdiskButton"
+                        Grid.Row="5"
+                        HorizontalAlignment="Stretch"
+                        Click="CreateVdisk_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE710;" FontSize="14" />
+                            <TextBlock x:Name="CreateVdiskButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="DeleteVdiskButton"
+                        Grid.Row="5"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Click="DeleteVdisk_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                            <TextBlock x:Name="DeleteVdiskButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
             </Border>
             <Grid Grid.Row="1">
                 <Grid.RowDefinitions>
@@ -220,7 +225,7 @@
                         VerticalScrollBarVisibility="Auto">
                         <Grid
                             x:Name="PoolFormGrid"
-                            ColumnSpacing="8"
+                            ColumnSpacing="6"
                             RowSpacing="6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -233,10 +238,13 @@
                     x:Name="SavePoolPropertiesButton"
                     Grid.Row="1"
                     Margin="0,8,0,0"
-                    Style="{StaticResource IconActionButton}"
-                    Tag="&#xE74E;"
                     HorizontalAlignment="Stretch"
-                    Click="SavePoolProperties_Click" />
+                    Click="SavePoolProperties_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE74E;" FontSize="14" />
+                        <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </Grid>
         </Grid>
     </Grid>

@@ -452,8 +452,12 @@ public static class TopologyProjector
     }
 
     internal static int TierSortOrder(string mediaType) =>
-        mediaType.Equals("SSD", StringComparison.OrdinalIgnoreCase)
-        || mediaType.Equals("SCM", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        NormalizeMedia(mediaType) switch
+        {
+            "SCM" => 0,
+            "SSD" => 1,
+            _ => 2
+        };
 
     private static string NormalizeMedia(string value) =>
         value.Equals("HDD", StringComparison.OrdinalIgnoreCase) ? "HDD"
