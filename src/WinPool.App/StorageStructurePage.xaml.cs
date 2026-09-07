@@ -773,8 +773,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             else
             {
                 steps.Add(zh
-                    ? "虚拟磁盘保持未初始化（RAW），稍后在磁盘/分区页初始化。"
-                    : "Leave the virtual disk RAW; initialize it on the Disk/partition page.");
+                    ? "虚拟磁盘保持未初始化（RAW），稍后在磁盘分区页初始化。"
+                    : "Leave the virtual disk RAW; initialize it on the Disk partition page.");
             }
 
             return steps;

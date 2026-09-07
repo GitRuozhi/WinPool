@@ -10,7 +10,7 @@ using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
 namespace WinPool_App;
 
 /// <summary>
-/// Disk/partition editor (V0.47): the former Edit upper half. Shows the
+/// Disk partition editor (V0.47): the former Edit upper half. Shows the
 /// disk/partition topology and keeps disk actions separate from partition
 /// actions.
 /// </summary>

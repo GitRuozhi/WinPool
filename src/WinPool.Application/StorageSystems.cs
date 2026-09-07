@@ -1066,7 +1066,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         if (request.CreatePartition == false)
         {
             // Auto-create partition is off: the virtual disk stays RAW and
-            // is initialized on the Disk/partition editor (V0.47 design §6).
+            // is initialized on the Disk partition editor (V0.47 design §6).
             return created;
         }
 

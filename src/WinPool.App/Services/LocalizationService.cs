@@ -13,7 +13,7 @@ public sealed class LocalizationService : ObservableObject
         {
             ["Manage"] = ("管理", "Manage"),
             ["StorageStructure"] = ("存储结构编辑", "Storage structure editor"),
-            ["DiskPartition"] = ("磁盘分区编辑", "Disk/partition editor"),
+            ["DiskPartition"] = ("磁盘分区编辑", "Disk partition editor"),
             ["DiskActionsSection"] = ("磁盘操作", "Disk actions"),
             ["PartitionActionsSection"] = ("分区操作", "Partition actions"),
             ["Test"] = ("测试", "Test"),
