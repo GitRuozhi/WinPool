@@ -38,12 +38,15 @@ re-opening product debate.
 1. Retire the current Edit page. Former lower half → **Storage structure
    editor**. Former upper half → **Disk/partition editor**.
 2. Storage structure editor: left topology; upper-right structure operations;
-   lower-right pool / virtual-disk / partition properties.
+   lower-right pool / virtual-disk / partition properties. No bottom draft
+   bar. Undo, redo, discard-all, and apply-all live in the upper right.
 3. Disk/partition editor: one control group for the disk, one for the
    partition (or unallocated gap).
-4. One draft, one apply. Structure and parameters do not use two competing
-   submit buttons.
-5. Topology does not draw empty tiers. Add-tier is a structure operation.
+4. One working copy. Upper-right apply-all writes it. No second submit
+   button for properties.
+5. Real tiers follow disks; there is no Add-tier button. Empty real tiers
+   are not drawn. Hot spare and retired are optional simulated layers
+   shown by pool switches.
 6. Hide the PowerShell template-tier ritual: spec on the pool, size on the
    virtual disk.
 7. **One virtual disk is the 1.0 contract.** Do not create a second. A pool
@@ -58,11 +61,13 @@ re-opening product debate.
 10. Prefill `64K` interleave, HDD Parity with columns `n` or `n−1`, SSD Mirror
     (Simple if one disk). Warn on 256K combinations. These defaults are
     changeable.
-11. Columns, interleave, media type, and disk role are first-class. Write-back
-    cache is an advanced field defaulting to Windows Auto; it is not a
-    research prefill.
-12. Apply preview is a human-language step list. Do not expand raw PowerShell
-    on these pages.
+11. Columns, stripe size, media type, resiliency, and copies are pool
+    property fields. Journal and Manual allocation are out of this product
+    path. Optimize and repair stay on Manage; they are not structure
+    operations.
+12. Structure controls are always visible. Disable what cannot run; show
+    computed values read-only in gray. Do not hide a control because
+    nothing is selected.
 13. Workstation and standalone server share the editor. No cluster / S2D / WAC.
 14. Simulation only. Real mutation stays denied.
 
@@ -91,11 +96,11 @@ current item has passed, unless the developer changes the order.
 | --- | --- | --- |
 | PE1 | Navigation: remove Edit; add Storage structure editor and Disk/partition editor; bilingual labels; last-page restore still works | App starts; both pages open; Edit is gone; process stays alive |
 | PE2 | Disk/partition editor: move the former Edit-upper topology; split disk vs partition control groups | Selecting a disk enables only disk actions; selecting a partition enables only partition actions |
-| PE3 | Storage structure chrome: left topology, upper-right structure operations, lower-right properties, one draft bar | Layout matches §1; empty tiers are not drawn |
+| PE3 | Storage structure chrome: left topology; upper-right operations in the order undo/redo/discard-all/apply-all, create/dissolve pool, retire/hot-spare disk, create/delete virtual disk; lower-right properties as named in the control spec; all listed controls visible | Layout matches §1; empty real tiers are not drawn |
 | PE4 | Create composition: select disks, correct media type, roles, tiers, one virtual disk, auto-partition checkbox, NTFS/ReFS, research prefills | Simulated create yields one pool, one virtual disk, optional one user volume; 256K warns |
 | PE5 | Modify: join/evict/unallocated→tier, add-tier without drawing an empty strip, one apply for structure and parameters | All-Unallocated re-tier persists; forms do not silently revert |
 | PE6 | Reduce several virtual disks to one; refuse creating a second | No create-second control; extras can be removed with confirmation when they hold data |
-| PE7 | Human-language apply preview; simulation persist only | Preview lists steps in the UI language; no raw command dump; real systems stay read-only |
+| PE7 | Apply-all from the upper right writes the simulation only | Real systems stay read-only; dangerous cases still use a confirmation dialog |
 | PE8 | Tests for the new pages' projection and simulation operations; native open of both pages | Named tests pass; native: start → each new page → process alive → no new crash log |
 
 Reuse the topology layout engine. Do not invent a second layout system. Before
