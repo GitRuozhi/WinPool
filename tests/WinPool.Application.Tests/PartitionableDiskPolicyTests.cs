@@ -8,13 +8,13 @@ public sealed class PartitionableDiskPolicyTests
     [InlineData("RAW")]
     [InlineData("GPT")]
     [InlineData("MBR")]
-    public void EligibleStylesIncludeSupportedLocalDisks(string partitionStyle)
+    [InlineData("")]
+    public void EligibleStylesIncludeSupportedAndUninitializedDisks(string partitionStyle)
     {
         Assert.True(PartitionableDiskPolicy.IsEligible(Disk(partitionStyle)));
     }
 
     [Theory]
-    [InlineData("")]
     [InlineData("Unknown")]
     [InlineData("Network")]
     public void UnsupportedStylesAreNotEligible(string partitionStyle)

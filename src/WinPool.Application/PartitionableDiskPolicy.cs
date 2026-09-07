@@ -11,8 +11,12 @@ public static class PartitionableDiskPolicy
     {
         ArgumentNullException.ThrowIfNull(disk);
 
+        // A blank partition style is an uninitialized disk: Windows reports
+        // no style until the disk is initialized. Such a disk is partitionable
+        // and must stay visible; operation safety is enforced separately.
         return disk.Size > 0
-            && (disk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(disk.PartitionStyle)
+                || disk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
                 || disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
                 || disk.PartitionStyle.Equals("MBR", StringComparison.OrdinalIgnoreCase));
     }
