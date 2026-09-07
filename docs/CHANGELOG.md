@@ -7,6 +7,33 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.47 storage-structure and disk-partition editors — 2026-09-07
+
+### Changed
+- Product version is **V0.47**.
+- The Edit page is replaced by two simulation editors: Storage structure
+  (former lower half) and Disk/partition (former upper half).
+- On Storage structure, a pool still has at most one virtual disk and
+  optionally one user partition. Creating a partition when creating the disk
+  defaults on. Deleting a virtual disk is allowed, including the last disk.
+- The developer closed this split-page stage. Its Plan is frozen under
+  [Archive/V0.47-editor-pages](Archive/V0.47-editor-pages/Plan.md). Storage-
+  structure control layout is the active Plan, not this result.
+
+### Verification
+- 2026-09-07: split-page implementation is on `main` (`ca03c69`, `3305261`);
+  architecture coverage for the seven-page shell and editor pages is in
+  `7316075`. This documentation close did not re-run those tests.
+- Native PE8 (start → each new page → process alive → no new crash log):
+  `unverified`.
+- Real storage-structure mutation: `not_required` and remains denied.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+- Storage-structure upper-right and lower-right controls are still the
+  previous Edit-page chrome; the control Plan has not been executed.
+- Native open of the two new pages remains `unverified`.
+
 ## V0.46 edit-lower multi virtual-disk row — 2026-09-07
 
 ### Changed
