@@ -956,7 +956,31 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             merged.Add(extra);
         }
 
-        return merged;
+        // Normalize on load: any simulation document saved before free disks
+        // gained OS-disk views is upgraded once so the Disk partition editor
+        // can show every free primordial disk. Idempotent — after the first
+        // run the helper returns the same snapshot and nothing is saved.
+        var normalized = new List<StorageSystemDocument>(merged.Count);
+        foreach (var document in merged)
+        {
+            var ensured = EditWorkspace.EnsureFreeDisksHaveOsDisks(document.Snapshot);
+            if (ReferenceEquals(ensured, document.Snapshot))
+            {
+                normalized.Add(document);
+                continue;
+            }
+
+            var updated = document with
+            {
+                Snapshot = ensured,
+                Revision = checked(document.Revision + 1),
+                UpdatedAt = DateTimeOffset.Now
+            };
+            await _systemRepository.SaveSimulationAsync(updated);
+            normalized.Add(updated);
+        }
+
+        return normalized;
     }
 
     private static SimulationOperationResult ResetBuiltInSimulation(
