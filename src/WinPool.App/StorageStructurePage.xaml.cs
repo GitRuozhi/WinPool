@@ -308,14 +308,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         };
     }
 
-    /// <summary>Empty tier numbers restore the committed tier value on commit.</summary>
+    /// <summary>
+    /// Commit-time normalization of tier numbers (Enter / focus loss): empty
+    /// values restore the committed tier value; out-of-range values clamp to
+    /// the allowed bounds (capacity to the tier's member capacity).
+    /// </summary>
     private void NormalizeTierNumber(NumberBox number)
     {
-        if (NumValue(number) is not null)
-        {
-            return;
-        }
-
         foreach (var group in TierGroups())
         {
             var tier = SelectedTier(group.Media);
@@ -326,25 +325,39 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
             if (ReferenceEquals(group.SizeBox, number))
             {
-                SetNum(number, tier.Size > 0 ? Math.Round(tier.Size / 1024d / 1024d / 1024d, 2) : 0);
+                var maxBytes = TierCapacityMaxBytes(group.Media);
+                if (NumValue(number) is null)
+                {
+                    SetNum(number, tier.Size > 0 ? Math.Round(tier.Size / 1024d / 1024d / 1024d, 2) : 0);
+                }
+                else if (maxBytes > 0
+                    && NumValue(number) is { } sizeGb
+                    && (long)(sizeGb * 1024d * 1024d * 1024d) > maxBytes)
+                {
+                    SetNum(number, Math.Round(maxBytes / 1024d / 1024d / 1024d, 2));
+                }
+
                 return;
             }
 
             if (ReferenceEquals(group.CopiesBox, number))
             {
-                SetNum(number, tier.NumberOfDataCopies ?? 1);
+                var value = NumValue(number) ?? (tier.NumberOfDataCopies ?? 1);
+                SetNum(number, Math.Clamp(value, 1, 16));
                 return;
             }
 
             if (ReferenceEquals(group.FailuresBox, number))
             {
-                SetNum(number, tier.PhysicalDiskRedundancy ?? 0);
+                var value = NumValue(number) ?? (tier.PhysicalDiskRedundancy ?? 0);
+                SetNum(number, Math.Clamp(value, 0, 16));
                 return;
             }
 
             if (ReferenceEquals(group.ColumnsBox, number))
             {
-                SetNum(number, tier.NumberOfColumns ?? 1);
+                var value = NumValue(number) ?? (tier.NumberOfColumns ?? 1);
+                SetNum(number, Math.Clamp(value, 1, 64));
                 return;
             }
         }
@@ -447,18 +460,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
         bool first = false,
         List<FrameworkElement>? visibilityGroup = null)
     {
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var line = new Border
+        if (!first)
         {
-            Height = 1,
-            Margin = new Thickness(0, first ? 0 : 8, 0, 6),
-            Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
-        };
-        Grid.SetRow(line, row);
-        Grid.SetColumn(line, 0);
-        Grid.SetColumnSpan(line, 3);
-        PoolFormGrid.Children.Add(line);
-        visibilityGroup?.Add(line);
+            PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var line = new Border
+            {
+                Height = 1,
+                Margin = new Thickness(0, 8, 0, 6),
+                Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
+            };
+            Grid.SetRow(line, row);
+            Grid.SetColumn(line, 0);
+            Grid.SetColumnSpan(line, 3);
+            PoolFormGrid.Children.Add(line);
+            visibilityGroup?.Add(line);
+            row += 1;
+        }
+
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var label = new TextBlock
         {
@@ -467,12 +485,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
             FontSize = 12,
             Text = ViewModel.Localization[key]
         };
-        Grid.SetRow(label, row + 1);
+        Grid.SetRow(label, row);
         Grid.SetColumn(label, 0);
         Grid.SetColumnSpan(label, 3);
         PoolFormGrid.Children.Add(label);
         visibilityGroup?.Add(label);
-        return row + 2;
+        return row + 1;
     }
 
     /// <summary>
@@ -1343,10 +1361,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
             var tierVisible = TierVisible(pool.StableId, group.Media);
-            var editable = tierVisible && !holdsData && tier is not null;
-            group.SizeBox.IsEnabled = editable;
-            group.ResiliencyBox.IsEnabled = editable;
-            group.InterleaveBox.IsEnabled = editable;
+            // Capacity (Size) is a reservation: it stays editable even on
+            // data-bearing pools. Destructive spec fields are not.
+            var sizeEditable = tierVisible && tier is not null;
+            var specEditable = sizeEditable && !holdsData;
+            group.SizeBox.IsEnabled = sizeEditable;
+            group.ResiliencyBox.IsEnabled = specEditable;
+            group.InterleaveBox.IsEnabled = specEditable;
             group.DiskCountBox.IsReadOnly = true;
             if (!tierVisible)
             {
@@ -1358,9 +1379,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var isSimple = resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase);
             LinkResiliency(group);
             group.DiskCountBox.Text = TierMemberCount(pool.StableId, group.Media).ToString();
-            group.CopiesBox.IsEnabled = editable && isMirror;
-            group.FailuresBox.IsEnabled = editable && !isMirror && !isSimple;
-            group.ColumnsBox.IsEnabled = editable && !isMirror && !isSimple;
+            group.CopiesBox.IsEnabled = specEditable && isMirror;
+            group.FailuresBox.IsEnabled = specEditable && !isMirror && !isSimple;
+            group.ColumnsBox.IsEnabled = specEditable && !isMirror && !isSimple;
             if (isMirror || isSimple)
             {
                 SetNum(group.ColumnsBox, null);
@@ -2302,6 +2323,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _ => "capacity"
     };
 
+    /// <summary>
+    /// True when destructive tier parameters changed (resiliency, stripe,
+    /// copies, failures, columns). Size is a capacity reservation and can be
+    /// edited even on data-bearing pools, so it is excluded here.
+    /// </summary>
     private bool RebuildsTierParameters(
         StorageSnapshot working,
         StorageSnapshot committed,
@@ -2314,9 +2340,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var committedTier = committed.StorageTiers.FirstOrDefault(item =>
                 string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
                 && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-            return workingTier is not null
-                && committedTier is not null
-                && !TierSpecsEqual(workingTier, committedTier);
+            if (workingTier is null || committedTier is null)
+            {
+                return false;
+            }
+
+            return !string.Equals(
+                    workingTier.ResiliencySettingName,
+                    committedTier.ResiliencySettingName,
+                    StringComparison.OrdinalIgnoreCase)
+                || workingTier.Interleave != committedTier.Interleave
+                || workingTier.NumberOfDataCopies != committedTier.NumberOfDataCopies
+                || workingTier.PhysicalDiskRedundancy != committedTier.PhysicalDiskRedundancy
+                || workingTier.NumberOfColumns != committedTier.NumberOfColumns;
         });
 
     private bool ReFsWouldChangeOnApply()
