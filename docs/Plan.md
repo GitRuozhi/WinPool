@@ -1,4 +1,4 @@
-# WinPool V0.47 storage-structure and disk-partition editors
+# WinPool V0.47 storage-structure editor controls
 
 [English](Plan.md) | [简体中文（仅供阅读）](Plan.zh-CN.md)
 
@@ -7,21 +7,20 @@
 - **Plan status:** confirmed and installed as the active Plan; implementation
   not started; execution awaits the developer's explicit request
 - **Created:** 2026-09-07
-- **Baseline commit:** `f60bbc5c871e97e3e78f39a10e91b27a74a217c3`
+- **Baseline commit:** `918679f21d48d6db7034430ddf6bcbf70c547864`
 - **Working branch:** `main`
 - **Current product version:** V0.47
 - **Target product version:** V0.47
-- **Stage type:** replace the Edit page with two simulation editors that
-  implement the accepted standalone storage-pool design
+- **Stage type:** storage-structure editor controls on the already split pages
 
-This Plan exists because the developer accepted the standalone storage-pool
-editor design, asked to archive it, and asked to write a new `docs/Plan.md`
-with version `+0.01`.
+The Edit-page split is closed and frozen under
+[Archive/V0.47-editor-pages](Archive/V0.47-editor-pages/Plan.md). This Plan is
+the former temp control spec, now the only active Plan.
 
-The accepted product design is frozen at
-[Archive/V0.47-standalone-pool-editor/Storage-Pool-Editor-Design.md](Archive/V0.47-standalone-pool-editor/Storage-Pool-Editor-Design.md).
-Before any execution, read that design. It outranks the current Edit page. It
-does not outrank the real-mutation safety boundary.
+Product decisions:
+[Storage-Structure-Product-Decisions.md](Storage-Structure-Product-Decisions.md).
+Accepted editor design (historical):
+[Archive/V0.47-standalone-pool-editor](Archive/V0.47-standalone-pool-editor/Storage-Pool-Editor-Design.md).
 
 This Plan does **not** authorize real storage mutation, push, tag, GitHub
 Release, binary upload, deployment, schema changes, IPC changes, or unrelated
@@ -30,107 +29,121 @@ product work. All mutation in this stage is **simulation only**.
 No implementation begins until the developer explicitly requests execution of
 this Plan.
 
-## 1. Controlling decisions
+## 1. Page
 
-These are copied from the accepted design so the Plan can be executed without
-re-opening product debate.
+Left: topology. Upper right: structure operations. Lower right: properties.
+No bottom draft bar. Simulation only: when the current system is not a
+simulation, upper-right and lower-right controls are disabled.
 
-1. Retire the current Edit page. Former lower half → **Storage structure
-   editor**. Former upper half → **Disk/partition editor**.
-2. Storage structure editor: left topology; upper-right structure operations;
-   lower-right pool / virtual-disk / partition properties. No bottom draft
-   bar. Undo, redo, discard-all, and apply-all live in the upper right.
-3. Disk/partition editor: one control group for the disk, one for the
-   partition (or unallocated gap).
-4. Working copy for structure: upper-right apply-all writes membership and
-   create/dissolve/delete. Lower-right **Save pool properties** writes the
-   property form.
-5. Real tiers follow disks; there is no Add-tier button. Empty real tiers
-   are not drawn. Hot spare and retired are optional simulated layers
-   shown by pool switches.
-6. Hide the PowerShell template-tier ritual: spec on the pool, size on the
-   virtual disk.
-7. **At most one virtual disk per pool on this page.** Create virtual disk
-   is enabled only when the current pool has none. Delete virtual disk is
-   allowed for the last remaining disk (confirm if it holds data). Do not
-   create a second.
-8. Create/modify on the structure page supports one user partition. Checkbox
-   **Create a partition when creating the disk**, default on. Extra partitions
-   go to Disk/partition editor.
-9. NTFS and ReFS are both supported. Prefill NTFS 64K. Disable ReFS creation
-   when the SKU forbids it.
-10. Prefill `64K` interleave, HDD Parity with columns `n` or `n−1`, SSD Mirror
-    (Simple if one disk). Warn on 256K combinations. These defaults are
-    changeable.
-11. Columns, stripe size, media type, resiliency, and copies are pool
-    property fields. Journal and Manual allocation are out of this product
-    path. Optimize and repair stay on Manage; they are not structure
-    operations.
-12. Structure controls are always visible. Disable what cannot run; show
-    computed values read-only in gray. Do not hide a control because
-    nothing is selected.
-13. Workstation and standalone server share the editor. No cluster / S2D / WAC.
-14. Simulation only. Real mutation stays denied.
+Listed controls stay visible except a real-tier field group, which appears only
+when that tier exists. Disable what cannot run. Computed values are read-only
+and gray.
 
-## 2. Closed loop
+## 2. Upper right
 
-When this Plan is complete, a user can:
+Always visible. Wrap by group: buttons in a group left to right; groups top to
+bottom.
 
-- Open Storage structure editor and Disk/partition editor instead of Edit.
-- Create one simulated pool with media tiers, one virtual disk, and optionally
-  one NTFS or ReFS volume, using the research defaults unless they change them.
-- Modify membership, add a tier to an all-Unallocated pool, evict to
-  Unallocated, and apply once without the draft snapping back.
-- Reduce an existing multi-virtual-disk pool to one disk.
-- Partition unpooled disks on the Disk/partition page with separate disk and
-  partition controls.
+```text
+Undo    Redo    Discard all    Apply all
+Create pool    Dissolve pool
+Retire disk    Hot-spare disk
+Create virtual disk    Delete virtual disk
+```
 
-That is the minimum closed loop. Do not add a second virtual-disk create path,
-cluster objects, free-form commands, or real mutation.
+| Button | Disabled when | Action |
+| --- | --- | --- |
+| Undo | no previous draft step | Undo one draft step (topology, properties, structure buttons) |
+| Redo | nothing to redo | Redo one step |
+| Discard all | no unapplied changes | Working copy returns to last applied snapshot |
+| Apply all | no unapplied changes, or not a simulation | Write the draft to the simulation document. Confirm first for 256K stripe, ReFS, wiping data on join, deleting a virtual disk that holds data, dissolving a committed pool |
+| Create pool | a draft pool already exists, or not a simulation | Insert an empty draft pool. Disks dragged in join as data disks and create real tiers by media |
+| Dissolve pool | no non-primordial pool, or not a simulation | Draft pool: discard it. Committed pool: confirm, then dissolve on Apply all |
+| Retire disk | no in-pool physical disk selected, already retired, system/boot, or not a simulation | Disk enters the retired simulated layer and turns on Show retired. Page-file/crash-dump: confirm dropping that role first |
+| Hot-spare disk | no in-pool physical disk selected, already hot spare, system/boot, or not a simulation | Disk enters the hot-spare simulated layer and turns on Show hot spare |
+| Create virtual disk | the current pool already has a virtual disk, or not a simulation | Create the one virtual disk from lower-right properties |
+| Delete virtual disk | the current pool has no virtual disk, or not a simulation | Delete the selected virtual disk, including the last one. Confirm if it holds data |
 
-## 3. Work items
+No Execute modify, Confirm properties, Add tier, Remove tier, Optimize, or Repair on this page. Optimize and repair stay on Manage.
 
-Execute in order. Do not start the next item until the named check for the
-current item has passed, unless the developer changes the order.
+## 3. Lower right
+
+Each row is label then value. Gaps between the pool group, each real-tier group,
+and disk-and-partition. Last row is a full-width button **Save pool properties**,
+which writes the property form for the current pool. Membership, create,
+dissolve, and delete still go through Apply all.
+
+### Pool
+
+| Field | Control | Default | Gray / disabled |
+| --- | --- | --- | --- |
+| Pool name | text | PoolNN | |
+| Virtual disk name | text | same as pool | still shown before the disk exists |
+| Volume name | text | same as virtual disk | disabled when auto-create partition is off |
+| Auto-create partition | switch | on | disabled when a virtual disk already exists |
+| Show hot-spare layer | switch | off | cannot turn off while that layer has disks |
+| Show retired layer | switch | off | cannot turn off while that layer has disks |
+
+On: topology draws that simulated layer even if empty, as a drop target. Drag
+matches the Retire / Hot-spare buttons.
+
+### Performance / capacity / dedicated
+
+One field set. Draw a group only when that tier exists (SSD data disks /
+HDD data disks / SCM data disks). First matching data disk creates the group;
+last disk leaving removes it.
+
+| Field | Control | Default | Gray / disabled |
+| --- | --- | --- | --- |
+| Size | GB text | Max for that tier’s data disks | may shrink, not above Max |
+| Provisioning | Fixed / Thin | Fixed | read-only gray Fixed while real tiers exist |
+| Resiliency | Simple / Mirror / Parity | Performance/dedicated: Mirror if ≥2 disks, Simple if 1. Capacity: Parity | disabled when stored data exists |
+| Data copies | number | 2 for Mirror | read-only gray 1 for Simple; disabled when stored data exists |
+| Fault tolerance | number | copies−1 for Mirror; 1 for Parity | gray when computed; editable for Parity; disabled when stored data exists |
+| Physical disk count | number | current data disks in the tier | read-only gray |
+| Columns | number | Mirror from copies and disk count; capacity n or n−1 | Mirror read-only gray by default; disabled when stored data exists |
+| Stripe size | 16K / 32K / 64K / 128K / 256K | 64K | disabled when stored data exists; 256K requires confirm on apply |
+
+### Disk and partition
+
+| Field | Control | Default | Gray / disabled |
+| --- | --- | --- | --- |
+| Partition table | GPT / MBR | GPT | read-only gray after the virtual disk is initialized |
+| File system | NTFS / ReFS | NTFS | disabled when auto-create partition is off; ReFS disabled if the SKU cannot create it; read-only gray when stored data exists; ReFS requires confirm on apply |
+| Allocation unit | 4K / 8K / 16K / 32K / 64K | 64K | disabled when auto-create partition is off; read-only gray when stored data exists |
+
+More than one user partition: file system and allocation unit read-only gray.
+
+## 4. Topology
+
+- Drag into a pool = data disk; real tier by media.
+- Draw a real tier only when it has data disks.
+- Simulated hot-spare and retired layers: draw only when the switch is on;
+  draw even if empty.
+- Undo/redo/discard/apply cover topology drags.
+
+## 5. Work items
 
 | ID | Work | Check |
 | --- | --- | --- |
-| PE1 | Navigation: remove Edit; add Storage structure editor and Disk/partition editor; bilingual labels; last-page restore still works | App starts; both pages open; Edit is gone; process stays alive |
-| PE2 | Disk/partition editor: move the former Edit-upper topology; split disk vs partition control groups | Selecting a disk enables only disk actions; selecting a partition enables only partition actions |
-| PE3 | Storage structure chrome: left topology; upper-right buttons wrap by group (undo/redo/discard-all/apply-all, then create/dissolve pool, retire/hot-spare disk, create/delete virtual disk); lower-right label-value rows with gaps between groups and a full-row Save pool properties button; real-tier groups only when that tier exists | Layout matches §1; empty real tiers are not drawn |
-| PE4 | Create composition: select disks, correct media type, roles, tiers, one virtual disk, auto-partition checkbox, NTFS/ReFS, research prefills | Simulated create yields one pool, one virtual disk, optional one user volume; 256K warns |
-| PE5 | Modify: join/evict/unallocated→tier, add-tier without drawing an empty strip, one apply for structure and parameters | All-Unallocated re-tier persists; forms do not silently revert |
-| PE6 | Create virtual disk only when the pool has none; delete allowed including the last disk | Create disabled when a virtual disk exists; last disk can be deleted with confirmation if it holds data |
-| PE7 | Apply-all from the upper right writes the simulation only | Real systems stay read-only; dangerous cases still use a confirmation dialog |
-| PE8 | Tests for the new pages' projection and simulation operations; native open of both pages | Named tests pass; native: start → each new page → process alive → no new crash log |
+| SC1 | Upper-right buttons in the four wrapped rows, including undo/redo/discard-all/apply-all | All ten buttons visible; disable rules match §2 |
+| SC2 | Lower-right label-value groups, gaps, Save pool properties full row; real-tier groups only when the tier exists | Layout matches §3 |
+| SC3 | Show hot-spare / retired switches; drag into those simulated layers | Switch off hides an empty simulated layer; drag sets the state |
+| SC4 | Create virtual disk only when none exist; delete allowed for the last disk | Create disabled with one disk; last disk can be deleted |
+| SC5 | Tests for the new controls; native open of Storage structure | Named tests pass; native: start → page → process alive → no new crash log |
 
-Reuse the topology layout engine. Do not invent a second layout system. Before
-changing the engine, read
+Reuse the topology layout engine. Before changing it, read
 [Reference/20260905_统一拓扑布局引擎执行踩坑记录.md](Reference/20260905_统一拓扑布局引擎执行踩坑记录.md).
 
-## 4. Verification
-
-Ordinary PE items use the smallest related test plus the native open in PE8
-when UI chrome moved. Completing the Plan does not start full acceptance. Ask
-the developer before a formal gate.
-
-Result vocabulary follows [Quality](Quality.md): `passed`, `failed`,
-`unverified`, `not_required`, `deferred_by_user`.
-
-Real hardware mutation is `not_required` and remains denied.
-
-## 5. Explicitly out of this Plan
+## 6. Out of this Plan
 
 - Creating a second virtual disk
+- Manual allocation, Journal disks
+- Optimize and repair on this page
 - Cluster / S2D / WAC
-- Development-page command line (1.x tab stays a placeholder)
 - Real storage-structure mutation
 - Push, tag, Release, binaries
-- Schema or IPC version changes unless an implementation item proves a
-  document-format change is required, in which case stop and ask
 
-## 6. Version
+## 7. Version
 
-Product version is V0.47 (`Directory.Build.props` iteration 6 → 7). This is
-still the V0.4 product line. Iteration `c=7`; remind at `c=8` or `c=9`. Never
-`c=10`.
+Product version stays **V0.47**. Still the V0.4 line. Iteration `c=7`.

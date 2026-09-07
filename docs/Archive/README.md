@@ -4,13 +4,14 @@
 
 Archive content records historical state and does not define current requirements.
 The current product version is V0.47. The active Plan is `docs/Plan.md` (V0.47
-storage-structure and disk-partition editors). The accepted product design is
-archived under `V0.47-standalone-pool-editor`. The previous implemented stage
-is the unified topology layout engine under `V0.45-layout-engine`.
+storage-structure editor controls). The Edit-page split is frozen under
+`V0.47-editor-pages`. The accepted product design is under
+`V0.47-standalone-pool-editor`.
 
 | Entry | Status | Date | Version / commits | Contents |
 | --- | --- | --- | --- | --- |
-| [`V0.47-standalone-pool-editor/`](V0.47-standalone-pool-editor/) | accepted product design; Plan installed; implementation not started | 2026-09-07 | V0.47 | Standalone storage-pool editor: retire Edit; Storage structure editor + Disk/partition editor; one virtual disk; NTFS and ReFS |
+| [`V0.47-editor-pages/`](V0.47-editor-pages/) | closed by developer; split pages landed; native PE8 unverified | 2026-09-07 | V0.47; implementation `ca03c69`…`3305261` | Replaced Edit with Storage structure and Disk/partition pages |
+| [`V0.47-standalone-pool-editor/`](V0.47-standalone-pool-editor/) | accepted product design | 2026-09-07 | V0.47 | Standalone storage-pool editor product design |
 | [`V0.2/`](V0.2/) | archived | 2026-08-10 | V0.2; source baseline `ec8b34a` | 15 architecture, implementation, acceptance, and manual-test plans plus their frozen index |
 | [`V0.31-pre-correction/`](V0.31-pre-correction/) | superseded / invalid | 2026-08-10 | `6cf68e3`, `8d7fb25` | The Plan and Plan index that incorrectly overrode the user's `docs/Archive` decision |
 | [`V0.32/`](V0.32/) | accepted; manual cases unverified | 2026-08-10 | V0.32; `dc5e263`, `7b7a798` | Final V0.31 correction state and the user's V0.32 version decision |

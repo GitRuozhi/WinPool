@@ -6,13 +6,13 @@
 > [README.md](README.md) 为准。
 
 归档内容记录历史状态，不定义当前要求。当前产品版本为 V0.47。活动 Plan 为
-`docs/Plan.md`（V0.47 存储结构编辑与磁盘分区编辑）。已认可产品设计归档于
-`V0.47-standalone-pool-editor`。上一份已实施阶段是 `V0.45-layout-engine` 的
-统一拓扑布局引擎。
+`docs/Plan.md`（V0.47 存储结构编辑页控件）。拆页阶段冻结于 `V0.47-editor-pages`。
+已认可产品设计在 `V0.47-standalone-pool-editor`。
 
 | 条目 | 状态 | 日期 | 版本/提交 | 内容 |
 | --- | --- | --- | --- | --- |
-| [`V0.47-standalone-pool-editor/`](V0.47-standalone-pool-editor/) | 已认可产品设计；Plan 已安装；实施未开始 | 2026-09-07 | V0.47 | 单机存储池编辑：取消编辑页；存储结构编辑 + 磁盘分区编辑；一块虚拟磁盘；NTFS 与 ReFS |
+| [`V0.47-editor-pages/`](V0.47-editor-pages/) | 开发者结束；拆页已落地；原生 PE8 未验证 | 2026-09-07 | V0.47；实现 `ca03c69`…`3305261` | 用存储结构编辑和磁盘分区编辑替换编辑页 |
+| [`V0.47-standalone-pool-editor/`](V0.47-standalone-pool-editor/) | 已认可产品设计 | 2026-09-07 | V0.47 | 单机存储池编辑产品设计 |
 | [`V0.2/`](V0.2/) | archived | 2026-08-10 | V0.2；源码基线 `ec8b34a` | 15 份架构、实现、验收和人工测试计划及其冻结索引 |
 | [`V0.31-pre-correction/`](V0.31-pre-correction/) | superseded / invalid | 2026-08-10 | `6cf68e3`、`8d7fb25` | 错误覆盖用户 `docs/Archive` 决定的 Plan 和 Plan 索引 |
 | [`V0.32/`](V0.32/) | accepted；人工用例未验证 | 2026-08-10 | V0.32；`dc5e263`、`7b7a798` | V0.31 修正最终状态及用户的 V0.32 版本决定 |
