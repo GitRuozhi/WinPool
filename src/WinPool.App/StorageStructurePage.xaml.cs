@@ -122,7 +122,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
-        _working = ViewModel.ActiveSnapshot;
+        _working = EditWorkspace.NormalizeTierCapacities(ViewModel.ActiveSnapshot);
         _undoStack.Clear();
         _redoStack.Clear();
         _formDirty = false;
@@ -1078,7 +1078,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         SetResiliency(group.ResiliencyBox, tier.ResiliencySettingName);
         SetInterleave(group.InterleaveBox, tier.Interleave ?? 65536);
-        SetNum(group.SizeBox, tier.Size > 0 ? Math.Round(tier.Size / 1024d / 1024d / 1024d, 2) : null);
+        var tierBytes = tier.Size > 0 ? tier.Size : TierCapacityMaxBytes(group.Media);
+        SetNum(group.SizeBox, tierBytes > 0 ? Math.Round(tierBytes / 1024d / 1024d / 1024d, 2) : null);
         SetNum(group.ColumnsBox, tier.NumberOfColumns);
         SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? 1);
         SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? 1);
@@ -2785,6 +2786,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var performance = TierOf("SSD");
         var capacity = TierOf("HDD");
         var dedicated = TierOf("SCM");
+        long? TierCapacityOrMembers(StorageTierInfo? tier)
+        {
+            if (tier is null)
+            {
+                return null;
+            }
+
+            if (tier.Size > 0)
+            {
+                return tier.Size;
+            }
+
+            // Unset capacity means "member capacity": never drop the field.
+            var memberBytes = working.PhysicalDisks
+                .Where(disk => tier.MemberPhysicalDiskIds.Contains(
+                    disk.StableId, StringComparer.OrdinalIgnoreCase))
+                .Sum(disk => disk.Size);
+            return memberBytes > 0 ? memberBytes : null;
+        }
+
         return new SimulationOperationRequest(
             SimulationOperationKind.UpdateStoragePool,
             pool.StableId,
@@ -2792,11 +2813,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             VirtualDiskName: vdisk?.FriendlyName,
             PerformanceResiliency: performance?.ResiliencySettingName,
             PerformanceInterleaveBytes: performance?.Interleave,
-            PerformanceSizeBytes: performance is { Size: > 0 } ? performance.Size : null,
+            PerformanceSizeBytes: TierCapacityOrMembers(performance),
             PerformanceDataCopies: performance?.NumberOfDataCopies,
             CapacityResiliency: capacity?.ResiliencySettingName,
             CapacityInterleaveBytes: capacity?.Interleave,
-            CapacitySizeBytes: capacity is { Size: > 0 } ? capacity.Size : null,
+            CapacitySizeBytes: TierCapacityOrMembers(capacity),
             CapacityColumns: capacity?.NumberOfColumns,
             CapacityToleratedFailures: capacity?.PhysicalDiskRedundancy,
             ScmResiliency: dedicated?.ResiliencySettingName,
@@ -2900,7 +2921,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var merged = ApplyFormToWorking(_working);
+        var merged = EditWorkspace.NormalizeTierCapacities(ApplyFormToWorking(_working));
         var committed = ViewModel.ActiveSnapshot;
         var objectChanged = EditWorkspace.HasPoolPropertyChanges(merged, committed, pool.StableId);
         var tierChanged = objectChanged && RebuildsTierParameters(merged, committed, pool.StableId);
