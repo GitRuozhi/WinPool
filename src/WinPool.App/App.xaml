@@ -12,11 +12,11 @@
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <Color x:Key="WinPoolTopologyRestStrokeColor">#66000000</Color>
+                    <Color x:Key="WinPoolTopologyRestStrokeColor">#60000000</Color>
                     <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{StaticResource WinPoolTopologyRestStrokeColor}" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
-                    <Color x:Key="WinPoolTopologyRestStrokeColor">#99FFFFFF</Color>
+                    <Color x:Key="WinPoolTopologyRestStrokeColor">#40FFFFFF</Color>
                     <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{StaticResource WinPoolTopologyRestStrokeColor}" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
