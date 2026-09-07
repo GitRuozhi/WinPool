@@ -7,6 +7,19 @@ while a stage is active; historical plans remain in `Archive`. Git history
 records construction process. New entries use result sections; older entries
 are not rewritten for format consistency.
 
+## V0.46 relaxed row-height floor — 2026-09-07
+
+### Changed
+- The topology engine's relaxed row-height cap is now
+  `max(5, H+1, ceil(H×1.3))`. Short sibling rows can shrink further before a
+  pool moves to the next row.
+
+### Verification
+- 2026-09-07: `TopologyLayoutEngineTests` passed 23, 0 failed, 0 skipped.
+
+### Known Limitations
+- Real storage-structure mutation remains denied.
+
 ## V0.46 edit-lower structure tools and workspace restore — 2026-09-06
 
 ### Changed
