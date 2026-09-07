@@ -10,6 +10,19 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <!-- Other merged dictionaries here -->
             </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <Color x:Key="WinPoolTopologyRestStrokeColor">#66000000</Color>
+                    <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{StaticResource WinPoolTopologyRestStrokeColor}" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <Color x:Key="WinPoolTopologyRestStrokeColor">#99FFFFFF</Color>
+                    <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{StaticResource WinPoolTopologyRestStrokeColor}" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
             <Color x:Key="WinPoolAccentColor">#0078D4</Color>
             <Color x:Key="WinPoolAccentHoverColor">#330078D4</Color>
             <Color x:Key="WinPoolAccentPressedColor">#4D0078D4</Color>

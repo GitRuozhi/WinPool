@@ -142,7 +142,7 @@ public sealed partial class TopologyNodeControl : UserControl
         }
 
         NodeBorder.Background = Brush("LayerFillColorDefaultBrush");
-        NodeBorder.BorderBrush = Brush("ControlStrokeColorSecondaryBrush");
+        NodeBorder.BorderBrush = Brush("WinPoolTopologyRestStrokeBrush");
         InteractionBorder.Visibility = Visibility.Collapsed;
         DisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
         TypeLabelText.Foreground = Brush("TextFillColorSecondaryBrush");

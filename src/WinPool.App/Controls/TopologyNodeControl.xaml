@@ -18,7 +18,7 @@
             <VisualState x:Name="Normal">
                 <VisualState.Setters>
                     <Setter Target="NodeBorder.Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
-                    <Setter Target="NodeBorder.BorderBrush" Value="{ThemeResource ControlStrokeColorSecondaryBrush}" />
+                    <Setter Target="NodeBorder.BorderBrush" Value="{ThemeResource WinPoolTopologyRestStrokeBrush}" />
                     <Setter Target="InteractionBorder.Visibility" Value="Collapsed" />
                     <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
                     <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -54,7 +54,7 @@
             Margin="0"
             Padding="6"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource ControlStrokeColorSecondaryBrush}"
+            BorderBrush="{ThemeResource WinPoolTopologyRestStrokeBrush}"
             BorderThickness="1"
             CornerRadius="2"
             Tapped="NodeBorder_Tapped"
