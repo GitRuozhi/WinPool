@@ -969,10 +969,14 @@ public sealed record StructureProblem(
         var members = snapshot.PhysicalDisks
             .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
             .ToList();
-        // The tier card shows the tier's CAPACITY reservation: an unset
-        // capacity means "member capacity", so capacity edits made in the
-        // property panel are reflected here after every save.
+        // The tier card mirrors every spec the property panel saves: the
+        // resiliency / stripe spec, and the tier's CAPACITY reservation
+        // (an unset capacity means "member capacity"). Saved edits are
+        // therefore visible on the left after each save.
         var tierCapacity = tier.Size > 0 ? tier.Size : members.Sum(item => item.Size);
+        var spec = tier.Interleave is { } interleave and > 0
+            ? $"{tier.ResiliencySettingName} {interleave / 1024}K"
+            : tier.ResiliencySettingName;
         var node = new TopologyNode(
             new StorageUnitRef(
                 tier.StableId,
@@ -981,6 +985,7 @@ public sealed record StructureProblem(
                 tier.IsStable,
                 pool.StableId),
             TopologyProjector.JoinSummary(
+                spec,
                 $"{members.Count} physical disks",
                 TopologyProjector.FormatBytes(tierCapacity)),
             childrenLayout: TopologyChildrenLayout.Flow);
