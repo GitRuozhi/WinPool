@@ -6,11 +6,25 @@
     xmlns:controls="using:WinPool_App.Controls"
     xmlns:editors="using:WinPool_App">
 
+    <editors:EditorPageBase.Resources>
+        <Style x:Key="StructureChromeButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </editors:EditorPageBase.Resources>
+
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="320" />
         </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
         <Border
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -46,206 +60,300 @@
                 </ItemsControl>
             </ScrollViewer>
         </Border>
-        <Grid
-            Grid.Column="1"
-            Margin="8,0,0,0"
-            RowSpacing="8">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-            <Border
-                Padding="12,8"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="4">
-                <Grid
-                    ColumnSpacing="8"
-                    RowSpacing="6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Button
-                        x:Name="UndoButton"
-                        HorizontalAlignment="Stretch"
-                        Click="Undo_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE7A7;" FontSize="14" />
-                            <TextBlock x:Name="UndoButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="RedoButton"
-                        Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        Click="Redo_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE7A6;" FontSize="14" />
-                            <TextBlock x:Name="RedoButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="DiscardAllButton"
-                        Grid.Row="1"
-                        HorizontalAlignment="Stretch"
-                        Click="DiscardAll_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE711;" FontSize="14" />
-                            <TextBlock x:Name="DiscardAllButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="ApplyAllButton"
-                        Grid.Row="1"
-                        Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        Click="ApplyAll_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE73E;" FontSize="14" />
-                            <TextBlock x:Name="ApplyAllButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="CreatePoolButton"
-                        Grid.Row="2"
-                        HorizontalAlignment="Stretch"
-                        Click="CreatePool_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE710;" FontSize="14" />
-                            <TextBlock x:Name="CreatePoolButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="DissolveButton"
-                        Grid.Row="2"
-                        Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        Click="Dissolve_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE74D;" FontSize="14" />
-                            <TextBlock x:Name="DissolveButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Grid Grid.Row="3" ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="ShowHotSpareLabel" VerticalAlignment="Center" />
-                        <ToggleSwitch
-                            x:Name="ShowHotSpareSwitch"
-                            Grid.Column="1"
-                            MinWidth="0"
-                            Margin="0"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="ShowHotSpareSwitch_Toggled" />
-                    </Grid>
-                    <Grid Grid.Row="3" Grid.Column="1" ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="ShowRetiredLabel" VerticalAlignment="Center" />
-                        <ToggleSwitch
-                            x:Name="ShowRetiredSwitch"
-                            Grid.Column="1"
-                            MinWidth="0"
-                            Margin="0"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="ShowRetiredSwitch_Toggled" />
-                    </Grid>
-                    <Button
-                        x:Name="RetireButton"
-                        Grid.Row="4"
-                        HorizontalAlignment="Stretch"
-                        Click="Retire_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE7E8;" FontSize="14" />
-                            <TextBlock x:Name="RetireButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="HotSpareButton"
-                        Grid.Row="4"
-                        Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        Click="HotSpare_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE72C;" FontSize="14" />
-                            <TextBlock x:Name="HotSpareButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="CreateVdiskButton"
-                        Grid.Row="5"
-                        HorizontalAlignment="Stretch"
-                        Click="CreateVdisk_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE710;" FontSize="14" />
-                            <TextBlock x:Name="CreateVdiskButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="DeleteVdiskButton"
-                        Grid.Row="5"
-                        Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        Click="DeleteVdisk_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE74D;" FontSize="14" />
-                            <TextBlock x:Name="DeleteVdiskButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                </Grid>
-            </Border>
-            <Grid Grid.Row="1">
+        <Border
+            x:Name="StructureChromeBorder"
+            Grid.Row="1"
+            Margin="0,8,0,0"
+            Padding="8"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Grid ColumnSpacing="6" RowSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
+                <Button
+                    x:Name="UndoButton"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="Undo_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE7A7;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="UndoButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="RedoButton"
+                    Grid.Row="1"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="Redo_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE7A6;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="RedoButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="DiscardAllButton"
+                    Grid.Column="1"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="DiscardAll_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE711;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="DiscardAllButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="ApplyAllButton"
+                    Grid.Row="1"
+                    Grid.Column="1"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="ApplyAll_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="ApplyAllButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="CreatePoolButton"
+                    Grid.Column="2"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="CreatePool_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="CreatePoolButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="DissolveButton"
+                    Grid.Row="1"
+                    Grid.Column="2"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="Dissolve_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="DissolveButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Grid
+                    Grid.Column="5"
+                    MinHeight="36"
+                    ColumnSpacing="4"
+                    VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="ShowHotSpareLabel"
+                        VerticalAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <ToggleSwitch
+                        x:Name="ShowHotSpareSwitch"
+                        Grid.Column="1"
+                        MinWidth="0"
+                        Margin="0"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="ShowHotSpareSwitch_Toggled" />
+                </Grid>
+                <Grid
+                    Grid.Row="1"
+                    Grid.Column="5"
+                    MinHeight="36"
+                    ColumnSpacing="4"
+                    VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="ShowRetiredLabel"
+                        VerticalAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <ToggleSwitch
+                        x:Name="ShowRetiredSwitch"
+                        Grid.Column="1"
+                        MinWidth="0"
+                        Margin="0"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="ShowRetiredSwitch_Toggled" />
+                </Grid>
+                <Button
+                    x:Name="RetireButton"
+                    Grid.Column="4"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="Retire_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE7E8;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="RetireButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="HotSpareButton"
+                    Grid.Row="1"
+                    Grid.Column="4"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="HotSpare_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE72C;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="HotSpareButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="CreateVdiskButton"
+                    Grid.Column="3"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="CreateVdisk_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="CreateVdiskButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="DeleteVdiskButton"
+                    Grid.Row="1"
+                    Grid.Column="3"
+                    Style="{StaticResource StructureChromeButtonStyle}"
+                    Click="DeleteVdisk_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="DeleteVdiskButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+            </Grid>
+        </Border>
+        <Grid
+            Grid.Column="1"
+            Grid.RowSpan="2"
+            Margin="8,0,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ScrollViewer
+                VerticalAlignment="Stretch"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled">
                 <Border
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="4">
-                    <ScrollViewer
-                        Padding="8,4,8,8"
-                        VerticalScrollBarVisibility="Auto">
-                        <Grid
-                            x:Name="PoolFormGrid"
-                            ColumnSpacing="6"
-                            RowSpacing="0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                        </Grid>
-                    </ScrollViewer>
+                    <Grid
+                        x:Name="PoolFormGrid"
+                        Margin="8,8,8,8"
+                        ColumnSpacing="6"
+                        RowSpacing="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                    </Grid>
                 </Border>
-                <Button
-                    x:Name="SavePoolPropertiesButton"
-                    Grid.Row="1"
-                    Margin="0,8,0,0"
-                    HorizontalAlignment="Stretch"
-                    Click="SavePoolProperties_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE74E;" FontSize="14" />
-                        <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-            </Grid>
+            </ScrollViewer>
+            <Button
+                x:Name="SavePoolPropertiesButton"
+                Grid.Row="1"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Stretch"
+                Click="SavePoolProperties_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon Glyph="&#xE74E;" FontSize="14" />
+                    <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
         </Grid>
     </Grid>
 </editors:EditorPageBase>
