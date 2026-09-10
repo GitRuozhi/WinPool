@@ -48,6 +48,13 @@ public static class EditWorkspace
     public static bool IsUnallocated(string? id) =>
         id is not null && id.StartsWith(UnallocatedPrefix, StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsPartitionTableInitialized(OsDiskInfo disk)
+    {
+        ArgumentNullException.ThrowIfNull(disk);
+        return !string.IsNullOrWhiteSpace(disk.PartitionStyle)
+            && !string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool TryParseUnallocated(
         string id,
         out string osDiskId,
@@ -808,6 +815,11 @@ public sealed record StructureProblem(
             distributeByCapacity: true,
             capacityWeights: capacityWeights,
             adaptiveHeaderEnabled: true);
+        if (!IsPartitionTableInitialized(disk))
+        {
+            return node;
+        }
+
         foreach (var (child, capacityBytes) in InterleavePartitionsAndGaps(disk, partitions, minUnallocatedBytes))
         {
             node.Children.Add(child);
@@ -841,7 +853,7 @@ public sealed record StructureProblem(
                         partition.IsStable,
                         disk.StableId),
                     TopologyProjector.JoinSummary(
-                        string.IsNullOrWhiteSpace(partition.FileSystem) ? "Unknown" : partition.FileSystem,
+                        string.IsNullOrWhiteSpace(partition.FileSystem) ? "RAW" : partition.FileSystem,
                         TopologyProjector.FormatBytes(partition.Size))),
                 partition.Size);
             cursor = Math.Max(cursor, partition.Offset + partition.Size);

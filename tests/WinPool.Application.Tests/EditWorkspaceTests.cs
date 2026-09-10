@@ -45,6 +45,37 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
+    public void PartitionWorkspaceOmitsChildrenOnUninitializedDisks()
+    {
+        var source = TwoGapDiskSnapshot();
+        var snapshot = source with
+        {
+            OsDisks = source.OsDisks
+                .Select(disk => disk with { PartitionStyle = "RAW" })
+                .ToArray()
+        };
+        var disk = Assert.Single(EditWorkspace.ProjectPartitionWorkspace(snapshot, minUnallocatedBytes: 0));
+        Assert.Empty(disk.Children);
+    }
+
+    [Fact]
+    public void PartitionWorkspaceStillShowsUnformattedPartitionsOnInitializedDisks()
+    {
+        var snapshot = TwoGapDiskSnapshot();
+        var raw = snapshot.Partitions[0] with
+        {
+            FileSystem = string.Empty,
+            FileSystemLabel = string.Empty,
+            DriveLetter = string.Empty,
+            Path = string.Empty
+        };
+        snapshot = snapshot with { Partitions = [raw], Volumes = [] };
+        var disk = Assert.Single(EditWorkspace.ProjectPartitionWorkspace(snapshot, minUnallocatedBytes: 0));
+        Assert.Contains(disk.Children, child =>
+            child.Unit.StableId == raw.StableId && !EditWorkspace.IsUnallocated(child.Unit.StableId));
+    }
+
+    [Fact]
     public void PartitionWorkspaceHidesNonPrimordialPhysicalMembersAndShowsVirtualDisks()
     {
         var snapshot = TestSnapshotFactory.Create();

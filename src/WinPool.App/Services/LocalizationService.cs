@@ -269,6 +269,7 @@ public sealed class LocalizationService : ObservableObject
             ["ReadLabelShort"] = ("读", "R"),
             ["WriteLabelShort"] = ("写", "W"),
             ["Unallocated"] = ("未分配", "Unallocated"),
+            ["Unformatted"] = ("未格式化", "Unformatted"),
             ["DedicatedTier"] = ("专用层", "Dedicated tier"),
             ["ExecuteModify"] = ("执行修改", "Execute modify"),
             ["CreateNewPool"] = ("创建新池", "Create new pool"),

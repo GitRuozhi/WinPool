@@ -698,7 +698,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             }
 
             return TopologyProjector.JoinSummary(
-                string.IsNullOrWhiteSpace(partition.FileSystem) ? owner.Localization["Unknown"] : partition.FileSystem,
+                string.IsNullOrWhiteSpace(partition.FileSystem)
+                    ? owner.Localization["Unformatted"]
+                    : partition.FileSystem,
                 TopologyProjector.FormatBytes(partition.Size));
         }
 
