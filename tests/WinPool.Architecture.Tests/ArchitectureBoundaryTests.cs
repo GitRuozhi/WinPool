@@ -525,6 +525,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("FormatButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("PartitionChromeBorder", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("DiskLocationValue", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("StartOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("EndOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("UndoButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DiskSectionTitle", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("磁盘与分区", diskPartitionXaml, StringComparison.Ordinal);

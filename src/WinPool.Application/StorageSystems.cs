@@ -897,7 +897,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var format = fileSystem.Length > 0;
         var letter = !format
             ? string.Empty
-            : string.IsNullOrWhiteSpace(request.DriveLetter)
+            : request.DriveLetter is null
                 ? NextFreeDriveLetter(snapshot)
                 : TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
         var partitionId = string.IsNullOrWhiteSpace(request.AllocatedPartitionId)

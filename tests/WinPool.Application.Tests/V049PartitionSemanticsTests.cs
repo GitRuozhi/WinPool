@@ -46,6 +46,20 @@ public sealed class V049PartitionSemanticsTests
     }
 
     [Fact]
+    public void CreatePartitionWithEmptyDriveLetterDoesNotAssignOne()
+    {
+        var document = Apply(
+            InitializedDisk(),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreatePartition,
+                "osdisk:ssd0",
+                FileSystem: "NTFS",
+                DriveLetter: string.Empty));
+        var volume = Assert.Single(document.Snapshot.Volumes);
+        Assert.Equal(string.Empty, volume.DriveLetter);
+    }
+
+    [Fact]
     public void ClearingDriveLetterRemovesAccessPath()
     {
         var document = Apply(

@@ -69,66 +69,179 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <Grid ColumnSpacing="6" RowSpacing="6">
+            <Grid ColumnSpacing="6">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
                 <Button
                     x:Name="OnlineButton"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="Online_Click" />
+                    Click="Online_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE8FB;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="OnlineButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="OfflineButton"
-                    Grid.Row="1"
+                    Grid.Column="1"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="Offline_Click" />
+                    Click="Offline_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE8AE;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="OfflineButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="InitializeButton"
-                    Grid.Column="1"
+                    Grid.Column="2"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="Initialize_Click" />
+                    Click="Initialize_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE9CE;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="InitializeButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="ConvertGptButton"
-                    Grid.Row="1"
-                    Grid.Column="1"
+                    Grid.Column="3"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="ConvertGpt_Click" />
+                    Click="ConvertGpt_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE8AB;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="ConvertGptButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="NewPartitionButton"
-                    Grid.Column="2"
+                    Grid.Column="4"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="NewPartition_Click" />
+                    Click="NewPartition_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="NewPartitionButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="DeletePartitionButton"
-                    Grid.Row="1"
-                    Grid.Column="2"
+                    Grid.Column="5"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="DeletePartition_Click" />
+                    Click="DeletePartition_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="DeletePartitionButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="ExtendButton"
-                    Grid.Column="3"
+                    Grid.Column="6"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="Extend_Click" />
+                    Click="Extend_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE8A5;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="ExtendButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="ShrinkButton"
-                    Grid.Row="1"
-                    Grid.Column="3"
+                    Grid.Column="7"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="Shrink_Click" />
+                    Click="Shrink_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE73F;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="ShrinkButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
                 <Button
                     x:Name="OpenExplorerButton"
-                    Grid.Column="4"
-                    Grid.RowSpan="2"
+                    Grid.Column="8"
                     Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="OpenExplorer_Click" />
+                    Click="OpenExplorer_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE838;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock
+                            x:Name="OpenExplorerButtonLabel"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
             </Grid>
         </Border>
         <ScrollViewer
@@ -162,6 +275,8 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <TextBlock
                                 x:Name="DiskLocationLabel"
@@ -181,32 +296,50 @@
                                 Grid.Column="1"
                                 VerticalAlignment="Center" />
                             <TextBlock
-                                x:Name="DriveLetterLabel"
+                                x:Name="StartOffsetLabel"
                                 Grid.Row="2"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="StartOffsetValue"
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="EndOffsetLabel"
+                                Grid.Row="3"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="EndOffsetValue"
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="DriveLetterLabel"
+                                Grid.Row="4"
                                 VerticalAlignment="Center" />
                             <ComboBox
                                 x:Name="DriveLetterBox"
-                                Grid.Row="2"
+                                Grid.Row="4"
                                 Grid.Column="1"
                                 HorizontalAlignment="Stretch"
                                 SelectionChanged="DriveLetterBox_SelectionChanged" />
                             <TextBlock
                                 x:Name="VolumeLabelCaption"
-                                Grid.Row="3"
+                                Grid.Row="5"
                                 VerticalAlignment="Center" />
                             <TextBox
                                 x:Name="VolumeLabelBox"
-                                Grid.Row="3"
+                                Grid.Row="5"
                                 Grid.Column="1"
                                 LostFocus="VolumeLabelBox_LostFocus"
                                 KeyDown="VolumeLabelBox_KeyDown" />
                             <TextBlock
                                 x:Name="SizeLabel"
-                                Grid.Row="4"
+                                Grid.Row="6"
                                 VerticalAlignment="Center" />
                             <NumberBox
                                 x:Name="SizeBox"
-                                Grid.Row="4"
+                                Grid.Row="6"
                                 Grid.Column="1"
                                 Minimum="0"
                                 SmallChange="1"
@@ -215,30 +348,30 @@
                                 ValidationMode="InvalidInputOverwritten" />
                             <TextBlock
                                 x:Name="FileSystemLabel"
-                                Grid.Row="5"
+                                Grid.Row="7"
                                 VerticalAlignment="Center" />
                             <ComboBox
                                 x:Name="FileSystemBox"
-                                Grid.Row="5"
+                                Grid.Row="7"
                                 Grid.Column="1"
                                 HorizontalAlignment="Stretch"
                                 SelectionChanged="FileSystemBox_SelectionChanged" />
                             <TextBlock
                                 x:Name="ClusterLabel"
-                                Grid.Row="6"
+                                Grid.Row="8"
                                 VerticalAlignment="Center" />
                             <ComboBox
                                 x:Name="ClusterBox"
-                                Grid.Row="6"
+                                Grid.Row="8"
                                 Grid.Column="1"
                                 HorizontalAlignment="Stretch" />
                             <TextBlock
                                 x:Name="QuickFormatLabel"
-                                Grid.Row="7"
+                                Grid.Row="9"
                                 VerticalAlignment="Center" />
                             <ToggleSwitch
                                 x:Name="QuickFormatSwitch"
-                                Grid.Row="7"
+                                Grid.Row="9"
                                 Grid.Column="1"
                                 MinWidth="0"
                                 Margin="0"
@@ -250,7 +383,12 @@
                         x:Name="FormatButton"
                         Margin="0,8,0,0"
                         HorizontalAlignment="Stretch"
-                        Click="Format_Click" />
+                        Click="Format_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon x:Name="FormatButtonIcon" Glyph="&#xE9CE;" FontSize="14" />
+                            <TextBlock x:Name="FormatButtonLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </ScrollViewer>
     </Grid>

@@ -54,24 +54,26 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void LocalizeChrome()
     {
-        OnlineButton.Content = Text("联机", "Online");
-        OfflineButton.Content = Text("脱机", "Offline");
-        InitializeButton.Content = ViewModel.Localization["InitializeDisk"];
-        ConvertGptButton.Content = Text("转换为 GPT", "Convert to GPT");
-        NewPartitionButton.Content = ViewModel.Localization["NewPartition"];
-        DeletePartitionButton.Content = ViewModel.Localization["DeleteVolume"];
-        ExtendButton.Content = ViewModel.Localization["ExtendVolume"];
-        ShrinkButton.Content = ViewModel.Localization["ShrinkVolume"];
-        OpenExplorerButton.Content = Text("打开资源管理器", "Open in File Explorer");
+        OnlineButtonLabel.Text = Text("联机", "Online");
+        OfflineButtonLabel.Text = Text("脱机", "Offline");
+        InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
+        ConvertGptButtonLabel.Text = Text("转换为 GPT", "Convert to GPT");
+        NewPartitionButtonLabel.Text = ViewModel.Localization["NewPartition"];
+        DeletePartitionButtonLabel.Text = ViewModel.Localization["DeleteVolume"];
+        ExtendButtonLabel.Text = ViewModel.Localization["ExtendVolume"];
+        ShrinkButtonLabel.Text = ViewModel.Localization["ShrinkVolume"];
+        OpenExplorerButtonLabel.Text = Text("打开资源管理器", "Open in File Explorer");
         DiskLocationLabel.Text = Text("所在磁盘", "Disk");
         PartitionNumberLabel.Text = Text("分区编号", "Partition number");
+        StartOffsetLabel.Text = Text("起始位置", "Start");
+        EndOffsetLabel.Text = Text("结束位置", "End");
         DriveLetterLabel.Text = Text("盘符", "Drive letter");
         VolumeLabelCaption.Text = Text("卷标", "Volume label");
         SizeLabel.Text = Text("容量（GB）", "Size (GB)");
         FileSystemLabel.Text = Text("文件系统", "File system");
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
-        FormatButton.Content = ViewModel.Localization["Format"];
+        FormatButtonLabel.Text = ViewModel.Localization["Format"];
         FillFileSystemBox();
         FillClusterBox();
     }
@@ -213,7 +215,25 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : gap
                     ? Text("未分配", "Unallocated")
                     : "—";
-            FillDriveLetters(partition, volume);
+            var start = partition?.Offset ?? (gap ? _selectedUnallocatedOffset : null);
+            var length = partition?.Size ?? (gap ? _selectedUnallocatedSize : null);
+            if (start is long startBytes && length is long sizeBytes)
+            {
+                StartOffsetValue.Text = TopologyProjector.FormatBytes(startBytes);
+                EndOffsetValue.Text = TopologyProjector.FormatBytes(startBytes + sizeBytes);
+            }
+            else if (disk is not null && !gap && partition is null)
+            {
+                StartOffsetValue.Text = TopologyProjector.FormatBytes(0);
+                EndOffsetValue.Text = TopologyProjector.FormatBytes(disk.Size);
+            }
+            else
+            {
+                StartOffsetValue.Text = "—";
+                EndOffsetValue.Text = "—";
+            }
+
+            FillDriveLetters(partition, volume, autoAssign: gap);
             VolumeLabelBox.Text = volume?.FileSystemLabel
                 ?? (partition is null ? string.Empty : partition.FileSystemLabel);
             if (gap)
@@ -247,13 +267,20 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
     }
 
-    private void FillDriveLetters(PartitionInfo? partition, VolumeInfo? volume)
+    private void FillDriveLetters(PartitionInfo? partition, VolumeInfo? volume, bool autoAssign)
     {
         DriveLetterBox.Items.Clear();
-        DriveLetterBox.Items.Add(Text("无", "None"));
+        var none = Text("无", "None");
+        DriveLetterBox.Items.Add(none);
         var current = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
         var used = UsedDriveLetters(exceptPartitionId: partition?.StableId);
-        for (var letter = 'D'; letter <= 'Z'; letter++)
+        var nextFree = NextFreeDriveLetter(used);
+        if (autoAssign && current.Length != 1)
+        {
+            current = nextFree;
+        }
+
+        for (var letter = 'C'; letter <= 'Z'; letter++)
         {
             var token = letter.ToString();
             if (used.Contains(token) && !token.Equals(current, StringComparison.OrdinalIgnoreCase))
@@ -265,7 +292,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         if (current.Length == 1
-            && current[0] is >= 'A' and <= 'C'
+            && current[0] is >= 'A' and <= 'B'
             && !DriveLetterBox.Items.Cast<string>().Contains(current, StringComparer.OrdinalIgnoreCase))
         {
             DriveLetterBox.Items.Insert(1, current);
@@ -274,7 +301,20 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         DriveLetterBox.SelectedItem = current.Length == 1
             ? DriveLetterBox.Items.Cast<string>().FirstOrDefault(item =>
                 item.Equals(current, StringComparison.OrdinalIgnoreCase))
-            : DriveLetterBox.Items[0];
+            : none;
+    }
+
+    private static string NextFreeDriveLetter(IReadOnlySet<string> used)
+    {
+        foreach (var candidate in "CDEFGHIJKLMNOPQRSTUVWXYZ")
+        {
+            if (!used.Contains(candidate.ToString()))
+            {
+                return candidate.ToString();
+            }
+        }
+
+        return string.Empty;
     }
 
     private HashSet<string> UsedDriveLetters(string? exceptPartitionId)
@@ -410,9 +450,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FileSystemBox.IsEnabled = propertyEnabled;
         ClusterBox.IsEnabled = propertyEnabled;
         QuickFormatSwitch.IsEnabled = propertyEnabled;
-        FormatButton.Content = createMode
-            ? ViewModel.Localization["NewPartition"]
+        FormatButtonLabel.Text = createMode
+            ? Text("新建分区并格式化", "Create partition and format")
             : ViewModel.Localization["Format"];
+        FormatButtonIcon.Glyph = createMode ? "\uE710" : "\uE9CE";
         FormatButton.IsEnabled = simulated && (createMode || userPartition);
     }
 
