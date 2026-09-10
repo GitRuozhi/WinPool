@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，具体改造与完成状态归 [Plan](Plan.md)，测试要求归 [Quality](Quality.md)。下文的存储语义约定已由 V0.48 落实。实现差距见 CHANGELOG 中仍标为 unverified 的人工/设备项。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，有活动阶段时具体改造与完成状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。当前无活动 Plan。下文的存储语义约定已由 V0.48 落实。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
@@ -101,11 +101,11 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 
 内部开发文档只维护中文无语言后缀版本。根目录 `README.md`（英文）和 `README.zh-CN.md`（中文）保持用户信息一致；其他目录中的索引 README 不因此需要双语。历史双语原件不追溯翻译。代码/API 标识和微软原名保持英文。
 
-Product 管产品、Development 管技术、Quality 管验证、Plan 管当前阶段、CHANGELOG 管重要结果；AGENTS 管操作规则。Design 保存未排期方案，Reference 保存方法，Archive 保存被替代/结束的历史。一个事实一个维护位置，其余用短摘要和链接。
+Product 管产品、Development 管技术、Quality 管验证、Plan 管当前阶段（若有）、CHANGELOG 管重要结果；AGENTS 管操作规则。Design 保存未排期方案，Reference 保存方法，Archive 保存被替代/结束的历史。一个事实一个维护位置，其余用短摘要和链接。
 
 设计只需状态、基线/条件、未决问题三个说明，不引入复杂审批体系。讨论中的设计不等于当前规范；方向已认可也不代表细节冻结。纳入版本时重新核对代码，明确采纳部分并写入唯一活动 Plan，长期决定归各自所有者。无须为每份设计新建一个 Plan。
 
-Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
+有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代。框架必需数字版本由它机械生成。V0.48 是 V0.4 的第 8 次迭代，不另造 V0.4.8 产品称呼，也不创建迭代 10。文档交接不提前修改代码版本；执行 Agent 按 Plan 升版。
 

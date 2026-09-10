@@ -1,6 +1,6 @@
 # WinPool 变更记录
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存，待做工作见 [Plan](Plan.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。当前无活动 Plan。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
 
 ## V0.48：模拟语义、存储模型与提交链路
 
@@ -9,7 +9,8 @@
 - 草稿一次生成不可变操作序列，预览与应用共用；新对象 ID 在规划时分配。修复 B1（误删新建虚拟磁盘）和 B2（仅分区改动被跳过）。
 - 提交带稳定 CommitId；回复丢失时对账，已提交则重载，未提交才允许重试。Optimize 为明确的模拟无操作，不声称测得性能改善。
 - 内部格式切换为 SQLite schema 15、IPC 5、StorageSystemDocument 2、StorageSnapshot 3；旧格式拒绝，无迁移。
-- 自动测试 460 项通过。两编辑页完整人工/设备验收仍为 unverified。真实存储结构修改继续拒绝。
+- 2026-09-10 用户确认带成员的建池/改池可用并结束阶段。自动测试 460 项通过。完整设备、DPI、高对比度、托盘与长期运行仍为 unverified。真实存储结构修改继续拒绝。阶段计划见 [V0.48 归档](Archive/V0.48/README.md)。
+- 已知留下的交互：空池无成员直接应用会拒绝但无原因对话框，且工作草稿被丢；分区页撤销/应用按钮空闲时仍显示可用。不另起 Plan。
 
 ## 2026-09-10：文档与开发流程调整
 

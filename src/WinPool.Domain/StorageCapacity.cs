@@ -35,7 +35,7 @@ public static class ConservativeCapacity
 {
     /// <summary>
     /// Initial WinPool planning reserve. Not a Windows formula.
-    /// Source: docs/Plan.md §2.3 (V0.48).
+    /// Source: docs/Development.md capacity policy (V0.48).
     /// </summary>
     public const int PlanningReservePercent = 1;
 
