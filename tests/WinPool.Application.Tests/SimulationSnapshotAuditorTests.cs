@@ -45,4 +45,23 @@ public sealed class SimulationSnapshotAuditorTests
             Assert.True(findings.Count == 0, string.Join(Environment.NewLine, findings));
         }
     }
+
+    [Fact]
+    public void TripleTierUsesScmCacheAndManyPartitionDiskHasEightSlices()
+    {
+        var triple = SimulationLayouts.TripleTier();
+        var cache = Assert.Single(triple.StorageTiers, item => item.FriendlyName == "Cache");
+        Assert.Equal("SCM", cache.MediaType);
+        Assert.All(
+            cache.MemberPhysicalDiskIds,
+            id => Assert.Equal("SCM", triple.PhysicalDisks.Single(disk => disk.StableId == id).MediaType));
+
+        var tall = SimulationLayouts.ManyPartitions();
+        var system = Assert.Single(tall.OsDisks, item => item.IsSystem);
+        var parts = tall.Partitions.Where(item => item.OsDiskStableId == system.StableId).OrderBy(item => item.Offset).ToArray();
+        Assert.Equal(8, parts.Length);
+        Assert.Equal("EfiSystem", parts[0].Type);
+        Assert.Equal("MicrosoftReserved", parts[1].Type);
+        Assert.Equal("WindowsRecovery", parts[^1].Type);
+    }
 }

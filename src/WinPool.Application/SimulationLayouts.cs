@@ -12,6 +12,8 @@ public static class SimulationLayouts
     [
         ("simulation:builtin:layout-primordial-ready", "建池与初始化", PrimordialReady()),
         ("simulation:builtin:layout-standard-tiered", "标准两层池", StandardTiered()),
+        ("simulation:builtin:layout-triple-tier", "三层池", TripleTier()),
+        ("simulation:builtin:layout-tall-system", "超多分区系统盘", ManyPartitions()),
         ("simulation:builtin:layout-pool-no-vdisk", "空池待建虚拟磁盘", PoolWithoutVirtualDisk()),
         ("simulation:builtin:layout-single-disk-pool", "单盘池", SingleDiskPool()),
         ("simulation:builtin:layout-spare-retired", "热备与退役", SpareAndRetired()),
@@ -51,6 +53,40 @@ public static class SimulationLayouts
         b.VirtualDisk("vd", "Pool01", "pool", "Mirror", 1, 2, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Pool01");
         return b.Build("标准两层池", "layout-standard-tiered-v1");
+    }
+
+    public static StorageSnapshot TripleTier()
+    {
+        var b = new LayoutBuilder("tt");
+        b.SystemPhysical(0, "Boot NVMe");
+        b.Disk(1, "Cache-1", "SCM", "pool", size: GibPublic(256));
+        b.Disk(2, "Cache-2", "SCM", "pool", size: GibPublic(256));
+        b.Disk(3, "Perf-1", "SSD", "pool");
+        b.Disk(4, "Perf-2", "SSD", "pool");
+        b.Disk(5, "Perf-3", "SSD", "pool");
+        b.Disk(6, "Perf-4", "SSD", "pool");
+        for (var i = 7; i <= 14; i++)
+        {
+            b.Disk(i, $"Cap-{i - 6}", "HDD", "pool");
+        }
+
+        b.Primordial(0);
+        b.Pool("pool", "TripleTier", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+        b.Tier("cache", "Cache", "SCM", "pool", "vd", 1, 2);
+        b.Tier("perf", "Performance", "SSD", "pool", "vd", Mirror: true, 3, 4, 5, 6);
+        b.Tier("cap", "Capacity", "HDD", "pool", "vd", 7, 8, 9, 10, 11, 12, 13, 14);
+        b.VirtualDisk("vd", "TripleVD", "pool", "Mirror", 1, 2, 20, "cache", "perf", "cap");
+        b.OsForVirtualNtfs("vd", "TripleVD");
+        return b.Build("三层池", "layout-triple-tier-v2");
+    }
+
+    public static StorageSnapshot ManyPartitions()
+    {
+        var b = new LayoutBuilder("mp");
+        b.SystemPhysical(0, "8-partition NVMe", size: GibPublic(2048), extraDataPartitions: 4);
+        b.RawPhysical(1, "Empty-HDD", "HDD");
+        b.Primordial(0, 1);
+        return b.Build("超多分区系统盘", "layout-tall-system-v2");
     }
 
     public static StorageSnapshot PoolWithoutVirtualDisk()
@@ -168,7 +204,7 @@ public static class SimulationLayouts
             string usage = "",
             long? size = null)
         {
-            var bytes = size ?? (media == "HDD" ? Gib(4000) : Gib(1000));
+            var bytes = size ?? (media == "HDD" ? Gib(4000) : media == "SCM" ? Gib(256) : Gib(1000));
             _disks.Add(new PhysicalDiskInfo(
                 Id($"disk:{number:00}"),
                 true,
@@ -197,9 +233,9 @@ public static class SimulationLayouts
                 usage));
         }
 
-        public void SystemPhysical(int number, string name)
+        public void SystemPhysical(int number, string name, long? size = null, int extraDataPartitions = 0)
         {
-            Disk(number, name, "SSD", "primordial", system: true, size: Gib(512));
+            Disk(number, name, "SSD", "primordial", system: true, size: size ?? Gib(512));
             var disk = DiskByNumber(number);
             var osId = AddOs(number, disk.FriendlyName, disk.Size, disk.StableId, null, "GPT", system: true, offline: false);
             var offset = Megabyte;
@@ -207,10 +243,21 @@ public static class SimulationLayouts
             AddPartition(osId, number, ref part, ref offset, Megabyte * 100, "EfiSystem", "", "", true, false, true);
             AddPartition(osId, number, ref part, ref offset, Megabyte * 16, "MicrosoftReserved", "", "", false, false, true);
             var recovery = Megabyte * 500;
-            var windows = disk.Size - offset - recovery;
+            var extras = Math.Max(0, extraDataPartitions);
+            var extraEach = extras > 0 ? Gib(80) : 0;
+            var windows = extras > 0
+                ? Gib(200)
+                : disk.Size - offset - recovery;
             AddPartition(
                 osId, number, ref part, ref offset, windows, "Primary", "NTFS", TakeLetter(),
                 isSystem: false, isBoot: true, hidden: false, label: "", cluster: 65536);
+            for (var i = 1; i <= extras; i++)
+            {
+                AddPartition(
+                    osId, number, ref part, ref offset, extraEach, "Primary", "NTFS", TakeLetter(),
+                    cluster: 65536, label: $"Data{i}");
+            }
+
             AddPartition(osId, number, ref part, ref offset, recovery, "WindowsRecovery", "", "Recovery", false, false, true);
         }
 
@@ -284,7 +331,11 @@ public static class SimulationLayouts
         {
             var members = diskNumbers.Select(n => Id($"disk:{n:00}")).ToArray();
             var sizes = members.Select(id => _disks.First(d => d.StableId == id).Size).ToArray();
-            var resiliency = media == "HDD" ? "Parity" : Mirror && diskNumbers.Length >= 2 ? "Mirror" : "Simple";
+            var resiliency = media == "HDD"
+                ? "Parity"
+                : Mirror && diskNumbers.Length >= 2
+                    ? "Mirror"
+                    : "Simple";
             var copies = resiliency == "Mirror" ? 2 : 1;
             var columns = resiliency == "Parity" ? Math.Max(1, diskNumbers.Length - 1) : 1;
             var redundancy = resiliency == "Parity" || resiliency == "Mirror" ? 1 : 0;
@@ -552,4 +603,6 @@ public static class SimulationLayouts
 
         private static long Gib(double value) => checked((long)(value * 1024 * 1024 * 1024));
     }
+
+    private static long GibPublic(double value) => checked((long)(value * 1024 * 1024 * 1024));
 }
