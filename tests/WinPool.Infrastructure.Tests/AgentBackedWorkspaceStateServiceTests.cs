@@ -53,7 +53,7 @@ public sealed class AgentBackedWorkspaceStateServiceTests
     {
         var state = new WorkspaceUiState(
             "Manage",
-            "simulation:builtin:layout-triple-tier",
+            "simulation:builtin:layout-standard-tiered",
             ManageWorkspaceCategory.Disk,
             new Dictionary<ManageWorkspaceCategory, string>
             {

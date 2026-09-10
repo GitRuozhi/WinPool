@@ -12,7 +12,7 @@ public static class SimulationStorageSnapshotFactory
 
     public const string SimulatedComputerName = "DESKTOP-PL96UKD";
 
-    public const string SimulatedSnapshotVersion = "simulation-winpool-v02";
+    public const string SimulatedSnapshotVersion = "simulation-winpool-v03";
 
     public static StorageSnapshot Create()
     {

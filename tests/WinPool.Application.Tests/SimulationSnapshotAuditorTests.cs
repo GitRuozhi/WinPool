@@ -35,4 +35,14 @@ public sealed class SimulationSnapshotAuditorTests
         Assert.Contains(findings, item => item.Contains("overlap", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(findings, item => item.Contains("Drive letter C:", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void CuratedLayoutsHaveNoIntegrityFindings()
+    {
+        foreach (var layout in SimulationLayouts.CreateAll())
+        {
+            var findings = SimulationSnapshotAuditor.Audit(layout.Snapshot, layout.Name);
+            Assert.True(findings.Count == 0, string.Join(Environment.NewLine, findings));
+        }
+    }
 }
