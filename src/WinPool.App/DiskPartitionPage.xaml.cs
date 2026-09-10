@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
 using WinPool.Application;
@@ -10,21 +12,22 @@ using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
 namespace WinPool_App;
 
 /// <summary>
-/// Disk partition editor (V0.47): the former Edit upper half. Shows the
-/// disk/partition topology and keeps disk actions separate from partition
-/// actions.
+/// Disk partition editor: topology on the left, immediate disk/partition
+/// actions on the upper right, volume properties and format below.
+/// Simulation writes go through Agent one operation at a time.
 /// </summary>
 public sealed partial class DiskPartitionPage : EditorPageBase
 {
+    private const string DoNotFormatValue = "NONE";
+    private const string NoneLetterValue = "";
+
     private string? _selectedDiskId;
     private string? _selectedPartitionId;
     private long? _selectedUnallocatedOffset;
     private long? _selectedUnallocatedSize;
     private TopologyEditInteraction _interaction = null!;
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
-    private readonly Stack<StorageSnapshot> _undoStack = new();
-    private readonly Stack<StorageSnapshot> _redoStack = new();
-    private readonly SimulationOperationService _localEditor = new();
+    private bool _filling;
 
     public DiskPartitionPage()
     {
@@ -52,19 +55,45 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        OnlineButton.Content = Text("联机", "Online");
+        OfflineButton.Content = Text("脱机", "Offline");
+        InitializeButton.Content = ViewModel.Localization["InitializeDisk"];
+        ConvertGptButton.Content = Text("转换为 GPT", "Convert to GPT");
+        NewPartitionButton.Content = ViewModel.Localization["NewPartition"];
+        DeletePartitionButton.Content = ViewModel.Localization["DeleteVolume"];
         ExtendButton.Content = ViewModel.Localization["ExtendVolume"];
         ShrinkButton.Content = ViewModel.Localization["ShrinkVolume"];
-        DeletePartitionButton.Content = ViewModel.Localization["DeleteVolume"];
+        OpenExplorerButton.Content = Text("打开资源管理器", "Open in File Explorer");
+        DriveLetterLabel.Text = Text("盘符", "Drive letter");
+        VolumeLabelCaption.Text = Text("卷标", "Volume label");
+        SizeLabel.Text = Text("容量（GB）", "Size (GB)");
+        FileSystemLabel.Text = Text("文件系统", "File system");
+        ClusterLabel.Text = Text("分配单元", "Allocation unit");
+        QuickFormatLabel.Text = Text("快速格式化", "Quick format");
         FormatButton.Content = ViewModel.Localization["Format"];
-        NewPartitionButton.Content = ViewModel.Localization["NewPartition"];
-        InitializeButton.Content = ViewModel.Localization["InitializeDisk"];
-        OfflineButton.Content = Text("脱机 / 联机", "Offline / Online");
-        UndoButton.Content = ViewModel.Localization["Undo"];
-        RedoButton.Content = ViewModel.Localization["Redo"];
-        DiscardAllButton.Content = ViewModel.Localization["DiscardAll"];
-        ApplyAllButton.Content = ViewModel.Localization["ApplyAll"];
-        DiskActionsTitle.Text = ViewModel.Localization["DiskActionsSection"];
-        PartitionActionsTitle.Text = ViewModel.Localization["PartitionActionsSection"];
+        FillFileSystemBox();
+        FillClusterBox();
+    }
+
+    private void FillFileSystemBox()
+    {
+        FileSystemBox.Items.Clear();
+        FileSystemBox.Items.Add("NTFS");
+        FileSystemBox.Items.Add("ReFS");
+        FileSystemBox.Items.Add("exFAT");
+        FileSystemBox.Items.Add(Text("不格式化", "Don't format"));
+        FileSystemBox.SelectedIndex = 0;
+    }
+
+    private void FillClusterBox()
+    {
+        ClusterBox.Items.Clear();
+        foreach (var size in new[] { "4K", "8K", "16K", "32K", "64K" })
+        {
+            ClusterBox.Items.Add(size);
+        }
+
+        ClusterBox.SelectedIndex = 4;
     }
 
     private string? ResolveOsDiskId(string? stableId)
@@ -89,12 +118,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private void RefreshAll()
     {
         RefreshTopology();
+        FillForm();
         UpdateButtonState();
     }
 
-    // Exactly one object is highlighted at a time, matching Manage: a disk
-    // node, a partition node, or an unallocated gap. Selecting a partition
-    // must not also light its owning disk.
     private bool IsTopologyNodeSelected(TopologyNodeViewModel node)
     {
         if (_selectedPartitionId is not null)
@@ -141,8 +168,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             _selectedDiskId = partition?.OsDiskStableId ?? node.Unit.ParentStableId;
         }
 
-        RefreshTopology();
-        UpdateButtonState();
+        RefreshAll();
     }
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -168,356 +194,625 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_viewportWidth);
         TopologyControl.ItemsSource = new[] { rootViewModel };
-        var selected = _working.Partitions.FirstOrDefault(item => item.StableId == _selectedPartitionId);
-        SelectedPartitionInfo.Text = selected is null
-            ? _selectedUnallocatedOffset is null
-                ? string.Empty
-                : $"{ViewModel.Localization["Unallocated"]} · {TopologyProjector.FormatBytes(_selectedUnallocatedSize ?? 0)}"
-            : $"{ViewModel.PartitionTypeName(selected.Type)} · {(string.IsNullOrWhiteSpace(selected.FileSystem) ? "RAW" : selected.FileSystem)} · {TopologyProjector.FormatBytes(selected.Size)}";
     }
+
+    private void FillForm()
+    {
+        _filling = true;
+        try
+        {
+            var partition = SelectedPartition();
+            var gap = _selectedUnallocatedOffset is not null;
+            var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+            FillDriveLetters(partition, volume);
+            VolumeLabelBox.Text = volume?.FileSystemLabel ?? string.Empty;
+            if (gap)
+            {
+                var gb = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
+                SizeBox.Value = gb;
+                SizeBox.Maximum = gb;
+                FileSystemBox.SelectedIndex = 0;
+                ClusterBox.SelectedIndex = 4;
+                QuickFormatSwitch.IsOn = true;
+            }
+            else if (partition is not null)
+            {
+                SizeBox.Maximum = 1_000_000;
+                SizeBox.Value = Math.Round(partition.Size / 1024d / 1024d / 1024d, 2);
+                SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
+                SelectCluster(volume?.AllocationUnitSize ?? partition.AllocationUnitSize);
+                QuickFormatSwitch.IsOn = true;
+            }
+            else
+            {
+                SizeBox.Value = 0;
+                FileSystemBox.SelectedIndex = 0;
+                ClusterBox.SelectedIndex = 4;
+                QuickFormatSwitch.IsOn = true;
+            }
+        }
+        finally
+        {
+            _filling = false;
+        }
+    }
+
+    private void FillDriveLetters(PartitionInfo? partition, VolumeInfo? volume)
+    {
+        DriveLetterBox.Items.Clear();
+        DriveLetterBox.Items.Add(Text("无", "None"));
+        var current = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
+        var used = UsedDriveLetters(exceptPartitionId: partition?.StableId);
+        for (var letter = 'D'; letter <= 'Z'; letter++)
+        {
+            var token = letter.ToString();
+            if (used.Contains(token) && !token.Equals(current, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            DriveLetterBox.Items.Add(token);
+        }
+
+        if (current.Length == 1
+            && current[0] is >= 'A' and <= 'C'
+            && !DriveLetterBox.Items.Cast<string>().Contains(current, StringComparer.OrdinalIgnoreCase))
+        {
+            DriveLetterBox.Items.Insert(1, current);
+        }
+
+        DriveLetterBox.SelectedItem = current.Length == 1
+            ? DriveLetterBox.Items.Cast<string>().FirstOrDefault(item =>
+                item.Equals(current, StringComparison.OrdinalIgnoreCase))
+            : DriveLetterBox.Items[0];
+    }
+
+    private HashSet<string> UsedDriveLetters(string? exceptPartitionId)
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var volume in _working.Volumes)
+        {
+            if (exceptPartitionId is not null
+                && string.Equals(volume.PartitionStableId, exceptPartitionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (volume.DriveLetter.Length == 1)
+            {
+                used.Add(volume.DriveLetter);
+            }
+        }
+
+        foreach (var disk in _working.NetworkDisks)
+        {
+            var letter = TopologyProjector.NormalizeDriveLetter(disk.DriveLetter);
+            if (letter.Length == 1)
+            {
+                used.Add(letter);
+            }
+        }
+
+        return used;
+    }
+
+    private void SelectFileSystem(string? fileSystem)
+    {
+        var normalized = (fileSystem ?? string.Empty).Trim();
+        if (normalized.Equals("NTFS", StringComparison.OrdinalIgnoreCase))
+        {
+            FileSystemBox.SelectedIndex = 0;
+        }
+        else if (normalized.Equals("ReFS", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("REFS", StringComparison.OrdinalIgnoreCase))
+        {
+            FileSystemBox.SelectedIndex = 1;
+        }
+        else if (normalized.Equals("exFAT", StringComparison.OrdinalIgnoreCase))
+        {
+            FileSystemBox.SelectedIndex = 2;
+        }
+        else
+        {
+            FileSystemBox.SelectedIndex = 3;
+        }
+    }
+
+    private void SelectCluster(long? bytes)
+    {
+        ClusterBox.SelectedIndex = bytes switch
+        {
+            4096 => 0,
+            8192 => 1,
+            16384 => 2,
+            32768 => 3,
+            _ => 4
+        };
+    }
+
+    private PartitionInfo? SelectedPartition() =>
+        _working.Partitions.FirstOrDefault(item => item.StableId == _selectedPartitionId);
+
+    private OsDiskInfo? SelectedDisk() =>
+        _working.OsDisks.FirstOrDefault(item => item.StableId == _selectedDiskId);
+
+    private bool IsUserPartition(PartitionInfo? partition) =>
+        partition is { Type: "Primary", IsBoot: false, IsSystem: false }
+        && partition.Type is not "EfiSystem" and not "MicrosoftReserved" and not "WindowsRecovery";
+
+    private bool IsProtected(PartitionInfo partition) =>
+        partition.IsBoot
+        || partition.IsSystem
+        || partition.Type is "EfiSystem" or "MicrosoftReserved" or "WindowsRecovery";
+
+    private string SelectedFileSystemToken()
+    {
+        var selected = FileSystemBox.SelectedItem as string ?? "NTFS";
+        if (selected == Text("不格式化", "Don't format"))
+        {
+            return DoNotFormatValue;
+        }
+
+        return selected;
+    }
+
+    private long SelectedClusterBytes() =>
+        ParseSize(ClusterBox.SelectedItem as string ?? "64K");
 
     private void UpdateButtonState()
     {
         var simulated = ViewModel.IsUsingSimulatedInventory;
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        var disk = _working.OsDisks.FirstOrDefault(x => x.StableId == _selectedDiskId);
+        var partition = SelectedPartition();
+        var disk = SelectedDisk();
         var isPartitionSelection = partition is not null;
         var isGapSelection = _selectedUnallocatedOffset is not null;
         var isDiskSelection = disk is not null && !isPartitionSelection && !isGapSelection;
-        var primary = partition?.Type == "Primary" && partition is { IsBoot: false, IsSystem: false };
+        var userPartition = IsUserPartition(partition);
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        var hasVolume = volume is not null;
+        var skipFormat = SelectedFileSystemToken() == DoNotFormatValue;
+        var hasTable = disk is not null
+            && !string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(disk.PartitionStyle);
+        var alreadyGpt = disk is not null
+            && string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase);
+        var hasPartitions = disk is not null
+            && _working.Partitions.Any(item => item.OsDiskStableId == disk.StableId);
+        var letter = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
+        var explorerPath = letter.Length == 1 ? $"{letter}:\\" : string.Empty;
+        var diskOffline = disk?.IsOffline == true;
 
-        // Disk group: only a selected disk node enables disk actions.
-        var diskEditable = simulated && disk is { IsBoot: false, IsSystem: false };
-        InitializeButton.IsEnabled = isDiskSelection && diskEditable;
-        OfflineButton.IsEnabled = isDiskSelection && simulated && disk is not null;
+        OnlineButton.IsEnabled = simulated && isDiskSelection && disk is { IsOffline: true };
+        OfflineButton.IsEnabled = simulated
+            && isDiskSelection
+            && disk is { IsOffline: false, IsBoot: false, IsSystem: false };
+        InitializeButton.IsEnabled = simulated && isDiskSelection && disk is { IsBoot: false, IsSystem: false } && !hasTable;
+        ConvertGptButton.IsEnabled = simulated && isDiskSelection && !alreadyGpt && !hasPartitions;
+        NewPartitionButton.IsEnabled = simulated && isGapSelection && disk is { IsOffline: false };
+        DeletePartitionButton.IsEnabled = simulated && userPartition;
+        ExtendButton.IsEnabled = simulated && userPartition;
+        ShrinkButton.IsEnabled = simulated && userPartition;
+        OpenExplorerButton.IsEnabled = !simulated
+            && isPartitionSelection
+            && !diskOffline
+            && letter.Length == 1
+            && Directory.Exists(explorerPath);
 
-        // Partition group: only a selected partition or unallocated gap
-        // enables partition actions.
-        ExtendButton.IsEnabled = isPartitionSelection && simulated && primary == true;
-        ShrinkButton.IsEnabled = isPartitionSelection && simulated && primary == true;
-        DeletePartitionButton.IsEnabled = isPartitionSelection && simulated && primary == true;
-        FormatButton.IsEnabled = isPartitionSelection && simulated && primary == true;
-        NewPartitionButton.IsEnabled = simulated
-            && disk is { IsOffline: false }
-            && (isGapSelection || (isDiskSelection && DiskHasUnallocatedSpace(disk)));
+        var propertyEnabled = simulated && (isPartitionSelection || isGapSelection);
+        DriveLetterBox.IsEnabled = simulated && hasVolume;
+        VolumeLabelBox.IsEnabled = simulated && hasVolume;
+        SizeBox.IsEnabled = simulated && isGapSelection;
+        FileSystemBox.IsEnabled = propertyEnabled;
+        ClusterBox.IsEnabled = propertyEnabled && !skipFormat;
+        QuickFormatSwitch.IsEnabled = propertyEnabled && !skipFormat;
+        FormatButton.IsEnabled = simulated && userPartition && !skipFormat;
     }
 
-    private bool DiskHasUnallocatedSpace(OsDiskInfo disk)
+    private void FileSystemBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var used = _working.Partitions
-            .Where(p => p.OsDiskStableId == disk.StableId)
-            .Sum(p => p.Size);
-        return disk.Size > used;
-    }
-
-    private async void Extend_Click(object sender, RoutedEventArgs e) => await ResizeAsync(extend: true);
-
-    private async void Shrink_Click(object sender, RoutedEventArgs e) => await ResizeAsync(extend: false);
-
-    private async Task ResizeAsync(bool extend)
-    {
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        if (partition is null)
+        if (_filling)
         {
             return;
         }
 
-        var title = extend
-            ? Text("扩展卷（新大小 GB）", "Extend volume (new size in GB)")
-            : Text("压缩卷（新大小 GB）", "Shrink volume (new size in GB)");
-        var input = await PromptAsync(title, $"{partition.Size / 1024 / 1024 / 1024}");
-        if (input is null || !double.TryParse(input, out var gb) || gb <= 0)
-        {
-            return;
-        }
-
-        ApplyLocal(new SimulationOperationRequest(
-            extend ? SimulationOperationKind.ExtendPartition : SimulationOperationKind.ShrinkPartition,
-            partition.StableId,
-            SizeBytes: (long)(gb * 1024 * 1024 * 1024)));
+        UpdateButtonState();
     }
 
-    private async void DeletePartition_Click(object sender, RoutedEventArgs e)
+    private async void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        if (partition is null || !await ConfirmAsync(
-                Text("删除模拟分区", "Delete simulated partition"),
-                Text("确定从模拟系统中删除这个分区？", "Remove this partition from the simulation?")))
+        if (_filling || !ViewModel.IsUsingSimulatedInventory)
         {
             return;
         }
 
-        _selectedPartitionId = null;
-        ApplyLocal(new SimulationOperationRequest(
-            SimulationOperationKind.DeletePartition,
-            partition.StableId));
+        var partition = SelectedPartition();
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        if (partition is null || volume is null)
+        {
+            return;
+        }
+
+        var selected = DriveLetterBox.SelectedItem as string ?? string.Empty;
+        var next = selected == Text("无", "None") ? NoneLetterValue : selected;
+        if (string.Equals(next, volume.DriveLetter, StringComparison.OrdinalIgnoreCase)
+            || (next.Length == 0 && volume.DriveLetter.Length == 0))
+        {
+            return;
+        }
+
+        await SubmitAsync(
+            new SimulationOperationRequest(
+                SimulationOperationKind.ChangeDriveLetter,
+                partition.StableId,
+                DriveLetter: next),
+            Text("盘符已更新", "Drive letter updated"),
+            next.Length == 0
+                ? Text("已清除盘符。", "The drive letter was cleared.")
+                : Text($"盘符已设为 {next}:。", $"The drive letter is now {next}:."));
     }
 
-    private async void Format_Click(object sender, RoutedEventArgs e)
+    private async void VolumeLabelBox_LostFocus(object sender, RoutedEventArgs e) =>
+        await CommitVolumeLabelAsync();
+
+    private async void VolumeLabelBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        var partition = _working.Partitions.FirstOrDefault(x => x.StableId == _selectedPartitionId);
-        if (partition is null)
+        if (e.Key != Windows.System.VirtualKey.Enter)
         {
             return;
         }
 
-        var osDisk = _working.OsDisks.FirstOrDefault(x => x.StableId == partition.OsDiskStableId);
-        var isPlainPhysicalDisk = osDisk is { VirtualDiskStableId: null, IsBoot: false, IsSystem: false };
-        var primaryCount = _working.Partitions.Count(
-            x => x.OsDiskStableId == partition.OsDiskStableId && x.Type == "Primary");
-        if (isPlainPhysicalDisk && primaryCount == 1)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = Text("推荐初始化磁盘", "Disk initialization recommended"),
-                Content = Text(
-                    "该分区不是系统盘、不是虚拟磁盘，且磁盘上只有一个主分区。初始化磁盘比格式化更底层，推荐先初始化。",
-                    "This partition is the only primary partition on a non-system physical disk. Initializing the disk is lower-level than formatting and is recommended."),
-                PrimaryButtonText = Text("跳转到初始化磁盘", "Go to disk initialization"),
-                SecondaryButtonText = Text("仅格式化当前分区", "Format this partition only"),
-                CloseButtonText = Text("取消", "Cancel"),
-                DefaultButton = ContentDialogButton.Primary
-            };
-            var choice = await dialog.ShowAsync();
-            if (choice == ContentDialogResult.Primary)
-            {
-                await InitializeAsync();
-                return;
-            }
-
-            if (choice != ContentDialogResult.Secondary)
-            {
-                return;
-            }
-        }
-
-        await FormatAsync(partition);
+        e.Handled = true;
+        await CommitVolumeLabelAsync();
     }
 
-    private async Task FormatAsync(PartitionInfo partition)
+    private async Task CommitVolumeLabelAsync()
     {
-        var fileSystemBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, SelectedIndex = 0 };
-        fileSystemBox.Items.Add("NTFS");
-        fileSystemBox.Items.Add("ReFS");
-        fileSystemBox.Items.Add("exFAT");
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = Text("模拟格式化", "Simulated format"),
-            Content = fileSystemBox,
-            PrimaryButtonText = Text("确定", "OK"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (_filling || !ViewModel.IsUsingSimulatedInventory)
         {
             return;
         }
 
-        ApplyLocal(new SimulationOperationRequest(
-            SimulationOperationKind.FormatPartition,
-            partition.StableId,
-            FileSystem: fileSystemBox.SelectedItem as string ?? "NTFS",
-            AllocationUnitSize: 65536));
+        var partition = SelectedPartition();
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        if (partition is null || volume is null)
+        {
+            return;
+        }
+
+        var next = VolumeLabelBox.Text ?? string.Empty;
+        if (string.Equals(next, volume.FileSystemLabel, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await SubmitAsync(
+            new SimulationOperationRequest(
+                SimulationOperationKind.Rename,
+                partition.StableId,
+                Name: next),
+            Text("卷标已更新", "Volume label updated"),
+            Text("卷标已写入模拟文档。", "The volume label was saved to the simulation."));
     }
 
-    private async void NewPartition_Click(object sender, RoutedEventArgs e) => await NewPartitionAsync();
-
-    private async Task NewPartitionAsync()
+    private async void Online_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedDiskId is null)
+        var disk = SelectedDisk();
+        if (disk is null)
         {
             return;
         }
 
-        var size = await PromptAsync(
-            Text("新建分区大小 GB（留空为全部剩余）", "New partition size in GB (blank = all free space)"),
-            string.Empty);
-        if (size is null)
+        await SubmitAsync(
+            new SimulationOperationRequest(SimulationOperationKind.SetDiskOffline, disk.StableId, Offline: false),
+            Text("已联机", "Disk online"),
+            Text("磁盘已联机。", "The disk is online."));
+    }
+
+    private async void Offline_Click(object sender, RoutedEventArgs e)
+    {
+        var disk = SelectedDisk();
+        if (disk is null)
+        {
+            return;
+        }
+
+        var physical = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.PhysicalDiskStableId);
+        if (physical?.IsPageFile == true
+            && !await ConfirmAsync(
+                Text("移除页面文件", "Remove page file"),
+                Text("脱机前将移除该磁盘上的页面文件。确定继续？", "The page file on this disk will be removed before it goes offline. Continue?")))
+        {
+            return;
+        }
+
+        if (physical?.IsCrashDump == true
+            && !await ConfirmAsync(
+                Text("移除崩溃转储", "Remove crash dump"),
+                Text("脱机前将移除该磁盘上的崩溃转储。确定继续？", "The crash dump on this disk will be removed before it goes offline. Continue?")))
+        {
+            return;
+        }
+
+        await SubmitAsync(
+            new SimulationOperationRequest(SimulationOperationKind.SetDiskOffline, disk.StableId, Offline: true),
+            Text("已脱机", "Disk offline"),
+            Text("磁盘已脱机。", "The disk is offline."));
+    }
+
+    private async void Initialize_Click(object sender, RoutedEventArgs e)
+    {
+        var disk = SelectedDisk();
+        if (disk is null)
+        {
+            return;
+        }
+
+        if (!await ConfirmAsync(
+                ViewModel.Localization["InitializeDisk"],
+                Text("将该磁盘初始化为 GPT？", "Initialize this disk as GPT?")))
+        {
+            return;
+        }
+
+        await SubmitAsync(
+            new SimulationOperationRequest(
+                SimulationOperationKind.InitializeDisk,
+                disk.StableId,
+                Name: "GPT",
+                CreateMsr: ViewModel.CurrentPreferences.CreateMsrOnInitialize),
+            Text("初始化成功", "Initialization succeeded"),
+            Text("磁盘已初始化为 GPT。", "The disk was initialized as GPT."));
+    }
+
+    private async void ConvertGpt_Click(object sender, RoutedEventArgs e)
+    {
+        var disk = SelectedDisk();
+        if (disk is null)
+        {
+            return;
+        }
+
+        if (!await ConfirmAsync(
+                Text("转换为 GPT", "Convert to GPT"),
+                Text("将空磁盘转换为 GPT？不能转换为 MBR。", "Convert this empty disk to GPT? Conversion to MBR is not offered.")))
+        {
+            return;
+        }
+
+        await SubmitAsync(
+            new SimulationOperationRequest(SimulationOperationKind.ConvertDisk, disk.StableId, Name: "GPT"),
+            Text("转换成功", "Conversion succeeded"),
+            Text("磁盘已转换为 GPT。", "The disk was converted to GPT."));
+    }
+
+    private async void NewPartition_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedDiskId is null || _selectedUnallocatedOffset is null)
+        {
+            return;
+        }
+
+        var fileSystem = SelectedFileSystemToken();
+        if (fileSystem == "ReFS" && !await ConfirmRefsAsync())
         {
             return;
         }
 
         long? bytes = null;
-        if (!string.IsNullOrWhiteSpace(size) && TryParseGigabytes(size, out var gb))
+        if (!double.IsNaN(SizeBox.Value) && SizeBox.Value > 0)
         {
-            bytes = checked((long)(gb * 1024L * 1024L * 1024L));
+            bytes = (long)(SizeBox.Value * 1024d * 1024d * 1024d);
         }
-        else if (!string.IsNullOrWhiteSpace(size))
+
+        var letter = DriveLetterBox.SelectedItem as string;
+        if (letter == Text("无", "None"))
         {
-            await ShowMessageAsync(
-                Text("输入无效", "Invalid input"),
-                Text("请输入大于 0 的 GB 数值，或留空使用全部剩余空间。",
-                    "Enter a size in GB greater than zero, or leave the field blank to use all free space."));
+            letter = NoneLetterValue;
+        }
+
+        var format = fileSystem != DoNotFormatValue;
+        var diskId = _selectedDiskId;
+        var offset = _selectedUnallocatedOffset;
+        if (!await SubmitAsync(
+                new SimulationOperationRequest(
+                    SimulationOperationKind.CreatePartition,
+                    diskId,
+                    Name: VolumeLabelBox.Text,
+                    DriveLetter: format ? letter : NoneLetterValue,
+                    FileSystem: format ? fileSystem : string.Empty,
+                    AllocationUnitSize: format ? SelectedClusterBytes() : null,
+                    SizeBytes: bytes ?? _selectedUnallocatedSize,
+                    OffsetBytes: offset),
+                Text("新建分区成功", "Partition created"),
+                format
+                    ? Text("已在空隙中创建分区并格式化。", "A partition was created in the gap and formatted.")
+                    : Text("已在空隙中创建未格式化分区。", "An unformatted partition was created in the gap.")))
+        {
             return;
         }
 
-        ApplyLocal(new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
-            _selectedDiskId,
-            SizeBytes: bytes ?? _selectedUnallocatedSize,
-            OffsetBytes: _selectedUnallocatedOffset));
+        var created = _working.Partitions.FirstOrDefault(item =>
+            item.OsDiskStableId == diskId && item.Offset == offset);
+        if (created is not null)
+        {
+            _selectedPartitionId = created.StableId;
+            _selectedUnallocatedOffset = null;
+            _selectedUnallocatedSize = null;
+            RefreshAll();
+        }
     }
 
-    private async void Initialize_Click(object sender, RoutedEventArgs e) => await InitializeAsync();
-
-    private async Task InitializeAsync()
+    private async void DeletePartition_Click(object sender, RoutedEventArgs e)
     {
-        var disk = _working.OsDisks.FirstOrDefault(x => x.StableId == _selectedDiskId);
-        if (disk is null)
+        var partition = SelectedPartition();
+        if (partition is null || IsProtected(partition))
         {
             return;
         }
 
-        var styleBox = new ComboBox { SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
-        styleBox.Items.Add("GPT");
-        var msrBox = new ToggleSwitch
+        var volume = _working.VolumeForPartition(partition.StableId);
+        var hasData = volume is not null && volume.SizeRemaining < volume.Size;
+        if (hasData || volume is not null)
         {
-            IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize,
-            OnContent = string.Empty,
-            OffContent = string.Empty,
-            Header = ViewModel.Localization["CreateMsrOnInitialize"]
-        };
-        var preview = new TextBlock
-        {
-            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap
-        };
-        void UpdatePreview()
-        {
-            var lines = new List<string> { "clean", $"convert {(string)styleBox.SelectedItem}".ToLowerInvariant() };
-            if (msrBox.IsOn && (string)styleBox.SelectedItem == "GPT")
+            if (!await ConfirmAsync(
+                    Text("删除分区", "Delete partition"),
+                    Text("确定从模拟系统中删除这个分区？分区上的数据将不可用。",
+                        "Remove this partition from the simulation? Data on it will no longer be available.")))
             {
-                lines.Add("create partition msr size=16");
+                return;
             }
-
-            lines.Add("create partition primary");
-            lines.Add("format fs=ntfs quick");
-            preview.Text = "DISKPART> " + string.Join("\nDISKPART> ", lines);
         }
 
-        styleBox.SelectionChanged += (_, _) => UpdatePreview();
-        msrBox.Toggled += (_, _) => UpdatePreview();
-        UpdatePreview();
-        var dialog = new ContentDialog
+        var id = partition.StableId;
+        if (await SubmitAsync(
+                new SimulationOperationRequest(SimulationOperationKind.DeletePartition, id),
+                Text("删除成功", "Partition deleted"),
+                Text("分区已从模拟文档中删除。", "The partition was removed from the simulation.")))
         {
-            XamlRoot = XamlRoot,
-            Title = Text("初始化模拟磁盘", "Initialize simulated disk"),
-            Content = new StackPanel
-            {
-                Spacing = 10,
-                MinWidth = 380,
-                Children = { styleBox, msrBox, preview }
-            },
-            PrimaryButtonText = Text("初始化", "Initialize"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            _selectedPartitionId = null;
+            RefreshAll();
+        }
+    }
+
+    private async void Extend_Click(object sender, RoutedEventArgs e) => await ShowResizeUnsupportedAsync();
+
+    private async void Shrink_Click(object sender, RoutedEventArgs e) => await ShowResizeUnsupportedAsync();
+
+    private async Task ShowResizeUnsupportedAsync() =>
+        await ShowMessageAsync(
+            Text("尚不支持", "Not supported yet"),
+            Text(
+                "扩展和收缩需要 Windows supported-size 依据，本阶段不实现，不会改变分区大小。",
+                "Extend and shrink need a Windows supported-size result. They are not implemented in this stage and do not change partition size."));
+
+    private async void OpenExplorer_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.IsUsingSimulatedInventory)
         {
             return;
         }
 
-        _selectedPartitionId = null;
-        ApplyLocal(new SimulationOperationRequest(
-            SimulationOperationKind.InitializeDisk,
-            disk.StableId,
-            Name: (string)styleBox.SelectedItem,
-            CreateMsr: msrBox.IsOn && (string)styleBox.SelectedItem == "GPT"));
-    }
-
-    private async void Offline_Click(object sender, RoutedEventArgs e)
-    {
-        var disk = _working.OsDisks.FirstOrDefault(x => x.StableId == _selectedDiskId);
-        if (disk is null)
+        var partition = SelectedPartition();
+        if (partition is null)
         {
             return;
         }
 
-        ApplyLocal(new SimulationOperationRequest(
-            SimulationOperationKind.SetDiskOffline,
-            disk.StableId,
-            Offline: !disk.IsOffline));
-    }
-
-    private void ApplyLocal(SimulationOperationRequest request)
-    {
-        var document = ViewModel.ActiveDocument with { Snapshot = _working };
-        var result = _localEditor.Apply(document, SimulationDraftPlanner.ToOperation(request));
-        if (!result.Succeeded)
-        {
-            _ = ShowMessageAsync(Text("操作不可用", "Operation unavailable"), result.Error);
-            return;
-        }
-
-        _undoStack.Push(_working);
-        _redoStack.Clear();
-        _working = result.Document.Snapshot;
-        RefreshAll();
-    }
-
-    private void Undo_Click(object sender, RoutedEventArgs e)
-    {
-        if (_undoStack.Count == 0)
-        {
-            return;
-        }
-
-        _redoStack.Push(_working);
-        _working = _undoStack.Pop();
-        RefreshAll();
-    }
-
-    private void Redo_Click(object sender, RoutedEventArgs e)
-    {
-        if (_redoStack.Count == 0)
-        {
-            return;
-        }
-
-        _undoStack.Push(_working);
-        _working = _redoStack.Pop();
-        RefreshAll();
-    }
-
-    private void DiscardAll_Click(object sender, RoutedEventArgs e)
-    {
-        _undoStack.Clear();
-        _redoStack.Clear();
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
-    }
-
-    private async void ApplyAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ViewModel.IsUsingSimulatedInventory)
-        {
-            return;
-        }
-
-        var plan = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, _working);
-        if (plan.IsEmpty)
+        var letter = _working.DriveLetterOf(partition);
+        var path = letter.Length == 1 ? $"{letter}:\\" : string.Empty;
+        if (path.Length == 0 || !Directory.Exists(path))
         {
             await ShowMessageAsync(
-                ViewModel.Localization["NoApplyChangesTitle"],
-                ViewModel.Localization["NoApplyChangesMessage"]);
+                Text("无法打开", "Cannot open"),
+                Text("当前卷没有可打开的本机路径。", "The selected volume has no local path that can be opened."));
             return;
         }
 
-        var applied = await ViewModel.ApplySimulationPlanAsync(plan);
-        if (!applied.IsSuccess)
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"\"{path}\"",
+            UseShellExecute = true
+        });
+    }
+
+    private async void Format_Click(object sender, RoutedEventArgs e)
+    {
+        var partition = SelectedPartition();
+        if (partition is null || IsProtected(partition))
+        {
+            return;
+        }
+
+        var fileSystem = SelectedFileSystemToken();
+        if (fileSystem == DoNotFormatValue)
+        {
+            return;
+        }
+
+        var current = _working.FileSystemOf(partition);
+        if (!string.IsNullOrWhiteSpace(current)
+            && !await ConfirmAsync(
+                ViewModel.Localization["Format"],
+                Text("格式化将清除该分区上的数据。确定继续？", "Formatting clears data on this partition. Continue?")))
+        {
+            return;
+        }
+
+        if (fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase) && !await ConfirmRefsAsync())
+        {
+            return;
+        }
+
+        var quick = QuickFormatSwitch.IsOn;
+        var ok = await SubmitAsync(
+            new SimulationOperationRequest(
+                SimulationOperationKind.FormatPartition,
+                partition.StableId,
+                Name: VolumeLabelBox.Text,
+                FileSystem: fileSystem,
+                AllocationUnitSize: SelectedClusterBytes()),
+            quick ? Text("快速格式化成功", "Quick format succeeded") : Text("格式化成功", "Format succeeded"),
+            quick
+                ? Text("模拟快速格式化已写入文档。", "The simulated quick format was saved.")
+                : Text("模拟格式化已写入文档。", "The simulated format was saved."),
+            failTitle: Text("格式化失败", "Format failed"));
+        _ = ok;
+    }
+
+    private async Task<bool> ConfirmRefsAsync() =>
+        await ConfirmAsync(
+            Text("ReFS 提示", "ReFS notice"),
+            Text(
+                "ReFS 没有与 NTFS 64K 同等的长期测试证据。确定继续？",
+                "ReFS has no long-run evidence equivalent to NTFS 64K. Continue anyway?"));
+
+    private async Task<bool> SubmitAsync(
+        SimulationOperationRequest request,
+        string successTitle,
+        string successMessage,
+        string? failTitle = null)
+    {
+        WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt> result;
+        try
+        {
+            result = await ViewModel.ApplySimulationOperationAsync(request);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException)
+        {
+            await ShowMessageAsync(failTitle ?? Text("操作失败", "Operation failed"), exception.Message);
+            return false;
+        }
+
+        if (result.Status == WinPool.Application.ApplicationStatus.OutcomeUnknown)
         {
             await ShowMessageAsync(
-                Text("操作不可用", "Operation unavailable"),
-                applied.Messages.FirstOrDefault()?.UserTextKey ?? applied.Status.ToString());
-            return;
+                Text("提交结果未知", "Commit outcome unknown"),
+                result.Messages.FirstOrDefault()?.UserTextKey
+                    ?? Text(
+                        "请求已发送，但结果未知。请重新加载后再决定是否重试。",
+                        "The request was sent and the outcome is unknown. Reload before retrying."));
+            _working = ViewModel.ActiveSnapshot;
+            RefreshAll();
+            return false;
         }
 
-        _undoStack.Clear();
-        _redoStack.Clear();
+        if (!result.IsSuccess || result.Value is null)
+        {
+            await ShowMessageAsync(
+                failTitle ?? Text("操作失败", "Operation failed"),
+                result.Messages.FirstOrDefault()?.UserTextKey
+                    ?? Text("模拟操作未完成。", "The simulation operation did not complete."));
+            return false;
+        }
+
         _working = ViewModel.ActiveSnapshot;
+        await ShowMessageAsync(successTitle, successMessage);
         RefreshAll();
+        return true;
     }
 }

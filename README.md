@@ -4,7 +4,7 @@
 
 WinPool is a Windows desktop application for viewing storage topology, monitoring devices, and editing simulated storage systems.
 
-The current implementation is **V0.48**. Real storage-structure changes are not enabled.
+The current implementation is **V0.49**. Real storage-structure changes are not enabled.
 
 ## What you can use
 

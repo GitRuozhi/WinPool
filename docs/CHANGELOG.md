@@ -1,6 +1,14 @@
 # WinPool 变更记录
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存。活动阶段见 [Plan](Plan.md)（待批准）。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。活动阶段见 [Plan](Plan.md)（已实现，待确认关闭）。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+
+## V0.49：磁盘分区页及时生效与格式化属性
+
+- 分区页改为格式化/卷属性工作区：右上动作、右下属性；去掉撤销/重做/放弃/应用全部。每次允许的动作单独经 Agent 提交，弹出成功或失败。
+- 模拟格式化支持 NTFS、ReFS、exFAT；NTFS 默认；ReFS 先确认证据限制。快速格式化走同一 `FormatPartition`，同样弹结果。不格式化则只建无卷分区。
+- 打开资源管理器只对本机真实卷。扩展/收缩按钮占位，不改大小。结构页仍为统一草稿。
+- 内部格式仍为 schema 15 / IPC 5 / document 2 / snapshot 3。真实存储结构修改继续拒绝。
+- 自动测试 467 项通过；依赖审计无已知漏洞包。WinUI、完整设备、DPI、高对比度、托盘与长期运行仍为 unverified。阶段计划见 [Plan](Plan.md)。
 
 ## 2026-09-10：V0.49 分区页 Plan 已编制
 

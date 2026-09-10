@@ -6,10 +6,20 @@
     xmlns:controls="using:WinPool_App.Controls"
     xmlns:editors="using:WinPool_App">
 
+    <editors:EditorPageBase.Resources>
+        <Style x:Key="PartitionChromeButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </editors:EditorPageBase.Resources>
+
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="280" />
+            <ColumnDefinition Width="320" />
         </Grid.ColumnDefinitions>
         <Border
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -46,52 +56,186 @@
                 </ItemsControl>
             </ScrollViewer>
         </Border>
-        <Border
+        <Grid
             Grid.Column="1"
             Margin="8,0,0,0"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
-            <ScrollViewer Padding="12,8" VerticalScrollBarVisibility="Auto">
-                <StackPanel Spacing="8">
+            RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border
+                Padding="8"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+                <Grid ColumnSpacing="6" RowSpacing="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="UndoButton" HorizontalAlignment="Stretch" Click="Undo_Click" />
-                        <Button x:Name="RedoButton" Grid.Column="1" HorizontalAlignment="Stretch" Click="Redo_Click" />
+                        <Button
+                            x:Name="OnlineButton"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="Online_Click" />
+                        <Button
+                            x:Name="OfflineButton"
+                            Grid.Column="1"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="Offline_Click" />
+                        <Button
+                            x:Name="InitializeButton"
+                            Grid.Column="2"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="Initialize_Click" />
+                        <Button
+                            x:Name="ConvertGptButton"
+                            Grid.Column="3"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="ConvertGpt_Click" />
                     </Grid>
-                    <Grid ColumnSpacing="6">
+                    <Grid Grid.Row="1" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="DiscardAllButton" HorizontalAlignment="Stretch" Click="DiscardAll_Click" />
-                        <Button x:Name="ApplyAllButton" Grid.Column="1" HorizontalAlignment="Stretch" Click="ApplyAll_Click" />
+                        <Button
+                            x:Name="NewPartitionButton"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="NewPartition_Click" />
+                        <Button
+                            x:Name="DeletePartitionButton"
+                            Grid.Column="1"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="DeletePartition_Click" />
+                        <Button
+                            x:Name="ExtendButton"
+                            Grid.Column="2"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="Extend_Click" />
+                        <Button
+                            x:Name="ShrinkButton"
+                            Grid.Column="3"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="Shrink_Click" />
+                        <Button
+                            x:Name="OpenExplorerButton"
+                            Grid.Column="4"
+                            Style="{StaticResource PartitionChromeButtonStyle}"
+                            Click="OpenExplorer_Click" />
                     </Grid>
-                    <TextBlock
-                        x:Name="SelectedPartitionInfo"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        TextWrapping="Wrap" />
-                    <TextBlock
-                        x:Name="DiskActionsTitle"
-                        Margin="0,10,0,0"
-                        FontWeight="SemiBold" />
-                    <Button x:Name="InitializeButton" HorizontalAlignment="Stretch" Click="Initialize_Click" />
-                    <Button x:Name="OfflineButton" HorizontalAlignment="Stretch" Click="Offline_Click" />
-                    <TextBlock
-                        x:Name="PartitionActionsTitle"
-                        Margin="0,10,0,0"
-                        FontWeight="SemiBold" />
-                    <Button x:Name="ExtendButton" HorizontalAlignment="Stretch" Click="Extend_Click" />
-                    <Button x:Name="ShrinkButton" HorizontalAlignment="Stretch" Click="Shrink_Click" />
-                    <Button x:Name="DeletePartitionButton" HorizontalAlignment="Stretch" Click="DeletePartition_Click" />
-                    <Button x:Name="FormatButton" HorizontalAlignment="Stretch" Click="Format_Click" />
-                    <Button x:Name="NewPartitionButton" HorizontalAlignment="Stretch" Click="NewPartition_Click" />
+                </Grid>
+            </Border>
+            <ScrollViewer
+                Grid.Row="1"
+                VerticalAlignment="Stretch"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <Border
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid
+                            x:Name="PartitionFormGrid"
+                            Margin="8"
+                            ColumnSpacing="6"
+                            RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock
+                                x:Name="DriveLetterLabel"
+                                VerticalAlignment="Center" />
+                            <ComboBox
+                                x:Name="DriveLetterBox"
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch"
+                                SelectionChanged="DriveLetterBox_SelectionChanged" />
+                            <TextBlock
+                                x:Name="VolumeLabelCaption"
+                                Grid.Row="1"
+                                VerticalAlignment="Center" />
+                            <TextBox
+                                x:Name="VolumeLabelBox"
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                LostFocus="VolumeLabelBox_LostFocus"
+                                KeyDown="VolumeLabelBox_KeyDown" />
+                            <TextBlock
+                                x:Name="SizeLabel"
+                                Grid.Row="2"
+                                VerticalAlignment="Center" />
+                            <NumberBox
+                                x:Name="SizeBox"
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                Minimum="0"
+                                SmallChange="1"
+                                LargeChange="10"
+                                SpinButtonPlacementMode="Hidden"
+                                ValidationMode="InvalidInputOverwritten" />
+                            <TextBlock
+                                x:Name="FileSystemLabel"
+                                Grid.Row="3"
+                                VerticalAlignment="Center" />
+                            <ComboBox
+                                x:Name="FileSystemBox"
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch"
+                                SelectionChanged="FileSystemBox_SelectionChanged" />
+                            <TextBlock
+                                x:Name="ClusterLabel"
+                                Grid.Row="4"
+                                VerticalAlignment="Center" />
+                            <ComboBox
+                                x:Name="ClusterBox"
+                                Grid.Row="4"
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch" />
+                            <TextBlock
+                                x:Name="QuickFormatLabel"
+                                Grid.Row="5"
+                                VerticalAlignment="Center" />
+                            <ToggleSwitch
+                                x:Name="QuickFormatSwitch"
+                                Grid.Row="5"
+                                Grid.Column="1"
+                                MinWidth="0"
+                                Margin="0"
+                                OffContent=""
+                                OnContent="" />
+                        </Grid>
+                    </Border>
+                    <Button
+                        x:Name="FormatButton"
+                        Margin="0,8,0,0"
+                        HorizontalAlignment="Stretch"
+                        Click="Format_Click" />
                 </StackPanel>
             </ScrollViewer>
-        </Border>
+        </Grid>
     </Grid>
 </editors:EditorPageBase>

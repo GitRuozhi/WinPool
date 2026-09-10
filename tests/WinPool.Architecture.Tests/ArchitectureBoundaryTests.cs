@@ -189,7 +189,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.True(File.Exists(activePlanPath), "docs/Plan.md");
         var activePlan = File.ReadAllText(activePlanPath);
         Assert.Contains("V0.49", activePlan, StringComparison.Ordinal);
-        Assert.Contains("等待用户批准执行", activePlan, StringComparison.Ordinal);
+        Assert.Contains("已实现", activePlan, StringComparison.Ordinal);
         Assert.Contains("不加入、不调用真实存储写操作", activePlan, StringComparison.Ordinal);
         Assert.DoesNotContain("本 Plan 授权真实存储", activePlan, StringComparison.Ordinal);
 
@@ -483,6 +483,18 @@ public sealed class ArchitectureBoundaryTests
             "EditWorkspace.ProjectPartitionWorkspace",
             diskPartitionPage,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "ApplySimulationOperationAsync",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ApplyLocal",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SimulationOperationKind.ExtendPartition",
+            diskPartitionPage,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "SimulationOperationKind.CreateTieredPool",
             diskPartitionPage,
@@ -509,7 +521,9 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("Width=\"320\"", structureXaml, StringComparison.Ordinal);
         Assert.Contains("PoolFormGrid", structureXaml, StringComparison.Ordinal);
         Assert.Contains("TopologyControl", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("Width=\"280\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"320\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("FormatButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UndoButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DiskSectionTitle", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("磁盘与分区", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("存储池与虚拟磁盘", structureXaml, StringComparison.Ordinal);

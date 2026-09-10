@@ -50,14 +50,14 @@ public static class StorageEditRules
     [
         (SimulationOperationKind.Rename, "supported: object friendly name / volume label"),
         (SimulationOperationKind.ChangeDriveLetter, "supported: unused letter, volume present"),
-        (SimulationOperationKind.FormatPartition, "supported: NTFS; ReFS only on Server SKU"),
+        (SimulationOperationKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
         (SimulationOperationKind.DeletePartition, "supported: non-system primary"),
         (SimulationOperationKind.SetDiskOffline, "supported: non-boot/system/page/dump"),
         (SimulationOperationKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
         (SimulationOperationKind.ConvertDisk, "supported: empty disk to GPT only"),
-        (SimulationOperationKind.CreatePartition, "supported: GPT gap, NTFS volume optional"),
-        (SimulationOperationKind.ExtendPartition, "not_supported: no Windows supported-size evidence in V0.48"),
-        (SimulationOperationKind.ShrinkPartition, "not_supported: no Windows supported-size evidence in V0.48"),
+        (SimulationOperationKind.CreatePartition, "supported: GPT gap; NTFS/ReFS/exFAT volume optional"),
+        (SimulationOperationKind.ExtendPartition, "not_supported: no Windows supported-size evidence"),
+        (SimulationOperationKind.ShrinkPartition, "not_supported: no Windows supported-size evidence"),
         (SimulationOperationKind.CreateStoragePool, "supported: primordial data members"),
         (SimulationOperationKind.CreateTieredPool, "supported: Simple/Mirror×2/Parity with legal disk counts"),
         (SimulationOperationKind.CreateVirtualDisk, "supported: at most one new VD per pool; Fixed estimate"),
@@ -75,7 +75,17 @@ public static class StorageEditRules
         StorageSnapshot snapshot,
         SimulationOperationRequest request)
     {
+        if (snapshot.VolumeForPartition(request.TargetStableId) is null)
+        {
+            return Deny("storage.rule.drive-letter.missing-volume", "A volume is required before a drive letter can be assigned.");
+        }
+
         var letter = TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
+        if (letter.Length == 0)
+        {
+            return Allow("storage.rule.drive-letter.clear");
+        }
+
         if (letter.Length != 1)
         {
             return Deny("storage.rule.drive-letter.invalid", "A drive letter must be a single unused letter A–Z.");
@@ -109,21 +119,11 @@ public static class StorageEditRules
         }
 
         var fileSystem = (request.FileSystem ?? "NTFS").Trim().ToUpperInvariant();
-        if (fileSystem == "REFS")
-        {
-            if (!SupportsRefs(snapshot))
-            {
-                return Deny(
-                    "storage.rule.format.refs-capability",
-                    "ReFS create is not allowed on this target SKU or the SKU is unknown.",
-                    partition.StableId);
-            }
-        }
-        else if (fileSystem != "NTFS")
+        if (!IsCreateFileSystem(fileSystem))
         {
             return Deny(
                 "storage.rule.format.filesystem",
-                $"File system {fileSystem} is outside the V0.48 create range (NTFS, ReFS on capable SKUs).");
+                $"File system {fileSystem} is outside the create range (NTFS, ReFS, exFAT).");
         }
 
         return Allow("storage.rule.format", WindowsVolume);
@@ -252,14 +252,11 @@ public static class StorageEditRules
         }
 
         var fileSystem = request.FileSystem?.Trim().ToUpperInvariant();
-        if (!string.IsNullOrWhiteSpace(fileSystem) && fileSystem is not "NTFS" and not "REFS")
+        if (!string.IsNullOrWhiteSpace(fileSystem) && !IsCreateFileSystem(fileSystem))
         {
-            return Deny("storage.rule.create-partition.filesystem", "Only NTFS or capable-SKU ReFS can be created.");
-        }
-
-        if (fileSystem == "REFS" && !SupportsRefs(snapshot))
-        {
-            return Deny("storage.rule.create-partition.refs-capability", "ReFS create is not allowed on this target.");
+            return Deny(
+                "storage.rule.create-partition.filesystem",
+                "Only NTFS, ReFS, exFAT, or an unformatted partition can be created.");
         }
 
         return Allow("storage.rule.create-partition", WindowsPartition);
@@ -602,11 +599,8 @@ public static class StorageEditRules
         : string.Equals(resiliency, "Parity", StringComparison.OrdinalIgnoreCase) ? 1
         : 2;
 
-    private static bool SupportsRefs(StorageSnapshot snapshot)
-    {
-        var product = snapshot.Computer.WindowsProductName ?? string.Empty;
-        return product.Contains("Server", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsCreateFileSystem(string fileSystem) =>
+        fileSystem is "NTFS" or "REFS" or "EXFAT";
 
     private static StorageRuleDecision Allow(string code, string? source = null) =>
         new(StorageRuleVerdict.Allow, code, string.Empty, Source: source);

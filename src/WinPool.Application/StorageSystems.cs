@@ -545,8 +545,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
     private static StorageSnapshot Rename(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
-        var name = request.Name?.Trim();
-        if (string.IsNullOrWhiteSpace(name))
+        var name = request.Name?.Trim() ?? string.Empty;
+        var isVolumeOrPartition = snapshot.Volumes.Any(x => x.StableId == request.TargetStableId)
+            || snapshot.Partitions.Any(x => x.StableId == request.TargetStableId);
+        if (!isVolumeOrPartition && string.IsNullOrWhiteSpace(name))
         {
             throw new InvalidOperationException("A non-empty name is required.");
         }
@@ -623,7 +625,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 item.PartitionStableId == partitionId ? item with { FileSystemLabel = name } : item).ToArray();
             if (volumes.All(item => item.PartitionStableId != partitionId))
             {
-                volumes = volumes.Append(NewVolume(partitionId, snapshot.Partitions.First(item => item.StableId == partitionId).Size, name, "", null, [])).ToArray();
+                throw new InvalidOperationException("A volume is required before the label can be changed.");
             }
 
             return snapshot with { Volumes = volumes };
@@ -635,56 +637,48 @@ public sealed class SimulationOperationService : ISimulationOperationService
     private static StorageSnapshot ChangeDriveLetter(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
         var driveLetter = TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
-        if (driveLetter.Length != 1)
+        if (snapshot.Partitions.All(x => x.StableId != request.TargetStableId))
+        {
+            throw new InvalidOperationException("The selected partition was not found.");
+        }
+
+        if (driveLetter.Length is not (0 or 1))
         {
             throw new InvalidOperationException("A drive letter from A through Z is required.");
         }
-        if (snapshot.Partitions.Any(x =>
+
+        if (driveLetter.Length == 1
+            && snapshot.Partitions.Any(x =>
                 x.StableId != request.TargetStableId
                 && TopologyProjector.NormalizeDriveLetter(x.DriveLetter) == driveLetter))
         {
             throw new InvalidOperationException($"Drive letter {driveLetter}: is already in use.");
         }
 
-        if (snapshot.Partitions.All(x => x.StableId != request.TargetStableId))
-        {
-            throw new InvalidOperationException("The selected partition was not found.");
-        }
-
-        var path = $"{driveLetter}:\\";
         var volumes = snapshot.Volumes.ToList();
         var existing = volumes.FindIndex(item => item.PartitionStableId == request.TargetStableId);
-        if (existing >= 0)
+        if (existing < 0)
         {
-            var volume = volumes[existing];
-            var access = volume.AccessPaths
-                .Where(item => TopologyProjector.NormalizeDriveLetter(item).Length != 1)
-                .Append(path)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            volumes[existing] = volume with { AccessPaths = access };
-        }
-        else
-        {
-            var partition = snapshot.Partitions.First(item => item.StableId == request.TargetStableId);
-            volumes.Add(NewVolume(
-                request.TargetStableId,
-                partition.Size,
-                partition.FileSystemLabel,
-                partition.FileSystem,
-                partition.AllocationUnitSize,
-                [path]));
+            throw new InvalidOperationException("A volume is required before a drive letter can be assigned.");
         }
 
+        var volume = volumes[existing];
+        var withoutLetter = volume.AccessPaths
+            .Where(item => !IsDriveLetterAccessPath(item))
+            .ToArray();
+        var access = driveLetter.Length == 0
+            ? withoutLetter
+            : withoutLetter.Append($"{driveLetter}:\\").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        volumes[existing] = volume with { AccessPaths = access };
         return snapshot with { Volumes = volumes };
     }
 
     private static StorageSnapshot FormatPartition(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
         var fileSystem = request.FileSystem?.Trim().ToUpperInvariant();
-        if (fileSystem is not ("NTFS" or "REFS"))
+        if (fileSystem is not ("NTFS" or "REFS" or "EXFAT"))
         {
-            throw new InvalidOperationException("The simulated file system must be NTFS or ReFS.");
+            throw new InvalidOperationException("The simulated file system must be NTFS, ReFS, or exFAT.");
         }
         var allocationUnit = request.AllocationUnitSize ?? 4096;
         if (allocationUnit <= 0)
@@ -900,15 +894,18 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException("The simulated disk has no free space for a new partition.");
         }
 
-        var letter = string.IsNullOrWhiteSpace(request.DriveLetter)
-            ? NextFreeDriveLetter(snapshot)
-            : TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
+        var fileSystem = request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty;
+        var format = fileSystem.Length > 0;
+        var letter = !format
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(request.DriveLetter)
+                ? NextFreeDriveLetter(snapshot)
+                : TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
         var partitionId = string.IsNullOrWhiteSpace(request.AllocatedPartitionId)
             ? $"sim:partition:{Guid.NewGuid():N}"
             : request.AllocatedPartitionId;
-        var fileSystem = request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty;
         var label = request.Name?.Trim() ?? string.Empty;
-        long? cluster = string.IsNullOrWhiteSpace(fileSystem) ? null : request.AllocationUnitSize ?? 4096;
+        long? cluster = format ? request.AllocationUnitSize ?? 4096 : null;
         var path = string.IsNullOrWhiteSpace(letter) ? string.Empty : $"{letter}:\\";
         var partition = new PartitionInfo(
             partitionId,
@@ -929,19 +926,24 @@ public sealed class SimulationOperationService : ISimulationOperationService
             "OK",
             path,
             disk.StableId);
-        var volume = NewVolume(
-            partitionId,
-            size,
-            label,
-            fileSystem,
-            cluster,
-            string.IsNullOrWhiteSpace(path) ? [] : [path],
-            request.AllocatedVolumeId);
+
+        IReadOnlyList<VolumeInfo> volumes = snapshot.Volumes;
+        if (format)
+        {
+            volumes = snapshot.Volumes.Append(NewVolume(
+                partitionId,
+                size,
+                label,
+                fileSystem,
+                cluster,
+                string.IsNullOrWhiteSpace(path) ? [] : [path],
+                request.AllocatedVolumeId)).ToArray();
+        }
 
         return snapshot with
         {
             Partitions = snapshot.Partitions.Append(partition).ToArray(),
-            Volumes = snapshot.Volumes.Append(volume).ToArray()
+            Volumes = volumes
         };
     }
 
@@ -1538,6 +1540,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var usage = request.Name?.Trim() ?? string.Empty;
         var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetStableId);
         return EditWorkspace.SetDiskUsage(cleared, request.TargetStableId, usage);
+    }
+
+    private static bool IsDriveLetterAccessPath(string? path)
+    {
+        var trimmed = (path ?? string.Empty).Trim();
+        return trimmed.Length >= 2
+            && trimmed[1] == ':'
+            && char.ToUpperInvariant(trimmed[0]) is >= 'A' and <= 'Z';
     }
 
     private static string NextFreeDriveLetter(StorageSnapshot snapshot)
