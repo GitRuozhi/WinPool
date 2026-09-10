@@ -64,4 +64,12 @@ public sealed class SimulationSnapshotAuditorTests
         Assert.Equal("MicrosoftReserved", parts[1].Type);
         Assert.Equal("WindowsRecovery", parts[^1].Type);
     }
+
+    [Fact]
+    public void DenseServerHasALargePhysicalDiskSet()
+    {
+        var server = SimulationLayouts.DenseServer();
+        Assert.True(server.PhysicalDisks.Count >= 40, $"Expected 40+ disks, found {server.PhysicalDisks.Count}.");
+        Assert.Empty(SimulationSnapshotAuditor.Audit(server, "超多磁盘服务器"));
+    }
 }

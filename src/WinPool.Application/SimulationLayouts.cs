@@ -14,6 +14,7 @@ public static class SimulationLayouts
         ("simulation:builtin:layout-standard-tiered", "标准两层池", StandardTiered()),
         ("simulation:builtin:layout-triple-tier", "三层池", TripleTier()),
         ("simulation:builtin:layout-tall-system", "超多分区系统盘", ManyPartitions()),
+        ("simulation:builtin:layout-dense-server", "超多磁盘服务器", DenseServer()),
         ("simulation:builtin:layout-pool-no-vdisk", "空池待建虚拟磁盘", PoolWithoutVirtualDisk()),
         ("simulation:builtin:layout-single-disk-pool", "单盘池", SingleDiskPool()),
         ("simulation:builtin:layout-spare-retired", "热备与退役", SpareAndRetired()),
@@ -87,6 +88,33 @@ public static class SimulationLayouts
         b.RawPhysical(1, "Empty-HDD", "HDD");
         b.Primordial(0, 1);
         return b.Build("超多分区系统盘", "layout-tall-system-v2");
+    }
+
+    public static StorageSnapshot DenseServer()
+    {
+        var b = new LayoutBuilder("dsv");
+        b.SystemPhysical(0, "Boot NVMe");
+        for (var i = 1; i <= 8; i++)
+        {
+            b.Disk(i, $"SSD-{i:00}", "SSD", "pool");
+        }
+
+        for (var i = 9; i <= 36; i++)
+        {
+            b.Disk(i, $"HDD-{i - 8:00}", "HDD", "pool");
+        }
+
+        b.RawPhysical(37, "Expand-HDD-1", "HDD");
+        b.RawPhysical(38, "Expand-HDD-2", "HDD");
+        b.RawPhysical(39, "Expand-HDD-3", "HDD");
+        b.RawPhysical(40, "Expand-HDD-4", "HDD");
+        b.Primordial(0, 37, 38, 39, 40);
+        b.Pool("pool", "DataPool", Enumerable.Range(1, 36).ToArray());
+        b.Tier("perf", "Performance", "SSD", "pool", "vd", Enumerable.Range(1, 8).ToArray());
+        b.Tier("cap", "Capacity", "HDD", "pool", "vd", Enumerable.Range(9, 28).ToArray());
+        b.VirtualDisk("vd", "DataPool", "pool", "Simple", 1, 1, 20, "perf", "cap");
+        b.OsForVirtualNtfs("vd", "DataPool");
+        return b.Build("超多磁盘服务器", "layout-dense-server-v1");
     }
 
     public static StorageSnapshot PoolWithoutVirtualDisk()
