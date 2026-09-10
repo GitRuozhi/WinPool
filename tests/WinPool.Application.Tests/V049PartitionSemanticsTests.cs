@@ -97,6 +97,28 @@ public sealed class V049PartitionSemanticsTests
                     FileSystem: "FAT32")).Verdict);
     }
 
+    [Fact]
+    public void DeletePartitionRemovesMsrAndUnknownTypes()
+    {
+        var document = Apply(
+            EmptyRawDisk(),
+            new SimulationOperationRequest(
+                SimulationOperationKind.InitializeDisk,
+                "osdisk:ssd0",
+                Name: "GPT",
+                CreateMsr: true));
+        var msr = Assert.Single(document.Snapshot.Partitions, item => item.Type == "MicrosoftReserved");
+        Assert.Equal(
+            StorageRuleVerdict.Allow,
+            StorageEditRules.Evaluate(
+                document.Snapshot,
+                new SimulationOperationRequest(SimulationOperationKind.DeletePartition, msr.StableId)).Verdict);
+        document = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.DeletePartition,
+            msr.StableId));
+        Assert.DoesNotContain(document.Snapshot.Partitions, item => item.Type == "MicrosoftReserved");
+    }
+
     private static StorageSystemDocument InitializedDisk()
     {
         var document = Apply(

@@ -394,7 +394,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         NewPartitionButton.IsEnabled = simulated
             && disk is { IsOffline: false }
             && (createMode || (isDiskSelection && !initialized));
-        DeletePartitionButton.IsEnabled = simulated && userPartition;
+        DeletePartitionButton.IsEnabled = simulated && isPartitionSelection;
         ExtendButton.IsEnabled = simulated && userPartition;
         ShrinkButton.IsEnabled = simulated && userPartition;
         OpenExplorerButton.IsEnabled = !simulated
@@ -668,22 +668,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private async void DeletePartition_Click(object sender, RoutedEventArgs e)
     {
         var partition = SelectedPartition();
-        if (partition is null || IsProtected(partition))
+        if (partition is null)
         {
             return;
         }
 
-        var volume = _working.VolumeForPartition(partition.StableId);
-        var hasData = volume is not null && volume.SizeRemaining < volume.Size;
-        if (hasData || volume is not null)
+        if (!await ConfirmAsync(
+                Text("删除分区", "Delete partition"),
+                Text("确定从模拟系统中删除这个分区？分区上的数据将不可用。",
+                    "Remove this partition from the simulation? Data on it will no longer be available.")))
         {
-            if (!await ConfirmAsync(
-                    Text("删除分区", "Delete partition"),
-                    Text("确定从模拟系统中删除这个分区？分区上的数据将不可用。",
-                        "Remove this partition from the simulation? Data on it will no longer be available.")))
-            {
-                return;
-            }
+            return;
         }
 
         var id = partition.StableId;

@@ -51,7 +51,7 @@ public static class StorageEditRules
         (SimulationOperationKind.Rename, "supported: object friendly name / volume label"),
         (SimulationOperationKind.ChangeDriveLetter, "supported: unused letter, volume present"),
         (SimulationOperationKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
-        (SimulationOperationKind.DeletePartition, "supported: non-system primary"),
+        (SimulationOperationKind.DeletePartition, "supported: any existing partition"),
         (SimulationOperationKind.SetDiskOffline, "supported: non-boot/system/page/dump"),
         (SimulationOperationKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
         (SimulationOperationKind.ConvertDisk, "supported: empty disk to GPT only"),
@@ -137,12 +137,6 @@ public static class StorageEditRules
         if (partition is null)
         {
             return Deny("storage.rule.delete-partition.missing", "The selected partition was not found.");
-        }
-
-        if (partition.IsBoot || partition.IsSystem
-            || partition.Type is "EfiSystem" or "MicrosoftReserved" or "WindowsRecovery")
-        {
-            return Deny("storage.rule.delete-partition.protected", "Protected partitions cannot be deleted.");
         }
 
         return Allow("storage.rule.delete-partition", WindowsPartition);
