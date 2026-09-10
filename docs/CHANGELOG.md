@@ -1,6 +1,12 @@
 # WinPool 变更记录
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存。当前无活动 Plan。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。活动阶段见 [Plan](Plan.md)（待批准）。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+
+## 2026-09-10：V0.49 分区页 Plan 已编制
+
+用户确认分区页不走结构页统一草稿，改为及时生效的格式化/属性页；NTFS、ReFS、exFAT 均可模拟格式化；快速格式化也弹出成功或失败；资源管理器只对本机起效；扩缩容按钮占位不实现。来源稿为 [分区页控件设计](Archive/磁盘分区编辑页-控件设计.md)。
+
+本次只修改文档和架构断言。代码仍为 V0.48。Plan 存在不是开工指令。
 
 ## V0.48：模拟语义、存储模型与提交链路
 

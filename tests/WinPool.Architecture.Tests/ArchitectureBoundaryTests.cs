@@ -185,7 +185,14 @@ public sealed class ArchitectureBoundaryTests
             "Design",
             "WinPool-Multi-Edition-Plan-Simplified.md")));
 
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Plan.md")));
+        var activePlanPath = Path.Combine(root, "docs", "Plan.md");
+        Assert.True(File.Exists(activePlanPath), "docs/Plan.md");
+        var activePlan = File.ReadAllText(activePlanPath);
+        Assert.Contains("V0.49", activePlan, StringComparison.Ordinal);
+        Assert.Contains("等待用户批准执行", activePlan, StringComparison.Ordinal);
+        Assert.Contains("不加入、不调用真实存储写操作", activePlan, StringComparison.Ordinal);
+        Assert.DoesNotContain("本 Plan 授权真实存储", activePlan, StringComparison.Ordinal);
+
         var archivedPlan = Path.Combine(root, "docs", "Archive", "V0.48", "Plan.md");
         Assert.True(File.Exists(archivedPlan), "docs/Archive/V0.48/Plan.md");
         var plan = File.ReadAllText(archivedPlan);
