@@ -71,6 +71,21 @@ public sealed class V048SimulationSemanticsTests
     }
 
     [Fact]
+    public void EmptyMemberDraftPoolPlanIsRejectedWithReason()
+    {
+        var committed = Primordial(ssdCount: 1, hddCount: 0).Snapshot;
+        var drafted = EditWorkspace.InsertDraftPool(committed, "PoolEmpty");
+        var plan = SimulationDraftPlanner.Build(committed, drafted);
+        Assert.Contains(plan.Steps, step => step.Kind == SimulationEditKind.CreateTieredPool);
+        var applied = new SimulationOperationService().ApplyPlan(
+            Primordial(ssdCount: 1, hddCount: 0),
+            plan);
+        Assert.False(applied.Succeeded);
+        Assert.False(string.IsNullOrWhiteSpace(applied.Error));
+        Assert.Contains("physical disk", applied.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void DraftPlannerDoesNotEmitDeleteForNewlyCreatedVirtualDisk()
     {
         var committed = Primordial(ssdCount: 2, hddCount: 0).Snapshot;

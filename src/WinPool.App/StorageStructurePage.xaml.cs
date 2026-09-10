@@ -11,10 +11,9 @@ using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
 namespace WinPool_App;
 
 /// <summary>
-/// Storage structure editor (V0.47 control spec): left pool topology with a
-/// structural draft; upper-right structure operations (undo/redo/discard-all/
-/// apply-all, pool, disk-layer, virtual-disk); lower-right grouped pool,
-/// real-tier, and disk-and-partition properties with one Save row.
+/// Storage structure editor: left pool topology, bottom-left two-row
+/// structure operations, and a right-hand property card that sizes to its
+/// grouped pool / tier / disk-and-partition fields plus one Save row.
 /// Simulation only.
 /// </summary>
 public sealed partial class StorageStructurePage : EditorPageBase
@@ -501,7 +500,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var line = new Border
             {
                 Height = 1,
-                Margin = new Thickness(0, 6, 0, 3),
+                Margin = new Thickness(0, 10, 0, 2),
                 Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
             };
             Grid.SetRow(line, row);
@@ -515,9 +514,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var label = new TextBlock
         {
-            Margin = new Thickness(0, first ? 0 : 2, 0, 2),
+            Margin = new Thickness(0, first ? 0 : 4, 0, 8),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize = 12,
+            FontSize = 16,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"],
             Text = ViewModel.Localization[key]
         };
         Grid.SetRow(label, row);
@@ -546,6 +546,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var label = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 14,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             Text = ViewModel.Localization[key]
         };
         value.VerticalAlignment = VerticalAlignment.Center;
@@ -1972,23 +1974,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var applied = await ViewModel.ApplySimulationPlanAsync(plan);
         if (!applied.IsSuccess)
         {
-            if (applied.Status == ApplicationStatus.OutcomeUnknown)
-            {
-                await ShowMessageAsync(
-                    Text("提交结果未知", "Commit outcome unknown"),
-                    applied.Messages.FirstOrDefault()?.UserTextKey
-                    ?? Text(
-                        "请求已发送，但结果未知。请重新加载后再决定是否重试。",
-                        "The request was sent and the outcome is unknown. Reload before retrying."));
-            }
-
-            _undoStack.Clear();
-            _redoStack.Clear();
-            _working = ViewModel.ActiveSnapshot;
-            _formDirty = false;
-            NormalizeSelection();
-            ResetLayerSwitchesForSelection();
-            RefreshAll();
+            await HandleFailedApplyAsync(applied, pending);
             return;
         }
 
@@ -2001,6 +1987,41 @@ public sealed partial class StorageStructurePage : EditorPageBase
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         _formDirty = false;
+        RefreshAll();
+    }
+
+    private async Task HandleFailedApplyAsync(
+        ApplicationResult<SimulationEditReceipt> applied,
+        StorageSnapshot pending)
+    {
+        var detail = applied.Messages.FirstOrDefault()?.UserTextKey;
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            detail = applied.Status.ToString();
+        }
+
+        if (applied.Status == ApplicationStatus.OutcomeUnknown)
+        {
+            await ShowMessageAsync(
+                Text("提交结果未知", "Commit outcome unknown"),
+                detail);
+            _undoStack.Clear();
+            _redoStack.Clear();
+            _working = ViewModel.ActiveSnapshot;
+            _formDirty = false;
+            NormalizeSelection();
+            ResetLayerSwitchesForSelection();
+            RefreshAll();
+            return;
+        }
+
+        await ShowMessageAsync(Text("操作不可用", "Operation unavailable"), detail);
+        if (!ReferenceEquals(pending, _working))
+        {
+            _working = pending;
+            _formDirty = false;
+        }
+
         RefreshAll();
     }
 
