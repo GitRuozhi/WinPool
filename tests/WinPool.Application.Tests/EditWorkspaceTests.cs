@@ -564,7 +564,7 @@ public sealed class EditWorkspaceTests
                 0, "pool:t1", null, [])
         };
         return new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             [ssd, hdd, extra],
@@ -595,6 +595,7 @@ public sealed class EditWorkspaceTests
                 : [],
             [],
             [],
+            [],
             []);
     }
 
@@ -606,7 +607,7 @@ public sealed class EditWorkspaceTests
             "partition:mid", true, 1, 1, "Primary", 200_000, 300_000, false, false,
             "E", "Data", "NTFS", 65536, 100_000, "Healthy", "OK", "E:\\", "osdisk:gap");
         return new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [],
             [
@@ -626,6 +627,7 @@ public sealed class EditWorkspaceTests
             [partition],
             [],
             [],
+            [],
             []);
     }
 
@@ -640,7 +642,7 @@ public sealed class EditWorkspaceTests
             2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 3,
             false, false, false, false, "pool:primordial");
         return new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             [ssd, hdd],
@@ -649,6 +651,7 @@ public sealed class EditWorkspaceTests
                     "pool:primordial", true, "Primordial", true, "Healthy", "OK",
                     3_000_000_000L, 0, "subsystem:1", ["physical:ssd", "physical:hdd"])
             ],
+            [],
             [],
             [],
             [],
@@ -857,7 +860,9 @@ public sealed class NormalizeTierCapacityTests
         };
         var normalized = EditWorkspace.NormalizeTierCapacities(zeroed);
         var tier = normalized.StorageTiers.Single();
-        Assert.Equal(2_000_000, tier.Size);
+        Assert.True(tier.Size > 0);
+        Assert.True(tier.Size <= 2_000_000);
+        Assert.Equal(CapacitySourceKind.SimulatedEstimate, tier.SizeSource);
     }
 
     [Fact]

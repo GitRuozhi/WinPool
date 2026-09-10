@@ -148,7 +148,10 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
                     ("sizeBytes", Number(item.Size)),
                     ("footprintBytes", Number(item.FootprintOnPool)),
                     ("numberOfColumns", Number(item.NumberOfColumns)),
-                    ("interleaveBytes", Number(item.Interleave))));
+                    ("interleaveBytes", Number(item.Interleave)),
+                    ("numberOfDataCopies", Number(item.NumberOfDataCopies)),
+                    ("physicalDiskRedundancy", Number(item.PhysicalDiskRedundancy)),
+                    ("sizeSource", item.SizeSource.ToString())));
         }
 
         foreach (var item in source.PhysicalDisks)
@@ -173,7 +176,10 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
                 ("isCrashDump", Bool(item.IsCrashDump)),
                 ("firmwareVersion", item.FirmwareVersion),
                 ("interfaceType", item.InterfaceType),
-                ("provisioningType", item.ProvisioningType));
+                ("provisioningType", item.ProvisioningType),
+                ("usage", item.Usage),
+                ("isRetired", Bool(item.IsRetired)),
+                ("isHotSpare", Bool(item.IsHotSpare)));
             if (includeSensitiveValuesInMemory)
             {
                 properties["pnpDeviceId"] = item.PnpDeviceId;
@@ -249,7 +255,28 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
                     ("sizeRemainingBytes", Number(item.SizeRemaining)),
                     ("healthStatus", item.HealthStatus),
                     ("operationalStatus", item.OperationalStatus),
-                    ("isHidden", Bool(item.IsHidden))));
+                    ("isHidden", Bool(item.IsHidden)),
+                    ("partitionTypeId", item.PartitionTypeId)));
+        }
+
+        foreach (var item in source.Volumes)
+        {
+            Add(
+                StorageObjectKind.Volume,
+                item.StableId,
+                string.IsNullOrWhiteSpace(item.DriveLetter)
+                    ? First(item.FileSystemLabel, item.StableId)
+                    : $"{item.DriveLetter}:",
+                item.IsStable,
+                Resolve(item.PartitionStableId) ?? systemObject,
+                Properties(
+                    ("fileSystem", item.FileSystem),
+                    ("fileSystemLabel", item.FileSystemLabel),
+                    ("sizeBytes", Number(item.Size)),
+                    ("sizeRemainingBytes", Number(item.SizeRemaining)),
+                    ("allocationUnitSize", Number(item.AllocationUnitSize)),
+                    ("accessPaths", string.Join(";", item.AccessPaths)),
+                    ("volumeIdentity", includeSensitiveValuesInMemory ? item.VolumeIdentity : string.Empty)));
         }
 
         foreach (var item in source.NetworkDisks)

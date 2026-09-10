@@ -37,7 +37,7 @@ public static class EditWorkspace
     };
 
     public static string DiskUsage(PhysicalDiskInfo disk) =>
-        disk.IsRetired ? "Retired" : disk.IsHotSpare ? "HotSpare" : string.Empty;
+        PhysicalDiskUsage.ToSimulatedLayer(disk.Usage);
 
     public static bool IsPoolRow(string? id) =>
         string.Equals(id, PoolRowStableId, StringComparison.OrdinalIgnoreCase);
@@ -467,8 +467,7 @@ public static class EditWorkspace
                 .Select(item => item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase)
                     ? item with
                     {
-                        IsRetired = usage == "Retired",
-                        IsHotSpare = usage == "HotSpare"
+                        Usage = PhysicalDiskUsage.FromSimulatedLayer(usage)
                     }
                     : item)
                 .ToArray(),
@@ -1234,8 +1233,7 @@ public sealed record StructureProblem(
                         CanPool = target.IsPrimordial,
                         // Leaving a simulated layer returns the disk to the
                         // data path; a moved disk never keeps a layer role.
-                        IsRetired = false,
-                        IsHotSpare = false
+                        Usage = PhysicalDiskUsage.AutoSelect
                     }
                     : item)
                 .ToArray(),
@@ -1348,17 +1346,34 @@ public sealed record StructureProblem(
                     return tier;
                 }
 
-                var capacity = snapshot.PhysicalDisks
+                var members = snapshot.PhysicalDisks
                     .Where(disk => tier.MemberPhysicalDiskIds.Contains(
-                        disk.StableId, StringComparer.OrdinalIgnoreCase))
-                    .Sum(disk => disk.Size);
-                if (capacity <= 0)
+                        disk.StableId, StringComparer.OrdinalIgnoreCase)
+                        && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
+                    .ToArray();
+                if (members.Length == 0)
+                {
+                    return tier;
+                }
+
+                var copies = tier.NumberOfDataCopies
+                    ?? (string.Equals(tier.ResiliencySettingName, "Mirror", StringComparison.OrdinalIgnoreCase) ? 2 : 1);
+                var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+                    members.Select(disk => disk.Size).ToArray(),
+                    Math.Max(1, copies),
+                    tier.Interleave ?? 65536);
+                if (estimate.AlignedLogicalBytes <= 0)
                 {
                     return tier;
                 }
 
                 changed = true;
-                return tier with { Size = capacity, FootprintOnPool = capacity };
+                return tier with
+                {
+                    Size = estimate.AlignedLogicalBytes,
+                    FootprintOnPool = estimate.RawDataMemberBytes,
+                    SizeSource = CapacitySourceKind.SimulatedEstimate
+                };
             })
             .ToArray();
         return changed ? snapshot with { StorageTiers = tiers } : snapshot;
@@ -1731,8 +1746,7 @@ public sealed record StructureProblem(
                     {
                         PoolStableId = primordial.StableId,
                         CanPool = true,
-                        IsRetired = false,
-                        IsHotSpare = false
+                        Usage = PhysicalDiskUsage.AutoSelect
                     }
                     : item)
                 .ToArray()

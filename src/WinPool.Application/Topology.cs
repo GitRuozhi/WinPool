@@ -261,10 +261,14 @@ public static class TopologyProjector
             .ToList();
     }
 
-    public static string PartitionDisplayName(PartitionInfo partition)
+    public static string PartitionDisplayName(PartitionInfo partition) =>
+        PartitionDisplayName(snapshot: null, partition);
+
+    public static string PartitionDisplayName(StorageSnapshot? snapshot, PartitionInfo partition)
     {
-        var driveLetter = NormalizeDriveLetter(partition.DriveLetter);
-        var label = partition.FileSystemLabel.Replace('\0', ' ').Trim();
+        var volume = snapshot?.VolumeForPartition(partition.StableId);
+        var driveLetter = NormalizeDriveLetter(volume?.DriveLetter ?? partition.DriveLetter);
+        var label = (volume?.FileSystemLabel ?? partition.FileSystemLabel).Replace('\0', ' ').Trim();
         if (string.IsNullOrWhiteSpace(driveLetter))
         {
             return string.Empty;
@@ -446,7 +450,9 @@ public static class TopologyProjector
                     partition.IsStable,
                     osDisk.StableId),
                 JoinSummary(
-                    string.IsNullOrWhiteSpace(partition.FileSystem) ? "Unknown" : partition.FileSystem,
+                    string.IsNullOrWhiteSpace(snapshot.FileSystemOf(partition))
+                        ? "Unknown"
+                        : snapshot.FileSystemOf(partition),
                     FormatBytes(partition.Size))));
         }
     }

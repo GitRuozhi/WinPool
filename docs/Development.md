@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，具体改造与完成状态归 [Plan](Plan.md)，测试要求归 [Quality](Quality.md)。下文的存储语义约定是 2026-09-10 确认的目标，V0.48 负责落实；不得把目标描述为现有实现已完成。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，具体改造与完成状态归 [Plan](Plan.md)，测试要求归 [Quality](Quality.md)。下文的存储语义约定已由 V0.48 落实。实现差距见 CHANGELOG 中仍标为 unverified 的人工/设备项。
 
 ## 环境与模块
 
@@ -68,7 +68,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
 
-目前代码基线为 SQLite schema 14、IPC 4、StorageSystemDocument 1、StorageSnapshot 2；均是内部格式编号，不是产品版本。V0.48 允许直接切换新格式并重建开发数据，不编写旧数据库、旧模拟文件、旧 IPC 的迁移或兼容路径。实际新编号由对应代码常量统一维护，收口时更新本段。
+目前代码基线为 SQLite schema 15、IPC 5、StorageSystemDocument 2、StorageSnapshot 3；均是内部格式编号，不是产品版本。V0.48 已切换到这些编号并拒绝旧格式，不提供迁移或兼容路径。
 
 数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；测试使用隔离新根。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、脱敏、冲突检测和故障恢复要求。
 

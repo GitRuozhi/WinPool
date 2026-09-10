@@ -22,6 +22,8 @@ public static class AgentControlMessageTypes
         "agent.request.delete_simulation_document";
     public const string CommitSimulationEdit =
         "agent.request.commit_simulation_edit";
+    public const string LookupSimulationCommit =
+        "agent.request.lookup_simulation_commit";
     public const string CaptureInventory = "agent.request.capture_inventory";
     public const string CaptureManageInventory =
         "agent.request.capture_manage_inventory";

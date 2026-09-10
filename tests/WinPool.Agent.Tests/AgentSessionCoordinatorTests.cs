@@ -467,6 +467,11 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
+        public Task<ApplicationResult<AgentResponse>> LookupSimulationCommitAsync(
+            LookupAgentSimulationCommitRequest request,
+            CancellationToken cancellationToken) =>
+            Succeed(request);
+
         public Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
             CaptureAgentInventoryRequest request,
             CancellationToken cancellationToken) =>

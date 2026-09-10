@@ -107,13 +107,46 @@ public sealed class SimulationDocumentRepository
         return changed == 1;
     }
 
+    public async Task<SimulationDocumentPayload?> FindByCommitIdAsync(
+        string commitId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(commitId))
+        {
+            return null;
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT d.document_id, d.document_schema_version, d.display_name,
+                   d.sanitized_json, d.sha256, d.revision, d.updated_at_utc_ms
+            FROM simulation_edit_commits c
+            JOIN simulation_documents d ON d.document_id = c.document_id
+            WHERE c.commit_id = $commit;
+            """;
+        command.Parameters.AddWithValue("$commit", commitId.Trim());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
+    }
+
     public async Task<SimulationDocumentPayload> CommitEditAsync(
         SimulationDocumentPayload document,
         string expectedPreviousSha256,
         OperationPlan plan,
         IReadOnlyList<ExecutionEvent> events,
+        string commitId = "",
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(commitId))
+        {
+            var existing = await FindByCommitIdAsync(commitId, cancellationToken);
+            if (existing is not null)
+            {
+                return existing;
+            }
+        }
+
         Validate(document);
         ValidateExpectedHash(expectedPreviousSha256, allowNull: false);
         if (document.Revision < 2)
@@ -140,11 +173,12 @@ public sealed class SimulationDocumentRepository
         link.Transaction = transaction;
         link.CommandText = """
             INSERT INTO simulation_edit_commits(
-                operation_id, document_id, before_sha256, after_sha256,
+                operation_id, commit_id, document_id, before_sha256, after_sha256,
                 document_revision, committed_at_utc_ms)
-            VALUES($operation, $document, $before, $after, $revision, $committed);
+            VALUES($operation, $commit, $document, $before, $after, $revision, $committed);
             """;
         link.Parameters.AddWithValue("$operation", Id(plan.OperationId.Value));
+        link.Parameters.AddWithValue("$commit", string.IsNullOrWhiteSpace(commitId) ? Id(plan.OperationId.Value) : commitId.Trim());
         link.Parameters.AddWithValue("$document", saved.DocumentId);
         link.Parameters.AddWithValue("$before", expectedPreviousSha256);
         link.Parameters.AddWithValue("$after", saved.Sha256);

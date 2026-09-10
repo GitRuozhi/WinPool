@@ -93,8 +93,19 @@ public sealed record CommitAgentSimulationEditRequest(
     string ExpectedPreviousSha256,
     OperationPlan Plan,
     IReadOnlyList<ExecutionEvent> Events,
+    CorrelationId CorrelationId,
+    string CommitId = "")
+    : AgentRequest(CorrelationId);
+
+public sealed record LookupAgentSimulationCommitRequest(
+    string CommitId,
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
+
+public sealed record SimulationCommitLookupResponse(
+    bool Found,
+    SimulationDocumentPayload? Document)
+    : AgentResponse;
 
 public sealed record CaptureAgentInventoryRequest(
     bool IncludeLegacyComparison,

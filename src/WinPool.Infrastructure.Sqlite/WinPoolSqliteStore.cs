@@ -4,10 +4,10 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WinPoolSqliteStore
 {
-    // V0.43 starts from a deliberately clean schema 14 data root. Do not add
+    // V0.48 starts from a deliberately clean schema 15 data root. Do not add
     // migrations from earlier schemas: they contain retired product domains
     // and are intentionally rejected by InitializeAsync.
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 15;
 
     private readonly string connectionString;
 
@@ -593,6 +593,7 @@ public sealed class WinPoolSqliteStore
         );
         CREATE TABLE IF NOT EXISTS simulation_edit_commits(
             operation_id TEXT PRIMARY KEY REFERENCES operation_plans(operation_id),
+            commit_id TEXT NOT NULL UNIQUE,
             document_id TEXT NOT NULL,
             before_sha256 TEXT NOT NULL,
             after_sha256 TEXT NOT NULL,

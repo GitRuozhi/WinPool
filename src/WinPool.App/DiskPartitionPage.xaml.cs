@@ -22,6 +22,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private long? _selectedUnallocatedSize;
     private TopologyEditInteraction _interaction = null!;
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
+    private readonly Stack<StorageSnapshot> _undoStack = new();
+    private readonly Stack<StorageSnapshot> _redoStack = new();
+    private readonly SimulationOperationService _localEditor = new();
 
     public DiskPartitionPage()
     {
@@ -56,6 +59,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         NewPartitionButton.Content = ViewModel.Localization["NewPartition"];
         InitializeButton.Content = ViewModel.Localization["InitializeDisk"];
         OfflineButton.Content = Text("脱机 / 联机", "Offline / Online");
+        UndoButton.Content = ViewModel.Localization["Undo"];
+        RedoButton.Content = ViewModel.Localization["Redo"];
+        DiscardAllButton.Content = ViewModel.Localization["DiscardAll"];
+        ApplyAllButton.Content = ViewModel.Localization["ApplyAll"];
         DiskActionsTitle.Text = ViewModel.Localization["DiskActionsSection"];
         PartitionActionsTitle.Text = ViewModel.Localization["PartitionActionsSection"];
     }
@@ -224,12 +231,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        await ApplyAsync(new SimulationOperationRequest(
+        ApplyLocal(new SimulationOperationRequest(
             extend ? SimulationOperationKind.ExtendPartition : SimulationOperationKind.ShrinkPartition,
             partition.StableId,
             SizeBytes: (long)(gb * 1024 * 1024 * 1024)));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
     }
 
     private async void DeletePartition_Click(object sender, RoutedEventArgs e)
@@ -243,11 +248,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         _selectedPartitionId = null;
-        await ApplyAsync(new SimulationOperationRequest(
+        ApplyLocal(new SimulationOperationRequest(
             SimulationOperationKind.DeletePartition,
             partition.StableId));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
     }
 
     private async void Format_Click(object sender, RoutedEventArgs e)
@@ -290,8 +293,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         await FormatAsync(partition);
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
     }
 
     private async Task FormatAsync(PartitionInfo partition)
@@ -314,7 +315,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        await ApplyAsync(new SimulationOperationRequest(
+        ApplyLocal(new SimulationOperationRequest(
             SimulationOperationKind.FormatPartition,
             partition.StableId,
             FileSystem: fileSystemBox.SelectedItem as string ?? "NTFS",
@@ -352,13 +353,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        await ApplyAsync(new SimulationOperationRequest(
+        ApplyLocal(new SimulationOperationRequest(
             SimulationOperationKind.CreatePartition,
             _selectedDiskId,
             SizeBytes: bytes ?? _selectedUnallocatedSize,
             OffsetBytes: _selectedUnallocatedOffset));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
     }
 
     private async void Initialize_Click(object sender, RoutedEventArgs e) => await InitializeAsync();
@@ -373,7 +372,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var styleBox = new ComboBox { SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         styleBox.Items.Add("GPT");
-        styleBox.Items.Add("MBR");
         var msrBox = new ToggleSwitch
         {
             IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize,
@@ -423,13 +421,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         _selectedPartitionId = null;
-        await ApplyAsync(new SimulationOperationRequest(
+        ApplyLocal(new SimulationOperationRequest(
             SimulationOperationKind.InitializeDisk,
             disk.StableId,
             Name: (string)styleBox.SelectedItem,
             CreateMsr: msrBox.IsOn && (string)styleBox.SelectedItem == "GPT"));
-        _working = ViewModel.ActiveSnapshot;
-        RefreshAll();
     }
 
     private async void Offline_Click(object sender, RoutedEventArgs e)
@@ -440,10 +436,87 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        await ApplyAsync(new SimulationOperationRequest(
+        ApplyLocal(new SimulationOperationRequest(
             SimulationOperationKind.SetDiskOffline,
             disk.StableId,
             Offline: !disk.IsOffline));
+    }
+
+    private void ApplyLocal(SimulationOperationRequest request)
+    {
+        var document = ViewModel.ActiveDocument with { Snapshot = _working };
+        var result = _localEditor.Apply(document, SimulationDraftPlanner.ToOperation(request));
+        if (!result.Succeeded)
+        {
+            _ = ShowMessageAsync(Text("操作不可用", "Operation unavailable"), result.Error);
+            return;
+        }
+
+        _undoStack.Push(_working);
+        _redoStack.Clear();
+        _working = result.Document.Snapshot;
+        RefreshAll();
+    }
+
+    private void Undo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_undoStack.Count == 0)
+        {
+            return;
+        }
+
+        _redoStack.Push(_working);
+        _working = _undoStack.Pop();
+        RefreshAll();
+    }
+
+    private void Redo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_redoStack.Count == 0)
+        {
+            return;
+        }
+
+        _undoStack.Push(_working);
+        _working = _redoStack.Pop();
+        RefreshAll();
+    }
+
+    private void DiscardAll_Click(object sender, RoutedEventArgs e)
+    {
+        _undoStack.Clear();
+        _redoStack.Clear();
+        _working = ViewModel.ActiveSnapshot;
+        RefreshAll();
+    }
+
+    private async void ApplyAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.IsUsingSimulatedInventory)
+        {
+            return;
+        }
+
+        var plan = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, _working);
+        if (plan.IsEmpty)
+        {
+            await ShowMessageAsync(
+                ViewModel.Localization["NoApplyChangesTitle"],
+                ViewModel.Localization["NoApplyChangesMessage"]);
+            return;
+        }
+
+        var applied = await ViewModel.ApplySimulationPlanAsync(plan);
+        if (!applied.IsSuccess)
+        {
+            await ShowMessageAsync(
+                Text("操作不可用", "Operation unavailable"),
+                applied.Messages.FirstOrDefault()?.UserTextKey ?? applied.Status.ToString());
+            return;
+        }
+
+        _undoStack.Clear();
+        _redoStack.Clear();
         _working = ViewModel.ActiveSnapshot;
         RefreshAll();
     }

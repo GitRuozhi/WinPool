@@ -21,7 +21,7 @@
 - 保留真正的依赖、单写入方、类型化命令、脱敏与默认拒绝边界测试。文档检查验证当前约定，不依赖整段固定句子或把所有旧文件数量当成永久产品要求。
 - Git 排除生成物、数据库、日志和源图，保留软件实际消费的资源。
 
-本次文档重构按用户要求不改测试源码。旧 `EnglishDocumentationHasNonAuthoritativeChineseReadingCopies` 与新规则冲突，必须由 V0.48 首项任务修改；本次不声称现有代码测试通过。
+内部文档为中文单一权威，仅根 README 成对维护。该约定由架构测试 `CurrentInternalDocumentsAreChineseAuthoritativeAndOnlyRootReadmeIsPaired` 固定。
 
 ## 存储语义与提交检查
 

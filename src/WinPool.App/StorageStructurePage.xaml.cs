@@ -1899,7 +1899,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var preview = BuildApplyPreviewSteps(pending, ViewModel.ActiveSnapshot);
+        var planned = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, pending);
+        var preview = planned.Steps.Select(step => DescribePlanStep(step)).ToList();
+        if (preview.Count == 0)
+        {
+            preview = BuildApplyPreviewSteps(pending, ViewModel.ActiveSnapshot).ToList();
+        }
         if (preview.Count == 0)
         {
             await ShowMessageAsync(
@@ -1955,12 +1960,28 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        if (!await ApplyPendingSequenceAsync(pending))
+        var plan = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, pending);
+        if (plan.IsEmpty)
         {
-            // A mid-sequence rejection leaves some edits already applied.
-            // Sync the working copy to the committed snapshot and drop the
-            // draft, so it can never be applied a second time (which would
-            // duplicate a pool or virtual disk).
+            await ShowMessageAsync(
+                ViewModel.Localization["NoApplyChangesTitle"],
+                ViewModel.Localization["NoApplyChangesMessage"]);
+            return;
+        }
+
+        var applied = await ViewModel.ApplySimulationPlanAsync(plan);
+        if (!applied.IsSuccess)
+        {
+            if (applied.Status == ApplicationStatus.OutcomeUnknown)
+            {
+                await ShowMessageAsync(
+                    Text("提交结果未知", "Commit outcome unknown"),
+                    applied.Messages.FirstOrDefault()?.UserTextKey
+                    ?? Text(
+                        "请求已发送，但结果未知。请重新加载后再决定是否重试。",
+                        "The request was sent and the outcome is unknown. Reload before retrying."));
+            }
+
             _undoStack.Clear();
             _redoStack.Clear();
             _working = ViewModel.ActiveSnapshot;
@@ -2089,6 +2110,48 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         return result;
+    }
+
+    private string DescribePlanStep(SimulationEditRequest step)
+    {
+        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        return step.Kind switch
+        {
+            SimulationEditKind.CreateTieredPool => zh
+                ? $"创建存储池“{step.Name}”。"
+                : $"Create storage pool \"{step.Name}\".",
+            SimulationEditKind.CreateVirtualDisk => zh
+                ? $"创建虚拟磁盘“{step.Name}”。"
+                : $"Create virtual disk \"{step.Name}\".",
+            SimulationEditKind.DeleteVirtualDisk => zh
+                ? "删除虚拟磁盘。"
+                : "Delete virtual disk.",
+            SimulationEditKind.DissolveStoragePool => zh
+                ? "解散存储池。"
+                : "Dissolve storage pool.",
+            SimulationEditKind.CreatePartition => zh
+                ? "创建分区。"
+                : "Create partition.",
+            SimulationEditKind.DeletePartition => zh
+                ? "删除分区。"
+                : "Delete partition.",
+            SimulationEditKind.FormatPartition => zh
+                ? $"格式化为 {step.FileSystem ?? "NTFS"}。"
+                : $"Format as {step.FileSystem ?? "NTFS"}.",
+            SimulationEditKind.ChangeDriveLetter => zh
+                ? $"更改盘符为 {step.DriveLetter}。"
+                : $"Change drive letter to {step.DriveLetter}.",
+            SimulationEditKind.SetDiskUsage => zh
+                ? $"设置磁盘用途为 {step.Name}。"
+                : $"Set disk usage to {step.Name}.",
+            SimulationEditKind.MovePhysicalDisk => zh
+                ? "移动物理磁盘。"
+                : "Move physical disk.",
+            SimulationEditKind.UpdateStoragePool => zh
+                ? $"更新存储池“{step.Name}”。"
+                : $"Update storage pool \"{step.Name}\".",
+            _ => step.Kind.ToString()
+        };
     }
 
     private IReadOnlyList<string> BuildApplyPreviewSteps(StorageSnapshot working, StorageSnapshot committed)
@@ -3008,27 +3071,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
         }
 
-        if (objectChanged)
-        {
-            if (await ApplyAsync(BuildPoolPropertyRequest(pool, merged)) is null)
-            {
-                return;
-            }
-        }
-
-        if (partitionChanged)
-        {
-            if (await ApplyPartitionChangesAsync(merged, ViewModel.ActiveSnapshot, pool.StableId))
-            {
-                return;
-            }
-        }
-
-        // Keep structural draft steps on the new committed snapshot; the
-        // saved property values are checkpointed, so undo history ends here.
-        _working = EditWorkspace.RestoreWorkingMembership(ViewModel.ActiveSnapshot, merged);
-        _undoStack.Clear();
+        _undoStack.Push(_working);
         _redoStack.Clear();
+        _working = merged;
         _formDirty = false;
         RefreshAll();
     }

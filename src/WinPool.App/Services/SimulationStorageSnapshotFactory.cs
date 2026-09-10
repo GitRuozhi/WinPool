@@ -122,7 +122,7 @@ public static class SimulationStorageSnapshotFactory
         };
 
         return new StorageSnapshot(
-            2,
+            StorageSnapshot.CurrentSchemaVersion,
             SimulatedSnapshotVersion,
             DateTimeOffset.Now,
             new ComputerInfo(
@@ -141,6 +141,23 @@ public static class SimulationStorageSnapshotFactory
             virtualDisks,
             osDisks,
             partitions,
+            partitions
+                .Where(item =>
+                    !string.IsNullOrWhiteSpace(item.FileSystem)
+                    || !string.IsNullOrWhiteSpace(item.DriveLetter))
+                .Select(item => new VolumeInfo(
+                    $"sim:volume:{item.StableId}",
+                    item.IsStable,
+                    item.StableId,
+                    item.FileSystem,
+                    item.FileSystemLabel,
+                    item.Size,
+                    item.SizeRemaining,
+                    item.AllocationUnitSize,
+                    item.HealthStatus,
+                    item.OperationalStatus,
+                    string.IsNullOrWhiteSpace(item.Path) ? [] : [item.Path]))
+                .ToArray(),
             networkDisks,
             [],
             []);

@@ -38,6 +38,23 @@ public sealed class StorageMathTests
     {
         Assert.Null(StorageMath.Percentage(1, 0));
         Assert.Equal(125d, StorageMath.Percentage(5, 4));
+    }
+
+    [Fact]
+    public void ConservativeCapacityAppliesOnePercentReserveAndAlignment()
+    {
+        var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+            [200L * 1024 * 1024 * 1024, 200L * 1024 * 1024 * 1024],
+            dataCopies: 2,
+            interleaveBytes: 65536);
+        Assert.Equal(200L * 1024 * 1024 * 1024, estimate.LogicalGrossBytes);
+        Assert.True(estimate.AlignedLogicalBytes <= estimate.LogicalGrossBytes * 99 / 100);
+        Assert.Equal(0, estimate.AlignedLogicalBytes % 65536);
+    }
+
+    [Fact]
+    public void ClampActivityPercentageCapsAtOneHundred()
+    {
         Assert.Equal(100d, StorageMath.ClampActivityPercentage(125d));
     }
 

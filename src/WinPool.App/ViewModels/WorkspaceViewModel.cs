@@ -865,6 +865,24 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         return true;
     }
 
+    public async Task<WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt>> ApplySimulationPlanAsync(
+        WinPool.Application.SimulationDraftPlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _simulationEditCoordinator.ExecutePlanAsync(plan, cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return result;
+        }
+
+        foreach (var command in result.Value.SimulatedCommands)
+        {
+            CommandLog.Log("simulation", command, "OK", simulated: true);
+        }
+
+        return result;
+    }
+
     public async Task<WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt>> ApplySimulationOperationAsync(
         WinPool.Application.SimulationEditRequest request,
         CancellationToken cancellationToken = default)
@@ -894,7 +912,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 document,
                 commit.Plan,
                 commit.Events,
-                cancellationToken);
+                cancellationToken,
+                commit.CommitId);
         }
         else
         {

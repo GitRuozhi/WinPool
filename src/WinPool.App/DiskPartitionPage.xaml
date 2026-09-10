@@ -55,6 +55,22 @@
             CornerRadius="4">
             <ScrollViewer Padding="12,8" VerticalScrollBarVisibility="Auto">
                 <StackPanel Spacing="8">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="UndoButton" HorizontalAlignment="Stretch" Click="Undo_Click" />
+                        <Button x:Name="RedoButton" Grid.Column="1" HorizontalAlignment="Stretch" Click="Redo_Click" />
+                    </Grid>
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="DiscardAllButton" HorizontalAlignment="Stretch" Click="DiscardAll_Click" />
+                        <Button x:Name="ApplyAllButton" Grid.Column="1" HorizontalAlignment="Stretch" Click="ApplyAll_Click" />
+                    </Grid>
                     <TextBlock
                         x:Name="SelectedPartitionInfo"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"

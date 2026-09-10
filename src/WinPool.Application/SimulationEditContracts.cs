@@ -61,7 +61,20 @@ public sealed record SimulationEditRequest(
     int? ScmDataCopies = null,
     long? OffsetBytes = null,
     bool? CreatePartition = null,
-    bool? CreateVirtualDisk = null);
+    bool? CreateVirtualDisk = null,
+    string? AllocatedPoolId = null,
+    string? AllocatedVirtualDiskId = null,
+    string? AllocatedOsDiskId = null,
+    string? AllocatedPartitionId = null,
+    string? AllocatedVolumeId = null,
+    IReadOnlyList<string>? AccessPaths = null);
+
+public sealed record SimulationDraftPlan(
+    string PlanId,
+    IReadOnlyList<SimulationEditRequest> Steps)
+{
+    public bool IsEmpty => Steps.Count == 0;
+}
 
 public sealed record SimulationEditReceipt(
     OperationId OperationId,
@@ -76,5 +89,9 @@ public interface ISimulationEditCoordinator
 {
     Task<ApplicationResult<SimulationEditReceipt>> ExecuteAsync(
         SimulationEditRequest request,
+        CancellationToken cancellationToken);
+
+    Task<ApplicationResult<SimulationEditReceipt>> ExecutePlanAsync(
+        SimulationDraftPlan plan,
         CancellationToken cancellationToken);
 }

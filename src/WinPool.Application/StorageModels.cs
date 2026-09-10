@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using WinPool.Domain;
 
 namespace WinPool.Application;
 
@@ -24,6 +25,7 @@ public enum StorageUnitKind
     NetworkDisk,
     OsDisk,
     Partition,
+    Volume,
     NetworkDiskGroup,
     OtherDiskGroup,
     DirectDiskGroup,
@@ -94,8 +96,12 @@ public sealed record PhysicalDiskInfo(
     string InterfaceType = "",
     string ProvisioningType = "",
     string PnpDeviceId = "",
-    bool IsRetired = false,
-    bool IsHotSpare = false);
+    string Usage = "")
+{
+    public bool IsRetired => PhysicalDiskUsage.IsRetired(Usage);
+
+    public bool IsHotSpare => PhysicalDiskUsage.IsHotSpare(Usage);
+}
 
 public sealed record StoragePoolInfo(
     string StableId,
@@ -126,7 +132,8 @@ public sealed record StorageTierInfo(
     int? NumberOfColumns = null,
     long? Interleave = null,
     int? NumberOfDataCopies = null,
-    int? PhysicalDiskRedundancy = null);
+    int? PhysicalDiskRedundancy = null,
+    CapacitySourceKind SizeSource = CapacitySourceKind.Collected);
 
 public sealed record VirtualDiskInfo(
     string StableId,
@@ -142,7 +149,8 @@ public sealed record VirtualDiskInfo(
     long FootprintOnPool,
     string? PoolStableId,
     IReadOnlyList<string> TierStableIds,
-    IReadOnlyList<int> OsDiskNumbers);
+    IReadOnlyList<int> OsDiskNumbers,
+    CapacitySourceKind SizeSource = CapacitySourceKind.Collected);
 
 public sealed record OsDiskInfo(
     string StableId,
@@ -175,7 +183,50 @@ public sealed record PartitionInfo(
     string OperationalStatus,
     string Path,
     string? OsDiskStableId,
-    bool IsHidden = false);
+    bool IsHidden = false,
+    string PartitionTypeId = "");
+
+public sealed record VolumeInfo(
+    string StableId,
+    bool IsStable,
+    string? PartitionStableId,
+    string FileSystem,
+    string FileSystemLabel,
+    long Size,
+    long SizeRemaining,
+    long? AllocationUnitSize,
+    string HealthStatus,
+    string OperationalStatus,
+    IReadOnlyList<string> AccessPaths,
+    string VolumeIdentity = "")
+{
+    public string DriveLetter
+    {
+        get
+        {
+            foreach (var path in AccessPaths)
+            {
+                var trimmed = (path ?? string.Empty).Trim();
+                if (trimmed.Length >= 2 && trimmed[1] == ':')
+                {
+                    var candidate = char.ToUpperInvariant(trimmed[0]);
+                    if (candidate is >= 'A' and <= 'Z')
+                    {
+                        return candidate.ToString();
+                    }
+                }
+
+                var letter = TopologyProjector.NormalizeDriveLetter(path);
+                if (letter.Length == 1)
+                {
+                    return letter;
+                }
+            }
+
+            return string.Empty;
+        }
+    }
+}
 
 public sealed record NetworkDiskInfo(
     string StableId,
@@ -199,13 +250,16 @@ public sealed record StorageSnapshot(
     IReadOnlyList<VirtualDiskInfo> VirtualDisks,
     IReadOnlyList<OsDiskInfo> OsDisks,
     IReadOnlyList<PartitionInfo> Partitions,
+    IReadOnlyList<VolumeInfo> Volumes,
     IReadOnlyList<NetworkDiskInfo> NetworkDisks,
     IReadOnlyList<StorageRelationship> Relationships,
     IReadOnlyList<InventoryWarning> Warnings)
 {
+    public const int CurrentSchemaVersion = 3;
+
     public static StorageSnapshot Empty(string computerName) =>
         new(
-            2,
+            CurrentSchemaVersion,
             "empty",
             DateTimeOffset.MinValue,
             new ComputerInfo(
@@ -215,6 +269,7 @@ public sealed record StorageSnapshot(
                 string.Empty,
                 string.Empty,
                 DateTimeOffset.MinValue),
+            [],
             [],
             [],
             [],
@@ -306,9 +361,26 @@ public sealed record StorageSnapshot(
             return new StorageUnitRef(
                 stableId,
                 StorageUnitKind.Partition,
-                TopologyProjector.PartitionDisplayName(partition),
+                TopologyProjector.PartitionDisplayName(this, partition),
                 partition.IsStable,
                 partition.OsDiskStableId);
+        }
+
+        var volume = Volumes.FirstOrDefault(x => x.StableId == stableId);
+        if (volume is not null)
+        {
+            var letter = volume.DriveLetter;
+            var display = string.IsNullOrWhiteSpace(letter)
+                ? volume.FileSystemLabel
+                : string.IsNullOrWhiteSpace(volume.FileSystemLabel)
+                    ? $"{letter}:"
+                    : $"{letter}: {volume.FileSystemLabel}";
+            return new StorageUnitRef(
+                stableId,
+                StorageUnitKind.Volume,
+                display,
+                volume.IsStable,
+                volume.PartitionStableId);
         }
 
         var networkDisk = NetworkDisks.FirstOrDefault(x => x.StableId == stableId);
@@ -326,6 +398,36 @@ public sealed record StorageSnapshot(
             ? null
             : new StorageUnitRef(stableId, StorageUnitKind.OsDisk, $"Disk {osDisk.Number}", true, osDisk.PhysicalDiskStableId ?? osDisk.VirtualDiskStableId);
     }
+
+    public VolumeInfo? VolumeForPartition(string? partitionId) =>
+        string.IsNullOrWhiteSpace(partitionId)
+            ? null
+            : Volumes.FirstOrDefault(item =>
+                string.Equals(item.PartitionStableId, partitionId, StringComparison.OrdinalIgnoreCase));
+
+    public string DriveLetterOf(PartitionInfo partition) =>
+        VolumeForPartition(partition.StableId)?.DriveLetter
+        ?? TopologyProjector.NormalizeDriveLetter(partition.DriveLetter);
+
+    public string FileSystemOf(PartitionInfo partition) =>
+        VolumeForPartition(partition.StableId)?.FileSystem
+        ?? partition.FileSystem;
+
+    public string FileSystemLabelOf(PartitionInfo partition) =>
+        VolumeForPartition(partition.StableId)?.FileSystemLabel
+        ?? partition.FileSystemLabel;
+
+    public long SizeRemainingOf(PartitionInfo partition) =>
+        VolumeForPartition(partition.StableId)?.SizeRemaining
+        ?? partition.SizeRemaining;
+
+    public long? AllocationUnitOf(PartitionInfo partition) =>
+        VolumeForPartition(partition.StableId)?.AllocationUnitSize
+        ?? partition.AllocationUnitSize;
+
+    public IReadOnlyList<string> AccessPathsOf(PartitionInfo partition) =>
+        VolumeForPartition(partition.StableId)?.AccessPaths
+        ?? (string.IsNullOrWhiteSpace(partition.Path) ? [] : [partition.Path]);
 
 }
 

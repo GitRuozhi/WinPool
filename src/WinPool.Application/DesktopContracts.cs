@@ -76,6 +76,10 @@ public interface ISimulationOperationService
     SimulationOperationResult Apply(
         StorageSystemDocument document,
         SimulationOperationRequest request);
+
+    SimulationOperationResult ApplyPlan(
+        StorageSystemDocument document,
+        SimulationDraftPlan plan);
 }
 
 public interface IPrivilegeService

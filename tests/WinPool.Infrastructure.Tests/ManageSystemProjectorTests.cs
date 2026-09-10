@@ -539,10 +539,10 @@ public sealed class ManageSystemProjectorTests
             false, false, "C", "Data", "NTFS", 4096, 400_000,
             "Healthy", "OK", "C:\\", "osdisk:3");
         var snapshot = new StorageSnapshot(
-            2, "test", now,
+            StorageSnapshot.CurrentSchemaVersion, "test", now,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", now),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
-            [physical], [pool], [tier], [virtualDisk], [osDisk], [partition], [],
+            [physical], [pool], [tier], [virtualDisk], [osDisk], [partition], [], [],
             [new StorageRelationship("pool:1", "physical:1", "PoolMember")],
             []);
         return new(

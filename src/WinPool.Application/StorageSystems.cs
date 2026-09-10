@@ -72,7 +72,7 @@ public sealed record StorageSystemDocument(
     DateTimeOffset UpdatedAt,
     string? SourceHostName = null)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public string DocumentId => Id;
 
@@ -329,7 +329,13 @@ public sealed record SimulationOperationRequest(
     int? ScmDataCopies = null,
     long? OffsetBytes = null,
     bool? CreatePartition = null,
-    bool? CreateVirtualDisk = null);
+    bool? CreateVirtualDisk = null,
+    string? AllocatedPoolId = null,
+    string? AllocatedVirtualDiskId = null,
+    string? AllocatedOsDiskId = null,
+    string? AllocatedPartitionId = null,
+    string? AllocatedVolumeId = null,
+    IReadOnlyList<string>? AccessPaths = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -423,6 +429,17 @@ public sealed class SimulationOperationService : ISimulationOperationService
             return SimulationOperationResult.Failure(document, "Local storage systems are read-only.");
         }
 
+        var decision = StorageEditRules.Evaluate(document.Snapshot, request);
+        if (decision.Verdict == StorageRuleVerdict.Deny)
+        {
+            return SimulationOperationResult.Failure(document, decision.Message);
+        }
+
+        if (decision.Verdict == StorageRuleVerdict.InsufficientInfo)
+        {
+            return SimulationOperationResult.Failure(document, decision.Message);
+        }
+
         try
         {
             var snapshot = request.Kind switch
@@ -469,7 +486,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                         SimulationJobStatus.Completed,
                         now,
                         now,
-                        "Simulated storage-pool allocation rebalance completed.")).ToArray();
+                        "Simulated no-op. No rearrangement or performance improvement is claimed.")).ToArray();
                 }
                 else
                 {
@@ -480,8 +497,15 @@ public sealed class SimulationOperationService : ISimulationOperationService
                         SimulationJobStatus.Completed,
                         now,
                         now,
-                        "Simulated drive optimization completed.")).ToArray();
+                        "Simulated no-op. No rearrangement or performance improvement is claimed.")).ToArray();
                 }
+            }
+
+            snapshot = StorageRelationshipProjector.Rebuild(snapshot);
+            var graphErrors = StorageRelationshipProjector.Validate(snapshot);
+            if (graphErrors.Count > 0)
+            {
+                return SimulationOperationResult.Failure(document, graphErrors[0]);
             }
 
             return new SimulationOperationResult(
@@ -494,6 +518,29 @@ public sealed class SimulationOperationService : ISimulationOperationService
         {
             return SimulationOperationResult.Failure(document, ex.Message);
         }
+    }
+
+    public SimulationOperationResult ApplyPlan(
+        StorageSystemDocument document,
+        SimulationDraftPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(plan);
+        var current = document;
+        var commands = new List<string>();
+        foreach (var step in plan.Steps)
+        {
+            var result = Apply(current, SimulationDraftPlanner.ToOperation(step));
+            if (!result.Succeeded)
+            {
+                return result;
+            }
+
+            current = result.Document;
+            commands.AddRange(result.Commands);
+        }
+
+        return new SimulationOperationResult(true, current, string.Empty, commands);
     }
 
     private static StorageSnapshot Rename(StorageSnapshot snapshot, SimulationOperationRequest request)
@@ -559,14 +606,27 @@ public sealed class SimulationOperationService : ISimulationOperationService
             };
         }
 
-        if (snapshot.Partitions.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.Volumes.Any(x => x.StableId == request.TargetStableId))
         {
             return snapshot with
             {
-                Partitions = snapshot.Partitions
+                Volumes = snapshot.Volumes
                     .Select(x => x.StableId == request.TargetStableId ? x with { FileSystemLabel = name } : x)
                     .ToArray()
             };
+        }
+
+        if (snapshot.Partitions.Any(x => x.StableId == request.TargetStableId))
+        {
+            var partitionId = request.TargetStableId;
+            var volumes = snapshot.Volumes.Select(item =>
+                item.PartitionStableId == partitionId ? item with { FileSystemLabel = name } : item).ToArray();
+            if (volumes.All(item => item.PartitionStableId != partitionId))
+            {
+                volumes = volumes.Append(NewVolume(partitionId, snapshot.Partitions.First(item => item.StableId == partitionId).Size, name, "", null, [])).ToArray();
+            }
+
+            return snapshot with { Volumes = volumes };
         }
 
         throw new InvalidOperationException("The selected simulated object cannot be renamed.");
@@ -586,29 +646,45 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException($"Drive letter {driveLetter}: is already in use.");
         }
 
-        var found = false;
-        var partitions = snapshot.Partitions.Select(x =>
-        {
-            if (x.StableId != request.TargetStableId)
-            {
-                return x;
-            }
-            found = true;
-            return x with { DriveLetter = driveLetter, Path = $"{driveLetter}:\\" };
-        }).ToArray();
-        if (!found)
+        if (snapshot.Partitions.All(x => x.StableId != request.TargetStableId))
         {
             throw new InvalidOperationException("The selected partition was not found.");
         }
-        return snapshot with { Partitions = partitions };
+
+        var path = $"{driveLetter}:\\";
+        var volumes = snapshot.Volumes.ToList();
+        var existing = volumes.FindIndex(item => item.PartitionStableId == request.TargetStableId);
+        if (existing >= 0)
+        {
+            var volume = volumes[existing];
+            var access = volume.AccessPaths
+                .Where(item => TopologyProjector.NormalizeDriveLetter(item).Length != 1)
+                .Append(path)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            volumes[existing] = volume with { AccessPaths = access };
+        }
+        else
+        {
+            var partition = snapshot.Partitions.First(item => item.StableId == request.TargetStableId);
+            volumes.Add(NewVolume(
+                request.TargetStableId,
+                partition.Size,
+                partition.FileSystemLabel,
+                partition.FileSystem,
+                partition.AllocationUnitSize,
+                [path]));
+        }
+
+        return snapshot with { Volumes = volumes };
     }
 
     private static StorageSnapshot FormatPartition(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
         var fileSystem = request.FileSystem?.Trim().ToUpperInvariant();
-        if (fileSystem is not ("NTFS" or "REFS" or "EXFAT"))
+        if (fileSystem is not ("NTFS" or "REFS"))
         {
-            throw new InvalidOperationException("The simulated file system must be NTFS, ReFS, or exFAT.");
+            throw new InvalidOperationException("The simulated file system must be NTFS or ReFS.");
         }
         var allocationUnit = request.AllocationUnitSize ?? 4096;
         if (allocationUnit <= 0)
@@ -616,34 +692,63 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException("Allocation unit size must be positive.");
         }
 
-        var found = false;
-        var partitions = snapshot.Partitions.Select(x =>
+        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetStableId)
+            ?? throw new InvalidOperationException("The selected partition was not found.");
+        if (partition.IsBoot || partition.IsSystem)
         {
-            if (x.StableId != request.TargetStableId)
-            {
-                return x;
-            }
-            if (x.IsBoot || x.IsSystem)
-            {
-                throw new InvalidOperationException("A simulated boot or system partition cannot be formatted.");
-            }
-            found = true;
-            return x with
-            {
-                FileSystem = fileSystem,
-                FileSystemLabel = request.Name?.Trim() ?? x.FileSystemLabel,
-                AllocationUnitSize = allocationUnit,
-                SizeRemaining = x.Size,
-                HealthStatus = "Healthy",
-                OperationalStatus = "OK"
-            };
-        }).ToArray();
-        if (!found)
-        {
-            throw new InvalidOperationException("The selected partition was not found.");
+            throw new InvalidOperationException("A simulated boot or system partition cannot be formatted.");
         }
-        return snapshot with { Partitions = partitions };
+
+        var label = request.Name?.Trim() ?? snapshot.FileSystemLabelOf(partition);
+        var access = request.AccessPaths
+            ?? snapshot.AccessPathsOf(partition);
+        if (access.Count == 0 && !string.IsNullOrWhiteSpace(snapshot.DriveLetterOf(partition)))
+        {
+            access = [$"{snapshot.DriveLetterOf(partition)}:\\"];
+        }
+
+        var volumes = snapshot.Volumes.ToList();
+        var index = volumes.FindIndex(item => item.PartitionStableId == partition.StableId);
+        var volume = NewVolume(
+            partition.StableId,
+            partition.Size,
+            label,
+            fileSystem,
+            allocationUnit,
+            access,
+            request.AllocatedVolumeId);
+        if (index >= 0)
+        {
+            volumes[index] = volume with { StableId = volumes[index].StableId, IsStable = volumes[index].IsStable };
+        }
+        else
+        {
+            volumes.Add(volume);
+        }
+
+        return snapshot with { Volumes = volumes };
     }
+
+    private static VolumeInfo NewVolume(
+        string partitionId,
+        long size,
+        string label,
+        string fileSystem,
+        long? allocationUnit,
+        IReadOnlyList<string> accessPaths,
+        string? allocatedId = null) =>
+        new(
+            string.IsNullOrWhiteSpace(allocatedId) ? $"sim:volume:{Guid.NewGuid():N}" : allocatedId,
+            true,
+            partitionId,
+            fileSystem,
+            label,
+            size,
+            string.IsNullOrWhiteSpace(fileSystem) ? 0 : size,
+            allocationUnit,
+            "Healthy",
+            "OK",
+            accessPaths);
 
     private static StorageSnapshot DeletePartition(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
@@ -655,16 +760,17 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
         return snapshot with
         {
-            Partitions = snapshot.Partitions.Where(x => x.StableId != request.TargetStableId).ToArray()
+            Partitions = snapshot.Partitions.Where(x => x.StableId != request.TargetStableId).ToArray(),
+            Volumes = snapshot.Volumes.Where(x => x.PartitionStableId != request.TargetStableId).ToArray()
         };
     }
 
     private static StorageSnapshot ConvertDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
         var style = request.Name?.Trim().ToUpperInvariant();
-        if (style is not ("GPT" or "MBR"))
+        if (style != "GPT")
         {
-            throw new InvalidOperationException("Partition style must be GPT or MBR.");
+            throw new InvalidOperationException("Partition style must be GPT.");
         }
         var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
@@ -703,9 +809,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
     private static StorageSnapshot InitializeDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
     {
         var style = request.Name?.Trim().ToUpperInvariant();
-        if (style is not ("GPT" or "MBR"))
+        if (style != "GPT")
         {
-            throw new InvalidOperationException("Partition style must be GPT or MBR.");
+            throw new InvalidOperationException("Partition style must be GPT.");
         }
         var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
@@ -738,6 +844,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 disk.StableId));
         }
 
+        var remainingIds = remaining.Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return snapshot with
         {
             OsDisks = snapshot.OsDisks
@@ -745,7 +852,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     ? x with { PartitionStyle = style, IsOffline = false }
                     : x)
                 .ToArray(),
-            Partitions = remaining
+            Partitions = remaining,
+            Volumes = snapshot.Volumes
+                .Where(item => item.PartitionStableId is null || remainingIds.Contains(item.PartitionStableId))
+                .ToArray()
         };
     }
 
@@ -793,8 +903,15 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var letter = string.IsNullOrWhiteSpace(request.DriveLetter)
             ? NextFreeDriveLetter(snapshot)
             : TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
+        var partitionId = string.IsNullOrWhiteSpace(request.AllocatedPartitionId)
+            ? $"sim:partition:{Guid.NewGuid():N}"
+            : request.AllocatedPartitionId;
+        var fileSystem = request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty;
+        var label = request.Name?.Trim() ?? string.Empty;
+        long? cluster = string.IsNullOrWhiteSpace(fileSystem) ? null : request.AllocationUnitSize ?? 4096;
+        var path = string.IsNullOrWhiteSpace(letter) ? string.Empty : $"{letter}:\\";
         var partition = new PartitionInfo(
-            $"sim:partition:{Guid.NewGuid():N}",
+            partitionId,
             true,
             disk.Number,
             existing.Count + 1,
@@ -804,16 +921,28 @@ public sealed class SimulationOperationService : ISimulationOperationService
             false,
             false,
             letter,
-            request.Name?.Trim() ?? string.Empty,
-            request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty,
-            string.IsNullOrWhiteSpace(request.FileSystem) ? null : request.AllocationUnitSize ?? 4096,
+            label,
+            fileSystem,
+            cluster,
             size,
             "Healthy",
             "OK",
-            string.IsNullOrWhiteSpace(letter) ? string.Empty : $"{letter}:\\",
+            path,
             disk.StableId);
+        var volume = NewVolume(
+            partitionId,
+            size,
+            label,
+            fileSystem,
+            cluster,
+            string.IsNullOrWhiteSpace(path) ? [] : [path],
+            request.AllocatedVolumeId);
 
-        return snapshot with { Partitions = snapshot.Partitions.Append(partition).ToArray() };
+        return snapshot with
+        {
+            Partitions = snapshot.Partitions.Append(partition).ToArray(),
+            Volumes = snapshot.Volumes.Append(volume).ToArray()
+        };
     }
 
     private static StorageSnapshot ResizePartition(
@@ -897,7 +1026,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException("Boot, system, page-file, and crash-dump disks cannot join a simulated pool.");
         }
 
-        var poolId = $"sim:pool:{Guid.NewGuid():N}";
+        var poolId = string.IsNullOrWhiteSpace(request.AllocatedPoolId)
+            ? $"sim:pool:{Guid.NewGuid():N}"
+            : request.AllocatedPoolId;
         var pool = new StoragePoolInfo(
             poolId,
             true,
@@ -945,15 +1076,43 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException("A non-empty virtual disk name is required.");
         }
 
-        var free = pool.Size - pool.AllocatedSize;
-        var size = request.SizeBytes is null or <= 0 ? free : Math.Min(request.SizeBytes.Value, free);
+        var dataMembers = snapshot.PhysicalDisks
+            .Where(item => pool.MemberPhysicalDiskIds.Contains(item.StableId, StringComparer.OrdinalIgnoreCase)
+                && PhysicalDiskUsage.ContributesDataCapacity(item.Usage))
+            .ToArray();
+        var copies = request.PerformanceDataCopies
+            ?? EditWorkspace.RecommendedDataCopies(request.Resiliency ?? "Simple", dataMembers.Length);
+        copies = Math.Max(1, Math.Min(copies, Math.Max(1, dataMembers.Length)));
+        var interleave = request.InterleaveBytes ?? 65536;
+        var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+            dataMembers.Select(item => item.Size).ToArray(),
+            copies,
+            interleave,
+            pool.AllocatedSize);
+        var free = estimate.AlignedLogicalBytes;
+        var size = request.SizeBytes is null or <= 0 ? free : request.SizeBytes.Value;
         if (size <= 0)
         {
             throw new InvalidOperationException("The simulated pool has no free capacity.");
         }
 
-        var vdiskId = $"sim:vdisk:{Guid.NewGuid():N}";
+        if (request.SizeBytes is > 0 && size > free)
+        {
+            throw new InvalidOperationException(
+                $"Requested virtual disk size {size} exceeds the conservative logical upper bound {free}.");
+        }
+
+        var vdiskId = string.IsNullOrWhiteSpace(request.AllocatedVirtualDiskId)
+            ? $"sim:vdisk:{Guid.NewGuid():N}"
+            : request.AllocatedVirtualDiskId;
+        var osDiskId = string.IsNullOrWhiteSpace(request.AllocatedOsDiskId)
+            ? $"sim:osdisk:{Guid.NewGuid():N}"
+            : request.AllocatedOsDiskId;
         var osDiskNumber = snapshot.OsDisks.Select(x => x.Number).DefaultIfEmpty(-1).Max() + 1;
+        var tierIds = snapshot.StorageTiers
+            .Where(item => item.PoolStableId == pool.StableId)
+            .Select(item => item.StableId)
+            .ToArray();
         var vdisk = new VirtualDiskInfo(
             vdiskId,
             true,
@@ -963,14 +1122,15 @@ public sealed class SimulationOperationService : ISimulationOperationService
             request.Resiliency ?? "Simple",
             "Fixed",
             1,
-            request.InterleaveBytes ?? 65536,
+            interleave,
             size,
-            size,
+            Math.Min(estimate.RawDataMemberBytes, checked(size * copies)),
             pool.StableId,
-            [],
-            [osDiskNumber]);
+            tierIds,
+            [osDiskNumber],
+            CapacitySourceKind.SimulatedEstimate);
         var osDisk = new OsDiskInfo(
-            $"sim:osdisk:{Guid.NewGuid():N}",
+            osDiskId,
             name,
             osDiskNumber,
             "RAW",
@@ -980,11 +1140,17 @@ public sealed class SimulationOperationService : ISimulationOperationService
             false,
             null,
             vdiskId);
+        var tiers = snapshot.StorageTiers
+            .Select(tier => tier.PoolStableId == pool.StableId
+                ? tier with { VirtualDiskStableId = vdiskId }
+                : tier)
+            .ToArray();
 
         return snapshot with
         {
             VirtualDisks = snapshot.VirtualDisks.Append(vdisk).ToArray(),
             OsDisks = snapshot.OsDisks.Append(osDisk).ToArray(),
+            StorageTiers = tiers,
             StoragePools = snapshot.StoragePools
                 .Select(x => x.StableId == pool.StableId
                     ? x with { AllocatedSize = x.AllocatedSize + size }
@@ -1068,14 +1234,21 @@ public sealed class SimulationOperationService : ISimulationOperationService
             return created;
         }
 
+        var performanceTier = created.StorageTiers.FirstOrDefault(item =>
+            item.PoolStableId == pool.StableId
+            && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD")
+            ?? created.StorageTiers.FirstOrDefault(item => item.PoolStableId == pool.StableId);
         created = CreateVirtualDisk(created, new SimulationOperationRequest(
             SimulationOperationKind.CreateVirtualDisk,
             pool.StableId,
             Name: virtualName,
-            Resiliency: request.PerformanceResiliency ?? "Mirror",
-            InterleaveBytes: request.PerformanceInterleaveBytes ?? 65536,
+            Resiliency: performanceTier?.ResiliencySettingName ?? request.PerformanceResiliency ?? "Simple",
+            InterleaveBytes: performanceTier?.Interleave ?? request.PerformanceInterleaveBytes ?? 65536,
             SizeBytes: request.SizeBytes,
-            AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+            AllocationUnitSize: request.AllocationUnitSize ?? 65536,
+            PerformanceDataCopies: performanceTier?.NumberOfDataCopies,
+            AllocatedVirtualDiskId: request.AllocatedVirtualDiskId,
+            AllocatedOsDiskId: request.AllocatedOsDiskId));
         if (request.CreatePartition == false)
         {
             // Auto-create partition is off: the virtual disk stays RAW and
@@ -1120,7 +1293,18 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var columnCount = media == "HDD"
             ? columns ?? EditWorkspace.RecommendedCapacityColumns(members)
             : (int?)null;
-        var size = sizeBytes is > 0 ? sizeBytes.Value : members.Sum(item => item.Size);
+        var dataMembers = members.Where(item => PhysicalDiskUsage.ContributesDataCapacity(item.Usage)).ToArray();
+        var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+            dataMembers.Select(item => item.Size).ToArray(),
+            Math.Max(1, copies),
+            interleave ?? 65536);
+        var size = sizeBytes is > 0 ? sizeBytes.Value : estimate.AlignedLogicalBytes;
+        if (sizeBytes is > 0 && sizeBytes.Value > estimate.AlignedLogicalBytes && estimate.AlignedLogicalBytes > 0)
+        {
+            throw new InvalidOperationException(
+                $"Requested tier size {sizeBytes.Value} exceeds the conservative logical upper bound {estimate.AlignedLogicalBytes}.");
+        }
+
         return new StorageTierInfo(
             $"{poolId}:tier:{media.ToLowerInvariant()}",
             true,
@@ -1128,14 +1312,15 @@ public sealed class SimulationOperationService : ISimulationOperationService
             media,
             setting,
             size,
-            size,
+            estimate.RawDataMemberBytes,
             poolId,
             null,
             members.Select(item => item.StableId).ToArray(),
             columnCount,
             interleave ?? 65536,
             copies,
-            tolerated);
+            tolerated,
+            CapacitySourceKind.SimulatedEstimate);
     }
 
     private static StorageSnapshot UpdateStoragePool(StorageSnapshot snapshot, SimulationOperationRequest request)
@@ -1290,14 +1475,18 @@ public sealed class SimulationOperationService : ISimulationOperationService
             OsDisks = snapshot.OsDisks.Where(item => !osDiskIds.Contains(item.StableId)).ToArray(),
             Partitions = snapshot.Partitions.Where(item =>
                 item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray(),
+            Volumes = snapshot.Volumes.Where(item =>
+                item.PartitionStableId is null
+                || snapshot.Partitions.Any(partition =>
+                    partition.StableId == item.PartitionStableId
+                    && (partition.OsDiskStableId is null || !osDiskIds.Contains(partition.OsDiskStableId)))).ToArray(),
             PhysicalDisks = snapshot.PhysicalDisks
                 .Select(disk => members.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)
                     ? disk with
                     {
                         PoolStableId = primordial.StableId,
                         CanPool = true,
-                        IsRetired = false,
-                        IsHotSpare = false
+                        Usage = PhysicalDiskUsage.AutoSelect
                     }
                     : disk)
                 .ToArray()
@@ -1330,7 +1519,17 @@ public sealed class SimulationOperationService : ISimulationOperationService
             VirtualDisks = snapshot.VirtualDisks.Where(item => item.StableId != vdisk.StableId).ToArray(),
             OsDisks = snapshot.OsDisks.Where(item => !osDiskIds.Contains(item.StableId)).ToArray(),
             Partitions = snapshot.Partitions.Where(item =>
-                item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray()
+                item.OsDiskStableId is null || !osDiskIds.Contains(item.OsDiskStableId)).ToArray(),
+            Volumes = snapshot.Volumes.Where(item =>
+                item.PartitionStableId is null
+                || snapshot.Partitions.Any(partition =>
+                    partition.StableId == item.PartitionStableId
+                    && (partition.OsDiskStableId is null || !osDiskIds.Contains(partition.OsDiskStableId)))).ToArray(),
+            StorageTiers = snapshot.StorageTiers
+                .Select(tier => tier.VirtualDiskStableId == vdisk.StableId
+                    ? tier with { VirtualDiskStableId = null }
+                    : tier)
+                .ToArray()
         };
     }
 
@@ -1343,8 +1542,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
     private static string NextFreeDriveLetter(StorageSnapshot snapshot)
     {
-        var used = snapshot.Partitions
-            .Select(x => TopologyProjector.NormalizeDriveLetter(x.DriveLetter))
+        var used = snapshot.Volumes
+            .Select(x => x.DriveLetter)
+            .Concat(snapshot.Partitions.Select(x => TopologyProjector.NormalizeDriveLetter(x.DriveLetter)))
             .Concat(snapshot.NetworkDisks.Select(x => TopologyProjector.NormalizeDriveLetter(x.DriveLetter)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in "CDEFGHIJKLMNOPQRSTUVWXYZ")

@@ -190,7 +190,7 @@ public sealed class SimulationEditCoordinatorTests
     private static StorageSystemDocument CreateDocument(StorageSystemKind kind)
     {
         var snapshot = new StorageSnapshot(
-            2,
+            StorageSnapshot.CurrentSchemaVersion,
             "test",
             DateTimeOffset.FromUnixTimeSeconds(1_800_000_000),
             new ComputerInfo(
@@ -222,6 +222,7 @@ public sealed class SimulationEditCoordinatorTests
             [],
             [],
             [],
+            [],
             []);
         return new StorageSystemDocument(
             StorageSystemDocument.CurrentSchemaVersion,
@@ -239,6 +240,11 @@ public sealed class SimulationEditCoordinatorTests
         public SimulationOperationResult Apply(
             StorageSystemDocument document,
             SimulationOperationRequest request) =>
+            throw new InvalidOperationException("The simulation editor must not be invoked.");
+
+        public SimulationOperationResult ApplyPlan(
+            StorageSystemDocument document,
+            SimulationDraftPlan plan) =>
             throw new InvalidOperationException("The simulation editor must not be invoked.");
     }
 }

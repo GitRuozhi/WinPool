@@ -150,52 +150,47 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void EnglishDocumentationHasNonAuthoritativeChineseReadingCopies()
+    public void CurrentInternalDocumentsAreChineseAuthoritativeAndOnlyRootReadmeIsPaired()
     {
         var root = FindRepositoryRoot();
-        var pairs = new[]
-        {
-            ("README.md", "README.zh-CN.md"),
-            ("AGENTS.md", "AGENTS.zh-CN.md"),
-            ("docs/Product.md", "docs/Product.zh-CN.md"),
-            ("docs/Development.md", "docs/Development.zh-CN.md"),
-            ("docs/Quality.md", "docs/Quality.zh-CN.md"),
-            ("docs/Archive/V0.44-shared-runtime-staging/README.md", "docs/Archive/V0.44-shared-runtime-staging/README.zh-CN.md"),
-            ("docs/Archive/V0.44-shared-runtime-staging/Plan.md", "docs/Archive/V0.44-shared-runtime-staging/Plan.zh-CN.md"),
-            ("docs/Archive/V0.44-shared-staging-draft/README.md", "docs/Archive/V0.44-shared-staging-draft/README.zh-CN.md"),
-            ("docs/Archive/V0.43/Plan.md", "docs/Archive/V0.43/Plan.zh-CN.md"),
-            ("docs/Archive/V0.44/Plan.md", "docs/Archive/V0.44/Plan.zh-CN.md"),
-            ("docs/Archive/V0.44/README.md", "docs/Archive/V0.44/README.zh-CN.md"),
-            ("docs/Archive/V0.44/V0.44-App-Agent-runtime-collision.md", "docs/Archive/V0.44/V0.44-App-Agent-runtime-collision.zh-CN.md"),
-            ("docs/Archive/V0.32/Plan.md", "docs/Archive/V0.32/Plan.zh-CN.md"),
-            ("docs/Archive/V0.33/Plan.md", "docs/Archive/V0.33/Plan.zh-CN.md"),
-            ("docs/Archive/V0.33/README.md", "docs/Archive/V0.33/README.zh-CN.md"),
-            ("docs/CHANGELOG.md", "docs/CHANGELOG.zh-CN.md"),
-            ("docs/Archive/README.md", "docs/Archive/README.zh-CN.md")
-        };
-
+        Assert.True(File.Exists(Path.Combine(root, "README.md")), "README.md");
+        Assert.True(File.Exists(Path.Combine(root, "README.zh-CN.md")), "README.zh-CN.md");
         Assert.False(File.Exists(Path.Combine(root, "README_CN.md")));
-        Assert.All(
-            pairs,
-            pair =>
-            {
-                Assert.True(File.Exists(Path.Combine(root, pair.Item1)), pair.Item1);
-                var readingCopy = Path.Combine(root, pair.Item2);
-                Assert.True(File.Exists(readingCopy), pair.Item2);
-                Assert.Contains("无 `.zh-CN` 后缀", File.ReadAllText(readingCopy));
-            });
+        Assert.False(File.Exists(Path.Combine(root, "AGENTS.zh-CN.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "Product.zh-CN.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "Development.zh-CN.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "Quality.zh-CN.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "CHANGELOG.zh-CN.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "Plan.zh-CN.md")));
+        Assert.False(File.Exists(Path.Combine(root, "docs", "Archive", "README.zh-CN.md")));
 
-        var activePlan = Path.Combine(root, "docs", "Plan.md");
-        var activePlanZh = Path.Combine(root, "docs", "Plan.zh-CN.md");
-        if (File.Exists(activePlan))
-        {
-            Assert.True(File.Exists(activePlanZh), "docs/Plan.zh-CN.md");
-            Assert.Contains("无 `.zh-CN` 后缀", File.ReadAllText(activePlanZh));
-        }
-        else
-        {
-            Assert.False(File.Exists(activePlanZh));
-        }
+        var agents = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
+        Assert.Contains("内部开发文档以中文单一版本为准", agents, StringComparison.Ordinal);
+        Assert.Contains("[Design 索引](docs/Design/README.md)", agents, StringComparison.Ordinal);
+
+        var designIndex = Path.Combine(root, "docs", "Design", "README.md");
+        Assert.True(File.Exists(designIndex), "docs/Design/README.md");
+        var design = File.ReadAllText(designIndex);
+        Assert.Contains("设计储备", design, StringComparison.Ordinal);
+        Assert.Contains("未纳入 V0.48", design, StringComparison.Ordinal);
+        Assert.Contains("不自动成为当前要求", design, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(
+            root,
+            "docs",
+            "Design",
+            "WinPool-Hardware-Inventory-Analysis-and-Refactor-Plan.md")));
+        Assert.True(File.Exists(Path.Combine(
+            root,
+            "docs",
+            "Design",
+            "WinPool-Multi-Edition-Plan-Simplified.md")));
+
+        var planPath = Path.Combine(root, "docs", "Plan.md");
+        Assert.True(File.Exists(planPath), "docs/Plan.md");
+        var plan = File.ReadAllText(planPath);
+        Assert.Contains("V0.48", plan, StringComparison.Ordinal);
+        Assert.Contains("[Design](Design/README.md)不是任务来源", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("执行 V0.48 硬件", plan, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -759,7 +754,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>4</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>7</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>8</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
@@ -1089,25 +1084,25 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IpcProtocolCurrentVersionIsFour()
+    public void IpcProtocolCurrentVersionIsFive()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
 
-        Assert.Contains("public const int CurrentVersion = 4;", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("= 3;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 5;", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SqliteStoreSchemaVersionIsFourteen()
+    public void SqliteStoreSchemaVersionIsFifteen()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Infrastructure.Sqlite", "WinPoolSqliteStore.cs"));
 
-        Assert.Contains("public const int CurrentSchemaVersion = 14;", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("= 13;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentSchemaVersion = 15;", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("= 14;", source, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -4,7 +4,7 @@
 
 WinPool is a Windows desktop application for viewing storage topology, monitoring devices, and editing simulated storage systems.
 
-The current implementation is **V0.47**. V0.48 is a planned model and simulation refactor; its fixes are not yet implemented. Real storage-structure changes are not enabled.
+The current implementation is **V0.48**. Real storage-structure changes are not enabled.
 
 ## What you can use
 
@@ -13,7 +13,7 @@ The current implementation is **V0.47**. V0.48 is a planned model and simulation
 - Monitor supported devices and configure application and background preferences.
 - Use English or Simplified Chinese, themes, and keyboard navigation.
 
-The current editor has known submission, capacity-estimation, and relationship issues. Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
+Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
 
 The Test and Development tabs are roadmap notices throughout 1.x. Their full workspaces are planned for 2.0.
 

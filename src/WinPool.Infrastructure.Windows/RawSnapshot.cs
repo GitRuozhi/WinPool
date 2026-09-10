@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -68,6 +69,7 @@ internal sealed class RawPhysicalDisk : RawIdentity
     public bool IsPageFile { get; set; }
     public bool IsCrashDump { get; set; }
     public string PoolAssociationKey { get; set; } = string.Empty;
+    public string Usage { get; set; } = string.Empty;
 }
 
 internal sealed class RawPool : RawIdentity
@@ -94,6 +96,8 @@ internal sealed class RawTier : RawIdentity
     public long FootprintOnPool { get; set; }
     public int? NumberOfColumns { get; set; }
     public long? Interleave { get; set; }
+    public int? NumberOfDataCopies { get; set; }
+    public int? PhysicalDiskRedundancy { get; set; }
     public string PoolAssociationKey { get; set; } = string.Empty;
     public string VirtualDiskAssociationKey { get; set; } = string.Empty;
     public List<string> MemberPhysicalDiskKeys { get; set; } = [];
@@ -155,6 +159,7 @@ internal sealed class RawPartition
     public string DriveType { get; set; } = string.Empty;
     public string VolumeUniqueId { get; set; } = string.Empty;
     public string VolumeObjectId { get; set; } = string.Empty;
+    public List<string> AccessPaths { get; set; } = [];
 }
 
 internal sealed class RawLogicalVolume
@@ -248,7 +253,8 @@ internal static class RawSnapshotProjector
                 x.FirmwareVersion.Trim(),
                 (drive?.InterfaceType ?? string.Empty).Trim(),
                 x.ProvisioningType.Trim(),
-                (drive?.PNPDeviceID ?? string.Empty).Trim());
+                (drive?.PNPDeviceID ?? string.Empty).Trim(),
+                PhysicalDiskUsage.Normalize(x.Usage));
         }).ToList();
 
         var pools = raw.StoragePools.Select(x =>
@@ -303,7 +309,9 @@ internal static class RawSnapshotProjector
                 Resolve(virtualMap, x.VirtualDiskAssociationKey),
                 ResolveMany(physicalMap, x.MemberPhysicalDiskKeys),
                 x.NumberOfColumns,
-                x.Interleave);
+                x.Interleave,
+                x.NumberOfDataCopies,
+                x.PhysicalDiskRedundancy);
         }).ToList();
 
         var virtualDisks = raw.VirtualDisks.Select(x =>
@@ -345,6 +353,52 @@ internal static class RawSnapshotProjector
                 x.FreeSpace);
         }).ToList();
 
+        var volumes = raw.Partitions
+            .Where(x =>
+                !string.IsNullOrWhiteSpace(x.VolumeUniqueId)
+                || !string.IsNullOrWhiteSpace(x.FileSystem)
+                || !string.IsNullOrWhiteSpace(x.DriveLetter)
+                || !string.IsNullOrWhiteSpace(x.Path))
+            .Select(x =>
+            {
+                var partitionId = partitionMap[(x.DiskNumber, x.PartitionNumber)];
+                var letter = TopologyProjector.NormalizeDriveLetter(x.DriveLetter);
+                var access = (x.AccessPaths ?? [])
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Select(path => path.Trim())
+                    .ToList();
+                if (access.Count == 0 && !string.IsNullOrWhiteSpace(x.Path))
+                {
+                    access.Add(x.Path);
+                }
+                else if (access.Count == 0 && !string.IsNullOrWhiteSpace(letter))
+                {
+                    access.Add($"{letter}:\\");
+                }
+
+                var identity = StableId.Create(
+                    "volume",
+                    x.VolumeUniqueId,
+                    x.VolumeObjectId,
+                    x.DiskNumber,
+                    x.PartitionNumber,
+                    x.Path);
+                return new VolumeInfo(
+                    identity.Value,
+                    identity.IsStable,
+                    partitionId,
+                    x.FileSystem,
+                    x.FileSystemLabel.Replace('\0', ' ').Trim(),
+                    x.Size,
+                    x.SizeRemaining,
+                    x.AllocationUnitSize,
+                    x.HealthStatus,
+                    x.OperationalStatus,
+                    access,
+                    string.IsNullOrWhiteSpace(x.VolumeUniqueId) ? string.Empty : identity.Value);
+            })
+            .ToList();
+
         var relationships = BuildRelationships(pools, tiers, virtualDisks, osDisks, partitions);
         var warnings = raw.Warnings.Select(x => new InventoryWarning(
             x.Code,
@@ -356,8 +410,8 @@ internal static class RawSnapshotProjector
 
         var snapshotHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceJson)))[..16].ToLowerInvariant();
         var computerName = First(raw.Computer.Name, Environment.MachineName);
-        return new StorageSnapshot(
-            2,
+        var snapshot = new StorageSnapshot(
+            StorageSnapshot.CurrentSchemaVersion,
             snapshotHash,
             raw.ScannedAt,
             new ComputerInfo(
@@ -376,9 +430,11 @@ internal static class RawSnapshotProjector
             virtualDisks,
             osDisks,
             partitions,
+            volumes,
             networkDisks,
             relationships,
             warnings);
+        return StorageRelationshipProjector.Rebuild(snapshot);
     }
 
     private static Dictionary<string, (string Value, bool IsStable)> Map<T>(

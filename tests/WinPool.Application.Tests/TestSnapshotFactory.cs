@@ -23,11 +23,14 @@ internal static class TestSnapshotFactory
         var partition = new PartitionInfo(
             "partition:1", true, 3, 1, "Primary", 1048576, 900_000, false, false,
             "C", "Data", "NTFS", 4096, 400_000, "Healthy", "OK", "C:\\", "osdisk:3");
+        var volume = new VolumeInfo(
+            "volume:1", true, "partition:1", "NTFS", "Data", 900_000, 400_000, 4096,
+            "Healthy", "OK", ["C:\\"], "vol-test");
         return new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
-            [physical], [pool], [tier], [virtualDisk], [osDisk], [partition], [],
+            [physical], [pool], [tier], [virtualDisk], [osDisk], [partition], [volume], [],
             [new StorageRelationship("pool:1", "physical:1", "PoolMember")],
             []);
     }

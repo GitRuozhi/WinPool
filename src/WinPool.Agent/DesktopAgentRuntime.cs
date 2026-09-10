@@ -302,6 +302,16 @@ internal sealed class DesktopAgentRuntime :
         }
     }
 
+    public async Task<ApplicationResult<AgentResponse>> LookupSimulationCommitAsync(
+        LookupAgentSimulationCommitRequest request,
+        CancellationToken cancellationToken)
+    {
+        var document = await simulationDocuments.FindByCommitIdAsync(request.CommitId, cancellationToken);
+        return ApplicationResult<AgentResponse>.Succeeded(
+            new SimulationCommitLookupResponse(document is not null, document),
+            request.CorrelationId);
+    }
+
     public async Task<ApplicationResult<AgentResponse>> CommitSimulationEditAsync(
         CommitAgentSimulationEditRequest request,
         CancellationToken cancellationToken)
@@ -313,6 +323,7 @@ internal sealed class DesktopAgentRuntime :
                 request.ExpectedPreviousSha256,
                 request.Plan,
                 request.Events,
+                request.CommitId,
                 cancellationToken);
             return ApplicationResult<AgentResponse>.Succeeded(
                 new SimulationDocumentSavedResponse(document),

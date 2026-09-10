@@ -50,6 +50,7 @@ public enum StorageObjectKind
     VirtualDisk,
     OsDisk,
     Partition,
+    Volume,
     NetworkDisk,
     LogicalGroup
 }

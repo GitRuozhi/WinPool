@@ -394,7 +394,7 @@ public static class SimulationCatalog
         {
             var computerId = $"simulation:system:{_prefix}";
             return new StorageSnapshot(
-                2,
+                StorageSnapshot.CurrentSchemaVersion,
                 version,
                 DateTimeOffset.Now,
                 new ComputerInfo(
@@ -413,10 +413,31 @@ public static class SimulationCatalog
                 _virtualDisks,
                 _osDisks,
                 _partitions,
+                VolumesFrom(_partitions),
                 _networks,
                 [],
                 []);
         }
+
+        private static IReadOnlyList<VolumeInfo> VolumesFrom(IEnumerable<PartitionInfo> partitions) =>
+            partitions
+                .Where(item =>
+                    !string.IsNullOrWhiteSpace(item.FileSystem)
+                    || !string.IsNullOrWhiteSpace(item.DriveLetter)
+                    || !string.IsNullOrWhiteSpace(item.Path))
+                .Select(item => new VolumeInfo(
+                    $"sim:volume:{item.StableId}",
+                    item.IsStable,
+                    item.StableId,
+                    item.FileSystem,
+                    item.FileSystemLabel,
+                    item.Size,
+                    item.SizeRemaining,
+                    item.AllocationUnitSize,
+                    item.HealthStatus,
+                    item.OperationalStatus,
+                    string.IsNullOrWhiteSpace(item.Path) ? [] : [item.Path]))
+                .ToArray();
 
         private void AddOsDisk(
             int number,

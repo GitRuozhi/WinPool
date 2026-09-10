@@ -102,7 +102,8 @@ public interface IStructuredSimulationEditRepository
         StorageSystemDocument document,
         OperationPlan plan,
         IReadOnlyList<ExecutionEvent> events,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string commitId = "");
 }
 
 public static class SimulationDocumentCodec
@@ -153,6 +154,7 @@ public static class SimulationDocumentCodec
             ?? throw new InvalidDataException("The Agent simulation document is empty.");
         if (document.Kind != StorageSystemKind.Simulation
             || document.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion
+            || document.Snapshot.SchemaVersion != StorageSnapshot.CurrentSchemaVersion
             || !StringComparer.Ordinal.Equals(document.Id, payload.DocumentId))
         {
             throw new InvalidDataException("The Agent simulation document metadata is inconsistent.");
@@ -366,7 +368,8 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         StorageSystemDocument document,
         OperationPlan plan,
         IReadOnlyList<ExecutionEvent> events,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string commitId = "")
     {
         await gate.WaitAsync(cancellationToken);
         try
@@ -376,15 +379,44 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
                 throw new InvalidOperationException(
                     "The simulation document must be loaded before an edit can be committed.");
             }
-            var response = await SendAsync(
+
+            var id = string.IsNullOrWhiteSpace(commitId)
+                ? Guid.NewGuid().ToString("N")
+                : commitId.Trim();
+            var result = await connection.SendAsync(
                 new CommitAgentSimulationEditRequest(
                     SimulationDocumentCodec.Encode(document),
                     expected,
                     plan,
                     events,
-                    CorrelationId.New()),
+                    CorrelationId.New(),
+                    id),
                 cancellationToken);
-            UpdateHash(response, document.Id);
+            if (result.Status == ApplicationStatus.OutcomeUnknown)
+            {
+                var lookup = await connection.SendAsync(
+                    new LookupAgentSimulationCommitRequest(id, CorrelationId.New()),
+                    cancellationToken);
+                if (lookup.IsSuccess
+                    && lookup.Value is SimulationCommitLookupResponse found
+                    && found.Found
+                    && found.Document is not null)
+                {
+                    hashes[document.Id] = found.Document.Sha256;
+                    return;
+                }
+
+                throw new SimulationCommitOutcomeUnknownException(id);
+            }
+
+            if (!result.IsSuccess || result.Value is null)
+            {
+                throw new InvalidOperationException(
+                    result.Messages.FirstOrDefault()?.Code
+                    ?? "The Agent persistence request failed.");
+            }
+
+            UpdateHash(result.Value, document.Id);
         }
         finally
         {

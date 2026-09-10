@@ -261,7 +261,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 14, 0);
+        VALUES(1, 15, 0);
         """,
         "schema_info.checks")]
     [InlineData(

@@ -81,6 +81,8 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<DeleteAgentSimulationDocumentRequest>(envelope),
                 AgentControlMessageTypes.CommitSimulationEdit =>
                     Deserialize<CommitAgentSimulationEditRequest>(envelope),
+                AgentControlMessageTypes.LookupSimulationCommit =>
+                    Deserialize<LookupAgentSimulationCommitRequest>(envelope),
                 AgentControlMessageTypes.CaptureInventory =>
                     Deserialize<CaptureAgentInventoryRequest>(envelope),
                 AgentControlMessageTypes.CaptureManageInventory =>

@@ -950,6 +950,14 @@ public sealed class NamedPipeAgentConnectionTests
                     new SimulationDocumentSavedResponse(request.Document),
                     request.CorrelationId));
 
+        public Task<ApplicationResult<AgentResponse>> LookupSimulationCommitAsync(
+            LookupAgentSimulationCommitRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(
+                ApplicationResult<AgentResponse>.Succeeded(
+                    new SimulationCommitLookupResponse(false, null),
+                    request.CorrelationId));
+
         public Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
             CaptureAgentInventoryRequest request,
             CancellationToken cancellationToken) =>

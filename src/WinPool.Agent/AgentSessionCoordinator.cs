@@ -51,6 +51,10 @@ public interface IAgentRequestOperations
         CommitAgentSimulationEditRequest request,
         CancellationToken cancellationToken);
 
+    Task<ApplicationResult<AgentResponse>> LookupSimulationCommitAsync(
+        LookupAgentSimulationCommitRequest request,
+        CancellationToken cancellationToken);
+
     Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
         CaptureAgentInventoryRequest request,
         CancellationToken cancellationToken);
@@ -187,6 +191,8 @@ public sealed class AgentSessionCoordinator
                 operations.DeleteSimulationDocumentAsync(typed, cancellationToken),
             CommitAgentSimulationEditRequest typed =>
                 operations.CommitSimulationEditAsync(typed, cancellationToken),
+            LookupAgentSimulationCommitRequest typed =>
+                operations.LookupSimulationCommitAsync(typed, cancellationToken),
             CaptureAgentInventoryRequest typed =>
                 operations.CaptureInventoryAsync(typed, cancellationToken),
             CaptureAgentManageInventoryRequest typed =>

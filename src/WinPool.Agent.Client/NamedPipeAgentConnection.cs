@@ -887,6 +887,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.DeleteSimulationDocument,
             CommitAgentSimulationEditRequest =>
                 AgentControlMessageTypes.CommitSimulationEdit,
+            LookupAgentSimulationCommitRequest =>
+                AgentControlMessageTypes.LookupSimulationCommit,
             CaptureAgentInventoryRequest => AgentControlMessageTypes.CaptureInventory,
             CaptureAgentManageInventoryRequest =>
                 AgentControlMessageTypes.CaptureManageInventory,
@@ -926,6 +928,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<SimulationDocumentSavedResponse>(JsonOptions),
             nameof(SimulationDocumentDeletedResponse) =>
                 response.Deserialize<SimulationDocumentDeletedResponse>(JsonOptions),
+            nameof(SimulationCommitLookupResponse) =>
+                response.Deserialize<SimulationCommitLookupResponse>(JsonOptions),
             nameof(InventoryCaptureResponse) =>
                 response.Deserialize<InventoryCaptureResponse>(JsonOptions),
             nameof(ManageInventoryCaptureResponse) =>

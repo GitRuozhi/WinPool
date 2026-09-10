@@ -13,7 +13,8 @@ namespace WinPool.Infrastructure.Windows;
 public sealed record SimulationEditCommit(
     StorageSystemDocument Document,
     OperationPlan Plan,
-    IReadOnlyList<ExecutionEvent> Events);
+    IReadOnlyList<ExecutionEvent> Events,
+    string CommitId = "");
 
 /// <summary>
 /// Transitional adapter that routes the accepted V0.13 simulation document model
@@ -186,7 +187,8 @@ public sealed class SimulationEditCoordinator(
                 new SimulationEditCommit(
                     store.Result.Document,
                     plan,
-                    executionEvents),
+                    executionEvents,
+                    Guid.NewGuid().ToString("N")),
                 cancellationToken);
             return ApplicationResult<SimulationEditReceipt>.Succeeded(
                 new SimulationEditReceipt(
@@ -206,6 +208,178 @@ public sealed class SimulationEditCoordinator(
                 correlationId,
                 "simulation.cancelled",
                 "The simulation operation was cancelled.");
+        }
+        catch (SimulationCommitOutcomeUnknownException unknown)
+        {
+            return Failure(
+                ApplicationStatus.OutcomeUnknown,
+                correlationId,
+                "simulation.commit.outcome_unknown",
+                unknown.Message);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return Failure(
+                ApplicationStatus.Failed,
+                correlationId,
+                "simulation.execution-failed",
+                "The simulation operation failed without changing the active document.");
+        }
+    }
+
+    public async Task<ApplicationResult<SimulationEditReceipt>> ExecutePlanAsync(
+        SimulationDraftPlan plan,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var correlationId = CorrelationId.New();
+        var document = currentDocument();
+        if (document.Kind != StorageSystemKind.Simulation)
+        {
+            return Failure(
+                ApplicationStatus.Rejected,
+                correlationId,
+                "simulation.local-read-only",
+                "Local storage systems are read-only.");
+        }
+
+        if (plan.IsEmpty)
+        {
+            return Failure(
+                ApplicationStatus.Rejected,
+                correlationId,
+                "simulation.plan-empty",
+                "The simulation plan has no steps.");
+        }
+
+        var applied = simulationEditor.ApplyPlan(document, plan);
+        if (!applied.Succeeded)
+        {
+            return Failure(
+                ApplicationStatus.Rejected,
+                correlationId,
+                "simulation.plan-rejected",
+                applied.Error);
+        }
+
+        var systemId = document.SystemId;
+        var target = new StorageObjectId(
+            systemId,
+            StorageObjectKind.System,
+            document.Snapshot.Computer.StableId);
+        var inventoryVersion = InventoryVersion(document);
+        var environmentId = InternalStableIdentity.EnvironmentFromDocumentId(document.Id);
+        var machineBinding = MachineBinding.Create(["winpool-simulation", document.Id]);
+        var environment = new EnvironmentProfile(
+            environmentId,
+            EnvironmentKind.Simulation,
+            machineBinding,
+            ExecutionCapability.SimulateStorageMutation,
+            IsUserProvidedDisposableEnvironment: false,
+            DateTimeOffset.UtcNow);
+        var context = new WinPool.Execution.ExecutionContext(
+            environment,
+            ExecutionMode.Simulation,
+            PrivilegeState.StandardUser,
+            machineBinding,
+            inventoryVersion,
+            IsReleaseBuild: true);
+        var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["EditKind"] = "DraftPlan",
+            ["PlanId"] = plan.PlanId,
+            ["StepCount"] = plan.Steps.Count.ToString(CultureInfo.InvariantCulture)
+        };
+        var operationRequest = new OperationRequest(
+            OperationId.New(),
+            environmentId,
+            systemId,
+            OperationIntent.SimulateStorageMutation,
+            [target],
+            parameters,
+            DateTimeOffset.UtcNow);
+        var commitId = Guid.NewGuid().ToString("N");
+
+        try
+        {
+            var policy = new OperationPolicyEvaluator();
+            var authority = new InMemoryOperationAuthority(policy);
+            var planner = new DefaultOperationPlanner(
+                new FixedOperationInventoryVersionSource(inventoryVersion));
+            var operationPlan = await planner.BuildAsync(operationRequest, cancellationToken);
+            var authorization = await authority.AuthorizeAsync(
+                    operationPlan,
+                    context,
+                    userConfirmed: false,
+                    cancellationToken);
+            if (authorization.Kind != AuthorizationIssueKind.Issued || authorization.Token is null)
+            {
+                return Failure(
+                    authorization.Kind == AuthorizationIssueKind.Rejected
+                        ? ApplicationStatus.Rejected
+                        : ApplicationStatus.RequiresAuthorization,
+                    correlationId,
+                    authorization.Code,
+                    authorization.Message);
+            }
+
+            var store = new PlanDocumentStore(document, applied);
+            var executor = new SimulationOperationExecutor(store);
+            var gate = new ExecutorGate(policy, authority);
+            ExecutionEvent? terminal = null;
+            var executionEvents = new List<ExecutionEvent>();
+            await foreach (var executionEvent in gate.ExecuteAsync(
+                               operationPlan,
+                               context,
+                               authorization.Token,
+                               executor,
+                               cancellationToken))
+            {
+                executionEvents.Add(executionEvent);
+                if (executionEvent.Kind is ExecutionEventKind.Completed
+                    or ExecutionEventKind.Cancelled
+                    or ExecutionEventKind.Rejected
+                    or ExecutionEventKind.Failed)
+                {
+                    terminal = executionEvent;
+                }
+            }
+
+            if (terminal?.Kind != ExecutionEventKind.Completed || store.Result is null)
+            {
+                return Failure(
+                    ApplicationStatus.Failed,
+                    correlationId,
+                    terminal?.Code ?? "simulation.execution-incomplete",
+                    store.FailureText ?? terminal?.Message ?? "The simulation plan did not complete.");
+            }
+
+            await commitDocument(
+                new SimulationEditCommit(
+                    store.Result.Document,
+                    operationPlan,
+                    executionEvents,
+                    commitId),
+                cancellationToken);
+            return ApplicationResult<SimulationEditReceipt>.Succeeded(
+                new SimulationEditReceipt(
+                    operationPlan.OperationId,
+                    operationPlan.PlanHash,
+                    systemId,
+                    target,
+                    store.BeforeRevision,
+                    store.AfterRevision,
+                    store.Result.Commands),
+                correlationId);
+        }
+        catch (SimulationCommitOutcomeUnknownException unknown)
+        {
+            return Failure(
+                ApplicationStatus.OutcomeUnknown,
+                correlationId,
+                "simulation.commit.outcome_unknown",
+                unknown.Message);
         }
         catch (Exception exception) when (exception is
             ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -332,12 +506,52 @@ public sealed class SimulationEditCoordinator(
         StorageUnitKind.VirtualDisk => StorageObjectKind.VirtualDisk,
         StorageUnitKind.OsDisk => StorageObjectKind.OsDisk,
         StorageUnitKind.Partition => StorageObjectKind.Partition,
+        StorageUnitKind.Volume => StorageObjectKind.Volume,
         StorageUnitKind.NetworkDisk => StorageObjectKind.NetworkDisk,
         StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup
             or StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup =>
             StorageObjectKind.LogicalGroup,
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
+
+    private sealed class PlanDocumentStore(
+        StorageSystemDocument document,
+        SimulationOperationResult applied) : ISimulationDocumentStore
+    {
+        public long BeforeRevision { get; private set; }
+
+        public long AfterRevision { get; private set; }
+
+        public SimulationOperationResult? Result { get; private set; }
+
+        public string? FailureText { get; private set; }
+
+        public Task<SimulationMutationReceipt> ApplyAsync(
+            OperationPlan plan,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BeforeRevision = document.Revision;
+            AfterRevision = checked(BeforeRevision + 1);
+            Result = applied with
+            {
+                Document = applied.Document with { Revision = AfterRevision }
+            };
+            return Task.FromResult(
+                new SimulationMutationReceipt(
+                    SimulationDocumentSnapshot.Create(plan.SystemId, BeforeRevision, plan.Parameters),
+                    SimulationDocumentSnapshot.Create(plan.SystemId, AfterRevision, plan.Parameters)));
+        }
+
+        public Task RestoreAsync(
+            SimulationMutationReceipt receipt,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Result = null;
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class ApplicationSimulationDocumentStore(
         StorageSystemDocument document,
@@ -441,6 +655,12 @@ public sealed class SimulationEditCoordinator(
                 request.ScmDataCopies,
                 request.OffsetBytes,
                 request.CreatePartition,
-                request.CreateVirtualDisk);
+                request.CreateVirtualDisk,
+                request.AllocatedPoolId,
+                request.AllocatedVirtualDiskId,
+                request.AllocatedOsDiskId,
+                request.AllocatedPartitionId,
+                request.AllocatedVolumeId,
+                request.AccessPaths);
     }
 }

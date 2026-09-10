@@ -2,10 +2,9 @@
 
 ## 0. 状态与交接
 
-- 状态：范围与下述实施约定已按 2026-09-10 用户讨论确认，计划已编制；**代码未开始修改，交给后续 Agent 执行**。
-- 代码基线：`39f0d4eb3c141b169632976e598754b299a5a997`，`main`，已推送 `origin/main`。
-- 文档基线：本次文档重构提交；执行者先检查 Git，记录实际起点，不把代码基线误当成唯一所需提交。
-- 当前实现版本：V0.47；目标：V0.48。只编写文档时不改 `Directory.Build.props`，收口时按 R7 升版。
+- 状态：**已实现待人工验收**。R0–R7 代码与自动门已完成；完整人工/设备验收 unverified。
+- 执行起点：`e6b0a0ed8685fcd7328e41ee335837a62e6139ff`（文档重构 + 活动 Plan）。代码基线 `39f0d4eb3c141b169632976e598754b299a5a997` 为其父提交。
+- 当前实现版本：V0.48。
 - 本阶段取代原 V0.47 控件 Plan。旧计划已有对应实现及已知缺陷，不能再按其“未开始”状态重做，也没有据此宣告人工验收完成。原件见 [文档重构归档](Archive/20260910-documentation-reset/README.md)。
 - 当前已有的 `temp/磁盘分区编辑页-控件设计.md` 是用户未跟踪文件，保留，不纳入提交或默认作为需求。
 
@@ -102,16 +101,42 @@
 
 | ID | 工作与主要位置 | 必须产出/通过的检查 | 状态 |
 | --- | --- | --- | --- |
-| R0 | 文档断言适配与失败基线；`tests/WinPool.Architecture.Tests/ArchitectureBoundaryTests.cs`、相关 Application/AgentClient/Sqlite 测试 | 仅根 README 配对；新中文权威、Design 状态和链接；不删除有效架构边界。固定 §4 的失败行为为回归，不依赖忽略目录中的临时 harness | 未开始 |
-| R1 | 类型化事实模型；`StorageModels.cs`、`InventoryContracts.cs`、`RawSnapshot.cs`、`EmbeddedStorageInventoryScript.cs`、`EmbeddedPowerShellInventoryProvider.cs`、原生 collector 与持久化模型 | Volume/用途/身份/未知/关联定义贯通；真实只读、内置样例、导入和 generic Inventory 投影语义一致 | 未开始 |
-| R2 | 集中规则和容量；Domain 的 `StorageMath.cs`、Application 的 `EditWorkspace.cs` / `StorageSystems.cs` 中相关计算 | §2.2 操作矩阵、规则依据和能力条件；§2.3 保守估算；不再有 UI/服务两套算法；新增字段全链路往返 | 未开始 |
-| R3 | 操作规划与模拟服务；Application、现有 Execution 契约、`StorageStructurePage.xaml.cs`、磁盘分区页及 ViewModel | 同一计划用于预览/应用；一次分配模拟 ID；B1/B2 修复；创建/删除/修改后统一重建关系投影并校验 | 未开始 |
-| R4 | 原子提交与格式切换；`SimulationEditCoordinator.cs`、`StorageSystemRepository.cs`、Sqlite 仓储、Ipc/AgentClient | schema/文档/协议统一切换；冲突不覆盖、失败无部分提交、提交重试幂等；B3 对账闭环；新数据根可启动 | 未开始 |
-| R5 | 当前页面和引擎接入；Manage、两编辑页、Topology 投影、Localization、现有任务呈现 | 显示估算与未知、规则拒绝原因；无未实现功能伪成功；软件双语/主题保留；布局算法不无故改动；旧消费路径退出 | 未开始 |
-| R6 | 完整回归与验证；受影响测试项目及整个 solution | §4 回归与 §5 自动门；报告实际覆盖和未验证项，禁止用静态字符串检查替代编辑行为 | 未开始 |
-| R7 | 升版和文档收口；`Directory.Build.props`、README 双语、Development、CHANGELOG、本 Plan | 产品版本 V0.48，实际内部格式号一致；所有任务状态真实，限制可见；无旧模型/旧算法并行和未提交任务改动 | 未开始 |
+| R0 | 文档断言适配与失败基线；`tests/WinPool.Architecture.Tests/ArchitectureBoundaryTests.cs`、相关 Application/AgentClient/Sqlite 测试 | 仅根 README 配对；新中文权威、Design 状态和链接；不删除有效架构边界。固定 §4 的失败行为为回归，不依赖忽略目录中的临时 harness | 已验证：架构测试改为中文权威 + 仅根 README 配对 |
+| R1 | 类型化事实模型；`StorageModels.cs`、`InventoryContracts.cs`、`RawSnapshot.cs`、`EmbeddedStorageInventoryScript.cs`、`EmbeddedPowerShellInventoryProvider.cs`、原生 collector 与持久化模型 | Volume/用途/身份/未知/关联定义贯通；真实只读、内置样例、导入和 generic Inventory 投影语义一致 | 已验证：Volume、Usage、SizeSource、关系投影 |
+| R2 | 集中规则和容量；Domain 的 `StorageMath.cs`、Application 的 `EditWorkspace.cs` / `StorageSystems.cs` 中相关计算 | §2.2 操作矩阵、规则依据和能力条件；§2.3 保守估算；不再有 UI/服务两套算法；新增字段全链路往返 | 已验证：见下方操作矩阵；ConservativeCapacity 1% 余量 |
+| R3 | 操作规划与模拟服务；Application、现有 Execution 契约、`StorageStructurePage.xaml.cs`、磁盘分区页及 ViewModel | 同一计划用于预览/应用；一次分配模拟 ID；B1/B2 修复；创建/删除/修改后统一重建关系投影并校验 | 已验证：SimulationDraftPlanner + ApplyPlan；B1/B2 测试 |
+| R4 | 原子提交与格式切换；`SimulationEditCoordinator.cs`、`StorageSystemRepository.cs`、Sqlite 仓储、Ipc/AgentClient | schema/文档/协议统一切换；冲突不覆盖、失败无部分提交、提交重试幂等；B3 对账闭环；新数据根可启动 | 已验证：schema 15 / IPC 5 / document 2 / snapshot 3；CommitId 对账 |
+| R5 | 当前页面和引擎接入；Manage、两编辑页、Topology 投影、Localization、现有任务呈现 | 显示估算与未知、规则拒绝原因；无未实现功能伪成功；软件双语/主题保留；布局算法不无故改动；旧消费路径退出 | 已验证：结构页统一计划；分区页草稿+应用全部；属性按钮只写入草稿 |
+| R6 | 完整回归与验证；受影响测试项目及整个 solution | §4 回归与 §5 自动门；报告实际覆盖和未验证项，禁止用静态字符串检查替代编辑行为 | 已验证：Release 自动测试 460 通过；人工/设备 unverified |
+| R7 | 升版和文档收口；`Directory.Build.props`、README 双语、Development、CHANGELOG、本 Plan | 产品版本 V0.48，实际内部格式号一致；所有任务状态真实，限制可见；无旧模型/旧算法并行和未提交任务改动 | 已验证：Directory.Build.props V0.48 |
 
 R1 模型变化与最低限度序列化/测试修正可在同一可编译提交内完成，不为机械任务边界制造中间兼容层；R4 负责最终事务/版本闭环。保持每批可构建、可审阅，避免整个重构结束才首次运行。
+
+### R2 操作矩阵（执行记录）
+
+| 操作 | 结果 |
+| --- | --- |
+| Rename | 支持：对象名/卷标 |
+| ChangeDriveLetter | 支持：空闲盘符且已有卷 |
+| FormatPartition | 支持：NTFS；ReFS 仅 Server SKU |
+| DeletePartition | 支持：非系统主分区 |
+| SetDiskOffline | 支持：非启动/系统盘 |
+| InitializeDisk | 支持：仅 GPT；拒绝新建 MBR |
+| ConvertDisk | 支持：空盘转 GPT |
+| CreatePartition | 支持：GPT 空隙，可选 NTFS 卷 |
+| ExtendPartition | 尚不支持：无 Windows supported-size 依据 |
+| ShrinkPartition | 尚不支持：无 Windows supported-size 依据 |
+| CreateStoragePool | 支持：原始池数据成员 |
+| CreateTieredPool | 支持：Simple / 两副本 Mirror / 合法 Parity |
+| CreateVirtualDisk | 支持：每池新建至多一块；Fixed 保守估算 |
+| DeleteVirtualDisk | 支持：显式删除 |
+| UpdateStoragePool | 支持：名称与未占用容量相关参数 |
+| DissolveStoragePool | 支持：非原始池 |
+| MovePhysicalDisk | 支持：原始池或同介质层 |
+| EvictPhysicalDiskFromTiers | 支持：留在池内、退出层 |
+| SetDiskUsage | 支持：在仍有数据成员时 Retired/Hot Spare |
+| OptimizePool | 模拟无操作，不声称测得改善 |
+| OptimizeDrive | 模拟无操作，不声称测得改善 |
 
 ## 4. 已确认缺陷和必需回归
 

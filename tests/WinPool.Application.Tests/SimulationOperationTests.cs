@@ -23,7 +23,7 @@ public sealed class SimulationOperationTests
         var osDisk = new OsDiskInfo(
             "osdisk:5", "Free Disk One", 5, "RAW", 1_000_000_000, false, false, false, "physical:p1", null);
         var snapshot = new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             primordialDisks,
@@ -31,6 +31,7 @@ public sealed class SimulationOperationTests
             [],
             [],
             [osDisk],
+            [],
             [],
             [],
             [],
@@ -200,10 +201,10 @@ public sealed class SimulationOperationTests
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
             MemberDiskIds: ["physical:p1", "physical:p2"],
-            PerformanceResiliency: "Mirror",
+            PerformanceResiliency: "Simple",
             PerformanceInterleaveBytes: 65536,
-            PerformanceDataCopies: 2,
-            CapacityResiliency: "Parity",
+            PerformanceDataCopies: 1,
+            CapacityResiliency: "Simple",
             CapacityInterleaveBytes: 65536,
             CapacityColumns: 1,
             CapacityToleratedFailures: 1,
@@ -231,8 +232,8 @@ public sealed class SimulationOperationTests
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
             MemberDiskIds: ["physical:p1", "physical:p2"],
-            PerformanceResiliency: "Mirror",
-            CapacityResiliency: "Parity",
+            PerformanceResiliency: "Simple",
+            CapacityResiliency: "Simple",
             FileSystem: "NTFS",
             AllocationUnitSize: 65536,
             CreatePartition: false));
@@ -444,7 +445,7 @@ public sealed class SetDiskUsageTests
         var osDisk = new OsDiskInfo(
             "osdisk:5", "Free Disk One", 5, "RAW", 1_000_000_000, false, false, false, "physical:p1", null);
         var snapshot = new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             disks,
@@ -452,6 +453,7 @@ public sealed class SetDiskUsageTests
             [],
             [],
             [osDisk],
+            [],
             [],
             [],
             [],
@@ -596,11 +598,12 @@ public sealed class CreateTieredPoolSkipVdiskTests
             "pool:primordial", true, "Primordial", true, "Healthy", "OK",
             3_000_000_000L, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
         var snapshot = new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             disks,
             [primordial],
+            [],
             [],
             [],
             [],
@@ -667,12 +670,13 @@ public sealed class UpdateStoragePoolSizeTests
             4_000_000_000_000, 4_000_000_000_000, "pool:1", null,
             ["physical:p2"], 1, 65536, 1, 1);
         var snapshot = new StorageSnapshot(
-            2, "test", DateTimeOffset.UtcNow,
+            StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             disks,
             [pool],
             [ssdTier, hddTier],
+            [],
             [],
             [],
             [],

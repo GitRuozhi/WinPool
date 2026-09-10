@@ -19,6 +19,12 @@ public enum ApplicationStatus
     RequiresEnvironment
 }
 
+public sealed class SimulationCommitOutcomeUnknownException(string commitId)
+    : InvalidOperationException("The simulation commit was sent and the result is unknown. Reconcile before retrying.")
+{
+    public string CommitId { get; } = commitId;
+}
+
 public enum ApplicationMessageSeverity
 {
     Information,

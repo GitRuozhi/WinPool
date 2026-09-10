@@ -148,7 +148,7 @@ public sealed class InfrastructureTests
                 string.IsNullOrEmpty(partition.DriveLetter)
                 || (partition.DriveLetter.Length == 1
                     && partition.DriveLetter[0] is >= 'A' and <= 'Z')));
-        Assert.Equal(2, snapshot.SchemaVersion);
+        Assert.Equal(3, snapshot.SchemaVersion);
         Assert.Equal(154, document.HardwareReport.Items.Count);
         Assert.Equal(
             13,
