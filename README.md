@@ -2,61 +2,49 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-WinPool is a third-party WinUI 3 desktop application for understanding,
-monitoring, managing, and safely planning operations across Windows storage
-systems.
+WinPool is a Windows desktop application for viewing storage topology, monitoring devices, and editing simulated storage systems.
 
-The current product version is **V0.47**. The version source is
-`Directory.Build.props`. Final results are in the [changelog](docs/CHANGELOG.md).
+The current implementation is **V0.47**. V0.48 is a planned model and simulation refactor; its fixes are not yet implemented. Real storage-structure changes are not enabled.
 
-## Capabilities
+## What you can use
 
-WinPool presents storage topology, a focused operation workspace, simulation
-editing on Storage structure and Disk/partition pages, and monitoring. Delivery
-is an unpackaged, self-contained Windows x64 portable application. The published
-minimum supported OS is Windows 10 22H2 x64.
+- View local storage through read-only discovery and inspect pools, tiers, disks, partitions, and related information.
+- Edit simulated systems on the Storage structure and Disk/partition pages.
+- Monitor supported devices and configure application and background preferences.
+- Use English or Simplified Chinese, themes, and keyboard navigation.
 
-Real storage-structure mutation is not enabled. The Test and Development tabs
-are intentionally limited to simple roadmap notices throughout WinPool 1.x;
-their complete workspaces are planned for WinPool 2.0. Disk-test,
-external-tool, and Development/AI diagnostics subsystems were removed from the
-1.x runtime and are deferred to 1.x/2.0. Product limits are defined in
-[Product](docs/Product.md).
+The current editor has known submission, capacity-estimation, and relationship issues. Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
 
-## Build
+The Test and Development tabs are roadmap notices throughout 1.x. Their full workspaces are planned for 2.0.
 
-WinPool requires Windows, PowerShell, the SDK pinned by `global.json`, and the
-Windows App SDK dependencies restored by .NET.
+## Requirements and running
+
+Minimum supported: **Windows 10 22H2 x64**. Primary platforms: Windows 11 24H2 and 25H2 x64. Available storage features depend on the Windows edition and storage provider.
+
+Delivery is currently an unpackaged, self-contained x64 portable directory. Keep the entire directory together and run `WinPool.App.exe`; the companion Agent runs in the user tray. Data defaults to `%LocalAppData%\WinPool`, with an explicitly selected writable `Data` directory beside the program also supported. Exit WinPool before replacing program files.
+
+There is no released MSIX package or Microsoft Store listing.
+
+## Building from source
+
+On Windows with PowerShell and the SDK pinned by `global.json`:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
+dotnet restore WinPool.slnx
+dotnet build WinPool.slnx -c Release --no-restore -m:1
+.\artifacts\Release\WinPool.App.exe
 ```
 
-That command cleans regenerable local output, rebuilds, and writes a `WinPool.lnk` shortcut. The local run tree is `artifacts\$(Configuration)\`. Staging and process layout are documented in [Development](docs/Development.md).
-
-## Documentation
-
-- [Product](docs/Product.md): long-term purpose, boundaries, and roadmap.
-- [Development](docs/Development.md): architecture, environment, build, staging,
-  and version rules.
-- [Quality](docs/Quality.md): test and acceptance rules.
-- [Plan](docs/Plan.md): current formal stage, when one exists.
-- [Changelog](docs/CHANGELOG.md): important final results.
-- [Archive](docs/Archive/README.md): frozen historical plans and state.
-- [Agent rules](AGENTS.md): operational, safety, Git, and release rules.
-
-Reference files under `docs/Reference` are not current requirements.
+Check that an existing WinPool process is not using the output directory before rebuilding. Contributor instructions start at [AGENTS](AGENTS.md); internal development documentation is maintained in Chinese. The [development guide](docs/Development.md) describes build and data ownership.
 
 ## Research background
 
-Within the completed Windows 10 22H2 Storage Spaces tests, the current tested
-recommendation is:
-
 ```text
-64K interleave + 64K NTFS allocation unit size
+64K interleave + 64K NTFS cluster = current tested recommendation.
+Windows 11 has not yet received equivalent testing because current storage hardware prices and the author's practical budget do not allow a second full test platform.
 ```
 
-Equivalent Windows 11 testing has not yet been completed.
+These research results do not establish support or reliability for every Windows configuration.
 
 ## Rights
 

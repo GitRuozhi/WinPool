@@ -1,276 +1,112 @@
-# WinPool Development Guide
+# WinPool 开发约定
 
-[English](Development.md) | [简体中文（仅供阅读）](Development.zh-CN.md)
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，具体改造与完成状态归 [Plan](Plan.md)，测试要求归 [Quality](Quality.md)。下文的存储语义约定是 2026-09-10 确认的目标，V0.48 负责落实；不得把目标描述为现有实现已完成。
 
-## Technology and deployment
+## 环境与模块
 
-WinPool uses C#, WinUI 3, .NET 10, Windows App SDK 2.4, CommunityToolkit
-components where already justified, and an unpackaged self-contained Windows x64
-deployment. The .NET SDK is pinned in `global.json`. Windows-targeted projects
-share TFM `net10.0-windows10.0.26100.0`; `Microsoft.Windows.SDK.BuildTools` is
-the 28000 series. The published minimum OS is Windows 10 22H2 x64 and is not
-the compile TFM. The single project version is defined in
-`Directory.Build.props`.
+C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Windows 项目当前 TFM 为 `net10.0-windows10.0.26100.0`，SDK BuildTools 为 28000 系列。最低操作系统以 Product 为准。
 
-Portable delivery is the only implemented mode through V0.7. Signed MSIX work
-is scheduled for V0.8–V0.9, and Microsoft Store submission is post-V1.0 work.
-These roadmap entries do not authorize packaging work in an earlier Plan.
+| 模块 | 所有权 |
+| --- | --- |
+| Domain | 稳定标识、单位和无副作用的存储规则、容量计算 |
+| Application | 存储事实模型、用例契约、编辑意图、操作规划和表现投影 |
+| Execution | 类型化计划/步骤、执行策略、风险和前置条件、结果与回放；真实修改默认拒绝 |
+| Inventory / Monitoring | 采集与监控契约、适配接口及各自数据模型 |
+| Infrastructure.Windows | 固定只读 Windows 采集、Windows 适配、现有模拟协调与系统仓储适配 |
+| Infrastructure.Sqlite | 事务、仓储、数据格式实现 |
+| Ipc / Agent.Client | 封闭的 App–Agent 类型化传输、连接和结果传播 |
+| App | WinUI 页面、输入、呈现和交互；不自行实现存储规则或写 SQLite |
+| Agent | 每用户可见托盘进程、采集/监控协调、SQLite 写租约和进程生命周期 |
 
-The portable artifact must be kept as one complete directory.
-`WinPool.App.exe` and `WinPool.Agent.exe` sit at that directory root with shared
-runtime files stored once. WinPool installs no Windows service and opening the
-application does not itself require elevation. Exit all WinPool processes before
-replacing program files; partially overwriting a live directory is not a
-supported upgrade method.
+依赖保持表现与适配层 → Application → Domain 的现有方向，Execution 与 Inventory 等边界按现有项目引用验证。优先在现有项目内拆分职责，不新增通用引擎项目、DSL、插件体系或公开 SDK。
 
-V0.8–V0.9 MSIX acceptance must cover signing and package identity, clean install,
-first launch, update, downgrade rejection, uninstall, repair, startup,
-App/Agent activation, data locations, retention, and interrupted-update recovery
-on the named Windows matrix. Post-V1.0 Store work additionally requires approved
-privacy, support, certification, listing, and update-path material. Packaging,
-account creation, upload, and publication each remain separately authorized.
+`TopologyLayoutEngine` 的布局决策归整数单位计划，像素/DPI 只负责最后映射；不把容量业务规则放入布局算法。必须修改布局算法时才读 [布局执行记录](Reference/20260905_统一拓扑布局引擎执行踩坑记录.md)。硬件报告引擎保留 13 类、154 个已定义项目及 Source/Status/Warning 证据；当前范围不要求新增硬件大全页面。
 
-The product consists of two processes:
+## 存储事实、草稿和操作
 
-- `WinPool.App`: WinUI shell, pages, presentation adapters, and user interaction.
-- `WinPool.Agent`: visible per-user tray runtime, SQLite single writer, inventory,
-  monitoring, orchestration, and lifecycle owner.
+共用一套存储对象含义，区分采集事实、编辑草稿和操作结果；不复制三套完整模型。
 
-## Repository structure
+| 含义 | 约定 |
+| --- | --- |
+| 身份 | 内部稳定 ID、系统 ID 和提供程序定位信息分工明确；盘符、名称、列表顺序、DiskNumber 不能单独作为持久身份。保留稳定性/未知标记 |
+| 实体 | PhysicalDisk、StoragePool、StorageTier、VirtualDisk、OS Disk、Partition、Volume 各有明确身份；分区描述几何和分区类型，卷描述文件系统与挂载。无卷的分区也是合法事实 |
+| 关系 | 类型化对象关联是唯一事实源；通用关系图、导航和显示是其派生投影，不各自维护另一套可修改关系 |
+| 显示分组 | 备用/退役/介质分组不冒充真实 StorageTier。推导的关联带来源，不能自动升级为可执行事实 |
+| 未知 | 未采集、读取失败、不支持、否、零、空集合分别按含义表达；不得把缺失状态静默补成健康、可写或无系统角色 |
+| 草稿 | 记录用户意图和基线修订。临时输入不完整不等于允许生成非法模拟文档 |
+| 操作 | 一次生成类型化操作序列，预览、校验和提交共用它；模拟命令文本只作解释，不再由文本反推执行 |
+| 结果 | 区分成功、明确失败、结果未知和修订冲突；传输失败不能证明存储未改变。以 Agent 的持久化记录对账 |
 
-```text
-README.md
-README.zh-CN.md
-AGENTS.md
-AGENTS.zh-CN.md
-Directory.Build.props
-Directory.Build.targets
-global.json
-WinPool.slnx
-docs/
-  Product.md
-  Development.md
-  Quality.md
-  Plan.md                         present only while a stage is active
-  CHANGELOG.md
-  Reference/
-  Archive/
-build/
-  Clean-WinPool.ps1
-  Merge-RuntimeTrees.ps1
-  Rebuild-WinPool.ps1
-assets/                           tracked software-consumed resources
-OriginArtWork/                    ignored user-managed source artwork
-local-assets/                     ignored developer-local resources
-artifacts/                        ignored local build output
-src/
-tests/
-```
+读取遇到超出编辑范围的 Windows 结构时保留原貌及只读原因，不自动“修复”。新增或更改结构必须通过本次操作适用的规则；对无关未知对象不得仅因其存在而阻断其他独立对象的只读展示。
 
-No root `Plan` or root `DEVELOP.md` is part of the current structure.
+## 规则与容量
 
-## Dependency and ownership model
+规则统一入口，内部按对象/操作分组。合法性规则输出允许、拒绝或信息不足，并携带稳定原因、受影响对象和依据/适用条件。页面按钮、预览和 Agent 提交使用相同语义，Agent 提交前再次检查；UI 禁用不是校验边界。
 
-The dependency direction is presentation and ports → Application → Domain.
+规则依赖必要的 OS/SKU、提供程序、布局、介质、用途、扇区及能力信息；只定义当前操作需要的字段。不把本机能力偷偷套用到导入系统。未知组合不默认放行，不为通过旧样例而放宽规则。
 
-- Domain contains identities and pure storage rules.
-- Execution contains immutable plans, risk classification, authorization,
-  preconditions, policy evaluation, simulation, replay, and explicit denial.
-- Application owns stable internal use-case contracts and projections.
-- Infrastructure.Windows owns read-only Windows integration and reviewed system
-  support ports.
-- Infrastructure.Sqlite owns persistence implementation; normal App code never
-  writes SQLite directly.
-- Agent.Client and Ipc own the closed App-to-Agent transport.
-- Inventory and Monitoring own their respective models and typed adapters.
-- App consumes Application contracts and presentation models.
-- Agent owns the database write lease and process lifetime.
+容量至少明确原始物理容量、逻辑容量、已分配/物理占用、可用范围和估算来源，不能用同一个值替代。计算使用整数 bytes 和溢出检查；单位转换只在输入/显示边界进行。
 
-These contracts are internal. Do not freeze a public API, plug-in contract, IPC
-wire protocol, or C#/Python interoperability format until Product permits it.
+- 保留适用的采集值及来源；改名等无容量影响的操作不重新估算。
+- 成员、布局或分配相关参数改变后，使受影响的容量/能力证据失效，重新估算并标记，保留未受影响事实。
+- 先计算冗余和布局上界，再预留余量、按已知粒度向下对齐。适用的 Windows 支持范围优先；不能把成员容量之和当层或虚拟磁盘容量。
+- 理论估算、保守规划值和真实采集值区分。模拟应用后仍是估算；未来真实创建结束后才由重新采集结果更新。
+- 200G 成员合计、UseMax 实得约 199.86G、规划预留至约 198G 是用户提供的示例，不是 Windows 的固定扣减公式。具体受支持估算策略、参数和验证归当前 Plan。
+- 容量余量不能替代合法性，也不保证真实操作成功。无法建立保守估算的组合返回尚不支持，不制造精确数字。
 
-## Persistence and process lifecycle
+新增字段按一条链路完成：采集来源 → 原始数据 → 规范化模型 → 规则/模拟 → 持久化与 IPC → 界面/导出 → 往返和缺失值测试。字段的来源、单位、缺失含义和失效条件跟定义就近维护，不再分别维护大型字段副本。
 
-The standard data root is `%LocalAppData%\WinPool`. Portable mode uses a
-writable `Data` directory beside the executable. The standard-root
-`storage-location.json` pointer selects the mode; a location switch verifies the
-destination before making it active.
+## 数据与生命周期
 
-Normal launches use Agent-owned SQLite for inventory, workspace state, simulation
-documents, monitoring, and process/session history. Only the current schema is
-created or reopened. Older schemas are rejected without migration or
-modification. The current schema revision is 14 and the IPC protocol is 4; these
-are recorded in [CHANGELOG](CHANGELOG.md) Compatibility notes, not as extra
-project versions.
+标准数据根是 `%LocalAppData%/WinPool`，便携模式使用程序旁可写 `Data`；`storage-location.json` 是定位活动根的启动指针。切换前验证目标，现有租约、单实例和生命周期机制继续保留。
 
-User preferences do not live in SQLite. They are split into two JSON files by
-one criterion: **whether the value is still consumed after the App closes.**
-Each file has exactly one writer process, enforced by architecture tests.
+| 持久化来源 | 唯一写入者与用途 |
+| --- | --- |
+| `app-settings.json` | App；语言、主题、当前页面等前台偏好，Agent 只读所需项 |
+| `agent-settings.json` | Agent；持续监控、采样率、自启等关闭 App 后仍有效的偏好；App 经类型化请求修改 |
+| `winpool.db` | Agent；系统和采集快照、模拟文档、工作区、监控、执行与会话记录 |
 
-The persistence ownership policy has three durable authorities:
+偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
 
-- `app-settings.json` owns App-session user preferences (visual and language
-  choices, hardware-ID display, partition-ignore threshold, last active page).
-  The App is its only writer; the Agent reads it through
-  `IUserPreferencesReader` for tray presentation only.
-- `agent-settings.json` owns background preferences whose effect survives App
-  closure (continuous monitoring, monitoring sample rate, Agent login startup).
-  The Agent is its only writer through `IAgentPreferencesStore`; the App reads
-  it through `IAgentPreferencesReader` and changes values only through the
-  typed `SetAgentPreferenceRequest`. The Agent also owns the HKCU Run autostart
-  entry and registers its own executable path, so the file and the registry
-  cannot drift apart after a portable move.
-- `winpool.db` owns inventory and workspace cache, simulation documents,
-  monitoring, and process/session history. The Agent remains its only normal
-  writer.
+目前代码基线为 SQLite schema 14、IPC 4、StorageSystemDocument 1、StorageSnapshot 2；均是内部格式编号，不是产品版本。V0.48 允许直接切换新格式并重建开发数据，不编写旧数据库、旧模拟文件、旧 IPC 的迁移或兼容路径。实际新编号由对应代码常量统一维护，收口时更新本段。
 
-Every save to a preferences file is atomic (temporary file plus replace) and
-event-driven; foreground preferences save on each change. A load failure on an
-existing file blocks writes for that file until it becomes readable again, so
-defaults are never persisted over unreadable content. `agent-settings.json`
-carries a `SavedAtUtc` content label stamped on every save. Consumers compare
-it by inequality only, never by ordering: the Agent's data-less
-`AgentPreferencesChangedEvent` notification, the reconnect reseed, and the
-App's file watcher all funnel into one serialized reload pipeline that
-deduplicates by that label. JSON stores remain only for explicitly supported
-no-Agent development fallbacks.
+数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；测试使用隔离新根。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、脱敏、冲突检测和故障恢复要求。
 
-Product code must not silently erase an unknown data root.
-`storage-location.json` is the one durable bootstrap exception because WinPool
-must locate the active data root before opening either authority. IPC endpoint
-files are rebuildable runtime state, not additional state authorities.
+普通启动采用 Windows App SDK 单实例机制；重复启动激活已有窗口。必要的提权交接等待旧实例退出后再取得实例键。SQLite 不是实时 Windows 状态的权威，未来真实操作执行前必须重新核对对象及前置条件。
 
-WinPool is single-instance through Windows App SDK application lifecycle. Normal
-relaunch activates the existing window. An approved elevation handoff waits for
-the old process before the elevated successor claims the instance key. Execution
-mode is never persisted.
+## 构建与运行树
 
-## Execution boundary
-
-Executor policy denies real storage-structure mutation until Product and a
-confirmed Plan permit a typed path. Simulation editing and read-only discovery
-are normal capabilities. Each permitted mutation must validate its exact
-targets, show a reviewed preview, record an audit entry, and remain
-deny-by-default until authorized. Authorization rules live in
-[AGENTS](../AGENTS.md) and [Product](Product.md).
-
-The embedded PowerShell inventory is fixed and read-only. It remains until a
-native collector has equivalent field, identity, and degradation evidence.
-
-## Build and staging
-
-From the repository root:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Rebuild-WinPool.ps1
-```
-
-The rebuild script stops running WinPool processes, removes regenerable `artifacts` output and leftover project `bin`/`obj` folders, rebuilds the two-process tree, and writes `WinPool.lnk` in the repository root and on the current-user Desktop. It does not touch Tests evidence, Research material, `%LocalAppData%\WinPool` data, `Old`, or `Rubbish`. The stop-and-clean phase lives in `build\Clean-WinPool.ps1`; run that script alone with `-WhatIf` to preview a clean without building.
-
-A manual build is:
+在仓库根执行常规构建：
 
 ```powershell
 dotnet restore WinPool.slnx
 dotnet build WinPool.slnx -c Release --no-restore -m:1
+```
+
+生成文件集中在 `artifacts`：`trees/<Configuration>/App` 与 `Agent` 是独立树，`<Configuration>` 是并集运行树，`obj` 和 `build` 是中间文件与类库/测试输出。`src` 和 `tests` 只存源码。
+
+`build/Merge-RuntimeTrees.ps1` 按相对路径和 SHA-256 合并：同路径同内容存一份，内容不同则失败。`WinPool.App.exe` 与 `WinPool.Agent.exe` 位于同一根目录，共享自包含 runtime；保持 `PublishTrimmed=false`。
+
+```powershell
 .\artifacts\Release\WinPool.App.exe
 ```
 
-`dotnet build` writes generated files only under `artifacts`:
+不要部分覆盖正在运行的目录。构建前检查运行进程；若用户正在使用旧运行树，优先采用独立输出树，不擅自结束其会话。正式分发保持完整目录；不包含脚本、PDB、源图、数据库、日志、测试结果或重复子程序。构建输出可保留 PDB，产物不提交。
 
-```text
-artifacts\trees\$(Configuration)\App\    App self-contained build tree
-artifacts\trees\$(Configuration)\Agent\  Agent self-contained build tree
-artifacts\$(Configuration)\              SHA-256-checked union run tree
-artifacts\obj\                           compiler intermediates
-artifacts\build\                         class-library and test outputs
-```
+现有 `build/Rebuild-WinPool.ps1` 会停止 WinPool、调用清理脚本直接清除可再生输出、重建并写入快捷方式。只有任务明确需要该完整动作时使用；`build/Clean-WinPool.ps1 -WhatIf` 可预览。它不是纯文档任务或普通检查的默认入口。
 
-`src` and `tests` stay source. App and Agent first build into independent trees.
-`build/Merge-RuntimeTrees.ps1` then writes the run tree: same relative path and
-identical SHA-256 stores one file; different hashes fail the build. Both local
-executables are self-contained in that shared root, so launching
-`WinPool.Agent.exe` beside App does not look for a machine-wide .NET Runtime.
+未来正式 staging 使用仓库外未占用的新路径，复现同一并集和碰撞检查；不顺便部署、签名或发布。测试命令归 Quality。
 
-Test commands and when to run them are defined in [Quality](Quality.md).
+## 文档与版本
 
-The separate formal staging script is retired. Every build already produces
-the portable layout as `artifacts\$(Configuration)`, and any future formal
-staging must reproduce that layout into a new path outside the repository and
-refuse to overwrite an existing path. The required layout is:
+内部开发文档只维护中文无语言后缀版本。根目录 `README.md`（英文）和 `README.zh-CN.md`（中文）保持用户信息一致；其他目录中的索引 README 不因此需要双语。历史双语原件不追溯翻译。代码/API 标识和微软原名保持英文。
 
-```text
-WinPool.App.exe
-WinPool.Agent.exe
-```
+Product 管产品、Development 管技术、Quality 管验证、Plan 管当前阶段、CHANGELOG 管重要结果；AGENTS 管操作规则。Design 保存未排期方案，Reference 保存方法，Archive 保存被替代/结束的历史。一个事实一个维护位置，其余用短摘要和链接。
 
-Portable staging is the SHA-256-checked union of independent App and Agent
-self-contained publishes. Same relative path and identical hash: store one file.
-Same relative path and different hash: fail staging. App-only and Agent-only
-files remain. Formal staging excludes `*.pdb`; local build outputs may still
-contain symbols. `PublishTrimmed` remains false.
+设计只需状态、基线/条件、未决问题三个说明，不引入复杂审批体系。讨论中的设计不等于当前规范；方向已认可也不代表细节冻结。纳入版本时重新核对代码，明确采纳部分并写入唯一活动 Plan，长期决定归各自所有者。无须为每份设计新建一个 Plan。
 
-Staging must not contain duplicate child executables, scripts, PDB files, source artwork,
-unreferenced local assets, SQLite files, test results, or release metadata.
-Software resources explicitly consumed by the application may be included.
-Generated output is evidence only and is never committed.
+Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-## Version progression
+唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代。框架必需数字版本由它机械生成。V0.48 是 V0.4 的第 8 次迭代，不另造 V0.4.8 产品称呼，也不创建迭代 10。文档交接不提前修改代码版本；执行 Agent 按 Plan 升版。
 
-Product versions use `Va.b` for a new product line and may use `Va.bc` for a
-nonzero iteration within that line:
-
-- `a`: major version;
-- `b`: minor architecture/product line;
-- `c`: one-digit nonzero iteration within the minor version.
-
-Architecture and roadmap documents use `Va.b`. Iteration values are assigned
-from actual work and cannot exceed 9. Local iteration commits follow
-[AGENTS](../AGENTS.md) (default local commit). Remote pushes, tags, and
-releases follow [AGENTS](../AGENTS.md) and remain separately authorized.
-
-`Va.b` / `Va.bc` is the only project-version system. `Directory.Build.props`
-derives the numeric fields required by .NET and Windows mechanically from `a`,
-`b`, and `c`; those fields are build metadata with no independent version
-meaning. Database schema revisions, algorithm IDs, and IPC compatibility
-identifiers do not redefine the project version.
-
-## Documentation lifecycle
-
-Each fact has one owner:
-
-- Product: long-term purpose, non-goals, boundaries, and roadmap.
-- Development: architecture, module ownership, environment, build, version,
-  and document workflow.
-- Quality: stable gates, result vocabulary, acceptance classes, and when to
-  run them.
-- Plan: the only active formal stage, when one exists.
-- CHANGELOG: important final results and compatibility changes.
-- Archive: completed, superseded, or invalidated historical state.
-- Reference: non-authoritative external or cross-project methods.
-- AGENTS: operational, safety, authorization, reading, and Git rules.
-
-A current user decision outranks a generic project-management reference. Archive
-and Reference are never current requirements.
-
-An unsuffixed Markdown file is authoritative. A matching `.zh-CN.md` file is a
-Chinese reading copy only and must identify its unsuffixed authority. Documents
-already written in Chinese do not need a duplicate Chinese copy. When an
-authoritative document changes, update its reading copy in the same work item;
-the reading copy never controls behavior, acceptance, status, or history.
-
-When a stage is user-confirmed complete, record important final results in the
-CHANGELOG, freeze the Plan under Archive with its real final state, update the
-Archive index, and remove the active Plan if no next stage exists. Tags and
-releases remain separately authorized.
-
-## Contribution boundaries
-
-- Preserve the deny-by-default execution and process ownership model.
-- Do not add real storage mutation before a confirmed Plan in a Product-permitted
-  phase defines the typed operation and the required explicit authorization flow.
-- Keep software-consumed resources in tracked `assets`.
-- Do not make tracked code depend on ignored `OriginArtWork` or `local-assets`.
-- Do not couple WinPool to another repository through relative paths, copied live
-  files, submodules, or runtime imports.
-- Keep path moves, behavior changes, tests, and release actions independently
-  reviewable.
+项目不能通过相对路径、复制运行文件、子模块或运行时导入依赖其他仓库。软件资源使用受版本控制的 `assets`，不让代码依赖忽略目录。

@@ -1,183 +1,63 @@
-# Agent Instructions for WinPool
+# WinPool Agent 工作规则
 
-[English](AGENTS.md) | [简体中文（仅供阅读）](AGENTS.zh-CN.md)
+本文件是 WinPool 开发入口，只管理工作边界、阅读、执行和 Git。内部开发文档以中文单一版本为准；面向软件用户的根目录 README 保留中英双语。软件界面多语言不受影响。
 
-This file is the AI working entry and the highest-priority operational rules
-inside `Program\WinPool`. It states what must not be crossed. Product direction,
-architecture, quality gates, results, and history belong in `docs` and are read
-only when the current task needs them.
+## 决策与阅读
 
-## Precedence
+当前用户明确决定优先于旧文档、旧测试和现有实现。其次遵守本项目的安全与数据边界，再按事实所属文档执行。发现矛盾应指出具体冲突，不用历史规则推翻新决定。
 
-When instructions differ, use this order:
+普通任务先读本文件，检查 Git 状态、分支、上游及已有用户改动。其余按需读取，不全量加载双语历史和方案。
 
-1. The user's explicit decision in the current task.
-2. Safety, authorization, and protected-data rules in the parent and local
-   `AGENTS.md` files.
-3. The dedicated `docs` owner for that fact, when that document has been read
-   because the task requires it.
-4. Current implementation.
-
-A generic parent rule must not silently replace a more specific user decision.
-The user has decided that historical WinPool documents belong in `docs/Archive`;
-the parent-project `Old` rule continues to apply to superseded WinPool content
-that is not documentation.
-
-## Default reading
-
-The only project document required at the start of an ordinary task is this
-file. If a more specific local Agent file exists in the current working tree,
-follow it as well.
-
-Do not read README, Product, Development, Quality, CHANGELOG, Reference, or
-Archive by default, and do not load both language copies of the same document.
-Check Git status, branch, upstream, and protected paths before editing.
-
-Read other documents only when the task needs them:
-
-| Need | Read |
+| 任务需要 | 阅读入口 |
 | --- | --- |
-| How to run, current version, current capability, user-facing limits | `README.md` |
-| Product goals, boundary, roadmap, whether a request is in scope | `docs/Product.md` |
-| Architecture, module ownership, persistence, IPC, staging, version scheme | `docs/Development.md` |
-| Tests, acceptance vocabulary, whether a quality gate applies | `docs/Quality.md` |
-| Execute, continue, inspect, accept, or edit the current formal stage | `docs/Plan.md` |
-| Confirmed completed results or an important compatibility change | `docs/CHANGELOG.md` |
-| A named historical design, version, or superseded decision | the specific `docs/Archive` file |
-| A named method, study, or deferred observation | the specific `docs/Reference` file |
+| 软件用途、运行方法、当前公开能力 | [README](README.zh-CN.md) |
+| 产品行为、支持范围、长期路线 | [Product](docs/Product.md) |
+| 架构、数据所有权、模型约定、构建 | [Development](docs/Development.md) |
+| 测试范围和验收条件 | [Quality](docs/Quality.md) |
+| 执行、继续、检查当前正式阶段 | [Plan](docs/Plan.md)（存在时） |
+| 重要已完成结果和已知限制 | [CHANGELOG](docs/CHANGELOG.md) |
+| 讨论未排期设计或指定方案 | [Design 索引](docs/Design/README.md)，然后只读相关文件 |
+| 指定历史或方法 | [Archive 索引](docs/Archive/README.md)或指定 Reference 文件 |
 
-How to run and current capability are in `README.md`. Long-term product
-rules are in `docs/Product.md`. Architecture is in `docs/Development.md`.
-Tests and formal acceptance are in `docs/Quality.md`. Confirmed results are
-in `docs/CHANGELOG.md`. Project progress is not answered from Git status
-alone; read README, Product, and CHANGELOG when the question is progress.
+Design 是设计储备，Reference 是参考，Archive 是历史；它们不是默认上下文，也不自动授权实施。正文写有“必须”或“最终方案”不改变其状态。进度不能仅从版本号或 Git 提交数量推断。
 
-`docs/Plan.md` is read only when the developer explicitly asks to execute,
-continue, inspect, accept, or change the current formal plan. Its presence is
-not a reason to read it. Archive and Reference are never default context; do
-not read either tree in bulk. Reference is not a current project requirement.
+## 开发方式
 
-The developer's current decision outranks Plan, CHANGELOG, Archive, and old
-test assertions. If a document conflicts with a current decision or the
-confirmed implementation, treat the document as possibly stale; do not use
-old documents or old tests to reverse the current implementation.
-`docs/Plan.md` records only the confirmed current plan. It is not a permanent
-product contract. When no plan is active, do not invent the next stage from
-history.
+- 普通修复和小功能直接形成最小闭环：定位、实现、相关验证、更新受影响文档，不另起全面计划。
+- 跨模块重构、产品边界变化和真实存储功能通过唯一活动 Plan 明确范围与验收。已确认范围内的实现、修复和必要验证连续完成，不反复请求同一授权。
+- 用户让另一个 Agent 执行的 Plan，在交接前仅编制；收到执行请求后按 Plan 推进。计划存在本身不是执行指令。
+- 执行 Agent 可决定局部命名、私有实现和直接相关测试；不得擅自增加功能家族、改产品语义、降低验收要求或创造 Windows 不支持的结构。遇到这些选择，报告具体冲突，同时继续独立工作。
+- 只实现当前明确需要的抽象。复用现有模块，避免新旧模型、规则和执行路径长期并存；不要为假设中的未来功能先加框架。
+- 代码、测试和文档状态一起收口。计划分清未开始、实施中、已实现待验证、已验证、受阻；不能用“代码已写”代替验证。
+- 文档流程和事实归属见 [Development](docs/Development.md)。不把对话逐字转成规范，不为每次提交追加长篇工作日志。
 
-## Environment and scope
+## 安全与范围
 
-- Windows and PowerShell are the supported development environment.
-- The solution targets .NET 10, WinUI 3, Windows App SDK, and unpackaged x64.
-- Keep work inside `Program\WinPool` unless the task explicitly names another
-  path.
-- Do not reorganize Dite, KS, Research, Tests, Showcase, or other projects.
-- Preserve unrelated and pre-existing user changes.
+- 工作默认限定在 `Program/WinPool`。不整理 Dite、Research、Tests、Showcase 等其他项目；保留已有用户文件。
+- 真实存储结构修改默认拒绝。V0.48 不加入真实写操作；阶段边界与未来授权方式由 [Product](docs/Product.md)规定。自由形式存储命令始终禁止。
+- 开发 Agent 每次实际创建、删除、初始化、格式化、调整、修复真实存储对象前，必须取得该操作和准确目标的明确授权。不能用 UAC、Real 模式、宽泛授权或旧计划代替。
+- 采集固定且只读；内嵌 PowerShell 保留在程序集，通过标准输入调用，不另存或发布独立 inventory `.ps1`。
+- 硬件信息在持久化、导出、日志、复制或公开前经过既有脱敏边界。不公开未脱敏原始证据。
+- 开发数据允许重建不等于任意清理磁盘；只处理明确属于 WinPool 的开发数据，遵守文件处置规则，不静默擦除未知数据根。
 
-## Safety and data boundaries
+## 文件处置
 
-Real storage-structure mutation is denied by default. Do not create, remove,
-initialize, format, resize, repair, or otherwise mutate real disks, partitions,
-volumes, Storage Pools, Storage Tiers, or Virtual Disks unless the current
-product boundary or a confirmed Plan explicitly permits that path, and only
-after the required explicit authorization for that exact operation and those
-exact targets. Free-form storage commands remain forbidden.
+- 不直接删除文件。WinPool 被替代的文档移入 `docs/Archive`，标记真实状态并维护索引；不重写历史验收结果。
+- 其他被替代内容移入项目根 `Old`，低价值生成物移入项目根 `Rubbish/YYYYMMDD_reason`，尽量保留相对路径。不在 WinPool 内创建这些目录的变体。
+- 移动前核对准确路径与范围，移动后验证原位置消失、目标存在；不覆盖已有归档。
+- `assets` 是受版本控制的软件资源；`OriginArtWork`、`local-assets`、生成产物、数据库和日志不提交。
+- 普通清理不运行会直接删除输出的重建脚本；执行已明确要求的重建时先核对脚本作用范围。构建和运行目录替换按 [Development](docs/Development.md)处理。
 
-UAC elevation or selecting Real mode is not authorization. Simulation remains
-the default path for storage-structure changes, including while the UI is in
-Real mode, until the user has completed the real-mutation authorization flow.
+## Git 与交付
 
-Before a development Agent performs each actual storage mutation, it must ask
-the developer for specific approval of that operation and its targets. A
-previous, broad, or implied approval is insufficient. In the product, a user's
-explicit current-session selection of the local real-mutation option is the
-authorization for controlled real operations permitted by the current product
-boundary; that option must not be preselected or persisted as consent.
+- 单人仓库直接在 `main` 提交；不自行创建分支或 PR。
+- 完成授权范围内的改动后默认本地提交，不重复询问；只提交本任务文件。文档、重构、功能和视觉资源改动保持可独立审阅。
+- 推送必须有明确请求。推送前 fetch，检查上游是本地 HEAD 的祖先并审阅待推送提交；分叉时停止，不强推。累计五个未推送提交时提醒用户。
+- 一次“先推送当前本地”的授权不自动包含随后新产生的提交。tag、Release、二进制上传和部署分别需要明确请求。
+- 唯一产品版本源为 `Directory.Build.props`，版本规则见 Development。文档计划的目标版本不能冒充当前已实现版本；迭代 8、9 收紧范围，不创建迭代 10。
 
-Which product phase may add a typed real-mutation path is defined by
-[Product](docs/Product.md) and the confirmed Plan, not by this file.
+## 验证
 
-- Persisted, exported, imported, logged, or copied hardware data must pass
-  through the approved redaction boundary.
-- Do not store or publish a standalone inventory `.ps1`; fixed read-only
-  PowerShell remains assembly-embedded and is supplied through standard input.
+按 [Quality](docs/Quality.md)选择最小充分验证。纯文档改动只检查内容、链接、归档和 Git 范围，不运行代码、原生、设备或视觉测试。
 
-## Files and documents
-
-- Do not directly delete files by default. A narrow exception requires a
-  user-approved refactoring whose confirmed Plan names the exact obsolete
-  source or test targets and requires replacement and regression evidence first.
-- Historical WinPool documents go to `docs/Archive`, with an index and truthful
-  status. Archive content is not a current requirement.
-- Other confirmed superseded WinPool content goes to the parent-project `Old`
-  tree, preserving relative paths where practical.
-- Low-value generated material goes to the parent-project `Rubbish` tree.
-- Do not create local `Old`, `Rubbish`, or variant directories inside WinPool.
-- `README.md` is the user-facing entry. This file contains operational
-  constraints only. Product, Development, Quality, Plan, CHANGELOG, Reference,
-  and Archive content belongs under `docs`.
-- Only one active `docs/Plan.md` may exist. When no stage is active, the file
-  may be absent. Completed or invalidated plans are frozen under `docs/Archive`;
-  do not rewrite them to make history appear correct.
-- One long-term fact has one owner. Other documents may keep a one-sentence
-  summary and a link; they must not duplicate the full rule.
-- Git records process. Long-term documents record rules and important final
-  results, not commit lists, review logs, per-round test counts, or intermediate
-  construction notes.
-- Repository `assets` contains software-consumed resources and is tracked by
-  Git. `OriginArtWork` remains ignored until the user approves an asset
-  strategy.
-- An unsuffixed Markdown file is authoritative. A matching `.zh-CN.md` file is
-  a non-authoritative Chinese reading copy. If they differ, the unsuffixed
-  document controls. Update a reading copy in the same work item as its
-  authority. Ordinary tasks read the authoritative file only.
-
-## Agent workflow and Git
-
-- Implement only the confirmed minimum closed loop. Do not add framework,
-  schema, API, task, or deployment machinery because it might be needed later.
-- Changing product behavior, data boundaries, or stage scope requires
-  confirmation. Already-decided items are not re-litigated by old documents.
-- Do not write discussion drafts or unconfirmed schemes into long-term
-  documents. Do not create extra planning documents unless the developer
-  explicitly asks.
-- Split commits: documentation, refactor, feature, and visual or asset
-  changes go in separate commits. Equivalent refactors stay separate from
-  visual adjustments.
-- This is a solo repository. Commit directly on `main`. Do not create
-  feature branches and do not open pull requests.
-- After a completed in-scope change, create a local Git commit by default.
-  Do not ask. Follow existing commit-message habits. Do not commit
-  generated `artifacts/` or unrelated user files.
-- Do not push unless the developer explicitly asks. When five unpushed
-  commits have accumulated, remind the developer to push.
-- Before a push, fetch, verify `origin/main` is an ancestor of local HEAD,
-  inspect outgoing commits, and refuse divergence or force push. Never
-  force push.
-- Do not tag, create a GitHub Release, upload binaries, or deploy unless
-  the developer explicitly authorizes that action.
-
-The project version is defined in `Directory.Build.props`. Do not invent a
-second version system. Architecture and roadmap documents normally specify only
-`Va.b`. At iteration `c=8` or `c=9`, remind the developer to control scope.
-Never create `c=10`.
-
-## Verification triggers
-
-Use the result vocabulary and gate definitions in [Quality](docs/Quality.md)
-when a test or acceptance task requires them.
-
-- Documentation-only changes do not run code, native, device, or visual tests.
-- Ordinary small edits and ordinary feature work do not run the full quality
-  gate.
-- If the developer names a test, run that scope.
-- If a change has an obvious local risk, the smallest directly related check is
-  allowed; do not escalate it into a full verification flow.
-- Completing a formal stage does not start full acceptance. Ask the developer
-  whether to enter formal testing.
-- Never report an unavailable or unrun gate as passed.
-- Automatic checks do not substitute for tray, native-picker, visual, device,
-  or long-duration human evidence.
-- Real hardware mutation is not an accepted verification technique unless a
-  confirmed Plan for a permitted mutation stage requires it, and then only
-  under the authorization rules above.
+已确认 Plan 指定的自动验证属于执行范围，无需再请示；完整人工、设备和发布验收仅在明确请求范围内进行。无法运行或尚未运行的检查不能报通过，自动测试不能替代人工和真实设备证据。

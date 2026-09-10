@@ -1,163 +1,81 @@
-# WinPool Product Direction
+# WinPool 产品方向
 
-[English](Product.md) | [简体中文（仅供阅读）](Product.zh-CN.md)
+本文件是当前产品行为、边界和路线的中文权威。2026-09-10 用户决定已覆盖相冲突的历史设计；实现差距由 [V0.48 Plan](Plan.md)管理，不代表代码已经符合新要求。
 
-## Purpose
+## 定位
 
-WinPool is a third-party Windows storage-system desktop application. Its long-term
-purpose is to replace the fragmented Disk Management and Storage Spaces graphical
-experiences with one coherent view of storage topology, testing, monitoring, and
-reviewable operations.
+WinPool 是 Windows 存储结构管理软件，以统一桌面界面呈现存储拓扑、监控、管理和可审阅的编辑。它不创造 Windows 无法实现的存储结构，不以界面能画出来作为配置合法性的依据。
 
-The product should make relationships between systems, pools, tiers, physical
-disks, virtual disks, partitions, volumes, network storage, and other logical
-groups understandable without hiding important parameters.
+- 清楚表达池、层、物理磁盘、虚拟磁盘、OS 磁盘、分区、卷和网络存储之间的关系。
+- 同时提供完整拓扑和聚焦的操作工作区；操作必须明确、类型化、可预览、可验证。
+- 保留真实只读采集和模拟编辑，模拟只允许已知合法且在支持范围内的配置；信息不足或规则未覆盖时不默认放行。
+- 容量采用有依据的简化估算，以适用的真实采集值为准；估算和推导信息必须可辨认，不能伪装成 Windows 实测值。
+- 保持软件中英双语、主题、键盘操作、高对比度和响应式布局。开发文档取消双语不改变软件功能。
+- 当前不承诺公共 SDK、插件 API、数据库或 IPC 对外兼容契约。
 
-## Product principles
+## 当前能力与真实操作边界
 
-- Present the complete storage topology and a focused operation workspace together.
-- Make every proposed operation explicit, reviewable, typed, and auditable.
-- Treat simulation and read-only discovery as first-class capabilities.
-- Integrate testing, monitoring, comparison, and evidence export without bundling
-  or reimplementing external benchmark engines.
-- Keep internal contracts structured enough for future developer and AI-agent use
-  without freezing a public SDK, plug-in API, database contract, or wire protocol.
-- Preserve bilingual, theme-aware, keyboard-accessible, high-contrast, and
-  responsive desktop behavior.
+当前实现版本仍为 V0.47；公开能力见根目录 [README](../README.zh-CN.md)。V0.48 是模拟语义、相关引擎、持久化及缺陷修复阶段，尚待执行，不包含任何真实存储写操作。
 
-## Product boundary
+V0.5x 才可按具体计划引入选定的真实创建、修改、删除、格式化、扩缩容等操作。只读采集可继续改进。真实操作不要求在一个版本中覆盖所有 Windows 存储功能。
 
-WinPool may inspect the local machine through read-only collectors, edit persistent
-simulated systems, monitor supported devices, and execute explicitly reviewed
-support actions.
+未来真实操作保留准确目标校验、类型化预览、审计及执行后重新采集验证；自由形式存储命令不进入产品。授权区分：
 
-Real storage-structure mutation is outside the product boundary until V0.5. Until
-then, WinPool must not initialize, clear, format, create, remove, repair, or
-resize real disks, partitions, volumes, Storage Pools, Storage Tiers, or Virtual
-Disks. V0.5 is the earliest stage permitted to introduce those operations through
-reviewed typed plans; the product is not permanently simulation-only.
+- 开发 Agent：每次实际变更前取得开发者对准确操作和目标的明确批准。
+- 产品用户：当前会话显式选择本机真实修改选项，授权当时产品已支持的受控操作。不得预选或持久化同意；UAC 和 Real 模式本身不是授权。
 
-From V0.5 onward, each real mutation has two explicit authorization contexts:
+## 存储编辑边界
 
-- A development Agent must request the developer's approval immediately before
-  each exact mutation, naming the operation and targets. Earlier, blanket, or
-  implied approval does not apply.
-- A product user's explicit current-session selection of the local real-mutation
-  option authorizes V0.5 controlled real operations. UAC elevation or Real mode
-  by itself is not consent, and consent must not be preselected or persisted.
+这些是产品创建范围，不是对 Windows 对象模型的重新定义。发现已有系统时保留其真实结构；不因编辑器只支持一种结构就丢弃其他对象、强行合并或修改采集结果。
 
-The mutation path must retain typed operations, target validation, an operation
-preview, and an audit record. Simulation remains the default path, and free-form
-storage commands remain outside the product boundary.
+| 项目 | 当前有效决定 |
+| --- | --- |
+| 编辑页面 | 保留存储结构编辑和磁盘分区编辑两页；管理页负责完整检查，结构编辑页不扩成第二个检查器 |
+| 建池与虚拟磁盘 | 一个池最多新建一块虚拟磁盘；允许建池后暂不创建虚拟磁盘，或创建虚拟磁盘但暂不创建用户分区；每步仍须满足 Windows 规则 |
+| 已有多虚拟磁盘 | 如实读取与展示；支持范围内可减少，不创建第二块，不因读取而自动“归一化” |
+| 自动分区 | 建池流程默认可自动创建一个用户分区；额外分区属于磁盘分区页，不扩大建池向导 |
+| 分层 | 以性能层和容量层为主要路径，按介质提供分组和编辑；显示分组不等于已经创建 MSFT_StorageTier。保留已采集的空层/模板事实，界面可以折叠 |
+| 备用与退役 | 可以提供可选分组，但它们是磁盘用途/状态的呈现，不是虚构的 Windows 数据层，也不计入可用数据成员容量 |
+| 统一草稿 | 成员和参数属于同一次编辑。预览后统一应用；属性按钮不能另走一条绕过校验和提交规则的路径 |
+| 参数 | 提供适用的交错、列数、冗余、容量等参数；不能依据旧控件选项判定所有组合都受 Windows 支持 |
+| 文件系统 | NTFS 为默认；ReFS 仅在目标平台能力和当前规则支持时允许，不能声称具有同等长期测试证据 |
+| 排除项 | 新建 MBR、动态磁盘及其跨区/带区/镜像/RAID-5 卷、VHD/VHDX 功能、Manual 分配、Journal 作为独立设计路径、第二块虚拟磁盘、自由形式命令 |
 
-## WinPool 1.x scope
+历史设计中的“单盘 Mirror 仅警告仍放行”等例外不再生效。每种配置必须有可适用的 Windows 规则依据；不能以旧方案或旧测试要求恢复非法结构。未完成的表单可暂留界面，不得提交成有效模拟系统。
 
-WinPool 1.0 and the complete 1.x product line focus on storage topology,
-management and editing, monitoring, settings, data safety, and release-quality
-delivery. The Test and Development tabs remain visible navigation destinations,
-but each contains only a short roadmap notice. Their complete user interfaces,
-registered-directory test workflows, developer workspace, and AI Agent features
-are outside every 1.x release and are planned as WinPool 2.0 features.
-
-Disk-test, external-tool, and Development/AI diagnostics subsystems have been
-removed from the 1.0 release path and are deferred to 1.x/2.0; they are not part
-of the supported 1.x product surface.
-
-The 1.x editing surface is two pages: Storage structure editor (pools, tiers,
-one virtual disk, optional one volume) and Disk/partition editor. Creating a
-second virtual disk is outside 1.0; an existing multi-virtual-disk pool may be
-reduced to one. The accepted design is
-[Archive/V0.47-standalone-pool-editor](Archive/V0.47-standalone-pool-editor/Storage-Pool-Editor-Design.md).
-
-## Architecture line
-
-The V0.4 product line retains the accepted V0.13 visual baseline and the V0.2
-multi-process rewrite, reduced to the two processes required for the 1.0 release
-path:
-
-- one unpackaged WinUI 3 App;
-- one visible per-user tray Agent and SQLite writer;
-- typed named-pipe IPC and deny-by-default execution policy.
-
-The project version uses `Va.b` for a new product line and may use `Va.bc` for a
-nonzero iteration. Architecture milestones stop at `Va.b`; database schema
-revisions, algorithm IDs, and IPC compatibility identifiers are internal
-contracts and do not form additional project versions.
-
-### Internal engines
-
-Two internal engines are long-term product assets:
-
-- **Topology layout engine.** `TopologyLayoutEngine` plans topology layout in
-  integer width/height units. Structure decisions — sibling row packing,
-  column budgets, shrinking, row-height relaxation, and minimum widths such as
-  the two-unit floor for layered pools sharing a row — belong to the unit plan
-  and stay independent of pixels and DPI; pixel widths only stretch the
-  finished unit plan to the available width. The Manage topology is the
-  reference behavior. Before modifying this engine, read the execution pitfall
-  record under `docs/Reference` (2026-09-05).
-- **Hardware information engine.** The retained KS/StatSys-derived report
-  factory produces a structured hardware report of 13 categories and 154
-  defined items, each carrying Source, Status, and Warning evidence, collected
-  through the embedded read-only PowerShell inventory. It currently feeds
-  storage scans and storage-system documents and is a retained asset for a
-  future full-hardware surface.
-
-## Confirmed development route
-
-The user confirmed the following product route on 2026-08-12. It defines phase
-objectives, not permission to bypass the product boundary, a substitute for an
-active Plan, or evidence that a phase is complete.
-
-| Phase | Objective | Governing constraint |
-| --- | --- | --- |
-| V0.1 | Deliver the minimum prototype and establish the basic front-end visual direction. | Historical foundation. |
-| V0.2 | Completely restructure the codebase; establish the baseline architecture and development rules. | Historical foundation. |
-| V0.3 | Correct code defects and establish normal operation. | Historical foundation. Version confirmation does not mark remaining native or manual evidence as passed. |
-| V0.4 | Complete visual/art polish and refine existing functions and basic interactions. Later V0.4 iterations also cover platform and portable-distribution work. | Preserve accessibility and the accepted structural baseline. |
-| V0.5 | Deliver the minimum closed set of management and editing workflows required for the 1.0 storage-management product. | First phase permitted to introduce selected controlled real storage-structure operations under the explicit developer- and product-user authorization model; broad operation coverage is not a 1.0 requirement. |
-| V0.6 | Complete the monitoring and storage-health experience required for 1.0. | Test execution and the full Test workspace are excluded; monitoring must retain explicit targets, bounded persistence, and truthful diagnostics. |
-| V0.7 | Freeze the 1.0 feature scope and close remaining integration gaps across management, monitoring, settings, and data handling. | Test, developer, and AI Agent workspaces remain placeholders; no new feature family is introduced. |
-| V0.8 | Close known release-blocking defects and quality gaps and begin the signed MSIX packaging path while retaining portable delivery. | Work is limited to the frozen 1.0 scope; unknown future defects cannot be pre-declared resolved. |
-| V0.9 | Enter internal testing across the defined supported Windows platform matrix and correct findings. | Validate portable and MSIX install, upgrade, uninstall, startup, and data-location behavior across the named matrix. |
-| V1.0 | Publish the formal release. | Requires the approved V0.9 release-readiness gate; Microsoft Store submission begins only after V1.0 is complete. A tag, binary upload, and GitHub Release each still require explicit authorization. |
-| V1.x | Maintain the 1.0 product line with compatibility, reliability, security, and narrowly approved management or monitoring corrections. | The Test and Development tabs remain roadmap placeholders throughout 1.x. |
-| V2.0 | Introduce the complete Test workspace and the complete developer and AI Agent workspace. | External engines remain separate typed adapters; public or automation contracts require a separately confirmed product design. |
-
-Every implementation phase requires its own confirmed `docs/Plan.md`. The
-deny-by-default executor, simulation-first storage editing, read-only inventory,
-and data-redaction boundaries remain in force throughout this route; V0.5 real
-mutation is the defined, explicitly authorized exception to the simulation-only
-rule.
-
-## Windows support
-
-Published support from V0.44:
+结构合法性和经验风险是两类规则：合法不等于推荐；有风险的受支持配置仍需明确警告或既定限制。研究结论必须保持：
 
 ```text
-Minimum supported: Windows 10 22H2 x64
-Primary:           Windows 11 24H2 x64
-                   Windows 11 25H2 x64
+64K interleave + 64K NTFS cluster = current tested recommendation.
+Windows 11 has not yet received equivalent testing because current storage hardware prices and the author's practical budget do not allow a second full test platform.
 ```
 
-The compile-time Windows SDK / TFM is not the published minimum OS. WinPool
-does not ship ARM64 or x86. Older Windows versions may still start and are not
-a published guarantee.
+64K+64K 在当前测试中稳定；64K+256K 出现两阶段 NTFS 损坏；256K+64K 已发生失败，当前不推荐，不承诺未来复测；256K+256K 出现直接 NTFS 损坏、Event 55。256K interleave 不作为静默默认值。这些证据不等于其他文件系统或平台已受同等验证。
 
-## Installation route
+## 1.x 范围与架构约束
 
-WinPool currently ships only as an unpackaged, self-contained Windows x64
-portable application. There is no released MSIX package and no Microsoft Store
-listing. A future route in this document does not imply that its package exists.
+1.x 聚焦拓扑、管理编辑、监控、设置、数据安全和交付质量。“测试”“开发”标签只显示简单路线说明；完整测试工作区、外部基准执行、开发者和 AI 工作区留到 2.0，不因设计储备已有详细方案而提前加入。
 
-| Mode | Availability | Intended behavior |
-| --- | --- | --- |
-| Portable | Implemented now and retained | The user controls the complete self-contained program directory. Data defaults to `%LocalAppData%\WinPool`; an explicitly selected writable `Data` directory beside the executable remains available. |
-| Signed MSIX | Planned for V0.8–V0.9 | Develop and validate signing, identity, install, upgrade, uninstall, startup registration, data paths, recovery, and the supported Windows matrix. Portable delivery remains available. |
-| Microsoft Store | Planned after V1.0 is complete | Prepare identity, privacy, support, certification, package, and listing material only after the formal V1.0 product and its release evidence exist. Store publication is not a V1.0 prerequisite. |
+保留 WinUI App + 每用户可见托盘 Agent 两进程，类型化命名管道和 Agent 单 SQLite 写入方；不引入 Windows 服务。详细技术所有权归 [Development](Development.md)。保留现有拓扑布局引擎和硬件报告引擎，不以本次模拟重构为由重写视觉或新增完整硬件页。
 
-All modes must expose the same safety boundary. Packaging must not grant extra
-storage-mutation authority, turn the Agent into a Windows service, or bypass
-explicit target validation. Creating an account, reserving a product name,
-uploading a package, or publishing a listing each requires explicit
-authorization at that time.
+## 路线
+
+阶段目标不等于完成证明或执行授权；正式阶段使用唯一活动 Plan，普通修复不另建阶段。
+
+| 阶段 | 目标与限制 |
+| --- | --- |
+| V0.1–V0.3 | 原型、架构重写和稳定性历史；人工证据按原归档保留 |
+| V0.4 | 完善已有功能、交互、视觉和便携交付 |
+| V0.48 | 当前已确认的模拟/模型/引擎/数据库局部重构与缺陷修复；无真实存储写操作，不要求保留开发数据或兼容旧格式 |
+| V0.5x | 1.0 必需的最小管理编辑闭环，逐项引入经授权的真实操作 |
+| V0.6 | 监控与存储健康；不加入完整测试工作区 |
+| V0.7 | 冻结 1.0 功能，关闭集成缺口，不引入新功能家族 |
+| V0.8–V0.9 | 收口缺陷、质量验证、签名 MSIX 与平台矩阵；保留便携版 |
+| V1.0 / V1.x | 正式发布与维护；发布依据实际验收，不预先承诺未知问题已解决 |
+| V2.0 | 完整测试、开发者与 AI 工作区，按届时确认的设计实施 |
+
+## Windows 与交付
+
+最低受支持系统为 Windows 10 22H2 x64，主要平台为 Windows 11 24H2 / 25H2 x64；这是软件支持范围，不意味着所有 SKU/提供程序均可创建同一存储配置，也不意味着研究已经完成 Windows 11 等价测试。编译 TFM 不等于最低支持系统。ARM64、x86 和更早系统不属于公开保证。
+
+当前只交付完整目录形式的无打包、自包含 x64 便携版。数据默认位于 `%LocalAppData%/WinPool`，可显式选择可写的程序旁 `Data`。签名 MSIX 在 V0.8–V0.9，Store 在 V1.0 完成之后；目前没有已发布的 MSIX 或 Store 页面。安装方式不增加存储权限，不改变进程架构；账号、包上传和正式发布另行授权。

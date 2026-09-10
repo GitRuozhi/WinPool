@@ -1,63 +1,43 @@
-# WinPool Quality and Acceptance
+# WinPool 验证与验收
 
-[English](Quality.md) | [简体中文（仅供阅读）](Quality.zh-CN.md)
+本文件规定验证选择与结果含义。当前阶段的具体用例和进度归 [Plan](Plan.md)。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
 
-## Result vocabulary
+## 选择验证范围
 
-Every gate or case must use one of: `passed`, `failed`, `unverified`,
-`not_required`, or `deferred_by_user`. A skipped or unavailable check is never
-reported as passed.
+- 纯文档任务：检查内容一致性、当前链接、归档完整性及 Git 范围；不运行代码、原生、设备或视觉测试。
+- 普通修复/小功能：运行能验证风险的直接相关检查，不自动扩成全套验收。低影响、可逆修改不为凑数量添加测试。
+- 执行已确认 Plan：其中明确要求的回归和自动门属于任务本身，无须重复申请；阶段收口运行 Plan 指定范围。
+- 完整人工、平台、设备和发布验收：仅在用户明确要求或已确认计划明确包含时进行。完成代码不自动表示完整人工验收开始或结束。
+- 发现失败先判断是实现缺陷还是已失效的旧约定；不能删除有效安全断言来让测试通过，也不能让旧断言恢复用户已经否定的行为。
 
-## When to run gates
+结果只能使用 `passed`、`failed`、`unverified`、`not_required`、`deferred_by_user`。跳过、缺少环境和未运行均不能报 passed；源码推断与实测证据要分开。
 
-Having a full test capability does not mean every change should run every gate.
+## 文档与架构检查
 
-- Documentation-only changes do not run code, native, device, or visual tests.
-- Ordinary small edits and ordinary feature work do not run the full quality
-  gate.
-- If the developer names a test, run that scope.
-- If a change has an obvious local risk, the smallest directly related check is
-  allowed; do not escalate it into a full verification flow.
-- Completing a formal stage does not start full acceptance. Ask the developer
-  whether to enter formal testing.
-- A formal version or formal acceptance run uses the gates below after the
-  developer confirms that run.
+- 当前内部文档为中文单一权威，仅根 README 成对维护；历史副本原样保留，不要求归档一律配对或翻译。
+- 活动阶段只有一个 `docs/Plan.md`。Design 不被枚举为待执行计划；标题或旧正文中的命令式措辞不改变其状态。
+- 检查当前文档链接和路径、当前版本与目标版本的区分、已实现与待验证的区分。
+- 历史文档的原相对链接按归档说明追溯，不为修历史链接重写当前规则。
+- 保留真正的依赖、单写入方、类型化命令、脱敏与默认拒绝边界测试。文档检查验证当前约定，不依赖整段固定句子或把所有旧文件数量当成永久产品要求。
+- Git 排除生成物、数据库、日志和源图，保留软件实际消费的资源。
 
-Stage-specific test directories, matrices, and results belong in the active Plan
-or in Archive, not in this long-term policy. Test counts belong in Plan or
-CHANGELOG evidence when they are important final results.
+本次文档重构按用户要求不改测试源码。旧 `EnglishDocumentationHasNonAuthoritativeChineseReadingCopies` 与新规则冲突，必须由 V0.48 首项任务修改；本次不声称现有代码测试通过。
 
-WinPool 1.x exposes the Test and Development tabs as roadmap placeholders only.
-Formal 1.x acceptance verifies that those placeholders are present, simple,
-bilingual, and accessible. Test-workspace, external benchmark execution, and
-developer/AI-workspace cases are `not_required` for 1.x; retained internal code
-continues to receive automatic regression coverage where it remains in the
-solution.
+## 存储语义与提交检查
 
-## Quality model
+优先使用脱敏的固定输入、纯函数规则测试和实际应用服务集成测试；不以扫描源代码字符串代替行为验证。
 
-WinPool is a native Windows, multi-process .NET application. Browser DOM tests,
-web-server checks, and webpage screenshot rules from reference projects are not
-applicable unless WinPool later introduces a separately approved web surface.
+- 已知合法、已知非法、信息不足都覆盖；未知不能被默认值转换为允许。
+- 原始容量、逻辑容量、占用和可用范围分别检查；覆盖不同冗余、边界、对齐、溢出和估算来源。测试值不是 Windows 实测证据。
+- 采集 → 转换 → 保存 → 加载保持身份、用途、层参数、卷和挂载点；缺失值与采集失败仍可辨认。
+- 对象关联和关系投影一致；创建、删除、成员变更后无悬空引用、重复身份和错误归属。
+- 预览与提交使用同一操作序列；拒绝时不产生部分模拟提交；修订冲突不覆盖其他修改。
+- 覆盖“提交成功但回复丢失”，验证结果未知和持久化对账，不能仅断言抛出了异常。
+- 能查看 Windows 结构不代表已验证相应修改操作。只读采集样本不能冒充真实写操作验证。
 
-### Static and structure gate
+## 自动门
 
-- Required repository and documentation structure is present.
-- Exactly one active `docs/Plan.md` exists when a stage is active.
-- Every English authoritative Markdown document has a matching `.zh-CN.md`
-  reading copy, and every copy identifies the unsuffixed document as controlling.
-- Markdown links and documented paths resolve.
-- The product version source is `Directory.Build.props`. Runtime display values
-  must match that source. Documents that mention a product version must not
-  contradict it.
-- Architecture boundaries, closed diagnostics, typed commands, and deny-by-default
-  execution remain covered.
-- Git scope includes software-consumed `assets` and excludes `OriginArtWork`,
-  local-only resources, generated output, databases, logs, and release binaries.
-
-### .NET automatic gate
-
-Run from the WinPool repository root:
+正式阶段如 Plan 要求，在 WinPool 仓库根运行：
 
 ```powershell
 dotnet restore WinPool.slnx
@@ -66,46 +46,16 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 dotnet list WinPool.slnx package --vulnerable --include-transitive
 ```
 
-Tests must not mutate real storage structure. Build warnings require an explicit
-explanation or a user-approved exception.
+所有自动测试使用隔离数据，不修改真实存储结构。记录实际命令、提交基线和结果；警告逐项说明，未解决失败不能作为完成。输出按 Development 的运行树规则隔离，不覆盖用户正在运行的程序。
 
-### Windows native integration gate
+App 和 Agent 独立产出、SHA-256 并集合并与碰撞失败机制继续验证；运行时查找与目录布局必须一致。命名管道身份/ACL、SQLite 所有权、原子提交及只读边界仍受直接回归保护。
 
-- The App and Agent publish independently, then merge into one flat portable
-  directory. Same relative path and identical SHA-256: store one file. Different
-  SHA-256: fail staging.
-- Local `dotnet build` writes App and Agent to independent trees, then the same
-  SHA-256 union into `artifacts\$(Configuration)\`. A collision fails the build.
-- App runtime lookup paths match the staged tree (`WinPool.Agent.exe` beside App).
-- Named-pipe identity and ACL behavior, SQLite ownership, and read-only
-  inventory boundaries remain covered by automatic or controlled local
-  integration checks.
-- Staging contains no scripts, PDB files, local assets, databases, test results, or
-  duplicate child executables. Build outputs may still contain PDB files.
+## 人工与设备证据
 
-### Human and device gate
+WinPool 是原生多进程应用。浏览器 DOM 测试不替代 WinUI、托盘、原生选择器和设备检查。
 
-Manual evidence is required for native WinUI presentation, bilingual switching,
-themes, DPI, high contrast, keyboard use, tray lifecycle, native folder pickers,
-monitoring start/stop, and data-location round trips.
+需要实际证据的项目包括页面与拖拽、软件中英切换、主题/DPI/高对比度、键盘操作、托盘生命周期、文件夹选择器、监控启停和数据位置往返。1.x 的测试与开发页只验证简短路线占位及可访问性，不据此开发完整工作区。
 
-A formal manual matrix uses the directory named by the active Plan or the
-archived stage that defined it. Manual checks must not select the source tree,
-a network share, or an unregistered directory.
+V0.48 不用真实写操作验证模拟规则。未来允许真实写入的阶段，仍须按 Product/AGENTS 取得准确授权并记录目标与结果；自动测试和 CI 不触碰真实结构。缺少设备或目标平台时明确未验证，不制造通过记录。
 
-For controlled real-mutation verification in a Product-permitted stage,
-automatic tests and CI remain simulation-only. A manual case may perform one
-real operation only after the development Agent has obtained the developer's
-per-operation approval, or the product user has explicitly selected the local
-real-mutation option in the current session. The evidence must record the
-operation, targets, authorization context, selection state, and result.
-
-## Acceptance policy
-
-- Automatic gates establish deterministic engineering facts; they do not approve
-  visual intent or physical-device behavior.
-- The Agent cannot mark a human gate passed without user evidence.
-- Approved exceptions record reason, scope, approver, date, risk, and expiry.
-- Real hardware mutation is never an accepted verification technique unless a
-  confirmed Plan for a permitted mutation stage requires it. Unrun cases stay
-  `unverified`.
+自动门证明工程行为，不能批准视觉意图或物理设备行为。用户接受阶段也不能把未执行用例改写为 passed。例外记录原因、范围、批准者和风险，保持简短可追溯。
