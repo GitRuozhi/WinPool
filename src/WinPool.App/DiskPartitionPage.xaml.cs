@@ -446,13 +446,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && isDiskSelection
             && disk is { IsOffline: false, IsBoot: false, IsSystem: false };
         InitializeButton.IsEnabled = simulated && isDiskSelection && disk is { IsBoot: false, IsSystem: false } && !initialized;
-        ConvertGptButton.IsEnabled = simulated && isDiskSelection && !alreadyGpt && !hasPartitions;
-        NewPartitionButton.IsEnabled = simulated
-            && disk is { IsOffline: false }
-            && (createMode || (isDiskSelection && !initialized));
-        DeletePartitionButton.IsEnabled = simulated && isPartitionSelection;
-        ExtendButton.IsEnabled = simulated && userPartition;
-        ShrinkButton.IsEnabled = simulated && userPartition;
+        ConvertGptButton.IsEnabled = simulated && isDiskSelection && initialized && !alreadyGpt && !hasPartitions;
+        NewPartitionButton.IsEnabled = simulated && disk is { IsOffline: false } && createMode;
+        DeletePartitionButton.IsEnabled = simulated && userPartition;
+        ExtendButton.IsEnabled = false;
+        ShrinkButton.IsEnabled = false;
         OpenExplorerButton.IsEnabled = !simulated
             && isPartitionSelection
             && !diskOffline
@@ -686,18 +684,23 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         var physical = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.PhysicalDiskStableId);
-        if (physical?.IsPageFile == true
+        var removesPageFile = physical?.IsPageFile == true;
+        var removesCrashDump = physical?.IsCrashDump == true;
+        if ((removesPageFile || removesCrashDump)
             && !await ConfirmAsync(
-                Text("移除页面文件", "Remove page file"),
-                Text("脱机前将移除该磁盘上的页面文件。确定继续？", "The page file on this disk will be removed before it goes offline. Continue?")))
-        {
-            return;
-        }
-
-        if (physical?.IsCrashDump == true
-            && !await ConfirmAsync(
-                Text("移除崩溃转储", "Remove crash dump"),
-                Text("脱机前将移除该磁盘上的崩溃转储。确定继续？", "The crash dump on this disk will be removed before it goes offline. Continue?")))
+                Text("磁盘脱机", "Take disk offline"),
+                (removesPageFile, removesCrashDump) switch
+                {
+                    (true, true) => Text(
+                        "脱机前将移除该磁盘上的页面文件和崩溃转储。确定继续？",
+                        "The page file and crash dump on this disk will be removed before it goes offline. Continue?"),
+                    (true, false) => Text(
+                        "脱机前将移除该磁盘上的页面文件。确定继续？",
+                        "The page file on this disk will be removed before it goes offline. Continue?"),
+                    _ => Text(
+                        "脱机前将移除该磁盘上的崩溃转储。确定继续？",
+                        "The crash dump on this disk will be removed before it goes offline. Continue?")
+                }))
         {
             return;
         }
@@ -716,13 +719,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        if (!await ConfirmAsync(
-                ViewModel.Localization["InitializeDisk"],
-                Text("将该磁盘初始化为 GPT？", "Initialize this disk as GPT?")))
-        {
-            return;
-        }
-
         await SubmitAsync(
             new SimulationOperationRequest(
                 SimulationOperationKind.InitializeDisk,
@@ -737,13 +733,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         var disk = SelectedDisk();
         if (disk is null)
-        {
-            return;
-        }
-
-        if (!await ConfirmAsync(
-                Text("转换为 GPT", "Convert to GPT"),
-                Text("将空磁盘转换为 GPT？不能转换为 MBR。", "Convert this empty disk to GPT? Conversion to MBR is not offered.")))
         {
             return;
         }
@@ -780,9 +769,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         var fileSystem = SelectedFileSystemToken();
-        if (fileSystem == "ReFS" && !await ConfirmRefsAsync())
+        if (fileSystem == "ReFS")
         {
-            return;
+            PublishRefsNotice();
         }
 
         long? bytes = null;
@@ -834,10 +823,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        if (!await ConfirmAsync(
-                Text("删除分区", "Delete partition"),
-                Text("确定从模拟系统中删除这个分区？分区上的数据将不可用。",
-                    "Remove this partition from the simulation? Data on it will no longer be available.")))
+        if (EditWorkspace.PartitionHoldsStoredData(partition)
+            && !await ConfirmAsync(
+                Text("删除含数据的分区", "Delete partition with data"),
+                Text("该分区含有已使用的数据。删除后这些数据将不可用。确定继续？",
+                    "This partition holds used data. Deleting it makes that data unavailable. Continue?")))
         {
             return;
         }
@@ -852,17 +842,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             RefreshAll();
         }
     }
-
-    private async void Extend_Click(object sender, RoutedEventArgs e) => await ShowResizeUnsupportedAsync();
-
-    private async void Shrink_Click(object sender, RoutedEventArgs e) => await ShowResizeUnsupportedAsync();
-
-    private async Task ShowResizeUnsupportedAsync() =>
-        await ShowMessageAsync(
-            Text("尚不支持", "Not supported yet"),
-            Text(
-                "扩展和收缩需要 Windows supported-size 依据，本阶段不实现，不会改变分区大小。",
-                "Extend and shrink need a Windows supported-size result. They are not implemented in this stage and do not change partition size."));
 
     private async void OpenExplorer_Click(object sender, RoutedEventArgs e)
     {
@@ -911,18 +890,25 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var fileSystem = SelectedFileSystemToken();
 
-        var current = _working.FileSystemOf(partition);
-        if (!string.IsNullOrWhiteSpace(current)
+        var holdsData = EditWorkspace.PartitionHoldsStoredData(partition);
+        var usesRefs = fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase);
+        if (holdsData
             && !await ConfirmAsync(
                 ViewModel.Localization["Format"],
-                Text("格式化将清除该分区上的数据。确定继续？", "Formatting clears data on this partition. Continue?")))
+                usesRefs
+                    ? Text(
+                        "格式化将清除该分区上的已用数据。ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。确定继续？",
+                        "Formatting clears used data on this partition. ReFS has no long-run evidence equivalent to 64 KiB NTFS. Continue?")
+                    : Text(
+                        "格式化将清除该分区上的已用数据。确定继续？",
+                        "Formatting clears used data on this partition. Continue?")))
         {
             return;
         }
 
-        if (fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase) && !await ConfirmRefsAsync())
+        if (!holdsData && usesRefs)
         {
-            return;
+            PublishRefsNotice();
         }
 
         var quick = QuickFormatSwitch.IsOn;
@@ -941,12 +927,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _ = ok;
     }
 
-    private async Task<bool> ConfirmRefsAsync() =>
-        await ConfirmAsync(
+    private void PublishRefsNotice() =>
+        ViewModel.NotificationService.PublishWarning(
             Text("ReFS 提示", "ReFS notice"),
             Text(
-                "ReFS 没有与 NTFS 64 KiB 同等的长期测试证据。确定继续？",
-                "ReFS has no long-run evidence equivalent to NTFS 64 KiB. Continue anyway?"));
+                "ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。操作将继续。",
+                "ReFS has no long-run evidence equivalent to 64 KiB NTFS. The operation will continue."),
+            "disk-partition-editor");
 
     private async Task<bool> SubmitAsync(
         SimulationOperationRequest request,
@@ -992,7 +979,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         _working = ViewModel.ActiveSnapshot;
-        await ShowMessageAsync(successTitle, successMessage);
+        ViewModel.NotificationService.PublishInfo(
+            successTitle,
+            successMessage,
+            "disk-partition-editor");
         RefreshAll();
         return true;
     }

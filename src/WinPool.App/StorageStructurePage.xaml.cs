@@ -1041,33 +1041,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var confirm = usage == "Retired"
-            ? ConfirmAsync(
-                ViewModel.Localization["RetireDiskConfirmTitle"],
-                ViewModel.Localization["RetireDiskConfirmMessage"])
-            : ConfirmAsync(
-                ViewModel.Localization["HotSpareDiskConfirmTitle"],
-                ViewModel.Localization["HotSpareDiskConfirmMessage"]);
-        if (!await confirm)
-        {
-            return;
-        }
-
-        if (!await ConfirmDiskSpecialRoleDrop(workingDisk))
+        var prepared = await PrepareDiskSpecialRoleDropAsync(workingDisk);
+        if (prepared is null)
         {
             return;
         }
 
         try
         {
-            var next = EditWorkspace.SetDiskUsage(_working, diskId, usage);
-            if (usage == "Retired")
-            {
-            }
-            else
-            {
-            }
-
+            var next = EditWorkspace.SetDiskUsage(prepared, diskId, usage);
             CommitWorkingStep(next);
         }
         catch (InvalidOperationException exception)
@@ -1116,14 +1098,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        if (!await ConfirmDiskSpecialRoleDrop(workingDisk))
+        var prepared = await PrepareDiskSpecialRoleDropAsync(workingDisk);
+        if (prepared is null)
         {
             return;
         }
 
         try
         {
-            CommitWorkingStep(EditWorkspace.EvictDiskToUnallocated(_working, diskId));
+            CommitWorkingStep(EditWorkspace.EvictDiskToUnallocated(prepared, diskId));
         }
         catch (InvalidOperationException exception)
         {
@@ -1175,6 +1158,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
             else if (!EditWorkspace.IsPoolRow(poolId))
             {
+                if (workingDisk!.IsBoot || workingDisk.IsSystem)
+                {
+                    await ShowMessageAsync(
+                        ViewModel.Localization["SystemDiskCannotEvictTitle"],
+                        ViewModel.Localization["SystemDiskCannotEvictMessage"]);
+                    return;
+                }
+                if (workingDisk.IsPageFile || workingDisk.IsCrashDump)
+                {
+                    await ShowMessageAsync(
+                        ViewModel.Localization["StructureChangeBlockedTitle"],
+                        Text(
+                            "该磁盘承担页面文件或崩溃转储角色，不能在池之间移动。请先移除这些角色。",
+                            "This disk has a page-file or crash-dump role and cannot move between pools. Remove those roles first."));
+                    return;
+                }
+
                 next = EditWorkspace.MoveDiskToPool(next, diskId, poolId);
             }
 
@@ -1190,42 +1190,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     /// <summary>
-    /// Shared gate for retiring, hot-sparing, and evicting a pooled disk:
-    /// page-file and crash-dump roles need one confirmation, system and
-    /// boot disks are refused.
+    /// Shared gate for retiring, hot-sparing, and evicting a pooled disk.
+    /// Boot and system disks are refused immediately. Evictable special
+    /// roles are staged in the same undoable draft step and summarized by
+    /// the single Apply confirmation.
     /// </summary>
-    private async Task<bool> ConfirmDiskSpecialRoleDrop(PhysicalDiskInfo disk)
+    private async Task<StorageSnapshot?> PrepareDiskSpecialRoleDropAsync(PhysicalDiskInfo disk)
     {
-        switch (EditWorkspace.ClassifyDiskEvict(disk))
+        if (EditWorkspace.ClassifyDiskEvict(disk) == EditWorkspace.DiskEvictCheck.DeniedSystem)
         {
-            case EditWorkspace.DiskEvictCheck.DeniedSystem:
-                await ShowMessageAsync(
-                    ViewModel.Localization["SystemDiskCannotEvictTitle"],
-                    ViewModel.Localization["SystemDiskCannotEvictMessage"]);
-                return false;
-            case EditWorkspace.DiskEvictCheck.ConfirmPageFile:
-                if (!await ConfirmAsync(
-                        ViewModel.Localization["RemovePageFileTitle"],
-                        ViewModel.Localization["RemovePageFileMessage"]))
-                {
-                    return false;
-                }
-
-                _working = EditWorkspace.ClearEvictableSpecialRoles(_working, disk.StableId);
-                break;
-            case EditWorkspace.DiskEvictCheck.ConfirmCrashDump:
-                if (!await ConfirmAsync(
-                        ViewModel.Localization["RemoveCrashDumpTitle"],
-                        ViewModel.Localization["RemoveCrashDumpMessage"]))
-                {
-                    return false;
-                }
-
-                _working = EditWorkspace.ClearEvictableSpecialRoles(_working, disk.StableId);
-                break;
+            await ShowMessageAsync(
+                ViewModel.Localization["SystemDiskCannotEvictTitle"],
+                ViewModel.Localization["SystemDiskCannotEvictMessage"]);
+            return null;
         }
 
-        return true;
+        return disk.IsPageFile || disk.IsCrashDump
+            ? EditWorkspace.ClearEvictableSpecialRoles(_working, disk.StableId)
+            : _working;
     }
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -1867,6 +1849,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false }
             && !EditWorkspace.IsDraftPool(pool.StableId)
             && selectedDisk is not null
+            && !selectedDisk.IsBoot
+            && !selectedDisk.IsSystem
             && string.Equals(selectedDisk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase);
         RetireButton.IsEnabled = canLayerDisk && !selectedDisk!.IsRetired;
         HotSpareButton.IsEnabled = canLayerDisk && !selectedDisk!.IsHotSpare;
@@ -2180,6 +2164,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+        if (!await ConfirmAsync(
+                Text("放弃所有修改", "Discard all changes"),
+                Text(
+                    "确定放弃所有未应用的修改？草稿和撤销记录都将清除。",
+                    "Discard all unapplied changes? The draft and its undo history will be cleared.")))
+        {
+            return;
+        }
+
         _undoStack.Clear();
         _redoStack.Clear();
         _maximumSizeFields.Clear();
@@ -2230,7 +2223,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         CreateDraftPoolAndSelect();
     }
 
-    private async void Dissolve_Click(object sender, RoutedEventArgs e)
+    private void Dissolve_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
         if (pool is null || pool.IsPrimordial || !ViewModel.IsUsingSimulatedInventory)
@@ -2242,28 +2235,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         try
         {
             var next = _working;
-            if (EditWorkspace.IsDraftPool(pool.StableId))
-            {
-                if (!await ConfirmAsync(
-                        ViewModel.Localization["DissolvePoolTitle"],
-                        ViewModel.Localization["DraftPoolDiscardConfirmMessage"]))
-                {
-                    return;
-                }
-
-                next = EditWorkspace.DiscardDraftPool(next, pool.StableId);
-            }
-            else
-            {
-                if (!await ConfirmAsync(
-                        ViewModel.Localization["DissolvePoolTitle"],
-                        ViewModel.Localization["DissolvePoolMessage"]))
-                {
-                    return;
-                }
-
-                next = EditWorkspace.DissolvePoolInWorking(next, pool.StableId);
-            }
+            next = EditWorkspace.IsDraftPool(pool.StableId)
+                ? EditWorkspace.DiscardDraftPool(next, pool.StableId)
+                : EditWorkspace.DissolvePoolInWorking(next, pool.StableId);
 
             _selectedPoolId = null;
             _selectedPoolDiskId = null;
@@ -2302,36 +2276,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var confirm = usage == "Retired"
-            ? ConfirmAsync(
-                ViewModel.Localization["RetireDiskConfirmTitle"],
-                ViewModel.Localization["RetireDiskConfirmMessage"])
-            : ConfirmAsync(
-                ViewModel.Localization["HotSpareDiskConfirmTitle"],
-                ViewModel.Localization["HotSpareDiskConfirmMessage"]);
-        if (!await confirm)
-        {
-            return;
-        }
-
-        // Layer confirmation comes first: the role-dropping confirmation
-        // below clears page-file / crash-dump roles immediately, and no
-        // further user cancel point may follow it.
-        if (!await ConfirmDiskSpecialRoleDrop(disk))
+        var prepared = await PrepareDiskSpecialRoleDropAsync(disk);
+        if (prepared is null)
         {
             return;
         }
 
         try
         {
-            var next = EditWorkspace.SetDiskUsage(_working, disk.StableId, usage);
-            if (usage == "Retired")
-            {
-            }
-            else
-            {
-            }
-
+            var next = EditWorkspace.SetDiskUsage(prepared, disk.StableId, usage);
             CommitWorkingStep(next);
         }
         catch (InvalidOperationException exception)
@@ -2401,7 +2354,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return ("Simple", 65536);
     }
 
-    private async void DeleteVdisk_Click(object sender, RoutedEventArgs e)
+    private void DeleteVdisk_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
         if (pool is null
@@ -2420,21 +2373,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var vdisk = deleteTarget;
-        var holdsData = EditWorkspace.DiskHoldsStoredData(_working, vdisk.StableId, isVirtualDisk: true);
-        var committedVdisk = ViewModel.ActiveSnapshot.VirtualDisks.FirstOrDefault(item =>
-            string.Equals(item.StableId, vdisk.StableId, StringComparison.OrdinalIgnoreCase));
-        if (committedVdisk is not null)
-        {
-            if (holdsData
-                && !await ConfirmAsync(
-                    Text("删除虚拟磁盘", "Delete virtual disk"),
-                    Text(
-                        "该虚拟磁盘上有已使用的数据。删除会移除该虚拟磁盘及其卷。确定继续？",
-                        "This virtual disk holds used data. Deleting removes the virtual disk and its volume. Continue anyway?")))
-            {
-                return;
-            }
-        }
 
         try
         {
@@ -2509,23 +2447,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var createsDraftPool = pending.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
-        var createsVdisk = pending.VirtualDisks.Any(item => EditWorkspace.IsDraftVirtualDisk(item.StableId));
-        var reFsInvolved = string.Equals(
-            _fileSystemBox.SelectedItem as string,
-            "ReFS",
-            StringComparison.OrdinalIgnoreCase)
-            && (createsDraftPool || createsVdisk || ReFsWouldChangeOnApply());
-        var touchesUnrecommended = pending.StorageTiers.Any(tier =>
-                (tier.Interleave ?? 0) == 256 * 1024)
-            || createsDraftPool
-            || createsVdisk
-            || reFsInvolved;
-        if (touchesUnrecommended && !await ConfirmUnrecommendedAsync())
-        {
-            return;
-        }
-
         var joiningWithData = pending.PhysicalDisks
             .Where(disk =>
             {
@@ -2537,20 +2458,64 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     && EditWorkspace.DiskHoldsStoredData(ViewModel.ActiveSnapshot, disk.StableId);
             })
             .ToArray();
+        var warnings = new List<string>();
+        if (planned.DisplayItems.Any(item => item.CausesDataLoss))
+        {
+            warnings.Add(Text(
+                "计划会删除含有已用数据的分区或虚拟磁盘。",
+                "The plan deletes a partition or virtual disk that holds used data."));
+        }
         if (joiningWithData.Length > 0)
         {
             var names = string.Join(", ", joiningWithData.Select(disk => disk.FriendlyName));
-            if (!await ConfirmAsync(
-                    Text("加入磁盘将清除数据", "Joining disks clears data"),
-                    Text(
-                        $"以下磁盘带有已用数据，加入池后这些数据将不再可用：{names}。确定继续？",
-                        $"These disks hold used data that becomes unusable after joining the pool: {names}. Continue?")))
+            warnings.Add(Text(
+                $"加入池会使以下磁盘上的已用数据不可用：{names}。",
+                $"Joining the pool makes used data on these disks unavailable: {names}."));
+        }
+        if (planned.Steps.Any(step =>
+                step.InterleaveBytes == 256 * 1024
+                || step.PerformanceInterleaveBytes == 256 * 1024
+                || step.CapacityInterleaveBytes == 256 * 1024
+                || step.ScmInterleaveBytes == 256 * 1024))
+        {
+            warnings.Add(Text(
+                "256 KiB 交织不在当前测试推荐中；当前推荐为 64 KiB 交织 + 64 KiB NTFS 簇。",
+                "256 KiB interleave is outside the current tested recommendation of 64 KiB interleave + 64 KiB NTFS cluster."));
+        }
+        if (planned.Steps.Any(step => string.Equals(step.FileSystem, "ReFS", StringComparison.OrdinalIgnoreCase)))
+        {
+            warnings.Add(Text(
+                "ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。",
+                "ReFS has no long-run evidence equivalent to 64 KiB NTFS."));
+        }
+        var specialRoleDisks = pending.PhysicalDisks
+            .Where(disk =>
             {
-                return;
-            }
+                var committed = ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(item =>
+                    item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+                return committed is not null
+                    && ((committed.IsPageFile && !disk.IsPageFile)
+                        || (committed.IsCrashDump && !disk.IsCrashDump));
+            })
+            .Select(disk => disk.FriendlyName)
+            .ToArray();
+        if (specialRoleDisks.Length > 0)
+        {
+            warnings.Add(Text(
+                $"将移除以下磁盘上的页面文件或崩溃转储角色：{string.Join(", ", specialRoleDisks)}。",
+                $"Page-file or crash-dump roles will be removed from: {string.Join(", ", specialRoleDisks)}."));
         }
 
-        var lines = string.Join("\n", preview.Select(step => "• " + step));
+        var confirmation = new List<string>();
+        if (warnings.Count > 0)
+        {
+            confirmation.Add(Text("注意：", "Warnings:"));
+            confirmation.AddRange(warnings.Select(item => "• " + item));
+            confirmation.Add(string.Empty);
+        }
+        confirmation.Add(Text("将执行：", "Operations:"));
+        confirmation.AddRange(preview.Select(step => "• " + step));
+        var lines = string.Join("\n", confirmation);
         if (!await ConfirmAsync(ViewModel.Localization["ApplyPreviewTitle"], lines))
         {
             return;
@@ -2585,6 +2550,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ResetLayerSwitchesForSelection();
         _formDirty = false;
         RefreshAll();
+        ViewModel.NotificationService.PublishInfo(
+            Text("修改已应用", "Changes applied"),
+            Text("结构修改已写入模拟系统。", "The structural changes were saved to the simulation."),
+            "storage-structure-editor");
     }
 
     private async Task HandleFailedApplyAsync(
@@ -2820,51 +2789,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 || workingTier.NumberOfColumns != committedTier.NumberOfColumns;
         });
 
-    private bool ReFsWouldChangeOnApply()
-    {
-        var poolId = _selectedPoolId;
-        if (poolId is null || EditWorkspace.IsDraftPool(poolId))
-        {
-            return false;
-        }
-
-        var partition = CommittedPrimaryPartition(poolId);
-        return partition is not null
-            && !string.Equals(partition.FileSystem, "ReFS", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool TierSpecsEqual(StorageTierInfo left, StorageTierInfo right) =>
         string.Equals(left.ResiliencySettingName, right.ResiliencySettingName, StringComparison.OrdinalIgnoreCase)
         && left.Interleave == right.Interleave
         && left.NumberOfDataCopies == right.NumberOfDataCopies
         && left.PhysicalDiskRedundancy == right.PhysicalDiskRedundancy
         && left.NumberOfColumns == right.NumberOfColumns;
-
-    private async Task<bool> ConfirmUnrecommendedAsync()
-    {
-        if (new[] { Performance, Capacity, Dedicated }
-                .Any(group => (group.InterleaveBox.SelectedItem as string) == "256 KiB")
-            && !await ConfirmAsync(
-                Text("256 KiB 交织警告", "256 KiB interleave warning"),
-                Text(
-                    "256 KiB 交织不在当前测试推荐中。当前测试推荐为 64 KiB 交织 + 64 KiB NTFS 簇。确定继续？",
-                    "256 KiB interleave is outside the tested recommendation (64 KiB interleave + 64 KiB NTFS cluster). Continue anyway?")))
-        {
-            return false;
-        }
-
-        if (string.Equals(_fileSystemBox.SelectedItem as string, "ReFS", StringComparison.OrdinalIgnoreCase)
-            && !await ConfirmAsync(
-                Text("ReFS 提示", "ReFS notice"),
-                Text(
-                    "ReFS 没有与 NTFS 64 KiB 同等的长期测试证据。确定继续？",
-                    "ReFS has no long-run evidence equivalent to NTFS 64 KiB. Continue anyway?")))
-        {
-            return false;
-        }
-
-        return true;
-    }
 
     private async void SavePoolProperties_Click(object sender, RoutedEventArgs e)
     {
@@ -2915,14 +2845,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     "The property form holds no changes to save."));
             _formDirty = true;
             return;
-        }
-
-        if (tierChanged || reformatsPartition)
-        {
-            if (!await ConfirmUnrecommendedAsync())
-            {
-                return;
-            }
         }
 
         _undoStack.Push(priorState);

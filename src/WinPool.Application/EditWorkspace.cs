@@ -424,7 +424,7 @@ public static class EditWorkspace
     /// simulated layer (V0.47 control spec §A). The disk stays in its pool
     /// and leaves every real tier. Usage is "", "Retired", or "HotSpare".
     /// Boot, system, page-file, and crash-dump disks are refused; the page
-    /// confirms dropping a page-file / crash-dump role before calling this.
+    /// stages removal of an evictable special role before calling this.
     /// </summary>
     public static StorageSnapshot SetDiskUsage(StorageSnapshot snapshot, string diskId, string usage)
     {

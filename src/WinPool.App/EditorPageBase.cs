@@ -114,7 +114,11 @@ public class EditorPageBase : Page
         {
             XamlRoot = XamlRoot,
             Title = title,
-            Content = message,
+            Content = new ScrollViewer
+            {
+                MaxHeight = 500,
+                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }
+            },
             PrimaryButtonText = Text("确定", "OK"),
             CloseButtonText = Text("取消", "Cancel"),
             DefaultButton = ContentDialogButton.Close
