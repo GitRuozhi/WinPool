@@ -193,7 +193,9 @@ public static class SimulationDraftPlanner
                     SizeBytes: new[] { ssd, hdd, scm }
                         .Where(item => item is { MemberPhysicalDiskIds.Count: > 0 })
                         .Sum(item => item!.Size),
-                    PerformanceDataCopies: vdisk.NumberOfDataCopies,
+                    PerformanceDataCopies: ssd?.NumberOfDataCopies
+                        ?? scm?.NumberOfDataCopies
+                        ?? hdd?.NumberOfDataCopies,
                     CreatePartition: false,
                     AllocatedVirtualDiskId: vdiskId,
                     AllocatedOsDiskId: osDiskId,

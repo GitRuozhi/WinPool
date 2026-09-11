@@ -25,7 +25,8 @@ public static class EqualFillFlowLayout
         var baseCount = itemCount / rowCount;
         var extraRows = itemCount % rowCount;
         var rows = new List<EqualFillFlowRow>();
-        for (var rowIndex = 0, start = 0; rowIndex < rowCount; rowIndex++)
+        var start = 0;
+        for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             var count = baseCount + (rowIndex < extraRows ? 1 : 0);
             var usableWidth = Math.Max(1, width - (Math.Max(0, count - 1) * spacing));
@@ -53,7 +54,8 @@ public static class EqualFillFlowLayout
         var baseCount = itemCount / rowCount;
         var extraRows = itemCount % rowCount;
         var rows = new List<EqualFillFlowRow>();
-        for (var rowIndex = 0, start = 0; rowIndex < rowCount; rowIndex++)
+        var start = 0;
+        for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             var count = baseCount + (rowIndex < extraRows ? 1 : 0);
             var usableWidth = Math.Max(1, width - (Math.Max(0, count - 1) * spacing));
