@@ -12,6 +12,12 @@ public sealed class FixedWrapPanel : Panel
 
     public double Spacing { get; set; } = 6;
 
+    /// <summary>
+    /// Number of consecutive children kept together vertically as one
+    /// wrapping column. The default preserves ordinary row-major wrapping.
+    /// </summary>
+    public int ItemsPerColumn { get; set; } = 1;
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var width = double.IsInfinity(availableSize.Width) ? ItemWidth : Math.Max(ItemWidth, availableSize.Width);
@@ -21,25 +27,33 @@ public sealed class FixedWrapPanel : Panel
             child.Measure(new Size(ItemWidth, ItemHeight));
         }
 
-        var rows = Children.Count == 0 ? 0 : (Children.Count + perLine - 1) / perLine;
-        return new Size(width, rows == 0 ? 0 : rows * ItemHeight + (rows - 1) * Spacing);
+        var itemsPerColumn = Math.Max(1, ItemsPerColumn);
+        var columns = Children.Count == 0 ? 0 : (Children.Count + itemsPerColumn - 1) / itemsPerColumn;
+        var bands = columns == 0 ? 0 : (columns + perLine - 1) / perLine;
+        var columnHeight = itemsPerColumn * ItemHeight + (itemsPerColumn - 1) * Spacing;
+        return new Size(width, bands == 0 ? 0 : bands * columnHeight + (bands - 1) * Spacing);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         var perLine = Math.Max(1, (int)Math.Floor((finalSize.Width + Spacing) / (ItemWidth + Spacing)));
+        var itemsPerColumn = Math.Max(1, ItemsPerColumn);
+        var columnHeight = itemsPerColumn * ItemHeight + (itemsPerColumn - 1) * Spacing;
         for (var index = 0; index < Children.Count; index++)
         {
-            var row = index / perLine;
-            var column = index % perLine;
+            var group = index / itemsPerColumn;
+            var rowInColumn = index % itemsPerColumn;
+            var band = group / perLine;
+            var column = group % perLine;
             Children[index].Arrange(new Rect(
                 column * (ItemWidth + Spacing),
-                row * (ItemHeight + Spacing),
+                band * (columnHeight + Spacing) + rowInColumn * (ItemHeight + Spacing),
                 ItemWidth,
                 ItemHeight));
         }
 
-        var rows = Children.Count == 0 ? 0 : (Children.Count + perLine - 1) / perLine;
-        return new Size(finalSize.Width, rows == 0 ? 0 : rows * ItemHeight + (rows - 1) * Spacing);
+        var columns = Children.Count == 0 ? 0 : (Children.Count + itemsPerColumn - 1) / itemsPerColumn;
+        var bands = columns == 0 ? 0 : (columns + perLine - 1) / perLine;
+        return new Size(finalSize.Width, bands == 0 ? 0 : bands * columnHeight + (bands - 1) * Spacing);
     }
 }
