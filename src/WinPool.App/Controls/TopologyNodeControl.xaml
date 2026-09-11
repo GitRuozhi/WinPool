@@ -109,17 +109,17 @@
                             <Border
                                 Grid.Column="1"
                                 Padding="5,1"
-                                Background="{ThemeResource SystemFillColorCriticalBrush}"
+                                Background="{StaticResource WinPoolAccentBrush}"
                                 CornerRadius="3"
                                 Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
                                 <StackPanel Orientation="Horizontal" Spacing="3">
                                     <FontIcon
                                         FontSize="10"
-                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Foreground="{StaticResource WinPoolAccentForegroundBrush}"
                                         Glyph="&#xE7BA;" />
                                     <TextBlock
                                         FontSize="10"
-                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Foreground="{StaticResource WinPoolAccentForegroundBrush}"
                                         Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
                                 </StackPanel>
                             </Border>
@@ -243,17 +243,17 @@
                         <Border
                             Grid.Column="4"
                             Padding="5,1"
-                            Background="{ThemeResource SystemFillColorCriticalBrush}"
+                            Background="{StaticResource WinPoolAccentBrush}"
                             CornerRadius="3"
                             Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
                             <StackPanel Orientation="Horizontal" Spacing="3">
                                 <FontIcon
                                     FontSize="10"
-                                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                    Foreground="{StaticResource WinPoolAccentForegroundBrush}"
                                     Glyph="&#xE7BA;" />
                                 <TextBlock
                                     FontSize="10"
-                                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                    Foreground="{StaticResource WinPoolAccentForegroundBrush}"
                                     Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
                             </StackPanel>
                         </Border>
