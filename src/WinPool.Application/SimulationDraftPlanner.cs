@@ -144,7 +144,8 @@ public static class SimulationDraftPlanner
                 AllocatedOsDiskId: osDiskId,
                 AllocatedPartitionId: partitionId,
                 AllocatedVolumeId: volumeId,
-                DraftSourceId: draft.StableId));
+                DraftSourceId: draft.StableId,
+                VolumeName: volume?.FileSystemLabel ?? partition?.FileSystemLabel));
         }
 
         foreach (var vdisk in committed.VirtualDisks)
@@ -178,7 +179,8 @@ public static class SimulationDraftPlanner
                 Resiliency: draftVdisk.ResiliencySettingName,
                 InterleaveBytes: draftVdisk.Interleave,
                 SizeBytes: finalTierSize > 0 ? finalTierSize : draftVdisk.Size,
-                AllocatedVirtualDiskId: vdiskId));
+                AllocatedVirtualDiskId: vdiskId,
+                VolumeName: null));
         }
 
         foreach (var disk in working.PhysicalDisks)
@@ -271,7 +273,6 @@ public static class SimulationDraftPlanner
         {
             if (EditWorkspace.HasPoolPropertyChanges(working, committed, pool.StableId))
             {
-                var vdisk = working.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool.StableId);
                 var ssd = working.StorageTiers.FirstOrDefault(item =>
                     item.PoolStableId == pool.StableId
                     && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD");
@@ -284,8 +285,6 @@ public static class SimulationDraftPlanner
                 steps.Add(new SimulationEditRequest(
                     SimulationEditKind.UpdateStoragePool,
                     pool.StableId,
-                    Name: pool.FriendlyName,
-                    VirtualDiskName: vdisk?.FriendlyName,
                     PerformanceResiliency: ssd?.ResiliencySettingName,
                     PerformanceInterleaveBytes: ssd?.Interleave,
                     PerformanceSizeBytes: ssd?.Size,
@@ -350,19 +349,24 @@ public static class SimulationDraftPlanner
             DateTimeOffset.UtcNow);
         var service = new SimulationOperationService();
         var childItems = new List<SimulationPlanItem>();
-        var failedDissolveParents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var failedDissolveSteps = new List<(string PoolId, SimulationEditRequest Step, string Reason)>();
         var index = 0;
         foreach (var step in steps)
         {
             var parentPool = ParentDissolvedPool(committed, step, dissolvedPoolIds);
             var operation = ToOperation(step);
             StorageRuleDecision decision;
-            if (parentPool is not null && failedDissolveParents.TryGetValue(parentPool, out var priorReason))
+            var failedPrerequisite = parentPool is null
+                ? default
+                : failedDissolveSteps.FirstOrDefault(failure =>
+                    failure.PoolId.Equals(parentPool, StringComparison.OrdinalIgnoreCase)
+                    && DependsOn(step, failure.Step, committed));
+            if (failedPrerequisite.Step is not null)
             {
                 decision = new StorageRuleDecision(
                     StorageRuleVerdict.Deny,
                     "storage.rule.plan-prerequisite",
-                    $"A prerequisite action did not pass: {priorReason}",
+                    $"A prerequisite action did not pass: {failedPrerequisite.Reason}",
                     step.TargetProviderKey);
             }
             else
@@ -388,7 +392,7 @@ public static class SimulationDraftPlanner
 
             if (parentPool is not null && decision.Verdict != StorageRuleVerdict.Allow)
             {
-                failedDissolveParents.TryAdd(parentPool, decision.Message);
+                failedDissolveSteps.Add((parentPool, step, decision.Message));
             }
             childItems.Add(new SimulationPlanItem(
                 $"step:{index++}",
@@ -432,6 +436,31 @@ public static class SimulationDraftPlanner
         var planBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(steps));
         var planId = Convert.ToHexString(SHA256.HashData(planBytes)).ToLowerInvariant()[..32];
         return new SimulationDraftPlan(planId, steps, items);
+    }
+
+    private static bool DependsOn(
+        SimulationEditRequest step,
+        SimulationEditRequest failed,
+        StorageSnapshot snapshot)
+    {
+        if (step.Kind == SimulationEditKind.DeleteEmptyStoragePool)
+        {
+            return true;
+        }
+
+        if (step.Kind != SimulationEditKind.DeleteVirtualDisk
+            || failed.Kind != SimulationEditKind.DeletePartition)
+        {
+            return false;
+        }
+
+        var partition = snapshot.Partitions.FirstOrDefault(item =>
+            item.StableId.Equals(failed.TargetProviderKey, StringComparison.OrdinalIgnoreCase));
+        var osDisk = partition is null ? null : snapshot.OsDisks.FirstOrDefault(item =>
+            item.StableId.Equals(partition.OsDiskStableId, StringComparison.OrdinalIgnoreCase));
+        return osDisk?.VirtualDiskStableId?.Equals(
+            step.TargetProviderKey,
+            StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static string? ParentDissolvedPool(
@@ -500,23 +529,12 @@ public static class SimulationDraftPlanner
         StoragePoolInfo? pool)
     {
         var changes = new List<string>();
-        if (pool is not null && !string.Equals(pool.FriendlyName, request.Name, StringComparison.Ordinal))
-        {
-            changes.Add($"name {pool.FriendlyName} → {request.Name}");
-        }
-        var currentVdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool?.StableId);
-        if (currentVdisk is not null
-            && !string.IsNullOrWhiteSpace(request.VirtualDiskName)
-            && !string.Equals(currentVdisk.FriendlyName, request.VirtualDiskName, StringComparison.Ordinal))
-        {
-            changes.Add($"virtual disk {currentVdisk.FriendlyName} → {request.VirtualDiskName}");
-        }
         AddSizeChange("SSD", request.PerformanceSizeBytes);
         AddSizeChange("HDD", request.CapacitySizeBytes);
         AddSizeChange("SCM", request.ScmSizeBytes);
         return changes.Count == 0
-            ? $"Update storage pool {request.Name ?? pool?.FriendlyName}"
-            : $"Update storage pool {pool?.FriendlyName ?? request.Name}: {string.Join(", ", changes)}";
+            ? $"Update storage pool {pool?.FriendlyName ?? request.TargetProviderKey}"
+            : $"Update storage pool {pool?.FriendlyName ?? request.TargetProviderKey}: {string.Join(", ", changes)}";
 
         void AddSizeChange(string media, long? requested)
         {
@@ -524,7 +542,7 @@ public static class SimulationDraftPlanner
                 item.PoolStableId == pool?.StableId && EditWorkspace.NormalizeMedia(item.MediaType) == media)?.Size;
             if (requested is not null && requested != current)
             {
-                changes.Add($"{media} {current} → {requested} bytes");
+                changes.Add($"{media} {TopologyProjector.FormatBytes(current ?? 0)} → {TopologyProjector.FormatBytes(requested.Value)}");
             }
         }
     }
@@ -712,5 +730,6 @@ public static class SimulationDraftPlanner
             request.AllocatedOsDiskId,
             request.AllocatedPartitionId,
             request.AllocatedVolumeId,
-            request.AccessPaths);
+            request.AccessPaths,
+            request.VolumeName);
 }

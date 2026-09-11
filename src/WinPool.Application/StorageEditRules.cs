@@ -63,7 +63,7 @@ public static class StorageEditRules
         (SimulationOperationKind.CreateTieredPool, "supported: Simple/Mirror×2/Parity with legal disk counts"),
         (SimulationOperationKind.CreateVirtualDisk, "supported: at most one new VD per pool; Fixed estimate"),
         (SimulationOperationKind.DeleteVirtualDisk, "supported: explicit delete"),
-        (SimulationOperationKind.UpdateStoragePool, "supported: name and unused-capacity layout fields"),
+        (SimulationOperationKind.UpdateStoragePool, "supported: unused-capacity layout fields"),
         (SimulationOperationKind.DissolveStoragePool, "supported: non-primordial"),
         (SimulationOperationKind.DeleteEmptyStoragePool, "internal: remove an empty pool after ordered dissolve steps"),
         (SimulationOperationKind.MovePhysicalDisk, "supported: primordial or same-media tier"),

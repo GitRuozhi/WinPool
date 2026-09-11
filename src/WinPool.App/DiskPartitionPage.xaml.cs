@@ -27,6 +27,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private TopologyEditInteraction _interaction = null!;
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
     private bool _filling;
+    private bool _renameInProgress;
 
     public DiskPartitionPage()
     {
@@ -500,9 +501,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : Text($"盘符已设为 {next}:。", $"The drive letter is now {next}:."));
     }
 
-    private async void VolumeLabelBox_LostFocus(object sender, RoutedEventArgs e) =>
-        await CommitVolumeLabelAsync();
-
     private async void VolumeLabelBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key != Windows.System.VirtualKey.Enter)
@@ -516,7 +514,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async Task CommitVolumeLabelAsync()
     {
-        if (_filling || !ViewModel.IsUsingSimulatedInventory)
+        if (_filling || _renameInProgress || !ViewModel.IsUsingSimulatedInventory)
         {
             return;
         }
@@ -534,13 +532,21 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        await SubmitAsync(
-            new SimulationOperationRequest(
-                SimulationOperationKind.Rename,
-                partition.StableId,
-                Name: next),
-            Text("卷标已更新", "Volume label updated"),
-            Text("卷标已写入模拟文档。", "The volume label was saved to the simulation."));
+        _renameInProgress = true;
+        try
+        {
+            await SubmitAsync(
+                new SimulationOperationRequest(
+                    SimulationOperationKind.Rename,
+                    volume.StableId,
+                    Name: next),
+                Text("卷标已更新", "Volume label updated"),
+                Text("卷标已写入模拟文档。", "The volume label was saved to the simulation."));
+        }
+        finally
+        {
+            _renameInProgress = false;
+        }
     }
 
     private async void Online_Click(object sender, RoutedEventArgs e)

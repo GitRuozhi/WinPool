@@ -203,17 +203,18 @@ internal static class RawSnapshotProjector
 {
     public static StorageSnapshot Project(RawSnapshot raw, string sourceJson)
     {
-        var physicalMap = Map(raw.PhysicalDisks, "physical", x => [x.DeviceId, x.FriendlyName, x.Model, x.Size]);
-        var poolMap = Map(raw.StoragePools, "pool", x => [x.FriendlyName, x.Size]);
-        var tierMap = Map(raw.StorageTiers, "tier", x => [x.FriendlyName, x.MediaType, x.Size]);
-        var virtualMap = Map(raw.VirtualDisks, "virtual", x => [x.FriendlyName, x.Size]);
-        var subsystemMap = Map(raw.StorageSubsystems, "subsystem", x => [x.FriendlyName]);
+        var unstableSalt = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceJson)))[..16].ToLowerInvariant();
+        var physicalMap = Map(raw.PhysicalDisks, "physical", x => [unstableSalt, x.AssociationKey, x.DeviceId, x.SerialNumber]);
+        var poolMap = Map(raw.StoragePools, "pool", x => [unstableSalt, x.AssociationKey, x.IsPrimordial, x.SubsystemAssociationKey]);
+        var tierMap = Map(raw.StorageTiers, "tier", x => [unstableSalt, x.AssociationKey, x.PoolAssociationKey, x.VirtualDiskAssociationKey, x.MediaType]);
+        var virtualMap = Map(raw.VirtualDisks, "virtual", x => [unstableSalt, x.AssociationKey, x.PoolAssociationKey, string.Join("|", x.TierAssociationKeys)]);
+        var subsystemMap = Map(raw.StorageSubsystems, "subsystem", x => [unstableSalt, x.AssociationKey]);
         var osDiskMap = raw.OsDisks.ToDictionary(
             x => x.Number,
-            x => StableId.Create("osdisk", x.UniqueId, null, x.Number, x.FriendlyName, x.Size).Value);
+            x => StableId.Create("osdisk", x.UniqueId, null, unstableSalt, x.Number, x.Path).Value);
         var partitionMap = raw.Partitions.ToDictionary(
             x => (x.DiskNumber, x.PartitionNumber),
-            x => StableId.Create("partition", x.Guid, null, x.DiskNumber, x.PartitionNumber, x.Offset, x.Size).Value);
+            x => StableId.Create("partition", x.Guid, null, unstableSalt, x.DiskNumber, x.PartitionNumber, x.Offset, x.Size).Value);
 
         var partitions = raw.Partitions.Select(x =>
         {
@@ -380,6 +381,7 @@ internal static class RawSnapshotProjector
                     "volume",
                     x.VolumeUniqueId,
                     x.VolumeObjectId,
+                    unstableSalt,
                     x.DiskNumber,
                     x.PartitionNumber,
                     x.Path);

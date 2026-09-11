@@ -320,7 +320,6 @@
                                 x:Name="VolumeLabelBox"
                                 Grid.Row="5"
                                 Grid.Column="1"
-                                LostFocus="VolumeLabelBox_LostFocus"
                                 KeyDown="VolumeLabelBox_KeyDown" />
                             <TextBlock
                                 x:Name="SizeLabel"

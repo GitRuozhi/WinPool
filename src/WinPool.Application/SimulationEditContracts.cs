@@ -74,7 +74,8 @@ public sealed record SimulationEditRequest(
     string? AllocatedPartitionId = null,
     string? AllocatedVolumeId = null,
     IReadOnlyList<string>? AccessPaths = null,
-    string? DraftSourceId = null);
+    string? DraftSourceId = null,
+    string? VolumeName = null);
 
 public sealed record SimulationPlanItem(
     string Id,

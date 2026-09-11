@@ -341,7 +341,8 @@ public sealed record SimulationOperationRequest(
     string? AllocatedOsDiskId = null,
     string? AllocatedPartitionId = null,
     string? AllocatedVolumeId = null,
-    IReadOnlyList<string>? AccessPaths = null);
+    IReadOnlyList<string>? AccessPaths = null,
+    string? VolumeName = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -396,7 +397,7 @@ public static class SimulatedCommandText
              $"New-VirtualDisk -FriendlyName '{request.VirtualDiskName ?? request.Name}'",
              $"New-Partition | Format-Volume -FileSystem {request.FileSystem ?? "NTFS"} -AllocationUnitSize {request.AllocationUnitSize ?? 65536}"],
         SimulationOperationKind.UpdateStoragePool =>
-            [$"Set-StoragePool / Set-StorageTier / Set-VirtualDisk '{request.Name}'"],
+            ["Set-StoragePool / Set-StorageTier / Set-VirtualDisk layout fields"],
         SimulationOperationKind.DissolveStoragePool =>
             ["Dissolve simulated pool and return member disks to primordial"],
         SimulationOperationKind.DeleteEmptyStoragePool =>
@@ -603,6 +604,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
             {
                 VirtualDisks = snapshot.VirtualDisks
                     .Select(x => x.StableId == request.TargetStableId ? x with { FriendlyName = name } : x)
+                    .ToArray(),
+                OsDisks = snapshot.OsDisks
+                    .Select(x => x.VirtualDiskStableId == request.TargetStableId
+                        ? x with { FriendlyName = name }
+                        : x)
                     .ToArray()
             };
         }
@@ -1203,7 +1209,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         return CreatePartition(result, new SimulationOperationRequest(
             SimulationOperationKind.CreatePartition,
             osDiskId,
-            Name: name,
+            Name: string.IsNullOrWhiteSpace(request.VolumeName) ? name : request.VolumeName,
             FileSystem: string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
             AllocationUnitSize: request.AllocationUnitSize ?? 65536,
             AllocatedPartitionId: request.AllocatedPartitionId,
@@ -1320,7 +1326,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         return CreatePartition(created, new SimulationOperationRequest(
             SimulationOperationKind.CreatePartition,
             osDisk.StableId,
-            Name: virtualName,
+            Name: string.IsNullOrWhiteSpace(request.VolumeName) ? virtualName : request.VolumeName,
             FileSystem: string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
             AllocationUnitSize: request.AllocationUnitSize ?? 65536,
             AllocatedPartitionId: request.AllocatedPartitionId,
@@ -1401,8 +1407,6 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 "A simulated pool with more than one virtual disk cannot be modified.");
         }
 
-        var name = string.IsNullOrWhiteSpace(request.Name) ? pool.FriendlyName : request.Name.Trim();
-        var virtualName = string.IsNullOrWhiteSpace(request.VirtualDiskName) ? null : request.VirtualDiskName.Trim();
         var tiers = snapshot.StorageTiers
             .Select(tier =>
             {
@@ -1445,7 +1449,6 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 ? disk
                 : disk with
                 {
-                    FriendlyName = virtualName ?? disk.FriendlyName,
                     Size = tierCapacityChanged ? logicalSize : disk.Size,
                     FootprintOnPool = tierCapacityChanged ? physicalFootprint : disk.FootprintOnPool,
                     SizeSource = tierCapacityChanged ? CapacitySourceKind.SimulatedEstimate : disk.SizeSource
@@ -1458,7 +1461,6 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 return vdisk is not null
                     ? disk with
                     {
-                        FriendlyName = virtualName ?? disk.FriendlyName,
                         Size = tierCapacityChanged ? vdisk.Size : disk.Size
                     }
                     : disk;
@@ -1478,7 +1480,6 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 .Select(item => item.StableId == pool.StableId
                     ? item with
                     {
-                        FriendlyName = name,
                         AllocatedSize = tierCapacityChanged ? physicalFootprint : item.AllocatedSize
                     }
                     : item)

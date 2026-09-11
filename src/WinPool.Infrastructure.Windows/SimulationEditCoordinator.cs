@@ -433,6 +433,7 @@ public sealed class SimulationEditCoordinator(
         }
 
         Add(values, "VirtualDiskName", request.VirtualDiskName);
+        Add(values, "VolumeName", request.VolumeName);
         Add(values, "PerformanceResiliency", request.PerformanceResiliency);
         Add(values, "PerformanceInterleaveBytes", request.PerformanceInterleaveBytes);
         Add(values, "PerformanceSizeBytes", request.PerformanceSizeBytes);
