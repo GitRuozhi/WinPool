@@ -1341,7 +1341,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     : disk)
                 .ToArray()
         };
-        if (request.CreateVirtualDisk != true)
+        if (request.CreateVirtualDisk == false || pool.MemberPhysicalDiskIds.Count == 0)
         {
             return created;
         }
@@ -1362,7 +1362,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             SizeBytes: request.SizeBytes,
             AllocationUnitSize: request.AllocationUnitSize ?? 65536,
             PerformanceDataCopies: performanceTier?.NumberOfDataCopies,
-            CreatePartition: request.CreatePartition,
+            CreatePartition: request.CreatePartition ?? true,
             FileSystem: request.FileSystem,
             VolumeName: request.VolumeName,
             AllocatedVirtualDiskId: request.AllocatedVirtualDiskId,

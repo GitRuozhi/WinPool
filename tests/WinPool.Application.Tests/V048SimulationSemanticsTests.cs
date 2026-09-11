@@ -103,6 +103,7 @@ public sealed class V048SimulationSemanticsTests
         Assert.True(existing.Succeeded, existing.Error);
 
         var committed = existing.Document.Snapshot;
+        var primordialId = committed.StoragePools.Single(item => item.IsPrimordial).StableId;
         var oldPool = committed.StoragePools.Single(item => item.FriendlyName == "PoolOld");
         var working = EditWorkspace.InsertDraftPool(committed, "PoolNew");
         var draft = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
@@ -112,7 +113,7 @@ public sealed class V048SimulationSemanticsTests
         var moveIndex = plan.Steps.ToList().FindIndex(item =>
             item.Kind == SimulationEditKind.MovePhysicalDisk
             && item.TargetProviderKey == "physical:ssd0"
-            && item.Name == "primordial");
+            && item.Name == primordialId);
         var createIndex = plan.Steps.ToList().FindIndex(item => item.Kind == SimulationEditKind.CreateTieredPool);
         Assert.InRange(moveIndex, 0, createIndex - 1);
         Assert.DoesNotContain(plan.DisplayItems, item => item.Decision?.Verdict != StorageRuleVerdict.Allow);
@@ -145,7 +146,8 @@ public sealed class V048SimulationSemanticsTests
         Assert.True(existing.Succeeded, existing.Error);
 
         var committed = existing.Document.Snapshot;
-        var working = EditWorkspace.MoveDiskToPool(committed, "physical:ssd0", "primordial");
+        var primordialId = committed.StoragePools.Single(item => item.IsPrimordial).StableId;
+        var working = EditWorkspace.MoveDiskToPool(committed, "physical:ssd0", primordialId);
         var plan = SimulationDraftPlanner.Build(committed, working);
 
         Assert.DoesNotContain(plan.DisplayItems, item =>
@@ -166,7 +168,11 @@ public sealed class V048SimulationSemanticsTests
         drafted = EditWorkspace.MoveDiskToPool(drafted, "physical:ssd1", draft.StableId);
         drafted = EditWorkspace.InsertDraftVirtualDisk(drafted, draft.StableId, "PoolA", "Mirror", 65536);
         var plan = SimulationDraftPlanner.Build(committed, drafted);
-        Assert.Contains(plan.Steps, step => step.Kind == SimulationEditKind.CreateTieredPool);
+        var createPool = Assert.Single(plan.Steps, step => step.Kind == SimulationEditKind.CreateTieredPool);
+        var createVdisk = Assert.Single(plan.Steps, step => step.Kind == SimulationEditKind.CreateVirtualDisk);
+        Assert.Equal(createPool.AllocatedPoolId, createVdisk.TargetProviderKey);
+        Assert.NotNull(createVdisk.AllocatedOsDiskId);
+        Assert.NotEqual(createVdisk.AllocatedVirtualDiskId, createVdisk.AllocatedOsDiskId);
         Assert.DoesNotContain(plan.Steps, step => step.Kind == SimulationEditKind.DeleteVirtualDisk);
         var applied = new SimulationOperationService().ApplyPlan(Primordial(ssdCount: 2, hddCount: 0), plan);
         Assert.True(applied.Succeeded, applied.Error);
@@ -306,12 +312,44 @@ public sealed class V048SimulationSemanticsTests
         var draft = Assert.Single(working.VirtualDisks);
         Assert.Equal(100L * 1024 * 1024 * 1024, draft.Size);
 
+        var plan = SimulationDraftPlanner.Build(emptyPool.Document.Snapshot, working);
+        var create = Assert.Single(plan.Steps, item => item.Kind == SimulationEditKind.CreateVirtualDisk);
+        Assert.NotNull(create.AllocatedVirtualDiskId);
+        Assert.NotNull(create.AllocatedOsDiskId);
+        Assert.NotEqual(create.AllocatedVirtualDiskId, create.AllocatedOsDiskId);
+        Assert.DoesNotContain(plan.DisplayItems, item => item.Decision?.Verdict == StorageRuleVerdict.Deny);
+
         var applied = service.ApplyPlan(
             emptyPool.Document,
-            SimulationDraftPlanner.Build(emptyPool.Document.Snapshot, working));
+            plan);
 
         Assert.True(applied.Succeeded, applied.Error);
         Assert.Equal(draft.Size, Assert.Single(applied.Document.Snapshot.VirtualDisks).Size);
+    }
+
+    [Fact]
+    public void PoolUpdateTouchesItsOfflineVirtualDisk()
+    {
+        var created = new SimulationOperationService().Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2));
+        Assert.True(created.Succeeded, created.Error);
+        var pool = created.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var snapshot = created.Document.Snapshot with
+        {
+            OsDisks = created.Document.Snapshot.OsDisks
+                .Select(item => item.VirtualDiskStableId is not null ? item with { IsOffline = true } : item)
+                .ToArray()
+        };
+
+        Assert.True(StorageEditRules.TouchesOfflineDisk(snapshot, [pool.StableId]));
+        Assert.False(StorageEditRules.TouchesOfflineDisk(snapshot, ["physical:ssd0"]));
     }
 
     [Fact]
@@ -470,8 +508,15 @@ public sealed class V048SimulationSemanticsTests
         var second = SimulationDraftPlanner.Build(committed, working);
 
         Assert.Equal(first.PlanId, second.PlanId);
-        Assert.Equal(first.Steps.Single().AllocatedPoolId, second.Steps.Single().AllocatedPoolId);
-        Assert.Equal(first.Steps.Single().AllocatedVirtualDiskId, second.Steps.Single().AllocatedVirtualDiskId);
+        Assert.Equal(
+            first.Steps.Single(item => item.Kind == SimulationEditKind.CreateTieredPool).AllocatedPoolId,
+            second.Steps.Single(item => item.Kind == SimulationEditKind.CreateTieredPool).AllocatedPoolId);
+        Assert.Equal(
+            first.Steps.Single(item => item.Kind == SimulationEditKind.CreateVirtualDisk).AllocatedVirtualDiskId,
+            second.Steps.Single(item => item.Kind == SimulationEditKind.CreateVirtualDisk).AllocatedVirtualDiskId);
+        Assert.Equal(
+            first.Steps.Single(item => item.Kind == SimulationEditKind.CreateVirtualDisk).AllocatedOsDiskId,
+            second.Steps.Single(item => item.Kind == SimulationEditKind.CreateVirtualDisk).AllocatedOsDiskId);
     }
 
     [Fact]
@@ -689,7 +734,10 @@ public sealed class V048SimulationSemanticsTests
             new SimulationOperationRequest(SimulationOperationKind.Rename, vdisk.StableId, Name: "SpaceB"));
         Assert.True(renamed.Succeeded, renamed.Error);
         Assert.Equal("SpaceB", Assert.Single(renamed.Document.Snapshot.VirtualDisks).FriendlyName);
-        Assert.Equal("SpaceB", Assert.Single(renamed.Document.Snapshot.OsDisks).FriendlyName);
+        Assert.Equal(
+            "SpaceB",
+            renamed.Document.Snapshot.OsDisks.Single(item =>
+                item.VirtualDiskStableId == vdisk.StableId).FriendlyName);
     }
 
     [Fact]

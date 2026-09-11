@@ -75,6 +75,47 @@ public static class StorageEditRules
         (SimulationOperationKind.OptimizeDrive, "simulated no-op; does not claim a measured result")
     ];
 
+    public static bool TouchesOfflineDisk(
+        StorageSnapshot snapshot,
+        IEnumerable<string> targetStableIds)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(targetStableIds);
+        var targets = targetStableIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targetedPools = snapshot.StoragePools.Where(pool => targets.Contains(pool.StableId))
+            .Select(pool => pool.StableId)
+            .Concat(snapshot.StorageTiers.Where(tier => targets.Contains(tier.StableId))
+                .Select(tier => tier.PoolStableId))
+            .Where(poolId => poolId is not null)
+            .Select(poolId => poolId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var osDisk in snapshot.OsDisks.Where(item => item.IsOffline))
+        {
+            var virtualPoolId = osDisk.VirtualDiskStableId is string virtualDiskId
+                ? snapshot.VirtualDisks.FirstOrDefault(item =>
+                    item.StableId.Equals(virtualDiskId, StringComparison.OrdinalIgnoreCase))?.PoolStableId
+                : null;
+            if (targets.Contains(osDisk.StableId)
+                || osDisk.PhysicalDiskStableId is not null && targets.Contains(osDisk.PhysicalDiskStableId)
+                || osDisk.VirtualDiskStableId is not null && targets.Contains(osDisk.VirtualDiskStableId)
+                || virtualPoolId is not null && targetedPools.Contains(virtualPoolId)
+                || osDisk.PhysicalDiskStableId is not null && snapshot.StoragePools.Any(pool =>
+                    targetedPools.Contains(pool.StableId)
+                    && pool.MemberPhysicalDiskIds.Contains(osDisk.PhysicalDiskStableId, StringComparer.OrdinalIgnoreCase))
+                || snapshot.Partitions.Any(partition =>
+                    partition.OsDiskStableId == osDisk.StableId
+                    && (targets.Contains(partition.StableId)
+                        || snapshot.Volumes.Any(volume =>
+                            volume.PartitionStableId == partition.StableId && targets.Contains(volume.StableId)))))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static StorageRuleDecision EvaluateDriveLetter(
         StorageSnapshot snapshot,
         SimulationOperationRequest request)

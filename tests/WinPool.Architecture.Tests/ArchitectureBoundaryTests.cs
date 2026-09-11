@@ -449,6 +449,8 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml.cs"));
         var workspace = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "ViewModels", "WorkspaceViewModel.cs"));
+        var draftPlanner = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Application", "SimulationDraftPlanner.cs"));
 
         Assert.Contains(
             "WinPool.Application.SimulationEditRequest",
@@ -458,26 +460,15 @@ public sealed class ArchitectureBoundaryTests
             "EditWorkspace.ProjectPoolWorkspace",
             structurePage,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "SimulationOperationKind.CreateTieredPool",
-            structurePage,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SimulationOperationKind.DissolveStoragePool",
-            structurePage,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SimulationOperationKind.EvictPhysicalDiskFromTiers",
-            structurePage,
-            StringComparison.Ordinal);
+        Assert.Contains("SimulationDraftPlanner.Build", structurePage, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.CreateTieredPool", draftPlanner, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.DeleteEmptyStoragePool", draftPlanner, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.EvictPhysicalDiskFromTiers", draftPlanner, StringComparison.Ordinal);
         Assert.Contains(
             "EditWorkspace.DiskNeedsSamePoolTierAssignment",
-            structurePage,
+            draftPlanner,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "SimulationOperationKind.SetDiskUsage",
-            structurePage,
-            StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.SetDiskUsage", draftPlanner, StringComparison.Ordinal);
         Assert.Contains(
             "EditWorkspace.ProjectPartitionWorkspace",
             diskPartitionPage,
@@ -1327,15 +1318,35 @@ public sealed class ArchitectureBoundaryTests
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
+        var draftPlanner = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Application", "SimulationDraftPlanner.cs"));
         // One virtual disk is the 1.0 contract: the structure page can
         // create the one virtual disk only while the pool has none (SC4),
         // and Delete removes the selected virtual disk including the last
         // one. A pool that arrives with several may only be reduced to one;
         // there is no path that adds a second disk to a pool that has one.
-        Assert.Contains("SimulationOperationKind.CreateVirtualDisk", page, StringComparison.Ordinal);
-        Assert.Contains("SimulationOperationKind.DeleteVirtualDisk", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationDraftPlanner.Build", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.CreateVirtualDisk", draftPlanner, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.DeleteVirtualDisk", draftPlanner, StringComparison.Ordinal);
+        Assert.Contains("AppendPartitionIntents(enriched);", page, StringComparison.Ordinal);
+        Assert.Contains("createVdisk?.AllocatedOsDiskId is not null", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.CreatePartition", page, StringComparison.Ordinal);
         Assert.Contains("EditWorkspace.HasMultipleVirtualDisks", page, StringComparison.Ordinal);
-        Assert.Contains("SimulationOperationKind.CreateTieredPool", page, StringComparison.Ordinal);
+        Assert.Contains("SimulationEditKind.CreateTieredPool", draftPlanner, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DiskPartitionFormRestoresFileSystemChoicesForEachSelection()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml.cs"));
+
+        Assert.Contains("FillFileSystemChoices(partition);", page, StringComparison.Ordinal);
+        Assert.Contains("case \"EfiSystem\":", page, StringComparison.Ordinal);
+        Assert.Contains("case \"MicrosoftReserved\":", page, StringComparison.Ordinal);
+        Assert.Contains("case \"WindowsRecovery\":", page, StringComparison.Ordinal);
+        Assert.Contains("FillFileSystemBox();", page, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

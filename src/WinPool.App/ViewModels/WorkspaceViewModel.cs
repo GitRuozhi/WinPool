@@ -979,29 +979,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             targetIds.Add(memberId);
         }
 
-        foreach (var osDisk in snapshot.OsDisks.Where(item => item.IsOffline))
-        {
-            var targetedPools = snapshot.StoragePools.Where(pool => targetIds.Contains(pool.StableId))
-                .Select(pool => pool.StableId)
-                .Concat(snapshot.StorageTiers.Where(tier => targetIds.Contains(tier.StableId))
-                    .Select(tier => tier.PoolStableId))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (targetIds.Contains(osDisk.StableId)
-                || osDisk.PhysicalDiskStableId is not null && targetIds.Contains(osDisk.PhysicalDiskStableId)
-                || osDisk.VirtualDiskStableId is not null && targetIds.Contains(osDisk.VirtualDiskStableId)
-                || osDisk.PhysicalDiskStableId is not null && snapshot.StoragePools.Any(pool =>
-                    targetedPools.Contains(pool.StableId)
-                    && pool.MemberPhysicalDiskIds.Contains(osDisk.PhysicalDiskStableId, StringComparer.OrdinalIgnoreCase))
-                || snapshot.Partitions.Any(partition =>
-                    partition.OsDiskStableId == osDisk.StableId
-                    && (targetIds.Contains(partition.StableId)
-                        || snapshot.Volumes.Any(volume =>
-                            volume.PartitionStableId == partition.StableId && targetIds.Contains(volume.StableId)))))
-            {
-                return true;
-            }
-        }
-        return false;
+        return WinPool.Application.StorageEditRules.TouchesOfflineDisk(snapshot, targetIds);
     }
 
     private static WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt> OfflineEditRejected()

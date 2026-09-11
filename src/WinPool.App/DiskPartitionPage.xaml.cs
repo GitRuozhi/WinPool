@@ -272,6 +272,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 EndOffsetValue.Text = "—";
             }
 
+            FillFileSystemChoices(partition);
             FillDriveLetters(partition, volume, autoAssign: gap);
             VolumeLabelBox.Text = volume?.FileSystemLabel
                 ?? (partition is null ? string.Empty : partition.FileSystemLabel);
@@ -350,6 +351,25 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ? DriveLetterBox.Items.Cast<string>().FirstOrDefault(item =>
                 item.Equals(current, StringComparison.OrdinalIgnoreCase))
             : none;
+    }
+
+    private void FillFileSystemChoices(PartitionInfo? partition)
+    {
+        switch (partition?.Type)
+        {
+            case "EfiSystem":
+                FillFileSystemBoxFor("FAT32");
+                break;
+            case "MicrosoftReserved":
+                FillFileSystemBoxFor(string.Empty);
+                break;
+            case "WindowsRecovery":
+                FillFileSystemBoxFor("NTFS");
+                break;
+            default:
+                FillFileSystemBox();
+                break;
+        }
     }
 
     private static string NextFreeDriveLetter(IReadOnlySet<string> used)

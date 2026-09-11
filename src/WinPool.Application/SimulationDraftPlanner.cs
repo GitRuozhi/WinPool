@@ -116,9 +116,9 @@ public static class SimulationDraftPlanner
             {
                 vdiskId = NewId("sim:vdisk", allocated, vdisk.StableId);
                 var osDisk = working.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
+                osDiskId = NewId("sim:osdisk", allocated, osDisk?.StableId ?? vdisk.StableId);
                 if (osDisk is not null)
                 {
-                    osDiskId = NewId("sim:osdisk", allocated, osDisk.StableId);
                     var nestedPartition = working.Partitions.FirstOrDefault(item =>
                         item.OsDiskStableId == osDisk.StableId
                         && item.Type is "Primary" or "BasicData");
@@ -284,6 +284,7 @@ public static class SimulationDraftPlanner
             var originalPool = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.StableId)?.PoolStableId;
             if (EditWorkspace.IsDraftPool(disk.PoolStableId ?? string.Empty)
                 || originalPool is not null && dissolvedPoolIds.Contains(originalPool)
+                || !string.Equals(originalPool, disk.PoolStableId, StringComparison.OrdinalIgnoreCase)
                 || disk.IsRetired
                 || disk.IsHotSpare
                 || EditWorkspace.DiskIsAssignedToTier(working, disk.StableId)
@@ -772,14 +773,15 @@ public static class SimulationDraftPlanner
 
     private static string NewId(string prefix, Dictionary<string, string> allocated, string draftId)
     {
-        if (allocated.TryGetValue(draftId, out var existing))
+        var allocationKey = $"{prefix}|{draftId}";
+        if (allocated.TryGetValue(allocationKey, out var existing))
         {
             return existing;
         }
 
         var suffix = draftId[(draftId.LastIndexOf(':') + 1)..];
         var created = $"{prefix}:{suffix}";
-        allocated[draftId] = created;
+        allocated[allocationKey] = created;
         return created;
     }
 
