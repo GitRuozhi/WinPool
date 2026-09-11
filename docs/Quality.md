@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前 V0.51 磁盘编辑、入口一致性与布局修复代码已实施；2026-09-11 的后续缺陷修复已通过 Application 206 项、Architecture 43 项测试及完整 Release 构建。原生 UI、人工视觉和真实设备场景仍未验证。V0.50 的历史验证和未验证状态见归档，不能替代本次验证。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
+本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前 V0.51 磁盘编辑、入口一致性与布局修复代码已实施；2026-09-11 的后续缺陷及 MAX 补充修复已通过 Application 208 项、Architecture 43 项、全套 506 项测试及完整 Release 构建。含数据池的 MAX 按钮、待办与保存路径已用原生 WinUI 验证，其它人工视觉和真实设备场景仍未验证。V0.50 的历史验证和未验证状态见归档，不能替代本次验证。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
 
 ## 选择验证范围
 

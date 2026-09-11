@@ -341,6 +341,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         if (sizeGroup is not null)
                         {
                             var maximumKey = MaximumKey(sizeGroup);
+                            // WinUI can deliver the TextChanged raised by
+                            // UpdateMaximumSizeText after the filling guard has
+                            // been released. Keep the mode when the visible
+                            // value is still our generated MAX token.
+                            if (_maximumSizeFields.Contains(maximumKey)
+                                && box.Text.StartsWith("MAX(", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _formDirty = true;
+                                UpdateButtonState();
+                                return;
+                            }
                             if (_maximumSizeFields.Contains(maximumKey))
                             {
                                 CaptureSelectedIntent();
@@ -1705,6 +1716,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _poolIntents.TryGetValue(intentKey ?? string.Empty, out var intent);
         var selected = intentKey is not null
             && intentKey.Equals(_selectedPoolId, StringComparison.OrdinalIgnoreCase);
+        bool UsesMaximum(TierFields group, string media) =>
+            intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|{media}")
+            || selected
+                && _maximumSizeFields.Contains(MaximumKey(group))
+                && group.SizeBox.Text.StartsWith("MAX(", StringComparison.OrdinalIgnoreCase);
 
         return step with
         {
@@ -1725,9 +1741,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             CreatePartition = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
                 ? false
                 : step.CreatePartition,
-            PerformanceUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|SSD"),
-            CapacityUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|HDD"),
-            ScmUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|SCM"),
+            PerformanceUseMaximum = UsesMaximum(Performance, "SSD"),
+            CapacityUseMaximum = UsesMaximum(Capacity, "HDD"),
+            ScmUseMaximum = UsesMaximum(Dedicated, "SCM"),
             ProvisioningType = "Fixed"
         };
     }
@@ -2042,8 +2058,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var tierVisible = TierVisible(pool.StableId, group.Media);
             var sizeEditable = tierVisible && tier is not null && !holdsData;
             var specEditable = sizeEditable;
+            var maximumBytes = tierVisible && tier is not null ? TierCapacityMaxBytes(group.Media) : 0;
+            var maximumSelected = _maximumSizeFields.Contains(MaximumKey(group));
             group.SizeBox.IsEnabled = sizeEditable;
-            group.MaximumButton.IsEnabled = sizeEditable && TierCapacityMaxBytes(group.Media) > 0;
+            group.MaximumButton.IsEnabled = tierVisible
+                && tier is not null
+                && maximumBytes > 0
+                && (!holdsData || maximumSelected || maximumBytes > tier.Size);
             var provisioning = string.IsNullOrWhiteSpace(vdisk?.ProvisioningType)
                 ? "Fixed"
                 : vdisk.ProvisioningType;
@@ -2729,6 +2750,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             };
         }
 
+        var holdsData = EditWorkspace.PoolHoldsStoredData(result, pool.StableId);
         foreach (var group in TierGroups())
         {
             var tier = result.StorageTiers.FirstOrDefault(item =>
@@ -2739,22 +2761,35 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 continue;
             }
 
-            var resiliency = group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
-            var interleave = ParseSize(group.InterleaveBox.SelectedItem as string ?? "64 KiB");
-            var copies = NumValue(group.CopiesBox) is { } copyValue
-                ? Math.Max(1, (int)copyValue)
-                : tier.NumberOfDataCopies ?? 1;
-            var failures = NumValue(group.FailuresBox) is { } failureValue
-                ? Math.Max(0, (int)failureValue)
-                : tier.PhysicalDiskRedundancy ?? 1;
-            var columns = NumValue(group.ColumnsBox) is { } columnValue
-                ? (int)columnValue
-                : tier.NumberOfColumns;
-            var size = NumValue(group.SizeBox) is { } sizeValue
-                ? (long)(sizeValue * 1024L * 1024L * 1024L)
-                : (long?)null;
+            var maximumSelected = _maximumSizeFields.Contains(MaximumKey(group));
+            var resiliency = holdsData
+                ? tier.ResiliencySettingName
+                : group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
+            long? interleave = holdsData
+                ? tier.Interleave
+                : ParseSize(group.InterleaveBox.SelectedItem as string ?? "64 KiB");
+            int? copies = holdsData
+                ? tier.NumberOfDataCopies
+                : NumValue(group.CopiesBox) is { } copyValue
+                    ? Math.Max(1, (int)copyValue)
+                    : tier.NumberOfDataCopies ?? 1;
+            int? failures = holdsData
+                ? tier.PhysicalDiskRedundancy
+                : NumValue(group.FailuresBox) is { } failureValue
+                    ? Math.Max(0, (int)failureValue)
+                    : tier.PhysicalDiskRedundancy ?? 1;
+            var columns = holdsData
+                ? tier.NumberOfColumns
+                : NumValue(group.ColumnsBox) is { } columnValue
+                    ? (int)columnValue
+                    : tier.NumberOfColumns;
+            var size = holdsData && !maximumSelected
+                ? tier.Size
+                : NumValue(group.SizeBox) is { } sizeValue
+                    ? (long)(sizeValue * 1024L * 1024L * 1024L)
+                    : (long?)null;
             var changed = !string.Equals(resiliency, tier.ResiliencySettingName, StringComparison.OrdinalIgnoreCase)
-                || interleave != (tier.Interleave ?? 0)
+                || interleave != tier.Interleave
                 || copies != tier.NumberOfDataCopies
                 || failures != tier.PhysicalDiskRedundancy
                 || columns != tier.NumberOfColumns
@@ -2762,12 +2797,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
             if (changed)
             {
                 var parity = resiliency.Equals("Parity", StringComparison.OrdinalIgnoreCase)
-                    ? Math.Max(1, failures)
+                    ? Math.Max(1, failures ?? 1)
                     : 0;
                 var footprint = size is null
                     ? tier.FootprintOnPool
                     : ConservativeCapacity.PhysicalFootprintForLogical(
-                        size.Value, resiliency, copies, columns, parity);
+                        size.Value, resiliency, copies ?? 1, columns, parity);
                 result = result with
                 {
                     StorageTiers = result.StorageTiers

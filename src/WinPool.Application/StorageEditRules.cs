@@ -458,9 +458,29 @@ public static class StorageEditRules
         var changesLayout = tiers.Any(tier => TierLayoutChanges(tier, request));
         if (changesLayout && EditWorkspace.PoolHoldsStoredData(snapshot, pool.StableId))
         {
-            return Deny(
-                "storage.rule.update-pool.existing-data",
-                "Tier layout or capacity cannot be changed while the pool's virtual disk contains data.");
+            try
+            {
+                var hasUnsafeChange = tiers.Any(tier =>
+                    TierLayoutChanges(tier, request)
+                    && (TierSpecificationChanges(tier, request)
+                        || !UsesMaximumCapacity(tier, request)
+                        || RequestedTierSize(snapshot, tier, request) < tier.Size));
+                if (hasUnsafeChange)
+                {
+                    return Deny(
+                        "storage.rule.update-pool.existing-data",
+                        "A pool containing data can only expand a tier with Use maximum size; tier settings and capacity reductions remain blocked.");
+                }
+            }
+            catch (ArgumentException)
+            {
+                return new(
+                    StorageRuleVerdict.InsufficientInfo,
+                    "storage.rule.update-pool.maximum-unknown",
+                    "The simulated maximum cannot be calculated safely for this tier layout.",
+                    pool.StableId,
+                    WindowsTierSupportedSize);
+            }
         }
 
         foreach (var tier in tiers)
@@ -912,6 +932,32 @@ public static class StorageEditRules
                 || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
         };
     }
+
+    private static bool TierSpecificationChanges(StorageTierInfo tier, SimulationOperationRequest request)
+    {
+        var media = EditWorkspace.NormalizeMedia(tier.MediaType);
+        return media switch
+        {
+            "HDD" => Different(request.CapacityResiliency, tier.ResiliencySettingName)
+                || Different(request.CapacityInterleaveBytes, tier.Interleave)
+                || Different(request.CapacityColumns, tier.NumberOfColumns)
+                || Different(request.CapacityToleratedFailures, tier.PhysicalDiskRedundancy),
+            "SCM" => Different(request.ScmResiliency, tier.ResiliencySettingName)
+                || Different(request.ScmInterleaveBytes, tier.Interleave)
+                || Different(request.ScmDataCopies, tier.NumberOfDataCopies),
+            _ => Different(request.PerformanceResiliency, tier.ResiliencySettingName)
+                || Different(request.PerformanceInterleaveBytes, tier.Interleave)
+                || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
+        };
+    }
+
+    private static bool UsesMaximumCapacity(StorageTierInfo tier, SimulationOperationRequest request) =>
+        EditWorkspace.NormalizeMedia(tier.MediaType) switch
+        {
+            "HDD" => request.CapacityUseMaximum,
+            "SCM" => request.ScmUseMaximum,
+            _ => request.PerformanceUseMaximum
+        };
 
     private static bool Different<T>(T? requested, T? current) where T : struct =>
         requested.HasValue && !EqualityComparer<T>.Default.Equals(requested.Value, current.GetValueOrDefault());

@@ -707,6 +707,41 @@ public sealed class UpdateStoragePoolSizeTests
             DateTimeOffset.Now);
     }
 
+    private static StorageSystemDocument WithStoredData(StorageSystemDocument document)
+    {
+        const string virtualDiskId = "virtual:1";
+        const string osDiskId = "osdisk:3";
+        var tiers = document.Snapshot.StorageTiers
+            .Select(item => item with
+            {
+                Size = item.MediaType == "SSD" ? 1_000_000_000_000 : item.Size,
+                FootprintOnPool = item.MediaType == "SSD" ? 1_000_000_000_000 : item.FootprintOnPool,
+                VirtualDiskStableId = virtualDiskId
+            })
+            .ToArray();
+        var virtualDisk = new VirtualDiskInfo(
+            virtualDiskId, true, "Virtual01", "Healthy", "OK", "Simple", "Fixed",
+            1, 65536, 5_000_000_000_000, 5_000_000_000_000, "pool:1",
+            tiers.Select(item => item.StableId).ToArray(), [3]);
+        var osDisk = new OsDiskInfo(
+            osDiskId, "Virtual01", 3, "GPT", virtualDisk.Size,
+            false, false, false, null, virtualDiskId);
+        var partition = new PartitionInfo(
+            "partition:1", true, 3, 1, "Basic", 1_048_576, 900_000_000_000,
+            false, false, "D", "Data", "NTFS", 4096, 400_000_000_000,
+            "Healthy", "OK", "D:\\", osDiskId);
+        return document with
+        {
+            Snapshot = document.Snapshot with
+            {
+                StorageTiers = tiers,
+                VirtualDisks = [virtualDisk],
+                OsDisks = [osDisk],
+                Partitions = [partition]
+            }
+        };
+    }
+
     [Fact]
     public void UpdateStoragePoolResizesThePerformanceTier()
     {
@@ -744,5 +779,52 @@ public sealed class UpdateStoragePoolSizeTests
             [2_000_000_000_000], "Simple").AlignedLogicalBytes;
         Assert.Equal(expected, tier.Size);
         Assert.Equal(expected, tier.FootprintOnPool);
+    }
+
+    [Fact]
+    public void UpdateStoragePoolMaximumModeCanExpandATierContainingData()
+    {
+        var document = WithStoredData(CreateDocument());
+        var result = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.UpdateStoragePool,
+                "pool:1",
+                Name: "Pool01",
+                PerformanceSizeBytes: 1,
+                PerformanceUseMaximum: true));
+
+        Assert.True(result.Succeeded, result.Error);
+        var tier = result.Document.Snapshot.StorageTiers.Single(item => item.StableId == "pool:1:tier:ssd");
+        Assert.True(tier.Size > 1_000_000_000_000);
+        Assert.Equal(tier.Size + 4_000_000_000_000,
+            result.Document.Snapshot.VirtualDisks.Single().Size);
+        Assert.Equal(result.Document.Snapshot.VirtualDisks.Single().Size,
+            result.Document.Snapshot.OsDisks.Single().Size);
+    }
+
+    [Fact]
+    public void UpdateStoragePoolStillBlocksManualCapacityAndLayoutChangesWhenDataExists()
+    {
+        var document = WithStoredData(CreateDocument());
+        var service = new SimulationOperationService();
+        var manualRequest = new SimulationOperationRequest(
+            SimulationOperationKind.UpdateStoragePool,
+            "pool:1",
+            PerformanceSizeBytes: 1_500_000_000_000);
+        var layoutRequest = new SimulationOperationRequest(
+            SimulationOperationKind.UpdateStoragePool,
+            "pool:1",
+            PerformanceUseMaximum: true,
+            PerformanceResiliency: "Mirror");
+        var manualExpansion = service.Apply(document, manualRequest);
+        var layoutChange = service.Apply(document, layoutRequest);
+
+        Assert.False(manualExpansion.Succeeded);
+        Assert.Equal("storage.rule.update-pool.existing-data",
+            StorageEditRules.Evaluate(document.Snapshot, manualRequest).Code);
+        Assert.False(layoutChange.Succeeded);
+        Assert.Equal("storage.rule.update-pool.existing-data",
+            StorageEditRules.Evaluate(document.Snapshot, layoutRequest).Code);
     }
 }
