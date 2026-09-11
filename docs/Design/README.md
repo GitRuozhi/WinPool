@@ -6,7 +6,6 @@
 
 | 方案 | 当前定位 | 重新排期前核对 |
 | --- | --- | --- |
-| [V0.50 Plan](V0.50Plan.md) | 已编制、待用户批准；尚未替换活动 V0.49 Plan，不授权实施 | 六个 BUG、MAX/容量单位、校验分工、固定控件换行、只读待应用动作窗口；批准后移为唯一活动 Plan |
 | [硬件读取分析与重构方案](WinPool-Hardware-Inventory-Analysis-and-Refactor-Plan.md) | 设计储备；源方案基于 V0.45，未纳入 V0.48 | 硬件页是否进入产品范围、StorageFast/HardwareFull 是否仍必要、V0.48 后实际模型及采集边界 |
 | [多版本发行方案](WinPool-Multi-Edition-Plan-Simplified.md) | 设计储备；源方案基于 V0.45 之后，未纳入 V0.48 | Standard/Portable/Preview 的必要性、功能范围、MSIX 阶段、届时的数据策略和平台验证 |
 

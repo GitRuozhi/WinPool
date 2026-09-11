@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前活动 Plan 为 V0.49 分区页，已实现、待确认关闭。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
+本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前活动 Plan 为 V0.50，待用户批准、尚未实施；V0.49 已有验证状态见 [归档](Archive/V0.49/README.md)，不因计划替换改变。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
 
 ## 选择验证范围
 

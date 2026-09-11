@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，有活动阶段时具体改造与完成状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。活动 Plan 为 V0.49 分区页，已实现、待确认关闭。结构页统一草稿、分区页及时生效见 Product。已知限制见 [CHANGELOG](CHANGELOG.md)。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，有活动阶段时具体改造与完成状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。活动 Plan 为 V0.50，待用户批准、尚未实施；当前代码仍为 V0.49，旧计划见 [V0.49 归档](Archive/V0.49/README.md)。结构页统一草稿、分区页及时生效见 Product。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
