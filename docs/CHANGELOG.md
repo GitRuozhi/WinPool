@@ -1,6 +1,10 @@
 # WinPool 变更记录
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存。当前实现为 V0.50，阶段状态见 [Plan](Plan.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。当前实现为 V0.50，九项缺陷修复状态见 [Plan](Plan.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+
+## 2026-09-11：V0.50 静态审查与修复计划
+
+审查 `fde06b2` 后发现：改名隐含模拟格式化、默认新建草稿被零容量拒绝、缩小层后分区越界、新 VD 容量未随层更新、切换选择丢创建意图、解散覆盖移动目标、Interleave 回填错误、动作对象/风险/父原因缺失，以及 MAX 撤销不同步。九项修复转入活动 Plan，尚未实施；原计划原样归档。本轮未运行测试、构建或原生程序，历史自动通过结果不覆盖上述场景。
 
 ## V0.50：结构动作、容量与开发链路收口
 
@@ -8,7 +12,7 @@
 - Simple、Mirror、Parity 使用统一逻辑容量和物理占用算法；MAX 向下取 4 GiB 整数倍。层容量显示/输入使用二进制单位，预配类型为仅含 Fixed 的下拉框。
 - 修复空池建虚拟磁盘容量不一致、Parity 漏算校验、改池绕过规则、建池意图丢失、解散重复删除和目录挂载路径误判盘符。
 - App 负责模拟业务规则与候选文档；Agent 的模拟系统检查标记为跳过，同时保留哈希、修订、事务、CommitId 对账和单写入方保护。真实存储写入仍拒绝。
-- 两个编辑页的左下操作控件使用固定 DIP 尺寸并按可用宽度换行。自动回归、Release 构建和原生窄窗口检查结果见 Plan；真实设备写入、DPI/高对比度和长期运行仍未验证。
+- 两个编辑页的左下操作控件使用固定 DIP 尺寸并按可用宽度换行。初次实施的自动回归、Release 构建和原生窄窗口检查结果见 [归档](Archive/V0.50/README.md)；真实设备写入、DPI/高对比度和长期运行仍未验证。
 
 ## 2026-09-10：内置模拟系统校正
 

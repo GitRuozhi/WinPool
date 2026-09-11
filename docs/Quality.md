@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。V0.50 已执行，自动门及原生界面检查结果记录在该计划；V0.49 历史状态见 [归档](Archive/V0.49/README.md)。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
+本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前为 V0.50 九项缺陷修复计划，待批准执行；初次实施的自动门及原生界面检查结果见 [V0.50 归档](Archive/V0.50/README.md)，不能替代本次组合场景验证。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
 
 ## 选择验证范围
 
