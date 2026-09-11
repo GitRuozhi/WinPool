@@ -265,10 +265,10 @@ public static class EditWorkspace
     }
 
     /// <summary>
-    /// A partition holds stored data when it carries a file system and any
-    /// of its capacity is consumed. When the snapshot cannot prove the
-    /// partition empty, the conservative "holds data" answer applies
-    /// (Plan §7.2).
+    /// Authoritative stored-data predicate for editor status, rules, and
+    /// plan risk. A formatted partition holds data when any capacity is
+    /// consumed. RAW and unformatted partitions do not expose file-system
+    /// data and remain data-free even if a provider reports no free bytes.
     /// </summary>
     public static bool PartitionHoldsStoredData(PartitionInfo partition) =>
         !string.IsNullOrWhiteSpace(partition.FileSystem)

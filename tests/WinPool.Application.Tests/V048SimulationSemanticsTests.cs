@@ -87,6 +87,75 @@ public sealed class V048SimulationSemanticsTests
     }
 
     [Fact]
+    public void ExistingPoolMemberMovesThroughPrimordialBeforeDraftPoolCreation()
+    {
+        var service = new SimulationOperationService();
+        var existing = service.Apply(
+            Primordial(ssdCount: 3, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolOld",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Simple",
+                CreateVirtualDisk: false));
+        Assert.True(existing.Succeeded, existing.Error);
+
+        var committed = existing.Document.Snapshot;
+        var oldPool = committed.StoragePools.Single(item => item.FriendlyName == "PoolOld");
+        var working = EditWorkspace.InsertDraftPool(committed, "PoolNew");
+        var draft = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd0", draft.StableId);
+
+        var plan = SimulationDraftPlanner.Build(committed, working);
+        var moveIndex = plan.Steps.ToList().FindIndex(item =>
+            item.Kind == SimulationEditKind.MovePhysicalDisk
+            && item.TargetProviderKey == "physical:ssd0"
+            && item.Name == "primordial");
+        var createIndex = plan.Steps.ToList().FindIndex(item => item.Kind == SimulationEditKind.CreateTieredPool);
+        Assert.InRange(moveIndex, 0, createIndex - 1);
+        Assert.DoesNotContain(plan.DisplayItems, item => item.Decision?.Verdict != StorageRuleVerdict.Allow);
+
+        var applied = service.ApplyPlan(existing.Document, plan);
+        Assert.True(applied.Succeeded, applied.Error);
+        var newPool = applied.Document.Snapshot.StoragePools.Single(item => item.FriendlyName == "PoolNew");
+        Assert.Equal(
+            new[] { "physical:ssd1" },
+            applied.Document.Snapshot.StoragePools.Single(item => item.StableId == oldPool.StableId).MemberPhysicalDiskIds);
+        Assert.Contains("physical:ssd0", newPool.MemberPhysicalDiskIds);
+        Assert.Equal(
+            newPool.StableId,
+            applied.Document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd0").PoolStableId);
+    }
+
+    [Fact]
+    public void PlanRejectsLeavingAnExistingPoolWithoutMembers()
+    {
+        var service = new SimulationOperationService();
+        var existing = service.Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolOld",
+                MemberDiskIds: ["physical:ssd0"],
+                PerformanceResiliency: "Simple",
+                CreateVirtualDisk: false));
+        Assert.True(existing.Succeeded, existing.Error);
+
+        var committed = existing.Document.Snapshot;
+        var working = EditWorkspace.MoveDiskToPool(committed, "physical:ssd0", "primordial");
+        var plan = SimulationDraftPlanner.Build(committed, working);
+
+        Assert.Contains(plan.DisplayItems, item =>
+            item.Decision?.Code == "storage.rule.pool.empty-final"
+            && item.Decision.Verdict == StorageRuleVerdict.Deny);
+        var applied = service.ApplyPlan(existing.Document, plan);
+        Assert.False(applied.Succeeded);
+        Assert.Equal(committed, applied.Document.Snapshot);
+    }
+
+    [Fact]
     public void DraftPlannerDoesNotEmitDeleteForNewlyCreatedVirtualDisk()
     {
         var committed = Primordial(ssdCount: 2, hddCount: 0).Snapshot;

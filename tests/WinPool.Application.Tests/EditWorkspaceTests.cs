@@ -248,6 +248,19 @@ public sealed class EditWorkspaceTests
         };
         Assert.True(EditWorkspace.DiskSupportsStructureModification(withRaw, "physical:extra", isVirtualDisk: false));
 
+        // RAW has no mounted file system whose used bytes can be established.
+        // Every consumer must therefore keep it data-free even when the
+        // provider reports zero remaining bytes.
+        var rawWithNoRemaining = withRaw with
+        {
+            Partitions = [withRaw.Partitions.Single() with { SizeRemaining = 0 }]
+        };
+        Assert.False(EditWorkspace.PartitionHoldsStoredData(rawWithNoRemaining.Partitions.Single()));
+        Assert.True(EditWorkspace.DiskSupportsStructureModification(
+            rawWithNoRemaining,
+            "physical:extra",
+            isVirtualDisk: false));
+
         var withData = withRaw with
         {
             Partitions =

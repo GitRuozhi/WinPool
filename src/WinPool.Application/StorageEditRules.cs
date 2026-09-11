@@ -384,7 +384,7 @@ public static class StorageEditRules
 
         var tiers = snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId).ToArray();
         var changesLayout = tiers.Any(tier => TierLayoutChanges(tier, request));
-        if (changesLayout && PoolHasData(snapshot, pool.StableId))
+        if (changesLayout && EditWorkspace.PoolHoldsStoredData(snapshot, pool.StableId))
         {
             return Deny(
                 "storage.rule.update-pool.existing-data",
@@ -839,16 +839,6 @@ public static class StorageEditRules
                 || Different(request.PerformanceSizeBytes, tier.Size)
                 || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
         };
-    }
-
-    private static bool PoolHasData(StorageSnapshot snapshot, string poolId)
-    {
-        var vdiskIds = snapshot.VirtualDisks.Where(item => item.PoolStableId == poolId)
-            .Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var osIds = snapshot.OsDisks.Where(item => item.VirtualDiskStableId is not null && vdiskIds.Contains(item.VirtualDiskStableId))
-            .Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return snapshot.Partitions.Any(item => item.OsDiskStableId is not null && osIds.Contains(item.OsDiskStableId)
-            && item.Size > item.SizeRemaining);
     }
 
     private static bool Different<T>(T? requested, T? current) where T : struct =>

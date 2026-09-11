@@ -286,6 +286,8 @@ public sealed class LocalizationService : ObservableObject
             ["RemoveCrashDumpMessage"] = ("退出前将移除该磁盘上的崩溃转储。确定继续？", "The crash dump on this disk will be removed before it leaves the tier. Continue?"),
             ["RebuildBlockedTitle"] = ("无法确认", "Cannot confirm"),
             ["RebuildBlockedMessage"] = ("有数据时不允许重建池和虚拟磁盘。", "A pool or virtual disk that holds data cannot be rebuilt."),
+            ["StructureChangeBlockedTitle"] = ("无法修改结构", "Cannot modify structure"),
+            ["DataBearingMemberMoveBlockedMessage"] = ("该磁盘是含有数据的存储池中的原成员，不能直接移出。", "This disk is an original member of a storage pool that holds data and cannot be moved out directly."),
             ["StructureHasStoredData"] = ("含有数据", "Contains stored data"),
             ["StructureCannotLeave"] = ("原成员，不能拖出", "Original member, cannot drag out"),
             ["StructurePendingModification"] = ("有未执行的变更", "Has unexecuted changes"),

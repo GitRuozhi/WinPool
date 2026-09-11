@@ -550,6 +550,15 @@ public sealed class SimulationOperationService : ISimulationOperationService
             commands.AddRange(result.Commands);
         }
 
+        var emptyPool = current.Snapshot.StoragePools.FirstOrDefault(item =>
+            !item.IsPrimordial && item.MemberPhysicalDiskIds.Count == 0);
+        if (emptyPool is not null)
+        {
+            return SimulationOperationResult.Failure(
+                document,
+                $"Storage pool '{emptyPool.FriendlyName}' must retain at least one physical disk when changes are applied.");
+        }
+
         return new SimulationOperationResult(true, current, string.Empty, commands);
     }
 

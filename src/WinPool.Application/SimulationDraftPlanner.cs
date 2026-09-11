@@ -31,6 +31,11 @@ public static class SimulationDraftPlanner
             .Select(item => item.StableId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var primordialId = committed.StoragePools.FirstOrDefault(item => item.IsPrimordial)?.StableId ?? string.Empty;
+        var draftPoolIds = working.StoragePools
+            .Where(item => EditWorkspace.IsDraftPool(item.StableId))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var draftMembersMovedToPrimordial = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var pool in committed.StoragePools.Where(item => dissolvedPoolIds.Contains(item.StableId)))
         {
@@ -59,6 +64,15 @@ public static class SimulationDraftPlanner
                     finalTarget = primordialId;
                 }
 
+                // A draft pool does not exist yet. Return the disk to the
+                // primordial pool first; the later create step consumes it
+                // as a member of the new pool.
+                if (draftPoolIds.Contains(finalTarget))
+                {
+                    finalTarget = primordialId;
+                    draftMembersMovedToPrimordial.Add(diskId);
+                }
+
                 steps.Add(new SimulationEditRequest(SimulationEditKind.MovePhysicalDisk, diskId, Name: finalTarget));
             }
 
@@ -67,6 +81,30 @@ public static class SimulationDraftPlanner
 
         foreach (var draft in working.StoragePools.Where(item => EditWorkspace.IsDraftPool(item.StableId)))
         {
+            // Members dragged from an existing pool are still associated
+            // with that pool in the committed snapshot used by precheck.
+            // Materialize the exit before validating creation so the create
+            // operation sees the same primordial membership that it will
+            // consume during execution.
+            foreach (var memberId in draft.MemberPhysicalDiskIds)
+            {
+                var original = committed.PhysicalDisks.FirstOrDefault(item =>
+                    item.StableId.Equals(memberId, StringComparison.OrdinalIgnoreCase));
+                if (original is null
+                    || string.IsNullOrWhiteSpace(original.PoolStableId)
+                    || original.PoolStableId.Equals(primordialId, StringComparison.OrdinalIgnoreCase)
+                    || draftMembersMovedToPrimordial.Contains(memberId))
+                {
+                    continue;
+                }
+
+                steps.Add(new SimulationEditRequest(
+                    SimulationEditKind.MovePhysicalDisk,
+                    memberId,
+                    Name: primordialId));
+                draftMembersMovedToPrimordial.Add(memberId);
+            }
+
             var poolId = NewId("sim:pool", allocated, draft.StableId);
             var vdisk = working.VirtualDisks.FirstOrDefault(item => item.PoolStableId == draft.StableId);
             string? vdiskId = null;
@@ -403,6 +441,42 @@ public static class SimulationDraftPlanner
                 CausesDataLoss(committed, step)));
         }
 
+        // Zero-member pools are useful while arranging a draft, but they
+        // are not a valid applied result. Mark the move that emptied each
+        // surviving pool so the action panel explains the final-state
+        // failure before submission. A dissolved pool is absent here and
+        // therefore remains valid.
+        foreach (var emptyPool in document.Snapshot.StoragePools.Where(item =>
+                     !item.IsPrimordial
+                     && item.MemberPhysicalDiskIds.Count == 0
+                     && !dissolvedPoolIds.Contains(item.StableId)))
+        {
+            var originalMembers = committed.StoragePools.FirstOrDefault(item =>
+                    item.StableId.Equals(emptyPool.StableId, StringComparison.OrdinalIgnoreCase))?
+                .MemberPhysicalDiskIds.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var itemIndex = childItems.FindLastIndex(item =>
+                item.Request.Kind == SimulationEditKind.MovePhysicalDisk
+                && originalMembers.Contains(item.Request.TargetProviderKey));
+            var decision = new StorageRuleDecision(
+                StorageRuleVerdict.Deny,
+                "storage.rule.pool.empty-final",
+                $"Storage pool '{emptyPool.FriendlyName}' must retain at least one physical disk when changes are applied.",
+                emptyPool.StableId);
+            if (itemIndex >= 0)
+            {
+                childItems[itemIndex] = childItems[itemIndex] with { Decision = decision };
+            }
+            else
+            {
+                childItems.Add(new SimulationPlanItem(
+                    $"validation:pool-not-empty:{emptyPool.StableId}",
+                    $"Validate storage pool {emptyPool.FriendlyName}",
+                    new SimulationEditRequest(SimulationEditKind.UpdateStoragePool, emptyPool.StableId),
+                    Decision: decision));
+            }
+        }
+
         var items = new List<SimulationPlanItem>();
         foreach (var item in childItems)
         {
@@ -552,7 +626,7 @@ public static class SimulationDraftPlanner
         if (request.Kind == SimulationEditKind.DeletePartition)
         {
             var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
-            return partition is not null && partition.Size > partition.SizeRemaining;
+            return partition is not null && EditWorkspace.PartitionHoldsStoredData(partition);
         }
 
         if (request.Kind != SimulationEditKind.DeleteVirtualDisk)
@@ -560,11 +634,10 @@ public static class SimulationDraftPlanner
             return false;
         }
 
-        var osIds = snapshot.OsDisks.Where(item => item.VirtualDiskStableId == request.TargetProviderKey)
-            .Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return snapshot.Partitions.Any(item => item.OsDiskStableId is not null
-            && osIds.Contains(item.OsDiskStableId)
-            && item.Size > item.SizeRemaining);
+        return EditWorkspace.DiskHoldsStoredData(
+            snapshot,
+            request.TargetProviderKey,
+            isVirtualDisk: true);
     }
 
     private static void AppendPartitionAndVolumeSteps(

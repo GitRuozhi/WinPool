@@ -1159,6 +1159,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     StringComparison.OrdinalIgnoreCase);
             if (wasOriginalMember && EditWorkspace.DiskIsAssignedToTier(_working, diskId))
             {
+                await ShowMessageAsync(
+                    ViewModel.Localization["StructureChangeBlockedTitle"],
+                    ViewModel.Localization["DataBearingMemberMoveBlockedMessage"]);
                 return;
             }
         }
