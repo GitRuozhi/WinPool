@@ -298,6 +298,45 @@ public static class TopologyLayoutEngine
             rows.Add(row);
         }
 
+        // Keep the minimum row count found by the existing feasibility pass,
+        // then redistribute consecutive siblings as evenly as possible. This
+        // stays inside the root layout plan and never measures UI elements.
+        if (rows.Count > 1)
+        {
+            var baseCount = root.Children.Count / rows.Count;
+            var extraRows = root.Children.Count % rows.Count;
+            var balancedRows = new List<List<int>>();
+            var balancedNodes = new Node[root.Children.Count];
+            var balanced = true;
+            var start = 0;
+            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                var count = baseCount + (rowIndex < extraRows ? 1 : 0);
+                var inputs = root.Children.Skip(start).Take(count).ToList();
+                var placed = TryPlace(inputs, availableWidth);
+                if (placed is null)
+                {
+                    balanced = false;
+                    break;
+                }
+
+                var row = new List<int>(count);
+                for (var i = 0; i < count; i++)
+                {
+                    balancedNodes[start + i] = placed[i];
+                    row.Add(start + i);
+                }
+                balancedRows.Add(row);
+                start += count;
+            }
+
+            if (balanced)
+            {
+                ordered = balancedNodes;
+                rows = balancedRows;
+            }
+        }
+
         var children = ordered.ToList();
         var unitWidth = 1;
         var unitHeight = root.ShowHeader ? 1 : 0;

@@ -230,5 +230,5 @@ public static class ConservativeCapacity
     }
 
     private static string PolicyLabel() =>
-        "WinPool V0.50 simulated Fixed estimate: exclude non-data members, apply the selected Simple/Mirror/Parity layout, and align the logical maximum down to 4 GiB. Not a Windows guarantee.";
+        "WinPool simulated Fixed estimate: exclude non-data members, apply the selected Simple/Mirror/Parity layout, and align the logical maximum down to 4 GiB. Not a Windows guarantee.";
 }

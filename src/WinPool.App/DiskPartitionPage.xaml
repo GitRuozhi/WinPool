@@ -271,6 +271,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <TextBlock
                                 x:Name="DiskLocationLabel"
@@ -308,26 +309,36 @@
                                 Grid.Column="2"
                                 VerticalAlignment="Center" />
                             <TextBlock
-                                x:Name="DriveLetterLabel"
+                                x:Name="PartitionTypeLabel"
                                 Grid.Row="4"
                                 VerticalAlignment="Center" />
                             <ComboBox
-                                x:Name="DriveLetterBox"
+                                x:Name="PartitionTypeBox"
                                 Grid.Row="4"
+                                Grid.Column="2"
+                                HorizontalAlignment="Stretch"
+                                SelectionChanged="PartitionTypeBox_SelectionChanged" />
+                            <TextBlock
+                                x:Name="DriveLetterLabel"
+                                Grid.Row="5"
+                                VerticalAlignment="Center" />
+                            <ComboBox
+                                x:Name="DriveLetterBox"
+                                Grid.Row="5"
                                 Grid.Column="2"
                                 HorizontalAlignment="Stretch"
                                 SelectionChanged="DriveLetterBox_SelectionChanged" />
                             <TextBlock
                                 x:Name="VolumeLabelCaption"
-                                Grid.Row="5"
+                                Grid.Row="6"
                                 VerticalAlignment="Center" />
                             <TextBox
                                 x:Name="VolumeLabelBox"
-                                Grid.Row="5"
+                                Grid.Row="6"
                                 Grid.Column="2"
                                 KeyDown="VolumeLabelBox_KeyDown" />
                             <StackPanel
-                                Grid.Row="6"
+                                Grid.Row="7"
                                 Orientation="Horizontal"
                                 Spacing="5"
                                 VerticalAlignment="Center">
@@ -343,7 +354,7 @@
                             </StackPanel>
                             <Button
                                 x:Name="ResetSizeButton"
-                                Grid.Row="6"
+                                Grid.Row="7"
                                 Grid.Column="1"
                                 Style="{StaticResource PropertyResetButtonStyle}"
                                 Click="ResetSize_Click"
@@ -352,7 +363,7 @@
                             </Button>
                             <NumberBox
                                 x:Name="SizeBox"
-                                Grid.Row="6"
+                                Grid.Row="7"
                                 Grid.Column="2"
                                 Minimum="0"
                                 SmallChange="1"
@@ -361,7 +372,7 @@
                                 ValidationMode="InvalidInputOverwritten"
                                 ValueChanged="SizeBox_ValueChanged" />
                             <StackPanel
-                                Grid.Row="7"
+                                Grid.Row="8"
                                 Orientation="Horizontal"
                                 Spacing="5"
                                 VerticalAlignment="Center">
@@ -377,7 +388,7 @@
                             </StackPanel>
                             <Button
                                 x:Name="ResetFileSystemButton"
-                                Grid.Row="7"
+                                Grid.Row="8"
                                 Grid.Column="1"
                                 Style="{StaticResource PropertyResetButtonStyle}"
                                 Click="ResetFileSystem_Click"
@@ -386,12 +397,12 @@
                             </Button>
                             <ComboBox
                                 x:Name="FileSystemBox"
-                                Grid.Row="7"
+                                Grid.Row="8"
                                 Grid.Column="2"
                                 HorizontalAlignment="Stretch"
                                 SelectionChanged="FileSystemBox_SelectionChanged" />
                             <StackPanel
-                                Grid.Row="8"
+                                Grid.Row="9"
                                 Orientation="Horizontal"
                                 Spacing="5"
                                 VerticalAlignment="Center">
@@ -407,7 +418,7 @@
                             </StackPanel>
                             <Button
                                 x:Name="ResetClusterButton"
-                                Grid.Row="8"
+                                Grid.Row="9"
                                 Grid.Column="1"
                                 Style="{StaticResource PropertyResetButtonStyle}"
                                 Click="ResetCluster_Click"
@@ -416,12 +427,12 @@
                             </Button>
                             <ComboBox
                                 x:Name="ClusterBox"
-                                Grid.Row="8"
+                                Grid.Row="9"
                                 Grid.Column="2"
                                 HorizontalAlignment="Stretch"
                                 SelectionChanged="ClusterBox_SelectionChanged" />
                             <StackPanel
-                                Grid.Row="9"
+                                Grid.Row="10"
                                 Orientation="Horizontal"
                                 Spacing="5"
                                 VerticalAlignment="Center">
@@ -437,7 +448,7 @@
                             </StackPanel>
                             <Button
                                 x:Name="ResetQuickFormatButton"
-                                Grid.Row="9"
+                                Grid.Row="10"
                                 Grid.Column="1"
                                 Style="{StaticResource PropertyResetButtonStyle}"
                                 Click="ResetQuickFormat_Click"
@@ -446,7 +457,7 @@
                             </Button>
                             <ToggleSwitch
                                 x:Name="QuickFormatSwitch"
-                                Grid.Row="9"
+                                Grid.Row="10"
                                 Grid.Column="2"
                                 MinWidth="0"
                                 Margin="0"

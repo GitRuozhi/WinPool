@@ -22,7 +22,7 @@ public sealed class SimulationOperationTests
             "pool:primordial", true, "Primordial", true, "Healthy", "OK",
             300L * 1024 * 1024 * 1024, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
         var osDisk = new OsDiskInfo(
-            "osdisk:5", "Free Disk One", 5, "RAW", 100L * 1024 * 1024 * 1024, false, false, false, "physical:p1", null);
+            "osdisk:5", "Free Disk One", 5, "GPT", 100L * 1024 * 1024 * 1024, false, false, false, "physical:p1", null);
         var snapshot = new StorageSnapshot(
             StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
@@ -67,6 +67,18 @@ public sealed class SimulationOperationTests
             "osdisk:5",
             SizeBytes: 500_000_000));
         Assert.Single(document.Snapshot.Partitions);
+
+        document = document with
+        {
+            Snapshot = document.Snapshot with
+            {
+                OsDisks = document.Snapshot.OsDisks
+                    .Select(item => item.StableId == "osdisk:5"
+                        ? item with { PartitionStyle = "RAW" }
+                        : item)
+                    .ToArray()
+            }
+        };
 
         document = Apply(document, new SimulationOperationRequest(
             SimulationOperationKind.InitializeDisk,
@@ -113,7 +125,7 @@ public sealed class SimulationOperationTests
             SimulationOperationKind.CreatePartition,
             osDisk.StableId));
         var partition = Assert.Single(document.Snapshot.Partitions);
-        Assert.Equal("Primary", partition.Type);
+        Assert.Equal("BasicData", partition.Type);
 
         document = Apply(document, new SimulationOperationRequest(
             SimulationOperationKind.FormatPartition,

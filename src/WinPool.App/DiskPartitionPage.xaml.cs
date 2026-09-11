@@ -40,14 +40,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (e.Parameter is EditorNavigationParameter parameter)
         {
             ViewModel = parameter.ViewModel;
-            _selectedDiskId = ResolveOsDiskId(parameter.TargetStableId);
+            var targetPartition = ViewModel.EffectiveActiveSnapshot.Partitions.FirstOrDefault(item =>
+                item.StableId.Equals(parameter.TargetStableId, StringComparison.OrdinalIgnoreCase));
+            _selectedPartitionId = targetPartition?.StableId;
+            _selectedDiskId = targetPartition?.OsDiskStableId ?? ResolveOsDiskId(parameter.TargetStableId);
         }
         else
         {
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
-        _working = ViewModel.ActiveSnapshot;
+        _working = ViewModel.EffectiveActiveSnapshot;
         _interaction = new TopologyEditInteraction(IsTopologyNodeSelected, OnTopologySelected, false);
         LocalizeChrome();
         RefreshAll();
@@ -60,14 +63,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
         ConvertGptButtonLabel.Text = Text("转换为 GPT", "Convert to GPT");
         NewPartitionButtonLabel.Text = ViewModel.Localization["NewPartition"];
-        DeletePartitionButtonLabel.Text = ViewModel.Localization["DeleteVolume"];
-        ExtendButtonLabel.Text = ViewModel.Localization["ExtendVolume"];
-        ShrinkButtonLabel.Text = ViewModel.Localization["ShrinkVolume"];
+        DeletePartitionButtonLabel.Text = Text("删除分区", "Delete partition");
+        ExtendButtonLabel.Text = Text("扩展分区", "Extend partition");
+        ShrinkButtonLabel.Text = Text("压缩分区", "Shrink partition");
         OpenExplorerButtonLabel.Text = Text("打开资源管理器", "Open in File Explorer");
         DiskLocationLabel.Text = Text("所在磁盘", "Disk");
         PartitionNumberLabel.Text = Text("分区编号", "Partition number");
         StartOffsetLabel.Text = Text("起始位置", "Start");
         EndOffsetLabel.Text = Text("结束位置", "End");
+        PartitionTypeLabel.Text = Text("分区类型", "Partition type");
         DriveLetterLabel.Text = Text("盘符", "Drive letter");
         VolumeLabelCaption.Text = Text("卷标", "Volume label");
         SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
@@ -84,6 +88,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
         FillFileSystemBox();
         FillClusterBox();
+        FillPartitionTypeBox();
     }
 
     private IEnumerable<Button> PropertyResetButtons()
@@ -103,6 +108,24 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FileSystemBox.SelectedIndex = 0;
     }
 
+    private void FillPartitionTypeBox()
+    {
+        PartitionTypeBox.Items.Clear();
+        PartitionTypeBox.Items.Add(Text("基本数据分区", "Basic data partition"));
+        PartitionTypeBox.Items.Add(Text("EFI 系统分区", "EFI system partition"));
+        PartitionTypeBox.Items.Add(Text("Microsoft 保留分区（MSR）", "Microsoft Reserved Partition (MSR)"));
+        PartitionTypeBox.Items.Add(Text("Windows 恢复分区", "Windows recovery partition"));
+        PartitionTypeBox.SelectedIndex = 0;
+    }
+
+    private PartitionKind SelectedPartitionKind() => PartitionTypeBox.SelectedIndex switch
+    {
+        1 => PartitionKind.EfiSystem,
+        2 => PartitionKind.MicrosoftReserved,
+        3 => PartitionKind.WindowsRecovery,
+        _ => PartitionKind.BasicData
+    };
+
     private void FillClusterBox()
     {
         ClusterBox.Items.Clear();
@@ -121,7 +144,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return null;
         }
 
-        var snapshot = ViewModel.ActiveSnapshot;
+        var snapshot = ViewModel.EffectiveActiveSnapshot;
         if (snapshot.OsDisks.Any(x => x.StableId == stableId))
         {
             return stableId;
@@ -260,6 +283,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 FileSystemBox.SelectedIndex = 0;
                 ClusterBox.SelectedIndex = 4;
                 QuickFormatSwitch.IsOn = true;
+                PartitionTypeBox.SelectedIndex = 0;
             }
             else if (partition is not null)
             {
@@ -268,6 +292,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
                 SelectCluster(volume?.AllocationUnitSize ?? partition.AllocationUnitSize);
                 QuickFormatSwitch.IsOn = true;
+                PartitionTypeBox.SelectedIndex = partition.Type switch
+                {
+                    "EfiSystem" => 1,
+                    "MicrosoftReserved" => 2,
+                    "WindowsRecovery" => 3,
+                    _ => 0
+                };
             }
             else
             {
@@ -275,6 +306,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 FileSystemBox.SelectedIndex = 0;
                 ClusterBox.SelectedIndex = 4;
                 QuickFormatSwitch.IsOn = true;
+                PartitionTypeBox.SelectedIndex = 0;
             }
         }
         finally
@@ -403,7 +435,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _working.OsDisks.FirstOrDefault(item => item.StableId == _selectedDiskId);
 
     private bool IsUserPartition(PartitionInfo? partition) =>
-        partition is { Type: "Primary", IsBoot: false, IsSystem: false }
+        partition is { Type: "Primary" or "BasicData", IsBoot: false, IsSystem: false }
         && partition.Type is not "EfiSystem" and not "MicrosoftReserved" and not "WindowsRecovery";
 
     private bool IsProtected(PartitionInfo partition) =>
@@ -431,24 +463,29 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var userPartition = IsUserPartition(partition);
         var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
         var hasVolume = volume is not null;
-        var initialized = IsInitialized(disk);
         var alreadyGpt = disk is not null
             && string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase);
-        var hasPartitions = disk is not null
-            && _working.Partitions.Any(item => item.OsDiskStableId == disk.StableId);
+        var raw = disk?.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase) == true;
+        var mbr = disk?.PartitionStyle.Equals("MBR", StringComparison.OrdinalIgnoreCase) == true;
+        var hasGap = disk is not null && EditWorkspace.UnallocatedGaps(
+            disk,
+            _working.Partitions.Where(item => item.OsDiskStableId == disk.StableId).ToArray()).Any(item => item.Size > 0);
         var letter = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
         var explorerPath = letter.Length == 1 ? $"{letter}:\\" : string.Empty;
         var diskOffline = disk?.IsOffline == true;
-        var createMode = isGapSelection && initialized;
+        var createMode = isGapSelection && alreadyGpt;
 
         OnlineButton.IsEnabled = simulated && isDiskSelection && disk is { IsOffline: true };
         OfflineButton.IsEnabled = simulated
             && isDiskSelection
             && disk is { IsOffline: false, IsBoot: false, IsSystem: false };
-        InitializeButton.IsEnabled = simulated && isDiskSelection && disk is { IsBoot: false, IsSystem: false } && !initialized;
-        ConvertGptButton.IsEnabled = simulated && isDiskSelection && initialized && !alreadyGpt && !hasPartitions;
-        NewPartitionButton.IsEnabled = simulated && disk is { IsOffline: false } && createMode;
-        DeletePartitionButton.IsEnabled = simulated && userPartition;
+        InitializeButton.IsEnabled = simulated && isDiskSelection && !diskOffline
+            && disk is { IsBoot: false, IsSystem: false } && raw;
+        ConvertGptButton.IsEnabled = simulated && isDiskSelection && !diskOffline
+            && disk is { IsBoot: false, IsSystem: false } && mbr;
+        NewPartitionButton.IsEnabled = simulated && !diskOffline && alreadyGpt && hasGap
+            && (isDiskSelection || isGapSelection);
+        DeletePartitionButton.IsEnabled = simulated && !diskOffline && userPartition;
         ExtendButton.IsEnabled = false;
         ShrinkButton.IsEnabled = false;
         OpenExplorerButton.IsEnabled = !simulated
@@ -457,18 +494,30 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && letter.Length == 1
             && Directory.Exists(explorerPath);
 
-        var propertyEnabled = simulated && (isPartitionSelection || isGapSelection);
-        DriveLetterBox.IsEnabled = simulated && (hasVolume || createMode);
-        VolumeLabelBox.IsEnabled = simulated && (hasVolume || createMode);
-        SizeBox.IsEnabled = simulated && isGapSelection;
-        FileSystemBox.IsEnabled = propertyEnabled;
-        ClusterBox.IsEnabled = propertyEnabled;
-        QuickFormatSwitch.IsEnabled = propertyEnabled;
+        var propertyEnabled = simulated && !diskOffline && (isPartitionSelection || isGapSelection);
+        var kind = SelectedPartitionKind();
+        PartitionTypeBox.IsEnabled = propertyEnabled && createMode;
+        DriveLetterBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
+        VolumeLabelBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
+        SizeBox.IsEnabled = propertyEnabled && isGapSelection;
+        FileSystemBox.IsEnabled = propertyEnabled && kind != PartitionKind.MicrosoftReserved;
+        ClusterBox.IsEnabled = propertyEnabled && kind != PartitionKind.MicrosoftReserved;
+        QuickFormatSwitch.IsEnabled = propertyEnabled && kind != PartitionKind.MicrosoftReserved;
+        if (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery)
+        {
+            DriveLetterBox.IsEnabled = false;
+        }
+        if (createMode && kind == PartitionKind.MicrosoftReserved)
+        {
+            VolumeLabelBox.IsEnabled = false;
+        }
         FormatButtonLabel.Text = createMode
-            ? Text("新建分区并格式化", "Create partition and format")
+            ? kind == PartitionKind.MicrosoftReserved
+                ? Text("新建分区", "Create partition")
+                : Text("新建分区并格式化", "Create partition and format")
             : ViewModel.Localization["Format"];
         FormatButtonIcon.Glyph = createMode ? "\uE710" : "\uE9CE";
-        FormatButton.IsEnabled = simulated && (createMode || userPartition);
+        FormatButton.IsEnabled = propertyEnabled && (createMode || userPartition);
         UpdatePropertyResetState();
     }
 
@@ -480,6 +529,62 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         UpdateButtonState();
+    }
+
+    private void PartitionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_filling || _selectedUnallocatedOffset is null)
+        {
+            return;
+        }
+
+        _filling = true;
+        try
+        {
+            var gapGiB = (_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d;
+            switch (SelectedPartitionKind())
+            {
+                case PartitionKind.EfiSystem:
+                    FillFileSystemBoxFor("FAT32");
+                    ClusterBox.SelectedIndex = 0;
+                    SizeBox.Value = Math.Min(gapGiB, 300d / 1024d);
+                    DriveLetterBox.SelectedIndex = 0;
+                    break;
+                case PartitionKind.MicrosoftReserved:
+                    FillFileSystemBoxFor(string.Empty);
+                    SizeBox.Value = Math.Min(gapGiB, 16d / 1024d);
+                    DriveLetterBox.SelectedIndex = 0;
+                    VolumeLabelBox.Text = string.Empty;
+                    QuickFormatSwitch.IsOn = false;
+                    break;
+                case PartitionKind.WindowsRecovery:
+                    FillFileSystemBoxFor("NTFS");
+                    ClusterBox.SelectedIndex = 0;
+                    SizeBox.Value = Math.Min(gapGiB, 990d / 1024d);
+                    DriveLetterBox.SelectedIndex = 0;
+                    QuickFormatSwitch.IsOn = true;
+                    break;
+                default:
+                    FillFileSystemBox();
+                    ClusterBox.SelectedIndex = 4;
+                    SizeBox.Value = gapGiB;
+                    FillDriveLetters(null, null, autoAssign: true);
+                    QuickFormatSwitch.IsOn = true;
+                    break;
+            }
+        }
+        finally
+        {
+            _filling = false;
+        }
+        UpdateButtonState();
+    }
+
+    private void FillFileSystemBoxFor(string fileSystem)
+    {
+        FileSystemBox.Items.Clear();
+        FileSystemBox.Items.Add(fileSystem);
+        FileSystemBox.SelectedIndex = 0;
     }
 
     private void SizeBox_ValueChanged(object sender, NumberBoxValueChangedEventArgs e)
@@ -512,11 +617,16 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
         var gap = _selectedUnallocatedOffset is not null;
         var parameterEnabled = ViewModel.IsUsingSimulatedInventory && (partition is not null || gap);
-        var recommendedSize = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
+        var recommendedSize = Math.Round(RecommendedCreateSizeGiB(), 2);
         var baselineFileSystem = volume?.FileSystem ?? partition?.FileSystem;
         if (string.IsNullOrWhiteSpace(baselineFileSystem))
         {
-            baselineFileSystem = "NTFS";
+            baselineFileSystem = SelectedPartitionKind() switch
+            {
+                PartitionKind.EfiSystem => "FAT32",
+                PartitionKind.MicrosoftReserved => string.Empty,
+                _ => "NTFS"
+            };
         }
 
         var baselineCluster = volume?.AllocationUnitSize ?? partition?.AllocationUnitSize;
@@ -531,7 +641,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 StringComparison.OrdinalIgnoreCase);
         var clusterChanged = parameterEnabled
             && ClusterBox.IsEnabled
-            && SelectedClusterBytes() != (baselineCluster ?? 65536);
+            && SelectedClusterBytes() != (baselineCluster ??
+                (SelectedPartitionKind() == PartitionKind.BasicData ? 65536 : 4096));
         var quickFormatChanged = parameterEnabled
             && QuickFormatSwitch.IsEnabled
             && !QuickFormatSwitch.IsOn;
@@ -556,7 +667,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         if (_selectedUnallocatedOffset is not null)
         {
-            SizeBox.Value = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
+            SizeBox.Value = Math.Round(RecommendedCreateSizeGiB(), 2);
         }
 
         UpdatePropertyResetState();
@@ -564,20 +675,39 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void ResetFileSystem_Click(object sender, RoutedEventArgs e)
     {
-        FileSystemBox.SelectedItem = "NTFS";
+        FileSystemBox.SelectedItem = SelectedPartitionKind() switch
+        {
+            PartitionKind.EfiSystem => "FAT32",
+            PartitionKind.MicrosoftReserved => string.Empty,
+            _ => "NTFS"
+        };
         UpdatePropertyResetState();
     }
 
     private void ResetCluster_Click(object sender, RoutedEventArgs e)
     {
-        ClusterBox.SelectedItem = "64 KiB";
+        ClusterBox.SelectedItem = SelectedPartitionKind() == PartitionKind.BasicData
+            ? "64 KiB"
+            : "4 KiB";
         UpdatePropertyResetState();
     }
 
     private void ResetQuickFormat_Click(object sender, RoutedEventArgs e)
     {
-        QuickFormatSwitch.IsOn = true;
+        QuickFormatSwitch.IsOn = SelectedPartitionKind() != PartitionKind.MicrosoftReserved;
         UpdatePropertyResetState();
+    }
+
+    private double RecommendedCreateSizeGiB()
+    {
+        var gapGiB = (_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d;
+        return SelectedPartitionKind() switch
+        {
+            PartitionKind.EfiSystem => Math.Min(gapGiB, 300d / 1024d),
+            PartitionKind.MicrosoftReserved => Math.Min(gapGiB, 16d / 1024d),
+            PartitionKind.WindowsRecovery => Math.Min(gapGiB, 990d / 1024d),
+            _ => gapGiB
+        };
     }
 
     private async void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -661,7 +791,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
     }
 
-    private async void Online_Click(object sender, RoutedEventArgs e)
+    private void Online_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
         if (disk is null)
@@ -669,13 +799,16 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        await SubmitAsync(
-            new SimulationOperationRequest(SimulationOperationKind.SetDiskOffline, disk.StableId, Offline: false),
+        ViewModel.SetTransientDiskOffline(disk.StableId, false);
+        _working = ViewModel.EffectiveActiveSnapshot;
+        ViewModel.NotificationService.PublishInfo(
             Text("已联机", "Disk online"),
-            Text("磁盘已联机。", "The disk is online."));
+            Text("磁盘已在当前会话中联机。", "The disk is online for this app session."),
+            "disk-partition-editor");
+        RefreshAll();
     }
 
-    private async void Offline_Click(object sender, RoutedEventArgs e)
+    private void Offline_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
         if (disk is null)
@@ -683,38 +816,28 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        var physical = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.PhysicalDiskStableId);
-        var removesPageFile = physical?.IsPageFile == true;
-        var removesCrashDump = physical?.IsCrashDump == true;
-        if ((removesPageFile || removesCrashDump)
-            && !await ConfirmAsync(
-                Text("磁盘脱机", "Take disk offline"),
-                (removesPageFile, removesCrashDump) switch
-                {
-                    (true, true) => Text(
-                        "脱机前将移除该磁盘上的页面文件和崩溃转储。确定继续？",
-                        "The page file and crash dump on this disk will be removed before it goes offline. Continue?"),
-                    (true, false) => Text(
-                        "脱机前将移除该磁盘上的页面文件。确定继续？",
-                        "The page file on this disk will be removed before it goes offline. Continue?"),
-                    _ => Text(
-                        "脱机前将移除该磁盘上的崩溃转储。确定继续？",
-                        "The crash dump on this disk will be removed before it goes offline. Continue?")
-                }))
-        {
-            return;
-        }
-
-        await SubmitAsync(
-            new SimulationOperationRequest(SimulationOperationKind.SetDiskOffline, disk.StableId, Offline: true),
+        ViewModel.SetTransientDiskOffline(disk.StableId, true);
+        _working = ViewModel.EffectiveActiveSnapshot;
+        ViewModel.NotificationService.PublishInfo(
             Text("已脱机", "Disk offline"),
-            Text("磁盘已脱机。", "The disk is offline."));
+            Text("磁盘已在当前会话中脱机，所有修改入口已锁定。", "The disk is offline for this app session and all edit actions are locked."),
+            "disk-partition-editor");
+        RefreshAll();
     }
 
     private async void Initialize_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
         if (disk is null)
+        {
+            return;
+        }
+
+        if (DiskHoldsStoredData(disk)
+            && !await ConfirmAsync(
+                Text("初始化含数据的磁盘", "Initialize disk with data"),
+                Text("初始化将清除该磁盘上的分区和已用数据。确定继续？",
+                    "Initialization clears the partitions and used data on this disk. Continue?")))
         {
             return;
         }
@@ -737,14 +860,51 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
+        if (DiskHoldsStoredData(disk)
+            && !await ConfirmAsync(
+                Text("转换含数据的磁盘", "Convert disk with data"),
+                Text("转换为 GPT 将清除该 MBR 磁盘上的分区和已用数据。确定继续？",
+                    "Converting to GPT clears the partitions and used data on this MBR disk. Continue?")))
+        {
+            return;
+        }
+
         await SubmitAsync(
             new SimulationOperationRequest(SimulationOperationKind.ConvertDisk, disk.StableId, Name: "GPT"),
             Text("转换成功", "Conversion succeeded"),
             Text("磁盘已转换为 GPT。", "The disk was converted to GPT."));
     }
 
-    private async void NewPartition_Click(object sender, RoutedEventArgs e) =>
-        await CreatePartitionAsync();
+    private void NewPartition_Click(object sender, RoutedEventArgs e)
+    {
+        var disk = SelectedDisk();
+        if (disk is null)
+        {
+            return;
+        }
+
+        var largest = EditWorkspace.UnallocatedGaps(
+                disk,
+                _working.Partitions.Where(item => item.OsDiskStableId == disk.StableId).ToArray())
+            .Where(item => item.Size > 0)
+            .OrderByDescending(item => item.Size)
+            .ThenBy(item => item.Offset)
+            .FirstOrDefault();
+        if (largest.Size <= 0)
+        {
+            return;
+        }
+
+        _selectedPartitionId = null;
+        _selectedUnallocatedOffset = largest.Offset;
+        _selectedUnallocatedSize = largest.Size;
+        RefreshAll();
+    }
+
+    private bool DiskHoldsStoredData(OsDiskInfo disk) =>
+        _working.Partitions.Any(item =>
+            item.OsDiskStableId == disk.StableId
+            && EditWorkspace.PartitionHoldsStoredData(item));
 
     private async Task CreatePartitionAsync()
     {
@@ -768,7 +928,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        var fileSystem = SelectedFileSystemToken();
+        var partitionKind = SelectedPartitionKind();
+        var fileSystem = partitionKind == PartitionKind.MicrosoftReserved
+            ? string.Empty
+            : SelectedFileSystemToken();
         if (fileSystem == "ReFS")
         {
             PublishRefsNotice();
@@ -797,9 +960,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     FileSystem: fileSystem,
                     AllocationUnitSize: SelectedClusterBytes(),
                     SizeBytes: bytes ?? _selectedUnallocatedSize,
-                    OffsetBytes: offset),
+                    OffsetBytes: offset,
+                    PartitionKind: partitionKind),
                 Text("新建分区成功", "Partition created"),
-                Text("已在空隙中创建分区并格式化。", "A partition was created in the gap and formatted.")))
+                partitionKind == PartitionKind.MicrosoftReserved
+                    ? Text("已在空隙中创建 Microsoft 保留分区。", "A Microsoft Reserved Partition was created in the gap.")
+                    : Text("已在空隙中创建分区并格式化。", "A partition was created in the gap and formatted.")))
         {
             return;
         }
@@ -964,7 +1130,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     ?? Text(
                         "请求已发送，但结果未知。请重新加载后再决定是否重试。",
                         "The request was sent and the outcome is unknown. Reload before retrying."));
-            _working = ViewModel.ActiveSnapshot;
+            _working = ViewModel.EffectiveActiveSnapshot;
             RefreshAll();
             return false;
         }
@@ -978,7 +1144,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return false;
         }
 
-        _working = ViewModel.ActiveSnapshot;
+        _working = ViewModel.EffectiveActiveSnapshot;
         ViewModel.NotificationService.PublishInfo(
             successTitle,
             successMessage,

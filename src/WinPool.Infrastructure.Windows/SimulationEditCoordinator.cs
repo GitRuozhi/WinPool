@@ -434,6 +434,7 @@ public sealed class SimulationEditCoordinator(
 
         Add(values, "VirtualDiskName", request.VirtualDiskName);
         Add(values, "VolumeName", request.VolumeName);
+        Add(values, "PartitionKind", request.PartitionKind);
         Add(values, "PerformanceResiliency", request.PerformanceResiliency);
         Add(values, "PerformanceInterleaveBytes", request.PerformanceInterleaveBytes);
         Add(values, "PerformanceSizeBytes", request.PerformanceSizeBytes);
@@ -668,6 +669,8 @@ public sealed class SimulationEditCoordinator(
                 request.AllocatedOsDiskId,
                 request.AllocatedPartitionId,
                 request.AllocatedVolumeId,
-                request.AccessPaths);
+                request.AccessPaths,
+                request.VolumeName,
+                request.PartitionKind);
     }
 }

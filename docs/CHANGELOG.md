@@ -1,6 +1,10 @@
 # WinPool 变更记录
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存。当前实现为 V0.50，最新即时改名与 BUG 修复计划见 [Plan](Plan.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。当前实现为 V0.51，最新磁盘编辑与入口一致性修复见 [Plan](Plan.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+
+## 2026-09-11：V0.51 磁盘编辑与入口一致性
+
+联机/脱机改为不落库的会话状态，脱机对象只读；初始化、MBR 转 GPT、最大空隙创建和固定 GPT 分区类型使用统一规则。允许正式空池，建池拆为池、虚拟磁盘、分区三个动作；管理页补齐热备/退役层，换行按行数平均分配，并修复 MAX、草稿名称和六组入口不一致。代码已实施，按用户限制未运行测试、构建或原生 UI。
 
 ## 2026-09-11：属性变化提示补齐
 

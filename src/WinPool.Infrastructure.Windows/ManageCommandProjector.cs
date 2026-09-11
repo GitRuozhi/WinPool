@@ -58,29 +58,26 @@ public sealed class ManageCommandProjector
                 Add(commands, ManageCommandKind.RenamePool, editable);
                 Add(commands, ManageCommandKind.CreatePool, isSimulation && pool is not null);
                 Add(commands, ManageCommandKind.EditPool, editable);
-                Add(commands, ManageCommandKind.OptimizePoolUsage, editable);
                 break;
             }
             case ManageWorkspaceCategory.Tier:
-                Add(commands, ManageCommandKind.RenameTier, isSimulation);
-                Add(commands, ManageCommandKind.CreateTier, isSimulation);
                 Add(commands, ManageCommandKind.EditTier, isSimulation);
                 break;
             case ManageWorkspaceCategory.Disk:
             {
                 var osDisk = ResolveOsDisk(activeDocument.Snapshot, objectId.ProviderKey, role);
-                var physical = osDisk?.PhysicalDiskStableId is string physicalId
-                    ? activeDocument.Snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == physicalId)
-                    : null;
                 var canTakeOffline = osDisk is { IsOffline: true }
-                    || osDisk is { IsBoot: false, IsSystem: false }
-                       && physical is not { IsPageFile: true } and not { IsCrashDump: true };
-                var hasPartitions = osDisk is not null
-                    && activeDocument.Snapshot.Partitions.Any(x => x.OsDiskStableId == osDisk.StableId);
-                Add(commands, ManageCommandKind.RenameDisk, isSimulation && role != ManageObjectRole.NetworkDisk);
-                Add(commands, ManageCommandKind.InitializeDisk, isSimulation && osDisk is not null);
-                Add(commands, ManageCommandKind.CreatePartition, isSimulation && osDisk is not null);
-                Add(commands, ManageCommandKind.ConvertDiskStyle, isSimulation && osDisk is not null && !hasPartitions);
+                    || osDisk is { IsBoot: false, IsSystem: false };
+                var online = osDisk is { IsOffline: false };
+                Add(commands, ManageCommandKind.InitializeDisk,
+                    isSimulation && online && osDisk is { IsBoot: false, IsSystem: false }
+                    && osDisk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase));
+                Add(commands, ManageCommandKind.CreatePartition,
+                    isSimulation && online
+                    && osDisk!.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase));
+                Add(commands, ManageCommandKind.ConvertDiskStyle,
+                    isSimulation && online && osDisk is { IsBoot: false, IsSystem: false }
+                    && osDisk.PartitionStyle.Equals("MBR", StringComparison.OrdinalIgnoreCase));
                 Add(
                     commands,
                     osDisk is { IsOffline: true }
@@ -95,8 +92,11 @@ public sealed class ManageCommandProjector
             {
                 var partition = activeDocument.Snapshot.Partitions.FirstOrDefault(
                     item => item.StableId == objectId.ProviderKey);
-                var primary = partition?.Type == "Primary";
-                var editable = isSimulation && primary;
+                var osDisk = partition is null ? null : activeDocument.Snapshot.OsDisks.FirstOrDefault(
+                    item => item.StableId == partition.OsDiskStableId);
+                var primary = partition?.Type is "Primary" or "BasicData";
+                var editable = isSimulation && primary && osDisk is { IsOffline: false }
+                    && partition is { IsBoot: false, IsSystem: false };
                 Add(commands, ManageCommandKind.OpenExplorer, primary && localConsistent);
                 Add(commands, ManageCommandKind.ChangeDriveLetter, editable);
                 Add(commands, ManageCommandKind.RenamePartition, editable);

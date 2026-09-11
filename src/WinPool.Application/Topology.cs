@@ -377,7 +377,35 @@ public static class TopologyProjector
             poolNode.Children.Add(tierNode);
         }
 
-        var directMembers = members.Where(x => !tierMemberIds.Contains(x.StableId)).ToList();
+        foreach (var usage in new[] { "HotSpare", "Retired" })
+        {
+            var usageMembers = members.Where(member =>
+                    usage == "HotSpare" ? member.IsHotSpare : member.IsRetired)
+                .ToList();
+            if (usageMembers.Count == 0)
+            {
+                continue;
+            }
+
+            var usageNode = new TopologyNode(
+                new StorageUnitRef(
+                    EditWorkspace.SimulatedLayerId(pool.StableId, usage),
+                    StorageUnitKind.StorageTier,
+                    usage == "HotSpare" ? "Hot spare" : "Retired",
+                    false,
+                    pool.StableId),
+                JoinSummary($"{usageMembers.Count} physical disks", FormatBytes(usageMembers.Sum(x => x.Size))),
+                isSelectable: false,
+                childrenLayout: TopologyChildrenLayout.Flow);
+            foreach (var member in usageMembers)
+            {
+                usageNode.Children.Add(CreatePhysicalDiskNode(member, snapshot, true, includeOsChildren: false));
+            }
+            poolNode.Children.Add(usageNode);
+        }
+
+        var directMembers = members.Where(x =>
+            !tierMemberIds.Contains(x.StableId) && !x.IsHotSpare && !x.IsRetired).ToList();
         if (directMembers.Count > 0)
         {
             var directGroup = new TopologyNode(

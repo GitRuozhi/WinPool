@@ -15,7 +15,7 @@ public sealed class V049PartitionSemanticsTests
             SimulationOperationKind.CreatePartition,
             "osdisk:ssd0",
             SizeBytes: 1_000_000_000));
-        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "Primary");
+        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
         Assert.DoesNotContain(document.Snapshot.Volumes, item => item.PartitionStableId == partition.StableId);
 
         var formatted = Apply(document, new SimulationOperationRequest(
@@ -39,7 +39,7 @@ public sealed class V049PartitionSemanticsTests
                 FileSystem: "exFAT",
                 AllocationUnitSize: 65536,
                 DriveLetter: "E"));
-        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "Primary");
+        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
         var volume = Assert.Single(document.Snapshot.Volumes, item => item.PartitionStableId == partition.StableId);
         Assert.Equal("EXFAT", volume.FileSystem);
         Assert.Equal("E", volume.DriveLetter);
@@ -59,6 +59,64 @@ public sealed class V049PartitionSemanticsTests
         Assert.Equal(string.Empty, volume.DriveLetter);
     }
 
+    [Theory]
+    [InlineData(PartitionKind.BasicData, "NTFS", "BasicData", false, "ebd0a0a2")]
+    [InlineData(PartitionKind.EfiSystem, "FAT32", "EfiSystem", true, "c12a7328")]
+    [InlineData(PartitionKind.MicrosoftReserved, "", "MicrosoftReserved", true, "e3c9e316")]
+    [InlineData(PartitionKind.WindowsRecovery, "NTFS", "WindowsRecovery", true, "de94bba4")]
+    public void CreatePartitionUsesFixedGptPartitionKinds(
+        PartitionKind kind,
+        string fileSystem,
+        string expectedType,
+        bool expectedHidden,
+        string expectedTypeIdPrefix)
+    {
+        var document = Apply(
+            InitializedDisk(),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreatePartition,
+                "osdisk:ssd0",
+                FileSystem: fileSystem,
+                SizeBytes: 100_000_000,
+                PartitionKind: kind));
+
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        Assert.Equal(expectedType, partition.Type);
+        Assert.Equal(expectedHidden, partition.IsHidden);
+        Assert.Contains(expectedTypeIdPrefix, partition.PartitionTypeId, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(fileSystem.ToUpperInvariant(), partition.FileSystem.ToUpperInvariant());
+    }
+
+    [Fact]
+    public void ConvertMbrDiskToGptClearsExistingPartitions()
+    {
+        var document = Apply(
+            InitializedDisk(),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreatePartition,
+                "osdisk:ssd0",
+                FileSystem: "NTFS",
+                SizeBytes: 100_000_000));
+        document = document with
+        {
+            Snapshot = document.Snapshot with
+            {
+                OsDisks = document.Snapshot.OsDisks
+                    .Select(item => item with { PartitionStyle = "MBR" })
+                    .ToArray()
+            }
+        };
+
+        var converted = Apply(document, new SimulationOperationRequest(
+            SimulationOperationKind.ConvertDisk,
+            "osdisk:ssd0",
+            Name: "GPT"));
+
+        Assert.Empty(converted.Snapshot.Partitions);
+        Assert.Empty(converted.Snapshot.Volumes);
+        Assert.Equal("GPT", Assert.Single(converted.Snapshot.OsDisks).PartitionStyle);
+    }
+
     [Fact]
     public void ClearingDriveLetterRemovesAccessPath()
     {
@@ -69,7 +127,7 @@ public sealed class V049PartitionSemanticsTests
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
                 DriveLetter: "F"));
-        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "Primary");
+        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
         document = Apply(document, new SimulationOperationRequest(
             SimulationOperationKind.ChangeDriveLetter,
             partition.StableId,
@@ -84,7 +142,7 @@ public sealed class V049PartitionSemanticsTests
         var snapshot = Apply(
             InitializedDisk(),
             new SimulationOperationRequest(SimulationOperationKind.CreatePartition, "osdisk:ssd0")).Snapshot;
-        var partition = Assert.Single(snapshot.Partitions, item => item.Type == "Primary");
+        var partition = Assert.Single(snapshot.Partitions, item => item.Type == "BasicData");
         Assert.Equal(
             StorageRuleVerdict.Allow,
             StorageEditRules.Evaluate(

@@ -302,6 +302,14 @@ public enum SimulationOperationKind
     SetDiskUsage
 }
 
+public enum PartitionKind
+{
+    BasicData,
+    EfiSystem,
+    MicrosoftReserved,
+    WindowsRecovery
+}
+
 public sealed record SimulationOperationRequest(
     SimulationOperationKind Kind,
     string TargetStableId,
@@ -342,7 +350,8 @@ public sealed record SimulationOperationRequest(
     string? AllocatedPartitionId = null,
     string? AllocatedVolumeId = null,
     IReadOnlyList<string>? AccessPaths = null,
-    string? VolumeName = null);
+    string? VolumeName = null,
+    PartitionKind? PartitionKind = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -367,7 +376,8 @@ public static class SimulatedCommandText
         SimulationOperationKind.DeletePartition =>
             ["Remove-Partition -Confirm:$false"],
         SimulationOperationKind.ConvertDisk =>
-            [$"Set-Disk -PartitionStyle {request.Name?.Trim().ToUpperInvariant()}"],
+            ["Clear-Disk -RemoveData -Confirm:$false",
+             $"Initialize-Disk -PartitionStyle {request.Name?.Trim().ToUpperInvariant()}"],
         SimulationOperationKind.SetDiskOffline =>
             [$"Set-Disk -IsOffline ${(request.Offline == true ? "true" : "false")}"],
         SimulationOperationKind.OptimizePool =>
@@ -375,7 +385,7 @@ public static class SimulatedCommandText
         SimulationOperationKind.InitializeDisk =>
             BuildInitialize(request),
         SimulationOperationKind.CreatePartition =>
-            [$"New-Partition -Size {FormatSize(request.SizeBytes)} -AssignDriveLetter"],
+            BuildCreatePartition(request),
         SimulationOperationKind.ExtendPartition =>
             [$"Resize-Partition -Size {FormatSize(request.SizeBytes)}"],
         SimulationOperationKind.ShrinkPartition =>
@@ -383,8 +393,7 @@ public static class SimulatedCommandText
         SimulationOperationKind.CreateStoragePool =>
             [$"New-StoragePool -FriendlyName '{request.Name}' -StorageSubsystemFriendlyName 'Windows Storage*' -PhysicalDisks ({request.MemberDiskIds?.Count ?? 0} disks)"],
         SimulationOperationKind.CreateVirtualDisk =>
-            [$"New-VirtualDisk -FriendlyName '{request.Name}' -Interleave {request.InterleaveBytes ?? 65536} -ResiliencySettingName {request.Resiliency ?? "Simple"}",
-             $"New-Partition -AssignDriveLetter | Format-Volume -FileSystem NTFS -AllocationUnitSize {request.AllocationUnitSize ?? 65536} -Confirm:$false"],
+            [$"New-VirtualDisk -FriendlyName '{request.Name}' -Interleave {request.InterleaveBytes ?? 65536} -ResiliencySettingName {request.Resiliency ?? "Simple"}"],
         SimulationOperationKind.MovePhysicalDisk =>
             ["Add-PhysicalDisk / Remove-PhysicalDisk (move between pools)"],
         SimulationOperationKind.EvictPhysicalDiskFromTiers =>
@@ -393,9 +402,7 @@ public static class SimulatedCommandText
             [$"Optimize-Volume"],
         SimulationOperationKind.CreateTieredPool =>
             [$"New-StoragePool -FriendlyName '{request.Name}'",
-             "New-StorageTier (Performance/Capacity)",
-             $"New-VirtualDisk -FriendlyName '{request.VirtualDiskName ?? request.Name}'",
-             $"New-Partition | Format-Volume -FileSystem {request.FileSystem ?? "NTFS"} -AllocationUnitSize {request.AllocationUnitSize ?? 65536}"],
+             "New-StorageTier (Performance/Capacity)"],
         SimulationOperationKind.UpdateStoragePool =>
             ["Set-StoragePool / Set-StorageTier / Set-VirtualDisk layout fields"],
         SimulationOperationKind.DissolveStoragePool =>
@@ -422,6 +429,29 @@ public static class SimulatedCommandText
         }
         return commands;
     }
+
+    private static IReadOnlyList<string> BuildCreatePartition(SimulationOperationRequest request)
+    {
+        var kind = request.PartitionKind ?? PartitionKind.BasicData;
+        var guid = PartitionTypeId(kind);
+        var commands = new List<string>
+        {
+            $"New-Partition -Size {FormatSize(request.SizeBytes)} -GptType '{guid}'"
+        };
+        if (kind != PartitionKind.MicrosoftReserved)
+        {
+            commands.Add($"Format-Volume -FileSystem {request.FileSystem ?? (kind == PartitionKind.EfiSystem ? "FAT32" : "NTFS")} -AllocationUnitSize {request.AllocationUnitSize ?? 4096} -Confirm:$false");
+        }
+        return commands;
+    }
+
+    internal static string PartitionTypeId(PartitionKind kind) => kind switch
+    {
+        PartitionKind.EfiSystem => "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}",
+        PartitionKind.MicrosoftReserved => "{e3c9e316-0b5c-4db8-817d-f92df00215ae}",
+        PartitionKind.WindowsRecovery => "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}",
+        _ => "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}"
+    };
 
     private static string FormatSize(long? bytes) =>
         bytes is null or <= 0 ? "(remaining)" : $"{bytes}";
@@ -548,15 +578,6 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
             current = result.Document;
             commands.AddRange(result.Commands);
-        }
-
-        var emptyPool = current.Snapshot.StoragePools.FirstOrDefault(item =>
-            !item.IsPrimordial && item.MemberPhysicalDiskIds.Count == 0);
-        if (emptyPool is not null)
-        {
-            return SimulationOperationResult.Failure(
-                document,
-                $"Storage pool '{emptyPool.FriendlyName}' must retain at least one physical disk when changes are applied.");
         }
 
         return new SimulationOperationResult(true, current, string.Empty, commands);
@@ -792,14 +813,24 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
         var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
-        if (snapshot.Partitions.Any(x => x.OsDiskStableId == disk.StableId))
+        if (!string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Only an empty simulated disk can be converted.");
+            throw new InvalidOperationException("Only an MBR simulated disk can be converted to GPT.");
         }
+        var removedPartitionIds = snapshot.Partitions
+            .Where(x => x.OsDiskStableId == disk.StableId)
+            .Select(x => x.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return snapshot with
         {
             OsDisks = snapshot.OsDisks
                 .Select(x => x.StableId == disk.StableId ? x with { PartitionStyle = style } : x)
+                .ToArray(),
+            Partitions = snapshot.Partitions
+                .Where(x => x.OsDiskStableId != disk.StableId)
+                .ToArray(),
+            Volumes = snapshot.Volumes
+                .Where(x => x.PartitionStableId is null || !removedPartitionIds.Contains(x.PartitionStableId))
                 .ToArray()
         };
     }
@@ -837,6 +868,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
         {
             throw new InvalidOperationException("The simulated boot or system disk cannot be initialized.");
         }
+        if (!string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only a RAW simulated disk can be initialized.");
+        }
 
         var remaining = snapshot.Partitions.Where(x => x.OsDiskStableId != disk.StableId).ToList();
         if (style == "GPT" && request.CreateMsr == true)
@@ -859,7 +894,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 "Healthy",
                 "OK",
                 string.Empty,
-                disk.StableId));
+                disk.StableId,
+                true,
+                "{e3c9e316-0b5c-4db8-817d-f92df00215ae}"));
         }
 
         var remainingIds = remaining.Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -918,9 +955,17 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException("The simulated disk has no free space for a new partition.");
         }
 
-        var fileSystem = request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty;
+        var kind = request.PartitionKind ?? PartitionKind.BasicData;
+        var partitionType = kind.ToString();
+        var fileSystem = kind switch
+        {
+            PartitionKind.MicrosoftReserved => string.Empty,
+            PartitionKind.EfiSystem => "FAT32",
+            PartitionKind.WindowsRecovery => "NTFS",
+            _ => request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty
+        };
         var format = fileSystem.Length > 0;
-        var letter = !format
+        var letter = !format || kind is PartitionKind.EfiSystem or PartitionKind.WindowsRecovery
             ? string.Empty
             : request.DriveLetter is null
                 ? NextFreeDriveLetter(snapshot)
@@ -936,11 +981,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
             true,
             disk.Number,
             existing.Count + 1,
-            "Primary",
+            partitionType,
             offset,
             size,
             false,
-            false,
+            kind == PartitionKind.EfiSystem,
             letter,
             label,
             fileSystem,
@@ -949,7 +994,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
             "Healthy",
             "OK",
             path,
-            disk.StableId);
+            disk.StableId,
+            kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery,
+            SimulatedCommandText.PartitionTypeId(kind));
 
         IReadOnlyList<VolumeInfo> volumes = snapshot.Volumes;
         if (format)
@@ -1030,10 +1077,6 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
 
         var memberIds = (request.MemberDiskIds ?? []).ToArray();
-        if (memberIds.Length == 0)
-        {
-            throw new InvalidOperationException("At least one physical disk is required for a simulated pool.");
-        }
         var primordial = snapshot.StoragePools.FirstOrDefault(x => x.IsPrimordial)
             ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
         var members = snapshot.PhysicalDisks
@@ -1186,7 +1229,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             osDiskId,
             name,
             osDiskNumber,
-            "RAW",
+            "GPT",
             size,
             false,
             false,
@@ -1223,7 +1266,8 @@ public sealed class SimulationOperationService : ISimulationOperationService
             AllocationUnitSize: request.AllocationUnitSize ?? 65536,
             AllocatedPartitionId: request.AllocatedPartitionId,
             AllocatedVolumeId: request.AllocatedVolumeId,
-            AccessPaths: request.AccessPaths));
+            AccessPaths: request.AccessPaths,
+            PartitionKind: PartitionKind.BasicData));
     }
 
     private static long KnownPhysicalAllocation(StorageSnapshot snapshot, string poolId) =>
@@ -1297,18 +1341,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     : disk)
                 .ToArray()
         };
+        if (request.CreateVirtualDisk != true)
+        {
+            return created;
+        }
 
         var virtualName = string.IsNullOrWhiteSpace(request.VirtualDiskName)
             ? pool.FriendlyName
             : request.VirtualDiskName.Trim();
-        if (request.CreateVirtualDisk == false)
-        {
-            // Auto-create virtual disk is off: the pool is created with its
-            // media tiers only and stays empty until the user creates a
-            // virtual disk on it.
-            return created;
-        }
-
         var performanceTier = created.StorageTiers.FirstOrDefault(item =>
             item.PoolStableId == pool.StableId
             && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD")
@@ -1322,24 +1362,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
             SizeBytes: request.SizeBytes,
             AllocationUnitSize: request.AllocationUnitSize ?? 65536,
             PerformanceDataCopies: performanceTier?.NumberOfDataCopies,
+            CreatePartition: request.CreatePartition,
+            FileSystem: request.FileSystem,
+            VolumeName: request.VolumeName,
             AllocatedVirtualDiskId: request.AllocatedVirtualDiskId,
-            AllocatedOsDiskId: request.AllocatedOsDiskId));
-        if (request.CreatePartition == false)
-        {
-            // Auto-create partition is off: the virtual disk stays RAW and
-            // is initialized on the Disk partition editor (V0.47 design §6).
-            return created;
-        }
-
-        var osDisk = created.OsDisks.Last(item => item.VirtualDiskStableId is not null);
-        return CreatePartition(created, new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
-            osDisk.StableId,
-            Name: string.IsNullOrWhiteSpace(request.VolumeName) ? virtualName : request.VolumeName,
-            FileSystem: string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
-            AllocationUnitSize: request.AllocationUnitSize ?? 65536,
+            AllocatedOsDiskId: request.AllocatedOsDiskId,
             AllocatedPartitionId: request.AllocatedPartitionId,
             AllocatedVolumeId: request.AllocatedVolumeId));
+        return created;
     }
 
     private static StorageTierInfo BuildTier(

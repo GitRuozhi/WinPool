@@ -440,6 +440,16 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
+    public void EqualFillFlowLayoutBalancesSevenItemsAcrossTwoRows()
+    {
+        var rows = WinPool.Application.EqualFillFlowLayout.CreateRowsForColumnCount(7, 6, 900);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(4, rows[0].Count);
+        Assert.Equal(3, rows[1].Count);
+    }
+
+    [Fact]
     public void SummariesUseExactlyTwoSpacesBetweenFields()
     {
         var summary = WinPool.Application.TopologyProjector.JoinSummary("one", "two", "three");

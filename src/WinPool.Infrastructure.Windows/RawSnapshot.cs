@@ -509,8 +509,8 @@ internal static class RawSnapshotProjector
             "e3c9e316-0b5c-4db8-817d-f92df00215ae" or "reserved" or "msr" => "MicrosoftReserved",
             "de94bba4-06d1-4d40-a16a-bfd50179d6ac" or "recovery" => "WindowsRecovery",
             "extended" or "0x05" or "0x0f" => "Extended",
-            "basic" or "primary" or "ifs" or "fat12" or "fat16" or "fat32"
-                or "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7" => "Primary",
+            "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7" => "BasicData",
+            "basic" or "primary" or "ifs" or "fat12" or "fat16" or "fat32" => "Primary",
             "simple" => "Simple",
             "spanned" => "Spanned",
             "striped" => "Striped",

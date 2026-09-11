@@ -25,7 +25,9 @@ public static class StorageEditRules
             SimulationOperationKind.ChangeDriveLetter => EvaluateDriveLetter(snapshot, request),
             SimulationOperationKind.FormatPartition => EvaluateFormat(snapshot, request),
             SimulationOperationKind.DeletePartition => EvaluateDeletePartition(snapshot, request),
-            SimulationOperationKind.SetDiskOffline => EvaluateOffline(snapshot, request),
+            SimulationOperationKind.SetDiskOffline => Deny(
+                "storage.rule.offline.transient-only",
+                "Online and offline are temporary editor states and cannot be persisted."),
             SimulationOperationKind.InitializeDisk => EvaluateInitialize(snapshot, request),
             SimulationOperationKind.ConvertDisk => EvaluateConvert(snapshot, request),
             SimulationOperationKind.CreatePartition => EvaluateCreatePartition(snapshot, request),
@@ -53,10 +55,10 @@ public static class StorageEditRules
         (SimulationOperationKind.ChangeDriveLetter, "supported: unused letter, volume present"),
         (SimulationOperationKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
         (SimulationOperationKind.DeletePartition, "supported: any existing partition"),
-        (SimulationOperationKind.SetDiskOffline, "supported: non-boot/system/page/dump"),
+        (SimulationOperationKind.SetDiskOffline, "not_supported: editor-session state only"),
         (SimulationOperationKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
-        (SimulationOperationKind.ConvertDisk, "supported: empty disk to GPT only"),
-        (SimulationOperationKind.CreatePartition, "supported: GPT gap; NTFS/ReFS/exFAT volume optional"),
+        (SimulationOperationKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
+        (SimulationOperationKind.CreatePartition, "supported: four fixed GPT partition kinds"),
         (SimulationOperationKind.ExtendPartition, "not_supported: no Windows supported-size evidence"),
         (SimulationOperationKind.ShrinkPartition, "not_supported: no Windows supported-size evidence"),
         (SimulationOperationKind.CreateStoragePool, "supported: primordial data members"),
@@ -192,6 +194,11 @@ public static class StorageEditRules
             return Deny("storage.rule.initialize.system", "The boot or system disk cannot be initialized.");
         }
 
+        if (!string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase))
+        {
+            return Deny("storage.rule.initialize.raw-only", "Only a RAW disk can be initialized.");
+        }
+
         return Allow("storage.rule.initialize", WindowsPartition);
     }
 
@@ -211,9 +218,14 @@ public static class StorageEditRules
             return Deny("storage.rule.convert.missing", "The selected disk was not found.");
         }
 
-        if (snapshot.Partitions.Any(item => item.OsDiskStableId == disk.StableId))
+        if (disk.IsBoot || disk.IsSystem)
         {
-            return Deny("storage.rule.convert.not-empty", "A disk that still has partitions cannot be converted.");
+            return Deny("storage.rule.convert.system", "The boot or system disk cannot use the destructive conversion path.");
+        }
+
+        if (!string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase))
+        {
+            return Deny("storage.rule.convert.mbr-only", "Only an MBR disk can be converted to GPT.");
         }
 
         return Allow("storage.rule.convert", WindowsPartition);
@@ -234,8 +246,7 @@ public static class StorageEditRules
             return Deny("storage.rule.create-partition.offline", "An offline disk cannot accept a new partition.");
         }
 
-        if (!string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase)
-            && disk.PartitionStyle != "RAW")
+        if (!string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase))
         {
             return Deny(
                 "storage.rule.create-partition.gpt",
@@ -247,12 +258,25 @@ public static class StorageEditRules
             return Deny("storage.rule.create-partition.size", "Partition size cannot be negative.");
         }
 
-        var fileSystem = request.FileSystem?.Trim().ToUpperInvariant();
-        if (!string.IsNullOrWhiteSpace(fileSystem) && !IsCreateFileSystem(fileSystem))
+        var kind = request.PartitionKind ?? PartitionKind.BasicData;
+        var fileSystem = request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (kind == PartitionKind.MicrosoftReserved && fileSystem.Length > 0)
+        {
+            return Deny("storage.rule.create-partition.msr-format", "An MSR partition cannot be formatted.");
+        }
+        if (kind == PartitionKind.EfiSystem && fileSystem != "FAT32")
+        {
+            return Deny("storage.rule.create-partition.efi-filesystem", "An EFI system partition must use FAT32.");
+        }
+        if (kind == PartitionKind.WindowsRecovery && fileSystem != "NTFS")
+        {
+            return Deny("storage.rule.create-partition.recovery-filesystem", "A Windows recovery partition created here must use NTFS.");
+        }
+        if (kind == PartitionKind.BasicData && fileSystem.Length > 0 && !IsCreateFileSystem(fileSystem))
         {
             return Deny(
                 "storage.rule.create-partition.filesystem",
-                "Only NTFS, ReFS, exFAT, or an unformatted partition can be created.");
+                "A formatted basic data partition must use NTFS, ReFS, or exFAT.");
         }
 
         return Allow("storage.rule.create-partition", WindowsPartition);
@@ -278,6 +302,13 @@ public static class StorageEditRules
         if (members.Verdict != StorageRuleVerdict.Allow)
         {
             return members;
+        }
+
+        if (request.MemberDiskIds is null || request.MemberDiskIds.Count == 0)
+        {
+            return request.CreateVirtualDisk == true
+                ? Deny("storage.rule.empty-pool.virtual-disk", "An empty pool cannot create a virtual disk.")
+                : Allow("storage.rule.create-empty-pool", WindowsPhysicalDiskUsage);
         }
 
         var disks = snapshot.PhysicalDisks
@@ -609,7 +640,7 @@ public static class StorageEditRules
     {
         if (memberIds is null || memberIds.Count == 0)
         {
-            return Deny("storage.rule.members.empty", "At least one physical disk is required.");
+            return Allow("storage.rule.members.empty-pool", WindowsPhysicalDiskUsage);
         }
 
         var primordial = snapshot.StoragePools.FirstOrDefault(item => item.IsPrimordial);

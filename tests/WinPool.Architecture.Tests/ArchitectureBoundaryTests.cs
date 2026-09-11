@@ -188,8 +188,8 @@ public sealed class ArchitectureBoundaryTests
         var activePlanPath = Path.Combine(root, "docs", "Plan.md");
         Assert.True(File.Exists(activePlanPath), "docs/Plan.md");
         var activePlan = File.ReadAllText(activePlanPath);
-        Assert.Contains("V0.50", activePlan, StringComparison.Ordinal);
-        Assert.Contains("V0.50 仍不实现或执行真实存储写操作", activePlan, StringComparison.Ordinal);
+        Assert.Contains("V0.51", activePlan, StringComparison.Ordinal);
+        Assert.Contains("V0.51 仍不实现或执行真实存储写操作", activePlan, StringComparison.Ordinal);
         Assert.DoesNotContain("本 Plan 授权真实存储", activePlan, StringComparison.Ordinal);
 
         var archivedPlan = Path.Combine(root, "docs", "Archive", "V0.48", "Plan.md");
@@ -790,7 +790,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>5</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>0</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>1</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)0", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);

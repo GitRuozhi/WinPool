@@ -160,7 +160,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
-        _working = EditWorkspace.NormalizeTierCapacities(ViewModel.ActiveSnapshot);
+        _working = EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot);
         _undoStack.Clear();
         _redoStack.Clear();
         _poolIntents.Clear();
@@ -191,8 +191,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DissolveButtonLabel.Text = ViewModel.Localization["DissolvePool"];
         RetireButtonLabel.Text = ViewModel.Localization["RetireDisk"];
         HotSpareButtonLabel.Text = ViewModel.Localization["HotSpareDisk"];
-        CreateVdiskButtonLabel.Text = ViewModel.Localization["CreateVirtualDisk"];
-        DeleteVdiskButtonLabel.Text = ViewModel.Localization["DeleteVirtualDisk"];
+        CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘和分区", "Create virtual disk and partition");
+        DeleteVdiskButtonLabel.Text = Text("删除虚拟磁盘和分区", "Delete virtual disk and partition");
         SavePoolPropertiesButtonLabel.Text = ViewModel.Localization["SavePoolProperties"];
         ShowHotSpareLabel.Text = ViewModel.Localization["ShowHotSpareLayer"];
         ShowRetiredLabel.Text = ViewModel.Localization["ShowRetiredLayer"];
@@ -985,6 +985,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+        if (IsPhysicalDiskOffline(diskId))
+        {
+            _ = ShowMessageAsync(
+                Text("磁盘已脱机", "Disk offline"),
+                Text("脱机磁盘只能查看，请先在磁盘分区编辑页联机。", "An offline disk is read-only. Bring it online in the disk partition editor first."));
+            return;
+        }
+
+        if (EditWorkspace.IsPlus(targetId))
+        {
+            CreateDraftPoolAndSelect();
+            if (_selectedPoolId is not null && EditWorkspace.IsDraftPool(_selectedPoolId))
+            {
+                _ = DropDiskIntoPoolAsync(diskId, _selectedPoolId);
+            }
+            return;
+        }
+
         if (EditWorkspace.IsRetiredLayer(targetId) || EditWorkspace.IsHotSpareLayer(targetId))
         {
             _ = DropDiskIntoSimulatedLayerAsync(
@@ -1178,6 +1196,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 next = EditWorkspace.MoveDiskToPool(next, diskId, poolId);
             }
 
+            if (EditWorkspace.IsDraftPool(poolId)
+                && _autoVdiskSwitch.IsOn
+                && next.VirtualDisks.All(item => !string.Equals(
+                    item.PoolStableId,
+                    poolId,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                var draftPool = next.StoragePools.First(item => item.StableId == poolId);
+                next = EditWorkspace.InsertDraftVirtualDisk(
+                    next,
+                    poolId,
+                    string.IsNullOrWhiteSpace(_virtualDiskNameBox.Text)
+                        ? draftPool.FriendlyName
+                        : _virtualDiskNameBox.Text.Trim(),
+                    "Simple",
+                    65536);
+            }
+
             if (!ReferenceEquals(next, _working))
             {
                 CommitWorkingStep(next);
@@ -1197,6 +1233,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
     /// </summary>
     private async Task<StorageSnapshot?> PrepareDiskSpecialRoleDropAsync(PhysicalDiskInfo disk)
     {
+        if (IsPhysicalDiskOffline(disk.StableId))
+        {
+            await ShowMessageAsync(
+                Text("磁盘已脱机", "Disk offline"),
+                Text("脱机磁盘只能查看，请先联机。", "An offline disk is read-only. Bring it online first."));
+            return null;
+        }
+
         if (EditWorkspace.ClassifyDiskEvict(disk) == EditWorkspace.DiskEvictCheck.DeniedSystem)
         {
             await ShowMessageAsync(
@@ -1209,6 +1253,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ? EditWorkspace.ClearEvictableSpecialRoles(_working, disk.StableId)
             : _working;
     }
+
+    private bool IsPhysicalDiskOffline(string physicalDiskId) =>
+        _working.OsDisks.Any(item =>
+            item.PhysicalDiskStableId == physicalDiskId && item.IsOffline);
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -1414,7 +1462,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var osDisk = _working.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
         return _working.Partitions
-            .Where(item => item.OsDiskStableId == osDisk?.StableId && item.Type == "Primary")
+            .Where(item => item.OsDiskStableId == osDisk?.StableId
+                && item.Type is "Primary" or "BasicData")
             .OrderBy(item => item.Offset)
             .FirstOrDefault();
     }
@@ -1430,7 +1479,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var osDisk = _working.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
         return _working.Partitions
-            .Where(item => item.OsDiskStableId == osDisk?.StableId && item.Type == "Primary")
+            .Where(item => item.OsDiskStableId == osDisk?.StableId
+                && item.Type is "Primary" or "BasicData")
             .OrderBy(item => item.Offset)
             .ToArray();
     }
@@ -1447,7 +1497,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var osDisk = committed.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
         return committed.Partitions
-            .Where(item => item.OsDiskStableId == osDisk?.StableId && item.Type == "Primary")
+            .Where(item => item.OsDiskStableId == osDisk?.StableId
+                && item.Type is "Primary" or "BasicData")
             .OrderBy(item => item.Offset)
             .FirstOrDefault();
     }
@@ -1669,19 +1720,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 ? intent?.VolumeName ?? (selected ? _volumeNameBox.Text.Trim() : null) ?? step.VolumeName
                 : step.VolumeName,
             CreateVirtualDisk = step.Kind == SimulationEditKind.CreateTieredPool
-                ? intent?.AutoCreateVirtualDisk ?? step.CreateVirtualDisk
+                ? false
                 : step.CreateVirtualDisk,
             CreatePartition = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
-                ? intent?.AutoCreatePartition ?? step.CreatePartition
+                ? false
                 : step.CreatePartition,
-            AllocatedPartitionId = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
-                && intent?.AutoCreatePartition == true
-                ? step.AllocatedPartitionId ?? StableIntentObjectId("sim:partition", intentKey)
-                : step.AllocatedPartitionId,
-            AllocatedVolumeId = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
-                && intent?.AutoCreatePartition == true
-                ? step.AllocatedVolumeId ?? StableIntentObjectId("sim:volume", intentKey)
-                : step.AllocatedVolumeId,
             PerformanceUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|SSD"),
             CapacityUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|HDD"),
             ScmUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|SCM"),
@@ -1732,7 +1775,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void AppendPartitionIntents(List<SimulationEditRequest> steps)
     {
-        foreach (var pair in _poolIntents)
+        var intents = new Dictionary<string, PoolEditIntent>(_poolIntents, StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(_selectedPoolId))
+        {
+            intents[_selectedPoolId] = new PoolEditIntent(
+                _autoVdiskSwitch.IsOn,
+                _autoPartitionSwitch.IsOn,
+                _fileSystemBox.SelectedItem as string ?? "NTFS",
+                ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
+                _volumeNameBox.Text.Trim());
+        }
+
+        foreach (var pair in intents)
         {
             AppendPartitionIntent(steps, pair.Key, pair.Value);
         }
@@ -1743,6 +1797,39 @@ public sealed partial class StorageStructurePage : EditorPageBase
         string poolId,
         PoolEditIntent intent)
     {
+        var appliedPoolId = poolId;
+        if (EditWorkspace.IsDraftPool(poolId))
+        {
+            appliedPoolId = steps.FirstOrDefault(item =>
+                item.Kind == SimulationEditKind.CreateTieredPool
+                && item.DraftSourceId?.Equals(poolId, StringComparison.OrdinalIgnoreCase) == true)
+                ?.AllocatedPoolId ?? string.Empty;
+        }
+
+        var createVdisk = steps.FirstOrDefault(item =>
+            item.Kind == SimulationEditKind.CreateVirtualDisk
+            && item.TargetProviderKey.Equals(appliedPoolId, StringComparison.OrdinalIgnoreCase));
+        if (intent.AutoCreateVirtualDisk
+            && intent.AutoCreatePartition
+            && createVdisk?.AllocatedOsDiskId is not null
+            && !steps.Any(item => item.Kind == SimulationEditKind.CreatePartition
+                && item.TargetProviderKey.Equals(createVdisk.AllocatedOsDiskId, StringComparison.OrdinalIgnoreCase)))
+        {
+            steps.Add(new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
+                createVdisk.AllocatedOsDiskId,
+                Name: intent.VolumeName,
+                FileSystem: intent.FileSystem,
+                AllocationUnitSize: intent.AllocationUnitSize,
+                SizeBytes: createVdisk.SizeBytes is long virtualDiskSize
+                    ? Math.Max(0, virtualDiskSize - (1024L * 1024))
+                    : null,
+                OffsetBytes: 1024L * 1024,
+                AllocatedPartitionId: StableIntentObjectId("sim:partition", poolId),
+                AllocatedVolumeId: StableIntentObjectId("sim:volume", poolId),
+                PartitionKind: PartitionKind.BasicData));
+        }
+
         if (EditWorkspace.IsDraftPool(poolId))
         {
             return;
@@ -1851,6 +1938,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && selectedDisk is not null
             && !selectedDisk.IsBoot
             && !selectedDisk.IsSystem
+            && !IsPhysicalDiskOffline(selectedDisk.StableId)
             && string.Equals(selectedDisk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase);
         RetireButton.IsEnabled = canLayerDisk && !selectedDisk!.IsRetired;
         HotSpareButton.IsEnabled = canLayerDisk && !selectedDisk!.IsHotSpare;
@@ -1863,7 +1951,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         CreateVdiskButton.IsEnabled = canEditPool
             && realVdisk is null
             && DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD") + DataDiskCount(pool!, "SCM") > 0;
-        DeleteVdiskButton.IsEnabled = canEditPool && deleteTarget is not null;
+        var virtualDiskOffline = deleteTarget is not null && _working.OsDisks.Any(item =>
+            item.VirtualDiskStableId == deleteTarget.StableId && item.IsOffline);
+        DeleteVdiskButton.IsEnabled = canEditPool && deleteTarget is not null && !virtualDiskOffline;
 
         var formEnabled = simulated
             && pool is { IsPrimordial: false }
@@ -2084,12 +2174,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             var next = CreateDraftPoolStep(_working);
             var draftId = next.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
-            if (_autoVdiskSwitch.IsOn)
+            if (_autoVdiskSwitch.IsOn
+                && next.StoragePools.First(item => item.StableId == draftId).MemberPhysicalDiskIds.Count > 0)
             {
+                var draftName = next.StoragePools.First(item => item.StableId == draftId).FriendlyName;
                 next = EditWorkspace.InsertDraftVirtualDisk(
                     next,
                     draftId,
-                    ViewModel.Localization["NotCreatedVirtualDisk"],
+                    draftName,
                     "Simple",
                     65536);
             }
@@ -2178,7 +2270,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _maximumSizeFields.Clear();
         _poolIntents.Clear();
         _outcomeUnknown = false;
-        _working = ViewModel.ActiveSnapshot;
+        _working = ViewModel.EffectiveActiveSnapshot;
         _formDirty = false;
         _selectedPoolId = null;
         _selectedPoolDiskId = null;
@@ -2542,7 +2634,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _maximumSizeFields.Clear();
         _poolIntents.Clear();
         _outcomeUnknown = false;
-        _working = ViewModel.ActiveSnapshot;
+        _working = ViewModel.EffectiveActiveSnapshot;
         _selectedPoolId = EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
             ? _working.StoragePools.LastOrDefault(item => !item.IsPrimordial)?.StableId
             : _selectedPoolId;
@@ -2962,7 +3054,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ToggleMaximumSize(TierFields group)
     {
-        MergeFormIntoWorking();
         CaptureSelectedIntent();
         _undoStack.Push(CaptureDraftState());
         _redoStack.Clear();
@@ -3308,7 +3399,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 next = EditWorkspace.InsertDraftVirtualDisk(
                     _working,
                     poolId,
-                    ViewModel.Localization["NotCreatedVirtualDisk"],
+                    string.IsNullOrWhiteSpace(_virtualDiskNameBox.Text)
+                        ? pool.FriendlyName
+                        : _virtualDiskNameBox.Text.Trim(),
                     "Simple",
                     65536);
             }

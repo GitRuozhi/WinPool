@@ -462,7 +462,7 @@ public sealed partial class MainPage : Page
             ManageCommandKind.CreatePartition =>
                 Spec("新建分区", "New partition", "\uE710", command, NavigatePartitionAsync),
             ManageCommandKind.ConvertDiskStyle =>
-                Spec("转换到其他类型", "Convert to another style", "\uE8AB", command, NavigatePartitionAsync),
+                Spec("转换为 GPT", "Convert to GPT", "\uE8AB", command, NavigatePartitionAsync),
             ManageCommandKind.OnlineDisk =>
                 Spec("联机", "Online", "\uEDA2", command, NavigatePartitionAsync),
             ManageCommandKind.OfflineDisk =>
@@ -474,7 +474,7 @@ public sealed partial class MainPage : Page
             ManageCommandKind.ChangeDriveLetter =>
                 Spec("修改盘符和路径", "Change drive letter and paths", "\uE8B7", command, NavigatePartitionAsync),
             ManageCommandKind.RenamePartition =>
-                Spec("重命名分区", "Rename partition", "\uE8AC", command, NavigatePartitionAsync),
+                Spec("修改卷标", "Change volume label", "\uE8AC", command, NavigatePartitionAsync),
             ManageCommandKind.FormatPartition =>
                 Spec("格式化分区", "Format partition", "\uE9CE", command, NavigatePartitionAsync),
             ManageCommandKind.EditPartition =>
@@ -669,7 +669,8 @@ public sealed partial class MainPage : Page
 
     private Task NavigatePartitionAsync()
     {
-        ((MainWindow)App.Window).ShowDiskPartition();
+        ((MainWindow)App.Window).ShowDiskPartition(
+            ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey);
         return Task.CompletedTask;
     }
 

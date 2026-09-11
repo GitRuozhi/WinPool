@@ -326,9 +326,9 @@ public sealed partial class MainWindow : Window
         SelectShellPage(ShellPageKind.StorageStructure, targetStableId);
     }
 
-    public void ShowDiskPartition()
+    public void ShowDiskPartition(string? targetStableId = null)
     {
-        SelectShellPage(ShellPageKind.DiskPartition);
+        SelectShellPage(ShellPageKind.DiskPartition, targetStableId);
     }
 
     public void ApplyTheme(ThemePreference preference)

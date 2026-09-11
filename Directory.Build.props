@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
-    <!-- Va.b: a=major, b=product line. V0.50 is the current project version. -->
+    <!-- Va.b: a=major, b=product line. V0.51 is the current project version. -->
     <WinPoolVersionMajor>0</WinPoolVersionMajor>
     <WinPoolVersionMinor>5</WinPoolVersionMinor>
-    <WinPoolVersionIteration>0</WinPoolVersionIteration>
+    <WinPoolVersionIteration>1</WinPoolVersionIteration>
     <WinPoolArchitectureVersion>V$(WinPoolVersionMajor).$(WinPoolVersionMinor)</WinPoolArchitectureVersion>
     <WinPoolVersion Condition="'$(WinPoolVersionIteration)' == '0'">$(WinPoolArchitectureVersion)0</WinPoolVersion>
     <WinPoolVersion Condition="'$(WinPoolVersionIteration)' != '0'">$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)</WinPoolVersion>

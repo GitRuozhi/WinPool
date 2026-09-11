@@ -120,7 +120,8 @@ public static class SimulationDraftPlanner
                 {
                     osDiskId = NewId("sim:osdisk", allocated, osDisk.StableId);
                     var nestedPartition = working.Partitions.FirstOrDefault(item =>
-                        item.OsDiskStableId == osDisk.StableId && item.Type == "Primary");
+                        item.OsDiskStableId == osDisk.StableId
+                        && item.Type is "Primary" or "BasicData");
                     if (nestedPartition is not null)
                     {
                         partitionId = NewId("sim:partition", allocated, nestedPartition.StableId);
@@ -147,7 +148,7 @@ public static class SimulationDraftPlanner
                 : working.Partitions.FirstOrDefault(item =>
                     working.OsDisks.Any(os =>
                         os.VirtualDiskStableId == vdisk.StableId && os.StableId == item.OsDiskStableId)
-                    && item.Type == "Primary");
+                    && item.Type is "Primary" or "BasicData");
             var volume = partition is null ? null : working.VolumeForPartition(partition.StableId);
             steps.Add(new SimulationEditRequest(
                 SimulationEditKind.CreateTieredPool,
@@ -175,15 +176,47 @@ public static class SimulationDraftPlanner
                     : new[] { ssd, hdd, scm }
                         .Where(item => item is { MemberPhysicalDiskIds.Count: > 0 })
                         .Sum(item => item!.Size),
-                CreateVirtualDisk: createVirtual,
-                CreatePartition: partition is not null,
+                CreateVirtualDisk: false,
+                CreatePartition: false,
                 AllocatedPoolId: poolId,
-                AllocatedVirtualDiskId: vdiskId,
-                AllocatedOsDiskId: osDiskId,
-                AllocatedPartitionId: partitionId,
-                AllocatedVolumeId: volumeId,
                 DraftSourceId: draft.StableId,
                 VolumeName: volume?.FileSystemLabel ?? partition?.FileSystemLabel));
+
+            if (createVirtual && vdiskId is not null && osDiskId is not null)
+            {
+                steps.Add(new SimulationEditRequest(
+                    SimulationEditKind.CreateVirtualDisk,
+                    poolId,
+                    Name: vdisk!.FriendlyName,
+                    Resiliency: vdisk.ResiliencySettingName,
+                    InterleaveBytes: vdisk.Interleave,
+                    SizeBytes: new[] { ssd, hdd, scm }
+                        .Where(item => item is { MemberPhysicalDiskIds.Count: > 0 })
+                        .Sum(item => item!.Size),
+                    PerformanceDataCopies: vdisk.NumberOfDataCopies,
+                    CreatePartition: false,
+                    AllocatedVirtualDiskId: vdiskId,
+                    AllocatedOsDiskId: osDiskId,
+                    DraftSourceId: vdisk.StableId));
+            }
+
+            if (partition is not null && osDiskId is not null)
+            {
+                steps.Add(new SimulationEditRequest(
+                    SimulationEditKind.CreatePartition,
+                    osDiskId,
+                    Name: volume?.FileSystemLabel ?? partition.FileSystemLabel,
+                    DriveLetter: working.DriveLetterOf(partition),
+                    FileSystem: volume?.FileSystem ?? partition.FileSystem,
+                    AllocationUnitSize: volume?.AllocationUnitSize ?? partition.AllocationUnitSize,
+                    SizeBytes: partition.Size,
+                    OffsetBytes: partition.Offset,
+                    AllocatedPartitionId: partitionId,
+                    AllocatedVolumeId: volumeId,
+                    AccessPaths: volume?.AccessPaths,
+                    DraftSourceId: partition.StableId,
+                    PartitionKind: PartitionKind.BasicData));
+            }
         }
 
         foreach (var vdisk in committed.VirtualDisks)
@@ -207,6 +240,7 @@ public static class SimulationDraftPlanner
                      && !EditWorkspace.IsDraftPool(item.PoolStableId ?? string.Empty)))
         {
             var vdiskId = NewId("sim:vdisk", allocated, draftVdisk.StableId);
+            var osDiskId = NewId("sim:osdisk", allocated, draftVdisk.StableId);
             var finalTierSize = working.StorageTiers
                 .Where(item => item.PoolStableId == draftVdisk.PoolStableId)
                 .Sum(item => item.Size);
@@ -218,6 +252,7 @@ public static class SimulationDraftPlanner
                 InterleaveBytes: draftVdisk.Interleave,
                 SizeBytes: finalTierSize > 0 ? finalTierSize : draftVdisk.Size,
                 AllocatedVirtualDiskId: vdiskId,
+                AllocatedOsDiskId: osDiskId,
                 VolumeName: null));
         }
 
@@ -388,6 +423,8 @@ public static class SimulationDraftPlanner
         var service = new SimulationOperationService();
         var childItems = new List<SimulationPlanItem>();
         var failedDissolveSteps = new List<(string PoolId, SimulationEditRequest Step, string Reason)>();
+        var createdPoolItems = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var createdOsDiskItems = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var index = 0;
         foreach (var step in steps)
         {
@@ -432,49 +469,36 @@ public static class SimulationDraftPlanner
             {
                 failedDissolveSteps.Add((parentPool, step, decision.Message));
             }
+            var itemId = step.Kind switch
+            {
+                SimulationEditKind.CreateTieredPool when step.AllocatedPoolId is not null =>
+                    $"create-pool:{step.AllocatedPoolId}",
+                SimulationEditKind.CreateVirtualDisk when step.AllocatedVirtualDiskId is not null =>
+                    $"create-vdisk:{step.AllocatedVirtualDiskId}",
+                _ => $"step:{index}"
+            };
+            var createParent = step.Kind switch
+            {
+                SimulationEditKind.CreateVirtualDisk => createdPoolItems.GetValueOrDefault(step.TargetProviderKey),
+                SimulationEditKind.CreatePartition => createdOsDiskItems.GetValueOrDefault(step.TargetProviderKey),
+                _ => null
+            };
+            if (step.Kind == SimulationEditKind.CreateTieredPool && step.AllocatedPoolId is not null)
+            {
+                createdPoolItems[step.AllocatedPoolId] = itemId;
+            }
+            if (step.Kind == SimulationEditKind.CreateVirtualDisk && step.AllocatedOsDiskId is not null)
+            {
+                createdOsDiskItems[step.AllocatedOsDiskId] = itemId;
+            }
+            index++;
             childItems.Add(new SimulationPlanItem(
-                $"step:{index++}",
+                itemId,
                 ActionTitle(committed, step),
                 step,
-                parentPool is null ? null : $"dissolve:{parentPool}",
+                parentPool is null ? createParent : $"dissolve:{parentPool}",
                 decision,
                 CausesDataLoss(committed, step)));
-        }
-
-        // Zero-member pools are useful while arranging a draft, but they
-        // are not a valid applied result. Mark the move that emptied each
-        // surviving pool so the action panel explains the final-state
-        // failure before submission. A dissolved pool is absent here and
-        // therefore remains valid.
-        foreach (var emptyPool in document.Snapshot.StoragePools.Where(item =>
-                     !item.IsPrimordial
-                     && item.MemberPhysicalDiskIds.Count == 0
-                     && !dissolvedPoolIds.Contains(item.StableId)))
-        {
-            var originalMembers = committed.StoragePools.FirstOrDefault(item =>
-                    item.StableId.Equals(emptyPool.StableId, StringComparison.OrdinalIgnoreCase))?
-                .MemberPhysicalDiskIds.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var itemIndex = childItems.FindLastIndex(item =>
-                item.Request.Kind == SimulationEditKind.MovePhysicalDisk
-                && originalMembers.Contains(item.Request.TargetProviderKey));
-            var decision = new StorageRuleDecision(
-                StorageRuleVerdict.Deny,
-                "storage.rule.pool.empty-final",
-                $"Storage pool '{emptyPool.FriendlyName}' must retain at least one physical disk when changes are applied.",
-                emptyPool.StableId);
-            if (itemIndex >= 0)
-            {
-                childItems[itemIndex] = childItems[itemIndex] with { Decision = decision };
-            }
-            else
-            {
-                childItems.Add(new SimulationPlanItem(
-                    $"validation:pool-not-empty:{emptyPool.StableId}",
-                    $"Validate storage pool {emptyPool.FriendlyName}",
-                    new SimulationEditRequest(SimulationEditKind.UpdateStoragePool, emptyPool.StableId),
-                    Decision: decision));
-            }
         }
 
         var items = new List<SimulationPlanItem>();
@@ -804,5 +828,6 @@ public static class SimulationDraftPlanner
             request.AllocatedPartitionId,
             request.AllocatedVolumeId,
             request.AccessPaths,
-            request.VolumeName);
+            request.VolumeName,
+            request.PartitionKind);
 }

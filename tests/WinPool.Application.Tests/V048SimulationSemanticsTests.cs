@@ -72,7 +72,7 @@ public sealed class V048SimulationSemanticsTests
     }
 
     [Fact]
-    public void EmptyMemberDraftPoolPlanIsRejectedWithReason()
+    public void EmptyMemberDraftPoolPlanCreatesAnEmptyPool()
     {
         var committed = Primordial(ssdCount: 1, hddCount: 0).Snapshot;
         var drafted = EditWorkspace.InsertDraftPool(committed, "PoolEmpty");
@@ -81,9 +81,10 @@ public sealed class V048SimulationSemanticsTests
         var applied = new SimulationOperationService().ApplyPlan(
             Primordial(ssdCount: 1, hddCount: 0),
             plan);
-        Assert.False(applied.Succeeded);
-        Assert.False(string.IsNullOrWhiteSpace(applied.Error));
-        Assert.Contains("physical disk", applied.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.True(applied.Succeeded, applied.Error);
+        var pool = applied.Document.Snapshot.StoragePools.Single(item => item.FriendlyName == "PoolEmpty");
+        Assert.Empty(pool.MemberPhysicalDiskIds);
+        Assert.Empty(applied.Document.Snapshot.VirtualDisks);
     }
 
     [Fact]
@@ -129,7 +130,7 @@ public sealed class V048SimulationSemanticsTests
     }
 
     [Fact]
-    public void PlanRejectsLeavingAnExistingPoolWithoutMembers()
+    public void PlanAllowsLeavingAnExistingPoolWithoutMembers()
     {
         var service = new SimulationOperationService();
         var existing = service.Apply(
@@ -147,12 +148,12 @@ public sealed class V048SimulationSemanticsTests
         var working = EditWorkspace.MoveDiskToPool(committed, "physical:ssd0", "primordial");
         var plan = SimulationDraftPlanner.Build(committed, working);
 
-        Assert.Contains(plan.DisplayItems, item =>
-            item.Decision?.Code == "storage.rule.pool.empty-final"
-            && item.Decision.Verdict == StorageRuleVerdict.Deny);
+        Assert.DoesNotContain(plan.DisplayItems, item =>
+            item.Decision?.Verdict == StorageRuleVerdict.Deny);
         var applied = service.ApplyPlan(existing.Document, plan);
-        Assert.False(applied.Succeeded);
-        Assert.Equal(committed, applied.Document.Snapshot);
+        Assert.True(applied.Succeeded, applied.Error);
+        var pool = applied.Document.Snapshot.StoragePools.Single(item => item.FriendlyName == "PoolOld");
+        Assert.Empty(pool.MemberPhysicalDiskIds);
     }
 
     [Fact]
@@ -188,7 +189,7 @@ public sealed class V048SimulationSemanticsTests
                 AllocationUnitSize: 65536));
         Assert.True(created.Succeeded, created.Error);
         var committed = created.Document.Snapshot;
-        var partition = Assert.Single(committed.Partitions, item => item.Type == "Primary");
+        var partition = Assert.Single(committed.Partitions, item => item.Type == "BasicData");
         var volume = committed.VolumeForPartition(partition.StableId)!;
         var working = committed with
         {
