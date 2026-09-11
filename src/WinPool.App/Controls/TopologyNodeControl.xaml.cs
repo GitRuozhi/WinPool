@@ -149,11 +149,18 @@ public sealed partial class TopologyNodeControl : UserControl
         SummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
         var iconBrush = Brush("TextFillColorSecondaryBrush");
         TypeIcon.Foreground = iconBrush;
+        SingleLineTypeIcon.Foreground = iconBrush;
         ExpandIcon.Foreground = iconBrush;
         WindowsMarkerSquare1.Fill = iconBrush;
         WindowsMarkerSquare2.Fill = iconBrush;
         WindowsMarkerSquare3.Fill = iconBrush;
         WindowsMarkerSquare4.Fill = iconBrush;
+        SingleLineWindowsSquare1.Fill = iconBrush;
+        SingleLineWindowsSquare2.Fill = iconBrush;
+        SingleLineWindowsSquare3.Fill = iconBrush;
+        SingleLineWindowsSquare4.Fill = iconBrush;
+        SingleLineDisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
+        SingleLineSummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
         ApplyStatusMarkBrushes(iconBrush, Brush("WinPoolAccentBrush"));
     }
 
@@ -166,11 +173,18 @@ public sealed partial class TopologyNodeControl : UserControl
         TypeLabelText.Foreground = brush;
         SummaryText.Foreground = brush;
         TypeIcon.Foreground = brush;
+        SingleLineTypeIcon.Foreground = brush;
+        SingleLineDisplayNameText.Foreground = brush;
+        SingleLineSummaryText.Foreground = brush;
         ExpandIcon.Foreground = brush;
         WindowsMarkerSquare1.Fill = brush;
         WindowsMarkerSquare2.Fill = brush;
         WindowsMarkerSquare3.Fill = brush;
         WindowsMarkerSquare4.Fill = brush;
+        SingleLineWindowsSquare1.Fill = brush;
+        SingleLineWindowsSquare2.Fill = brush;
+        SingleLineWindowsSquare3.Fill = brush;
+        SingleLineWindowsSquare4.Fill = brush;
         ApplyStatusMarkBrushes(
             brush,
             ViewModel.IsSelected ? brush : Brush("WinPoolAccentBrush"));

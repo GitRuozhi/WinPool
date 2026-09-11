@@ -347,9 +347,26 @@ public sealed class V048SimulationSemanticsTests
                 .Select(item => item.VirtualDiskStableId is not null ? item with { IsOffline = true } : item)
                 .ToArray()
         };
+        var virtualDisk = Assert.Single(snapshot.VirtualDisks);
 
         Assert.True(StorageEditRules.TouchesOfflineDisk(snapshot, [pool.StableId]));
+        Assert.True(StorageEditRules.TouchesOfflineDisk(snapshot, [virtualDisk.StableId]));
         Assert.False(StorageEditRules.TouchesOfflineDisk(snapshot, ["physical:ssd0"]));
+    }
+
+    [Fact]
+    public void PhysicalDiskIdentityResolvesItsOfflineOsDisk()
+    {
+        var document = Primordial(ssdCount: 1, hddCount: 0);
+        var snapshot = document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item with { IsOffline = true })
+                .ToArray()
+        };
+
+        Assert.True(StorageEditRules.TouchesOfflineDisk(snapshot, ["physical:ssd0"]));
+        Assert.True(StorageEditRules.TouchesOfflineDisk(snapshot, ["osdisk:ssd0"]));
     }
 
     [Fact]

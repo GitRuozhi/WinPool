@@ -109,12 +109,19 @@
                             <Border
                                 Grid.Column="1"
                                 Padding="5,1"
-                                Background="{ThemeResource SystemFillColorCautionBrush}"
+                                Background="{ThemeResource SystemFillColorCriticalBrush}"
                                 CornerRadius="3"
                                 Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
-                                <TextBlock
-                                    FontSize="10"
-                                    Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
+                                <StackPanel Orientation="Horizontal" Spacing="3">
+                                    <FontIcon
+                                        FontSize="10"
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Glyph="&#xE7BA;" />
+                                    <TextBlock
+                                        FontSize="10"
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
+                                </StackPanel>
                             </Border>
                         </Grid>
                         <Grid Margin="0,2,0,0" ColumnSpacing="5">
@@ -179,28 +186,77 @@
                     </StackPanel>
                     <Grid
                         IsHitTestVisible="False"
-                        ColumnSpacing="10"
+                        ColumnSpacing="6"
                         VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.SingleLineHeaderVisibility, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock
+                        <FontIcon
+                            x:Name="SingleLineTypeIcon"
                             Grid.Column="0"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="{x:Bind ViewModel.TypeGlyph, Mode=OneWay}" />
+                        <Grid
+                            x:Name="SingleLineWindowsMarker"
+                            Grid.Column="1"
+                            Width="12"
+                            Height="12"
+                            ColumnSpacing="1.5"
+                            RowSpacing="1.5"
+                            Visibility="{x:Bind ViewModel.WindowsMarkerVisibility, Mode=OneWay}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Rectangle x:Name="SingleLineWindowsSquare1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Rectangle x:Name="SingleLineWindowsSquare2" Grid.Column="1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Rectangle x:Name="SingleLineWindowsSquare3" Grid.Row="1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Rectangle x:Name="SingleLineWindowsSquare4" Grid.Row="1" Grid.Column="1" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Grid>
+                        <TextBlock
+                            x:Name="SingleLineDisplayNameText"
+                            Grid.Column="2"
                             VerticalAlignment="Center"
                             FontSize="13"
                             FontWeight="SemiBold"
                             TextWrapping="NoWrap"
                             Text="{x:Bind ViewModel.Unit.DisplayName, Mode=OneWay}" />
                         <TextBlock
-                            Grid.Column="1"
+                            x:Name="SingleLineSummaryText"
+                            Grid.Column="3"
                             VerticalAlignment="Center"
                             FontSize="11"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap"
                             Text="{x:Bind ViewModel.SingleLineHeaderText, Mode=OneWay}" />
+                        <Border
+                            Grid.Column="4"
+                            Padding="5,1"
+                            Background="{ThemeResource SystemFillColorCriticalBrush}"
+                            CornerRadius="3"
+                            Visibility="{x:Bind ViewModel.BadgeVisibility, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="3">
+                                <FontIcon
+                                    FontSize="10"
+                                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                    Glyph="&#xE7BA;" />
+                                <TextBlock
+                                    FontSize="10"
+                                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                    Text="{x:Bind ViewModel.BadgeText, Mode=OneWay}" />
+                            </StackPanel>
+                        </Border>
                     </Grid>
                 </Grid>
             </Grid>

@@ -62,7 +62,11 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         Children = node.Children
             .Select(child => new TopologyNodeViewModel(child, owner, snapshot, edit))
             .ToList();
-        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit);
+        IsOffline = unit.Kind is StorageUnitKind.PhysicalDisk
+                or StorageUnitKind.VirtualDisk
+                or StorageUnitKind.OsDisk
+            && StorageEditRules.TouchesOfflineDisk(snapshot, [unit.StableId]);
+        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit, IsOffline);
         IsWindowsBacked = ComputeIsWindowsBacked(snapshot, unit);
         var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == unit.StableId);
         IsDragSource = edit?.AllowDiskDrag == true
@@ -95,6 +99,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public bool BadgeIsWarning { get; }
 
+    public bool IsOffline { get; }
+
     public bool IsWindowsBacked { get; }
 
     public Visibility WindowsMarkerVisibility =>
@@ -124,8 +130,14 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private static (string Text, bool IsWarning) ComputeBadge(
         WorkspaceViewModel owner,
         StorageSnapshot snapshot,
-        StorageUnitRef unit)
+        StorageUnitRef unit,
+        bool isOffline)
     {
+        if (isOffline)
+        {
+            return (owner.Localization["Offline"], true);
+        }
+
         switch (unit.Kind)
         {
             case StorageUnitKind.PhysicalDisk:
