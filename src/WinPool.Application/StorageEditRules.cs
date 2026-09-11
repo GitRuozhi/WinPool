@@ -435,6 +435,54 @@ public static class StorageEditRules
             }
         }
 
+        if (changesLayout)
+        {
+            long requestedLogicalSize;
+            try
+            {
+                requestedLogicalSize = tiers.Sum(tier => RequestedTierSize(snapshot, tier, request));
+            }
+            catch (ArgumentException)
+            {
+                return new(
+                    StorageRuleVerdict.InsufficientInfo,
+                    "storage.rule.update-pool.partition-bounds-unknown",
+                    "The requested layout does not provide enough information to validate partition boundaries.",
+                    pool.StableId,
+                    WindowsTierSupportedSize);
+            }
+
+            var vdiskIds = snapshot.VirtualDisks.Where(item => item.PoolStableId == pool.StableId)
+                .Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var osDisk in snapshot.OsDisks.Where(item =>
+                         item.VirtualDiskStableId is not null && vdiskIds.Contains(item.VirtualDiskStableId)))
+            {
+                foreach (var partition in snapshot.Partitions.Where(item => item.OsDiskStableId == osDisk.StableId))
+                {
+                    long required;
+                    try
+                    {
+                        required = checked(partition.Offset + partition.Size);
+                    }
+                    catch (OverflowException)
+                    {
+                        return Deny(
+                            "storage.rule.update-pool.partition-range",
+                            $"Disk {partition.DiskNumber} partition {partition.PartitionNumber} has an invalid byte range.",
+                            partition.StableId);
+                    }
+
+                    if (required > requestedLogicalSize)
+                    {
+                        return Deny(
+                            "storage.rule.update-pool.partition-bounds",
+                            $"Disk {partition.DiskNumber} partition {partition.PartitionNumber} requires at least {required} bytes, but the requested OS disk size is {requestedLogicalSize} bytes.",
+                            partition.StableId);
+                    }
+                }
+            }
+        }
+
         return Allow("storage.rule.update-pool");
     }
 
@@ -716,6 +764,60 @@ public static class StorageEditRules
                 "The selected layout does not provide enough information to calculate a safe simulated maximum.",
                 Source: WindowsTierSupportedSize);
         }
+    }
+
+    private static long RequestedTierSize(
+        StorageSnapshot snapshot,
+        StorageTierInfo tier,
+        SimulationOperationRequest request)
+    {
+        var media = EditWorkspace.NormalizeMedia(tier.MediaType);
+        var setting = media switch
+        {
+            "HDD" => request.CapacityResiliency ?? tier.ResiliencySettingName,
+            "SCM" => request.ScmResiliency ?? tier.ResiliencySettingName,
+            _ => request.PerformanceResiliency ?? tier.ResiliencySettingName
+        };
+        var copies = media switch
+        {
+            "HDD" => tier.NumberOfDataCopies ?? 1,
+            "SCM" => request.ScmDataCopies ?? tier.NumberOfDataCopies ?? 1,
+            _ => request.PerformanceDataCopies ?? tier.NumberOfDataCopies ?? 1
+        };
+        var columns = media == "HDD" ? request.CapacityColumns ?? tier.NumberOfColumns : tier.NumberOfColumns;
+        var tolerated = media == "HDD"
+            ? request.CapacityToleratedFailures ?? tier.PhysicalDiskRedundancy ?? 1
+            : tier.PhysicalDiskRedundancy ?? 0;
+        var useMaximum = media switch
+        {
+            "HDD" => request.CapacityUseMaximum,
+            "SCM" => request.ScmUseMaximum,
+            _ => request.PerformanceUseMaximum
+        };
+        if (useMaximum)
+        {
+            return ConservativeCapacity.PlanLogicalUpperBound(
+                tier.MemberPhysicalDiskIds
+                    .Select(id => snapshot.PhysicalDisks.First(item => item.StableId == id).Size)
+                    .ToArray(),
+                setting,
+                copies,
+                columns,
+                setting.Equals("Parity", StringComparison.OrdinalIgnoreCase) ? tolerated : 0,
+                media switch
+                {
+                    "HDD" => request.CapacityInterleaveBytes ?? tier.Interleave ?? 65536,
+                    "SCM" => request.ScmInterleaveBytes ?? tier.Interleave ?? 65536,
+                    _ => request.PerformanceInterleaveBytes ?? tier.Interleave ?? 65536
+                }).AlignedLogicalBytes;
+        }
+
+        return media switch
+        {
+            "HDD" => request.CapacitySizeBytes ?? tier.Size,
+            "SCM" => request.ScmSizeBytes ?? tier.Size,
+            _ => request.PerformanceSizeBytes ?? tier.Size
+        };
     }
 
     private static bool TierLayoutChanges(StorageTierInfo tier, SimulationOperationRequest request)

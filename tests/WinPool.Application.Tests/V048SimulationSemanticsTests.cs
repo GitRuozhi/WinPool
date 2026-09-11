@@ -335,6 +335,208 @@ public sealed class V048SimulationSemanticsTests
         Assert.All(kinds, kind => Assert.Contains(matrix, item => item.Kind == kind));
     }
 
+    [Fact]
+    public void UpdatingPoolNamesDoesNotFormatOrMutateTheVolume()
+    {
+        var service = new SimulationOperationService();
+        var created = service.Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolA",
+                VirtualDiskName: "SpaceA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                CreatePartition: true,
+                FileSystem: "NTFS",
+                AllocationUnitSize: 65536));
+        Assert.True(created.Succeeded, created.Error);
+        var pool = created.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var beforePartition = Assert.Single(created.Document.Snapshot.Partitions);
+        var beforeVolume = Assert.Single(created.Document.Snapshot.Volumes);
+
+        var renamed = service.Apply(
+            created.Document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.UpdateStoragePool,
+                pool.StableId,
+                Name: "PoolRenamed",
+                VirtualDiskName: "SpaceRenamed",
+                FileSystem: "REFS",
+                AllocationUnitSize: 4096));
+
+        Assert.True(renamed.Succeeded, renamed.Error);
+        Assert.Equal(beforePartition, Assert.Single(renamed.Document.Snapshot.Partitions));
+        Assert.Equal(beforeVolume, Assert.Single(renamed.Document.Snapshot.Volumes));
+    }
+
+    [Fact]
+    public void EmptyDraftPoolCanCarryAZeroCapacityVirtualDiskPlaceholder()
+    {
+        var committed = Primordial(ssdCount: 1, hddCount: 0).Snapshot;
+        var drafted = EditWorkspace.InsertDraftPool(committed, "PoolEmpty");
+        var pool = drafted.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+
+        drafted = EditWorkspace.InsertDraftVirtualDisk(drafted, pool.StableId, "Pending", "Simple", 65536);
+
+        Assert.Equal(0, Assert.Single(drafted.VirtualDisks).Size);
+        var plan = SimulationDraftPlanner.Build(committed, drafted);
+        Assert.Contains(plan.DisplayItems, item => item.Decision?.Verdict != StorageRuleVerdict.Allow);
+    }
+
+    [Fact]
+    public void UnchangedDraftBuildKeepsPlanAndAllocatedObjectIdsStable()
+    {
+        var committed = Primordial(ssdCount: 2, hddCount: 0).Snapshot;
+        var working = EditWorkspace.InsertDraftPool(committed, "PoolA");
+        var pool = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd0", pool.StableId);
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd1", pool.StableId);
+        working = EditWorkspace.InsertDraftVirtualDisk(working, pool.StableId, "SpaceA", "Mirror", 65536);
+
+        var first = SimulationDraftPlanner.Build(committed, working);
+        var second = SimulationDraftPlanner.Build(committed, working);
+
+        Assert.Equal(first.PlanId, second.PlanId);
+        Assert.Equal(first.Steps.Single().AllocatedPoolId, second.Steps.Single().AllocatedPoolId);
+        Assert.Equal(first.Steps.Single().AllocatedVirtualDiskId, second.Steps.Single().AllocatedVirtualDiskId);
+    }
+
+    [Fact]
+    public void ShrinkingPoolRejectsPartitionsBeyondTheNewOsDiskBoundary()
+    {
+        var service = new SimulationOperationService();
+        var created = service.Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                CreatePartition: true));
+        Assert.True(created.Succeeded, created.Error);
+        var pool = created.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var partition = Assert.Single(created.Document.Snapshot.Partitions);
+        var required = checked(partition.Offset + partition.Size);
+
+        var exact = service.Apply(created.Document, new SimulationOperationRequest(
+            SimulationOperationKind.UpdateStoragePool, pool.StableId, PerformanceSizeBytes: required));
+        Assert.True(exact.Succeeded, exact.Error);
+
+        var tooSmall = service.Apply(created.Document, new SimulationOperationRequest(
+            SimulationOperationKind.UpdateStoragePool, pool.StableId, PerformanceSizeBytes: required - 1));
+        Assert.False(tooSmall.Succeeded);
+        Assert.Contains("requires at least", tooSmall.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(created.Document, tooSmall.Document);
+    }
+
+    [Fact]
+    public void ExistingEmptyPoolAppliesTierResizeBeforeCreatingItsFirstVirtualDisk()
+    {
+        var service = new SimulationOperationService();
+        var created = service.Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                CreateVirtualDisk: false));
+        Assert.True(created.Succeeded, created.Error);
+        var pool = created.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var working = EditWorkspace.InsertDraftVirtualDisk(
+            created.Document.Snapshot, pool.StableId, "SpaceA", "Mirror", 65536);
+        const long finalSize = 80L * 1024 * 1024 * 1024;
+        working = working with
+        {
+            StorageTiers = working.StorageTiers.Select(item => item.PoolStableId == pool.StableId
+                && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD"
+                ? item with { Size = finalSize, FootprintOnPool = finalSize * 2 }
+                : item).ToArray()
+        };
+
+        var plan = SimulationDraftPlanner.Build(created.Document.Snapshot, working);
+        var updateIndex = plan.Steps.ToList().FindIndex(item => item.Kind == SimulationEditKind.UpdateStoragePool);
+        var createIndex = plan.Steps.ToList().FindIndex(item => item.Kind == SimulationEditKind.CreateVirtualDisk);
+        Assert.InRange(updateIndex, 0, createIndex - 1);
+        Assert.Equal(finalSize, plan.Steps[createIndex].SizeBytes);
+        var applied = service.ApplyPlan(created.Document, plan);
+        Assert.True(applied.Succeeded, applied.Error);
+        Assert.Equal(finalSize, Assert.Single(applied.Document.Snapshot.VirtualDisks).Size);
+    }
+
+    [Fact]
+    public void DissolveMovesEachMemberToItsFinalDraftTargetOnce()
+    {
+        var service = new SimulationOperationService();
+        var poolAResult = service.Apply(
+            Primordial(ssdCount: 4, hddCount: 0),
+            new SimulationOperationRequest(SimulationOperationKind.CreateTieredPool, "primordial",
+                Name: "PoolA", MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror", PerformanceDataCopies: 2, CreateVirtualDisk: false));
+        Assert.True(poolAResult.Succeeded, poolAResult.Error);
+        var poolBResult = service.Apply(
+            poolAResult.Document,
+            new SimulationOperationRequest(SimulationOperationKind.CreateTieredPool, "primordial",
+                Name: "PoolB", MemberDiskIds: ["physical:ssd2", "physical:ssd3"],
+                PerformanceResiliency: "Mirror", PerformanceDataCopies: 2, CreateVirtualDisk: false));
+        Assert.True(poolBResult.Succeeded, poolBResult.Error);
+        var poolA = poolBResult.Document.Snapshot.StoragePools.Single(item => item.FriendlyName == "PoolA");
+        var poolB = poolBResult.Document.Snapshot.StoragePools.Single(item => item.FriendlyName == "PoolB");
+        var working = EditWorkspace.DissolvePoolInWorking(poolBResult.Document.Snapshot, poolA.StableId);
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd0", poolB.StableId);
+
+        var plan = SimulationDraftPlanner.Build(poolBResult.Document.Snapshot, working);
+        var move = Assert.Single(plan.Steps, item => item.Kind == SimulationEditKind.MovePhysicalDisk
+            && item.TargetProviderKey == "physical:ssd0");
+        Assert.Equal(poolB.StableId, move.Name);
+        Assert.Contains("SSD 0", plan.DisplayItems.Single(item => item.Request == move).Title);
+        Assert.Contains("PoolB", plan.DisplayItems.Single(item => item.Request == move).Title);
+        var applied = service.ApplyPlan(poolBResult.Document, plan);
+        Assert.True(applied.Succeeded, applied.Error);
+        Assert.Equal(poolB.StableId, applied.Document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd0").PoolStableId);
+        Assert.DoesNotContain(applied.Document.Snapshot.StoragePools, item => item.StableId == poolA.StableId);
+    }
+
+    [Fact]
+    public void DissolvePlanKeepsObjectNamesAndActualDataLossOnParentAndChild()
+    {
+        var service = new SimulationOperationService();
+        var created = service.Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(SimulationOperationKind.CreateTieredPool, "primordial",
+                Name: "PoolA", VirtualDiskName: "SpaceA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror", PerformanceDataCopies: 2,
+                CreatePartition: true, FileSystem: "NTFS"));
+        Assert.True(created.Succeeded, created.Error);
+        var partition = Assert.Single(created.Document.Snapshot.Partitions);
+        var withData = created.Document.Snapshot with
+        {
+            Partitions = created.Document.Snapshot.Partitions.Select(item => item.StableId == partition.StableId
+                ? item with { SizeRemaining = item.Size - 1 }
+                : item).ToArray()
+        };
+        var pool = withData.StoragePools.Single(item => !item.IsPrimordial);
+        var working = EditWorkspace.DissolvePoolInWorking(withData, pool.StableId);
+
+        var plan = SimulationDraftPlanner.Build(withData, working);
+        var parent = Assert.Single(plan.DisplayItems, item => item.Request.Kind == SimulationEditKind.DissolveStoragePool);
+        var deletePartition = Assert.Single(plan.DisplayItems, item => item.Request.Kind == SimulationEditKind.DeletePartition);
+        var deleteVdisk = Assert.Single(plan.DisplayItems, item => item.Request.Kind == SimulationEditKind.DeleteVirtualDisk);
+        Assert.True(parent.CausesDataLoss);
+        Assert.True(deletePartition.CausesDataLoss);
+        Assert.True(deleteVdisk.CausesDataLoss);
+        Assert.Contains("partition", deletePartition.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SpaceA", deleteVdisk.Title);
+    }
+
     private static StorageSystemDocument Primordial(int ssdCount, int hddCount)
     {
         var disks = new List<PhysicalDiskInfo>();

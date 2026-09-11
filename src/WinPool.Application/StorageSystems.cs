@@ -1317,19 +1317,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
 
         var osDisk = created.OsDisks.Last(item => item.VirtualDiskStableId is not null);
-        created = CreatePartition(created, new SimulationOperationRequest(
+        return CreatePartition(created, new SimulationOperationRequest(
             SimulationOperationKind.CreatePartition,
-            osDisk.StableId));
-        var partition = created.Partitions
-            .Where(item => item.OsDiskStableId == osDisk.StableId)
-            .OrderByDescending(item => item.Offset)
-            .First();
-        return FormatPartition(created, new SimulationOperationRequest(
-            SimulationOperationKind.FormatPartition,
-            partition.StableId,
+            osDisk.StableId,
             Name: virtualName,
             FileSystem: string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
-            AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+            AllocationUnitSize: request.AllocationUnitSize ?? 65536,
+            AllocatedPartitionId: request.AllocatedPartitionId,
+            AllocatedVolumeId: request.AllocatedVolumeId));
     }
 
     private static StorageTierInfo BuildTier(
@@ -1469,6 +1464,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     : disk;
             })
             .ToArray();
+        if (tierCapacityChanged)
+        {
+            var affectedVdiskIds = virtualDisks.Where(item => item.PoolStableId == pool.StableId)
+                .Select(item => item.StableId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            EnsurePartitionsFit(snapshot, osDisks.Where(item =>
+                item.VirtualDiskStableId is not null && affectedVdiskIds.Contains(item.VirtualDiskStableId)).ToArray());
+        }
         var updated = snapshot with
         {
             StoragePools = snapshot.StoragePools
@@ -1484,25 +1487,33 @@ public sealed class SimulationOperationService : ISimulationOperationService
             VirtualDisks = virtualDisks,
             OsDisks = osDisks
         };
-        if (string.IsNullOrWhiteSpace(request.FileSystem))
-        {
-            return updated;
-        }
+        return updated;
+    }
 
-        var vdisk = updated.VirtualDisks.FirstOrDefault(item => item.PoolStableId == pool.StableId);
-        var osDisk = updated.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk?.StableId);
-        var partition = updated.Partitions
-            .Where(item => item.OsDiskStableId == osDisk?.StableId && item.Type == "Primary")
-            .OrderBy(item => item.Offset)
-            .FirstOrDefault();
-        return partition is null
-            ? updated
-            : FormatPartition(updated, new SimulationOperationRequest(
-                SimulationOperationKind.FormatPartition,
-                partition.StableId,
-                Name: virtualName,
-                FileSystem: request.FileSystem,
-                AllocationUnitSize: request.AllocationUnitSize ?? 65536));
+    private static void EnsurePartitionsFit(StorageSnapshot snapshot, IReadOnlyList<OsDiskInfo> osDisks)
+    {
+        foreach (var disk in osDisks)
+        {
+            foreach (var partition in snapshot.Partitions.Where(item => item.OsDiskStableId == disk.StableId))
+            {
+                long end;
+                try
+                {
+                    end = checked(partition.Offset + partition.Size);
+                }
+                catch (OverflowException)
+                {
+                    throw new InvalidOperationException(
+                        $"Disk {partition.DiskNumber} partition {partition.PartitionNumber} has an invalid byte range.");
+                }
+
+                if (end > disk.Size)
+                {
+                    throw new InvalidOperationException(
+                        $"Disk {partition.DiskNumber} partition {partition.PartitionNumber} requires the OS disk to be at least {end} bytes, but the requested size is {disk.Size} bytes.");
+                }
+            }
+        }
     }
 
     private static StorageTierInfo PatchTier(

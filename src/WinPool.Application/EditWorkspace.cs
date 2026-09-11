@@ -1642,10 +1642,6 @@ public sealed record StructureProblem(
             }
 
             var placeholderSize = EstimatePoolLogicalCapacity(snapshot, poolId, resiliency, interleave);
-            if (placeholderSize <= 0)
-            {
-                throw new InvalidOperationException("The simulated pool has no createable logical capacity.");
-            }
             var placeholder = new VirtualDiskInfo(
                 $"{DraftVirtualDiskPrefix}{Guid.NewGuid():N}",
                 false,
@@ -1657,7 +1653,9 @@ public sealed record StructureProblem(
                 1,
                 interleave,
                 placeholderSize,
-                EstimatePoolPhysicalFootprint(snapshot, poolId, placeholderSize, resiliency),
+                placeholderSize > 0
+                    ? EstimatePoolPhysicalFootprint(snapshot, poolId, placeholderSize, resiliency)
+                    : 0,
                 pool.StableId,
                 [],
                 []);

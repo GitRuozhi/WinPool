@@ -11,7 +11,7 @@ using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
 namespace WinPool_App;
 
 /// <summary>
-/// Storage structure editor: left pool topology, bottom-left two-row
+/// Storage structure editor: left pool topology, bottom-left wrapping
 /// structure operations, and a right-hand property card that sizes to its
 /// grouped pool / tier / disk-and-partition fields plus one Save row.
 /// Simulation only.
@@ -29,9 +29,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     // Structural draft history. Every topology drag or structure-button
     // change commits one step; Save checkpoints the history away.
-    private readonly Stack<StorageSnapshot> _undoStack = [];
-    private readonly Stack<StorageSnapshot> _redoStack = [];
+    private readonly Stack<EditorDraftState> _undoStack = [];
+    private readonly Stack<EditorDraftState> _redoStack = [];
     private readonly HashSet<string> _maximumSizeFields = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PoolEditIntent> _poolIntents = new(StringComparer.OrdinalIgnoreCase);
     private SimulationDraftPlan? _currentPlan;
     private string _planBuildError = string.Empty;
     private bool _outcomeUnknown;
@@ -50,6 +51,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ComboBox ProvisioningBox,
         List<FrameworkElement> Rows,
         List<int> RowIndices);
+
+    private sealed record PoolEditIntent(
+        bool AutoCreateVirtualDisk,
+        bool AutoCreatePartition,
+        string FileSystem,
+        long AllocationUnitSize,
+        string VolumeName);
+
+    private sealed record EditorDraftState(
+        StorageSnapshot Snapshot,
+        IReadOnlyDictionary<string, PoolEditIntent> PoolIntents,
+        IReadOnlySet<string> MaximumSizeFields);
 
     /// <summary>Reset button shown only while its field differs from the
     /// committed state (it replaces the former dot marker).</summary>
@@ -146,6 +159,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _working = EditWorkspace.NormalizeTierCapacities(ViewModel.ActiveSnapshot);
         _undoStack.Clear();
         _redoStack.Clear();
+        _poolIntents.Clear();
+        _maximumSizeFields.Clear();
         _formDirty = false;
         _interaction = new TopologyEditInteraction(
             IsTopologyNodeSelected,
@@ -293,7 +308,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         var sizeGroup = TierGroups().FirstOrDefault(group => ReferenceEquals(group.SizeBox, box));
                         if (sizeGroup is not null)
                         {
-                            _maximumSizeFields.Remove(MaximumKey(sizeGroup));
+                            var maximumKey = MaximumKey(sizeGroup);
+                            if (_maximumSizeFields.Contains(maximumKey))
+                            {
+                                CaptureSelectedIntent();
+                                _undoStack.Push(CaptureDraftState());
+                                _redoStack.Clear();
+                            }
+                            _maximumSizeFields.Remove(maximumKey);
                         }
                         _formDirty = true;
                         UpdateButtonState();
@@ -695,6 +717,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+        CaptureSelectedIntent();
+        if (_formDirty && !HasInvalidSizeInput())
+        {
+            _working = ApplyFormToWorking(_working);
+            _formDirty = false;
+        }
+
         switch (node.Unit.Kind)
         {
             case StorageUnitKind.PhysicalDisk:
@@ -1065,6 +1094,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 }
             }
 
+            if (_poolIntents.TryGetValue(pool.StableId, out var intent))
+            {
+                _autoVdiskSwitch.IsOn = intent.AutoCreateVirtualDisk;
+                _autoPartitionSwitch.IsOn = intent.AutoCreatePartition;
+                if (_fileSystemBox.Items.Contains(intent.FileSystem))
+                {
+                    _fileSystemBox.SelectedItem = intent.FileSystem;
+                }
+                _clusterBox.SelectedItem = ClusterToken(intent.AllocationUnitSize);
+                _volumeNameBox.Text = intent.VolumeName;
+            }
+
             UpdateLinkedFields();
         }
         finally
@@ -1208,8 +1249,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private static void SetInterleave(ComboBox box, long bytes)
     {
-        var token = $"{Math.Max(1, bytes / 1024)}K";
-        box.SelectedItem = box.Items.OfType<string>().Contains(token) ? token : "64 KiB";
+        var token = InterleaveToken(bytes);
+        if (!box.Items.OfType<string>().Contains(token))
+        {
+            box.Items.Add(token);
+        }
+        box.SelectedItem = token;
     }
 
     private static string ToGigabytes(long? bytes) =>
@@ -1317,13 +1362,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void RefreshPendingActions()
     {
+        CaptureSelectedIntent();
         PendingActionsPanel.Children.Clear();
         _planBuildError = string.Empty;
         try
         {
             var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
             var built = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, projected);
-            var enriched = built.Steps.Select(EnrichPlanIntent).ToArray();
+            var enriched = built.Steps.Select(EnrichPlanIntent).ToList();
+            AppendPartitionIntents(enriched);
             _currentPlan = SimulationDraftPlanner.Precheck(ViewModel.ActiveSnapshot, enriched);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
@@ -1383,53 +1430,152 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private SimulationEditRequest EnrichPlanIntent(SimulationEditRequest step)
     {
-        var selectedPool = SelectedPool();
-        if (selectedPool is null
-            || step.Kind is not (SimulationEditKind.CreateTieredPool
+        if (step.Kind is not (SimulationEditKind.CreateTieredPool
                 or SimulationEditKind.CreateVirtualDisk
                 or SimulationEditKind.UpdateStoragePool))
         {
             return step;
         }
 
-        var belongsToSelection = step.Kind == SimulationEditKind.CreateTieredPool
-            ? EditWorkspace.IsDraftPool(selectedPool.StableId)
-            : step.TargetProviderKey == selectedPool.StableId;
-        if (!belongsToSelection)
-        {
-            return step;
-        }
+        var intentKey = step.Kind == SimulationEditKind.CreateTieredPool
+            ? step.DraftSourceId
+            : step.TargetProviderKey;
+        _poolIntents.TryGetValue(intentKey ?? string.Empty, out var intent);
+        var selected = intentKey is not null
+            && intentKey.Equals(_selectedPoolId, StringComparison.OrdinalIgnoreCase);
 
         return step with
         {
-            FileSystem = _fileSystemBox.SelectedItem as string ?? step.FileSystem,
-            AllocationUnitSize = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
-            CreateVirtualDisk = step.Kind == SimulationEditKind.CreateTieredPool ? _autoVdiskSwitch.IsOn : step.CreateVirtualDisk,
+            FileSystem = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
+                ? intent?.FileSystem ?? (selected ? _fileSystemBox.SelectedItem as string : null) ?? step.FileSystem
+                : step.FileSystem,
+            AllocationUnitSize = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
+                ? intent?.AllocationUnitSize
+                    ?? (selected ? ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB") : (long?)null)
+                    ?? step.AllocationUnitSize
+                : step.AllocationUnitSize,
+            CreateVirtualDisk = step.Kind == SimulationEditKind.CreateTieredPool
+                ? intent?.AutoCreateVirtualDisk ?? step.CreateVirtualDisk
+                : step.CreateVirtualDisk,
             CreatePartition = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
-                ? _autoPartitionSwitch.IsOn
+                ? intent?.AutoCreatePartition ?? step.CreatePartition
                 : step.CreatePartition,
-            AllocatedPartitionId = step.Kind == SimulationEditKind.CreateVirtualDisk && _autoPartitionSwitch.IsOn
-                ? step.AllocatedPartitionId ?? $"sim:partition:{Guid.NewGuid():N}"
+            AllocatedPartitionId = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
+                && intent?.AutoCreatePartition == true
+                ? step.AllocatedPartitionId ?? StableIntentObjectId("sim:partition", intentKey)
                 : step.AllocatedPartitionId,
-            AllocatedVolumeId = step.Kind == SimulationEditKind.CreateVirtualDisk && _autoPartitionSwitch.IsOn
-                ? step.AllocatedVolumeId ?? $"sim:volume:{Guid.NewGuid():N}"
+            AllocatedVolumeId = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
+                && intent?.AutoCreatePartition == true
+                ? step.AllocatedVolumeId ?? StableIntentObjectId("sim:volume", intentKey)
                 : step.AllocatedVolumeId,
-            PerformanceUseMaximum = _maximumSizeFields.Contains(MaximumKey(Performance)),
-            CapacityUseMaximum = _maximumSizeFields.Contains(MaximumKey(Capacity)),
-            ScmUseMaximum = _maximumSizeFields.Contains(MaximumKey(Dedicated)),
-            PerformanceSizeBytes = SizeBytes(Performance.SizeBox) ?? step.PerformanceSizeBytes,
-            CapacitySizeBytes = SizeBytes(Capacity.SizeBox) ?? step.CapacitySizeBytes,
-            ScmSizeBytes = SizeBytes(Dedicated.SizeBox) ?? step.ScmSizeBytes,
+            PerformanceUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|SSD"),
+            CapacityUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|HDD"),
+            ScmUseMaximum = intentKey is not null && _maximumSizeFields.Contains($"{intentKey}|SCM"),
             ProvisioningType = "Fixed"
         };
     }
 
+    private static string StableIntentObjectId(string prefix, string? intentKey)
+    {
+        var source = string.IsNullOrWhiteSpace(intentKey) ? "pending" : intentKey;
+        var suffix = source[(source.LastIndexOf(':') + 1)..];
+        return $"{prefix}:{suffix}";
+    }
+
+    private void CaptureSelectedIntent()
+    {
+        if (_filling || string.IsNullOrWhiteSpace(_selectedPoolId))
+        {
+            return;
+        }
+
+        _poolIntents[_selectedPoolId] = new PoolEditIntent(
+            _autoVdiskSwitch.IsOn,
+            _autoPartitionSwitch.IsOn,
+            _fileSystemBox.SelectedItem as string ?? "NTFS",
+            ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
+            _volumeNameBox.Text.Trim());
+    }
+
+    private EditorDraftState CaptureDraftState() => new(
+        _working,
+        new Dictionary<string, PoolEditIntent>(_poolIntents, StringComparer.OrdinalIgnoreCase),
+        new HashSet<string>(_maximumSizeFields, StringComparer.OrdinalIgnoreCase));
+
+    private void RestoreDraftState(EditorDraftState state)
+    {
+        _working = state.Snapshot;
+        _poolIntents.Clear();
+        foreach (var pair in state.PoolIntents)
+        {
+            _poolIntents[pair.Key] = pair.Value;
+        }
+        _maximumSizeFields.Clear();
+        _maximumSizeFields.UnionWith(state.MaximumSizeFields);
+        _formDirty = false;
+    }
+
+    private void AppendPartitionIntents(List<SimulationEditRequest> steps)
+    {
+        foreach (var pair in _poolIntents)
+        {
+            AppendPartitionIntent(steps, pair.Key, pair.Value);
+        }
+    }
+
+    private void AppendPartitionIntent(
+        List<SimulationEditRequest> steps,
+        string poolId,
+        PoolEditIntent intent)
+    {
+        if (EditWorkspace.IsDraftPool(poolId))
+        {
+            return;
+        }
+
+        var partition = CommittedPrimaryPartition(poolId);
+        if (partition is null)
+        {
+            return;
+        }
+
+        var fileSystem = intent.FileSystem;
+        var cluster = intent.AllocationUnitSize;
+        var label = intent.VolumeName;
+        var formatChanged = !string.Equals(fileSystem, partition.FileSystem, StringComparison.OrdinalIgnoreCase)
+            || cluster != partition.AllocationUnitSize;
+        if (formatChanged)
+        {
+            steps.Add(new SimulationEditRequest(
+                SimulationEditKind.FormatPartition,
+                partition.StableId,
+                Name: label,
+                FileSystem: fileSystem,
+                AllocationUnitSize: cluster));
+            return;
+        }
+
+        if (!string.Equals(label, partition.FileSystemLabel, StringComparison.Ordinal))
+        {
+            var volume = ViewModel.ActiveSnapshot.VolumeForPartition(partition.StableId);
+            if (volume is not null)
+            {
+                steps.Add(new SimulationEditRequest(SimulationEditKind.Rename, volume.StableId, Name: label));
+            }
+        }
+    }
+
     private TextBlock ActionText(SimulationPlanItem item)
     {
-        var title = DescribePlanStep(item.Request);
+        var title = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+            ? $"{DescribePlanStep(item.Request)} {item.Title}"
+            : item.Title;
         var reason = item.Decision?.Verdict == StorageRuleVerdict.Allow
             ? string.Empty
             : item.Decision?.Message ?? string.Empty;
+        var dataLoss = item.CausesDataLoss
+            ? Text("\n会删除已使用的数据。", "\nDeletes used data.")
+            : string.Empty;
         var max = item.Request.PerformanceUseMaximum
             || item.Request.CapacityUseMaximum
             || item.Request.ScmUseMaximum
@@ -1441,19 +1587,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return new TextBlock
         {
             Text = string.IsNullOrWhiteSpace(reason)
-                ? $"{title}{max}{unknown}"
-                : $"{title}{max}{unknown}\n{reason}",
+                ? $"{title}{max}{unknown}{dataLoss}"
+                : $"{title}{max}{unknown}{dataLoss}\n{reason}",
             TextWrapping = TextWrapping.Wrap,
-            Foreground = item.Decision?.Verdict == StorageRuleVerdict.Allow
+            Foreground = item.Decision?.Verdict == StorageRuleVerdict.Allow && !item.CausesDataLoss
                 ? (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"]
                 : (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"]
         };
     }
 
-    private bool HasInvalidSizeInput() => TierGroups().Any(group =>
-        group.SizeBox.IsEnabled
-        && !_maximumSizeFields.Contains(MaximumKey(group))
-        && NumValue(group.SizeBox) is null);
+    private bool HasInvalidSizeInput()
+    {
+        var pool = SelectedPool();
+        return pool is not null && TierGroups().Any(group =>
+            TierVisible(pool.StableId, group.Media)
+            && group.SizeBox.IsEnabled
+            && !_maximumSizeFields.Contains(MaximumKey(group))
+            && NumValue(group.SizeBox) is null);
+    }
 
     private void UpdateButtonState()
     {
@@ -1584,7 +1735,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
             group.ProvisioningBox.IsEnabled = sizeEditable
                 && provisioning.Equals("Fixed", StringComparison.OrdinalIgnoreCase);
             group.ResiliencyBox.IsEnabled = specEditable;
-            group.InterleaveBox.IsEnabled = specEditable;
+            var supportedInterleave = tier?.Interleave is null
+                || tier.Interleave is 16384 or 32768 or 65536 or 131072 or 262144;
+            group.InterleaveBox.IsEnabled = specEditable && supportedInterleave;
+            ToolTipService.SetToolTip(
+                group.InterleaveBox,
+                supportedInterleave
+                    ? null
+                    : Text("当前 Interleave 值超出编辑范围，已按原值保留。", "The current interleave is outside the editable range and is preserved."));
             group.DiskCountBox.IsReadOnly = true;
             if (!tierVisible)
             {
@@ -1675,7 +1833,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        _undoStack.Push(_working);
+        _undoStack.Push(CaptureDraftState());
         _redoStack.Clear();
         _working = next;
         _formDirty = false;
@@ -1739,8 +1897,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        _redoStack.Push(_working);
-        _working = _undoStack.Pop();
+        CaptureSelectedIntent();
+        if (_formDirty)
+        {
+            _working = ApplyFormToWorking(_working);
+        }
+        _redoStack.Push(CaptureDraftState());
+        RestoreDraftState(_undoStack.Pop());
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         RefreshAll();
@@ -1756,8 +1919,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        _undoStack.Push(_working);
-        _working = _redoStack.Pop();
+        _undoStack.Push(CaptureDraftState());
+        RestoreDraftState(_redoStack.Pop());
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         RefreshAll();
@@ -1773,6 +1936,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _undoStack.Clear();
         _redoStack.Clear();
         _maximumSizeFields.Clear();
+        _poolIntents.Clear();
         _outcomeUnknown = false;
         _working = ViewModel.ActiveSnapshot;
         _formDirty = false;
@@ -2158,6 +2322,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _undoStack.Clear();
         _redoStack.Clear();
         _maximumSizeFields.Clear();
+        _poolIntents.Clear();
         _outcomeUnknown = false;
         _working = ViewModel.ActiveSnapshot;
         _selectedPoolId = EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
@@ -2307,6 +2472,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         .ToArray()
                 };
             }
+        }
+
+        var draftVdisk = result.VirtualDisks.FirstOrDefault(item =>
+            item.PoolStableId == pool.StableId && EditWorkspace.IsDraftVirtualDisk(item.StableId));
+        if (draftVdisk is not null)
+        {
+            var finalSize = result.StorageTiers.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.Size);
+            var finalFootprint = result.StorageTiers.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.FootprintOnPool);
+            result = result with
+            {
+                VirtualDisks = result.VirtualDisks.Select(item => item.StableId == draftVdisk.StableId
+                    ? item with { Size = finalSize, FootprintOnPool = finalFootprint }
+                    : item).ToArray(),
+                OsDisks = result.OsDisks.Select(item => item.VirtualDiskStableId == draftVdisk.StableId
+                    ? item with { Size = finalSize }
+                    : item).ToArray()
+            };
         }
 
         return result;
@@ -3214,13 +3396,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     /// <summary>
-    /// Save pool properties persists the property form immediately: pool and
-    /// virtual-disk names, tier parameters, and the user-partition volume
-    /// label / file system / cluster are written to the simulation document
-    /// now. Structural draft steps survive the save (RestoreWorkingMembership
-    /// replays them) but the undo history is checkpointed away, because the
-    /// property values are no longer part of the draft. Apply-all covers the
-    /// same property diff for users who skip Save.
+    /// Save pool properties merges the current form into the structural draft.
+    /// It does not persist the simulation document; Apply-all submits the
+    /// resulting plan together with the other pending structure changes.
     /// </summary>
     private async void SavePoolProperties_Click(object sender, RoutedEventArgs e)
     {
@@ -3279,7 +3457,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
         }
 
-        _undoStack.Push(_working);
+        _undoStack.Push(CaptureDraftState());
         _redoStack.Clear();
         _working = merged;
         _formDirty = false;
@@ -3396,6 +3574,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ToggleMaximumSize(TierFields group)
     {
+        MergeFormIntoWorking();
+        CaptureSelectedIntent();
+        _undoStack.Push(CaptureDraftState());
+        _redoStack.Clear();
         var key = MaximumKey(group);
         var maximum = TierCapacityMaxBytes(group.Media);
         if (_maximumSizeFields.Remove(key))
