@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前为 V0.50 九项缺陷修复实施；初次实施的自动门及原生界面检查结果见 [V0.50 归档](Archive/V0.50/README.md)，不能替代本次组合场景验证。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
+本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前为 V0.50 即时改名与结构草稿修复计划，代码未实施；本轮禁止自行运行测试、构建或程序，具体限制见 Plan；初次实施的自动门及原生界面检查结果见 [V0.50 归档](Archive/V0.50/README.md)，不能替代本次组合场景验证。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
 
 ## 选择验证范围
 

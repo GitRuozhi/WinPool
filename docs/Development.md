@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前九项缺陷修复与执行状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。当前代码为 V0.50，初次实施计划见 [V0.50 归档](Archive/V0.50/README.md)。结构页统一草稿、分区页及时生效见 Product。已知限制见 [CHANGELOG](CHANGELOG.md)。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前即时改名与结构草稿修复及执行状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。当前代码为 V0.50，初次实施计划见 [V0.50 归档](Archive/V0.50/README.md)。结构页非名称参数统一草稿、已有对象即时改名的新决定及分区页及时生效见 Product；即时改名尚待实施。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
@@ -28,7 +28,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 | 含义 | 约定 |
 | --- | --- |
-| 身份 | 内部稳定 ID、系统 ID 和提供程序定位信息分工明确；盘符、名称、列表顺序、DiskNumber 不能单独作为持久身份。保留稳定性/未知标记 |
+| 身份 | 内部稳定 ID、系统 ID 和提供程序定位信息分工明确；盘符、名称、列表顺序、DiskNumber 不能单独作为持久身份。名称变化不得改变身份、关系或目标定位；缺少可靠 ID 时不以名称猜测跨采集关联。保留稳定性/未知标记 |
 | 实体 | PhysicalDisk、StoragePool、StorageTier、VirtualDisk、OS Disk、Partition、Volume 各有明确身份；分区描述几何和分区类型，卷描述文件系统与挂载。无卷的分区也是合法事实 |
 | 关系 | 类型化对象关联是唯一事实源；通用关系图、导航和显示是其派生投影，不各自维护另一套可修改关系 |
 | 显示分组 | 备用/退役/介质分组不冒充真实 StorageTier。推导的关联带来源，不能自动升级为可执行事实 |
