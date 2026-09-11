@@ -75,8 +75,23 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
         FormatButtonLabel.Text = ViewModel.Localization["Format"];
+        foreach (var button in PropertyResetButtons())
+        {
+            ToolTipService.SetToolTip(button, ViewModel.Localization["ResetRecommended"]);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+                button,
+                ViewModel.Localization["ResetRecommended"]);
+        }
         FillFileSystemBox();
         FillClusterBox();
+    }
+
+    private IEnumerable<Button> PropertyResetButtons()
+    {
+        yield return ResetSizeButton;
+        yield return ResetFileSystemButton;
+        yield return ResetClusterButton;
+        yield return ResetQuickFormatButton;
     }
 
     private void FillFileSystemBox()
@@ -456,6 +471,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             : ViewModel.Localization["Format"];
         FormatButtonIcon.Glyph = createMode ? "\uE710" : "\uE9CE";
         FormatButton.IsEnabled = simulated && (createMode || userPartition);
+        UpdatePropertyResetState();
     }
 
     private void FileSystemBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -466,6 +482,104 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         UpdateButtonState();
+    }
+
+    private void SizeBox_ValueChanged(object sender, NumberBoxValueChangedEventArgs e)
+    {
+        if (!_filling)
+        {
+            UpdatePropertyResetState();
+        }
+    }
+
+    private void ClusterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_filling)
+        {
+            UpdatePropertyResetState();
+        }
+    }
+
+    private void QuickFormatSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_filling)
+        {
+            UpdatePropertyResetState();
+        }
+    }
+
+    private void UpdatePropertyResetState()
+    {
+        var partition = SelectedPartition();
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        var gap = _selectedUnallocatedOffset is not null;
+        var parameterEnabled = ViewModel.IsUsingSimulatedInventory && (partition is not null || gap);
+        var recommendedSize = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
+        var baselineFileSystem = volume?.FileSystem ?? partition?.FileSystem;
+        if (string.IsNullOrWhiteSpace(baselineFileSystem))
+        {
+            baselineFileSystem = "NTFS";
+        }
+
+        var baselineCluster = volume?.AllocationUnitSize ?? partition?.AllocationUnitSize;
+        var sizeChanged = gap
+            && SizeBox.IsEnabled
+            && (double.IsNaN(SizeBox.Value) || Math.Abs(SizeBox.Value - recommendedSize) > 0.005);
+        var fileSystemChanged = parameterEnabled
+            && FileSystemBox.IsEnabled
+            && !string.Equals(
+                SelectedFileSystemToken(),
+                baselineFileSystem,
+                StringComparison.OrdinalIgnoreCase);
+        var clusterChanged = parameterEnabled
+            && ClusterBox.IsEnabled
+            && SelectedClusterBytes() != (baselineCluster ?? 65536);
+        var quickFormatChanged = parameterEnabled
+            && QuickFormatSwitch.IsEnabled
+            && !QuickFormatSwitch.IsOn;
+
+        SetPropertyResetState(ResetSizeButton, SizeChangedIndicator, sizeChanged);
+        SetPropertyResetState(ResetFileSystemButton, FileSystemChangedIndicator, fileSystemChanged);
+        SetPropertyResetState(ResetClusterButton, ClusterChangedIndicator, clusterChanged);
+        SetPropertyResetState(ResetQuickFormatButton, QuickFormatChangedIndicator, quickFormatChanged);
+    }
+
+    private static void SetPropertyResetState(
+        Button button,
+        FrameworkElement indicator,
+        bool changed)
+    {
+        var visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+        button.Visibility = visibility;
+        indicator.Visibility = visibility;
+    }
+
+    private void ResetSize_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedUnallocatedOffset is not null)
+        {
+            SizeBox.Value = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
+        }
+
+        UpdatePropertyResetState();
+    }
+
+    private void ResetFileSystem_Click(object sender, RoutedEventArgs e)
+    {
+        FileSystemBox.SelectedItem = "NTFS";
+        UpdatePropertyResetState();
+    }
+
+    private void ResetCluster_Click(object sender, RoutedEventArgs e)
+    {
+        ClusterBox.SelectedItem = "64 KiB";
+        UpdatePropertyResetState();
+    }
+
+    private void ResetQuickFormat_Click(object sender, RoutedEventArgs e)
+    {
+        QuickFormatSwitch.IsOn = true;
+        UpdatePropertyResetState();
     }
 
     private async void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

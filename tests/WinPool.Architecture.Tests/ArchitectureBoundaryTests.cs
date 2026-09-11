@@ -514,6 +514,8 @@ public sealed class ArchitectureBoundaryTests
         var root = FindRepositoryRoot();
         var structureXaml = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml"));
+        var structurePage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
         var diskPartitionXaml = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml"));
         Assert.Contains("TopologyControl", structureXaml, StringComparison.Ordinal);
@@ -526,6 +528,15 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("DiskLocationValue", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("StartOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("EndOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ResetSizeButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("SizeChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ResetFileSystemButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("FileSystemChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ResetClusterButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ClusterChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ResetQuickFormatButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("QuickFormatChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ChangeIndicator", structurePage, StringComparison.Ordinal);
         Assert.DoesNotContain("UndoButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DiskSectionTitle", diskPartitionXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("磁盘与分区", diskPartitionXaml, StringComparison.Ordinal);

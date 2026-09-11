@@ -65,9 +65,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         IReadOnlyDictionary<string, PoolEditIntent> PoolIntents,
         IReadOnlySet<string> MaximumSizeFields);
 
-    /// <summary>Reset button shown only while its field differs from the
-    /// committed state (it replaces the former dot marker).</summary>
-    private sealed record FieldReset(Button ResetButton, Func<bool> IsChanged);
+    /// <summary>Reset affordances shown only while a field differs from the
+    /// committed state.</summary>
+    private sealed record FieldReset(
+        Button ResetButton,
+        FrameworkElement ChangeIndicator,
+        Func<bool> IsChanged);
 
     private readonly List<FieldReset> _fieldResets = [];
     private readonly TextBox _poolNameBox = new();
@@ -773,19 +776,36 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             Text = ViewModel.Localization[key]
         };
+        var indicator = new Border
+        {
+            Width = 6,
+            Height = 6,
+            CornerRadius = new CornerRadius(3),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
+            Visibility = Visibility.Collapsed
+        };
+        var labelPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        labelPanel.Children.Add(label);
+        labelPanel.Children.Add(indicator);
         value.VerticalAlignment = VerticalAlignment.Center;
         if (value is not ToggleSwitch)
         {
             value.Height = 32;
         }
 
-        Grid.SetRow(label, row);
-        Grid.SetColumn(label, 0);
+        Grid.SetRow(labelPanel, row);
+        Grid.SetColumn(labelPanel, 0);
         Grid.SetRow(value, row);
         Grid.SetColumn(value, 2);
-        PoolFormGrid.Children.Add(label);
+        PoolFormGrid.Children.Add(labelPanel);
         PoolFormGrid.Children.Add(value);
-        visibilityGroup?.Add(label);
+        visibilityGroup?.Add(labelPanel);
         visibilityGroup?.Add(value);
         if (reset is null)
         {
@@ -799,7 +819,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Grid.SetColumn(button, 1);
         PoolFormGrid.Children.Add(button);
         visibilityGroup?.Add(button);
-        _fieldResets.Add(new FieldReset(button, changed ?? (() => false)));
+        _fieldResets.Add(new FieldReset(button, indicator, changed ?? (() => false)));
         return row + 1;
     }
 
@@ -3075,6 +3095,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
 
             field.ResetButton.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+            field.ChangeIndicator.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
