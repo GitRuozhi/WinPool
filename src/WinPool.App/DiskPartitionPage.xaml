@@ -69,18 +69,7 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <Grid ColumnSpacing="6">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+            <controls:FixedWrapPanel ItemWidth="176" ItemHeight="44" Spacing="6">
                 <Button
                     x:Name="OnlineButton"
                     Style="{StaticResource PartitionChromeButtonStyle}"
@@ -242,7 +231,7 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
-            </Grid>
+            </controls:FixedWrapPanel>
         </Border>
         <ScrollViewer
             Grid.Column="1"

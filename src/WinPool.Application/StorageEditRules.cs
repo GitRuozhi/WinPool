@@ -37,6 +37,7 @@ public static class StorageEditRules
             SimulationOperationKind.DeleteVirtualDisk => EvaluateDeleteVirtualDisk(snapshot, request),
             SimulationOperationKind.UpdateStoragePool => EvaluateUpdatePool(snapshot, request),
             SimulationOperationKind.DissolveStoragePool => EvaluateDissolve(snapshot, request),
+            SimulationOperationKind.DeleteEmptyStoragePool => EvaluateDeleteEmptyPool(snapshot, request),
             SimulationOperationKind.MovePhysicalDisk => EvaluateMove(snapshot, request),
             SimulationOperationKind.EvictPhysicalDiskFromTiers => EvaluateEvict(snapshot, request),
             SimulationOperationKind.SetDiskUsage => EvaluateUsage(snapshot, request),
@@ -64,6 +65,7 @@ public static class StorageEditRules
         (SimulationOperationKind.DeleteVirtualDisk, "supported: explicit delete"),
         (SimulationOperationKind.UpdateStoragePool, "supported: name and unused-capacity layout fields"),
         (SimulationOperationKind.DissolveStoragePool, "supported: non-primordial"),
+        (SimulationOperationKind.DeleteEmptyStoragePool, "internal: remove an empty pool after ordered dissolve steps"),
         (SimulationOperationKind.MovePhysicalDisk, "supported: primordial or same-media tier"),
         (SimulationOperationKind.EvictPhysicalDiskFromTiers, "supported: keep in pool, drop tier membership"),
         (SimulationOperationKind.SetDiskUsage, "supported: Retired/Hot Spare when pool has remaining data members"),
@@ -284,21 +286,41 @@ public static class StorageEditRules
         foreach (var group in disks.GroupBy(item => EditWorkspace.NormalizeMedia(item.MediaType)))
         {
             var ids = group.Select(item => item.StableId).ToArray();
-            var setting = group.Key == "HDD"
-                ? request.CapacityResiliency
-                : request.PerformanceResiliency ?? request.Resiliency ?? request.ScmResiliency;
-            var copies = group.Key == "HDD" ? null : request.PerformanceDataCopies ?? request.ScmDataCopies;
+            var setting = group.Key switch
+            {
+                "HDD" => request.CapacityResiliency,
+                "SCM" => request.ScmResiliency,
+                _ => request.PerformanceResiliency ?? request.Resiliency
+            };
+            setting ??= EditWorkspace.RecommendedResiliency(group.Key, ids.Length);
+            var copies = group.Key == "SCM" ? request.ScmDataCopies : request.PerformanceDataCopies;
+            copies ??= EditWorkspace.RecommendedDataCopies(setting, ids.Length);
             var decision = EvaluateLayout(
                 snapshot,
                 ids,
                 setting,
                 copies,
-                request.CapacityResiliency,
-                request.CapacityColumns,
-                request.CapacityToleratedFailures);
+                group.Key == "HDD" ? request.CapacityColumns : null,
+                group.Key == "HDD" ? request.CapacityToleratedFailures : null);
             if (decision.Verdict != StorageRuleVerdict.Allow)
             {
                 return decision;
+            }
+
+            var requestedSize = group.Key switch
+            {
+                "HDD" => request.CapacitySizeBytes,
+                "SCM" => request.ScmSizeBytes,
+                _ => request.PerformanceSizeBytes
+            };
+            var capacity = EvaluateCapacity(
+                snapshot, ids, setting, copies,
+                group.Key == "HDD" ? request.CapacityColumns : null,
+                group.Key == "HDD" ? request.CapacityToleratedFailures : null,
+                requestedSize);
+            if (capacity.Verdict != StorageRuleVerdict.Allow)
+            {
+                return capacity;
             }
         }
 
@@ -329,7 +351,6 @@ public static class StorageEditRules
             pool.MemberPhysicalDiskIds,
             request.Resiliency ?? request.PerformanceResiliency,
             copies,
-            request.CapacityResiliency,
             request.CapacityColumns,
             request.CapacityToleratedFailures);
     }
@@ -361,6 +382,59 @@ public static class StorageEditRules
                 "A pool with more than one virtual disk cannot be modified in this editor.");
         }
 
+        var tiers = snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId).ToArray();
+        var changesLayout = tiers.Any(tier => TierLayoutChanges(tier, request));
+        if (changesLayout && PoolHasData(snapshot, pool.StableId))
+        {
+            return Deny(
+                "storage.rule.update-pool.existing-data",
+                "Tier layout or capacity cannot be changed while the pool's virtual disk contains data.");
+        }
+
+        foreach (var tier in tiers)
+        {
+            if (!TierLayoutChanges(tier, request))
+            {
+                continue;
+            }
+
+            var media = EditWorkspace.NormalizeMedia(tier.MediaType);
+            var setting = media switch
+            {
+                "HDD" => request.CapacityResiliency ?? tier.ResiliencySettingName,
+                "SCM" => request.ScmResiliency ?? tier.ResiliencySettingName,
+                _ => request.PerformanceResiliency ?? tier.ResiliencySettingName
+            };
+            var copies = media switch
+            {
+                "HDD" => tier.NumberOfDataCopies,
+                "SCM" => request.ScmDataCopies ?? tier.NumberOfDataCopies,
+                _ => request.PerformanceDataCopies ?? tier.NumberOfDataCopies
+            };
+            var columns = media == "HDD" ? request.CapacityColumns ?? tier.NumberOfColumns : tier.NumberOfColumns;
+            var tolerated = media == "HDD"
+                ? request.CapacityToleratedFailures ?? tier.PhysicalDiskRedundancy
+                : tier.PhysicalDiskRedundancy;
+            var layout = EvaluateLayout(snapshot, tier.MemberPhysicalDiskIds, setting, copies, columns, tolerated);
+            if (layout.Verdict != StorageRuleVerdict.Allow)
+            {
+                return layout;
+            }
+
+            var size = media switch
+            {
+                "HDD" => request.CapacitySizeBytes ?? tier.Size,
+                "SCM" => request.ScmSizeBytes ?? tier.Size,
+                _ => request.PerformanceSizeBytes ?? tier.Size
+            };
+            var capacity = EvaluateCapacity(
+                snapshot, tier.MemberPhysicalDiskIds, setting, copies, columns, tolerated, size);
+            if (capacity.Verdict != StorageRuleVerdict.Allow)
+            {
+                return capacity;
+            }
+        }
+
         return Allow("storage.rule.update-pool");
     }
 
@@ -375,6 +449,25 @@ public static class StorageEditRules
         }
 
         return Allow("storage.rule.dissolve");
+    }
+
+    private static StorageRuleDecision EvaluateDeleteEmptyPool(
+        StorageSnapshot snapshot,
+        SimulationOperationRequest request)
+    {
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        if (pool is null || pool.IsPrimordial)
+        {
+            return Deny("storage.rule.delete-empty-pool.invalid", "A non-primordial pool is required.");
+        }
+
+        if (snapshot.VirtualDisks.Any(item => item.PoolStableId == pool.StableId)
+            || pool.MemberPhysicalDiskIds.Count > 0)
+        {
+            return Deny("storage.rule.delete-empty-pool.not-empty", "The pool must have no virtual disks or member disks before it is removed.");
+        }
+
+        return Allow("storage.rule.delete-empty-pool");
     }
 
     private static StorageRuleDecision EvaluateMove(
@@ -515,7 +608,6 @@ public static class StorageEditRules
         IReadOnlyList<string> memberIds,
         string? resiliency,
         int? dataCopies,
-        string? capacityResiliency,
         int? columns,
         int? tolerated)
     {
@@ -573,20 +665,95 @@ public static class StorageEditRules
                 Source: WindowsTierSupportedSize);
         }
 
-        if (!string.IsNullOrWhiteSpace(capacityResiliency)
-            && !string.Equals(capacityResiliency, "Parity", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(capacityResiliency, "Simple", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(capacityResiliency, "Mirror", StringComparison.OrdinalIgnoreCase))
+        return Allow("storage.rule.layout", WindowsTierSupportedSize);
+    }
+
+    private static StorageRuleDecision EvaluateCapacity(
+        StorageSnapshot snapshot,
+        IReadOnlyList<string> memberIds,
+        string? resiliency,
+        int? dataCopies,
+        int? columns,
+        int? tolerated,
+        long? requestedBytes)
+    {
+        if (requestedBytes is <= 0)
+        {
+            return Deny("storage.rule.capacity.zero", "A positive logical capacity is required.");
+        }
+
+        var dataMembers = snapshot.PhysicalDisks
+            .Where(item => memberIds.Contains(item.StableId, StringComparer.OrdinalIgnoreCase)
+                && PhysicalDiskUsage.ContributesDataCapacity(item.Usage))
+            .ToArray();
+        var setting = string.IsNullOrWhiteSpace(resiliency)
+            ? (dataMembers.Length < 2 ? "Simple" : "Mirror")
+            : resiliency.Trim();
+        try
+        {
+            var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+                dataMembers.Select(item => item.Size).ToArray(),
+                setting,
+                dataCopies ?? CopiesFor(setting),
+                columns,
+                setting.Equals("Parity", StringComparison.OrdinalIgnoreCase) ? tolerated ?? 1 : 0);
+            if (estimate.AlignedLogicalBytes <= 0)
+            {
+                return Deny("storage.rule.capacity.none", "The selected layout has less than 4 GiB of createable logical capacity.");
+            }
+
+            return requestedBytes > estimate.AlignedLogicalBytes
+                ? Deny(
+                    "storage.rule.capacity.exceeds-maximum",
+                    $"Requested capacity {requestedBytes} bytes exceeds the simulated maximum {estimate.AlignedLogicalBytes} bytes.")
+                : Allow("storage.rule.capacity");
+        }
+        catch (ArgumentException)
         {
             return new(
                 StorageRuleVerdict.InsufficientInfo,
-                "storage.rule.layout.capacity-unknown",
-                $"Capacity resiliency '{capacityResiliency}' is not covered.",
+                "storage.rule.capacity.layout-insufficient",
+                "The selected layout does not provide enough information to calculate a safe simulated maximum.",
                 Source: WindowsTierSupportedSize);
         }
-
-        return Allow("storage.rule.layout", WindowsTierSupportedSize);
     }
+
+    private static bool TierLayoutChanges(StorageTierInfo tier, SimulationOperationRequest request)
+    {
+        var media = EditWorkspace.NormalizeMedia(tier.MediaType);
+        return media switch
+        {
+            "HDD" => Different(request.CapacityResiliency, tier.ResiliencySettingName)
+                || Different(request.CapacityInterleaveBytes, tier.Interleave)
+                || Different(request.CapacitySizeBytes, tier.Size)
+                || Different(request.CapacityColumns, tier.NumberOfColumns)
+                || Different(request.CapacityToleratedFailures, tier.PhysicalDiskRedundancy),
+            "SCM" => Different(request.ScmResiliency, tier.ResiliencySettingName)
+                || Different(request.ScmInterleaveBytes, tier.Interleave)
+                || Different(request.ScmSizeBytes, tier.Size)
+                || Different(request.ScmDataCopies, tier.NumberOfDataCopies),
+            _ => Different(request.PerformanceResiliency, tier.ResiliencySettingName)
+                || Different(request.PerformanceInterleaveBytes, tier.Interleave)
+                || Different(request.PerformanceSizeBytes, tier.Size)
+                || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
+        };
+    }
+
+    private static bool PoolHasData(StorageSnapshot snapshot, string poolId)
+    {
+        var vdiskIds = snapshot.VirtualDisks.Where(item => item.PoolStableId == poolId)
+            .Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var osIds = snapshot.OsDisks.Where(item => item.VirtualDiskStableId is not null && vdiskIds.Contains(item.VirtualDiskStableId))
+            .Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return snapshot.Partitions.Any(item => item.OsDiskStableId is not null && osIds.Contains(item.OsDiskStableId)
+            && item.Size > item.SizeRemaining);
+    }
+
+    private static bool Different<T>(T? requested, T? current) where T : struct =>
+        requested.HasValue && !EqualityComparer<T>.Default.Equals(requested.Value, current.GetValueOrDefault());
+
+    private static bool Different(string? requested, string current) =>
+        requested is not null && !requested.Equals(current, StringComparison.OrdinalIgnoreCase);
 
     private static int CopiesFor(string resiliency) =>
         string.Equals(resiliency, "Simple", StringComparison.OrdinalIgnoreCase) ? 1

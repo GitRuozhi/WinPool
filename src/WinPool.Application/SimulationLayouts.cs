@@ -365,11 +365,16 @@ public static class SimulationLayouts
                     ? "Mirror"
                     : "Simple";
             var copies = resiliency == "Mirror" ? 2 : 1;
-            var columns = resiliency == "Parity" ? Math.Max(1, diskNumbers.Length - 1) : 1;
+            var columns = resiliency == "Parity" ? diskNumbers.Length : 1;
             var redundancy = resiliency == "Parity" || resiliency == "Mirror" ? 1 : 0;
-            var logical = resiliency == "Parity"
-                ? sizes.Sum() * Math.Max(1, diskNumbers.Length - 1) / diskNumbers.Length
-                : ConservativeCapacity.PlanLogicalUpperBound(sizes, copies, 65536).AlignedLogicalBytes;
+            var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+                sizes,
+                resiliency,
+                copies,
+                columns,
+                redundancy,
+                65536);
+            var logical = estimate.AlignedLogicalBytes;
             _tiers.Add(new StorageTierInfo(
                 Id($"tier:{key}"),
                 true,
@@ -377,7 +382,7 @@ public static class SimulationLayouts
                 media,
                 resiliency,
                 logical,
-                sizes.Sum(),
+                estimate.PhysicalFootprintBytes,
                 Id($"pool:{poolKey}"),
                 Id($"vdisk:{virtualDiskKey}"),
                 members,
@@ -465,12 +470,12 @@ public static class SimulationLayouts
 
         public StorageSnapshot Build(string computerName, string version)
         {
-            var allocated = _virtualDisks.Sum(item => item.Size);
+            var allocated = _virtualDisks.Sum(item => item.FootprintOnPool);
             var pools = _pools
                 .Select(pool => pool.IsPrimordial
                     ? pool
                     : pool with { AllocatedSize = allocated > 0 && _virtualDisks.Any(item => item.PoolStableId == pool.StableId)
-                        ? _virtualDisks.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.Size)
+                        ? _virtualDisks.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.FootprintOnPool)
                         : 0 })
                 .ToArray();
             var snapshot = new StorageSnapshot(

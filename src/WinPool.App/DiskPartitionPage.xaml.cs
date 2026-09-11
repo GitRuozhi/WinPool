@@ -69,7 +69,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         EndOffsetLabel.Text = Text("结束位置", "End");
         DriveLetterLabel.Text = Text("盘符", "Drive letter");
         VolumeLabelCaption.Text = Text("卷标", "Volume label");
-        SizeLabel.Text = Text("容量（GB）", "Size (GB)");
+        SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
         FileSystemLabel.Text = Text("文件系统", "File system");
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
@@ -90,7 +90,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private void FillClusterBox()
     {
         ClusterBox.Items.Clear();
-        foreach (var size in new[] { "4K", "8K", "16K", "32K", "64K" })
+        foreach (var size in new[] { "4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB" })
         {
             ClusterBox.Items.Add(size);
         }
@@ -402,7 +402,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         disk is not null && EditWorkspace.IsPartitionTableInitialized(disk);
 
     private long SelectedClusterBytes() =>
-        ParseSize(ClusterBox.SelectedItem as string ?? "64K");
+        ParseSize(ClusterBox.SelectedItem as string ?? "64 KiB");
 
     private void UpdateButtonState()
     {
@@ -825,8 +825,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         await ConfirmAsync(
             Text("ReFS 提示", "ReFS notice"),
             Text(
-                "ReFS 没有与 NTFS 64K 同等的长期测试证据。确定继续？",
-                "ReFS has no long-run evidence equivalent to NTFS 64K. Continue anyway?"));
+                "ReFS 没有与 NTFS 64 KiB 同等的长期测试证据。确定继续？",
+                "ReFS has no long-run evidence equivalent to NTFS 64 KiB. Continue anyway?"));
 
     private async Task<bool> SubmitAsync(
         SimulationOperationRequest request,

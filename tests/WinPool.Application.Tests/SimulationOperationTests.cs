@@ -1,4 +1,5 @@
 using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.Application.Tests;
 
@@ -10,18 +11,18 @@ public sealed class SimulationOperationTests
         {
             new PhysicalDiskInfo(
                 "physical:p1", true, "Free Disk One", "Model", "AA0001", "SATA", "SSD",
-                1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
+                100L * 1024 * 1024 * 1024, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
                 false, false, false, false, "pool:primordial"),
             new PhysicalDiskInfo(
                 "physical:p2", true, "Free Disk Two", "Model", "AA0002", "SATA", "HDD",
-                2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
+                200L * 1024 * 1024 * 1024, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
                 false, false, false, false, "pool:primordial")
         };
         var primordial = new StoragePoolInfo(
             "pool:primordial", true, "Primordial", true, "Healthy", "OK",
-            3_000_000_000L, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
+            300L * 1024 * 1024 * 1024, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
         var osDisk = new OsDiskInfo(
-            "osdisk:5", "Free Disk One", 5, "RAW", 1_000_000_000, false, false, false, "physical:p1", null);
+            "osdisk:5", "Free Disk One", 5, "RAW", 100L * 1024 * 1024 * 1024, false, false, false, "physical:p1", null);
         var snapshot = new StorageSnapshot(
             StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
@@ -432,18 +433,18 @@ public sealed class SetDiskUsageTests
         {
             new PhysicalDiskInfo(
                 "physical:p1", true, "Free Disk One", "Model", "AA0001", "SATA", "SSD",
-                1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
+                100L * 1024 * 1024 * 1024, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
                 false, false, false, false, "pool:primordial"),
             new PhysicalDiskInfo(
                 "physical:p2", true, "Free Disk Two", "Model", "AA0002", "SATA", "HDD",
-                2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
+                200L * 1024 * 1024 * 1024, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
                 false, false, false, false, "pool:primordial")
         };
         var primordial = new StoragePoolInfo(
             "pool:primordial", true, "Primordial", true, "Healthy", "OK",
-            3_000_000_000L, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
+            300L * 1024 * 1024 * 1024, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
         var osDisk = new OsDiskInfo(
-            "osdisk:5", "Free Disk One", 5, "RAW", 1_000_000_000, false, false, false, "physical:p1", null);
+            "osdisk:5", "Free Disk One", 5, "RAW", 100L * 1024 * 1024 * 1024, false, false, false, "physical:p1", null);
         var snapshot = new StorageSnapshot(
             StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
@@ -587,16 +588,16 @@ public sealed class CreateTieredPoolSkipVdiskTests
         {
             new PhysicalDiskInfo(
                 "physical:p1", true, "Free Disk One", "Model", "AA0001", "SATA", "SSD",
-                1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
+                100L * 1024 * 1024 * 1024, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
                 false, false, false, false, "pool:primordial"),
             new PhysicalDiskInfo(
                 "physical:p2", true, "Free Disk Two", "Model", "AA0002", "SATA", "HDD",
-                2_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
+                200L * 1024 * 1024 * 1024, 512, 4096, "Healthy", "OK", true, string.Empty, 6,
                 false, false, false, false, "pool:primordial")
         };
         var primordial = new StoragePoolInfo(
             "pool:primordial", true, "Primordial", true, "Healthy", "OK",
-            3_000_000_000L, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
+            300L * 1024 * 1024 * 1024, 0, "subsystem:1", ["physical:p1", "physical:p2"]);
         var snapshot = new StorageSnapshot(
             StorageSnapshot.CurrentSchemaVersion, "test", DateTimeOffset.UtcNow,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", DateTimeOffset.UtcNow),
@@ -636,8 +637,8 @@ public sealed class CreateTieredPoolSkipVdiskTests
                 CreateVirtualDisk: false));
         Assert.True(result.Succeeded, result.Error);
         var pool = result.Document.Snapshot.StoragePools.First(item => item.FriendlyName == "Pool01");
-        Assert.Empty(result.Document.Snapshot.VirtualDisks.Where(item => item.PoolStableId == pool.StableId));
-        Assert.NotEmpty(result.Document.Snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId));
+        Assert.DoesNotContain(result.Document.Snapshot.VirtualDisks, item => item.PoolStableId == pool.StableId);
+        Assert.Contains(result.Document.Snapshot.StorageTiers, item => item.PoolStableId == pool.StableId);
         Assert.Empty(result.Document.Snapshot.Partitions);
     }
 }
@@ -662,9 +663,9 @@ public sealed class UpdateStoragePoolSizeTests
             6_000_000_000_000, 5_000_000_000_000, "subsystem:1",
             ["physical:p1", "physical:p2"]);
         var ssdTier = new StorageTierInfo(
-            "pool:1:tier:ssd", true, "Performance", "SSD", "Mirror",
+            "pool:1:tier:ssd", true, "Performance", "SSD", "Simple",
             2_000_000_000_000, 2_000_000_000_000, "pool:1", null,
-            ["physical:p1"], null, 65536, 2, 1);
+            ["physical:p1"], null, 65536, 1, 0);
         var hddTier = new StorageTierInfo(
             "pool:1:tier:hdd", true, "Capacity", "HDD", "Parity",
             4_000_000_000_000, 4_000_000_000_000, "pool:1", null,
@@ -710,5 +711,26 @@ public sealed class UpdateStoragePoolSizeTests
         Assert.Equal(1_500_000_000_000, tier.Size);
         var hdd = result.Document.Snapshot.StorageTiers.Single(item => item.StableId == "pool:1:tier:hdd");
         Assert.Equal(4_000_000_000_000, hdd.Size);
+    }
+
+    [Fact]
+    public void UpdateStoragePoolMaximumModeUsesTheSharedCapacityEstimate()
+    {
+        var document = CreateDocument();
+        var result = new SimulationOperationService().Apply(
+            document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.UpdateStoragePool,
+                "pool:1",
+                Name: "Pool01",
+                PerformanceSizeBytes: 1,
+                PerformanceUseMaximum: true));
+
+        Assert.True(result.Succeeded, result.Error);
+        var tier = result.Document.Snapshot.StorageTiers.Single(item => item.StableId == "pool:1:tier:ssd");
+        var expected = ConservativeCapacity.PlanLogicalUpperBound(
+            [2_000_000_000_000], "Simple").AlignedLogicalBytes;
+        Assert.Equal(expected, tier.Size);
+        Assert.Equal(expected, tier.FootprintOnPool);
     }
 }

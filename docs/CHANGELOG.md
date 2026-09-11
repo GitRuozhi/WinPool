@@ -1,6 +1,14 @@
 # WinPool 变更记录
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存。活动阶段见 [Plan](Plan.md)（V0.50，待用户批准，尚未实施）；当前代码仍为 V0.49。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。当前实现为 V0.50，阶段状态见 [Plan](Plan.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+
+## V0.50：结构动作、容量与开发链路收口
+
+- 结构页增加只读待应用动作面板，以基线和草稿生成净差异；解散按分区、虚拟磁盘、成员盘、空池顺序预检查和执行，预览与提交复用同一计划。
+- Simple、Mirror、Parity 使用统一逻辑容量和物理占用算法；MAX 向下取 4 GiB 整数倍。层容量显示/输入使用二进制单位，预配类型为仅含 Fixed 的下拉框。
+- 修复空池建虚拟磁盘容量不一致、Parity 漏算校验、改池绕过规则、建池意图丢失、解散重复删除和目录挂载路径误判盘符。
+- App 负责模拟业务规则与候选文档；Agent 的模拟系统检查标记为跳过，同时保留哈希、修订、事务、CommitId 对账和单写入方保护。真实存储写入仍拒绝。
+- 两个编辑页的左下操作控件使用固定 DIP 尺寸并按可用宽度换行。自动回归、Release 构建和原生窄窗口检查结果见 Plan；真实设备写入、DPI/高对比度和长期运行仍未验证。
 
 ## 2026-09-10：内置模拟系统校正
 

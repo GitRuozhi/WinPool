@@ -289,7 +289,8 @@ public sealed class SimulationEditCoordinator(
         {
             ["EditKind"] = "DraftPlan",
             ["PlanId"] = plan.PlanId,
-            ["StepCount"] = plan.Steps.Count.ToString(CultureInfo.InvariantCulture)
+            ["StepCount"] = plan.Steps.Count.ToString(CultureInfo.InvariantCulture),
+            ["SystemValidation"] = "SkippedForSimulation"
         };
         var operationRequest = new OperationRequest(
             OperationId.New(),
@@ -652,7 +653,12 @@ public sealed class SimulationEditCoordinator(
                 request.CapacityToleratedFailures,
                 request.ScmResiliency,
                 request.ScmInterleaveBytes,
+                request.ScmSizeBytes,
                 request.ScmDataCopies,
+                request.PerformanceUseMaximum,
+                request.CapacityUseMaximum,
+                request.ScmUseMaximum,
+                request.ProvisioningType,
                 request.OffsetBytes,
                 request.CreatePartition,
                 request.CreateVirtualDisk,

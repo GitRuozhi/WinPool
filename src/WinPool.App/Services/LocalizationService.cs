@@ -312,8 +312,8 @@ public sealed class LocalizationService : ObservableObject
             ["PartitionFileSystem"] = ("分区系统格式", "Partition file system"),
             ["PartitionClusterSize"] = ("分区簇大小", "Partition cluster size"),
             ["ResearchNote64k"] = (
-                "本项目测试结论：64K 交织 + 64K NTFS 簇为当前安全推荐配置。",
-                "Tested recommendation: 64K interleave + 64K NTFS cluster."),
+                "本项目测试结论：64 KiB 交织 + 64 KiB NTFS 簇为当前安全推荐配置。",
+                "Tested recommendation: 64 KiB interleave + 64 KiB NTFS cluster."),
             ["MultipleVirtualDiskWarning"] = (
                 "不推荐在一个 Windows 存储空间内创建多个虚拟磁盘。如确有需要，推荐创建一个虚拟磁盘并创建多个分区。",
                 "Creating more than one virtual disk in a Windows storage space is not recommended. If you need more volumes, create one virtual disk and multiple partitions."),
@@ -321,7 +321,7 @@ public sealed class LocalizationService : ObservableObject
             ["DissolvePoolMessage"] = (
                 "将删除该池、存储层、虚拟磁盘和分区，物理磁盘回到原始池。确定继续？",
                 "This removes the pool, tiers, virtual disks, and partitions, and returns physical disks to the primordial pool. Continue?"),
-            ["SizeGbPlaceholder"] = ("GB，留空为成员容量", "GB, blank = member capacity"),
+            ["SizeGbPlaceholder"] = ("GiB，留空为成员容量", "GiB, blank = member capacity"),
             ["ApplyPreviewTitle"] = ("应用预览", "Apply preview"),
             ["AutoCreatePartition"] = ("自动创建分区", "Auto-create partition"),
             ["Undo"] = ("撤销", "Undo"),
@@ -341,7 +341,10 @@ public sealed class LocalizationService : ObservableObject
             ["NotCreatedVirtualDisk"] = ("暂未创建", "Not created"),
             ["ShowHotSpareLayer"] = ("显示热备层", "Show hot-spare layer"),
             ["ShowRetiredLayer"] = ("显示退役层", "Show retired layer"),
-            ["TierSize"] = ("容量（GB）", "Size (GB)"),
+            ["TierSize"] = ("容量（GiB）", "Size (GiB)"),
+            ["UseMaximumSize"] = ("使用最大容量", "Use maximum size"),
+            ["PendingActions"] = ("待应用动作", "Pending actions"),
+            ["NoPendingActions"] = ("暂无待应用动作", "No pending actions"),
             ["TierProvisioning"] = ("预配类型", "Provisioning"),
             ["TierResiliency"] = ("弹性", "Resiliency"),
             ["TierDataCopies"] = ("冗余副本数", "Data copies"),

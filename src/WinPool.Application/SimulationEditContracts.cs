@@ -24,6 +24,7 @@ public enum SimulationEditKind
     CreateTieredPool,
     UpdateStoragePool,
     DissolveStoragePool,
+    DeleteEmptyStoragePool,
     DeleteVirtualDisk,
     SetDiskUsage
 }
@@ -58,7 +59,12 @@ public sealed record SimulationEditRequest(
     int? CapacityToleratedFailures = null,
     string? ScmResiliency = null,
     long? ScmInterleaveBytes = null,
+    long? ScmSizeBytes = null,
     int? ScmDataCopies = null,
+    bool PerformanceUseMaximum = false,
+    bool CapacityUseMaximum = false,
+    bool ScmUseMaximum = false,
+    string? ProvisioningType = null,
     long? OffsetBytes = null,
     bool? CreatePartition = null,
     bool? CreateVirtualDisk = null,
@@ -69,11 +75,22 @@ public sealed record SimulationEditRequest(
     string? AllocatedVolumeId = null,
     IReadOnlyList<string>? AccessPaths = null);
 
+public sealed record SimulationPlanItem(
+    string Id,
+    string Title,
+    SimulationEditRequest Request,
+    string? ParentId = null,
+    StorageRuleDecision? Decision = null,
+    bool CausesDataLoss = false);
+
 public sealed record SimulationDraftPlan(
     string PlanId,
-    IReadOnlyList<SimulationEditRequest> Steps)
+    IReadOnlyList<SimulationEditRequest> Steps,
+    IReadOnlyList<SimulationPlanItem>? Items = null)
 {
     public bool IsEmpty => Steps.Count == 0;
+
+    public IReadOnlyList<SimulationPlanItem> DisplayItems => Items ?? [];
 }
 
 public sealed record SimulationEditReceipt(

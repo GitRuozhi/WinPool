@@ -28,7 +28,8 @@ public class EditorPageBase : Page
         ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;
 
     protected static long ParseSize(string token) =>
-        token.TrimEnd('K', 'k') is var digits && long.TryParse(digits, out var value)
+        token.Replace("KiB", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .TrimEnd('K', 'k') is var digits && long.TryParse(digits, out var value)
             ? value * 1024
             : 65536;
 

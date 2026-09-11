@@ -24,6 +24,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Border
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -61,7 +62,6 @@
             </ScrollViewer>
         </Border>
         <Border
-            x:Name="StructureChromeBorder"
             Grid.Row="1"
             Margin="0,8,0,0"
             Padding="8"
@@ -69,19 +69,25 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <Grid ColumnSpacing="6" RowSpacing="6">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <StackPanel Spacing="6">
+                <TextBlock x:Name="PendingActionsTitle" FontWeight="SemiBold" />
+                <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="PendingActionsPanel" Spacing="4">
+                        <TextBlock x:Name="PendingActionsEmptyText" />
+                    </StackPanel>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
+        <Border
+            x:Name="StructureChromeBorder"
+            Grid.Row="2"
+            Margin="0,8,0,0"
+            Padding="8"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <controls:FixedWrapPanel ItemWidth="176" ItemHeight="44" Spacing="6">
                 <Button
                     x:Name="UndoButton"
                     Style="{StaticResource StructureChromeButtonStyle}"
@@ -312,11 +318,11 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
-            </Grid>
+            </controls:FixedWrapPanel>
         </Border>
         <Grid
             Grid.Column="1"
-            Grid.RowSpan="2"
+            Grid.RowSpan="3"
             Margin="8,0,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />

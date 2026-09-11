@@ -10,14 +10,48 @@ public static class SimulationDraftPlanner
         ArgumentNullException.ThrowIfNull(working);
         var steps = new List<SimulationEditRequest>();
         var allocated = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var dissolvedPoolIds = committed.StoragePools
+            .Where(item => !item.IsPrimordial
+                && !working.StoragePools.Any(candidate => candidate.StableId.Equals(item.StableId, StringComparison.OrdinalIgnoreCase)))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dissolvedVdiskIds = committed.VirtualDisks
+            .Where(item => item.PoolStableId is not null && dissolvedPoolIds.Contains(item.PoolStableId))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dissolvedOsDiskIds = committed.OsDisks
+            .Where(item => item.VirtualDiskStableId is not null && dissolvedVdiskIds.Contains(item.VirtualDiskStableId))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dissolvedPartitionIds = committed.Partitions
+            .Where(item => item.OsDiskStableId is not null && dissolvedOsDiskIds.Contains(item.OsDiskStableId))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var primordialId = committed.StoragePools.FirstOrDefault(item => item.IsPrimordial)?.StableId ?? string.Empty;
 
-        foreach (var pool in committed.StoragePools.Where(item => !item.IsPrimordial))
+        foreach (var pool in committed.StoragePools.Where(item => dissolvedPoolIds.Contains(item.StableId)))
         {
-            if (!working.StoragePools.Any(item =>
-                    item.StableId.Equals(pool.StableId, StringComparison.OrdinalIgnoreCase)))
+            foreach (var partition in committed.Partitions.Where(item => dissolvedPartitionIds.Contains(item.StableId)))
             {
-                steps.Add(new SimulationEditRequest(SimulationEditKind.DissolveStoragePool, pool.StableId));
+                var osDisk = committed.OsDisks.FirstOrDefault(item => item.StableId == partition.OsDiskStableId);
+                if (osDisk?.VirtualDiskStableId is not null && dissolvedVdiskIds.Contains(osDisk.VirtualDiskStableId)
+                    && committed.VirtualDisks.Any(item => item.StableId == osDisk.VirtualDiskStableId && item.PoolStableId == pool.StableId))
+                {
+                    steps.Add(new SimulationEditRequest(SimulationEditKind.DeletePartition, partition.StableId));
+                }
             }
+
+            foreach (var vdisk in committed.VirtualDisks.Where(item => item.PoolStableId == pool.StableId))
+            {
+                steps.Add(new SimulationEditRequest(SimulationEditKind.DeleteVirtualDisk, vdisk.StableId));
+            }
+
+            foreach (var diskId in pool.MemberPhysicalDiskIds)
+            {
+                steps.Add(new SimulationEditRequest(SimulationEditKind.MovePhysicalDisk, diskId, Name: primordialId));
+            }
+
+            steps.Add(new SimulationEditRequest(SimulationEditKind.DeleteEmptyStoragePool, pool.StableId));
         }
 
         foreach (var draft in working.StoragePools.Where(item => EditWorkspace.IsDraftPool(item.StableId)))
@@ -76,6 +110,7 @@ public static class SimulationDraftPlanner
                 AllocationUnitSize: volume?.AllocationUnitSize ?? partition?.AllocationUnitSize,
                 PerformanceResiliency: ssd?.ResiliencySettingName,
                 PerformanceInterleaveBytes: ssd?.Interleave,
+                PerformanceSizeBytes: ssd?.Size,
                 PerformanceDataCopies: ssd?.NumberOfDataCopies,
                 CapacityResiliency: hdd?.ResiliencySettingName,
                 CapacityInterleaveBytes: hdd?.Interleave,
@@ -83,7 +118,9 @@ public static class SimulationDraftPlanner
                 CapacityToleratedFailures: hdd?.PhysicalDiskRedundancy,
                 ScmResiliency: scm?.ResiliencySettingName,
                 ScmInterleaveBytes: scm?.Interleave,
+                ScmSizeBytes: scm?.Size,
                 ScmDataCopies: scm?.NumberOfDataCopies,
+                SizeBytes: vdisk?.Size,
                 CreateVirtualDisk: createVirtual,
                 CreatePartition: partition is not null,
                 AllocatedPoolId: poolId,
@@ -95,6 +132,11 @@ public static class SimulationDraftPlanner
 
         foreach (var vdisk in committed.VirtualDisks)
         {
+            if (dissolvedVdiskIds.Contains(vdisk.StableId))
+            {
+                continue;
+            }
+
             if (working.VirtualDisks.Any(item =>
                     item.StableId.Equals(vdisk.StableId, StringComparison.OrdinalIgnoreCase)))
             {
@@ -128,6 +170,7 @@ public static class SimulationDraftPlanner
 
             var original = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.StableId);
             if (original is null
+                || original.PoolStableId is not null && dissolvedPoolIds.Contains(original.PoolStableId)
                 || string.Equals(original.PoolStableId, disk.PoolStableId, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -141,7 +184,9 @@ public static class SimulationDraftPlanner
 
         foreach (var disk in working.PhysicalDisks)
         {
+            var originalPool = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.StableId)?.PoolStableId;
             if (EditWorkspace.IsDraftPool(disk.PoolStableId ?? string.Empty)
+                || originalPool is not null && dissolvedPoolIds.Contains(originalPool)
                 || disk.IsRetired
                 || disk.IsHotSpare
                 || EditWorkspace.DiskIsAssignedToTier(working, disk.StableId)
@@ -157,7 +202,9 @@ public static class SimulationDraftPlanner
 
         foreach (var disk in working.PhysicalDisks)
         {
+            var originalPool = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.StableId)?.PoolStableId;
             if (EditWorkspace.IsDraftPool(disk.PoolStableId ?? string.Empty)
+                || originalPool is not null && dissolvedPoolIds.Contains(originalPool)
                 || disk.IsRetired
                 || disk.IsHotSpare
                 || string.IsNullOrEmpty(disk.PoolStableId)
@@ -181,6 +228,7 @@ public static class SimulationDraftPlanner
 
             var original = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.StableId);
             if (original is null
+                || original.PoolStableId is not null && dissolvedPoolIds.Contains(original.PoolStableId)
                 || !string.Equals(original.PoolStableId, disk.PoolStableId, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -229,21 +277,155 @@ public static class SimulationDraftPlanner
                     CapacityToleratedFailures: hdd?.PhysicalDiskRedundancy,
                     ScmResiliency: scm?.ResiliencySettingName,
                     ScmInterleaveBytes: scm?.Interleave,
+                    ScmSizeBytes: scm?.Size,
                     ScmDataCopies: scm?.NumberOfDataCopies));
             }
         }
 
-        AppendPartitionAndVolumeSteps(committed, working, steps);
-        return new SimulationDraftPlan(Guid.NewGuid().ToString("N"), steps);
+        AppendPartitionAndVolumeSteps(committed, working, steps, dissolvedPartitionIds);
+        return BuildPlanWithItems(committed, steps, dissolvedPoolIds);
     }
+
+    public static SimulationDraftPlan Precheck(
+        StorageSnapshot committed,
+        IReadOnlyList<SimulationEditRequest> steps)
+    {
+        var dissolvedPoolIds = steps
+            .Where(item => item.Kind == SimulationEditKind.DeleteEmptyStoragePool)
+            .Select(item => item.TargetProviderKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return BuildPlanWithItems(committed, steps, dissolvedPoolIds);
+    }
+
+    private static SimulationDraftPlan BuildPlanWithItems(
+        StorageSnapshot committed,
+        IReadOnlyList<SimulationEditRequest> steps,
+        IReadOnlySet<string> dissolvedPoolIds)
+    {
+        var document = new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:plan-preview",
+            StorageSystemKind.Simulation,
+            committed.Computer.Name,
+            committed,
+            HardwareInventoryReport.Empty(DateTimeOffset.UtcNow),
+            [],
+            DateTimeOffset.UtcNow);
+        var service = new SimulationOperationService();
+        var childItems = new List<SimulationPlanItem>();
+        var index = 0;
+        foreach (var step in steps)
+        {
+            var operation = ToOperation(step);
+            var decision = StorageEditRules.Evaluate(document.Snapshot, operation);
+            if (decision.Verdict == StorageRuleVerdict.Allow)
+            {
+                var applied = service.Apply(document, operation);
+                if (applied.Succeeded)
+                {
+                    document = applied.Document;
+                }
+                else
+                {
+                    decision = new StorageRuleDecision(
+                        StorageRuleVerdict.Deny,
+                        "storage.rule.plan-apply",
+                        applied.Error,
+                        step.TargetProviderKey);
+                }
+            }
+
+            var parentPool = ParentDissolvedPool(committed, step, dissolvedPoolIds);
+            childItems.Add(new SimulationPlanItem(
+                $"step:{index++}",
+                ActionTitle(step),
+                step,
+                parentPool is null ? null : $"dissolve:{parentPool}",
+                decision,
+                step.Kind is SimulationEditKind.DeletePartition or SimulationEditKind.DeleteVirtualDisk));
+        }
+
+        var items = new List<SimulationPlanItem>();
+        foreach (var item in childItems)
+        {
+            if (item.ParentId is not null && items.All(existing => existing.Id != item.ParentId))
+            {
+                var poolId = item.ParentId["dissolve:".Length..];
+                var children = childItems.Where(candidate => candidate.ParentId == item.ParentId).ToArray();
+                var blocked = children.FirstOrDefault(candidate => candidate.Decision?.Verdict != StorageRuleVerdict.Allow);
+                var parentDecision = blocked?.Decision
+                    ?? new StorageRuleDecision(StorageRuleVerdict.Allow, "storage.rule.dissolve-plan", string.Empty, poolId);
+                items.Add(new SimulationPlanItem(
+                    item.ParentId,
+                    $"Dissolve pool {committed.StoragePools.First(pool => pool.StableId == poolId).FriendlyName}",
+                    new SimulationEditRequest(SimulationEditKind.DissolveStoragePool, poolId),
+                    Decision: parentDecision,
+                    CausesDataLoss: children.Any(candidate => candidate.CausesDataLoss)));
+            }
+
+            items.Add(item);
+        }
+
+        return new SimulationDraftPlan(Guid.NewGuid().ToString("N"), steps, items);
+    }
+
+    private static string? ParentDissolvedPool(
+        StorageSnapshot snapshot,
+        SimulationEditRequest step,
+        IReadOnlySet<string> dissolvedPoolIds)
+    {
+        if (step.Kind == SimulationEditKind.DeleteEmptyStoragePool
+            && dissolvedPoolIds.Contains(step.TargetProviderKey))
+        {
+            return step.TargetProviderKey;
+        }
+
+        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == step.TargetProviderKey);
+        if (vdisk?.PoolStableId is not null && dissolvedPoolIds.Contains(vdisk.PoolStableId))
+        {
+            return vdisk.PoolStableId;
+        }
+
+        var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == step.TargetProviderKey);
+        var osDisk = partition is null ? null : snapshot.OsDisks.FirstOrDefault(item => item.StableId == partition.OsDiskStableId);
+        var parentVdisk = osDisk?.VirtualDiskStableId is null
+            ? null
+            : snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == osDisk.VirtualDiskStableId);
+        if (parentVdisk?.PoolStableId is not null && dissolvedPoolIds.Contains(parentVdisk.PoolStableId))
+        {
+            return parentVdisk.PoolStableId;
+        }
+
+        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == step.TargetProviderKey);
+        return disk?.PoolStableId is not null && dissolvedPoolIds.Contains(disk.PoolStableId)
+            ? disk.PoolStableId
+            : null;
+    }
+
+    private static string ActionTitle(SimulationEditRequest request) => request.Kind switch
+    {
+        SimulationEditKind.DeletePartition => $"Delete partition {request.TargetProviderKey}",
+        SimulationEditKind.DeleteVirtualDisk => $"Delete virtual disk {request.TargetProviderKey}",
+        SimulationEditKind.MovePhysicalDisk => $"Move physical disk {request.TargetProviderKey}",
+        SimulationEditKind.DeleteEmptyStoragePool => $"Remove empty pool {request.TargetProviderKey}",
+        SimulationEditKind.CreateTieredPool => $"Create storage pool {request.Name}",
+        SimulationEditKind.CreateVirtualDisk => $"Create virtual disk {request.Name}",
+        SimulationEditKind.UpdateStoragePool => $"Update storage pool {request.Name}",
+        _ => $"{request.Kind}: {request.TargetProviderKey}"
+    };
 
     private static void AppendPartitionAndVolumeSteps(
         StorageSnapshot committed,
         StorageSnapshot working,
-        List<SimulationEditRequest> steps)
+        List<SimulationEditRequest> steps,
+        IReadOnlySet<string> dissolvedPartitionIds)
     {
         foreach (var partition in committed.Partitions)
         {
+            if (dissolvedPartitionIds.Contains(partition.StableId))
+            {
+                continue;
+            }
             if (working.Partitions.Any(item => item.StableId == partition.StableId))
             {
                 continue;
@@ -372,7 +554,12 @@ public static class SimulationDraftPlanner
             request.CapacityToleratedFailures,
             request.ScmResiliency,
             request.ScmInterleaveBytes,
+            request.ScmSizeBytes,
             request.ScmDataCopies,
+            request.PerformanceUseMaximum,
+            request.CapacityUseMaximum,
+            request.ScmUseMaximum,
+            request.ProvisioningType,
             request.OffsetBytes,
             request.CreatePartition,
             request.CreateVirtualDisk,

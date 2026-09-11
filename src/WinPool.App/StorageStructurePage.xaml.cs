@@ -31,18 +31,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
     // change commits one step; Save checkpoints the history away.
     private readonly Stack<StorageSnapshot> _undoStack = [];
     private readonly Stack<StorageSnapshot> _redoStack = [];
+    private readonly HashSet<string> _maximumSizeFields = new(StringComparer.OrdinalIgnoreCase);
+    private SimulationDraftPlan? _currentPlan;
+    private string _planBuildError = string.Empty;
+    private bool _outcomeUnknown;
 
     private sealed record TierFields(
         string Media,
         string TitleKey,
         ComboBox ResiliencyBox,
         ComboBox InterleaveBox,
-        NumberBox SizeBox,
+        TextBox SizeBox,
+        Button MaximumButton,
         NumberBox CopiesBox,
         NumberBox FailuresBox,
         NumberBox ColumnsBox,
         TextBox DiskCountBox,
-        TextBlock ProvisioningText,
+        ComboBox ProvisioningBox,
         List<FrameworkElement> Rows,
         List<int> RowIndices);
 
@@ -101,17 +106,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
             titleKey,
             new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch },
             new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch },
-            CreateNumberField(minimum: 0),
+            new TextBox { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "GiB" },
+            new Button
+            {
+                Width = 32,
+                Height = 32,
+                Padding = new Thickness(6),
+                Content = new FontIcon { Glyph = "\uE74E", FontSize = 14 }
+            },
             CreateNumberField(minimum: 1, maximum: 16),
             CreateNumberField(minimum: 0, maximum: 16),
             CreateNumberField(minimum: 1, maximum: 64),
             new TextBox { IsReadOnly = true },
-            new TextBlock
-            {
-                Text = "Fixed",
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                VerticalAlignment = VerticalAlignment.Center
-            },
+            new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch },
             [],
             []);
 
@@ -172,6 +179,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ShowRetiredLabel.Text = ViewModel.Localization["ShowRetiredLayer"];
         _multiVdiskWarning.Text = ViewModel.Localization["MultipleVirtualDiskWarning"];
         _volumeNameBox.PlaceholderText = ViewModel.Localization["VolumeName"];
+        PendingActionsTitle.Text = ViewModel.Localization["PendingActions"];
+        PendingActionsEmptyText.Text = ViewModel.Localization["NoPendingActions"];
     }
 
     private void EnsureForm()
@@ -188,17 +197,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
-        FillCombo(_clusterBox, ["4K", "8K", "16K", "32K", "64K"], 4);
+        FillCombo(_clusterBox, ["4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB"], 4);
         foreach (var group in TierGroups())
         {
             FillCombo(group.ResiliencyBox, ["Simple", "Mirror", "Parity"], 1);
-            FillCombo(group.InterleaveBox, ["16K", "32K", "64K", "128K", "256K"], 2);
+            FillCombo(group.InterleaveBox, ["16 KiB", "32 KiB", "64 KiB", "128 KiB", "256 KiB"], 2);
+            FillCombo(group.ProvisioningBox, ["Fixed"], 0);
+            ToolTipService.SetToolTip(group.MaximumButton, ViewModel.Localization["UseMaximumSize"]);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+                group.MaximumButton,
+                ViewModel.Localization["UseMaximumSize"]);
+            group.MaximumButton.Click += (_, _) => ToggleMaximumSize(group);
         }
 
         foreach (var group in TierGroups())
         {
             HookFormField(group.ResiliencyBox, isCombo: true);
             HookFormField(group.InterleaveBox, isCombo: true);
+            HookFormField(group.ProvisioningBox, isCombo: true);
             HookFormField(group.SizeBox);
             HookFormField(group.CopiesBox);
             HookFormField(group.FailuresBox);
@@ -274,6 +290,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 {
                     if (!_filling)
                     {
+                        var sizeGroup = TierGroups().FirstOrDefault(group => ReferenceEquals(group.SizeBox, box));
+                        if (sizeGroup is not null)
+                        {
+                            _maximumSizeFields.Remove(MaximumKey(sizeGroup));
+                        }
                         _formDirty = true;
                         UpdateButtonState();
                     }
@@ -351,26 +372,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 continue;
             }
 
-            if (ReferenceEquals(group.SizeBox, number))
-            {
-                var maxBytes = TierCapacityMaxBytes(group.Media);
-                if (NumValue(number) is null)
-                {
-                    var restoreBytes = tier.Size > 0 ? tier.Size : maxBytes;
-                    SetNum(number, restoreBytes > 0
-                        ? Math.Round(restoreBytes / 1024d / 1024d / 1024d, 2)
-                        : null);
-                }
-                else if (maxBytes > 0
-                    && NumValue(number) is { } sizeGb
-                    && (long)(sizeGb * 1024d * 1024d * 1024d) > maxBytes)
-                {
-                    SetNum(number, Math.Round(maxBytes / 1024d / 1024d / 1024d, 2));
-                }
-
-                return;
-            }
-
             if (ReferenceEquals(group.CopiesBox, number))
             {
                 var value = NumValue(number) ?? (tier.NumberOfDataCopies ?? 1);
@@ -408,8 +409,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private int AddTierGroup(int row, TierFields group)
     {
         row = AddSectionHeader(row, group.TitleKey, visibilityGroup: group.Rows);
-        row = AddTierRow(row, group, "TierSize", group.SizeBox, () => ResetTierField(group, "Size"));
-        row = AddTierRow(row, group, "TierProvisioning", group.ProvisioningText, null);
+        var sizePanel = new Grid { ColumnSpacing = 6 };
+        sizePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sizePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(group.MaximumButton, 1);
+        sizePanel.Children.Add(group.SizeBox);
+        sizePanel.Children.Add(group.MaximumButton);
+        row = AddTierRow(row, group, "TierSize", sizePanel, () => ResetTierField(group, "Size"));
+        row = AddTierRow(row, group, "TierProvisioning", group.ProvisioningBox, null);
         row = AddTierRow(row, group, "TierResiliency", group.ResiliencyBox, () => ResetTierField(group, "Resiliency"));
         row = AddTierRow(row, group, "TierDataCopies", group.CopiesBox, () => ResetTierField(group, "Copies"));
         row = AddTierRow(row, group, "TierToleratedFailures", group.FailuresBox, () => ResetTierField(group, "Failures"));
@@ -1032,7 +1039,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
             _partitionStyleBox.SelectedItem = "GPT";
             _fileSystemBox.SelectedItem = "NTFS";
-            _clusterBox.SelectedItem = "64K";
+            _clusterBox.SelectedItem = "64 KiB";
             if (partition is not null)
             {
                 if (vdisk is not null)
@@ -1089,7 +1096,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         SetNum(Capacity.CopiesBox, 1);
         _partitionStyleBox.SelectedItem = "GPT";
         _fileSystemBox.SelectedItem = "NTFS";
-        _clusterBox.SelectedItem = "64K";
+        _clusterBox.SelectedItem = "64 KiB";
         UpdateLinkedFields();
     }
 
@@ -1104,6 +1111,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             SetNum(group.CopiesBox, 2);
             SetNum(group.FailuresBox, 1);
             group.DiskCountBox.Text = "0";
+            group.ProvisioningBox.SelectedItem = "Fixed";
+            UpdateMaximumSizeText(group);
             return;
         }
 
@@ -1115,6 +1124,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? 1);
         SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? 1);
         group.DiskCountBox.Text = tier.MemberPhysicalDiskIds.Count.ToString();
+        group.ProvisioningBox.SelectedItem = "Fixed";
+        UpdateMaximumSizeText(group);
     }
 
     private Dictionary<string, StorageTierInfo> TierMap(string poolId) =>
@@ -1198,7 +1209,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private static void SetInterleave(ComboBox box, long bytes)
     {
         var token = $"{Math.Max(1, bytes / 1024)}K";
-        box.SelectedItem = box.Items.OfType<string>().Contains(token) ? token : "64K";
+        box.SelectedItem = box.Items.OfType<string>().Contains(token) ? token : "64 KiB";
     }
 
     private static string ToGigabytes(long? bytes) =>
@@ -1298,14 +1309,155 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var volumeName = _volumeNameBox.Text.Trim();
         var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
-        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64K");
+        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB");
         return !string.Equals(volumeName, partition.FileSystemLabel, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(fileSystem, partition.FileSystem, StringComparison.OrdinalIgnoreCase)
             || cluster != partition.AllocationUnitSize;
     }
 
+    private void RefreshPendingActions()
+    {
+        PendingActionsPanel.Children.Clear();
+        _planBuildError = string.Empty;
+        try
+        {
+            var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
+            var built = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, projected);
+            var enriched = built.Steps.Select(EnrichPlanIntent).ToArray();
+            _currentPlan = SimulationDraftPlanner.Precheck(ViewModel.ActiveSnapshot, enriched);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+        {
+            _currentPlan = null;
+            _planBuildError = exception.Message;
+        }
+
+        if (_currentPlan is null || _currentPlan.IsEmpty)
+        {
+            var empty = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(_planBuildError)
+                    ? HasInvalidSizeInput()
+                        ? Text("容量必须是有效的非负 GiB 数值。", "Capacity must be a valid non-negative GiB value.")
+                        : ViewModel.Localization["NoPendingActions"]
+                    : _planBuildError,
+                TextWrapping = TextWrapping.Wrap
+            };
+            PendingActionsPanel.Children.Add(empty);
+            return;
+        }
+
+        if (HasInvalidSizeInput())
+        {
+            PendingActionsPanel.Children.Add(new TextBlock
+            {
+                Text = Text("容量必须是有效的非负 GiB 数值。", "Capacity must be a valid non-negative GiB value."),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"]
+            });
+        }
+
+        foreach (var item in _currentPlan.DisplayItems.Where(item => item.ParentId is null))
+        {
+            var children = _currentPlan.DisplayItems.Where(candidate => candidate.ParentId == item.Id).ToArray();
+            if (children.Length == 0)
+            {
+                PendingActionsPanel.Children.Add(ActionText(item));
+                continue;
+            }
+
+            var childPanel = new StackPanel { Spacing = 4, Margin = new Thickness(12, 4, 0, 0) };
+            foreach (var child in children)
+            {
+                childPanel.Children.Add(ActionText(child));
+            }
+
+            PendingActionsPanel.Children.Add(new Expander
+            {
+                Header = ActionText(item),
+                Content = childPanel,
+                IsExpanded = false
+            });
+        }
+    }
+
+    private SimulationEditRequest EnrichPlanIntent(SimulationEditRequest step)
+    {
+        var selectedPool = SelectedPool();
+        if (selectedPool is null
+            || step.Kind is not (SimulationEditKind.CreateTieredPool
+                or SimulationEditKind.CreateVirtualDisk
+                or SimulationEditKind.UpdateStoragePool))
+        {
+            return step;
+        }
+
+        var belongsToSelection = step.Kind == SimulationEditKind.CreateTieredPool
+            ? EditWorkspace.IsDraftPool(selectedPool.StableId)
+            : step.TargetProviderKey == selectedPool.StableId;
+        if (!belongsToSelection)
+        {
+            return step;
+        }
+
+        return step with
+        {
+            FileSystem = _fileSystemBox.SelectedItem as string ?? step.FileSystem,
+            AllocationUnitSize = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
+            CreateVirtualDisk = step.Kind == SimulationEditKind.CreateTieredPool ? _autoVdiskSwitch.IsOn : step.CreateVirtualDisk,
+            CreatePartition = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
+                ? _autoPartitionSwitch.IsOn
+                : step.CreatePartition,
+            AllocatedPartitionId = step.Kind == SimulationEditKind.CreateVirtualDisk && _autoPartitionSwitch.IsOn
+                ? step.AllocatedPartitionId ?? $"sim:partition:{Guid.NewGuid():N}"
+                : step.AllocatedPartitionId,
+            AllocatedVolumeId = step.Kind == SimulationEditKind.CreateVirtualDisk && _autoPartitionSwitch.IsOn
+                ? step.AllocatedVolumeId ?? $"sim:volume:{Guid.NewGuid():N}"
+                : step.AllocatedVolumeId,
+            PerformanceUseMaximum = _maximumSizeFields.Contains(MaximumKey(Performance)),
+            CapacityUseMaximum = _maximumSizeFields.Contains(MaximumKey(Capacity)),
+            ScmUseMaximum = _maximumSizeFields.Contains(MaximumKey(Dedicated)),
+            PerformanceSizeBytes = SizeBytes(Performance.SizeBox) ?? step.PerformanceSizeBytes,
+            CapacitySizeBytes = SizeBytes(Capacity.SizeBox) ?? step.CapacitySizeBytes,
+            ScmSizeBytes = SizeBytes(Dedicated.SizeBox) ?? step.ScmSizeBytes,
+            ProvisioningType = "Fixed"
+        };
+    }
+
+    private TextBlock ActionText(SimulationPlanItem item)
+    {
+        var title = DescribePlanStep(item.Request);
+        var reason = item.Decision?.Verdict == StorageRuleVerdict.Allow
+            ? string.Empty
+            : item.Decision?.Message ?? string.Empty;
+        var max = item.Request.PerformanceUseMaximum
+            || item.Request.CapacityUseMaximum
+            || item.Request.ScmUseMaximum
+                ? " · MAX"
+                : string.Empty;
+        var unknown = _outcomeUnknown
+            ? Text(" · 结果待确认", " · outcome pending confirmation")
+            : string.Empty;
+        return new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(reason)
+                ? $"{title}{max}{unknown}"
+                : $"{title}{max}{unknown}\n{reason}",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = item.Decision?.Verdict == StorageRuleVerdict.Allow
+                ? (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"]
+                : (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"]
+        };
+    }
+
+    private bool HasInvalidSizeInput() => TierGroups().Any(group =>
+        group.SizeBox.IsEnabled
+        && !_maximumSizeFields.Contains(MaximumKey(group))
+        && NumValue(group.SizeBox) is null);
+
     private void UpdateButtonState()
     {
+        RefreshPendingActions();
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
         var hasUnapplied = HasUncommittedChanges();
@@ -1313,7 +1465,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UndoButton.IsEnabled = _undoStack.Count > 0;
         RedoButton.IsEnabled = _redoStack.Count > 0;
         DiscardAllButton.IsEnabled = hasUnapplied;
-        ApplyAllButton.IsEnabled = simulated && hasUnapplied;
+        var planBlocked = _currentPlan?.DisplayItems.Any(item =>
+            item.Decision?.Verdict != StorageRuleVerdict.Allow) == true;
+        ApplyAllButton.IsEnabled = simulated
+            && hasUnapplied
+            && _currentPlan is not null
+            && string.IsNullOrWhiteSpace(_planBuildError)
+            && !planBlocked
+            && !HasInvalidSizeInput()
+            && !_outcomeUnknown;
         CreatePoolButton.IsEnabled = simulated
             && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
         DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false };
@@ -1409,11 +1569,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
             var tierVisible = TierVisible(pool.StableId, group.Media);
-            // Capacity (Size) is a reservation: it stays editable even on
-            // data-bearing pools. Destructive spec fields are not.
-            var sizeEditable = tierVisible && tier is not null;
-            var specEditable = sizeEditable && !holdsData;
+            var sizeEditable = tierVisible && tier is not null && !holdsData;
+            var specEditable = sizeEditable;
             group.SizeBox.IsEnabled = sizeEditable;
+            group.MaximumButton.IsEnabled = sizeEditable && TierCapacityMaxBytes(group.Media) > 0;
+            var provisioning = string.IsNullOrWhiteSpace(vdisk?.ProvisioningType)
+                ? "Fixed"
+                : vdisk.ProvisioningType;
+            if (!group.ProvisioningBox.Items.Contains(provisioning))
+            {
+                group.ProvisioningBox.Items.Add(provisioning);
+            }
+            group.ProvisioningBox.SelectedItem = provisioning;
+            group.ProvisioningBox.IsEnabled = sizeEditable
+                && provisioning.Equals("Fixed", StringComparison.OrdinalIgnoreCase);
             group.ResiliencyBox.IsEnabled = specEditable;
             group.InterleaveBox.IsEnabled = specEditable;
             group.DiskCountBox.IsReadOnly = true;
@@ -1434,6 +1603,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             {
                 SetNum(group.ColumnsBox, null);
             }
+            UpdateMaximumSizeText(group);
         }
 
         // Disk and partition group.
@@ -1602,6 +1772,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         _undoStack.Clear();
         _redoStack.Clear();
+        _maximumSizeFields.Clear();
+        _outcomeUnknown = false;
         _working = ViewModel.ActiveSnapshot;
         _formDirty = false;
         _selectedPoolId = null;
@@ -1901,12 +2073,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var planned = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, pending);
-        var preview = planned.Steps.Select(step => DescribePlanStep(step)).ToList();
-        if (preview.Count == 0)
+        var planned = _currentPlan ?? SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, pending);
+        var blockedItem = planned.DisplayItems.FirstOrDefault(item =>
+            item.Decision?.Verdict != StorageRuleVerdict.Allow);
+        if (blockedItem is not null)
         {
-            preview = BuildApplyPreviewSteps(pending, ViewModel.ActiveSnapshot).ToList();
+            await ShowMessageAsync(
+                Text("计划被规则阻止", "Plan blocked by rules"),
+                blockedItem.Decision?.Message ?? blockedItem.Title);
+            return;
         }
+        var preview = planned.Steps.Select(step => DescribePlanStep(step)).ToList();
         if (preview.Count == 0)
         {
             await ShowMessageAsync(
@@ -1962,7 +2139,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var plan = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, pending);
+        var plan = planned;
         if (plan.IsEmpty)
         {
             await ShowMessageAsync(
@@ -1980,6 +2157,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         _undoStack.Clear();
         _redoStack.Clear();
+        _maximumSizeFields.Clear();
+        _outcomeUnknown = false;
         _working = ViewModel.ActiveSnapshot;
         _selectedPoolId = EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
             ? _working.StoragePools.LastOrDefault(item => !item.IsPrimordial)?.StableId
@@ -2005,12 +2184,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             await ShowMessageAsync(
                 Text("提交结果未知", "Commit outcome unknown"),
                 detail);
-            _undoStack.Clear();
-            _redoStack.Clear();
-            _working = ViewModel.ActiveSnapshot;
+            _outcomeUnknown = true;
+            _working = pending;
             _formDirty = false;
-            NormalizeSelection();
-            ResetLayerSwitchesForSelection();
             RefreshAll();
             return;
         }
@@ -2084,7 +2260,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
 
             var resiliency = group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
-            var interleave = ParseSize(group.InterleaveBox.SelectedItem as string ?? "64K");
+            var interleave = ParseSize(group.InterleaveBox.SelectedItem as string ?? "64 KiB");
             var copies = NumValue(group.CopiesBox) is { } copyValue
                 ? Math.Max(1, (int)copyValue)
                 : tier.NumberOfDataCopies ?? 1;
@@ -2097,11 +2273,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var size = NumValue(group.SizeBox) is { } sizeValue
                 ? (long)(sizeValue * 1024L * 1024L * 1024L)
                 : (long?)null;
-            var sizeMax = TierCapacityMaxBytes(group.Media);
-            if (size is { } typedSize && sizeMax > 0 && typedSize > sizeMax)
-            {
-                size = sizeMax;
-            }
             var changed = !string.Equals(resiliency, tier.ResiliencySettingName, StringComparison.OrdinalIgnoreCase)
                 || interleave != (tier.Interleave ?? 0)
                 || copies != tier.NumberOfDataCopies
@@ -2110,6 +2281,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 || (size is not null && size != tier.Size);
             if (changed)
             {
+                var parity = resiliency.Equals("Parity", StringComparison.OrdinalIgnoreCase)
+                    ? Math.Max(1, failures)
+                    : 0;
+                var footprint = size is null
+                    ? tier.FootprintOnPool
+                    : ConservativeCapacity.PhysicalFootprintForLogical(
+                        size.Value, resiliency, copies, columns, parity);
                 result = result with
                 {
                     StorageTiers = result.StorageTiers
@@ -2122,7 +2300,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                                 PhysicalDiskRedundancy = failures,
                                 NumberOfColumns = columns,
                                 Size = size ?? tier.Size,
-                                FootprintOnPool = size ?? tier.Size
+                                FootprintOnPool = footprint,
+                                SizeSource = CapacitySourceKind.SimulatedEstimate
                             }
                             : item)
                         .ToArray()
@@ -2150,6 +2329,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             SimulationEditKind.DissolveStoragePool => zh
                 ? "解散存储池。"
                 : "Dissolve storage pool.",
+            SimulationEditKind.DeleteEmptyStoragePool => zh
+                ? "移除空存储池。"
+                : "Remove empty storage pool.",
             SimulationEditKind.CreatePartition => zh
                 ? "创建分区。"
                 : "Create partition.",
@@ -2388,8 +2570,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 if (workingTier.Size != committedTier.Size)
                 {
                     steps.Add(zh
-                        ? $"将该层容量调整为 {Math.Round(workingTier.Size / 1024d / 1024d / 1024d, 2)} GB。"
-                        : $"Adjust the tier capacity to {Math.Round(workingTier.Size / 1024d / 1024d / 1024d, 2)} GB.");
+                        ? $"将该层容量调整为 {Math.Round(workingTier.Size / 1024d / 1024d / 1024d, 2)} GiB。"
+                        : $"Adjust the tier capacity to {Math.Round(workingTier.Size / 1024d / 1024d / 1024d, 2)} GiB.");
                 }
 
                 if (TierSpecsEqual(workingTier, committedTier))
@@ -2416,7 +2598,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     fileSystem,
                     committedPartition.FileSystem,
                     StringComparison.OrdinalIgnoreCase);
-                var clusterChanged = ParseSize(_clusterBox.SelectedItem as string ?? "64K")
+                var clusterChanged = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB")
                     != committedPartition.AllocationUnitSize;
                 var labelChanged = !string.Equals(
                     volumeName,
@@ -2531,19 +2713,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
         };
 
     /// <summary>
-    /// The research defaults are changeable, but 256K interleave and ReFS are
+    /// The research defaults are changeable, but 256 KiB interleave and ReFS are
     /// outside the tested recommendation and are never applied silently
     /// (V0.47 design §8).
     /// </summary>
     private async Task<bool> ConfirmUnrecommendedAsync()
     {
         if (new[] { Performance, Capacity, Dedicated }
-                .Any(group => (group.InterleaveBox.SelectedItem as string) == "256K")
+                .Any(group => (group.InterleaveBox.SelectedItem as string) == "256 KiB")
             && !await ConfirmAsync(
-                Text("256K 交织警告", "256K interleave warning"),
+                Text("256 KiB 交织警告", "256 KiB interleave warning"),
                 Text(
-                    "256K 交织不在当前测试推荐中。当前测试推荐为 64K 交织 + 64K NTFS 簇。确定继续？",
-                    "256K interleave is outside the tested recommendation (64K interleave + 64K NTFS cluster). Continue anyway?")))
+                    "256 KiB 交织不在当前测试推荐中。当前测试推荐为 64 KiB 交织 + 64 KiB NTFS 簇。确定继续？",
+                    "256 KiB interleave is outside the tested recommendation (64 KiB interleave + 64 KiB NTFS cluster). Continue anyway?")))
         {
             return false;
         }
@@ -2552,8 +2734,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !await ConfirmAsync(
                 Text("ReFS 提示", "ReFS notice"),
                 Text(
-                    "ReFS 没有与 NTFS 64K 同等的长期测试证据。确定继续？",
-                    "ReFS has no long-run evidence equivalent to NTFS 64K. Continue anyway?")))
+                    "ReFS 没有与 NTFS 64 KiB 同等的长期测试证据。确定继续？",
+                    "ReFS has no long-run evidence equivalent to NTFS 64 KiB. Continue anyway?")))
         {
             return false;
         }
@@ -2810,7 +2992,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var volumeName = _volumeNameBox.Text.Trim();
         var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
-        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64K");
+        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB");
         var fsChanged = !string.Equals(
             fileSystem,
             committedPartition.FileSystem,
@@ -2877,21 +3059,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
             "primordial",
             Name: pool.FriendlyName,
             FileSystem: _fileSystemBox.SelectedItem as string ?? "NTFS",
-            AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64K"),
+            AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
             MemberDiskIds: memberIds,
             VirtualDiskName: virtualName,
             PerformanceResiliency: Performance.ResiliencyBox.SelectedItem as string,
-            PerformanceInterleaveBytes: ParseSize(Performance.InterleaveBox.SelectedItem as string ?? "64K"),
+            PerformanceInterleaveBytes: ParseSize(Performance.InterleaveBox.SelectedItem as string ?? "64 KiB"),
             PerformanceSizeBytes: SizeBytes(Performance.SizeBox),
+            PerformanceUseMaximum: _maximumSizeFields.Contains(MaximumKey(Performance)),
             PerformanceDataCopies: CopiesCount(Performance.CopiesBox),
             CapacityResiliency: Capacity.ResiliencyBox.SelectedItem as string,
-            CapacityInterleaveBytes: ParseSize(Capacity.InterleaveBox.SelectedItem as string ?? "64K"),
+            CapacityInterleaveBytes: ParseSize(Capacity.InterleaveBox.SelectedItem as string ?? "64 KiB"),
             CapacitySizeBytes: SizeBytes(Capacity.SizeBox),
+            CapacityUseMaximum: _maximumSizeFields.Contains(MaximumKey(Capacity)),
             CapacityColumns: ColumnsCount(Capacity.ColumnsBox),
             CapacityToleratedFailures: FailuresCount(Capacity.FailuresBox),
             ScmResiliency: Dedicated.ResiliencyBox.SelectedItem as string,
-            ScmInterleaveBytes: ParseSize(Dedicated.InterleaveBox.SelectedItem as string ?? "64K"),
+            ScmInterleaveBytes: ParseSize(Dedicated.InterleaveBox.SelectedItem as string ?? "64 KiB"),
+            ScmSizeBytes: SizeBytes(Dedicated.SizeBox),
+            ScmUseMaximum: _maximumSizeFields.Contains(MaximumKey(Dedicated)),
             ScmDataCopies: CopiesCount(Dedicated.CopiesBox),
+            ProvisioningType: "Fixed",
             CreatePartition: _autoPartitionSwitch.IsOn,
             CreateVirtualDisk: _autoVdiskSwitch.IsOn);
     }
@@ -2966,7 +3153,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 Name: name,
                 Resiliency: draftVdisk.ResiliencySettingName,
                 InterleaveBytes: draftVdisk.Interleave,
-                AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64K"))) is null)
+                AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"))) is null)
         {
             return false;
         }
@@ -3023,7 +3210,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             partition.StableId,
             Name: _volumeNameBox.Text.Trim(),
             FileSystem: _fileSystemBox.SelectedItem as string ?? "NTFS",
-            AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64K"))) is not null;
+            AllocationUnitSize: ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"))) is not null;
     }
 
     /// <summary>
@@ -3113,7 +3300,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var volumeName = _volumeNameBox.Text.Trim();
         var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
-        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64K");
+        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB");
         var fsChanged = !string.Equals(
             fileSystem,
             partition.FileSystem,
@@ -3128,16 +3315,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
         string.Equals(box.SelectedItem as string, value, StringComparison.OrdinalIgnoreCase);
 
     private static string InterleaveToken(long? bytes) =>
-        $"{Math.Max(1, (bytes ?? 65536) / 1024)}K";
+        $"{Math.Max(1, (bytes ?? 65536) / 1024)} KiB";
 
     private static string ClusterToken(long? bytes) =>
         bytes switch
         {
-            4096 => "4K",
-            8192 => "8K",
-            16384 => "16K",
-            32768 => "32K",
-            _ => "64K"
+            4096 => "4 KiB",
+            8192 => "8 KiB",
+            16384 => "16 KiB",
+            32768 => "32 KiB",
+            _ => "64 KiB"
         };
     // ---- Field dirty dots, recommended resets, and change checks ------
 
@@ -3180,8 +3367,65 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return double.IsNaN(box.Value) ? null : box.Value;
     }
 
+    private double? NumValue(TextBox box)
+    {
+        var group = TierGroups().FirstOrDefault(item => ReferenceEquals(item.SizeBox, box));
+        if (group is not null && _maximumSizeFields.Contains(MaximumKey(group)))
+        {
+            return TierCapacityMaxBytes(group.Media) / 1024d / 1024d / 1024d;
+        }
+
+        return double.TryParse(
+            box.Text,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.CurrentCulture,
+            out var value)
+            && double.IsFinite(value)
+            && value >= 0
+                ? value
+                : null;
+    }
+
     private static void SetNum(NumberBox box, double? value) =>
         box.Value = value ?? double.NaN;
+
+    private static void SetNum(TextBox box, double? value) =>
+        box.Text = value?.ToString("0.##", System.Globalization.CultureInfo.CurrentCulture) ?? string.Empty;
+
+    private string MaximumKey(TierFields group) => $"{_selectedPoolId}|{group.Media}";
+
+    private void ToggleMaximumSize(TierFields group)
+    {
+        var key = MaximumKey(group);
+        var maximum = TierCapacityMaxBytes(group.Media);
+        if (_maximumSizeFields.Remove(key))
+        {
+            _filling = true;
+            SetNum(group.SizeBox, maximum / 1024d / 1024d / 1024d);
+            _filling = false;
+        }
+        else if (maximum > 0)
+        {
+            _maximumSizeFields.Add(key);
+            UpdateMaximumSizeText(group);
+        }
+
+        _formDirty = true;
+        UpdateButtonState();
+    }
+
+    private void UpdateMaximumSizeText(TierFields group)
+    {
+        if (!_maximumSizeFields.Contains(MaximumKey(group)))
+        {
+            return;
+        }
+
+        var maximumGiB = TierCapacityMaxBytes(group.Media) / 1024L / 1024L / 1024L;
+        _filling = true;
+        group.SizeBox.Text = $"MAX({maximumGiB}GiB)";
+        _filling = false;
+    }
 
     private static bool NumberEquals(double? actual, int? expected) =>
         expected is not null
@@ -3218,12 +3462,41 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var tier = TierMap(pool.StableId).GetValueOrDefault(media);
-        return tier is null
-            ? 0
-            : _working.PhysicalDisks
-                .Where(disk => tier.MemberPhysicalDiskIds.Contains(
-                    disk.StableId, StringComparer.OrdinalIgnoreCase))
-                .Sum(disk => disk.Size);
+        var group = GroupFor(media);
+        if (tier is null || group is null)
+        {
+            return 0;
+        }
+
+        var members = _working.PhysicalDisks
+            .Where(disk => tier.MemberPhysicalDiskIds.Contains(
+                    disk.StableId, StringComparer.OrdinalIgnoreCase)
+                && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
+            .ToArray();
+        var resiliency = group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
+        var copies = NumValue(group.CopiesBox) is { } copyValue
+            ? Math.Max(1, (int)copyValue)
+            : tier.NumberOfDataCopies ?? 1;
+        var columns = NumValue(group.ColumnsBox) is { } columnValue
+            ? (int)columnValue
+            : tier.NumberOfColumns;
+        var parity = resiliency.Equals("Parity", StringComparison.OrdinalIgnoreCase)
+            ? NumValue(group.FailuresBox) is { } failureValue ? Math.Max(1, (int)failureValue) : 1
+            : 0;
+        try
+        {
+            return ConservativeCapacity.PlanLogicalUpperBound(
+                members.Select(item => item.Size).ToArray(),
+                resiliency,
+                copies,
+                columns,
+                parity,
+                ParseSize(group.InterleaveBox.SelectedItem as string ?? "64 KiB")).AlignedLogicalBytes;
+        }
+        catch (ArgumentException)
+        {
+            return 0;
+        }
     }
 
     private int TierDataDiskCount(string media)
@@ -3316,12 +3589,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
                 break;
             case "Stripe":
-                group.InterleaveBox.SelectedItem = "64K";
+                group.InterleaveBox.SelectedItem = "64 KiB";
                 break;
         }
     }
 
-    private static long? SizeBytes(NumberBox box) =>
+    private long? SizeBytes(TextBox box) =>
         NumValue(box) is { } gb ? (long)(gb * 1024L * 1024L * 1024L) : null;
 
     private static int? CopiesCount(NumberBox box) =>
@@ -3441,7 +3714,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var partition = PrimaryPartition(pool.StableId);
         var baseline = partition?.AllocationUnitSize is { } bytes
             ? ClusterToken(bytes)
-            : "64K";
+            : "64 KiB";
         return !string.Equals(
             _clusterBox.SelectedItem as string,
             baseline,
@@ -3469,7 +3742,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case "AllocationUnit":
                 if (_clusterBox.IsEnabled)
                 {
-                    _clusterBox.SelectedItem = "64K";
+                    _clusterBox.SelectedItem = "64 KiB";
                 }
 
                 break;

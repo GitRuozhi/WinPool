@@ -879,7 +879,7 @@ public sealed class TierCardCapacityTests
 public sealed class NormalizeTierCapacityTests
 {
     [Fact]
-    public void UnsetTierCapacityNormalizesToMemberCapacity()
+    public void UnsetTierCapacityBelowFourGibRemainsUnavailable()
     {
         var snapshot = TestSnapshotFactory.Create();
         // Factory tier has a size; zero it to simulate legacy documents.
@@ -891,9 +891,7 @@ public sealed class NormalizeTierCapacityTests
         };
         var normalized = EditWorkspace.NormalizeTierCapacities(zeroed);
         var tier = normalized.StorageTiers.Single();
-        Assert.True(tier.Size > 0);
-        Assert.True(tier.Size <= 2_000_000);
-        Assert.Equal(CapacitySourceKind.SimulatedEstimate, tier.SizeSource);
+        Assert.Equal(0, tier.Size);
     }
 
     [Fact]

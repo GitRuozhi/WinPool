@@ -41,15 +41,31 @@ public sealed class StorageMathTests
     }
 
     [Fact]
-    public void ConservativeCapacityAppliesOnePercentReserveAndAlignment()
+    public void ConservativeCapacityAppliesMirrorAndFourGibAlignment()
     {
         var estimate = ConservativeCapacity.PlanLogicalUpperBound(
             [200L * 1024 * 1024 * 1024, 200L * 1024 * 1024 * 1024],
+            resiliency: "Mirror",
             dataCopies: 2,
             interleaveBytes: 65536);
         Assert.Equal(200L * 1024 * 1024 * 1024, estimate.LogicalGrossBytes);
-        Assert.True(estimate.AlignedLogicalBytes <= estimate.LogicalGrossBytes * 99 / 100);
-        Assert.Equal(0, estimate.AlignedLogicalBytes % 65536);
+        Assert.Equal(estimate.LogicalGrossBytes, estimate.AlignedLogicalBytes);
+        Assert.Equal(0, estimate.AlignedLogicalBytes % ConservativeCapacity.CapacityAlignmentBytes);
+        Assert.Equal(400L * 1024 * 1024 * 1024, estimate.PhysicalFootprintBytes);
+    }
+
+    [Fact]
+    public void ParityUsesColumnsAndParityOverhead()
+    {
+        var gib = 1024L * 1024 * 1024;
+        var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+            [100 * gib, 100 * gib, 100 * gib],
+            "Parity",
+            columns: 3,
+            parityColumns: 1);
+
+        Assert.Equal(200 * gib, estimate.AlignedLogicalBytes);
+        Assert.Equal(300 * gib, estimate.PhysicalFootprintBytes);
     }
 
     [Fact]

@@ -132,7 +132,9 @@ public static class EditWorkspace
             return "Simple";
         }
 
-        return NormalizeMedia(mediaType) == "HDD" ? "Parity" : "Mirror";
+        return NormalizeMedia(mediaType) == "HDD"
+            ? memberCount >= 3 ? "Parity" : "Simple"
+            : "Mirror";
     }
 
     public static int RecommendedDataCopies(string resiliency, int memberCount)
@@ -1370,10 +1372,21 @@ public sealed record StructureProblem(
 
                 var copies = tier.NumberOfDataCopies
                     ?? (string.Equals(tier.ResiliencySettingName, "Mirror", StringComparison.OrdinalIgnoreCase) ? 2 : 1);
-                var estimate = ConservativeCapacity.PlanLogicalUpperBound(
-                    members.Select(disk => disk.Size).ToArray(),
-                    Math.Max(1, copies),
-                    tier.Interleave ?? 65536);
+                ConservativeCapacityEstimate estimate;
+                try
+                {
+                    estimate = ConservativeCapacity.PlanLogicalUpperBound(
+                        members.Select(disk => disk.Size).ToArray(),
+                        tier.ResiliencySettingName,
+                        Math.Max(1, copies),
+                        tier.NumberOfColumns,
+                        tier.PhysicalDiskRedundancy ?? 0,
+                        tier.Interleave ?? 65536);
+                }
+                catch (ArgumentException)
+                {
+                    return tier;
+                }
                 if (estimate.AlignedLogicalBytes <= 0)
                 {
                     return tier;
@@ -1383,7 +1396,7 @@ public sealed record StructureProblem(
                 return tier with
                 {
                     Size = estimate.AlignedLogicalBytes,
-                    FootprintOnPool = estimate.RawDataMemberBytes,
+                    FootprintOnPool = estimate.PhysicalFootprintBytes,
                     SizeSource = CapacitySourceKind.SimulatedEstimate
                 };
             })
@@ -1628,9 +1641,11 @@ public sealed record StructureProblem(
                 throw new InvalidOperationException("The pool already has a virtual disk.");
             }
 
-            var placeholderSize = pool.MemberPhysicalDiskIds
-                .Select(id => snapshot.PhysicalDisks.FirstOrDefault(disk => disk.StableId == id)?.Size ?? 0)
-                .Sum();
+            var placeholderSize = EstimatePoolLogicalCapacity(snapshot, poolId, resiliency, interleave);
+            if (placeholderSize <= 0)
+            {
+                throw new InvalidOperationException("The simulated pool has no createable logical capacity.");
+            }
             var placeholder = new VirtualDiskInfo(
                 $"{DraftVirtualDiskPrefix}{Guid.NewGuid():N}",
                 false,
@@ -1642,7 +1657,7 @@ public sealed record StructureProblem(
                 1,
                 interleave,
                 placeholderSize,
-                placeholderSize,
+                EstimatePoolPhysicalFootprint(snapshot, poolId, placeholderSize, resiliency),
                 pool.StableId,
                 [],
                 []);
@@ -1659,7 +1674,11 @@ public sealed record StructureProblem(
         }
 
         var diskName = string.IsNullOrWhiteSpace(name) ? pool.FriendlyName : name.Trim();
-        var free = Math.Max(0, pool.Size - pool.AllocatedSize);
+        var free = EstimatePoolLogicalCapacity(snapshot, poolId, resiliency, interleave);
+        if (free <= 0)
+        {
+            throw new InvalidOperationException("The simulated pool has no createable logical capacity.");
+        }
         var vdisk = new VirtualDiskInfo(
             $"{DraftVirtualDiskPrefix}{Guid.NewGuid():N}",
             false,
@@ -1671,7 +1690,7 @@ public sealed record StructureProblem(
             1,
             interleave,
             free,
-            free,
+            EstimatePoolPhysicalFootprint(snapshot, poolId, free, resiliency),
             pool.StableId,
             [],
             []);
@@ -1679,6 +1698,65 @@ public sealed record StructureProblem(
         {
             VirtualDisks = snapshot.VirtualDisks.Append(vdisk).ToArray()
         };
+    }
+
+    public static long EstimatePoolLogicalCapacity(
+        StorageSnapshot snapshot,
+        string poolId,
+        string resiliency,
+        long interleave)
+    {
+        var tiers = snapshot.StorageTiers
+            .Where(item => item.PoolStableId == poolId)
+            .ToArray();
+        if (tiers.Length > 0)
+        {
+            return tiers.Sum(item => item.Size);
+        }
+
+        var pool = snapshot.StoragePools.First(item => item.StableId == poolId);
+        var members = snapshot.PhysicalDisks
+            .Where(item => pool.MemberPhysicalDiskIds.Contains(item.StableId, StringComparer.OrdinalIgnoreCase)
+                && PhysicalDiskUsage.ContributesDataCapacity(item.Usage))
+            .ToArray();
+        var copies = RecommendedDataCopies(resiliency, members.Length);
+        var columns = string.Equals(resiliency, "Parity", StringComparison.OrdinalIgnoreCase)
+            ? members.Length
+            : (int?)null;
+        var parity = string.Equals(resiliency, "Parity", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        return ConservativeCapacity.PlanLogicalUpperBound(
+            members.Select(item => item.Size).ToArray(),
+            resiliency,
+            copies,
+            columns,
+            parity,
+            interleave,
+            snapshot.VirtualDisks
+                .Where(item => item.PoolStableId == poolId)
+                .Sum(item => item.FootprintOnPool)).AlignedLogicalBytes;
+    }
+
+    private static long EstimatePoolPhysicalFootprint(
+        StorageSnapshot snapshot,
+        string poolId,
+        long logicalBytes,
+        string resiliency)
+    {
+        var tiers = snapshot.StorageTiers.Where(item => item.PoolStableId == poolId).ToArray();
+        if (tiers.Length > 0)
+        {
+            return tiers.Sum(item => item.FootprintOnPool);
+        }
+
+        var memberCount = snapshot.StoragePools.First(item => item.StableId == poolId)
+            .MemberPhysicalDiskIds.Count;
+        var copies = RecommendedDataCopies(resiliency, memberCount);
+        return ConservativeCapacity.PhysicalFootprintForLogical(
+            logicalBytes,
+            resiliency,
+            copies,
+            string.Equals(resiliency, "Parity", StringComparison.OrdinalIgnoreCase) ? memberCount : null,
+            string.Equals(resiliency, "Parity", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
     }
 
     public static StorageSnapshot DeleteVirtualDiskFromWorking(StorageSnapshot snapshot, string vdiskId)
@@ -1884,14 +1962,33 @@ public sealed record StructureProblem(
                     var media = NormalizeMedia(tier.MediaType);
                     var resiliency = RecommendedResiliency(media, members.Length);
                     var copies = RecommendedDataCopies(resiliency, members.Length);
+                    var failures = RecommendedToleratedFailures(resiliency, copies);
+                    var columns = media == "HDD" ? RecommendedCapacityColumns(members) : (int?)null;
+                    ConservativeCapacityEstimate? estimate = null;
+                    try
+                    {
+                        estimate = ConservativeCapacity.PlanLogicalUpperBound(
+                            members.Select(item => item.Size).ToArray(),
+                            resiliency,
+                            copies,
+                            columns,
+                            resiliency.Equals("Parity", StringComparison.OrdinalIgnoreCase) ? Math.Max(1, failures) : 0,
+                            tier.Interleave ?? 65536);
+                    }
+                    catch (ArgumentException)
+                    {
+                        // An incomplete draft remains visible with zero capacity;
+                        // the shared rule evaluator supplies the blocking reason.
+                    }
                     return tier with
                     {
                         ResiliencySettingName = resiliency,
                         NumberOfDataCopies = copies,
-                        PhysicalDiskRedundancy = RecommendedToleratedFailures(resiliency, copies),
-                        NumberOfColumns = media == "HDD" ? RecommendedCapacityColumns(members) : null,
-                        Size = members.Sum(item => item.Size),
-                        FootprintOnPool = members.Sum(item => item.Size)
+                        PhysicalDiskRedundancy = failures,
+                        NumberOfColumns = columns,
+                        Size = estimate?.AlignedLogicalBytes ?? 0,
+                        FootprintOnPool = estimate?.PhysicalFootprintBytes ?? 0,
+                        SizeSource = CapacitySourceKind.SimulatedEstimate
                     };
                 })
                 .ToArray()

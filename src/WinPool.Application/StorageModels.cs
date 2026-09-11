@@ -206,18 +206,7 @@ public sealed record VolumeInfo(
         {
             foreach (var path in AccessPaths)
             {
-                var trimmed = (path ?? string.Empty).Trim();
-                if (trimmed.Length >= 2 && trimmed[1] == ':')
-                {
-                    var candidate = char.ToUpperInvariant(trimmed[0]);
-                    if (candidate is >= 'A' and <= 'Z')
-                    {
-                        return candidate.ToString();
-                    }
-                }
-
-                var letter = TopologyProjector.NormalizeDriveLetter(path);
-                if (letter.Length == 1)
+                if (StorageAccessPath.TryGetDriveLetter(path, out var letter))
                 {
                     return letter;
                 }
@@ -226,6 +215,28 @@ public sealed record VolumeInfo(
             return string.Empty;
         }
     }
+}
+
+public static class StorageAccessPath
+{
+    public static bool TryGetDriveLetter(string? value, out string driveLetter)
+    {
+        var path = (value ?? string.Empty).Trim();
+        var isSingleLetter = path.Length == 1;
+        var isColonForm = path.Length == 2 && path[1] == ':';
+        var isRootForm = path.Length == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/');
+        if ((isSingleLetter || isColonForm || isRootForm)
+            && char.ToUpperInvariant(path[0]) is >= 'A' and <= 'Z')
+        {
+            driveLetter = char.ToUpperInvariant(path[0]).ToString();
+            return true;
+        }
+
+        driveLetter = string.Empty;
+        return false;
+    }
+
+    public static bool IsDriveLetter(string? value) => TryGetDriveLetter(value, out _);
 }
 
 public sealed record NetworkDiskInfo(
