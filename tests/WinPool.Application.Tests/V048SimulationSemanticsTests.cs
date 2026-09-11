@@ -394,6 +394,47 @@ public sealed class V048SimulationSemanticsTests
     }
 
     [Fact]
+    public void ExistingEmptyPoolAcceptsSeparateVirtualDiskAndPartitionSteps()
+    {
+        var service = new SimulationOperationService();
+        var created = service.Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationOperationRequest(
+                SimulationOperationKind.CreateTieredPool,
+                "primordial",
+                Name: "PoolA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                CreateVirtualDisk: false));
+        Assert.True(created.Succeeded, created.Error);
+        var pool = created.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var working = EditWorkspace.InsertDraftVirtualDisk(
+            created.Document.Snapshot, pool.StableId, "SpaceA", "Mirror", 65536);
+        var steps = SimulationDraftPlanner.Build(created.Document.Snapshot, working).Steps.ToList();
+        var createVdisk = Assert.Single(steps, item => item.Kind == SimulationEditKind.CreateVirtualDisk);
+        Assert.NotNull(createVdisk.AllocatedOsDiskId);
+        steps.Add(new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            createVdisk.AllocatedOsDiskId!,
+            Name: "VolumeA",
+            FileSystem: "NTFS",
+            AllocationUnitSize: 65536,
+            SizeBytes: createVdisk.SizeBytes - (1024L * 1024),
+            AllocatedPartitionId: "sim:partition:auto",
+            AllocatedVolumeId: "sim:volume:auto",
+            PartitionKind: PartitionKind.BasicData));
+
+        var plan = SimulationDraftPlanner.Precheck(created.Document.Snapshot, steps);
+        var applied = service.ApplyPlan(created.Document, plan);
+
+        Assert.True(applied.Succeeded, applied.Error);
+        Assert.Single(applied.Document.Snapshot.VirtualDisks);
+        Assert.Single(applied.Document.Snapshot.Partitions);
+        Assert.Equal("VolumeA", Assert.Single(applied.Document.Snapshot.Volumes).FileSystemLabel);
+    }
+
+    [Fact]
     public void UpdatePoolCannotTurnSingleDiskSimpleTierIntoMirror()
     {
         var service = new SimulationOperationService();

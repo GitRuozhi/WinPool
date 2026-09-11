@@ -1323,6 +1323,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _poolNameBox.Text = pool.FriendlyName;
             var vdisk = _working.VirtualDisks.FirstOrDefault(item =>
                 string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
+            _autoVdiskSwitch.IsOn = isCreateContext;
+            _autoPartitionSwitch.IsOn = vdisk is null;
             _virtualDiskNameBox.Text = vdisk?.FriendlyName ?? pool.FriendlyName;
             var partition = PrimaryPartition(pool.StableId);
             _volumeNameBox.Text = partition is not null
@@ -1813,8 +1815,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         string poolId,
         PoolEditIntent intent)
     {
+        var draftPool = EditWorkspace.IsDraftPool(poolId);
         var appliedPoolId = poolId;
-        if (EditWorkspace.IsDraftPool(poolId))
+        if (draftPool)
         {
             appliedPoolId = steps.FirstOrDefault(item =>
                 item.Kind == SimulationEditKind.CreateTieredPool
@@ -1825,7 +1828,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var createVdisk = steps.FirstOrDefault(item =>
             item.Kind == SimulationEditKind.CreateVirtualDisk
             && item.TargetProviderKey.Equals(appliedPoolId, StringComparison.OrdinalIgnoreCase));
-        if (intent.AutoCreateVirtualDisk
+        if ((!draftPool || intent.AutoCreateVirtualDisk)
             && intent.AutoCreatePartition
             && createVdisk?.AllocatedOsDiskId is not null
             && !steps.Any(item => item.Kind == SimulationEditKind.CreatePartition
@@ -1840,7 +1843,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 SizeBytes: createVdisk.SizeBytes is long virtualDiskSize
                     ? Math.Max(0, virtualDiskSize - (1024L * 1024))
                     : null,
-                OffsetBytes: 1024L * 1024,
                 AllocatedPartitionId: StableIntentObjectId("sim:partition", poolId),
                 AllocatedVolumeId: StableIntentObjectId("sim:volume", poolId),
                 PartitionKind: PartitionKind.BasicData));
@@ -1927,6 +1929,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
         var hasUnapplied = HasUncommittedChanges();
+        var poolOffline = pool is not null
+            && StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]);
 
         UndoButton.IsEnabled = _undoStack.Count > 0;
         RedoButton.IsEnabled = _redoStack.Count > 0;
@@ -1942,10 +1946,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !_outcomeUnknown;
         CreatePoolButton.IsEnabled = simulated
             && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
-        DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false };
+        DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = simulated
             && _formDirty
-            && pool is { IsPrimordial: false } && !EditWorkspace.IsDraftPool(pool.StableId);
+            && pool is { IsPrimordial: false }
+            && !EditWorkspace.IsDraftPool(pool.StableId)
+            && !poolOffline;
 
         var selectedDisk = _working!.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedPoolDiskId);
         var canLayerDisk = simulated
@@ -1955,6 +1961,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !selectedDisk.IsBoot
             && !selectedDisk.IsSystem
             && !IsPhysicalDiskOffline(selectedDisk.StableId)
+            && !poolOffline
             && string.Equals(selectedDisk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase);
         RetireButton.IsEnabled = canLayerDisk && !selectedDisk!.IsRetired;
         HotSpareButton.IsEnabled = canLayerDisk && !selectedDisk!.IsHotSpare;
@@ -1963,7 +1970,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var realVdisk = poolVdisks.FirstOrDefault(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId));
         var canEditPool = simulated
             && pool is { IsPrimordial: false }
-            && !EditWorkspace.IsDraftPool(pool.StableId);
+            && !EditWorkspace.IsDraftPool(pool.StableId)
+            && !poolOffline;
         CreateVdiskButton.IsEnabled = canEditPool
             && realVdisk is null
             && DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD") + DataDiskCount(pool!, "SCM") > 0;
@@ -1973,6 +1981,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var formEnabled = simulated
             && pool is { IsPrimordial: false }
+            && !poolOffline
             && poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)) <= 1;
         ShowHotSpareSwitch.IsEnabled = simulated;
         ShowRetiredSwitch.IsEnabled = simulated;
@@ -2046,8 +2055,22 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _autoPartitionSwitch.IsEnabled = creationContext
             && (!isDraft || _autoVdiskSwitch.IsOn);
 
-        if (!formEnabled || pool is null)
+        if (pool is null)
         {
+            foreach (var group in TierGroups())
+            {
+                group.SizeBox.IsEnabled = false;
+                group.MaximumButton.IsEnabled = false;
+                group.ProvisioningBox.IsEnabled = false;
+                group.ResiliencyBox.IsEnabled = false;
+                group.InterleaveBox.IsEnabled = false;
+                group.CopiesBox.IsEnabled = false;
+                group.FailuresBox.IsEnabled = false;
+                group.ColumnsBox.IsEnabled = false;
+            }
+            _partitionStyleBox.IsEnabled = false;
+            _fileSystemBox.IsEnabled = false;
+            _clusterBox.IsEnabled = false;
             return;
         }
 
@@ -2056,12 +2079,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
             var tierVisible = TierVisible(pool.StableId, group.Media);
-            var sizeEditable = tierVisible && tier is not null && !holdsData;
+            var sizeEditable = formEnabled && tierVisible && tier is not null && !holdsData;
             var specEditable = sizeEditable;
             var maximumBytes = tierVisible && tier is not null ? TierCapacityMaxBytes(group.Media) : 0;
             var maximumSelected = _maximumSizeFields.Contains(MaximumKey(group));
             group.SizeBox.IsEnabled = sizeEditable;
-            group.MaximumButton.IsEnabled = tierVisible
+            group.MaximumButton.IsEnabled = formEnabled
+                && tierVisible
                 && tier is not null
                 && maximumBytes > 0
                 && (!holdsData || maximumSelected || maximumBytes > tier.Size);
@@ -2117,12 +2141,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             vdisk!.StableId,
             isVirtualDisk: true);
         var initialized = hasVdisk && partition is not null;
-        _partitionStyleBox.IsEnabled = canEditPartition || (hasVdisk && !initialized && !holdsData);
+        _partitionStyleBox.IsEnabled = formEnabled
+            && (canEditPartition || (hasVdisk && !initialized && !holdsData));
         var fsEditable = hasVdisk
             ? initialized && !partitionHasData && userPartitions.Count <= 1
             : canEditPartition;
-        _fileSystemBox.IsEnabled = fsEditable;
-        _clusterBox.IsEnabled = fsEditable;
+        _fileSystemBox.IsEnabled = formEnabled && fsEditable;
+        _clusterBox.IsEnabled = formEnabled && fsEditable;
     }
 
     private void ShowHotSpareSwitch_Toggled(object sender, RoutedEventArgs e)

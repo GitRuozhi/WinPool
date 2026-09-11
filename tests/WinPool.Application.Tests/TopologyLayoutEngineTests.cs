@@ -118,7 +118,7 @@ public sealed class TopologyLayoutEngineTests
             + TopologyLayoutEngine.SiblingSpacing;
         var result = TopologyLayoutEngine.Layout(system, sixPixel - 1);
         Assert.Equal(new[] { 0, 1 }, Assert.Single(result.Rows));
-        Assert.Equal(5, result.Children[1].UnitWidth);
+        Assert.Equal(4, result.Children[1].UnitWidth);
         Assert.Equal(5, result.Children[1].UnitHeight);
     }
 
@@ -163,6 +163,22 @@ public sealed class TopologyLayoutEngineTests
         Assert.Equal(3, result.UnitWidth);
         Assert.Equal(7, result.UnitHeight);
         Assert.True(result.PixelWidth <= threeColumns + 8);
+    }
+
+    [Fact]
+    public void NestedFlowBalancesSevenItemsAcrossTwoRows()
+    {
+        var flow = FlowHeader(Enumerable.Range(0, 7).Select(_ => Leaf()).ToArray());
+        var sixColumnWidth = TopologyLayoutEngine.AncestorChrome
+            + (6 * TopologyLayoutEngine.LeafMinWidth)
+            + (5 * TopologyLayoutEngine.SiblingSpacing);
+
+        var result = TopologyLayoutEngine.Layout(flow, sixColumnWidth);
+
+        Assert.Equal(2, result.Rows.Count);
+        Assert.Equal(new[] { 0, 1, 2, 3 }, result.Rows[0]);
+        Assert.Equal(new[] { 4, 5, 6 }, result.Rows[1]);
+        Assert.Equal(4, result.FlowColumns);
     }
 
     [Fact]

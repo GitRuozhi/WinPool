@@ -613,12 +613,13 @@ public static class TopologyLayoutEngine
         var measured = input.Children
             .Select(child => MeasureSubtree(child, columnBudget))
             .ToList();
-        var rows = new List<List<int>>();
-        for (var start = 0; start < n; start += columns)
-        {
-            var count = Math.Min(columns, n - start);
-            rows.Add(Enumerable.Range(start, count).ToList());
-        }
+        // Preserve the row count selected by the existing column-budget
+        // search, then spread consecutive items evenly across those rows.
+        // Only the ranges are needed here; final pixel widths are assigned
+        // later from the real container width.
+        var rows = EqualFillFlowLayout.CreateRowsForColumnCount(n, columns, 1)
+            .Select(row => Enumerable.Range(row.StartIndex, row.Count).ToList())
+            .ToList();
 
         var unitWidth = 1;
         var contentHeight = 0;
@@ -650,7 +651,7 @@ public static class TopologyLayoutEngine
             UnitWidth = unitWidth,
             UnitHeight = (input.ShowHeader ? 1 : 0) + contentHeight,
             PixelWidth = AncestorChrome + innerPixel,
-            FlowColumns = columns,
+            FlowColumns = rows.Count == 0 ? 1 : rows.Max(row => row.Count),
             Rows = rows,
             Children = measured
         };
