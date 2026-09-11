@@ -34,7 +34,7 @@ public static class SimulationLayouts
         b.RawPhysical(5, "RAW-HDD-3", "HDD");
         b.GptEmptyPhysical(6, "GPT-empty-SSD", "SSD");
         b.Primordial(0, 1, 2, 3, 4, 5, 6);
-        return b.Build("建池与初始化", "layout-primordial-ready-v1");
+        return b.Build("建池与初始化", "layout-primordial-ready-v2");
     }
 
     public static StorageSnapshot StandardTiered()
@@ -53,15 +53,15 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 3, 4, 5, 6);
         b.VirtualDisk("vd", "Pool01", "pool", "Mirror", 1, 2, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Pool01");
-        return b.Build("标准两层池", "layout-standard-tiered-v1");
+        return b.Build("标准两层池", "layout-standard-tiered-v2");
     }
 
     public static StorageSnapshot TripleTier()
     {
         var b = new LayoutBuilder("tt");
         b.SystemPhysical(0, "Boot NVMe");
-        b.Disk(1, "Cache-1", "SCM", "pool", size: GibPublic(256));
-        b.Disk(2, "Cache-2", "SCM", "pool", size: GibPublic(256));
+        b.Disk(1, "Cache-1", "SCM", "pool", size: DecimalGigabytes(256));
+        b.Disk(2, "Cache-2", "SCM", "pool", size: DecimalGigabytes(256));
         b.Disk(3, "Perf-1", "SSD", "pool");
         b.Disk(4, "Perf-2", "SSD", "pool");
         b.Disk(5, "Perf-3", "SSD", "pool");
@@ -78,16 +78,16 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 7, 8, 9, 10, 11, 12, 13, 14);
         b.VirtualDisk("vd", "TripleVD", "pool", "Mirror", 1, 2, 20, "cache", "perf", "cap");
         b.OsForVirtualNtfs("vd", "TripleVD");
-        return b.Build("三层池", "layout-triple-tier-v2");
+        return b.Build("三层池", "layout-triple-tier-v3");
     }
 
     public static StorageSnapshot ManyPartitions()
     {
         var b = new LayoutBuilder("mp");
-        b.SystemPhysical(0, "8-partition NVMe", size: GibPublic(2048), extraDataPartitions: 4);
+        b.SystemPhysical(0, "8-partition NVMe", size: DecimalTerabytes(2), extraDataPartitions: 4);
         b.RawPhysical(1, "Empty-HDD", "HDD");
         b.Primordial(0, 1);
-        return b.Build("超多分区系统盘", "layout-tall-system-v2");
+        return b.Build("超多分区系统盘", "layout-tall-system-v3");
     }
 
     public static StorageSnapshot DenseServer()
@@ -114,7 +114,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", Enumerable.Range(9, 28).ToArray());
         b.VirtualDisk("vd", "DataPool", "pool", "Simple", 1, 1, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "DataPool");
-        return b.Build("超多磁盘服务器", "layout-dense-server-v1");
+        return b.Build("超多磁盘服务器", "layout-dense-server-v2");
     }
 
     public static StorageSnapshot PoolWithoutVirtualDisk()
@@ -128,7 +128,7 @@ public static class SimulationLayouts
         b.Disk(5, "HDD-3", "HDD", "pool");
         b.Primordial(0);
         b.Pool("pool", "EmptyPool", 1, 2, 3, 4, 5);
-        return b.Build("空池待建虚拟磁盘", "layout-pool-no-vdisk-v1");
+        return b.Build("空池待建虚拟磁盘", "layout-pool-no-vdisk-v2");
     }
 
     public static StorageSnapshot SingleDiskPool()
@@ -138,7 +138,7 @@ public static class SimulationLayouts
         b.Disk(1, "Solo-SSD", "SSD", "pool");
         b.Primordial(0);
         b.Pool("pool", "SoloPool", 1);
-        return b.Build("单盘池", "layout-single-disk-pool-v1");
+        return b.Build("单盘池", "layout-single-disk-pool-v2");
     }
 
     public static StorageSnapshot SpareAndRetired()
@@ -157,7 +157,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 2, 3, 4);
         b.VirtualDisk("vd", "Data", "pool", "Simple", 1, 1, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Data");
-        return b.Build("热备与退役", "layout-spare-retired-v1");
+        return b.Build("热备与退役", "layout-spare-retired-v2");
     }
 
     public static StorageSnapshot DualVirtualDisk()
@@ -177,7 +177,7 @@ public static class SimulationLayouts
         b.VirtualDisk("vd2", "LogVD", "pool", "Simple", 1, 1, 22);
         b.OsForVirtualNtfs("vd1", "DataVD");
         b.OsForVirtualNtfs("vd2", "LogVD");
-        return b.Build("双虚拟磁盘", "layout-dual-vd-v2");
+        return b.Build("双虚拟磁盘", "layout-dual-vd-v3");
     }
 
     public static StorageSnapshot PartitionEdges()
@@ -189,7 +189,7 @@ public static class SimulationLayouts
         b.MixedFileSystemPhysical(3, "FS-mix-SSD", "SSD");
         b.OfflineNtfsPhysical(4, "Offline-HDD", "HDD");
         b.Primordial(0, 1, 2, 3, 4);
-        return b.Build("分区边界", "layout-partition-edges-v1");
+        return b.Build("分区边界", "layout-partition-edges-v2");
     }
 
     public static StorageSnapshot OtherAndNetwork()
@@ -200,7 +200,7 @@ public static class SimulationLayouts
         b.OtherNtfs(40, "USB-Other");
         b.Network("R", "share-r");
         b.Network("S", "share-s");
-        return b.Build("其它与网络", "layout-other-network-v1");
+        return b.Build("其它与网络", "layout-other-network-v2");
     }
 
     private sealed class LayoutBuilder
@@ -232,7 +232,11 @@ public static class SimulationLayouts
             string usage = "",
             long? size = null)
         {
-            var bytes = size ?? (media == "HDD" ? Gib(4000) : media == "SCM" ? Gib(256) : Gib(1000));
+            var bytes = size ?? (media == "HDD"
+                ? DecimalTerabytes(4)
+                : media == "SCM"
+                    ? DecimalGigabytes(256)
+                    : DecimalTerabytes(1));
             _disks.Add(new PhysicalDiskInfo(
                 Id($"disk:{number:00}"),
                 true,
@@ -263,7 +267,7 @@ public static class SimulationLayouts
 
         public void SystemPhysical(int number, string name, long? size = null, int extraDataPartitions = 0)
         {
-            Disk(number, name, "SSD", "primordial", system: true, size: size ?? Gib(512));
+            Disk(number, name, "SSD", "primordial", system: true, size: size ?? DecimalGigabytes(512));
             var disk = DiskByNumber(number);
             var osId = AddOs(number, disk.FriendlyName, disk.Size, disk.StableId, null, "GPT", system: true, offline: false);
             var offset = Megabyte;
@@ -308,7 +312,7 @@ public static class SimulationLayouts
 
         public void MixedFileSystemPhysical(int number, string name, string media)
         {
-            Disk(number, name, media, "primordial", size: Gib(2000));
+            Disk(number, name, media, "primordial", size: DecimalTerabytes(2));
             var disk = DiskByNumber(number);
             var osId = AddOs(number, disk.FriendlyName, disk.Size, disk.StableId, null, "GPT", false, false);
             var offset = Megabyte;
@@ -637,5 +641,7 @@ public static class SimulationLayouts
         private static long Gib(double value) => checked((long)(value * 1024 * 1024 * 1024));
     }
 
-    private static long GibPublic(double value) => checked((long)(value * 1024 * 1024 * 1024));
+    private static long DecimalGigabytes(long value) => checked(value * 1_000_000_000L);
+
+    private static long DecimalTerabytes(long value) => checked(value * 1_000_000_000_000L);
 }

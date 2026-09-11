@@ -47,6 +47,33 @@ public sealed class SimulationSnapshotAuditorTests
     }
 
     [Fact]
+    public void CuratedPhysicalDisksUseDecimalMarketedCapacities()
+    {
+        var standard = SimulationLayouts.StandardTiered();
+        Assert.Equal(
+            1_000_000_000_000L,
+            standard.PhysicalDisks.Single(disk => disk.FriendlyName == "SSD-1").Size);
+        Assert.Equal(
+            4_000_000_000_000L,
+            standard.PhysicalDisks.Single(disk => disk.FriendlyName == "HDD-1").Size);
+        Assert.Equal(
+            18_000_000_000_000L,
+            standard.StoragePools.Single(pool => pool.FriendlyName == "Pool01").Size);
+        Assert.Equal("931.32 GiB", TopologyProjector.FormatBytes(1_000_000_000_000L));
+
+        var triple = SimulationLayouts.TripleTier();
+        Assert.Equal(
+            256_000_000_000L,
+            triple.PhysicalDisks.Single(disk => disk.FriendlyName == "Cache-1").Size);
+
+        var tall = SimulationLayouts.ManyPartitions();
+        var physical = Assert.Single(tall.PhysicalDisks, disk => disk.IsSystem);
+        var os = Assert.Single(tall.OsDisks, disk => disk.IsSystem);
+        Assert.Equal(2_000_000_000_000L, physical.Size);
+        Assert.Equal(physical.Size, os.Size);
+    }
+
+    [Fact]
     public void TripleTierUsesScmCacheAndManyPartitionDiskHasEightSlices()
     {
         var triple = SimulationLayouts.TripleTier();
