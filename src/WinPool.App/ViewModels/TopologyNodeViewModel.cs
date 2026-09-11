@@ -66,7 +66,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 or StorageUnitKind.VirtualDisk
                 or StorageUnitKind.OsDisk
             && StorageEditRules.TouchesOfflineDisk(snapshot, [unit.StableId]);
-        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit, IsOffline);
+        (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit);
         IsWindowsBacked = ComputeIsWindowsBacked(snapshot, unit);
         var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == unit.StableId);
         IsDragSource = edit?.AllowDiskDrag == true
@@ -130,14 +130,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private static (string Text, bool IsWarning) ComputeBadge(
         WorkspaceViewModel owner,
         StorageSnapshot snapshot,
-        StorageUnitRef unit,
-        bool isOffline)
+        StorageUnitRef unit)
     {
-        if (isOffline)
-        {
-            return (owner.Localization["Offline"], true);
-        }
-
         switch (unit.Kind)
         {
             case StorageUnitKind.PhysicalDisk:
@@ -234,11 +228,16 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public Visibility PendingModificationVisibility =>
         ShowsEditStatus && _hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
 
+    public Visibility OfflineVisibility =>
+        IsOffline ? Visibility.Visible : Visibility.Collapsed;
+
     public string HasStoredDataName => _owner.Localization["StructureHasStoredData"];
 
     public string CannotLeaveName => _owner.Localization["StructureCannotLeave"];
 
     public string PendingModificationName => _owner.Localization["StructurePendingModification"];
+
+    public string OfflineName => _owner.Localization["Offline"];
 
     /// <summary>Call outside layout passes; raises the icon notifications.</summary>
     public void SetPendingModifications(bool value)

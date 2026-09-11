@@ -880,6 +880,58 @@ public sealed class V048SimulationSemanticsTests
         Assert.Contains("unknown", parent.Decision?.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void DiskOfflineStateIsPartOfTheReturnedSimulationDocument()
+    {
+        var service = new SimulationOperationService();
+        var original = Primordial(ssdCount: 1, hddCount: 0);
+
+        var offline = service.Apply(
+            original,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskOffline,
+                "osdisk:ssd0",
+                Offline: true));
+
+        Assert.True(offline.Succeeded, offline.Error);
+        Assert.True(offline.Document.Snapshot.OsDisks.Single().IsOffline);
+        Assert.False(original.Snapshot.OsDisks.Single().IsOffline);
+
+        var online = service.Apply(
+            offline.Document,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskOffline,
+                "osdisk:ssd0",
+                Offline: false));
+
+        Assert.True(online.Succeeded, online.Error);
+        Assert.False(online.Document.Snapshot.OsDisks.Single().IsOffline);
+    }
+
+    [Fact]
+    public void SystemDiskCannotBePersistedAsOffline()
+    {
+        var original = Primordial(ssdCount: 1, hddCount: 0);
+        original = original with
+        {
+            Snapshot = original.Snapshot with
+            {
+                OsDisks = [original.Snapshot.OsDisks.Single() with { IsSystem = true }]
+            }
+        };
+
+        var result = new SimulationOperationService().Apply(
+            original,
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskOffline,
+                "osdisk:ssd0",
+                Offline: true));
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.Document.Snapshot.OsDisks.Single().IsOffline);
+        Assert.Contains("system", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static StorageSystemDocument Primordial(int ssdCount, int hddCount)
     {
         var disks = new List<PhysicalDiskInfo>();

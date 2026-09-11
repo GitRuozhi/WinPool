@@ -366,6 +366,13 @@
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Visibility="{x:Bind ViewModel.HasStoredDataVisibility, Mode=OneWay}"
                     AutomationProperties.Name="{x:Bind ViewModel.HasStoredDataName, Mode=OneWay}" />
+                <FontIcon
+                    x:Name="OfflineMark"
+                    FontSize="12"
+                    Glyph="&#xE7BA;"
+                    Foreground="{StaticResource WinPoolAccentBrush}"
+                    Visibility="{x:Bind ViewModel.OfflineVisibility, Mode=OneWay}"
+                    AutomationProperties.Name="{x:Bind ViewModel.OfflineName, Mode=OneWay}" />
             </StackPanel>
 
             </Grid>

@@ -811,7 +811,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
     }
 
-    private void Online_Click(object sender, RoutedEventArgs e)
+    private async void Online_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
         if (disk is null)
@@ -819,16 +819,16 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        ViewModel.SetTransientDiskOffline(disk.StableId, false);
-        _working = ViewModel.EffectiveActiveSnapshot;
-        ViewModel.NotificationService.PublishInfo(
+        await SubmitAsync(
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskOffline,
+                disk.StableId,
+                Offline: false),
             Text("已联机", "Disk online"),
-            Text("磁盘已在当前会话中联机。", "The disk is online for this app session."),
-            "disk-partition-editor");
-        RefreshAll();
+            Text("磁盘联机状态已写入模拟文档。", "The disk online state was saved to the simulation."));
     }
 
-    private void Offline_Click(object sender, RoutedEventArgs e)
+    private async void Offline_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
         if (disk is null)
@@ -836,13 +836,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        ViewModel.SetTransientDiskOffline(disk.StableId, true);
-        _working = ViewModel.EffectiveActiveSnapshot;
-        ViewModel.NotificationService.PublishInfo(
+        await SubmitAsync(
+            new SimulationOperationRequest(
+                SimulationOperationKind.SetDiskOffline,
+                disk.StableId,
+                Offline: true),
             Text("已脱机", "Disk offline"),
-            Text("磁盘已在当前会话中脱机，所有修改入口已锁定。", "The disk is offline for this app session and all edit actions are locked."),
-            "disk-partition-editor");
-        RefreshAll();
+            Text("磁盘脱机状态已写入模拟文档，所有修改入口已锁定。", "The disk offline state was saved to the simulation and all edit actions are locked."));
     }
 
     private async void Initialize_Click(object sender, RoutedEventArgs e)

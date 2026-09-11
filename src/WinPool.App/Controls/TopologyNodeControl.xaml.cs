@@ -195,6 +195,7 @@ public sealed partial class TopologyNodeControl : UserControl
         StoredDataMark.Foreground = presenceBrush;
         CannotLeaveMark.Foreground = presenceBrush;
         PendingMark.Fill = pendingBrush;
+        OfflineMark.Foreground = pendingBrush;
     }
 
     private void TopologyNodeControl_PointerEntered(object sender, PointerRoutedEventArgs e)

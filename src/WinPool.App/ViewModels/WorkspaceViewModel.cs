@@ -38,7 +38,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private ManageSelectionKey? _selectedSelection;
     private ManageObjectTarget? _selectedTopologyTarget;
     private readonly HashSet<string> _shownFindings = new(StringComparer.Ordinal);
-    private readonly Dictionary<(string DocumentId, string DiskId), bool> _transientDiskOffline = [];
     public const string AddStorageSystemKey = "action:add-storage-system";
     private const string ScanningNotificationKey = "inventory:scanning";
     private const string WorkspacePrepareNotificationKey = "startup:workspace-prepare";
@@ -139,55 +138,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public StorageSnapshot ActiveSnapshot => SelectedSystem.Snapshot;
 
-    public StorageSystemDocument EffectiveActiveDocument => ApplyTransientDiskState(ActiveDocument);
+    public StorageSystemDocument EffectiveActiveDocument => ActiveDocument;
 
-    public StorageSnapshot EffectiveActiveSnapshot => EffectiveActiveDocument.Snapshot;
-
-    public bool IsDiskEffectivelyOffline(string diskId)
-    {
-        var disk = ActiveSnapshot.OsDisks.FirstOrDefault(item =>
-            item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase));
-        return disk is not null
-            && _transientDiskOffline.GetValueOrDefault((ActiveDocument.Id, disk.StableId), disk.IsOffline);
-    }
-
-    public void SetTransientDiskOffline(string diskId, bool offline)
-    {
-        var disk = ActiveSnapshot.OsDisks.FirstOrDefault(item =>
-            item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase));
-        if (disk is null)
-        {
-            return;
-        }
-
-        _transientDiskOffline[(ActiveDocument.Id, disk.StableId)] = offline;
-        OnPropertyChanged(nameof(EffectiveActiveDocument));
-        OnPropertyChanged(nameof(EffectiveActiveSnapshot));
-        RebuildTopology();
-        RebuildObjects(_selectedSelection);
-        BuildDetails();
-        RebuildComparisonColumns();
-        RaiseWorkspaceSelectionChanged();
-    }
-
-    private StorageSystemDocument ApplyTransientDiskState(StorageSystemDocument document)
-    {
-        var changed = false;
-        var osDisks = document.Snapshot.OsDisks.Select(disk =>
-        {
-            if (!_transientDiskOffline.TryGetValue((document.Id, disk.StableId), out var offline)
-                || offline == disk.IsOffline)
-            {
-                return disk;
-            }
-
-            changed = true;
-            return disk with { IsOffline = offline };
-        }).ToArray();
-        return changed
-            ? document with { Snapshot = document.Snapshot with { OsDisks = osDisks } }
-            : document;
-    }
+    public StorageSnapshot EffectiveActiveSnapshot => ActiveSnapshot;
 
     public StorageSnapshot Snapshot =>
         SystemCatalog.Systems.First(x => x.IsLocal).Snapshot;
@@ -218,10 +171,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var id = SelectedSystem.Id;
         SystemCatalog.RemoveSimulation(id);
         await _systemRepository.DeleteSimulationAsync(id, cancellationToken);
-        foreach (var key in _transientDiskOffline.Keys.Where(key => key.DocumentId == id).ToArray())
-        {
-            _transientDiskOffline.Remove(key);
-        }
         SelectedSystem = SystemCatalog.Systems.FirstOrDefault(x => !x.IsLocal)
             ?? SystemCatalog.Systems.First(x => x.IsLocal);
         OnPropertyChanged(nameof(SelectedSystem));
@@ -924,7 +873,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.SimulationDraftPlan plan,
         CancellationToken cancellationToken = default)
     {
-        if (plan.Steps.Any(IsBlockedByTransientOffline))
+        if (plan.Steps.Any(IsBlockedByOfflineDisk))
         {
             return OfflineEditRejected();
         }
@@ -946,7 +895,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.SimulationEditRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (IsBlockedByTransientOffline(request))
+        if (IsBlockedByOfflineDisk(request))
         {
             return OfflineEditRejected();
         }
@@ -964,7 +913,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         return result;
     }
 
-    private bool IsBlockedByTransientOffline(WinPool.Application.SimulationEditRequest request)
+    private bool IsBlockedByOfflineDisk(WinPool.Application.SimulationEditRequest request)
     {
         if (request.Kind is WinPool.Application.SimulationEditKind.SetDiskOffline
             or WinPool.Application.SimulationEditKind.ResetDocument)
@@ -1000,21 +949,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         SimulationEditCommit commit,
         CancellationToken cancellationToken)
     {
-        var persistentOffline = ActiveDocument.Snapshot.OsDisks.ToDictionary(
-            item => item.StableId,
-            item => item.IsOffline,
-            StringComparer.OrdinalIgnoreCase);
-        var document = commit.Document with
-        {
-            Snapshot = commit.Document.Snapshot with
-            {
-                OsDisks = commit.Document.Snapshot.OsDisks
-                    .Select(item => persistentOffline.TryGetValue(item.StableId, out var offline)
-                        ? item with { IsOffline = offline }
-                        : item)
-                    .ToArray()
-            }
-        };
+        var document = commit.Document;
         if (_systemRepository is IStructuredSimulationEditRepository structured)
         {
             await structured.SaveEditAsync(
@@ -1041,7 +976,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public async Task ResetActiveSimulationAsync()
     {
-        var documentId = ActiveDocument.Id;
         var result = await ApplySimulationOperationAsync(
             new WinPool.Application.SimulationEditRequest(
                 WinPool.Application.SimulationEditKind.ResetDocument,
@@ -1051,12 +985,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
-        foreach (var key in _transientDiskOffline.Keys.Where(key => key.DocumentId == documentId).ToArray())
-        {
-            _transientDiskOffline.Remove(key);
-        }
-        OnPropertyChanged(nameof(EffectiveActiveDocument));
-        OnPropertyChanged(nameof(EffectiveActiveSnapshot));
         RebuildTopology();
         RebuildObjects(_selectedSelection);
         BuildDetails();
@@ -1588,7 +1516,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private TopologyNodeViewModel CreateTopologyRoot(StorageSystemDocument document)
     {
-        var projected = _manageProjector.Project(ApplyTransientDiskState(document));
+        var projected = _manageProjector.Project(document);
         var prefix = document.IsLocal
             ? (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
             : (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
@@ -1743,10 +1671,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var document = item.StorageSystemId is null
             ? ActiveDocument
             : SystemCatalog.Find(item.StorageSystemId) ?? ActiveDocument;
-        if (document.Id.Equals(ActiveDocument.Id, StringComparison.OrdinalIgnoreCase))
-        {
-            document = ApplyTransientDiskState(document);
-        }
         if (item.Projection.Id.System != document.SystemId)
         {
             DetailTitle = string.Empty;
