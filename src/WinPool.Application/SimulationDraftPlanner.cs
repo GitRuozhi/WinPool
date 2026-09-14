@@ -433,6 +433,7 @@ public static class SimulationDraftPlanner
         {
             var parentPool = ParentDissolvedPool(committed, step, dissolvedPoolIds);
             var operation = ToOperation(step);
+            IReadOnlyList<string> commandPreview = [];
             StorageRuleDecision decision;
             var failedPrerequisite = parentPool is null
                 ? default
@@ -455,6 +456,7 @@ public static class SimulationDraftPlanner
                     var applied = service.Apply(document, operation);
                     if (applied.Succeeded)
                     {
+                        commandPreview = applied.Commands;
                         document = applied.Document;
                     }
                     else
@@ -501,7 +503,7 @@ public static class SimulationDraftPlanner
                 step,
                 parentPool is null ? createParent : $"dissolve:{parentPool}",
                 decision,
-                CausesDataLoss(committed, step)));
+                CausesDataLoss(committed, step)) { CommandPreview = commandPreview });
         }
 
         var items = new List<SimulationPlanItem>();

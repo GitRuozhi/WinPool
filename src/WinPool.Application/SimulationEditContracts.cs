@@ -84,13 +84,21 @@ public sealed record SimulationPlanItem(
     SimulationEditRequest Request,
     string? ParentId = null,
     StorageRuleDecision? Decision = null,
-    bool CausesDataLoss = false);
+    bool CausesDataLoss = false)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string> CommandPreview { get; init; } = [];
+}
 
 public sealed record SimulationDraftPlan(
     string PlanId,
     IReadOnlyList<SimulationEditRequest> Steps,
     IReadOnlyList<SimulationPlanItem>? Items = null)
 {
+    public SystemId? BaselineSystemId { get; init; }
+    public long? BaselineRevision { get; init; }
+    public string? BaselineInventoryVersion { get; init; }
+
     public bool IsEmpty => Steps.Count == 0;
 
     public IReadOnlyList<SimulationPlanItem> DisplayItems => Items ?? [];

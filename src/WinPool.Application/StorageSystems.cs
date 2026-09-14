@@ -377,100 +377,6 @@ public sealed record SimulationOperationResult(
         new(false, document, error, []);
 }
 
-public static class SimulatedCommandText
-{
-    public static IReadOnlyList<string> Build(SimulationOperationRequest request) => request.Kind switch
-    {
-        SimulationOperationKind.Rename =>
-            [$"Set-StorageObject -FriendlyName '{request.Name}'"],
-        SimulationOperationKind.ChangeDriveLetter =>
-            [$"Set-Partition -NewDriveLetter {TopologyProjector.NormalizeDriveLetter(request.DriveLetter)}"],
-        SimulationOperationKind.FormatPartition =>
-            [$"Format-Volume -FileSystem {request.FileSystem?.Trim().ToUpperInvariant()} -AllocationUnitSize {request.AllocationUnitSize ?? 4096} -Confirm:$false"],
-        SimulationOperationKind.DeletePartition =>
-            ["Remove-Partition -Confirm:$false"],
-        SimulationOperationKind.ConvertDisk =>
-            ["Clear-Disk -RemoveData -Confirm:$false",
-             $"Initialize-Disk -PartitionStyle {request.Name?.Trim().ToUpperInvariant()}"],
-        SimulationOperationKind.SetDiskOffline =>
-            [$"Set-Disk -IsOffline ${(request.Offline == true ? "true" : "false")}"],
-        SimulationOperationKind.OptimizePool =>
-            ["Optimize-StoragePool"],
-        SimulationOperationKind.InitializeDisk =>
-            BuildInitialize(request),
-        SimulationOperationKind.CreatePartition =>
-            BuildCreatePartition(request),
-        SimulationOperationKind.ExtendPartition =>
-            [$"Resize-Partition -Size {FormatSize(request.SizeBytes)}"],
-        SimulationOperationKind.ShrinkPartition =>
-            [$"Resize-Partition -Size {FormatSize(request.SizeBytes)}"],
-        SimulationOperationKind.CreateStoragePool =>
-            [$"New-StoragePool -FriendlyName '{request.Name}' -StorageSubsystemFriendlyName 'Windows Storage*' -PhysicalDisks ({request.MemberDiskIds?.Count ?? 0} disks)"],
-        SimulationOperationKind.CreateVirtualDisk =>
-            [$"New-VirtualDisk -FriendlyName '{request.Name}' -Interleave {request.InterleaveBytes ?? 65536} -ResiliencySettingName {request.Resiliency ?? "Simple"}"],
-        SimulationOperationKind.MovePhysicalDisk =>
-            ["Add-PhysicalDisk / Remove-PhysicalDisk (move between pools)"],
-        SimulationOperationKind.EvictPhysicalDiskFromTiers =>
-            ["Remove-PhysicalDisk from storage tiers; keep the disk in the pool unallocated"],
-        SimulationOperationKind.OptimizeDrive =>
-            [$"Optimize-Volume"],
-        SimulationOperationKind.CreateTieredPool =>
-            [$"New-StoragePool -FriendlyName '{request.Name}'",
-             "New-StorageTier (Performance/Capacity)"],
-        SimulationOperationKind.UpdateStoragePool =>
-            ["Set-StoragePool / Set-StorageTier / Set-VirtualDisk layout fields"],
-        SimulationOperationKind.DissolveStoragePool =>
-            ["Dissolve simulated pool and return member disks to primordial"],
-        SimulationOperationKind.DeleteEmptyStoragePool =>
-            ["Remove empty simulated storage pool"],
-        SimulationOperationKind.DeleteVirtualDisk =>
-            ["Remove-VirtualDisk -Confirm:$false (removes the simulated virtual disk and its partitions)"],
-        SimulationOperationKind.SetDiskUsage =>
-            [$"Set-PhysicalDisk -Usage {(string.IsNullOrWhiteSpace(request.Name) ? "AutoSelect" : request.Name)} (simulated retired / hot-spare layer)"],
-        _ => []
-    };
-
-    private static IReadOnlyList<string> BuildInitialize(SimulationOperationRequest request)
-    {
-        var commands = new List<string>
-        {
-            "Clear-Disk -RemoveData -Confirm:$false",
-            $"Initialize-Disk -PartitionStyle {request.Name?.Trim().ToUpperInvariant()}"
-        };
-        if (request.CreateMsr == true)
-        {
-            commands.Add("New-Partition -Size 16MB -GptType '{e3c9e316-0b5c-4db8-817d-f92df00215ae}'");
-        }
-        return commands;
-    }
-
-    private static IReadOnlyList<string> BuildCreatePartition(SimulationOperationRequest request)
-    {
-        var kind = request.PartitionKind ?? PartitionKind.BasicData;
-        var guid = PartitionTypeId(kind);
-        var commands = new List<string>
-        {
-            $"New-Partition -Size {FormatSize(request.SizeBytes)} -GptType '{guid}'"
-        };
-        if (kind != PartitionKind.MicrosoftReserved)
-        {
-            commands.Add($"Format-Volume -FileSystem {request.FileSystem ?? (kind == PartitionKind.EfiSystem ? "FAT32" : "NTFS")} -AllocationUnitSize {request.AllocationUnitSize ?? 4096} -Confirm:$false");
-        }
-        return commands;
-    }
-
-    internal static string PartitionTypeId(PartitionKind kind) => kind switch
-    {
-        PartitionKind.EfiSystem => "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}",
-        PartitionKind.MicrosoftReserved => "{e3c9e316-0b5c-4db8-817d-f92df00215ae}",
-        PartitionKind.WindowsRecovery => "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}",
-        _ => "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}"
-    };
-
-    private static string FormatSize(long? bytes) =>
-        bytes is null or <= 0 ? "(remaining)" : $"{bytes}";
-}
-
 public sealed class SimulationOperationService : ISimulationOperationService
 {
     public SimulationOperationResult Apply(
@@ -570,7 +476,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     SourceFacts = WinPoolSimulationFacts.ApplyCandidate(document.SourceFacts, document.Snapshot, snapshot, document.SystemId)
                 },
                 string.Empty,
-                SimulatedCommandText.Build(request));
+                SimulationCommandPreview.Build(request, document.Snapshot, snapshot));
         }
         catch (InvalidOperationException ex)
         {
@@ -584,6 +490,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(plan);
+        if ((plan.BaselineSystemId is { } system && system != document.SystemId)
+            || (plan.BaselineRevision is { } revision && revision != document.Revision)
+            || (plan.BaselineInventoryVersion is { } version && !StringComparer.Ordinal.Equals(version, document.InventoryVersion)))
+            return SimulationOperationResult.Failure(document, "The editing baseline changed. Refresh or reconcile the draft before applying it.");
         var current = document;
         var commands = new List<string>();
         foreach (var step in plan.Steps)
@@ -591,7 +501,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             var result = Apply(current, SimulationDraftPlanner.ToOperation(step));
             if (!result.Succeeded)
             {
-                return result;
+                return SimulationOperationResult.Failure(document, result.Error);
             }
 
             current = result.Document;
@@ -1014,7 +924,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             path,
             disk.StableId,
             kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery,
-            SimulatedCommandText.PartitionTypeId(kind));
+            SimulationCommandPreview.PartitionTypeId(kind));
 
         IReadOnlyList<VolumeInfo> volumes = snapshot.Volumes;
         if (format)

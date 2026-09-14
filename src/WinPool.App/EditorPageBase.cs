@@ -16,7 +16,8 @@ namespace WinPool_App;
 public class EditorPageBase : Page
 {
     protected WorkspaceViewModel ViewModel { get; set; } = null!;
-    protected StorageSnapshot _working = StorageSnapshot.Empty("editor");
+    protected SimulationEditingSession EditingSession { get; } = new();
+    protected StorageSnapshot _working { get => EditingSession.Working; set => EditingSession.Working = value; }
 
     protected const double MinTopologyWidth = 320;
     protected const double TopologyWidthMargin = 20;

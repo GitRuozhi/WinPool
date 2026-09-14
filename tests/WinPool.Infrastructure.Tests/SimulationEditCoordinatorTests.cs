@@ -42,7 +42,7 @@ public sealed class SimulationEditCoordinatorTests
         Assert.False(string.IsNullOrWhiteSpace(result.Value.PlanHash));
         Assert.Equal("physical:p1", result.Value.Target.ProviderKey);
         Assert.Equal(result.Value.BeforeRevision + 1, result.Value.AfterRevision);
-        Assert.Contains("Set-StorageObject", Assert.Single(result.Value.SimulatedCommands));
+        Assert.Contains("Set-PhysicalDisk -InputObject $targetPhysicalDisk -NewFriendlyName", Assert.Single(result.Value.SimulatedCommands));
     }
 
     [Fact]

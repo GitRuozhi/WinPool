@@ -765,6 +765,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 {
                     DisplayName = builtin.DisplayName,
                     Snapshot = builtin.Snapshot,
+                    SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = existing.SystemId, Revision = checked((existing.SourceFacts?.Revision ?? 0) + 1) } : null,
                     HardwareReport = builtin.HardwareReport,
                     Jobs = [],
                     Revision = checked(existing.Revision + 1),
@@ -1009,6 +1010,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     {
                         DisplayName = builtin.DisplayName,
                         Snapshot = builtin.Snapshot,
+                        SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = existing.SystemId, Revision = checked((existing.SourceFacts?.Revision ?? 0) + 1) } : null,
                         HardwareReport = builtin.HardwareReport,
                         Jobs = [],
                         Revision = checked(existing.Revision + 1),
@@ -1072,12 +1074,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             {
                 DisplayName = builtin.DisplayName,
                 Snapshot = builtin.Snapshot,
+                SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = document.SystemId, Revision = checked((document.SourceFacts?.Revision ?? 0) + 1) } : null,
                 HardwareReport = builtin.HardwareReport,
                 Jobs = [],
                 UpdatedAt = DateTimeOffset.Now
             },
             string.Empty,
-            ["Reset-SimulationDocument -BuiltIn"]);
+            ["# Internal action: restore the built-in simulation. No Windows command."]);
     }
 
     public bool TrySetExecutionMode(ExecutionMode mode)

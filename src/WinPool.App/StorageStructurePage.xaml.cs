@@ -27,16 +27,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _filling;
     private bool _formDirty;
 
-    // Structural draft history. Every topology drag or structure-button
-    // change commits one step; Save checkpoints the history away.
-    private readonly Stack<EditorDraftState> _undoStack = [];
-    private readonly Stack<EditorDraftState> _redoStack = [];
-    private readonly HashSet<string> _maximumSizeFields = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, PoolEditIntent> _poolIntents = new(StringComparer.OrdinalIgnoreCase);
-    private SimulationDraftPlan? _currentPlan;
-    private string _planBuildError = string.Empty;
-    private bool _outcomeUnknown;
-    private bool _renameInProgress;
+    private Stack<EditorDraftState> _undoStack => EditingSession.UndoStack;
+    private Stack<EditorDraftState> _redoStack => EditingSession.RedoStack;
+    private HashSet<string> _maximumSizeFields => EditingSession.MaximumSizeFields;
+    private Dictionary<string, PoolEditIntent> _poolIntents => EditingSession.PoolIntents;
+    private SimulationDraftPlan? _currentPlan { get => EditingSession.CurrentPlan; set => EditingSession.CurrentPlan = value; }
+    private string _planBuildError { get => EditingSession.PlanBuildError; set => EditingSession.PlanBuildError = value; }
+    private bool _outcomeUnknown { get => EditingSession.OutcomeUnknown; set => EditingSession.OutcomeUnknown = value; }
+    private bool _renameInProgress { get => EditingSession.RenameInProgress; set => EditingSession.RenameInProgress = value; }
 
     private sealed record TierFields(
         string Media,
@@ -52,18 +50,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ComboBox ProvisioningBox,
         List<FrameworkElement> Rows,
         List<int> RowIndices);
-
-    private sealed record PoolEditIntent(
-        bool AutoCreateVirtualDisk,
-        bool AutoCreatePartition,
-        string FileSystem,
-        long AllocationUnitSize,
-        string VolumeName);
-
-    private sealed record EditorDraftState(
-        StorageSnapshot Snapshot,
-        IReadOnlyDictionary<string, PoolEditIntent> PoolIntents,
-        IReadOnlySet<string> MaximumSizeFields);
 
     /// <summary>Reset affordances shown only while a field differs from the
     /// committed state.</summary>
@@ -160,7 +146,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
-        _working = EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot);
+        EditingSession.Bind(ViewModel.SelectedSystem, EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot));
         _undoStack.Clear();
         _redoStack.Clear();
         _poolIntents.Clear();
@@ -455,7 +441,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         else if (ReferenceEquals(field, _volumeNameBox))
         {
             var partition = PrimaryPartition(pool.StableId);
-            var volume = partition is null ? null : ViewModel.ActiveSnapshot.VolumeForPartition(partition.StableId);
+            var volume = partition is null ? null : EditingSession.Baseline.VolumeForPartition(partition.StableId);
             targetId = volume?.StableId;
             currentName = volume?.FileSystemLabel ?? string.Empty;
             draftTarget = volume is null;
@@ -521,71 +507,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
     }
 
-    private void SynchronizeCommittedName(string targetId)
-    {
-        var committed = ViewModel.ActiveSnapshot;
-        _working = SynchronizeCommittedName(_working, committed, targetId);
-        SynchronizeHistoryNames(_undoStack, committed, targetId);
-        SynchronizeHistoryNames(_redoStack, committed, targetId);
-    }
-
-    private static void SynchronizeHistoryNames(
-        Stack<EditorDraftState> stack,
-        StorageSnapshot committed,
-        string targetId)
-    {
-        var states = stack.ToArray();
-        stack.Clear();
-        for (var index = states.Length - 1; index >= 0; index--)
-        {
-            stack.Push(states[index] with
-            {
-                Snapshot = SynchronizeCommittedName(states[index].Snapshot, committed, targetId)
-            });
-        }
-    }
-
-    private static StorageSnapshot SynchronizeCommittedName(
-        StorageSnapshot snapshot,
-        StorageSnapshot committed,
-        string targetId)
-    {
-        var pool = committed.StoragePools.FirstOrDefault(item => item.StableId == targetId);
-        var tier = committed.StorageTiers.FirstOrDefault(item => item.StableId == targetId);
-        var physical = committed.PhysicalDisks.FirstOrDefault(item => item.StableId == targetId);
-        var vdisk = committed.VirtualDisks.FirstOrDefault(item => item.StableId == targetId);
-        var osDisk = committed.OsDisks.FirstOrDefault(item => item.StableId == targetId);
-        var projectedOsDisks = vdisk is null
-            ? osDisk is null ? snapshot.OsDisks : snapshot.OsDisks
-                .Select(item => item.StableId == targetId ? item with { FriendlyName = osDisk.FriendlyName } : item).ToArray()
-            : snapshot.OsDisks
-                .Select(item => item.VirtualDiskStableId == targetId
-                    ? item with { FriendlyName = vdisk.FriendlyName }
-                    : item).ToArray();
-        var volume = committed.Volumes.FirstOrDefault(item => item.StableId == targetId);
-        var partition = committed.Partitions.FirstOrDefault(item => item.StableId == targetId)
-            ?? (volume?.PartitionStableId is string partitionId
-                ? committed.Partitions.FirstOrDefault(item => item.StableId == partitionId)
-                : null);
-        return snapshot with
-        {
-            StoragePools = pool is null ? snapshot.StoragePools : snapshot.StoragePools
-                .Select(item => item.StableId == targetId ? item with { FriendlyName = pool.FriendlyName } : item).ToArray(),
-            StorageTiers = tier is null ? snapshot.StorageTiers : snapshot.StorageTiers
-                .Select(item => item.StableId == targetId ? item with { FriendlyName = tier.FriendlyName } : item).ToArray(),
-            PhysicalDisks = physical is null ? snapshot.PhysicalDisks : snapshot.PhysicalDisks
-                .Select(item => item.StableId == targetId ? item with { FriendlyName = physical.FriendlyName } : item).ToArray(),
-            VirtualDisks = vdisk is null ? snapshot.VirtualDisks : snapshot.VirtualDisks
-                .Select(item => item.StableId == targetId ? item with { FriendlyName = vdisk.FriendlyName } : item).ToArray(),
-            OsDisks = projectedOsDisks,
-            Partitions = partition is null ? snapshot.Partitions : snapshot.Partitions
-                .Select(item => item.StableId == partition.StableId
-                    ? item with { FileSystemLabel = partition.FileSystemLabel }
-                    : item).ToArray(),
-            Volumes = volume is null ? snapshot.Volumes : snapshot.Volumes
-                .Select(item => item.StableId == targetId ? item with { FileSystemLabel = volume.FileSystemLabel } : item).ToArray()
-        };
-    }
+    private void SynchronizeCommittedName(string targetId) =>
+        EditingSession.AcceptRename(ViewModel.SelectedSystem, targetId);
 
     /// <summary>
     /// Commit-time normalization of tier numbers (Enter / focus loss): empty
@@ -853,7 +776,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return null;
         }
 
-        var snapshot = ViewModel.ActiveSnapshot;
+        var snapshot = EditingSession.Baseline;
         if (snapshot.StoragePools.Any(item => item.StableId == stableId))
         {
             return stableId;
@@ -886,7 +809,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var root = EditWorkspace.ProjectPoolWorkspaceRoot(
             _working,
             UnallocatedIgnoreBytes,
-            ViewModel.ActiveSnapshot,
+            EditingSession.Baseline,
             visible);
         var rootViewModel = new TopologyNodeViewModel(
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
@@ -901,7 +824,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ApplyPendingModificationStates(TopologyNodeViewModel root)
     {
-        var committed = ViewModel.ActiveSnapshot;
+        var committed = EditingSession.Baseline;
         var queue = new Queue<TopologyNodeViewModel>();
         queue.Enqueue(root);
         while (queue.Count > 0)
@@ -1162,7 +1085,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 candidate.StableId == sourcePoolId) is { IsPrimordial: false } sourcePoolInfo
             && !EditWorkspace.PoolSupportsStructureModification(_working, sourcePoolInfo.StableId))
         {
-            var committedDisk = ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(
+            var committedDisk = EditingSession.Baseline.PhysicalDisks.FirstOrDefault(
                 item => item.StableId == diskId);
             var wasOriginalMember = committedDisk is not null
                 && string.Equals(
@@ -1500,7 +1423,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private PartitionInfo? CommittedPrimaryPartition(string poolId)
     {
-        var committed = ViewModel.ActiveSnapshot;
+        var committed = EditingSession.Baseline;
         var vdisk = committed.VirtualDisks.FirstOrDefault(item =>
             string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase));
         if (vdisk is null)
@@ -1610,8 +1533,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
     /// </summary>
     private bool HasUncommittedChanges() =>
         _formDirty
-        || EditWorkspace.HasStructuralChanges(_working, ViewModel.ActiveSnapshot)
-        || EditWorkspace.HasAnyPoolPropertyChanges(_working, ViewModel.ActiveSnapshot)
+        || EditWorkspace.HasStructuralChanges(_working, EditingSession.Baseline)
+        || EditWorkspace.HasAnyPoolPropertyChanges(_working, EditingSession.Baseline)
         || HasStoredPartitionIntentChanges();
 
     private bool HasStoredPartitionIntentChanges()
@@ -1643,10 +1566,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         try
         {
             var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
-            var built = SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, projected);
+            var built = SimulationDraftPlanner.Build(EditingSession.Baseline, projected);
             var enriched = built.Steps.Select(EnrichPlanIntent).ToList();
             AppendPartitionIntents(enriched);
-            _currentPlan = SimulationDraftPlanner.Precheck(ViewModel.ActiveSnapshot, enriched);
+            _currentPlan = SimulationDraftPlanner.Precheck(EditingSession.Baseline, enriched);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
         {
@@ -1684,14 +1607,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var children = _currentPlan.DisplayItems.Where(candidate => candidate.ParentId == item.Id).ToArray();
             if (children.Length == 0)
             {
-                PendingActionsPanel.Children.Add(ActionText(item));
+                PendingActionsPanel.Children.Add(ActionDetails(item));
                 continue;
             }
 
             var childPanel = new StackPanel { Spacing = 4, Margin = new Thickness(12, 4, 0, 0) };
+            if (item.CommandPreview.Count > 0) childPanel.Children.Add(CommandDetails(item));
             foreach (var child in children)
             {
-                childPanel.Children.Add(ActionText(child));
+                childPanel.Children.Add(ActionDetails(child));
             }
 
             PendingActionsPanel.Children.Add(new Expander
@@ -1773,21 +1697,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             savedPartition is null ? _volumeNameBox.Text.Trim() : savedPartition.FileSystemLabel);
     }
 
-    private EditorDraftState CaptureDraftState() => new(
-        _working,
-        new Dictionary<string, PoolEditIntent>(_poolIntents, StringComparer.OrdinalIgnoreCase),
-        new HashSet<string>(_maximumSizeFields, StringComparer.OrdinalIgnoreCase));
+    private EditorDraftState CaptureDraftState() => EditingSession.Capture();
 
     private void RestoreDraftState(EditorDraftState state)
     {
-        _working = state.Snapshot;
-        _poolIntents.Clear();
-        foreach (var pair in state.PoolIntents)
-        {
-            _poolIntents[pair.Key] = pair.Value;
-        }
-        _maximumSizeFields.Clear();
-        _maximumSizeFields.UnionWith(state.MaximumSizeFields);
+        EditingSession.Restore(state);
         _formDirty = false;
     }
 
@@ -1880,6 +1794,33 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+    }
+
+    private Expander ActionDetails(SimulationPlanItem item) => new()
+    {
+        Header = ActionText(item), Content = CommandDetails(item),
+        HorizontalAlignment = HorizontalAlignment.Stretch
+    };
+
+    private StackPanel CommandDetails(SimulationPlanItem item)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        var text = item.CommandPreview.Count > 0 ? string.Join("\n\n", item.CommandPreview)
+            : Text("此步骤未通过预检查，没有可用命令。", "This step did not pass precheck; no command is available.");
+        panel.Children.Add(new ScrollViewer
+        {
+            MaxHeight = 320,
+            Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }
+        });
+        var copy = new Button { Content = Text("复制命令预览", "Copy command preview"), IsEnabled = item.CommandPreview.Count > 0 };
+        copy.Click += (_, _) =>
+        {
+            var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            package.SetText(text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+        };
+        panel.Children.Add(copy);
+        return panel;
     }
 
     private TextBlock ActionText(SimulationPlanItem item)
@@ -2271,8 +2212,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             _working = ApplyFormToWorking(_working);
         }
-        _redoStack.Push(CaptureDraftState());
-        RestoreDraftState(_undoStack.Pop());
+        EditingSession.Undo();
+        _formDirty = false;
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         RefreshAll();
@@ -2288,8 +2229,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        _undoStack.Push(CaptureDraftState());
-        RestoreDraftState(_redoStack.Pop());
+        EditingSession.Redo();
+        _formDirty = false;
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         RefreshAll();
@@ -2316,7 +2257,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _maximumSizeFields.Clear();
         _poolIntents.Clear();
         _outcomeUnknown = false;
-        _working = ViewModel.EffectiveActiveSnapshot;
+        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
         _formDirty = false;
         _selectedPoolId = null;
         _selectedPoolDiskId = null;
@@ -2553,9 +2494,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         foreach (var pool in pending.StoragePools.Where(item =>
                      !item.IsPrimordial && !EditWorkspace.IsDraftPool(item.StableId)))
         {
-            if (!EditWorkspace.HasPoolPropertyChanges(pending, ViewModel.ActiveSnapshot, pool.StableId)
-                || !EditWorkspace.PoolHoldsStoredData(ViewModel.ActiveSnapshot, pool.StableId)
-                || !RebuildsTierParameters(pending, ViewModel.ActiveSnapshot, pool.StableId))
+            if (!EditWorkspace.HasPoolPropertyChanges(pending, EditingSession.Baseline, pool.StableId)
+                || !EditWorkspace.PoolHoldsStoredData(EditingSession.Baseline, pool.StableId)
+                || !RebuildsTierParameters(pending, EditingSession.Baseline, pool.StableId))
             {
                 continue;
             }
@@ -2566,7 +2507,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var planned = _currentPlan ?? SimulationDraftPlanner.Build(ViewModel.ActiveSnapshot, pending);
+        var planned = _currentPlan ?? SimulationDraftPlanner.Build(EditingSession.Baseline, pending);
         var blockedItem = planned.DisplayItems.FirstOrDefault(item =>
             item.Decision?.Verdict != StorageRuleVerdict.Allow);
         if (blockedItem is not null)
@@ -2588,12 +2529,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var joiningWithData = pending.PhysicalDisks
             .Where(disk =>
             {
-                var committedDisk = ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(item =>
+                var committedDisk = EditingSession.Baseline.PhysicalDisks.FirstOrDefault(item =>
                     item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
                 return committedDisk is not null
                     && !string.Equals(committedDisk.PoolStableId, disk.PoolStableId, StringComparison.OrdinalIgnoreCase)
                     && !string.IsNullOrEmpty(disk.PoolStableId)
-                    && EditWorkspace.DiskHoldsStoredData(ViewModel.ActiveSnapshot, disk.StableId);
+                    && EditWorkspace.DiskHoldsStoredData(EditingSession.Baseline, disk.StableId);
             })
             .ToArray();
         var warnings = new List<string>();
@@ -2629,7 +2570,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var specialRoleDisks = pending.PhysicalDisks
             .Where(disk =>
             {
-                var committed = ViewModel.ActiveSnapshot.PhysicalDisks.FirstOrDefault(item =>
+                var committed = EditingSession.Baseline.PhysicalDisks.FirstOrDefault(item =>
                     item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
                 return committed is not null
                     && ((committed.IsPageFile && !disk.IsPageFile)
@@ -2659,7 +2600,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var plan = planned;
+        var plan = EditingSession.Prepare(planned);
         if (plan.IsEmpty)
         {
             await ShowMessageAsync(
@@ -2680,7 +2621,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _maximumSizeFields.Clear();
         _poolIntents.Clear();
         _outcomeUnknown = false;
-        _working = ViewModel.EffectiveActiveSnapshot;
+        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
         _selectedPoolId = EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
             ? _working.StoragePools.LastOrDefault(item => !item.IsPrimordial)?.StableId
             : _selectedPoolId;
@@ -2967,7 +2908,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var priorState = CaptureDraftState();
         CaptureSelectedIntent();
         var merged = EditWorkspace.NormalizeTierCapacities(ApplyFormToWorking(_working));
-        var committed = ViewModel.ActiveSnapshot;
+        var committed = EditingSession.Baseline;
         var objectChanged = EditWorkspace.HasPoolPropertyChanges(merged, committed, pool.StableId);
         var tierChanged = objectChanged && RebuildsTierParameters(merged, committed, pool.StableId);
         var hasData = EditWorkspace.PoolHoldsStoredData(committed, pool.StableId);
