@@ -141,4 +141,3 @@ public sealed class V052BugRegressionTests
             new(SimulationEditKind.FormatPartition, target.StableId, FileSystem: "NTFS")).Verdict);
     }
 }
-

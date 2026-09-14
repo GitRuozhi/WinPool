@@ -321,7 +321,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case TextBox box:
                 box.TextChanged += (_, _) =>
                 {
-                    if (!_filling)
+                    if (!_filling && control.IsEnabled && SelectedPool() is { IsPrimordial: false })
                     {
                         var sizeGroup = TierGroups().FirstOrDefault(group => ReferenceEquals(group.SizeBox, box));
                         if (sizeGroup is not null)
@@ -354,7 +354,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case NumberBox number:
                 number.ValueChanged += (_, _) =>
                 {
-                    if (!_filling)
+                    if (!_filling && control.IsEnabled && SelectedPool() is { IsPrimordial: false })
                     {
                         _formDirty = true;
                         UpdateButtonState();
@@ -364,7 +364,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case ComboBox combo when isCombo:
                 combo.SelectionChanged += (_, _) =>
                 {
-                    if (!_filling)
+                    if (!_filling && control.IsEnabled && SelectedPool() is { IsPrimordial: false })
                     {
                         _formDirty = true;
                         UpdateLinkedFields();
@@ -1532,7 +1532,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     /// property saves, form-level partition edits, or plain dirty fields.
     /// </summary>
     private bool HasUncommittedChanges() =>
-        _formDirty
+        (_formDirty && SelectedPool() is { IsPrimordial: false })
         || EditWorkspace.HasStructuralChanges(_working, EditingSession.Baseline)
         || EditWorkspace.HasAnyPoolPropertyChanges(_working, EditingSession.Baseline)
         || HasStoredPartitionIntentChanges();
@@ -1880,7 +1880,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             item.Decision?.Verdict != StorageRuleVerdict.Allow) == true;
         ApplyAllButton.IsEnabled = simulated
             && hasUnapplied
-            && _currentPlan is not null
+            && _currentPlan is { IsEmpty: false }
             && string.IsNullOrWhiteSpace(_planBuildError)
             && !planBlocked
             && !HasInvalidSizeInput()
