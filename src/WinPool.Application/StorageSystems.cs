@@ -84,6 +84,11 @@ public sealed record StorageSystemDocument(
 
     public string? ProvenanceDocumentId { get; init; }
 
+    public WinPoolFacts? SourceFacts { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public WinPoolSystem? Unified => SourceFacts is null ? null : new WinPoolSystem(SourceFacts);
+
     public string InventoryVersion => Snapshot.SnapshotVersion;
 
     public bool IsLocal => Kind == StorageSystemKind.Local;
@@ -91,10 +96,12 @@ public sealed record StorageSystemDocument(
     public StorageSystemDocument AsImportedSimulation(string? displayName = null)
     {
         var sourceDocumentId = Id;
+        var newSystemId = WinPool.Domain.SystemId.New();
         return this with
         {
             Id = $"simulation:{Guid.NewGuid():N}",
-            SystemId = WinPool.Domain.SystemId.New(),
+            SystemId = newSystemId,
+            SourceFacts = SourceFacts?.CopyTo(newSystemId),
             Kind = StorageSystemKind.Simulation,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? DisplayName : displayName.Trim(),
             Revision = 1,
@@ -148,7 +155,11 @@ public static class StorageSystemDocumentSanitizer
                 };
             }).ToArray()
         };
-        return document with { Snapshot = snapshot, HardwareReport = report };
+        return document with
+        {
+            Snapshot = snapshot, HardwareReport = report,
+            SourceFacts = document.SourceFacts is null ? null : WinPoolFactSanitizer.Redact(document.SourceFacts)
+        };
     }
 
     private static bool IsSensitive(HardwareInventoryItemResult item) =>
