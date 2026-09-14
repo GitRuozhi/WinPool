@@ -1,4 +1,4 @@
-using WinPool.Application;
+﻿using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -123,7 +123,6 @@ public sealed class ManageDetailsProjector
                 break;
             }
             case ManageObjectRole.Partition:
-            case ManageObjectRole.Volume:
             {
                 var partition = snapshot.Partitions.First(x => x.StableId == objectId.ProviderKey);
                 title = TopologyProjector.PartitionDisplayName(partition);
@@ -146,6 +145,20 @@ public sealed class ManageDetailsProjector
                 rows.Add(P("Available", TopologyProjector.FormatBytes(partition.SizeRemaining)));
                 rows.Add(P("Health", TopologyProjector.JoinSummary(partition.HealthStatus, partition.OperationalStatus)));
                 rows.Add(P("Path", string.IsNullOrWhiteSpace(partition.Path) ? "—" : partition.Path));
+                break;
+            }
+            case ManageObjectRole.Volume:
+            {
+                var volume = snapshot.Volumes.First(x => x.StableId == objectId.ProviderKey);
+                title = ManageSelectionRules.VolumeDisplayName(volume);
+                var partition = ManageSelectionRules.ResolvePartition(snapshot, objectId.ProviderKey, role);
+                rows.Add(P("Type", partition?.Type ?? "Unknown", ManageValuePresentation.PartitionType));
+                rows.Add(P("FileSystem", string.IsNullOrWhiteSpace(volume.FileSystem) ? "Unknown" : volume.FileSystem));
+                rows.Add(P("AllocationUnit", volume.AllocationUnitSize is { } unit ? TopologyProjector.FormatBytes(unit) : "—"));
+                rows.Add(P("Capacity", TopologyProjector.FormatBytes(volume.Size)));
+                rows.Add(P("Available", TopologyProjector.FormatBytes(volume.SizeRemaining)));
+                rows.Add(P("Health", TopologyProjector.JoinSummary(volume.HealthStatus, volume.OperationalStatus)));
+                rows.Add(P("Path", string.Join("; ", volume.AccessPaths)));
                 break;
             }
             case ManageObjectRole.NetworkDisk:

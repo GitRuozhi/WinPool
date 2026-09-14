@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 
@@ -250,7 +250,6 @@ public sealed class ManageComparisonProjector
                 break;
             }
             case ManageObjectRole.Partition:
-            case ManageObjectRole.Volume:
             {
                 var partition = snapshot.Partitions.First(x => x.StableId == objectId.ProviderKey);
                 rows.Add(P("OwningDisk", PartitionOwnerName(snapshot, partition)));
@@ -273,6 +272,24 @@ public sealed class ManageComparisonProjector
                 rows.Add(P("DriveLetter", Empty(TopologyProjector.NormalizeDriveLetter(partition.DriveLetter))));
                 rows.Add(P("VolumeLabel", Empty(partition.FileSystemLabel.Replace('\0', ' ').Trim())));
                 rows.Add(P("Path", string.IsNullOrWhiteSpace(partition.Path) ? string.Empty : partition.Path));
+                break;
+            }
+            case ManageObjectRole.Volume:
+            {
+                var volume = snapshot.Volumes.First(x => x.StableId == objectId.ProviderKey);
+                var partition = ManageSelectionRules.ResolvePartition(snapshot, objectId.ProviderKey, role);
+                rows.Add(P("OwningDisk", partition is null ? string.Empty : PartitionOwnerName(snapshot, partition)));
+                rows.Add(P("Type", partition?.Type ?? "Unknown", ManageValuePresentation.PartitionType));
+                rows.Add(P("FileSystem", volume.FileSystem));
+                rows.Add(P("AllocationUnit", volume.AllocationUnitSize is { } unit ? TopologyProjector.FormatBytes(unit) : string.Empty));
+                rows.Add(P("Capacity", TopologyProjector.FormatBytes(volume.Size)));
+                rows.Add(P("Available", TopologyProjector.FormatBytes(volume.SizeRemaining)));
+                rows.Add(P("SystemPartition", partition is { IsBoot: true } or { IsSystem: true } ? "✓" : string.Empty));
+                rows.Add(P("PartitionStatus", partition?.OperationalStatus ?? string.Empty));
+                rows.Add(P("StartOffset", partition is null ? string.Empty : TopologyProjector.FormatBytes(partition.Offset)));
+                rows.Add(P("DriveLetter", volume.DriveLetter));
+                rows.Add(P("VolumeLabel", volume.FileSystemLabel));
+                rows.Add(P("Path", string.Join("; ", volume.AccessPaths)));
                 break;
             }
             case ManageObjectRole.NetworkDisk:

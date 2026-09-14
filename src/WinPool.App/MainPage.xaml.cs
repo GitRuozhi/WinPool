@@ -669,8 +669,11 @@ public sealed partial class MainPage : Page
 
     private Task NavigatePartitionAsync()
     {
-        ((MainWindow)App.Window).ShowDiskPartition(
-            ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey);
+        var selected = ViewModel.SelectedWorkspaceItem?.Projection;
+        var target = selected?.Role == ManageObjectRole.Volume
+            ? ManageSelectionRules.ResolvePartition(ViewModel.ActiveDocument.Snapshot, selected.Id.ProviderKey, selected.Role)?.StableId
+            : selected?.Id.ProviderKey;
+        ((MainWindow)App.Window).ShowDiskPartition(target);
         return Task.CompletedTask;
     }
 

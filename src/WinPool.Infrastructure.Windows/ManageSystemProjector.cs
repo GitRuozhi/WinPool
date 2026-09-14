@@ -1,4 +1,4 @@
-using WinPool.Application;
+﻿using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -162,15 +162,13 @@ public sealed class ManageSystemProjector
                 new Dictionary<string, string?> { ["partitionType"] = partition.Type }));
         }
         order = 0;
-        foreach (var partition in OrderPartitions(snapshot)
-                     .Where(x => !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(x.DriveLetter))))
+        foreach (var volume in snapshot.Volumes.OrderBy(x => x.DriveLetter).ThenBy(x => x.FileSystemLabel))
         {
-            result.Add(Item(
-                systemId, partition.StableId, ManageObjectRole.Volume,
-                ManageWorkspaceCategory.Volume,
-                TopologyProjector.PartitionDisplayName(partition),
-                partition.IsStable, partition.OsDiskStableId, order++,
-                new Dictionary<string, string?> { ["partitionType"] = partition.Type }));
+            var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == volume.PartitionStableId);
+            var label = ManageSelectionRules.VolumeDisplayName(volume);
+            result.Add(Item(systemId, volume.StableId, ManageObjectRole.Volume, ManageWorkspaceCategory.Volume,
+                string.IsNullOrWhiteSpace(label) ? volume.StableId : label, volume.IsStable, volume.PartitionStableId, order++,
+                new Dictionary<string, string?> { ["partitionType"] = partition?.Type }));
         }
         foreach (var network in snapshot.NetworkDisks
                      .Where(x => !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(x.DriveLetter)))
@@ -359,7 +357,7 @@ public sealed class ManageSystemProjector
         ManageObjectRole.NetworkDisk => StorageObjectKind.NetworkDisk,
         ManageObjectRole.OsDisk => StorageObjectKind.OsDisk,
         ManageObjectRole.Partition => StorageObjectKind.Partition,
-        ManageObjectRole.Volume => StorageObjectKind.Partition,
+        ManageObjectRole.Volume => StorageObjectKind.Volume,
         ManageObjectRole.NetworkGroup or ManageObjectRole.OtherGroup
             or ManageObjectRole.DirectDiskGroup
             or ManageObjectRole.VirtualDiskGroup => StorageObjectKind.LogicalGroup,

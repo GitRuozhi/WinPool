@@ -1,4 +1,4 @@
-using WinPool.Application;
+﻿using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -32,10 +32,7 @@ public sealed class ManageCommandProjector
         }
 
         var isSimulation = !activeDocument.IsLocal;
-        var localConsistent = activeDocument.IsLocal
-            || activeDocument.SourceHostName?.Equals(
-                Environment.MachineName,
-                StringComparison.OrdinalIgnoreCase) == true;
+        var localConsistent = activeDocument.IsLocal;
         var commands = new List<ManageCommandView>();
         switch (category)
         {
@@ -90,8 +87,7 @@ public sealed class ManageCommandProjector
             case ManageWorkspaceCategory.Partition:
             case ManageWorkspaceCategory.Volume:
             {
-                var partition = activeDocument.Snapshot.Partitions.FirstOrDefault(
-                    item => item.StableId == objectId.ProviderKey);
+                var partition = ManageSelectionRules.ResolvePartition(activeDocument.Snapshot, objectId.ProviderKey, role);
                 var osDisk = partition is null ? null : activeDocument.Snapshot.OsDisks.FirstOrDefault(
                     item => item.StableId == partition.OsDiskStableId);
                 var primary = partition?.Type is "Primary" or "BasicData";
@@ -134,15 +130,13 @@ public sealed class ManageCommandProjector
         var activeSnapshot = activeDocument.Snapshot;
         var localSnapshot = localDocument.Snapshot;
         var activePartition = role is ManageObjectRole.Partition or ManageObjectRole.Volume
-            ? activeSnapshot.Partitions.FirstOrDefault(x => x.StableId == providerKey)
+            ? ManageSelectionRules.ResolvePartition(activeSnapshot, providerKey, role)
             : null;
         var localPartition = activePartition is null
             ? null
             : activeDocument.IsLocal
                 ? activePartition
-                : localSnapshot.Partitions.FirstOrDefault(
-                    x => x.DiskNumber == activePartition.DiskNumber
-                        && x.PartitionNumber == activePartition.PartitionNumber);
+                : null;
 
         PhysicalDiskInfo? localPhysical = null;
         OsDiskInfo? localOsDisk = null;
@@ -159,7 +153,7 @@ public sealed class ManageCommandProjector
                 ? null
                 : activeDocument.IsLocal
                     ? activeOsDisk
-                    : localSnapshot.OsDisks.FirstOrDefault(x => x.Number == activeOsDisk.Number);
+                    : null;
             hasResolvedDisk = localOsDisk is not null;
             localPhysical = localOsDisk?.PhysicalDiskStableId is string physicalId
                 ? localSnapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == physicalId)

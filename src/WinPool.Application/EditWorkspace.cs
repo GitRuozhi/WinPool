@@ -1,4 +1,4 @@
-using WinPool.Domain;
+﻿using WinPool.Domain;
 
 namespace WinPool.Application;
 
@@ -2044,6 +2044,7 @@ public sealed record StructureProblem(
         StorageUnitKind.NetworkDisk => ManageObjectRole.NetworkDisk,
         StorageUnitKind.OsDisk => ManageObjectRole.OsDisk,
         StorageUnitKind.Partition => ManageObjectRole.Partition,
+        StorageUnitKind.Volume => ManageObjectRole.Volume,
         StorageUnitKind.NetworkDiskGroup => ManageObjectRole.NetworkGroup,
         StorageUnitKind.OtherDiskGroup => ManageObjectRole.OtherGroup,
         StorageUnitKind.DirectDiskGroup => ManageObjectRole.DirectDiskGroup,
@@ -2062,7 +2063,7 @@ public sealed record StructureProblem(
         ManageObjectRole.NetworkDisk => StorageObjectKind.NetworkDisk,
         ManageObjectRole.OsDisk => StorageObjectKind.OsDisk,
         ManageObjectRole.Partition => StorageObjectKind.Partition,
-        ManageObjectRole.Volume => StorageObjectKind.Partition,
+        ManageObjectRole.Volume => StorageObjectKind.Volume,
         ManageObjectRole.NetworkGroup or ManageObjectRole.OtherGroup
             or ManageObjectRole.DirectDiskGroup
             or ManageObjectRole.VirtualDiskGroup => StorageObjectKind.LogicalGroup,

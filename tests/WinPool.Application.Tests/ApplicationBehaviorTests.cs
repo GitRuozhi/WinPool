@@ -1,4 +1,4 @@
-namespace WinPool.Application.Tests;
+﻿namespace WinPool.Application.Tests;
 
 public sealed class ApplicationBehaviorTests
 {
@@ -171,8 +171,8 @@ public sealed class ApplicationBehaviorTests
         Assert.False(WinPool.Application.ManageSelectionRules.SameSelection(first, otherSystem));
         Assert.False(WinPool.Application.ManageSelectionRules.SameSelection(first, volume));
         Assert.Equal(
-            WinPool.Application.ManageObjectRole.Partition,
-            WinPool.Application.ManageSelectionRules.TopologyTargetFor(volume).Role);
+            WinPool.Application.ManageObjectRole.Volume,
+            WinPool.Application.ManageSelectionRules.TopologyTargetFor(volume, StorageSnapshot.Empty("empty")).Role);
     }
 
     [Fact]

@@ -249,9 +249,20 @@ public static class ManageSelectionRules
                 && left.Category == right.Category
                 && SameObject(left.Id, right.Id);
 
-    public static ManageObjectTarget TopologyTargetFor(ManageSelectionKey selection) =>
-        selection.Role == ManageObjectRole.Volume
-            ? new ManageObjectTarget(selection.Id, ManageObjectRole.Partition)
+    public static PartitionInfo? ResolvePartition(StorageSnapshot snapshot, string providerKey, ManageObjectRole role)
+    {
+        var key = role == ManageObjectRole.Volume
+            ? snapshot.Volumes.FirstOrDefault(x => x.StableId == providerKey)?.PartitionStableId : providerKey;
+        return snapshot.Partitions.FirstOrDefault(x => x.StableId == key);
+    }
+
+    public static string VolumeDisplayName(VolumeInfo volume) => string.IsNullOrWhiteSpace(volume.DriveLetter)
+        ? string.IsNullOrWhiteSpace(volume.FileSystemLabel) ? volume.StableId : volume.FileSystemLabel
+        : $"{volume.DriveLetter}: {volume.FileSystemLabel}".Trim();
+
+    public static ManageObjectTarget TopologyTargetFor(ManageSelectionKey selection, StorageSnapshot snapshot) =>
+        selection.Role == ManageObjectRole.Volume && ResolvePartition(snapshot, selection.Id.ProviderKey, selection.Role) is { } partition
+            ? new ManageObjectTarget(new StorageObjectId(selection.Id.System, StorageObjectKind.Partition, partition.StableId), ManageObjectRole.Partition)
             : new ManageObjectTarget(selection.Id, selection.Role);
 
     public static ManageWorkspaceCategory CategoryFor(ManageObjectRole role) =>

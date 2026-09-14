@@ -1,4 +1,4 @@
-using WinPool.Application;
+﻿using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -93,7 +93,7 @@ public sealed class ManageNavigationProjector
                 var backing = PartitionBacking(
                     snapshot,
                     systemId,
-                    snapshot.Partitions.FirstOrDefault(x => x.StableId == key));
+                    ManageSelectionRules.ResolvePartition(snapshot, key, origin.Role));
                 return backing is null ? null : RelatedPool(snapshot, systemId, backing);
             }
             default:
@@ -151,7 +151,7 @@ public sealed class ManageNavigationProjector
                 return PartitionBacking(
                     snapshot,
                     systemId,
-                    snapshot.Partitions.FirstOrDefault(x => x.StableId == key));
+                    ManageSelectionRules.ResolvePartition(snapshot, key, origin.Role));
             case ManageObjectRole.StorageTier:
                 return Target(snapshot, systemId,
                     snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.MemberPhysicalDiskIds.FirstOrDefault());
@@ -187,7 +187,7 @@ public sealed class ManageNavigationProjector
             case ManageObjectRole.NetworkDisk:
                 return origin;
             case ManageObjectRole.Volume:
-                return new ManageObjectTarget(origin.Id, ManageObjectRole.Partition);
+                return Target(snapshot, systemId, ManageSelectionRules.ResolvePartition(snapshot, key, origin.Role)?.StableId);
             case ManageObjectRole.PhysicalDisk:
                 return Target(snapshot, systemId, FirstPartitionForPhysicalDisk(snapshot, key));
             case ManageObjectRole.VirtualDisk:
@@ -222,6 +222,7 @@ public sealed class ManageNavigationProjector
         SystemId systemId,
         ManageObjectTarget origin)
     {
+        if (origin.Role == ManageObjectRole.Volume) return origin;
         if (origin.Role == ManageObjectRole.NetworkDisk)
         {
             var network = snapshot.NetworkDisks.FirstOrDefault(
@@ -237,11 +238,9 @@ public sealed class ManageNavigationProjector
         {
             return null;
         }
-        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == target.Id.ProviderKey);
-        return partition is not null
-            && !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(partition.DriveLetter))
-                ? new ManageObjectTarget(target.Id, ManageObjectRole.Volume)
-                : null;
+        var volume = snapshot.Volumes.FirstOrDefault(x => x.PartitionStableId == target.Id.ProviderKey);
+        return volume is null ? null : new ManageObjectTarget(
+            new StorageObjectId(systemId, StorageObjectKind.Volume, volume.StableId), ManageObjectRole.Volume);
     }
 
     private static ManageObjectTarget? Primary(
@@ -274,7 +273,7 @@ public sealed class ManageNavigationProjector
             return PartitionBacking(
                 snapshot,
                 systemId,
-                snapshot.Partitions.FirstOrDefault(x => x.StableId == key));
+                ManageSelectionRules.ResolvePartition(snapshot, key, origin.Role));
         }
         return Target(snapshot, systemId, targetKey);
     }
@@ -349,7 +348,9 @@ public sealed class ManageNavigationProjector
                             ? (StorageObjectKind.OsDisk, ManageObjectRole.OsDisk)
                             : snapshot.Partitions.Any(x => x.StableId == providerKey)
                                 ? (StorageObjectKind.Partition, ManageObjectRole.Partition)
-                                : snapshot.NetworkDisks.Any(x => x.StableId == providerKey)
+                                : snapshot.Volumes.Any(x => x.StableId == providerKey)
+                                    ? (StorageObjectKind.Volume, ManageObjectRole.Volume)
+                                    : snapshot.NetworkDisks.Any(x => x.StableId == providerKey)
                                     ? (StorageObjectKind.NetworkDisk, ManageObjectRole.NetworkDisk)
                                     : providerKey.Equals(
                                         TopologyProjector.NetworkGroupStableId(snapshot),
