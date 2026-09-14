@@ -11,6 +11,7 @@ public interface IStorageInventoryProvider
 public interface IHardwareInventoryProvider
 {
     Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken);
+    Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) => CollectLocalAsync(cancellationToken);
 }
 
 public interface IReadOnlyInventoryCommandRunner

@@ -121,7 +121,7 @@ public sealed class NativeWindowsInventoryProvider : IInventoryProvider
                     : $"mount:{volume.RootPath}";
                 var id = new StorageObjectId(
                     request.SystemId,
-                    StorageObjectKind.Partition,
+                    StorageObjectKind.Volume,
                     HashIdentity(identityMaterial));
                 var properties = new Dictionary<string, string?>
                 {

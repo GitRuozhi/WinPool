@@ -66,7 +66,10 @@ internal sealed class AgentInventoryCoordinator
         await localCaptureGate.WaitAsync(cancellationToken);
         try
         {
-            var document = await manageProvider.CollectLocalAsync(cancellationToken);
+            if (!Enum.IsDefined(request.Purpose)) return Failed(request.CorrelationId, "agent.inventory.invalid_purpose");
+            var document = request.Purpose == CollectionPurpose.Hardware
+                ? await manageProvider.CollectHardwareAsync(cancellationToken)
+                : await manageProvider.CollectLocalAsync(cancellationToken);
             CachePhysicalDeviceIds(document);
             var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
             var provisional = EmbeddedPowerShellInventoryProvider.Project(
@@ -79,7 +82,18 @@ internal sealed class AgentInventoryCoordinator
                 preferredSystemId,
                 cancellationToken);
             var canonicalSystemId = identity.SystemId;
-            sanitized = sanitized with { SystemId = canonicalSystemId };
+            sanitized = sanitized with
+            {
+                SystemId = canonicalSystemId,
+                SourceFacts = sanitized.SourceFacts is null ? null : sanitized.SourceFacts with { SystemId = canonicalSystemId }
+            };
+            var cached = await localDocument.LoadAsync(cancellationToken);
+            if (cached is not null && sanitized.SourceFacts is not null)
+            {
+                var previous = LocalInventoryDocumentCodec.Decode(cached.Document);
+                if (previous.SystemId == canonicalSystemId && previous.SourceFacts is not null)
+                    sanitized = sanitized with { SourceFacts = WinPoolFactRefresh.Merge(previous.SourceFacts, sanitized.SourceFacts) };
+            }
             var projected = EmbeddedPowerShellInventoryProvider.Project(
                 canonicalSystemId,
                 sanitized.Snapshot,

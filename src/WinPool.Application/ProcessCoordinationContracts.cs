@@ -113,7 +113,7 @@ public sealed record CaptureAgentInventoryRequest(
     : AgentRequest(CorrelationId);
 
 public sealed record CaptureAgentManageInventoryRequest(
-    CorrelationId CorrelationId)
+    CorrelationId CorrelationId, CollectionPurpose Purpose = CollectionPurpose.Storage)
     : AgentRequest(CorrelationId);
 
 public sealed record LoadAgentManageInventoryRequest(CorrelationId CorrelationId)

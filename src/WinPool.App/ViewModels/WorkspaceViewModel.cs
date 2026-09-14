@@ -1089,7 +1089,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public async Task ScanAsync()
+    public Task ScanAsync() => ScanCoreAsync(CollectionPurpose.Storage, CancellationToken.None);
+
+    public Task RefreshHardwareAsync(CancellationToken cancellationToken) =>
+        SelectedSystem.IsLocal ? ScanCoreAsync(CollectionPurpose.Hardware, cancellationToken) : Task.CompletedTask;
+
+    private async Task ScanCoreAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
     {
         if (!await _scanGate.WaitAsync(0))
         {
@@ -1105,7 +1110,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var previous = _selectedSelection;
         try
         {
-            var localDocument = await _hardwareInventoryProvider.CollectLocalAsync(CancellationToken.None);
+            var localDocument = purpose == CollectionPurpose.Hardware
+                ? await _hardwareInventoryProvider.CollectHardwareAsync(cancellationToken)
+                : await _hardwareInventoryProvider.CollectLocalAsync(cancellationToken);
             var snapshot = localDocument.Snapshot;
             CommandLog.Log(
                 "inventory",

@@ -9,6 +9,8 @@ namespace WinPool.Infrastructure.Windows;
 
 public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner
 {
+    private readonly CollectionPurpose purpose;
+    public WindowsPowerShellRunner(CollectionPurpose purpose = CollectionPurpose.Hardware) => this.purpose = purpose;
     public const int TimeoutSeconds = 60;
     public static string ExecutablePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.System),
@@ -19,7 +21,8 @@ public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner
     public async Task<ReadOnlyCommandResult> RunInventoryAsync(
         CancellationToken cancellationToken)
     {
-        ReadOnlyStorageCommandPolicy.EnsureSafe(EmbeddedStorageInventoryScript.Source);
+        var command = EmbeddedStorageInventoryScript.ForPurpose(purpose);
+        ReadOnlyStorageCommandPolicy.EnsureSafe(command);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
         using var process = new Process
@@ -54,7 +57,7 @@ public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner
         }
 
         await process.StandardInput.WriteAsync(
-            EmbeddedStorageInventoryScript.Source.AsMemory(),
+            command.AsMemory(),
             timeout.Token);
         process.StandardInput.Close();
         var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
@@ -124,13 +127,18 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
         NumberHandling = JsonNumberHandling.AllowReadingFromString
     };
     private readonly IReadOnlyInventoryCommandRunner _runner;
+    private readonly CollectionPurpose _purpose;
 
-    public WindowsHardwareInventoryProvider(IReadOnlyInventoryCommandRunner? runner = null)
+    public WindowsHardwareInventoryProvider(IReadOnlyInventoryCommandRunner? runner = null, CollectionPurpose purpose = CollectionPurpose.Storage)
     {
-        _runner = runner ?? new WindowsPowerShellRunner();
+        _purpose = purpose;
+        _runner = runner ?? new WindowsPowerShellRunner(purpose);
     }
 
     public static string FixedStorageCommand => EmbeddedStorageInventoryScript.Source;
+
+    public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) =>
+        new WindowsHardwareInventoryProvider(purpose: CollectionPurpose.Hardware).CollectLocalAsync(cancellationToken);
 
     public async Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken)
     {
@@ -158,7 +166,7 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
                 raw,
                 result.StandardError,
                 result.Duration);
-            return new StorageSystemDocument(
+            var document = new StorageSystemDocument(
                 StorageSystemDocument.CurrentSchemaVersion,
                 $"local:{snapshot.Computer.StableId}",
                 StorageSystemKind.Local,
@@ -167,6 +175,8 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
                 report,
                 [],
                 snapshot.ScannedAt);
+            using var parsed = JsonDocument.Parse(result.StandardOutput);
+            return document with { SourceFacts = WinPoolFactCapture.Read(parsed.RootElement, snapshot, document.SystemId, _purpose) };
         }
         catch (JsonException ex)
         {

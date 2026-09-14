@@ -117,13 +117,16 @@ public static class WinPoolFactRefresh
         if (current.SystemId != incoming.SystemId) throw new InvalidOperationException("Collection belongs to another system.");
         if (current.IsSimulation || current.Sources.Any(x => x.Origin is FactOrigin.Simulation or FactOrigin.Import))
             throw new InvalidOperationException("A live collection cannot refresh a simulation or imported system.");
-        static (string, string, CollectionPurpose) Key(WinPoolSource source) => (source.Namespace, source.ClassName, source.Purpose);
+        static (string, string) Key(WinPoolSource source) => (source.Namespace, source.ClassName);
         var oldByKey = current.Sources.GroupBy(Key).ToDictionary(x => x.Key, x => x.Max(s => s.CapturedAt));
         var accepted = incoming.Sources.Where(x => !oldByKey.TryGetValue(Key(x), out var time) || x.CapturedAt > time).ToArray();
         if (accepted.Length == 0) return current;
         var replaceKeys = accepted.Where(x => x.ReadState == FieldReadState.Returned).Select(Key).ToHashSet();
         var removedSourceIds = current.Sources.Where(x => replaceKeys.Contains(Key(x))).Select(x => x.Id).ToHashSet();
-        var acceptedSourceIds = accepted.Select(x => x.Id).ToHashSet();
+        var acceptedSourceIds = accepted.Where(x => x.ReadState == FieldReadState.Returned).Select(x => x.Id).ToHashSet();
+        var replacedObjectIds = current.Objects.Where(x => removedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
+        var acceptedObjectIds = incoming.Objects.Where(x => acceptedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
+        var staleObjectIds = incoming.Objects.Where(x => !acceptedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
         var objects = current.Objects.Where(x => !removedSourceIds.Contains(x.SourceRef))
             .Concat(incoming.Objects.Where(x => acceptedSourceIds.Contains(x.SourceRef))).ToImmutableArray();
         var objectIds = objects.Select(x => x.Id).ToHashSet();
@@ -132,7 +135,11 @@ public static class WinPoolFactRefresh
         var merged = current with
         {
             Revision = checked(current.Revision + 1), Sources = sources, Objects = objects,
-            Relationships = current.Relationships.Concat(incoming.Relationships)
+            Relationships = current.Relationships
+                .Where(x => !replacedObjectIds.Contains(x.FromId) && !replacedObjectIds.Contains(x.ToId))
+                .Concat(incoming.Relationships.Where(x =>
+                    (acceptedObjectIds.Contains(x.FromId) || acceptedObjectIds.Contains(x.ToId))
+                    && !staleObjectIds.Contains(x.FromId) && !staleObjectIds.Contains(x.ToId)))
                 .Where(x => objectIds.Contains(x.FromId) && objectIds.Contains(x.ToId)).Distinct().ToImmutableArray(),
             Identities = current.Identities.Concat(incoming.Identities)
                 .DistinctBy(x => (x.ObjectType, x.SourceIdentity)).ToImmutableArray(),

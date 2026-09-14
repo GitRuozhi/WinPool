@@ -34,7 +34,8 @@ public enum ShellPageKind
     Test,
     Monitor,
     Development,
-    Settings
+    Settings,
+    Hardware
 }
 
 public sealed partial class ShellNavigationItem : ObservableObject

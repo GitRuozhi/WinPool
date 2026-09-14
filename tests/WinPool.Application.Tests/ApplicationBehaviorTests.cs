@@ -617,7 +617,7 @@ public sealed class ApplicationBehaviorTests
             simulation,
             new WinPool.Application.SimulationOperationRequest(
                 WinPool.Application.SimulationOperationKind.Rename,
-                "pool:1",
+                simulation.Snapshot.StoragePools[0].StableId,
                 Name: "Changed"));
 
         Assert.False(rejected.Succeeded);

@@ -12,6 +12,17 @@ public sealed class LocalizationService : ObservableObject
         new Dictionary<string, (string Zh, string En)>(StringComparer.Ordinal)
         {
             ["Manage"] = ("管理", "Manage"),
+            ["Hardware"] = ("硬件", "Hardware"),
+            ["HardwareRefresh"] = ("刷新完整硬件", "Refresh all hardware"),
+            ["HardwareEmpty"] = ("此系统没有已采集的硬件事实。", "This system has no collected hardware facts."),
+            ["HardwareReadOnly"] = ("只读硬件信息", "Read-only hardware information"),
+            ["SourceDetails"] = ("来源详情", "Source details"),
+            ["SourceRawValue"] = ("原值", "Raw value"),
+            ["SourceReturned"] = ("已返回", "Returned"),
+            ["SourceNotCollected"] = ("未采集", "Not collected"),
+            ["SourceUnavailable"] = ("不适用或不提供", "Unavailable"),
+            ["SourceFailed"] = ("读取失败", "Read failed"),
+            ["SourceRedacted"] = ("已脱敏", "Redacted"),
             ["StorageStructure"] = ("存储结构编辑", "Storage structure editor"),
             ["DiskPartition"] = ("磁盘分区编辑", "Disk partition editor"),
             ["DiskActionsSection"] = ("磁盘操作", "Disk actions"),

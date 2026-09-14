@@ -61,6 +61,7 @@ internal sealed class RawPhysicalDisk : RawIdentity
     public bool CanPool { get; set; }
     public string CannotPoolReason { get; set; } = string.Empty;
     public int? DeviceId { get; set; }
+    public string DeviceIdentifier { get; set; } = string.Empty;
     public string FirmwareVersion { get; set; } = string.Empty;
     public string ProvisioningType { get; set; } = string.Empty;
     public string PhysicalLocation { get; set; } = string.Empty;
@@ -105,6 +106,9 @@ internal sealed class RawTier : RawIdentity
 
 internal sealed class RawVirtualDisk : RawIdentity
 {
+    public int? NumberOfDataCopies { get; set; }
+    public int? PhysicalDiskRedundancy { get; set; }
+    public long? AllocatedSize { get; set; }
     public string FriendlyName { get; set; } = string.Empty;
     public string HealthStatus { get; set; } = string.Empty;
     public string OperationalStatus { get; set; } = string.Empty;
@@ -137,6 +141,8 @@ internal sealed class RawOsDisk
 
 internal sealed class RawPartition
 {
+    public long? VolumeSize { get; set; }
+    public string VolumeReadState { get; set; } = "NotCollected";
     public int DiskNumber { get; set; }
     public int PartitionNumber { get; set; }
     public string Guid { get; set; } = string.Empty;
@@ -238,7 +244,8 @@ internal static class RawSnapshotProjector
             x.OperationalStatus,
             string.IsNullOrWhiteSpace(driveLetter) ? x.Path : $"{driveLetter}:\\",
             osDiskMap.GetValueOrDefault(x.DiskNumber),
-            x.IsHidden);
+            x.IsHidden,
+            First(x.GptType, x.MbrType), x.Guid, x.GptType, x.MbrType);
         }).ToList();
 
         var physicalDisks = raw.PhysicalDisks.Select(x =>
@@ -255,7 +262,7 @@ internal static class RawSnapshotProjector
                 (drive?.InterfaceType ?? string.Empty).Trim(),
                 x.ProvisioningType.Trim(),
                 (drive?.PNPDeviceID ?? string.Empty).Trim(),
-                PhysicalDiskUsage.Normalize(x.Usage));
+                PhysicalDiskUsage.Normalize(x.Usage), x.DeviceIdentifier);
         }).ToList();
 
         var pools = raw.StoragePools.Select(x =>
@@ -322,7 +329,8 @@ internal static class RawSnapshotProjector
                 id.Value, id.IsStable, x.FriendlyName, x.HealthStatus, x.OperationalStatus,
                 x.ResiliencySettingName, x.ProvisioningType, x.NumberOfColumns, x.Interleave, x.Size,
                 x.FootprintOnPool, Resolve(poolMap, x.PoolAssociationKey),
-                ResolveMany(tierMap, x.TierAssociationKeys), x.OsDiskNumbers);
+                ResolveMany(tierMap, x.TierAssociationKeys), x.OsDiskNumbers,
+                CapacitySourceKind.Collected, x.NumberOfDataCopies, x.PhysicalDiskRedundancy, x.AllocatedSize);
         }).ToList();
 
         var osDisks = raw.OsDisks.Select(x => new OsDiskInfo(
@@ -391,7 +399,7 @@ internal static class RawSnapshotProjector
                     partitionId,
                     x.FileSystem,
                     x.FileSystemLabel.Replace('\0', ' ').Trim(),
-                    x.Size,
+                    x.VolumeSize ?? 0,
                     x.SizeRemaining,
                     x.AllocationUnitSize,
                     x.HealthStatus,
@@ -496,7 +504,7 @@ internal static class RawSnapshotProjector
 
     internal static string ClassifyPartition(RawPartition partition)
     {
-        var raw = First(partition.Type, partition.GptType, partition.MbrType);
+        var raw = First(partition.GptType, partition.Type, partition.MbrType);
         var normalized = raw.Trim().Trim('{', '}').ToLowerInvariant();
         if (partition.IsSystem && normalized is not "c12a7328-f81f-11d2-ba4b-00a0c93ec93b")
         {

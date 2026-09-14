@@ -236,9 +236,7 @@ public static class LocalInventoryDocumentCodec
     }
 
     /// <summary>
-    /// Cache load must still show the last local inventory when the envelope
-    /// hash or DateTimeOffset offset does not round-trip. Capture stays on
-    /// <see cref="Decode"/>.
+    /// A cache is accepted only through the same integrity checks as a capture.
     /// </summary>
     public static StorageSystemDocument? TryDecodeCached(LocalInventoryDocumentPayload? payload)
     {
@@ -253,20 +251,7 @@ public static class LocalInventoryDocumentCodec
         }
         catch (InvalidDataException)
         {
-        }
-
-        try
-        {
-            var document = JsonSerializer.Deserialize<StorageSystemDocument>(
-                payload.SanitizedJson,
-                JsonOptions);
-            return document is
-            {
-                Kind: StorageSystemKind.Local,
-                SchemaVersion: StorageSystemDocument.CurrentSchemaVersion
-            }
-                ? StorageSystemDocumentSanitizer.RedactSensitiveData(document) with { Revision = 0 }
-                : null;
+            return null;
         }
         catch (JsonException)
         {
@@ -284,12 +269,17 @@ public sealed class AgentBackedHardwareInventoryProvider(IAgentConnection connec
     private readonly IAgentConnection connection =
         connection ?? throw new ArgumentNullException(nameof(connection));
 
-    public async Task<StorageSystemDocument> CollectLocalAsync(
-        CancellationToken cancellationToken)
+    public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken) =>
+        CollectAsync(CollectionPurpose.Storage, cancellationToken);
+
+    public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) =>
+        CollectAsync(CollectionPurpose.Hardware, cancellationToken);
+
+    private async Task<StorageSystemDocument> CollectAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
     {
         var result = await connection.SendAsync(
             new CaptureAgentManageInventoryRequest(
-                CorrelationId.New()),
+                CorrelationId.New(), purpose),
             cancellationToken);
         if (!result.IsSuccess
             || result.Value is not ManageInventoryCaptureResponse response)

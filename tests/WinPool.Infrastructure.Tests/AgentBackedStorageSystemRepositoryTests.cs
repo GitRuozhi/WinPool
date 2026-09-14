@@ -91,7 +91,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
     }
 
     [Fact]
-    public void TryDecodeCachedStillReturnsALocalDocumentWhenTheEnvelopeHashDoesNotMatch()
+    public void TryDecodeCachedRejectsDocumentWhenTheEnvelopeHashDoesNotMatch()
     {
         var document = Document(StorageSystemKind.Local);
         var payload = LocalInventoryDocumentCodec.Encode(document) with
@@ -101,9 +101,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
 
         Assert.Throws<InvalidDataException>(() => LocalInventoryDocumentCodec.Decode(payload));
         var cached = LocalInventoryDocumentCodec.TryDecodeCached(payload);
-        Assert.NotNull(cached);
-        Assert.Equal(document.Id, cached.Id);
-        Assert.Equal(StorageSystemKind.Local, cached.Kind);
+        Assert.Null(cached);
     }
 
     private static StorageSystemDocument Document(StorageSystemKind kind)

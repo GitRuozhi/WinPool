@@ -135,7 +135,7 @@ public sealed class InfrastructureTests
     public async Task RealReadOnlyScanReturnsUsableInventory()
     {
         var provider = new WinPool.Infrastructure.Windows.WindowsHardwareInventoryProvider();
-        var document = await provider.CollectLocalAsync(CancellationToken.None);
+        var document = await provider.CollectHardwareAsync(CancellationToken.None);
         var snapshot = document.Snapshot;
         Assert.NotEmpty(snapshot.PhysicalDisks);
         Assert.NotEmpty(snapshot.StoragePools);
@@ -257,7 +257,7 @@ public sealed class InfrastructureTests
             item => item.Id.Kind == WinPool.Domain.StorageObjectKind.System);
         Assert.Contains(
             result.Value.Objects,
-            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Partition);
+            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Volume);
         Assert.Contains(
             result.Value.Objects,
             item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk

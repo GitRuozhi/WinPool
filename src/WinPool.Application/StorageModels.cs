@@ -96,7 +96,8 @@ public sealed record PhysicalDiskInfo(
     string InterfaceType = "",
     string ProvisioningType = "",
     string PnpDeviceId = "",
-    string Usage = "")
+    string Usage = "",
+    string DeviceIdentifier = "")
 {
     public bool IsRetired => PhysicalDiskUsage.IsRetired(Usage);
 
@@ -150,7 +151,10 @@ public sealed record VirtualDiskInfo(
     string? PoolStableId,
     IReadOnlyList<string> TierStableIds,
     IReadOnlyList<int> OsDiskNumbers,
-    CapacitySourceKind SizeSource = CapacitySourceKind.Collected);
+    CapacitySourceKind SizeSource = CapacitySourceKind.Collected,
+    int? NumberOfDataCopies = null,
+    int? PhysicalDiskRedundancy = null,
+    long? AllocatedSize = null);
 
 public sealed record OsDiskInfo(
     string StableId,
@@ -184,7 +188,10 @@ public sealed record PartitionInfo(
     string Path,
     string? OsDiskStableId,
     bool IsHidden = false,
-    string PartitionTypeId = "");
+    string PartitionTypeId = "",
+    string Guid = "",
+    string GptType = "",
+    string MbrType = "");
 
 public sealed record VolumeInfo(
     string StableId,

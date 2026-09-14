@@ -6,6 +6,29 @@ namespace WinPool.Application.Tests;
 
 public sealed class WinPoolFactsTests
 {
+    [Fact]
+    public void SystemCopyRemapsStorageAndFactsTogetherAndEditsStayInTheCopy()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        var original = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:original",
+            StorageSystemKind.Simulation, "Original", snapshot, HardwareInventoryReport.Empty(DateTimeOffset.Now), [], DateTimeOffset.Now);
+        var copy = original.AsImportedSimulation("Copy");
+        var sourceIds = original.SourceFacts!.Objects.Select(x => x.Id).ToHashSet();
+        Assert.DoesNotContain(copy.SourceFacts!.Objects, x => sourceIds.Contains(x.Id));
+        Assert.All(copy.Snapshot.StoragePools, pool =>
+        {
+            Assert.Contains(copy.SourceFacts.Objects, x => x.Id == pool.StableId);
+            Assert.All(pool.MemberPhysicalDiskIds, id => Assert.Contains(copy.Snapshot.PhysicalDisks, disk => disk.StableId == id));
+        });
+        var target = copy.Snapshot.StoragePools[0].StableId;
+        var edited = new SimulationOperationService().Apply(copy, new(SimulationOperationKind.Rename, target, Name: "Copy changed"));
+        Assert.True(edited.Succeeded);
+        Assert.Equal("Copy changed", edited.Document.Unified!.Objects.Single(x => x.Id == target).DisplayName);
+        Assert.NotEqual("Copy changed", original.Snapshot.StoragePools[0].FriendlyName);
+        Assert.NotSame(original.Snapshot.StoragePools, copy.Snapshot.StoragePools);
+        Assert.NotSame(original.Snapshot.Volumes[0].AccessPaths, copy.Snapshot.Volumes[0].AccessPaths);
+    }
+
     private static readonly SystemId System = SystemId.New();
     private static WinPoolFacts Example(DateTimeOffset time, FieldReadState state = FieldReadState.Returned)
     {

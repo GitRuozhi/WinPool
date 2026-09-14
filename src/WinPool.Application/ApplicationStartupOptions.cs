@@ -12,7 +12,8 @@ public enum ApplicationStartupTarget
     Monitor,
     Development,
     Settings,
-    Welcome
+    Welcome,
+    Hardware
 }
 
 public sealed record ApplicationStartupOptions(

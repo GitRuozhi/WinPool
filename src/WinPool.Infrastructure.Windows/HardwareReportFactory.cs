@@ -389,7 +389,7 @@ internal static class HardwareReportFactory
         values["1205"] = [.. adapters.Select(x => x.IPv6Addresses.FirstOrDefault() ?? string.Empty)];
         values["1206"] = [.. adapters.Select(x => x.MacAddress)];
         values["1207"] = [.. adapters.Select(x => YesNo(x.DefaultGateways.Count > 0))];
-        values["1208"] = [.. adapters.Select(x => YesNo(x.Dhcp.Equals("Enabled", StringComparison.OrdinalIgnoreCase)))];
+        values["1208"] = [.. adapters.Select(x => x.Dhcp is null ? string.Empty : YesNo(x.Dhcp.Equals("Enabled", StringComparison.OrdinalIgnoreCase)))];
         values["1209"] = [.. adapters.Select(x => x.DefaultGateways.FirstOrDefault() ?? string.Empty)];
         values["1210"] = [.. adapters.Select(x => string.Join(", ", x.DnsServers))];
         values["1211"] = [.. adapters.Select(x => x.Status)];

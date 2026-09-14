@@ -307,6 +307,7 @@ public sealed partial class MainWindow : Window
             ApplicationStartupTarget.Monitor => ShellPageKind.Monitor,
             ApplicationStartupTarget.Development => ShellPageKind.Development,
             ApplicationStartupTarget.Settings => ShellPageKind.Settings,
+            ApplicationStartupTarget.Hardware => ShellPageKind.Hardware,
             _ => ShellPageKind.Manage
         });
     }
@@ -564,6 +565,7 @@ public sealed partial class MainWindow : Window
     private void BuildShellNavigation()
     {
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Manage, string.Empty, "\uE80F"));
+        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Hardware, string.Empty, "\uE950"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.StorageStructure, string.Empty, "\uE710"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.DiskPartition, string.Empty, "\uEDA2"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Test, string.Empty, "\uE768"));
@@ -583,7 +585,8 @@ public sealed partial class MainWindow : Window
             (VirtualKey.Number4, ShellPageKind.Test),
             (VirtualKey.Number5, ShellPageKind.Monitor),
             (VirtualKey.Number6, ShellPageKind.Development),
-            (VirtualKey.Number7, ShellPageKind.Settings)
+            (VirtualKey.Number7, ShellPageKind.Settings),
+            (VirtualKey.Number8, ShellPageKind.Hardware)
         };
 
         foreach (var (key, page) in shortcuts)
@@ -607,6 +610,7 @@ public sealed partial class MainWindow : Window
         var keys = new Dictionary<ShellPageKind, string>
         {
             [ShellPageKind.Manage] = "Manage",
+            [ShellPageKind.Hardware] = "Hardware",
             [ShellPageKind.StorageStructure] = "StorageStructure",
             [ShellPageKind.DiskPartition] = "DiskPartition",
             [ShellPageKind.Test] = "Test",
@@ -655,6 +659,9 @@ public sealed partial class MainWindow : Window
 
         switch (page)
         {
+            case ShellPageKind.Hardware:
+                RootFrame.Navigate(typeof(HardwarePage), ViewModel);
+                break;
             case ShellPageKind.StorageStructure:
                 RootFrame.Navigate(
                     typeof(StorageStructurePage),

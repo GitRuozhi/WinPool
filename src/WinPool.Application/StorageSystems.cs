@@ -84,7 +84,8 @@ public sealed record StorageSystemDocument(
 
     public string? ProvenanceDocumentId { get; init; }
 
-    public WinPoolFacts? SourceFacts { get; init; }
+    public WinPoolFacts? SourceFacts { get; init; } = Kind == StorageSystemKind.Simulation
+        ? WinPoolSimulationFacts.Create(Snapshot, InternalStableIdentity.SystemFromDocumentId(Id)) : null;
 
     [System.Text.Json.Serialization.JsonIgnore]
     public WinPoolSystem? Unified => SourceFacts is null ? null : new WinPoolSystem(SourceFacts);
@@ -101,7 +102,9 @@ public sealed record StorageSystemDocument(
         {
             Id = $"simulation:{Guid.NewGuid():N}",
             SystemId = newSystemId,
-            SourceFacts = SourceFacts?.CopyTo(newSystemId),
+            SourceFacts = (SourceFacts ?? WinPoolSimulationFacts.Create(Snapshot, SystemId)).CopyTo(newSystemId),
+            Snapshot = WinPoolSystemCopy.Snapshot(Snapshot, newSystemId),
+            Jobs = [],
             Kind = StorageSystemKind.Simulation,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? DisplayName : displayName.Trim(),
             Revision = 1,
@@ -561,7 +564,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
             return new SimulationOperationResult(
                 true,
-                document with { Snapshot = snapshot, Jobs = jobs, UpdatedAt = DateTimeOffset.Now },
+                document with
+                {
+                    Snapshot = snapshot, Jobs = jobs, UpdatedAt = DateTimeOffset.Now,
+                    SourceFacts = WinPoolSimulationFacts.ApplyCandidate(document.SourceFacts, document.Snapshot, snapshot, document.SystemId)
+                },
                 string.Empty,
                 SimulatedCommandText.Build(request));
         }

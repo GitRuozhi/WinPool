@@ -51,7 +51,7 @@ public sealed record WinPoolSourceField(
 
     public string DisplayValue() => IsRedacted ? "••••" : Value switch
     {
-        null => string.Empty,
+        null => ReadState == FieldReadState.Returned ? "null" : string.Empty,
         { ValueKind: JsonValueKind.Null } => "null",
         { ValueKind: JsonValueKind.String } item => item.GetString() ?? string.Empty,
         { } item => item.GetRawText()
