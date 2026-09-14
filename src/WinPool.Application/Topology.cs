@@ -404,8 +404,7 @@ public static class TopologyProjector
             poolNode.Children.Add(usageNode);
         }
 
-        var directMembers = members.Where(x =>
-            !tierMemberIds.Contains(x.StableId) && !x.IsHotSpare && !x.IsRetired).ToList();
+        var directMembers = snapshot.DirectPoolMembers(pool.StableId);
         if (directMembers.Count > 0)
         {
             var directGroup = new TopologyNode(

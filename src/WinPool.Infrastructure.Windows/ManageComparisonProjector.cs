@@ -143,21 +143,7 @@ public sealed class ManageComparisonProjector
                     x => $"group:direct:{x.StableId}".Equals(
                         objectId.ProviderKey,
                         StringComparison.OrdinalIgnoreCase));
-                var direct = pool is null
-                    ? []
-                    : snapshot.PhysicalDisks
-                        .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
-                        .ToList();
-                var tierMemberIds = snapshot.StorageTiers
-                    .Where(x => x.PoolStableId == pool?.StableId)
-                    .SelectMany(x => x.MemberPhysicalDiskIds)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (pool is not null)
-                {
-                    direct = direct
-                        .Where(x => !tierMemberIds.Contains(x.StableId))
-                        .ToList();
-                }
+                IReadOnlyList<PhysicalDiskInfo> direct = pool is null ? [] : snapshot.DirectPoolMembers(pool.StableId);
                 rows.Add(P(
                     "PoolOwner",
                     pool?.FriendlyName ?? string.Empty));

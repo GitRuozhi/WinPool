@@ -104,14 +104,7 @@ public sealed class ManageSystemProjector
         }
         foreach (var pool in snapshot.StoragePools.Where(x => !x.IsPrimordial))
         {
-            var tierMemberIds = snapshot.StorageTiers
-                .Where(x => x.PoolStableId == pool.StableId)
-                .SelectMany(x => x.MemberPhysicalDiskIds)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var direct = snapshot.PhysicalDisks
-                .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
-                    && !tierMemberIds.Contains(x.StableId))
-                .ToList();
+            var direct = snapshot.DirectPoolMembers(pool.StableId);
             if (direct.Count == 0)
             {
                 continue;

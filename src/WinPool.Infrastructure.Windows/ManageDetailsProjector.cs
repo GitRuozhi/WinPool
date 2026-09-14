@@ -72,14 +72,7 @@ public sealed class ManageDetailsProjector
                 {
                     break;
                 }
-                var tierMemberIds = snapshot.StorageTiers
-                    .Where(x => x.PoolStableId == pool.StableId)
-                    .SelectMany(x => x.MemberPhysicalDiskIds)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var direct = snapshot.PhysicalDisks
-                    .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
-                        && !tierMemberIds.Contains(x.StableId))
-                    .ToList();
+                var direct = snapshot.DirectPoolMembers(pool.StableId);
                 rows.Add(P("Type", pool is not null && snapshot.UnknownTierMembershipPools.Contains(pool.StableId) ? "Membership unknown" : "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
                 rows.Add(P("Capacity", TopologyProjector.FormatBytes(direct.Sum(x => x.Size))));
                 rows.Add(P("Members", direct.Count.ToString()));

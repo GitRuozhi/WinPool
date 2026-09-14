@@ -1,4 +1,4 @@
-﻿using WinPool.Application;
+using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -315,14 +315,7 @@ public sealed class ManageNavigationProjector
         {
             return null;
         }
-        var tierMemberIds = snapshot.StorageTiers
-            .Where(x => x.PoolStableId == poolStableId)
-            .SelectMany(x => x.MemberPhysicalDiskIds)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return snapshot.PhysicalDisks
-            .Where(x => x.PoolStableId == poolStableId && !tierMemberIds.Contains(x.StableId))
-            .Select(x => x.StableId)
-            .FirstOrDefault();
+        return snapshot.DirectPoolMembers(poolStableId).FirstOrDefault()?.StableId;
     }
 
     private static ManageObjectTarget? Target(

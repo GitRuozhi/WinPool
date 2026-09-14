@@ -1023,17 +1023,7 @@ public sealed record StructureProblem(
         StorageSnapshot snapshot,
         StorageSnapshot committed)
     {
-        var tierMemberIds = snapshot.StorageTiers
-            .Where(item => item.PoolStableId == pool.StableId)
-            .SelectMany(item => item.MemberPhysicalDiskIds)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        // Role disks always belong to their simulated layer, which is drawn
-        // whenever it holds disks; they never appear here.
-        var directMembers = members
-            .Where(item => !tierMemberIds.Contains(item.StableId)
-                && !item.IsRetired
-                && !item.IsHotSpare)
-            .ToList();
+        var directMembers = snapshot.DirectPoolMembers(pool.StableId);
         if (directMembers.Count == 0)
         {
             return;

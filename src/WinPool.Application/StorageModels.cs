@@ -280,6 +280,16 @@ public sealed record StorageSnapshot(
     public IReadOnlyList<string> UnknownTierMembershipPools { get; init; } = [];
     public string DirectGroupName(string poolId) => UnknownTierMembershipPools.Contains(poolId) ? "Membership unknown" : "Unallocated";
 
+    public IReadOnlyList<PhysicalDiskInfo> DirectPoolMembers(string poolId)
+    {
+        var pool = StoragePools.FirstOrDefault(x => x.StableId == poolId);
+        if (pool is null) return [];
+        var assigned = StorageTiers.Where(x => x.PoolStableId == poolId)
+            .SelectMany(x => x.MemberPhysicalDiskIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return PhysicalDisks.Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
+            && !assigned.Contains(x.StableId) && !x.IsHotSpare && !x.IsRetired).ToArray();
+    }
+
     public static StorageSnapshot Empty(string computerName) =>
         new(
             CurrentSchemaVersion,
@@ -331,13 +341,7 @@ public sealed record StorageSnapshot(
 
         var directDiskGroupPool = StoragePools.FirstOrDefault(pool =>
             stableId.Equals($"group:direct:{pool.StableId}", StringComparison.OrdinalIgnoreCase)
-            && PhysicalDisks.Any(disk =>
-                pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)
-                && !StorageTiers.Any(tier =>
-                    tier.PoolStableId == pool.StableId
-                    && tier.MemberPhysicalDiskIds.Contains(
-                        disk.StableId,
-                        StringComparer.OrdinalIgnoreCase))));
+            && DirectPoolMembers(pool.StableId).Count > 0);
         if (directDiskGroupPool is not null)
         {
             return new StorageUnitRef(

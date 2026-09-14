@@ -1,10 +1,20 @@
-﻿using WinPool.Application;
+using WinPool.Application;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
 
 public sealed class ManageSystemProjectorTests
 {
+    [Fact]
+    public void SpecialRoleDisksAreNotDuplicatedInUnallocatedWorkspaceGroup()
+    {
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:groups",
+            StorageSystemKind.Simulation, "Groups", SimulationLayouts.SpareAndRetired(), [], DateTimeOffset.UtcNow);
+        var projection = new ManageSystemProjector().Project(document);
+        Assert.DoesNotContain(projection.WorkspaceObjects, x => x.Role == ManageObjectRole.DirectDiskGroup);
+        Assert.DoesNotContain(Flatten(projection.Root), x => x.Role == ManageObjectRole.DirectDiskGroup);
+    }
+
     [Fact]
     public void ProjectionPreservesIdentityHierarchyAndOccurrenceKeys()
     {
