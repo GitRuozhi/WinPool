@@ -33,28 +33,34 @@ public sealed class WinPoolFactsPersistenceTests
     }
 
     [Fact]
-    public void ActualDocumentCodecPreservesSourceValuesAndRedactsUnknownExtensionStrings()
+    public void ActualDocumentCodecPreservesOrdinaryStringsAndRedactsHardwareIdentifiers()
     {
         var system = SystemId.New();
         var time = DateTimeOffset.UtcNow;
         var source = new WinPoolSource("source", FactOrigin.Simulation, "WinPool", "PhysicalDisk", time, CollectionPurpose.Storage);
         var facts = new WinPoolFacts(1, system, 1, [source],
             [new("disk", FactObjectType.PhysicalDisk, "source", "opaque", true,
-                [WinPoolSourceField.Returned("Size", ulong.MaxValue, FactValueType.UInt64, "source", "bytes"),
-                 WinPoolSourceField.Returned("SerialNumber", "secret-serial", FactValueType.String, "source"),
-                 WinPoolSourceField.Returned("UnrecognizedVendorProperty", "secret-extension", FactValueType.String, "source")])],
+                   [WinPoolSourceField.Returned("Size", ulong.MaxValue, FactValueType.UInt64, "source", "bytes"),
+                    WinPoolSourceField.Returned("SerialNumber", "secret-serial", FactValueType.String, "source"),
+                    WinPoolSourceField.Returned("ObjectId", "ordinary-storage-id", FactValueType.String, "source"),
+                    WinPoolSourceField.Returned("UnrecognizedVendorProperty", "ordinary-extension", FactValueType.String, "source")])],
             [], [new(FactObjectType.PhysicalDisk, "opaque", "disk")], []) { IsSimulation = true };
         var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:roundtrip",
             StorageSystemKind.Simulation, "Roundtrip", StorageSnapshot.Empty("Example"), HardwareInventoryReport.Empty(time), [], time)
         { SystemId = system, SourceFacts = facts };
         var payload = SimulationDocumentCodec.Encode(document);
-        Assert.DoesNotContain("secret-", payload.SanitizedJson);
+        Assert.DoesNotContain("secret-serial", payload.SanitizedJson);
+        Assert.Contains("ordinary-storage-id", payload.SanitizedJson);
+        Assert.Contains("ordinary-extension", payload.SanitizedJson);
         var restored = SimulationDocumentCodec.Decode(payload);
         var disk = restored.Unified!.Objects.Single();
         Assert.Equal(ulong.MaxValue, disk.Field("Size")!.Value!.Value.GetUInt64());
         Assert.True(disk.Field("SerialNumber")!.IsRedacted);
         Assert.Equal(FieldReadState.Returned, disk.Field("SerialNumber")!.ReadState);
-        Assert.True(disk.Field("UnrecognizedVendorProperty")!.IsRedacted);
+        Assert.False(disk.Field("ObjectId")!.IsRedacted);
+        Assert.Equal("ordinary-storage-id", disk.Field("ObjectId")!.DisplayValue());
+        Assert.False(disk.Field("UnrecognizedVendorProperty")!.IsRedacted);
+        Assert.Equal("ordinary-extension", disk.Field("UnrecognizedVendorProperty")!.DisplayValue());
         Assert.False(facts.Objects[0].Field("SerialNumber")!.IsRedacted);
     }
 }

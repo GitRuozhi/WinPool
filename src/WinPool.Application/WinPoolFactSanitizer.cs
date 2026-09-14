@@ -5,17 +5,9 @@ namespace WinPool.Application;
 
 public static class WinPoolFactSanitizer
 {
-    private static readonly HashSet<string> PublicTextFields = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> HardwareIdentifierFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "FriendlyName", "Name", "Model", "Manufacturer", "Product", "Caption", "Description",
-        "MediaType", "BusType", "Usage", "HealthStatus", "OperationalStatus", "CannotPoolReason",
-        "FileSystem", "FileSystemLabel", "ResiliencySettingName", "ProvisioningType", "ProvisioningTypeDefault",
-        "PartitionStyle", "Type", "GptType", "MbrType", "FirmwareVersion", "DriverVersion", "Version",
-        "BuildNumber", "DisplayVersion", "WindowsProductName", "WindowsVersion", "OsBuild", "UBR",
-        "InterfaceType", "DeviceLocator", "BankLabel", "PartNumber", "Purpose", "Status", "LinkSpeed",
-        "Mode", "ReleaseDate", "SystemType", "MemoryErrorCorrection", "DriveLetter", "PowerPlan",
-        "MUILanguages", "InstalledUICulture", "RegionName", "TimeZoneCaption", "TimeZoneStandardName"
-        , "AccessPaths", "Path", "ProviderName", "ProviderPath", "DeviceId", "PartitionTypeId", "LastBootTime", "LastBootUpTime"
+        "SerialNumber", "VolumeSerialNumber", "PNPDeviceID", "MacAddress"
     };
 
     public static WinPoolFacts Redact(WinPoolFacts facts)
@@ -25,17 +17,17 @@ public static class WinPoolFactSanitizer
         {
             Objects = facts.Objects.Select(item => item with
             {
-                Fields = item.Fields.Select(field => RedactField(item.ObjectType, field)).ToImmutableArray()
+                Fields = item.Fields.Select(RedactField).ToImmutableArray()
             }).ToImmutableArray()
         };
     }
 
-    private static WinPoolSourceField RedactField(FactObjectType type, WinPoolSourceField field)
+    private static WinPoolSourceField RedactField(WinPoolSourceField field)
     {
-        // Unrecognized extension strings are private by default; numeric values retain their type and precision.
+        // Privacy is limited to the serial, PNP and MAC identifiers named by the UI privacy setting.
+        // Names, descriptions, paths, storage object IDs and unknown read-only properties stay visible.
         var sensitive = field.ValueType is FactValueType.String or FactValueType.StringArray
-            && (!PublicTextFields.Contains(field.Name)
-                || (type == FactObjectType.Computer && field.Name is "Name" or "FriendlyName"));
+            && HardwareIdentifierFields.Contains(field.Name);
         return sensitive && !field.IsRedacted && field.Value is not null
             ? field with { Value = null, IsRedacted = true }
             : field;

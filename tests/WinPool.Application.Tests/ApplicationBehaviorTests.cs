@@ -3,6 +3,34 @@
 public sealed class ApplicationBehaviorTests
 {
     [Fact]
+    public void FactSanitizerKeepsSystemNameAndOrdinaryHardwareInformation()
+    {
+        var system = WinPool.Domain.SystemId.New();
+        var source = new WinPool.Application.WinPoolSource(
+            "source", WinPool.Application.FactOrigin.Win32, "root/cimv2", "Win32_ComputerSystem",
+            DateTimeOffset.UtcNow, WinPool.Application.CollectionPurpose.Hardware);
+        var facts = new WinPool.Application.WinPoolFacts(1, system, 0, [source],
+            [new("computer", WinPool.Application.FactObjectType.Computer, source.Id, "opaque", true,
+                   [WinPool.Application.WinPoolSourceField.Returned("Name", "DESKTOP-EXAMPLE", WinPool.Application.FactValueType.String, source.Id),
+                    WinPool.Application.WinPoolSourceField.Returned("Description", "Workstation", WinPool.Application.FactValueType.String, source.Id),
+                    WinPool.Application.WinPoolSourceField.Returned("UniqueId", "storage-object-id", WinPool.Application.FactValueType.String, source.Id),
+                    WinPool.Application.WinPoolSourceField.Returned("SerialNumber", "SERIAL-123", WinPool.Application.FactValueType.String, source.Id),
+                    WinPool.Application.WinPoolSourceField.Returned("PNPDeviceID", "PCI\\VEN_EXAMPLE", WinPool.Application.FactValueType.String, source.Id),
+                    WinPool.Application.WinPoolSourceField.Returned("MacAddress", "00-11-22-33-44-55", WinPool.Application.FactValueType.String, source.Id)])],
+            [], [], []);
+
+        var redacted = WinPool.Application.WinPoolFactSanitizer.Redact(facts);
+
+        var computer = Assert.Single(redacted.Objects);
+        Assert.Equal("DESKTOP-EXAMPLE", computer.Field("Name")!.DisplayValue());
+        Assert.Equal("Workstation", computer.Field("Description")!.DisplayValue());
+        Assert.Equal("storage-object-id", computer.Field("UniqueId")!.DisplayValue());
+        Assert.True(computer.Field("SerialNumber")!.IsRedacted);
+        Assert.True(computer.Field("PNPDeviceID")!.IsRedacted);
+        Assert.True(computer.Field("MacAddress")!.IsRedacted);
+    }
+
+    [Fact]
     public void StandardUserCannotEnterRealMode()
     {
         var controller = new WinPool.Application.ExecutionModeController(WinPool.Domain.PrivilegeState.StandardUser);
