@@ -186,11 +186,15 @@ public sealed class ArchitectureBoundaryTests
             "WinPool-Multi-Edition-Plan-Simplified.md")));
 
         var activePlanPath = Path.Combine(root, "docs", "Plan.md");
-        Assert.True(File.Exists(activePlanPath), "docs/Plan.md");
-        var activePlan = File.ReadAllText(activePlanPath);
-        Assert.Contains("V0.52", activePlan, StringComparison.Ordinal);
-        Assert.Contains("真实存储只读", activePlan, StringComparison.Ordinal);
-        Assert.DoesNotContain("本 Plan 授权真实存储", activePlan, StringComparison.Ordinal);
+        // A completed phase has no active Plan.md; any future active plan remains Chinese.
+        if (File.Exists(activePlanPath))
+            Assert.Matches("[\\u4e00-\\u9fff]", File.ReadAllText(activePlanPath));
+        var completedPlanPath = Path.Combine(root, "docs", "Archive", "V0.52", "Plan.md");
+        Assert.True(File.Exists(completedPlanPath), "docs/Archive/V0.52/Plan.md");
+        var completedPlan = File.ReadAllText(completedPlanPath);
+        Assert.Contains("V0.52", completedPlan, StringComparison.Ordinal);
+        Assert.Contains("真实存储只读", completedPlan, StringComparison.Ordinal);
+        Assert.DoesNotContain("本 Plan 授权真实存储", completedPlan, StringComparison.Ordinal);
 
         var archivedPlan = Path.Combine(root, "docs", "Archive", "V0.48", "Plan.md");
         Assert.True(File.Exists(archivedPlan), "docs/Archive/V0.48/Plan.md");
