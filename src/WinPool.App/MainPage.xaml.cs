@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Text;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -423,9 +423,29 @@ public sealed partial class MainPage : Page
         }
 
         var surface = ViewModel.GetSelectedCommandSurface();
-        return surface is null
-            ? []
-            : surface.Commands.Select(BuildCommandSpec).ToList();
+        var commands = surface is null ? new List<CommandSpec>() : surface.Commands.Select(BuildCommandSpec).ToList();
+        if (SelectedSourceObject() is not null)
+            commands.Add(new(Text("来源详情", "Source details"), "\uE946", true, ShowSourceDetailsAsync));
+        return commands;
+    }
+
+    private WinPoolSystem? SelectedSourceSystem() => ViewModel.SelectedSystem.SourceFacts is { } facts ? new WinPoolSystem(WinPoolFactSanitizer.Redact(facts)) : null;
+
+    private WinPoolObject? SelectedSourceObject() => SelectedSourceSystem()?.Objects.FirstOrDefault(x =>
+        x.Id == ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey
+        || x.Sources.Any(source => source.Id == ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey));
+
+    private async Task ShowSourceDetailsAsync()
+    {
+        var item = SelectedSourceObject();
+        var system = SelectedSourceSystem();
+        if (item is null || system is null) return;
+        await new ContentDialog
+        {
+            XamlRoot = XamlRoot, Title = Text("来源详情", "Source details"), CloseButtonText = ViewModel.Localization["Close"],
+            Content = new ScrollViewer { MaxHeight = 500, Content = new TextBlock
+                { Text = WinPoolSourceDetails.Describe(system, item), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }
+        }.ShowAsync();
     }
 
     private CommandSpec BuildCommandSpec(ManageCommandView command) =>

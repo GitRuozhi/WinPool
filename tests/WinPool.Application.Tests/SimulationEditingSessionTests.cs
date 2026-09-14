@@ -4,7 +4,7 @@ public sealed class SimulationEditingSessionTests
 {
     private static StorageSystemDocument Document() => new(StorageSystemDocument.CurrentSchemaVersion,
         "simulation:session", StorageSystemKind.Simulation, "Session", TestSnapshotFactory.Create(),
-        HardwareInventoryReport.Empty(DateTimeOffset.Now), [], DateTimeOffset.Now);
+        [], DateTimeOffset.Now);
 
     [Fact]
     public void ImmediateRenameSurvivesStructuralUndoRedoAndDiscard()
@@ -17,7 +17,7 @@ public sealed class SimulationEditingSessionTests
         session.MaximumSizeFields.Add(poolId + ":SSD");
         session.PoolIntents[poolId] = new(true, true, "NTFS", 65536, "New volume");
         session.Working = session.Working with { SnapshotVersion = "structural-draft" };
-        var rename = new SimulationOperationService().Apply(document, new(SimulationOperationKind.Rename, poolId, Name: "Committed name"));
+        var rename = new SimulationOperationService().Apply(document, new(SimulationEditKind.Rename, poolId, Name: "Committed name"));
         Assert.True(rename.Succeeded);
         session.AcceptRename(rename.Document with { Revision = document.Revision + 1 }, poolId);
         Assert.True(session.Undo());
@@ -86,7 +86,7 @@ public sealed class SimulationEditingSessionTests
                 ? x with { Size = x.Size + 4294967296 } : x).ToArray()
         };
         var preview = Assert.Single(SimulationCommandPreview.Build(
-            new(SimulationOperationKind.UpdateStoragePool, tier.PoolStableId!), before, after));
+            new(SimulationEditKind.UpdateStoragePool, tier.PoolStableId!), before, after));
         Assert.Contains("requires recreation", preview);
         Assert.DoesNotContain("Resize-StorageTier", preview);
         Assert.DoesNotContain("Resize-VirtualDisk", preview);

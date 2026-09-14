@@ -32,8 +32,8 @@ public sealed class V048SimulationSemanticsTests
         var document = Primordial(ssdCount: 1, hddCount: 0);
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0"],
@@ -49,8 +49,8 @@ public sealed class V048SimulationSemanticsTests
         var document = Primordial(ssdCount: 2, hddCount: 2);
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 VirtualDiskName: "SpaceA",
@@ -93,8 +93,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var existing = service.Apply(
             Primordial(ssdCount: 3, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolOld",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -113,7 +113,7 @@ public sealed class V048SimulationSemanticsTests
         var moveIndex = plan.Steps.ToList().FindIndex(item =>
             item.Kind == SimulationEditKind.MovePhysicalDisk
             && item.TargetProviderKey == "physical:ssd0"
-            && item.Name == primordialId);
+            && item.DestinationGroupId == primordialId);
         var createIndex = plan.Steps.ToList().FindIndex(item => item.Kind == SimulationEditKind.CreateTieredPool);
         Assert.InRange(moveIndex, 0, createIndex - 1);
         Assert.DoesNotContain(plan.DisplayItems, item => item.Decision?.Verdict != StorageRuleVerdict.Allow);
@@ -136,8 +136,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var existing = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolOld",
                 MemberDiskIds: ["physical:ssd0"],
@@ -184,8 +184,8 @@ public sealed class V048SimulationSemanticsTests
     {
         var created = new SimulationOperationService().Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -243,14 +243,13 @@ public sealed class V048SimulationSemanticsTests
             StorageSystemKind.Simulation,
             "Paths",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.UtcNow),
             [],
             DateTimeOffset.UtcNow);
 
         var changed = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.ChangeDriveLetter,
+            new SimulationEditRequest(
+                SimulationEditKind.ChangeDriveLetter,
                 snapshot.Partitions[0].StableId,
                 DriveLetter: "D"));
 
@@ -268,8 +267,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -297,8 +296,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var emptyPool = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -332,8 +331,8 @@ public sealed class V048SimulationSemanticsTests
     {
         var created = new SimulationOperationService().Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -375,8 +374,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var emptyPool = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -416,8 +415,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -457,8 +456,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 1, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0"],
@@ -469,8 +468,8 @@ public sealed class V048SimulationSemanticsTests
 
         var updated = service.Apply(
             created.Document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 pool.StableId,
                 PerformanceResiliency: "Mirror",
                 PerformanceDataCopies: 2,
@@ -486,17 +485,17 @@ public sealed class V048SimulationSemanticsTests
     {
         var result = new SimulationOperationService().Apply(
             Primordial(ssdCount: 1, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.InitializeDisk,
+            new SimulationEditRequest(
+                SimulationEditKind.InitializeDisk,
                 "osdisk:ssd0",
-                Name: "MBR"));
+                PartitionStyle: "MBR"));
         Assert.False(result.Succeeded);
     }
 
     [Fact]
     public void OperationMatrixCoversEveryEditKind()
     {
-        var kinds = Enum.GetValues<SimulationOperationKind>();
+        var kinds = Enum.GetValues<SimulationEditKind>();
         var matrix = StorageEditRules.OperationMatrix();
         Assert.All(kinds, kind => Assert.Contains(matrix, item => item.Kind == kind));
     }
@@ -507,8 +506,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 VirtualDiskName: "SpaceA",
@@ -525,8 +524,8 @@ public sealed class V048SimulationSemanticsTests
 
         var renamed = service.Apply(
             created.Document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 pool.StableId,
                 Name: "PoolRenamed",
                 VirtualDiskName: "SpaceRenamed",
@@ -584,8 +583,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -597,12 +596,12 @@ public sealed class V048SimulationSemanticsTests
         var partition = Assert.Single(created.Document.Snapshot.Partitions);
         var required = checked(partition.Offset + partition.Size);
 
-        var exact = service.Apply(created.Document, new SimulationOperationRequest(
-            SimulationOperationKind.UpdateStoragePool, pool.StableId, PerformanceSizeBytes: required));
+        var exact = service.Apply(created.Document, new SimulationEditRequest(
+            SimulationEditKind.UpdateStoragePool, pool.StableId, PerformanceSizeBytes: required));
         Assert.True(exact.Succeeded, exact.Error);
 
-        var tooSmall = service.Apply(created.Document, new SimulationOperationRequest(
-            SimulationOperationKind.UpdateStoragePool, pool.StableId, PerformanceSizeBytes: required - 1));
+        var tooSmall = service.Apply(created.Document, new SimulationEditRequest(
+            SimulationEditKind.UpdateStoragePool, pool.StableId, PerformanceSizeBytes: required - 1));
         Assert.False(tooSmall.Succeeded);
         Assert.Contains("requires at least", tooSmall.Error, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(created.Document, tooSmall.Document);
@@ -614,8 +613,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -651,13 +650,13 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var poolAResult = service.Apply(
             Primordial(ssdCount: 4, hddCount: 0),
-            new SimulationOperationRequest(SimulationOperationKind.CreateTieredPool, "primordial",
+            new SimulationEditRequest(SimulationEditKind.CreateTieredPool, "primordial",
                 Name: "PoolA", MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
                 PerformanceResiliency: "Mirror", PerformanceDataCopies: 2, CreateVirtualDisk: false));
         Assert.True(poolAResult.Succeeded, poolAResult.Error);
         var poolBResult = service.Apply(
             poolAResult.Document,
-            new SimulationOperationRequest(SimulationOperationKind.CreateTieredPool, "primordial",
+            new SimulationEditRequest(SimulationEditKind.CreateTieredPool, "primordial",
                 Name: "PoolB", MemberDiskIds: ["physical:ssd2", "physical:ssd3"],
                 PerformanceResiliency: "Mirror", PerformanceDataCopies: 2, CreateVirtualDisk: false));
         Assert.True(poolBResult.Succeeded, poolBResult.Error);
@@ -669,7 +668,7 @@ public sealed class V048SimulationSemanticsTests
         var plan = SimulationDraftPlanner.Build(poolBResult.Document.Snapshot, working);
         var move = Assert.Single(plan.Steps, item => item.Kind == SimulationEditKind.MovePhysicalDisk
             && item.TargetProviderKey == "physical:ssd0");
-        Assert.Equal(poolB.StableId, move.Name);
+        Assert.Equal(poolB.StableId, move.DestinationGroupId);
         Assert.Contains("SSD 0", plan.DisplayItems.Single(item => item.Request == move).Title);
         Assert.Contains("PoolB", plan.DisplayItems.Single(item => item.Request == move).Title);
         var applied = service.ApplyPlan(poolBResult.Document, plan);
@@ -684,7 +683,7 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(SimulationOperationKind.CreateTieredPool, "primordial",
+            new SimulationEditRequest(SimulationEditKind.CreateTieredPool, "primordial",
                 Name: "PoolA", VirtualDiskName: "SpaceA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
                 PerformanceResiliency: "Mirror", PerformanceDataCopies: 2,
@@ -717,8 +716,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 VirtualDiskName: "SpaceA",
@@ -735,8 +734,8 @@ public sealed class V048SimulationSemanticsTests
 
         var empty = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolB",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -746,8 +745,8 @@ public sealed class V048SimulationSemanticsTests
         var pool = empty.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
         var withVdisk = service.Apply(
             empty.Document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateVirtualDisk,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateVirtualDisk,
                 pool.StableId,
                 Name: "SpaceB",
                 VolumeName: "DataB",
@@ -763,8 +762,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 VirtualDiskName: "SpaceA",
@@ -776,8 +775,8 @@ public sealed class V048SimulationSemanticsTests
 
         var updated = service.Apply(
             created.Document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 pool.StableId,
                 Name: "StalePoolName",
                 VirtualDiskName: "StaleSpaceName",
@@ -790,7 +789,7 @@ public sealed class V048SimulationSemanticsTests
         var vdisk = Assert.Single(updated.Document.Snapshot.VirtualDisks);
         var renamed = service.Apply(
             updated.Document,
-            new SimulationOperationRequest(SimulationOperationKind.Rename, vdisk.StableId, Name: "SpaceB"));
+            new SimulationEditRequest(SimulationEditKind.Rename, vdisk.StableId, Name: "SpaceB"));
         Assert.True(renamed.Succeeded, renamed.Error);
         Assert.Equal("SpaceB", Assert.Single(renamed.Document.Snapshot.VirtualDisks).FriendlyName);
         Assert.Equal(
@@ -805,8 +804,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var first = service.Apply(
             Primordial(ssdCount: 4, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -815,8 +814,8 @@ public sealed class V048SimulationSemanticsTests
                 CreateVirtualDisk: false));
         var second = service.Apply(
             first.Document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolB",
                 MemberDiskIds: ["physical:ssd2", "physical:ssd3"],
@@ -828,7 +827,7 @@ public sealed class V048SimulationSemanticsTests
 
         var sameName = service.Apply(
             second.Document,
-            new SimulationOperationRequest(SimulationOperationKind.Rename, poolB.StableId, Name: "PoolA"));
+            new SimulationEditRequest(SimulationEditKind.Rename, poolB.StableId, Name: "PoolA"));
 
         Assert.True(sameName.Succeeded, sameName.Error);
         Assert.Equal(2, sameName.Document.Snapshot.StoragePools.Count(item => item.FriendlyName == "PoolA"));
@@ -842,8 +841,8 @@ public sealed class V048SimulationSemanticsTests
         var service = new SimulationOperationService();
         var created = service.Apply(
             Primordial(ssdCount: 2, hddCount: 0),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "primordial",
                 Name: "PoolA",
                 MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
@@ -862,8 +861,8 @@ public sealed class V048SimulationSemanticsTests
         var pool = snapshot.StoragePools.Single(item => !item.IsPrimordial);
         var steps = new List<SimulationEditRequest>
         {
-            new(SimulationEditKind.MovePhysicalDisk, "physical:ssd0", Name: "pool:primordial"),
-            new(SimulationEditKind.MovePhysicalDisk, "physical:ssd1", Name: "pool:primordial"),
+            new(SimulationEditKind.MovePhysicalDisk, "physical:ssd0", DestinationGroupId: "pool:primordial"),
+            new(SimulationEditKind.MovePhysicalDisk, "physical:ssd1", DestinationGroupId: "pool:primordial"),
             new(SimulationEditKind.DeleteEmptyStoragePool, pool.StableId)
         };
 
@@ -889,8 +888,8 @@ public sealed class V048SimulationSemanticsTests
 
         var offline = service.Apply(
             original,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskOffline,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskOffline,
                 "osdisk:ssd0",
                 Offline: true));
 
@@ -900,8 +899,8 @@ public sealed class V048SimulationSemanticsTests
 
         var online = service.Apply(
             offline.Document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskOffline,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskOffline,
                 "osdisk:ssd0",
                 Offline: false));
 
@@ -920,8 +919,8 @@ public sealed class V048SimulationSemanticsTests
 
         var result = new SimulationOperationService().Apply(
             original,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskOffline,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskOffline,
                 "osdisk:ssd0",
                 Offline: true));
 
@@ -981,7 +980,6 @@ public sealed class V048SimulationSemanticsTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.UtcNow),
             [],
             DateTimeOffset.UtcNow);
     }

@@ -61,6 +61,7 @@ public sealed class LocalizationService : ObservableObject
             ["Disk"] = ("磁盘", "Disks"),
             ["Partition"] = ("分区", "Partitions"),
             ["Volume"] = ("卷", "Volumes"),
+            ["Membership unknown"] = ("层归属未知", "Membership unknown"),
             ["UnallocatedLayer"] = ("未划层", "Unallocated"),
             ["VirtualDisks"] = ("虚拟磁盘", "Virtual disks"),
             ["OperationArea"] = ("操作区", "Operations"),

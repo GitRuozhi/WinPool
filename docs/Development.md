@@ -1,6 +1,6 @@
-﻿# WinPool 开发约定
+# WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前磁盘编辑、入口一致性与布局修复状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。当前代码为 V0.51，上一轮 V0.50 修复见[归档](Archive/V0.50-fixes-2/README.md)。当前修复已实施、尚未运行验证。已知限制见 [CHANGELOG](CHANGELOG.md)。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前磁盘编辑、入口一致性与布局修复状态归 `docs/Plan.md`，测试要求归 [Quality](Quality.md)。当前代码为 V0.52。统一数据与模拟编辑升级的验收状态见活动 Plan。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
@@ -20,7 +20,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 依赖保持表现与适配层 → Application → Domain 的现有方向，Execution 与 Inventory 等边界按现有项目引用验证。优先在现有项目内拆分职责，不新增通用引擎项目、DSL、插件体系或公开 SDK。
 
-`TopologyLayoutEngine` 的布局决策归整数单位计划，像素/DPI 只负责最后映射；不把容量业务规则放入布局算法。必须修改布局算法时才读 [布局执行记录](Reference/20260905_统一拓扑布局引擎执行踩坑记录.md)。硬件报告引擎保留 13 类、154 个已定义项目及 Source/Status/Warning 证据；当前范围不要求新增硬件大全页面。
+`TopologyLayoutEngine` 的布局决策归整数单位计划，像素/DPI 只负责最后映射；不把容量业务规则放入布局算法。必须修改布局算法时才读 [布局执行记录](Reference/20260905_统一拓扑布局引擎执行踩坑记录.md)。硬件页按来源对象展示，不以旧 13 类、154 项为数量契约。旧报告工厂和原始快照解释器已退出构建，有效 CIM/WMI 与原生补充读取保留。
 
 ## 存储事实、草稿和操作
 
@@ -30,7 +30,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 | --- | --- |
 | 身份 | 内部稳定 ID、系统 ID 和提供程序定位信息分工明确；盘符、名称、列表顺序、DiskNumber 不能单独作为持久身份。名称变化不得改变身份、关系或目标定位；缺少可靠 ID 时不以名称猜测跨采集关联。保留稳定性/未知标记 |
 | 实体 | PhysicalDisk、StoragePool、StorageTier、VirtualDisk、OS Disk、Partition、Volume 各有明确身份；分区描述几何和分区类型，卷描述文件系统与挂载。无卷的分区也是合法事实 |
-| 关系 | 类型化对象关联是唯一事实源；通用关系图、导航和显示是其派生投影，不各自维护另一套可修改关系 |
+| 关系 | 来源事实中的对象关联是唯一事实源；通用关系图、导航和显示是其派生投影，不各自维护另一套可修改关系 |
 | 显示分组 | 备用/退役/介质分组不冒充真实 StorageTier。推导的关联带来源，不能自动升级为可执行事实 |
 | 未知 | 未采集、读取失败、不支持、否、零、空集合分别按含义表达；不得把缺失状态静默补成健康、可写或无系统角色 |
 | 草稿 | 记录用户意图和基线修订。临时输入不完整不等于允许生成非法模拟文档 |
@@ -56,6 +56,14 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 新增字段按一条链路完成：采集来源 → 原始数据 → 规范化模型 → 规则/模拟 → 持久化与 IPC → 界面/导出 → 往返和缺失值测试。字段的来源、单位、缺失含义和失效条件跟定义就近维护，不再分别维护大型字段副本。
 
+## V0.52 统一事实链路
+
+`WinPoolFacts` 保存带来源、时间、类型、读取状态的原始对象及关联；`WinPoolSystem` 与 `StorageSnapshot` 是只读派生结果。跨来源选值由 `WinPoolSourceDetails` 维护，只有明确等价的字段参与备用或冲突判断。缺少安全字段、关联冲突和数值超范围不能变成允许；普通名称、描述和路径保留，硬件标识按设置边界脱敏。
+
+存储与完整硬件使用独立刷新用途，Agent 串行协调；较旧结果忽略。来源失败保留上次事实及关联时间，成功空集合才移除对象。层成员没有可靠关联时显示归属未知，不按介质相同猜测。
+
+编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
+
 ## 数据与生命周期
 
 标准数据根是 `%LocalAppData%/WinPool`，便携模式使用程序旁可写 `Data`；`storage-location.json` 是定位活动根的启动指针。切换前验证目标，现有租约、单实例和生命周期机制继续保留。
@@ -68,7 +76,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
 
-V0.52 当前实施代码为 SQLite schema 16、IPC 6、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告正文不再写入文档。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。实际产品版本与完整验收状态以活动 Plan 为准。
+V0.52 当前实施代码为 SQLite schema 16、IPC 6、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。实际产品版本与完整验收状态以活动 Plan 为准。
 
 数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；测试使用隔离新根。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、脱敏、冲突检测和故障恢复要求。
 

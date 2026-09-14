@@ -55,6 +55,8 @@ public sealed record InventoryWarning(
     string Message,
     string? StableId = null);
 
+public sealed record StorageFieldIssue(string ObjectId, string FieldName, FieldReadState State, string? Reason);
+
 public sealed record ComputerInfo(
     string StableId,
     string Name,
@@ -274,6 +276,9 @@ public sealed record StorageSnapshot(
     IReadOnlyList<InventoryWarning> Warnings)
 {
     public const int CurrentSchemaVersion = 3;
+    public IReadOnlyList<StorageFieldIssue> FieldIssues { get; init; } = [];
+    public IReadOnlyList<string> UnknownTierMembershipPools { get; init; } = [];
+    public string DirectGroupName(string poolId) => UnknownTierMembershipPools.Contains(poolId) ? "Membership unknown" : "Unallocated";
 
     public static StorageSnapshot Empty(string computerName) =>
         new(
@@ -338,7 +343,7 @@ public sealed record StorageSnapshot(
             return new StorageUnitRef(
                 stableId,
                 StorageUnitKind.DirectDiskGroup,
-                "Unallocated",
+                DirectGroupName(directDiskGroupPool.StableId),
                 true,
                 directDiskGroupPool.StableId);
         }

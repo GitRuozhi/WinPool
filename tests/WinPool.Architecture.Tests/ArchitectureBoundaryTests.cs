@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 using WinPool.Application;
 
 namespace WinPool.Architecture.Tests;
@@ -483,11 +483,11 @@ public sealed class ArchitectureBoundaryTests
             diskPartitionPage,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "SimulationOperationKind.ExtendPartition",
+            "SimulationEditKind.ExtendPartition",
             diskPartitionPage,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "SimulationOperationKind.CreateTieredPool",
+            "SimulationEditKind.CreateTieredPool",
             diskPartitionPage,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -782,7 +782,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>5</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>1</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>2</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)0", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);

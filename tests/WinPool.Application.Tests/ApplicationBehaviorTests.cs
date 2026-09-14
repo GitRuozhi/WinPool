@@ -1,4 +1,4 @@
-﻿namespace WinPool.Application.Tests;
+namespace WinPool.Application.Tests;
 
 public sealed class ApplicationBehaviorTests
 {
@@ -66,41 +66,20 @@ public sealed class ApplicationBehaviorTests
                 snapshot.PhysicalDisks[0] with { MaskedSerialNumber = "SERIAL-123456" }
             ]
         };
-        var raw = System.Text.Json.JsonSerializer.SerializeToElement(new[] { "SERIAL-123456" });
-        var item = new WinPool.Application.HardwareInventoryItemResult(
-            "0803",
-            "Disk",
-            "SerialNumber",
-            "序列号",
-            raw,
-            [
-                new WinPool.Application.CollectorSourceResult(
-                    "test",
-                    WinPool.Application.CollectorSourceStatus.Success,
-                    raw,
-                    string.Empty,
-                    0)
-            ],
-            []);
         var document = new WinPool.Application.StorageSystemDocument(
             1,
             "simulation:test",
             WinPool.Application.StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            new WinPool.Application.HardwareInventoryReport(1, DateTimeOffset.Now, [item], []),
             [],
             DateTimeOffset.Now);
 
         var sanitized = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
 
         Assert.Contains('•', sanitized.Snapshot.PhysicalDisks[0].MaskedSerialNumber);
-        Assert.All(
-            sanitized.HardwareReport.Items[0].FinalValue!.Value.EnumerateArray(),
-            value => Assert.Contains('•', value.GetString()!));
-        Assert.All(
-            sanitized.HardwareReport.Items[0].Sources[0].RawValue!.Value.EnumerateArray(),
-            value => Assert.Contains('•', value.GetString()!));
+        Assert.DoesNotContain("SERIAL-123456", System.Text.Json.JsonSerializer.Serialize(sanitized.SourceFacts));
+        Assert.True(sanitized.SourceFacts!.Objects.First(x => x.ObjectType == FactObjectType.PhysicalDisk).Field("SerialNumber")!.IsRedacted);
     }
 
     [Fact]
@@ -602,13 +581,12 @@ public sealed class ApplicationBehaviorTests
     public void StorageSystemCatalogKeepsLocalFirstAndImportedSimulationsInOrder()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var report = WinPool.Application.HardwareInventoryReport.Empty(DateTimeOffset.Now);
         var local = new WinPool.Application.StorageSystemDocument(
             1, "local", WinPool.Application.StorageSystemKind.Local, "Local",
-            snapshot, report, [], DateTimeOffset.Now);
+            snapshot, [], DateTimeOffset.Now);
         var first = new WinPool.Application.StorageSystemDocument(
             1, "sim:1", WinPool.Application.StorageSystemKind.Simulation, "First",
-            snapshot, report, [], DateTimeOffset.Now);
+            snapshot, [], DateTimeOffset.Now);
         var second = first with
         {
             Id = "sim:2",
@@ -628,23 +606,22 @@ public sealed class ApplicationBehaviorTests
     public void SimulationOperationsRejectLocalAndPersistSnapshotChanges()
     {
         var snapshot = TestSnapshotFactory.Create();
-        var report = WinPool.Application.HardwareInventoryReport.Empty(DateTimeOffset.Now);
         var local = new WinPool.Application.StorageSystemDocument(
             1, "local", WinPool.Application.StorageSystemKind.Local, "Local",
-            snapshot, report, [], DateTimeOffset.Now);
+            snapshot, [], DateTimeOffset.Now);
         var simulation = local.AsImportedSimulation("Simulation");
         var service = new WinPool.Application.SimulationOperationService();
 
         var rejected = service.Apply(
             local,
-            new WinPool.Application.SimulationOperationRequest(
-                WinPool.Application.SimulationOperationKind.Rename,
+            new WinPool.Application.SimulationEditRequest(
+                WinPool.Application.SimulationEditKind.Rename,
                 "pool:1",
                 Name: "Changed"));
         var changed = service.Apply(
             simulation,
-            new WinPool.Application.SimulationOperationRequest(
-                WinPool.Application.SimulationOperationKind.Rename,
+            new WinPool.Application.SimulationEditRequest(
+                WinPool.Application.SimulationEditKind.Rename,
                 simulation.Snapshot.StoragePools[0].StableId,
                 Name: "Changed"));
 

@@ -15,49 +15,104 @@ public static class StorageEditRules
 
     public static StorageRuleDecision Evaluate(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Kind is not (SimulationOperationKind.Rename or SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive)
+        if (request.Kind is not (SimulationEditKind.Rename or SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
             && HasUnsupportedRelatedValue(snapshot, request))
             return Deny("storage.rule.source-value-out-of-range",
                 "A related source value exceeds the supported editing range. Inspect its original value in source details.");
+        var unavailable = RequiredSourceIssue(snapshot, request);
+        if (unavailable is not null)
+            return new(StorageRuleVerdict.InsufficientInfo, "storage.rule.source-field-unavailable",
+                $"{unavailable.FieldName} is unavailable or conflicting ({unavailable.State}, {unavailable.Reason}); this operation requires reliable source information.", unavailable.ObjectId);
         return request.Kind switch
         {
-            SimulationOperationKind.Rename => Allow("storage.rule.rename"),
-            SimulationOperationKind.ChangeDriveLetter => EvaluateDriveLetter(snapshot, request),
-            SimulationOperationKind.FormatPartition => EvaluateFormat(snapshot, request),
-            SimulationOperationKind.DeletePartition => EvaluateDeletePartition(snapshot, request),
-            SimulationOperationKind.SetDiskOffline => EvaluateOffline(snapshot, request),
-            SimulationOperationKind.InitializeDisk => EvaluateInitialize(snapshot, request),
-            SimulationOperationKind.ConvertDisk => EvaluateConvert(snapshot, request),
-            SimulationOperationKind.CreatePartition => EvaluateCreatePartition(snapshot, request),
-            SimulationOperationKind.ExtendPartition => UnsupportedResize("extend"),
-            SimulationOperationKind.ShrinkPartition => UnsupportedResize("shrink"),
-            SimulationOperationKind.CreateStoragePool => EvaluateCreatePool(snapshot, request),
-            SimulationOperationKind.CreateTieredPool => EvaluateCreateTieredPool(snapshot, request),
-            SimulationOperationKind.CreateVirtualDisk => EvaluateCreateVirtualDisk(snapshot, request),
-            SimulationOperationKind.DeleteVirtualDisk => EvaluateDeleteVirtualDisk(snapshot, request),
-            SimulationOperationKind.UpdateStoragePool => EvaluateUpdatePool(snapshot, request),
-            SimulationOperationKind.DissolveStoragePool => EvaluateDissolve(snapshot, request),
-            SimulationOperationKind.DeleteEmptyStoragePool => EvaluateDeleteEmptyPool(snapshot, request),
-            SimulationOperationKind.MovePhysicalDisk => EvaluateMove(snapshot, request),
-            SimulationOperationKind.EvictPhysicalDiskFromTiers => EvaluateEvict(snapshot, request),
-            SimulationOperationKind.SetDiskUsage => EvaluateUsage(snapshot, request),
-            SimulationOperationKind.OptimizePool => AllowNoOp("storage.rule.optimize-pool.simulated-noop"),
-            SimulationOperationKind.OptimizeDrive => AllowNoOp("storage.rule.optimize-drive.simulated-noop"),
+            SimulationEditKind.Rename => Allow("storage.rule.rename"),
+            SimulationEditKind.ChangeDriveLetter => EvaluateDriveLetter(snapshot, request),
+            SimulationEditKind.FormatPartition => EvaluateFormat(snapshot, request),
+            SimulationEditKind.DeletePartition => EvaluateDeletePartition(snapshot, request),
+            SimulationEditKind.SetDiskOffline => EvaluateOffline(snapshot, request),
+            SimulationEditKind.InitializeDisk => EvaluateInitialize(snapshot, request),
+            SimulationEditKind.ConvertDisk => EvaluateConvert(snapshot, request),
+            SimulationEditKind.CreatePartition => EvaluateCreatePartition(snapshot, request),
+            SimulationEditKind.ExtendPartition => UnsupportedResize("extend"),
+            SimulationEditKind.ShrinkPartition => UnsupportedResize("shrink"),
+            SimulationEditKind.CreateStoragePool => EvaluateCreatePool(snapshot, request),
+            SimulationEditKind.CreateTieredPool => EvaluateCreateTieredPool(snapshot, request),
+            SimulationEditKind.CreateVirtualDisk => EvaluateCreateVirtualDisk(snapshot, request),
+            SimulationEditKind.DeleteVirtualDisk => EvaluateDeleteVirtualDisk(snapshot, request),
+            SimulationEditKind.UpdateStoragePool => EvaluateUpdatePool(snapshot, request),
+            SimulationEditKind.DissolveStoragePool => EvaluateDissolve(snapshot, request),
+            SimulationEditKind.DeleteEmptyStoragePool => EvaluateDeleteEmptyPool(snapshot, request),
+            SimulationEditKind.MovePhysicalDisk => EvaluateMove(snapshot, request),
+            SimulationEditKind.EvictPhysicalDiskFromTiers => EvaluateEvict(snapshot, request),
+            SimulationEditKind.SetDiskUsage => EvaluateUsage(snapshot, request),
+            SimulationEditKind.OptimizePool => AllowNoOp("storage.rule.optimize-pool.simulated-noop"),
+            SimulationEditKind.OptimizeDrive => AllowNoOp("storage.rule.optimize-drive.simulated-noop"),
             _ => Deny("storage.rule.unknown-operation", $"Operation {request.Kind} is not recognized.")
         };
     }
 
-    private static bool HasUnsupportedRelatedValue(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageFieldIssue? RequiredSourceIssue(StorageSnapshot snapshot, SimulationEditRequest request)
+    {
+        if (snapshot.FieldIssues.Count == 0 || request.Kind is SimulationEditKind.Rename
+            or SimulationEditKind.OptimizeDrive or SimulationEditKind.OptimizePool) return null;
+        var required = new HashSet<(string, string)>();
+        void Need(string? id, params string[] fields) { if (id is not null) foreach (var field in fields) required.Add((id, field)); }
+        var target = request.TargetProviderKey;
+        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == target);
+        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == (partition?.OsDiskStableId ?? target));
+        var partitionAction = request.Kind is SimulationEditKind.FormatPartition or SimulationEditKind.DeletePartition
+            or SimulationEditKind.ChangeDriveLetter or SimulationEditKind.CreatePartition or SimulationEditKind.InitializeDisk
+            or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline;
+        if (partitionAction)
+        {
+            Need(disk?.StableId, "IsOffline");
+            if (request.Kind == SimulationEditKind.FormatPartition) Need(target, "IsBoot", "IsSystem", "Type");
+            if (request.Kind is SimulationEditKind.InitializeDisk or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline)
+                Need(disk?.StableId, "IsBoot", "IsSystem", "PartitionStyle");
+            if (request.Kind == SimulationEditKind.SetDiskOffline && request.Offline == true)
+                Need(disk?.PhysicalDiskStableId, "IsPageFile", "IsCrashDump");
+            if (request.Kind == SimulationEditKind.CreatePartition)
+            {
+                Need(disk?.StableId, "Size", "PartitionStyle");
+                foreach (var item in snapshot.Partitions.Where(x => x.OsDiskStableId == disk?.StableId)) Need(item.StableId, "Size", "Offset");
+            }
+        }
+        else
+        {
+            var poolId = snapshot.StoragePools.Any(x => x.StableId == target) ? target
+                : snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == target)?.PoolStableId
+                    ?? snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == target)?.PoolStableId;
+            var ids = new HashSet<string>(request.MemberDiskIds ?? []) { target };
+            foreach (var pool in snapshot.StoragePools.Where(x => x.StableId == poolId && !x.IsPrimordial))
+                foreach (var member in pool.MemberPhysicalDiskIds) ids.Add(member);
+            foreach (var physical in snapshot.PhysicalDisks.Where(x => ids.Contains(x.StableId)))
+            {
+                Need(physical.StableId, "Size", "Usage", "MediaType");
+                if (physical.StableId == target || request.Kind is not (SimulationEditKind.MovePhysicalDisk or SimulationEditKind.SetDiskUsage))
+                    Need(physical.StableId, "IsBoot", "IsSystem", "IsPageFile", "IsCrashDump");
+            }
+            foreach (var os in snapshot.OsDisks.Where(x => ids.Contains(x.PhysicalDiskStableId ?? "")
+                || snapshot.VirtualDisks.Any(v => v.StableId == x.VirtualDiskStableId && v.PoolStableId == poolId))) Need(os.StableId, "IsOffline");
+            foreach (var tier in snapshot.StorageTiers.Where(x => x.PoolStableId == poolId)) Need(tier.StableId, "Size", "AllocatedSize");
+            foreach (var volume in snapshot.Volumes.Where(x => snapshot.Partitions.Any(p => p.StableId == x.PartitionStableId
+                && snapshot.OsDisks.Any(d => d.StableId == p.OsDiskStableId && (ids.Contains(d.PhysicalDiskStableId ?? "")
+                    || snapshot.VirtualDisks.Any(v => v.StableId == d.VirtualDiskStableId && v.PoolStableId == poolId))))))
+                Need(volume.StableId, "Size", "SizeRemaining");
+        }
+        return snapshot.FieldIssues.FirstOrDefault(x => required.Contains((x.ObjectId, x.FieldName)));
+    }
+
+    private static bool HasUnsupportedRelatedValue(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var invalid = snapshot.Warnings.Where(x => x.Code == "facts.numeric-out-of-range")
             .Select(x => x.StableId).Where(x => x is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (invalid.Count == 0) return false;
-        var related = new HashSet<string>(request.MemberDiskIds ?? [], StringComparer.OrdinalIgnoreCase) { request.TargetStableId };
-        if (request.Kind == SimulationOperationKind.MovePhysicalDisk && request.Name is not null) related.Add(request.Name);
+        var related = new HashSet<string>(request.MemberDiskIds ?? [], StringComparer.OrdinalIgnoreCase) { request.TargetProviderKey };
+        if (request.Kind == SimulationEditKind.MovePhysicalDisk && request.DestinationGroupId is not null) related.Add(request.DestinationGroupId);
         var relationships = StorageRelationshipProjector.Project(snapshot);
         bool changed;
         do
@@ -73,30 +128,31 @@ public static class StorageEditRules
         return invalid.Any(x => related.Contains(x!));
     }
 
-    public static IReadOnlyList<(SimulationOperationKind Kind, string Support)> OperationMatrix() =>
+    public static IReadOnlyList<(SimulationEditKind Kind, string Support)> OperationMatrix() =>
     [
-        (SimulationOperationKind.Rename, "supported: object friendly name / volume label"),
-        (SimulationOperationKind.ChangeDriveLetter, "supported: unused letter, volume present"),
-        (SimulationOperationKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
-        (SimulationOperationKind.DeletePartition, "supported: any existing partition"),
-        (SimulationOperationKind.SetDiskOffline, "supported: persisted simulation disk state"),
-        (SimulationOperationKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
-        (SimulationOperationKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
-        (SimulationOperationKind.CreatePartition, "supported: four fixed GPT partition kinds"),
-        (SimulationOperationKind.ExtendPartition, "not_supported: no Windows supported-size evidence"),
-        (SimulationOperationKind.ShrinkPartition, "not_supported: no Windows supported-size evidence"),
-        (SimulationOperationKind.CreateStoragePool, "supported: primordial data members"),
-        (SimulationOperationKind.CreateTieredPool, "supported: Simple/Mirror×2/Parity with legal disk counts"),
-        (SimulationOperationKind.CreateVirtualDisk, "supported: at most one new VD per pool; Fixed estimate"),
-        (SimulationOperationKind.DeleteVirtualDisk, "supported: explicit delete"),
-        (SimulationOperationKind.UpdateStoragePool, "supported: unused-capacity layout fields"),
-        (SimulationOperationKind.DissolveStoragePool, "supported: non-primordial"),
-        (SimulationOperationKind.DeleteEmptyStoragePool, "internal: remove an empty pool after ordered dissolve steps"),
-        (SimulationOperationKind.MovePhysicalDisk, "supported: primordial or same-media tier"),
-        (SimulationOperationKind.EvictPhysicalDiskFromTiers, "supported: keep in pool, drop tier membership"),
-        (SimulationOperationKind.SetDiskUsage, "supported: Retired/Hot Spare when pool has remaining data members"),
-        (SimulationOperationKind.OptimizePool, "simulated no-op; does not claim a measured result"),
-        (SimulationOperationKind.OptimizeDrive, "simulated no-op; does not claim a measured result")
+        (SimulationEditKind.ResetDocument, "internal: built-in document reset adapter only"),
+        (SimulationEditKind.Rename, "supported: object friendly name / volume label"),
+        (SimulationEditKind.ChangeDriveLetter, "supported: unused letter, volume present"),
+        (SimulationEditKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
+        (SimulationEditKind.DeletePartition, "supported: any existing partition"),
+        (SimulationEditKind.SetDiskOffline, "supported: persisted simulation disk state"),
+        (SimulationEditKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
+        (SimulationEditKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
+        (SimulationEditKind.CreatePartition, "supported: four fixed GPT partition kinds"),
+        (SimulationEditKind.ExtendPartition, "not_supported: no Windows supported-size evidence"),
+        (SimulationEditKind.ShrinkPartition, "not_supported: no Windows supported-size evidence"),
+        (SimulationEditKind.CreateStoragePool, "supported: primordial data members"),
+        (SimulationEditKind.CreateTieredPool, "supported: Simple/Mirror×2/Parity with legal disk counts"),
+        (SimulationEditKind.CreateVirtualDisk, "supported: at most one new VD per pool; Fixed estimate"),
+        (SimulationEditKind.DeleteVirtualDisk, "supported: explicit delete"),
+        (SimulationEditKind.UpdateStoragePool, "supported: unused-capacity layout fields"),
+        (SimulationEditKind.DissolveStoragePool, "supported: non-primordial"),
+        (SimulationEditKind.DeleteEmptyStoragePool, "internal: remove an empty pool after ordered dissolve steps"),
+        (SimulationEditKind.MovePhysicalDisk, "supported: primordial or same-media tier"),
+        (SimulationEditKind.EvictPhysicalDiskFromTiers, "supported: keep in pool, drop tier membership"),
+        (SimulationEditKind.SetDiskUsage, "supported: Retired/Hot Spare when pool has remaining data members"),
+        (SimulationEditKind.OptimizePool, "simulated no-op; does not claim a measured result"),
+        (SimulationEditKind.OptimizeDrive, "simulated no-op; does not claim a measured result")
     ];
 
     public static bool TouchesOfflineDisk(
@@ -142,9 +198,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateDriveLetter(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        if (snapshot.VolumeForPartition(request.TargetStableId) is null)
+        if (snapshot.VolumeForPartition(request.TargetProviderKey) is null)
         {
             return Deny("storage.rule.drive-letter.missing-volume", "A volume is required before a drive letter can be assigned.");
         }
@@ -164,7 +220,7 @@ public static class StorageEditRules
             .Concat(snapshot.NetworkDisks.Select(item => TopologyProjector.NormalizeDriveLetter(item.DriveLetter)))
             .Where(item => item.Length == 1);
         if (used.Contains(letter, StringComparer.OrdinalIgnoreCase)
-            && snapshot.VolumeForPartition(request.TargetStableId)?.DriveLetter != letter)
+            && snapshot.VolumeForPartition(request.TargetProviderKey)?.DriveLetter != letter)
         {
             return Deny("storage.rule.drive-letter.conflict", $"Drive letter {letter}: is already in use.");
         }
@@ -174,9 +230,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateFormat(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (partition is null)
         {
             return Deny("storage.rule.format.missing", "The selected partition was not found.");
@@ -200,9 +256,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateDeletePartition(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (partition is null)
         {
             return Deny("storage.rule.delete-partition.missing", "The selected partition was not found.");
@@ -213,9 +269,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateOffline(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (disk is null)
         {
             return Deny("storage.rule.offline.missing", "The selected disk was not found.");
@@ -235,9 +291,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateInitialize(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var style = request.Name?.Trim().ToUpperInvariant();
+        var style = request.PartitionStyle?.Trim().ToUpperInvariant();
         if (style == "MBR")
         {
             return Deny("storage.rule.initialize.mbr", "New MBR partition tables are outside the product create range.");
@@ -248,7 +304,7 @@ public static class StorageEditRules
             return Deny("storage.rule.initialize.style", "Only GPT initialization is supported.");
         }
 
-        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (disk is null)
         {
             return Deny("storage.rule.initialize.missing", "The selected disk was not found.");
@@ -269,15 +325,15 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateConvert(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var style = request.Name?.Trim().ToUpperInvariant();
+        var style = request.PartitionStyle?.Trim().ToUpperInvariant();
         if (style != "GPT")
         {
             return Deny("storage.rule.convert.gpt-only", "Conversion is limited to GPT. MBR conversion is not offered.");
         }
 
-        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (disk is null)
         {
             return Deny("storage.rule.convert.missing", "The selected disk was not found.");
@@ -298,9 +354,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateCreatePartition(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (disk is null)
         {
             return Deny("storage.rule.create-partition.missing", "The selected disk was not found.");
@@ -356,12 +412,12 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateCreatePool(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request) =>
+        SimulationEditRequest request) =>
         EvaluateMembers(snapshot, request.MemberDiskIds, requirePrimordial: true);
 
     private static StorageRuleDecision EvaluateCreateTieredPool(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         var members = EvaluateMembers(snapshot, request.MemberDiskIds, requirePrimordial: true);
         if (members.Verdict != StorageRuleVerdict.Allow)
@@ -425,9 +481,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateCreateVirtualDisk(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (pool is null || pool.IsPrimordial)
         {
             return Deny("storage.rule.virtual-disk.pool", "A non-primordial pool is required.");
@@ -453,9 +509,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateDeleteVirtualDisk(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         return vdisk is null
             ? Deny("storage.rule.delete-virtual-disk.missing", "The simulated virtual disk was not found.")
             : Allow("storage.rule.delete-virtual-disk");
@@ -463,9 +519,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateUpdatePool(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (pool is null || pool.IsPrimordial)
         {
             return Deny("storage.rule.update-pool.invalid", "A non-primordial pool is required.");
@@ -604,9 +660,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateDissolve(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (pool is null || pool.IsPrimordial)
         {
             return Deny("storage.rule.dissolve.invalid", "The primordial pool cannot be dissolved.");
@@ -617,9 +673,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateDeleteEmptyPool(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (pool is null || pool.IsPrimordial)
         {
             return Deny("storage.rule.delete-empty-pool.invalid", "A non-primordial pool is required.");
@@ -636,9 +692,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateMove(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (disk is null)
         {
             return Deny("storage.rule.move.missing", "The selected physical disk was not found.");
@@ -664,9 +720,9 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateEvict(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         return disk is null
             ? Deny("storage.rule.evict.missing", "The selected physical disk was not found.")
             : Allow("storage.rule.evict", WindowsPhysicalDiskUsage);
@@ -674,15 +730,15 @@ public static class StorageEditRules
 
     private static StorageRuleDecision EvaluateUsage(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == request.TargetStableId);
+        var disk = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         if (disk is null)
         {
             return Deny("storage.rule.usage.missing", "The selected physical disk was not found.");
         }
 
-        var layer = request.Name?.Trim() ?? string.Empty;
+        var layer = request.DiskUsage?.Trim() ?? string.Empty;
         if (layer is not ("" or "Retired" or "HotSpare"))
         {
             return Deny("storage.rule.usage.value", "Usage must be data, Retired, or Hot Spare.");
@@ -885,7 +941,7 @@ public static class StorageEditRules
     private static long RequestedTierSize(
         StorageSnapshot snapshot,
         StorageTierInfo tier,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         var media = EditWorkspace.NormalizeMedia(tier.MediaType);
         var setting = media switch
@@ -936,7 +992,7 @@ public static class StorageEditRules
         };
     }
 
-    private static bool TierLayoutChanges(StorageTierInfo tier, SimulationOperationRequest request)
+    private static bool TierLayoutChanges(StorageTierInfo tier, SimulationEditRequest request)
     {
         var media = EditWorkspace.NormalizeMedia(tier.MediaType);
         return media switch
@@ -957,7 +1013,7 @@ public static class StorageEditRules
         };
     }
 
-    private static bool TierSpecificationChanges(StorageTierInfo tier, SimulationOperationRequest request)
+    private static bool TierSpecificationChanges(StorageTierInfo tier, SimulationEditRequest request)
     {
         var media = EditWorkspace.NormalizeMedia(tier.MediaType);
         return media switch
@@ -975,7 +1031,7 @@ public static class StorageEditRules
         };
     }
 
-    private static bool UsesMaximumCapacity(StorageTierInfo tier, SimulationOperationRequest request) =>
+    private static bool UsesMaximumCapacity(StorageTierInfo tier, SimulationEditRequest request) =>
         EditWorkspace.NormalizeMedia(tier.MediaType) switch
         {
             "HDD" => request.CapacityUseMaximum,

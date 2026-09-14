@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
@@ -22,7 +22,12 @@ internal static class WinPoolFactCapture
         ["Win32_VideoController"] = FactObjectType.VideoController, ["Win32_DesktopMonitor"] = FactObjectType.Monitor,
         ["WmiMonitorID"] = FactObjectType.Monitor, ["MSFT_NetAdapter"] = FactObjectType.NetworkAdapter,
         ["Win32_NetworkAdapter"] = FactObjectType.NetworkAdapter, ["Win32_Battery"] = FactObjectType.Battery,
-        ["Win32_LogicalDisk"] = FactObjectType.NetworkDisk
+        ["Win32_LogicalDisk"] = FactObjectType.LogicalDisk,
+        ["Win32_DiskDrive"] = FactObjectType.HardwareSupplement, ["Win32_TimeZone"] = FactObjectType.HardwareSupplement,
+        ["SoftwareLicensingProduct"] = FactObjectType.HardwareSupplement,
+        ["BatteryStaticData"] = FactObjectType.HardwareSupplement, ["BatteryStatus"] = FactObjectType.HardwareSupplement,
+        ["Registry.CurrentVersion"] = FactObjectType.HardwareSupplement, ["Registry.VideoMemory"] = FactObjectType.HardwareSupplement,
+        ["WindowsForms.Screen"] = FactObjectType.HardwareSupplement, ["Windows.Session"] = FactObjectType.HardwareSupplement
     };
 
     public static WinPoolFacts Read(JsonElement root, StorageSnapshot snapshot, SystemId systemId, CollectionPurpose purpose)
@@ -31,6 +36,8 @@ internal static class WinPoolFactCapture
         var objects = ImmutableArray.CreateBuilder<WinPoolSourceObject>();
         var bindings = ImmutableArray.CreateBuilder<WinPoolIdentityBinding>();
         string Namespace(string value) => value.Replace('\\', '/').ToLowerInvariant();
+        FactOrigin Origin(string ns, string cls) => ns == "winpool/native" ? FactOrigin.Native
+            : cls.StartsWith("MSFT_", StringComparison.Ordinal) ? FactOrigin.StorageCim : FactOrigin.Win32;
         string SourceId(string ns, string cls) => WinPoolIdentityRegistry.OpaqueSourceIdentity(ns + ":" + cls, "capture", snapshot.ScannedAt.ToString("O"));
         if (root.TryGetProperty("SourceQuerySuccesses", out var successes) && successes.ValueKind == JsonValueKind.Array)
         foreach (var success in successes.EnumerateArray())
@@ -39,7 +46,7 @@ internal static class WinPoolFactCapture
             if (!Classes.ContainsKey(cls)) continue;
             var ns = Namespace(success.GetProperty("Namespace").GetString() ?? "");
             var id = SourceId(ns, cls);
-            sources.TryAdd(id, new(id, cls.StartsWith("MSFT_", StringComparison.Ordinal) ? FactOrigin.StorageCim : FactOrigin.Win32,
+            sources.TryAdd(id, new(id, Origin(ns, cls),
                 ns, cls, snapshot.ScannedAt, purpose));
         }
         if (root.TryGetProperty("SourceObservations", out var observations) && observations.ValueKind == JsonValueKind.Array)
@@ -49,9 +56,10 @@ internal static class WinPoolFactCapture
             if (!Classes.TryGetValue(className, out var type)) continue;
             var sourceNamespace = Namespace(observation.GetProperty("Namespace").GetString() ?? string.Empty);
             var sourceRef = SourceId(sourceNamespace, className);
-            sources.TryAdd(sourceRef, new(sourceRef, className.StartsWith("MSFT_", StringComparison.Ordinal)
-                ? FactOrigin.StorageCim : FactOrigin.Win32, sourceNamespace, className, snapshot.ScannedAt, purpose));
+            sources.TryAdd(sourceRef, new(sourceRef, Origin(sourceNamespace, className), sourceNamespace, className, snapshot.ScannedAt, purpose));
             var fields = observation.GetProperty("Fields").EnumerateArray().Select(field => ReadField(field, sourceRef)).ToImmutableArray();
+            if (className == "Win32_LogicalDisk" && fields.FirstOrDefault(x => x.Name == "DriveType") is { } driveType
+                && driveType.TryGetInt64(out var driveCode) && driveCode == 4) type = FactObjectType.NetworkDisk;
             string Text(string name) => fields.FirstOrDefault(x => x.Name == name)?.Value is { ValueKind: JsonValueKind.String } text ? text.GetString() ?? "" : "";
             var uniqueId = Text(type == FactObjectType.Partition ? "Guid" : "UniqueId");
             var objectId = Text("ObjectId");
@@ -80,32 +88,63 @@ internal static class WinPoolFactCapture
             if (!Classes.ContainsKey(className)) continue;
             var ns = Namespace(failure.TryGetProperty("Namespace", out var namespaceValue) ? namespaceValue.GetString() ?? "" : "root/cimv2");
             var id = SourceId(ns, className);
-            sources[id] = new(id, className.StartsWith("MSFT_", StringComparison.Ordinal) ? FactOrigin.StorageCim : FactOrigin.Win32,
-                ns, className, snapshot.ScannedAt, purpose, FieldReadState.Failed, "QueryFailed");
+            sources[id] = new(id, Origin(ns, className), ns, className, snapshot.ScannedAt, purpose, FieldReadState.Failed,
+                failure.TryGetProperty("ReasonCode", out var code) ? code.GetString() : "QueryFailed");
         }
         var relationships = ImmutableArray.CreateBuilder<WinPoolFactRelationship>();
         var ids = objects.Select(x => x.Id).ToHashSet();
         void Link(string? from, string? to, string kind)
         {
-            if (from is not null && to is not null && ids.Contains(from) && ids.Contains(to)) relationships.Add(new(from, to, kind));
+            if (from is not null && to is not null && ids.Contains(from) && ids.Contains(to)) relationships.Add(new(from, to, kind, snapshot.ScannedAt));
         }
-        foreach (var pool in snapshot.StoragePools)
+        IEnumerable<JsonElement> Rows(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().ToArray() : [];
+        string RawText(JsonElement row, string name) => row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
+        string? Find(FactObjectType type, string unique, string objectId = "", string uniqueField = "UniqueId")
         {
-            Link(pool.SubsystemStableId, pool.StableId, "subsystem-pool");
-            foreach (var member in pool.MemberPhysicalDiskIds) Link(pool.StableId, member, "pool-member");
+            if (unique.Length == 0 && objectId.Length == 0) return null;
+            var matches = objects.Where(x => x.ObjectType == type && (unique.Length > 0
+                ? x.Field(uniqueField)?.DisplayValue() == unique : x.Field("ObjectId")?.DisplayValue() == objectId)).ToArray();
+            return matches.Length == 1 ? matches[0].Id : null;
         }
-        foreach (var disk in snapshot.VirtualDisks) Link(disk.PoolStableId, disk.StableId, "pool-virtual-disk");
-        foreach (var disk in snapshot.OsDisks)
+        string? Key(FactObjectType type, string key) => key.StartsWith("uid:", StringComparison.Ordinal) ? Find(type, key[4..])
+            : key.StartsWith("oid:", StringComparison.Ordinal) ? Find(type, "", key[4..]) : null;
+        foreach (var pool in Rows("StoragePools"))
         {
-            Link(disk.PhysicalDiskStableId, disk.StableId, "same-device");
-            Link(disk.VirtualDiskStableId, disk.StableId, "same-device");
+            var id = Find(FactObjectType.StoragePool, RawText(pool, "UniqueId"), RawText(pool, "ObjectId"));
+            Link(Key(FactObjectType.StorageSubsystem, RawText(pool, "SubsystemAssociationKey")), id, "subsystem-pool");
+            if (pool.TryGetProperty("MemberPhysicalDiskKeys", out var members))
+                foreach (var member in members.EnumerateArray()) Link(id, Key(FactObjectType.PhysicalDisk, member.GetString() ?? ""), "pool-member");
         }
-        foreach (var partition in snapshot.Partitions) Link(partition.OsDiskStableId, partition.StableId, "disk-partition");
-        foreach (var volume in snapshot.Volumes) Link(volume.PartitionStableId, volume.StableId, "partition-volume");
-        foreach (var tier in snapshot.StorageTiers)
+        foreach (var disk in Rows("VirtualDisks"))
+            Link(Key(FactObjectType.StoragePool, RawText(disk, "PoolAssociationKey")),
+                Find(FactObjectType.VirtualDisk, RawText(disk, "UniqueId"), RawText(disk, "ObjectId")), "pool-virtual-disk");
+        foreach (var disk in Rows("OsDisks"))
         {
-            Link(tier.PoolStableId, tier.StableId, "pool-tier");
-            Link(tier.VirtualDiskStableId, tier.StableId, "virtual-disk-tier");
+            var id = Find(FactObjectType.Disk, RawText(disk, "UniqueId"), RawText(disk, "ObjectId"));
+            Link(Key(FactObjectType.PhysicalDisk, RawText(disk, "PhysicalDiskAssociationKey")), id, "same-device");
+            Link(Key(FactObjectType.VirtualDisk, RawText(disk, "VirtualDiskAssociationKey")), id, "same-device");
+        }
+        foreach (var partition in Rows("Partitions"))
+        {
+            var id = Find(FactObjectType.Partition, RawText(partition, "Guid"), RawText(partition, "ObjectId"), "Guid");
+            Link(Find(FactObjectType.Disk, RawText(partition, "OsDiskUniqueId"), RawText(partition, "OsDiskObjectId")), id, "disk-partition");
+            Link(id, Find(FactObjectType.Volume, RawText(partition, "VolumeUniqueId"), RawText(partition, "VolumeObjectId")), "partition-volume");
+        }
+        foreach (var tier in Rows("StorageTiers"))
+        {
+            var id = Find(FactObjectType.StorageTier, RawText(tier, "UniqueId"), RawText(tier, "ObjectId"));
+            Link(Key(FactObjectType.StoragePool, RawText(tier, "PoolAssociationKey")), id, "pool-tier");
+            Link(Key(FactObjectType.VirtualDisk, RawText(tier, "VirtualDiskAssociationKey")), id, "virtual-disk-tier");
+        }
+        // The mount path is an association observed in this capture, never a persistent volume identity.
+        foreach (var logical in objects.Where(x => x.ObjectType == FactObjectType.LogicalDisk))
+        {
+            if (!StorageAccessPath.TryGetDriveLetter(logical.Field("DeviceID")?.DisplayValue(), out var letter)) continue;
+            var matches = objects.Where(x => x.ObjectType == FactObjectType.Volume
+                && StorageAccessPath.TryGetDriveLetter(x.Field("DriveLetter")?.DisplayValue(), out var mounted)
+                && mounted == letter).ToArray();
+            if (matches.Length == 1) Link(matches[0].Id, logical.Id, "same-volume");
         }
         var state = sources.Values.Any(x => x.ReadState == FieldReadState.Failed) ? FieldReadState.Failed : FieldReadState.Returned;
         var facts = new WinPoolFacts(WinPoolFacts.CurrentFormatVersion, systemId, 0, sources.Values.ToImmutableArray(), objects.ToImmutable(),

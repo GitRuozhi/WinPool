@@ -10,40 +10,6 @@ public enum StorageSystemKind
     Simulation
 }
 
-public enum CollectorSourceStatus
-{
-    Success,
-    NoData,
-    Failed,
-    Unavailable
-}
-
-public sealed record CollectorSourceResult(
-    string Source,
-    CollectorSourceStatus Status,
-    JsonElement? RawValue,
-    string Error,
-    long DurationMilliseconds);
-
-public sealed record HardwareInventoryItemResult(
-    string Id,
-    string Category,
-    string StandardName,
-    string ChineseName,
-    JsonElement? FinalValue,
-    IReadOnlyList<CollectorSourceResult> Sources,
-    IReadOnlyList<string> Warnings);
-
-public sealed record HardwareInventoryReport(
-    int SchemaVersion,
-    DateTimeOffset CollectedAt,
-    IReadOnlyList<HardwareInventoryItemResult> Items,
-    IReadOnlyList<string> Warnings)
-{
-    public static HardwareInventoryReport Empty(DateTimeOffset collectedAt) =>
-        new(1, collectedAt, [], []);
-}
-
 public enum SimulationJobStatus
 {
     Queued,
@@ -55,7 +21,7 @@ public enum SimulationJobStatus
 public sealed record SimulationJob(
     string Id,
     string Operation,
-    string TargetStableId,
+    string TargetProviderKey,
     SimulationJobStatus Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt,
@@ -67,7 +33,6 @@ public sealed record StorageSystemDocument(
     StorageSystemKind Kind,
     string DisplayName,
     StorageSnapshot Snapshot,
-    [property: System.Text.Json.Serialization.JsonIgnore] HardwareInventoryReport HardwareReport,
     IReadOnlyList<SimulationJob> Jobs,
     DateTimeOffset UpdatedAt,
     string? SourceHostName = null)
@@ -95,7 +60,7 @@ public sealed record StorageSystemDocument(
     [System.Text.Json.Serialization.JsonConstructor]
     public StorageSystemDocument(int schemaVersion, string id, StorageSystemKind kind, string displayName,
         WinPoolFacts sourceFacts, IReadOnlyList<SimulationJob> jobs, DateTimeOffset updatedAt, string? sourceHostName = null)
-        : this(schemaVersion, id, kind, displayName, StorageSnapshot.Empty(displayName), HardwareInventoryReport.Empty(updatedAt), jobs, updatedAt, sourceHostName)
+        : this(schemaVersion, id, kind, displayName, StorageSnapshot.Empty(displayName), jobs, updatedAt, sourceHostName)
     {
         if (schemaVersion != CurrentSchemaVersion || sourceFacts is null)
             throw new InvalidDataException("The document format is unsupported or source facts are missing.");
@@ -171,103 +136,11 @@ public sealed record StorageSystemDocument(
 
 public static class StorageSystemDocumentSanitizer
 {
-    private static readonly HashSet<string> SensitiveItemIds =
-    [
-        "0304",
-        "0510",
-        "0718",
-        "0803",
-        "1206"
-    ];
-
-    public static bool IsSensitiveItemId(string id) => SensitiveItemIds.Contains(id);
-
     public static StorageSystemDocument RedactSensitiveData(StorageSystemDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
-        var report = document.HardwareReport with
-        {
-            Items = document.HardwareReport.Items.Select(item =>
-            {
-                if (!IsSensitive(item))
-                {
-                    return item;
-                }
-                return item with
-                {
-                    FinalValue = MaskElement(item.FinalValue),
-                    Sources = item.Sources.Select(source => source with
-                    {
-                        RawValue = MaskElement(source.RawValue)
-                    }).ToArray()
-                };
-            }).ToArray()
-        };
-        return document with
-        {
-            HardwareReport = report,
-            SourceFacts = document.SourceFacts is null ? null : WinPoolFactSanitizer.Redact(document.SourceFacts)
-        };
+        return document with { SourceFacts = document.SourceFacts is null ? null : WinPoolFactSanitizer.Redact(document.SourceFacts) };
     }
-
-    private static bool IsSensitive(HardwareInventoryItemResult item) =>
-        SensitiveItemIds.Contains(item.Id)
-        || item.StandardName.Contains("Serial", StringComparison.OrdinalIgnoreCase)
-        || item.StandardName.Contains("MAC Address", StringComparison.OrdinalIgnoreCase)
-        || item.ChineseName.Contains("序列", StringComparison.Ordinal);
-
-    private static JsonElement? MaskElement(JsonElement? element)
-    {
-        if (element is null)
-        {
-            return null;
-        }
-
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            WriteMasked(writer, element.Value);
-        }
-        using var document = JsonDocument.Parse(stream.ToArray());
-        return document.RootElement.Clone();
-    }
-
-    private static void WriteMasked(Utf8JsonWriter writer, JsonElement element)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (var property in element.EnumerateObject())
-                {
-                    writer.WritePropertyName(property.Name);
-                    WriteMasked(writer, property.Value);
-                }
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (var item in element.EnumerateArray())
-                {
-                    WriteMasked(writer, item);
-                }
-                writer.WriteEndArray();
-                break;
-            case JsonValueKind.String:
-                writer.WriteStringValue(MaskOnce(element.GetString()));
-                break;
-            default:
-                element.WriteTo(writer);
-                break;
-        }
-    }
-
-    private static string MaskOnce(string? value) =>
-        string.IsNullOrWhiteSpace(value)
-        || value == "—"
-        || value.Contains('•')
-            ? value ?? string.Empty
-            : StableId.MaskSerial(value);
 }
 
 public sealed class StorageSystemCatalog
@@ -335,32 +208,6 @@ public sealed class StorageSystemCatalog
     }
 }
 
-public enum SimulationOperationKind
-{
-    Rename,
-    ChangeDriveLetter,
-    FormatPartition,
-    DeletePartition,
-    ConvertDisk,
-    SetDiskOffline,
-    OptimizePool,
-    InitializeDisk,
-    CreatePartition,
-    ExtendPartition,
-    ShrinkPartition,
-    CreateStoragePool,
-    CreateVirtualDisk,
-    MovePhysicalDisk,
-    EvictPhysicalDiskFromTiers,
-    OptimizeDrive,
-    CreateTieredPool,
-    UpdateStoragePool,
-    DissolveStoragePool,
-    DeleteEmptyStoragePool,
-    DeleteVirtualDisk,
-    SetDiskUsage
-}
-
 public enum PartitionKind
 {
     BasicData,
@@ -368,49 +215,6 @@ public enum PartitionKind
     MicrosoftReserved,
     WindowsRecovery
 }
-
-public sealed record SimulationOperationRequest(
-    SimulationOperationKind Kind,
-    string TargetStableId,
-    string? Name = null,
-    string? DriveLetter = null,
-    string? FileSystem = null,
-    long? AllocationUnitSize = null,
-    bool? Offline = null,
-    long? SizeBytes = null,
-    bool? CreateMsr = null,
-    long? InterleaveBytes = null,
-    string? Resiliency = null,
-    IReadOnlyList<string>? MemberDiskIds = null,
-    string? VirtualDiskName = null,
-    string? PerformanceResiliency = null,
-    long? PerformanceInterleaveBytes = null,
-    long? PerformanceSizeBytes = null,
-    int? PerformanceDataCopies = null,
-    string? CapacityResiliency = null,
-    long? CapacityInterleaveBytes = null,
-    long? CapacitySizeBytes = null,
-    int? CapacityColumns = null,
-    int? CapacityToleratedFailures = null,
-    string? ScmResiliency = null,
-    long? ScmInterleaveBytes = null,
-    long? ScmSizeBytes = null,
-    int? ScmDataCopies = null,
-    bool PerformanceUseMaximum = false,
-    bool CapacityUseMaximum = false,
-    bool ScmUseMaximum = false,
-    string? ProvisioningType = null,
-    long? OffsetBytes = null,
-    bool? CreatePartition = null,
-    bool? CreateVirtualDisk = null,
-    string? AllocatedPoolId = null,
-    string? AllocatedVirtualDiskId = null,
-    string? AllocatedOsDiskId = null,
-    string? AllocatedPartitionId = null,
-    string? AllocatedVolumeId = null,
-    IReadOnlyList<string>? AccessPaths = null,
-    string? VolumeName = null,
-    PartitionKind? PartitionKind = null);
 
 public sealed record SimulationOperationResult(
     bool Succeeded,
@@ -426,7 +230,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
 {
     public SimulationOperationResult Apply(
         StorageSystemDocument document,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         if (document.Kind != StorageSystemKind.Simulation)
         {
@@ -448,38 +252,38 @@ public sealed class SimulationOperationService : ISimulationOperationService
         {
             var snapshot = request.Kind switch
             {
-                SimulationOperationKind.Rename => Rename(document.Snapshot, request),
-                SimulationOperationKind.ChangeDriveLetter => ChangeDriveLetter(document.Snapshot, request),
-                SimulationOperationKind.FormatPartition => FormatPartition(document.Snapshot, request),
-                SimulationOperationKind.DeletePartition => DeletePartition(document.Snapshot, request),
-                SimulationOperationKind.ConvertDisk => ConvertDisk(document.Snapshot, request),
-                SimulationOperationKind.SetDiskOffline => SetDiskOffline(document.Snapshot, request),
-                SimulationOperationKind.InitializeDisk => InitializeDisk(document.Snapshot, request),
-                SimulationOperationKind.CreatePartition => CreatePartition(document.Snapshot, request),
-                SimulationOperationKind.ExtendPartition => ResizePartition(document.Snapshot, request, extend: true),
-                SimulationOperationKind.ShrinkPartition => ResizePartition(document.Snapshot, request, extend: false),
-                SimulationOperationKind.CreateStoragePool => CreateStoragePool(document.Snapshot, request),
-                SimulationOperationKind.CreateVirtualDisk => CreateVirtualDisk(document.Snapshot, request),
-                SimulationOperationKind.MovePhysicalDisk => MovePhysicalDisk(document.Snapshot, request),
-                SimulationOperationKind.EvictPhysicalDiskFromTiers =>
+                SimulationEditKind.Rename => Rename(document.Snapshot, request),
+                SimulationEditKind.ChangeDriveLetter => ChangeDriveLetter(document.Snapshot, request),
+                SimulationEditKind.FormatPartition => FormatPartition(document.Snapshot, request),
+                SimulationEditKind.DeletePartition => DeletePartition(document.Snapshot, request),
+                SimulationEditKind.ConvertDisk => ConvertDisk(document.Snapshot, request),
+                SimulationEditKind.SetDiskOffline => SetDiskOffline(document.Snapshot, request),
+                SimulationEditKind.InitializeDisk => InitializeDisk(document.Snapshot, request),
+                SimulationEditKind.CreatePartition => CreatePartition(document.Snapshot, request),
+                SimulationEditKind.ExtendPartition => ResizePartition(document.Snapshot, request, extend: true),
+                SimulationEditKind.ShrinkPartition => ResizePartition(document.Snapshot, request, extend: false),
+                SimulationEditKind.CreateStoragePool => CreateStoragePool(document.Snapshot, request),
+                SimulationEditKind.CreateVirtualDisk => CreateVirtualDisk(document.Snapshot, request),
+                SimulationEditKind.MovePhysicalDisk => MovePhysicalDisk(document.Snapshot, request),
+                SimulationEditKind.EvictPhysicalDiskFromTiers =>
                     EvictPhysicalDiskFromTiers(document.Snapshot, request),
-                SimulationOperationKind.CreateTieredPool => CreateTieredPool(document.Snapshot, request),
-                SimulationOperationKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
-                SimulationOperationKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
-                SimulationOperationKind.DeleteEmptyStoragePool => DeleteEmptyStoragePool(document.Snapshot, request),
-                SimulationOperationKind.DeleteVirtualDisk => DeleteVirtualDisk(document.Snapshot, request),
-                SimulationOperationKind.SetDiskUsage => SetDiskUsage(document.Snapshot, request),
-                SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive => document.Snapshot,
+                SimulationEditKind.CreateTieredPool => CreateTieredPool(document.Snapshot, request),
+                SimulationEditKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
+                SimulationEditKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
+                SimulationEditKind.DeleteEmptyStoragePool => DeleteEmptyStoragePool(document.Snapshot, request),
+                SimulationEditKind.DeleteVirtualDisk => DeleteVirtualDisk(document.Snapshot, request),
+                SimulationEditKind.SetDiskUsage => SetDiskUsage(document.Snapshot, request),
+                SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive => document.Snapshot,
                 _ => throw new ArgumentOutOfRangeException(nameof(request))
             };
 
             var jobs = document.Jobs;
-            if (request.Kind is SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive)
+            if (request.Kind is SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
             {
                 var now = DateTimeOffset.Now;
-                if (request.Kind == SimulationOperationKind.OptimizePool)
+                if (request.Kind == SimulationEditKind.OptimizePool)
                 {
-                    var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == request.TargetStableId);
+                    var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == request.TargetProviderKey);
                     if (pool is null || pool.IsPrimordial)
                     {
                         throw new InvalidOperationException("Only a non-primordial simulated pool can be optimized.");
@@ -498,7 +302,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                     jobs = jobs.Append(new SimulationJob(
                         $"job:{Guid.NewGuid():N}",
                         "OptimizeVolume",
-                        request.TargetStableId,
+                        request.TargetProviderKey,
                         SimulationJobStatus.Completed,
                         now,
                         now,
@@ -543,7 +347,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var commands = new List<string>();
         foreach (var step in plan.Steps)
         {
-            var result = Apply(current, SimulationDraftPlanner.ToOperation(step));
+            var result = Apply(current, step);
             if (!result.Succeeded)
             {
                 return SimulationOperationResult.Failure(document, result.Error);
@@ -556,19 +360,19 @@ public sealed class SimulationOperationService : ISimulationOperationService
         return new SimulationOperationResult(true, current, string.Empty, commands);
     }
 
-    private static StorageSnapshot Rename(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot Rename(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var name = request.Name?.Trim() ?? string.Empty;
-        var isVolumeOrPartition = snapshot.Volumes.Any(x => x.StableId == request.TargetStableId)
-            || snapshot.Partitions.Any(x => x.StableId == request.TargetStableId);
+        var isVolumeOrPartition = snapshot.Volumes.Any(x => x.StableId == request.TargetProviderKey)
+            || snapshot.Partitions.Any(x => x.StableId == request.TargetProviderKey);
         if (!isVolumeOrPartition && string.IsNullOrWhiteSpace(name))
         {
             throw new InvalidOperationException("A non-empty name is required.");
         }
 
-        if (snapshot.StoragePools.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.StoragePools.Any(x => x.StableId == request.TargetProviderKey))
         {
-            var target = snapshot.StoragePools.First(x => x.StableId == request.TargetStableId);
+            var target = snapshot.StoragePools.First(x => x.StableId == request.TargetProviderKey);
             if (target.IsPrimordial)
             {
                 throw new InvalidOperationException("The primordial pool cannot be renamed.");
@@ -576,69 +380,69 @@ public sealed class SimulationOperationService : ISimulationOperationService
             return snapshot with
             {
                 StoragePools = snapshot.StoragePools
-                    .Select(x => x.StableId == request.TargetStableId ? x with { FriendlyName = name } : x)
+                    .Select(x => x.StableId == request.TargetProviderKey ? x with { FriendlyName = name } : x)
                     .ToArray()
             };
         }
 
-        if (snapshot.StorageTiers.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.StorageTiers.Any(x => x.StableId == request.TargetProviderKey))
         {
             return snapshot with
             {
                 StorageTiers = snapshot.StorageTiers
-                    .Select(x => x.StableId == request.TargetStableId ? x with { FriendlyName = name } : x)
+                    .Select(x => x.StableId == request.TargetProviderKey ? x with { FriendlyName = name } : x)
                     .ToArray()
             };
         }
 
-        if (snapshot.PhysicalDisks.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.PhysicalDisks.Any(x => x.StableId == request.TargetProviderKey))
         {
             return snapshot with
             {
                 PhysicalDisks = snapshot.PhysicalDisks
-                    .Select(x => x.StableId == request.TargetStableId ? x with { FriendlyName = name } : x)
+                    .Select(x => x.StableId == request.TargetProviderKey ? x with { FriendlyName = name } : x)
                     .ToArray()
             };
         }
 
-        if (snapshot.VirtualDisks.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.VirtualDisks.Any(x => x.StableId == request.TargetProviderKey))
         {
             return snapshot with
             {
                 VirtualDisks = snapshot.VirtualDisks
-                    .Select(x => x.StableId == request.TargetStableId ? x with { FriendlyName = name } : x)
+                    .Select(x => x.StableId == request.TargetProviderKey ? x with { FriendlyName = name } : x)
                     .ToArray(),
                 OsDisks = snapshot.OsDisks
-                    .Select(x => x.VirtualDiskStableId == request.TargetStableId
+                    .Select(x => x.VirtualDiskStableId == request.TargetProviderKey
                         ? x with { FriendlyName = name }
                         : x)
                     .ToArray()
             };
         }
 
-        if (snapshot.OsDisks.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.OsDisks.Any(x => x.StableId == request.TargetProviderKey))
         {
             return snapshot with
             {
                 OsDisks = snapshot.OsDisks
-                    .Select(x => x.StableId == request.TargetStableId ? x with { FriendlyName = name } : x)
+                    .Select(x => x.StableId == request.TargetProviderKey ? x with { FriendlyName = name } : x)
                     .ToArray()
             };
         }
 
-        if (snapshot.Volumes.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.Volumes.Any(x => x.StableId == request.TargetProviderKey))
         {
             return snapshot with
             {
                 Volumes = snapshot.Volumes
-                    .Select(x => x.StableId == request.TargetStableId ? x with { FileSystemLabel = name } : x)
+                    .Select(x => x.StableId == request.TargetProviderKey ? x with { FileSystemLabel = name } : x)
                     .ToArray()
             };
         }
 
-        if (snapshot.Partitions.Any(x => x.StableId == request.TargetStableId))
+        if (snapshot.Partitions.Any(x => x.StableId == request.TargetProviderKey))
         {
-            var partitionId = request.TargetStableId;
+            var partitionId = request.TargetProviderKey;
             var volumes = snapshot.Volumes.Select(item =>
                 item.PartitionStableId == partitionId ? item with { FileSystemLabel = name } : item).ToArray();
             if (volumes.All(item => item.PartitionStableId != partitionId))
@@ -652,10 +456,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
         throw new InvalidOperationException("The selected simulated object cannot be renamed.");
     }
 
-    private static StorageSnapshot ChangeDriveLetter(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot ChangeDriveLetter(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var driveLetter = TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
-        if (snapshot.Partitions.All(x => x.StableId != request.TargetStableId))
+        if (snapshot.Partitions.All(x => x.StableId != request.TargetProviderKey))
         {
             throw new InvalidOperationException("The selected partition was not found.");
         }
@@ -667,14 +471,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
         if (driveLetter.Length == 1
             && snapshot.Partitions.Any(x =>
-                x.StableId != request.TargetStableId
+                x.StableId != request.TargetProviderKey
                 && TopologyProjector.NormalizeDriveLetter(x.DriveLetter) == driveLetter))
         {
             throw new InvalidOperationException($"Drive letter {driveLetter}: is already in use.");
         }
 
         var volumes = snapshot.Volumes.ToList();
-        var existing = volumes.FindIndex(item => item.PartitionStableId == request.TargetStableId);
+        var existing = volumes.FindIndex(item => item.PartitionStableId == request.TargetProviderKey);
         if (existing < 0)
         {
             throw new InvalidOperationException("A volume is required before a drive letter can be assigned.");
@@ -691,7 +495,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         return snapshot with { Volumes = volumes };
     }
 
-    private static StorageSnapshot FormatPartition(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot FormatPartition(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var fileSystem = request.FileSystem?.Trim().ToUpperInvariant();
         if (fileSystem is not ("NTFS" or "REFS" or "EXFAT"))
@@ -704,7 +508,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             throw new InvalidOperationException("Allocation unit size must be positive.");
         }
 
-        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected partition was not found.");
         if (partition.IsBoot || partition.IsSystem)
         {
@@ -762,29 +566,29 @@ public sealed class SimulationOperationService : ISimulationOperationService
             "OK",
             accessPaths);
 
-    private static StorageSnapshot DeletePartition(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot DeletePartition(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        if (snapshot.Partitions.All(x => x.StableId != request.TargetStableId))
+        if (snapshot.Partitions.All(x => x.StableId != request.TargetProviderKey))
         {
             throw new InvalidOperationException("The selected partition was not found.");
         }
 
         var result = snapshot with
         {
-            Partitions = snapshot.Partitions.Where(x => x.StableId != request.TargetStableId).ToArray(),
-            Volumes = snapshot.Volumes.Where(x => x.PartitionStableId != request.TargetStableId).ToArray()
+            Partitions = snapshot.Partitions.Where(x => x.StableId != request.TargetProviderKey).ToArray(),
+            Volumes = snapshot.Volumes.Where(x => x.PartitionStableId != request.TargetProviderKey).ToArray()
         };
         return result;
     }
 
-    private static StorageSnapshot ConvertDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot ConvertDisk(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var style = request.Name?.Trim().ToUpperInvariant();
+        var style = request.PartitionStyle?.Trim().ToUpperInvariant();
         if (style != "GPT")
         {
             throw new InvalidOperationException("Partition style must be GPT.");
         }
-        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
         if (!string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase))
         {
@@ -808,11 +612,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot SetDiskOffline(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot SetDiskOffline(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var offline = request.Offline
             ?? throw new InvalidOperationException("The requested online state is missing.");
-        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
         var physical = snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == disk.PhysicalDiskStableId);
         if (offline && (disk.IsBoot || disk.IsSystem
@@ -828,14 +632,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot InitializeDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot InitializeDisk(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var style = request.Name?.Trim().ToUpperInvariant();
+        var style = request.PartitionStyle?.Trim().ToUpperInvariant();
         if (style != "GPT")
         {
             throw new InvalidOperationException("Partition style must be GPT.");
         }
-        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
         if (disk.IsBoot || disk.IsSystem)
         {
@@ -887,9 +691,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot CreatePartition(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot CreatePartition(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected OS disk was not found.");
         if (disk.IsOffline)
         {
@@ -993,10 +797,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
     private static StorageSnapshot ResizePartition(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request,
+        SimulationEditRequest request,
         bool extend)
     {
-        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected partition was not found.");
         if (partition.IsBoot || partition.IsSystem)
         {
@@ -1036,7 +840,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot CreateStoragePool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot CreateStoragePool(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var name = request.Name?.Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -1104,9 +908,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot CreateVirtualDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot CreateVirtualDisk(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == request.TargetStableId)
+        var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected pool was not found.");
         if (pool.IsPrimordial)
         {
@@ -1231,8 +1035,8 @@ public sealed class SimulationOperationService : ISimulationOperationService
             return result;
         }
 
-        return CreatePartition(result, new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
+        return CreatePartition(result, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
             osDiskId,
             Name: string.IsNullOrWhiteSpace(request.VolumeName) ? name : request.VolumeName,
             FileSystem: string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
@@ -1248,25 +1052,25 @@ public sealed class SimulationOperationService : ISimulationOperationService
             .Where(item => item.PoolStableId == poolId)
             .Sum(item => item.FootprintOnPool);
 
-    private static StorageSnapshot MovePhysicalDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot MovePhysicalDisk(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var primordial = snapshot.StoragePools.FirstOrDefault(x => x.IsPrimordial)
             ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
-        var targetId = string.IsNullOrWhiteSpace(request.Name)
+        var targetId = string.IsNullOrWhiteSpace(request.DestinationGroupId)
             ? primordial.StableId
-            : request.Name.Trim();
-        return EditWorkspace.MoveDiskToPool(snapshot, request.TargetStableId, targetId);
+            : request.DestinationGroupId.Trim();
+        return EditWorkspace.MoveDiskToPool(snapshot, request.TargetProviderKey, targetId);
     }
 
     private static StorageSnapshot EvictPhysicalDiskFromTiers(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetStableId);
-        return EditWorkspace.EvictDiskToUnallocated(cleared, request.TargetStableId);
+        var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetProviderKey);
+        return EditWorkspace.EvictDiskToUnallocated(cleared, request.TargetProviderKey);
     }
 
-    private static StorageSnapshot CreateTieredPool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot CreateTieredPool(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         var primordial = snapshot.StoragePools.FirstOrDefault(item => item.IsPrimordial)
             ?? throw new InvalidOperationException("The simulated system has no primordial pool.");
@@ -1326,8 +1130,8 @@ public sealed class SimulationOperationService : ISimulationOperationService
             item.PoolStableId == pool.StableId
             && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD")
             ?? created.StorageTiers.FirstOrDefault(item => item.PoolStableId == pool.StableId);
-        created = CreateVirtualDisk(created, new SimulationOperationRequest(
-            SimulationOperationKind.CreateVirtualDisk,
+        created = CreateVirtualDisk(created, new SimulationEditRequest(
+            SimulationEditKind.CreateVirtualDisk,
             pool.StableId,
             Name: virtualName,
             Resiliency: performanceTier?.ResiliencySettingName ?? request.PerformanceResiliency ?? "Simple",
@@ -1404,9 +1208,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
             CapacitySourceKind.SimulatedEstimate);
     }
 
-    private static StorageSnapshot UpdateStoragePool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot UpdateStoragePool(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId)
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected pool was not found.");
         if (pool.IsPrimordial)
         {
@@ -1586,9 +1390,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot DissolveStoragePool(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot DissolveStoragePool(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId)
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected pool was not found.");
         if (pool.IsPrimordial)
         {
@@ -1643,9 +1447,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
     private static StorageSnapshot DeleteEmptyStoragePool(
         StorageSnapshot snapshot,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetStableId)
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The selected pool was not found.");
         if (pool.IsPrimordial || pool.MemberPhysicalDiskIds.Count > 0
             || snapshot.VirtualDisks.Any(item => item.PoolStableId == pool.StableId))
@@ -1660,9 +1464,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot DeleteVirtualDisk(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot DeleteVirtualDisk(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == request.TargetStableId)
+        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey)
             ?? throw new InvalidOperationException("The simulated virtual disk was not found.");
         var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == vdisk.PoolStableId)
             ?? throw new InvalidOperationException("The simulated pool was not found.");
@@ -1699,11 +1503,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
     }
 
-    private static StorageSnapshot SetDiskUsage(StorageSnapshot snapshot, SimulationOperationRequest request)
+    private static StorageSnapshot SetDiskUsage(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        var usage = request.Name?.Trim() ?? string.Empty;
-        var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetStableId);
-        return EditWorkspace.SetDiskUsage(cleared, request.TargetStableId, usage);
+        var usage = request.DiskUsage?.Trim() ?? string.Empty;
+        var cleared = EditWorkspace.ClearEvictableSpecialRoles(snapshot, request.TargetProviderKey);
+        return EditWorkspace.SetDiskUsage(cleared, request.TargetProviderKey, usage);
     }
 
     private static string NextFreeDriveLetter(StorageSnapshot snapshot)

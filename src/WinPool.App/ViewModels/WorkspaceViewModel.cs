@@ -90,7 +90,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             StorageSystemKind.Local,
             localSnapshot.Computer.Name,
             localSnapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.MinValue),
             [],
             DateTimeOffset.MinValue);
         SystemCatalog.ReplaceLocal(local);
@@ -765,7 +764,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 {
                     DisplayName = builtin.DisplayName,
                     SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = existing.SystemId, Revision = checked((existing.SourceFacts?.Revision ?? 0) + 1) } : null,
-                    HardwareReport = builtin.HardwareReport,
+
                     Jobs = [],
                     Revision = checked(existing.Revision + 1),
                     UpdatedAt = DateTimeOffset.Now
@@ -1008,7 +1007,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     {
                         DisplayName = builtin.DisplayName,
                         SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = existing.SystemId, Revision = checked((existing.SourceFacts?.Revision ?? 0) + 1) } : null,
-                        HardwareReport = builtin.HardwareReport,
+
                         Jobs = [],
                         Revision = checked(existing.Revision + 1),
                         UpdatedAt = DateTimeOffset.Now
@@ -1070,7 +1069,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             {
                 DisplayName = builtin.DisplayName,
                 SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = document.SystemId, Revision = checked((document.SourceFacts?.Revision ?? 0) + 1) } : null,
-                HardwareReport = builtin.HardwareReport,
+
                 Jobs = [],
                 UpdatedAt = DateTimeOffset.Now
             },

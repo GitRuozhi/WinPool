@@ -11,15 +11,15 @@ public sealed class V049PartitionSemanticsTests
     public void FormatPartitionAcceptsNtfsRefsAndExfatOnWorkstationSku(string fileSystem)
     {
         var document = InitializedDisk();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
             "osdisk:ssd0",
             SizeBytes: 1_000_000_000));
         var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
         Assert.DoesNotContain(document.Snapshot.Volumes, item => item.PartitionStableId == partition.StableId);
 
-        var formatted = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.FormatPartition,
+        var formatted = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.FormatPartition,
             partition.StableId,
             FileSystem: fileSystem,
             AllocationUnitSize: 65536));
@@ -33,8 +33,8 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             InitializedDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreatePartition,
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: "exFAT",
                 AllocationUnitSize: 65536,
@@ -50,8 +50,8 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             InitializedDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreatePartition,
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
                 DriveLetter: string.Empty));
@@ -73,8 +73,8 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             InitializedDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreatePartition,
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: fileSystem,
                 SizeBytes: 100_000_000,
@@ -92,8 +92,8 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             InitializedDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreatePartition,
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
                 SizeBytes: 100_000_000));
@@ -104,10 +104,10 @@ public sealed class V049PartitionSemanticsTests
                     .ToArray()
             });
 
-        var converted = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.ConvertDisk,
+        var converted = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ConvertDisk,
             "osdisk:ssd0",
-            Name: "GPT"));
+            PartitionStyle: "GPT"));
 
         Assert.Empty(converted.Snapshot.Partitions);
         Assert.Empty(converted.Snapshot.Volumes);
@@ -119,14 +119,14 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             InitializedDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreatePartition,
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
                 DriveLetter: "F"));
         var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.ChangeDriveLetter,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ChangeDriveLetter,
             partition.StableId,
             DriveLetter: string.Empty));
         var volume = Assert.Single(document.Snapshot.Volumes, item => item.PartitionStableId == partition.StableId);
@@ -138,30 +138,30 @@ public sealed class V049PartitionSemanticsTests
     {
         var snapshot = Apply(
             InitializedDisk(),
-            new SimulationOperationRequest(SimulationOperationKind.CreatePartition, "osdisk:ssd0")).Snapshot;
+            new SimulationEditRequest(SimulationEditKind.CreatePartition, "osdisk:ssd0")).Snapshot;
         var partition = Assert.Single(snapshot.Partitions, item => item.Type == "BasicData");
         Assert.Equal(
             StorageRuleVerdict.Allow,
             StorageEditRules.Evaluate(
                 snapshot,
-                new SimulationOperationRequest(
-                    SimulationOperationKind.FormatPartition,
+                new SimulationEditRequest(
+                    SimulationEditKind.FormatPartition,
                     partition.StableId,
                     FileSystem: "exFAT")).Verdict);
         Assert.Equal(
             StorageRuleVerdict.Allow,
             StorageEditRules.Evaluate(
                 snapshot,
-                new SimulationOperationRequest(
-                    SimulationOperationKind.FormatPartition,
+                new SimulationEditRequest(
+                    SimulationEditKind.FormatPartition,
                     partition.StableId,
                     FileSystem: "ReFS")).Verdict);
         Assert.Equal(
             StorageRuleVerdict.Deny,
             StorageEditRules.Evaluate(
                 snapshot,
-                new SimulationOperationRequest(
-                    SimulationOperationKind.FormatPartition,
+                new SimulationEditRequest(
+                    SimulationEditKind.FormatPartition,
                     partition.StableId,
                     FileSystem: "FAT32")).Verdict);
     }
@@ -171,19 +171,19 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             EmptyRawDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.InitializeDisk,
+            new SimulationEditRequest(
+                SimulationEditKind.InitializeDisk,
                 "osdisk:ssd0",
-                Name: "GPT",
+                PartitionStyle: "GPT",
                 CreateMsr: true));
         var msr = Assert.Single(document.Snapshot.Partitions, item => item.Type == "MicrosoftReserved");
         Assert.Equal(
             StorageRuleVerdict.Allow,
             StorageEditRules.Evaluate(
                 document.Snapshot,
-                new SimulationOperationRequest(SimulationOperationKind.DeletePartition, msr.StableId)).Verdict);
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.DeletePartition,
+                new SimulationEditRequest(SimulationEditKind.DeletePartition, msr.StableId)).Verdict);
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.DeletePartition,
             msr.StableId));
         Assert.DoesNotContain(document.Snapshot.Partitions, item => item.Type == "MicrosoftReserved");
     }
@@ -192,10 +192,10 @@ public sealed class V049PartitionSemanticsTests
     {
         var document = Apply(
             EmptyRawDisk(),
-            new SimulationOperationRequest(
-                SimulationOperationKind.InitializeDisk,
+            new SimulationEditRequest(
+                SimulationEditKind.InitializeDisk,
                 "osdisk:ssd0",
-                Name: "GPT",
+                PartitionStyle: "GPT",
                 CreateMsr: false));
         return document;
     }
@@ -230,14 +230,13 @@ public sealed class V049PartitionSemanticsTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.UtcNow),
             [],
             DateTimeOffset.UtcNow);
     }
 
     private static StorageSystemDocument Apply(
         StorageSystemDocument document,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         var result = new SimulationOperationService().Apply(document, request);
         Assert.True(result.Succeeded, result.Error);

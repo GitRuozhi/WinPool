@@ -74,6 +74,10 @@ public static class WinPoolSimulationFacts
         foreach (var disk in candidate.VirtualDisks) Link(disk.PoolStableId, disk.StableId, "pool-virtual-disk");
         foreach (var partition in candidate.Partitions) Link(partition.OsDiskStableId, partition.StableId, "disk-partition");
         foreach (var volume in candidate.Volumes) Link(volume.PartitionStableId, volume.StableId, "partition-volume");
+        // Supplementary source associations survive storage edits when both observations still exist.
+        if (previous is not null)
+            relationships.AddRange(previous.Relationships.Where(x => x.Kind == "same-volume"
+                && ids.Contains(x.FromId) && ids.Contains(x.ToId)));
         var used = objects.Select(x => x.SourceRef).Concat(objects.SelectMany(x => x.Fields.Select(f => f.SourceRef))).ToHashSet();
         var sources = (previous?.Sources.AsEnumerable() ?? []).Where(x => x.Id != sourceRef).Append(source)
             .Where(x => used.Contains(x.Id)).ToImmutableArray();

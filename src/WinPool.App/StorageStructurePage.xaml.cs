@@ -5,8 +5,8 @@ using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
-using SimulationOperationKind = WinPool.Application.SimulationEditKind;
-using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
+using SimulationEditKind = WinPool.Application.SimulationEditKind;
+using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 
 namespace WinPool_App;
 
@@ -2843,8 +2843,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 ? $"更改盘符为 {step.DriveLetter}。"
                 : $"Change drive letter to {step.DriveLetter}.",
             SimulationEditKind.SetDiskUsage => zh
-                ? $"设置磁盘用途为 {step.Name}。"
-                : $"Set disk usage to {step.Name}.",
+                ? $"设置磁盘用途为 {step.DiskUsage}。"
+                : $"Set disk usage to {step.DiskUsage}.",
             SimulationEditKind.MovePhysicalDisk => zh
                 ? "移动物理磁盘。"
                 : "Move physical disk.",

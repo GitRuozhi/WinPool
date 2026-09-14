@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using WinPool.Application;
 
@@ -121,11 +120,6 @@ public static partial class ReadOnlyStorageCommandPolicy
 
 public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvider
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        NumberHandling = JsonNumberHandling.AllowReadingFromString
-    };
     private readonly IReadOnlyInventoryCommandRunner _runner;
     private readonly CollectionPurpose _purpose;
 
@@ -158,25 +152,16 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
 
         try
         {
-            var raw = JsonSerializer.Deserialize<RawSnapshot>(result.StandardOutput, JsonOptions)
-                ?? throw new JsonException("The JSON snapshot was empty.");
-            var snapshot = RawSnapshotProjector.Project(raw, result.StandardOutput);
-            var report = HardwareReportFactory.Create(
-                snapshot,
-                raw,
-                result.StandardError,
-                result.Duration);
-            var document = new StorageSystemDocument(
-                StorageSystemDocument.CurrentSchemaVersion,
-                $"local:{snapshot.Computer.StableId}",
-                StorageSystemKind.Local,
-                snapshot.Computer.Name,
-                snapshot,
-                report,
-                [],
-                snapshot.ScannedAt);
             using var parsed = JsonDocument.Parse(result.StandardOutput);
-            return document with { SourceFacts = WinPoolFactCapture.Read(parsed.RootElement, snapshot, document.SystemId, _purpose) };
+            var root = parsed.RootElement;
+            var capturedAt = root.GetProperty("ScannedAt").GetDateTimeOffset();
+            var name = root.GetProperty("Computer").GetProperty("Name").GetString() ?? Environment.MachineName;
+            var context = StorageSnapshot.Empty(name) with { ScannedAt = capturedAt,
+                SnapshotVersion = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(result.StandardOutput))) };
+            var id = $"local:{context.Computer.StableId}";
+            var system = InternalStableIdentity.SystemFromDocumentId(id);
+            return new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, id, StorageSystemKind.Local,
+                name, WinPoolFactCapture.Read(root, context, system, _purpose), [], capturedAt);
         }
         catch (JsonException ex)
         {

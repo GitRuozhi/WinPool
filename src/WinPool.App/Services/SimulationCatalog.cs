@@ -1,4 +1,4 @@
-using WinPool.Application;
+﻿using WinPool.Application;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.App.Services;
@@ -15,8 +15,7 @@ public static class SimulationCatalog
             Document(
                 ReferenceDocumentId,
                 "DESKTOP-PL96UKD",
-                SimulationStorageSnapshotFactory.Create(),
-                KsReferenceReportFactory.Create())
+                SimulationStorageSnapshotFactory.Create())
         };
         foreach (var layout in SimulationLayouts.CreateAll())
         {
@@ -33,8 +32,7 @@ public static class SimulationCatalog
     private static StorageSystemDocument Document(
         string id,
         string name,
-        StorageSnapshot snapshot,
-        HardwareInventoryReport? hardwareReport = null)
+        StorageSnapshot snapshot)
     {
         snapshot = EditWorkspace.EnsureFreeDisksHaveOsDisks(snapshot);
         snapshot = StorageRelationshipProjector.Rebuild(snapshot);
@@ -44,7 +42,6 @@ public static class SimulationCatalog
             StorageSystemKind.Simulation,
             name,
             snapshot,
-            hardwareReport ?? HardwareInventoryReport.Empty(snapshot.ScannedAt),
             [],
             snapshot.ScannedAt);
     }

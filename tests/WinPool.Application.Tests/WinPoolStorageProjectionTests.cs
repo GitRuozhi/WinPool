@@ -39,9 +39,9 @@ public sealed class WinPoolStorageProjectionTests
         Assert.Contains(view.Warnings, x => x.Code == "facts.numeric-out-of-range" && x.StableId == "disk");
         Assert.Equal(ulong.MaxValue, facts.Objects[0].Field("Size")!.Value!.Value.GetUInt64());
         Assert.Equal(StorageRuleVerdict.Deny, StorageEditRules.Evaluate(view,
-            new(SimulationOperationKind.CreateStoragePool, "new-pool", MemberDiskIds: ["disk"])).Verdict);
+            new(SimulationEditKind.CreateStoragePool, "new-pool", MemberDiskIds: ["disk"])).Verdict);
         Assert.Equal(StorageRuleVerdict.Allow, StorageEditRules.Evaluate(view,
-            new(SimulationOperationKind.Rename, "disk", Name: "Retained disk")).Verdict);
+            new(SimulationEditKind.Rename, "disk", Name: "Retained disk")).Verdict);
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class WinPoolStorageProjectionTests
         var snapshot = SimulationLayouts.StandardTiered();
         var disk = snapshot.VirtualDisks.First();
         var partition = snapshot.Partitions.First(x => snapshot.OsDisks.Any(d => d.StableId == x.OsDiskStableId && d.VirtualDiskStableId == disk.StableId));
-        var request = new SimulationOperationRequest(SimulationOperationKind.DeletePartition, partition.StableId);
+        var request = new SimulationEditRequest(SimulationEditKind.DeletePartition, partition.StableId);
         var related = snapshot with { Warnings = [new("facts.numeric-out-of-range", "Retained raw capacity", disk.StableId)] };
         Assert.Equal("storage.rule.source-value-out-of-range", StorageEditRules.Evaluate(related, request).Code);
         var unrelated = snapshot with { Warnings = [new("facts.numeric-out-of-range", "Another device", "unrelated-device")] };

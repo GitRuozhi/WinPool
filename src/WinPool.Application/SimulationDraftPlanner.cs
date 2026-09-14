@@ -73,7 +73,7 @@ public static class SimulationDraftPlanner
                     draftMembersMovedToPrimordial.Add(diskId);
                 }
 
-                steps.Add(new SimulationEditRequest(SimulationEditKind.MovePhysicalDisk, diskId, Name: finalTarget));
+                steps.Add(new SimulationEditRequest(SimulationEditKind.MovePhysicalDisk, diskId, DestinationGroupId: finalTarget));
             }
 
             steps.Add(new SimulationEditRequest(SimulationEditKind.DeleteEmptyStoragePool, pool.StableId));
@@ -101,7 +101,7 @@ public static class SimulationDraftPlanner
                 steps.Add(new SimulationEditRequest(
                     SimulationEditKind.MovePhysicalDisk,
                     memberId,
-                    Name: primordialId));
+                    DestinationGroupId: primordialId));
                 draftMembersMovedToPrimordial.Add(memberId);
             }
 
@@ -276,7 +276,7 @@ public static class SimulationDraftPlanner
             steps.Add(new SimulationEditRequest(
                 SimulationEditKind.MovePhysicalDisk,
                 disk.StableId,
-                Name: disk.PoolStableId ?? string.Empty));
+                DestinationGroupId: disk.PoolStableId ?? string.Empty));
         }
 
         foreach (var disk in working.PhysicalDisks)
@@ -314,7 +314,7 @@ public static class SimulationDraftPlanner
             steps.Add(new SimulationEditRequest(
                 SimulationEditKind.MovePhysicalDisk,
                 disk.StableId,
-                Name: disk.PoolStableId));
+                DestinationGroupId: disk.PoolStableId));
         }
 
         foreach (var disk in working.PhysicalDisks)
@@ -341,7 +341,7 @@ public static class SimulationDraftPlanner
             steps.Add(new SimulationEditRequest(
                 SimulationEditKind.SetDiskUsage,
                 disk.StableId,
-                Name: usage));
+                DiskUsage: usage));
         }
 
         foreach (var pool in working.StoragePools.Where(item =>
@@ -420,7 +420,6 @@ public static class SimulationDraftPlanner
             StorageSystemKind.Simulation,
             committed.Computer.Name,
             committed,
-            HardwareInventoryReport.Empty(DateTimeOffset.UtcNow),
             [],
             DateTimeOffset.UtcNow);
         var service = new SimulationOperationService();
@@ -432,7 +431,7 @@ public static class SimulationDraftPlanner
         foreach (var step in steps)
         {
             var parentPool = ParentDissolvedPool(committed, step, dissolvedPoolIds);
-            var operation = ToOperation(step);
+            var operation = step;
             IReadOnlyList<string> commandPreview = [];
             StorageRuleDecision decision;
             var failedPrerequisite = parentPool is null
@@ -605,24 +604,26 @@ public static class SimulationDraftPlanner
         var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         var vdisk = snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
         var partition = snapshot.Partitions.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
-        var targetPool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.Name);
+        var targetPool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.DestinationGroupId);
+        var targetName = snapshot.FindUnit(request.TargetProviderKey)?.DisplayName ?? "selected object";
         return request.Kind switch
         {
             SimulationEditKind.DeletePartition => partition is null
-                ? $"Delete partition {request.TargetProviderKey}"
+                ? $"Delete partition {targetName}"
                 : $"Delete disk {partition.DiskNumber} partition {partition.PartitionNumber} ({partition.DriveLetter})",
-            SimulationEditKind.DeleteVirtualDisk => $"Delete virtual disk {vdisk?.FriendlyName ?? request.TargetProviderKey}",
+            SimulationEditKind.DeleteVirtualDisk => $"Delete virtual disk {vdisk?.FriendlyName ?? targetName}",
             SimulationEditKind.MovePhysicalDisk =>
-                $"Move {disk?.FriendlyName ?? request.TargetProviderKey}: {snapshot.StoragePools.FirstOrDefault(item => item.StableId == disk?.PoolStableId)?.FriendlyName ?? disk?.PoolStableId ?? "unpooled"} → {targetPool?.FriendlyName ?? request.Name}",
-            SimulationEditKind.DeleteEmptyStoragePool => $"Remove empty pool {pool?.FriendlyName ?? request.TargetProviderKey}",
+                $"Move {disk?.FriendlyName ?? targetName}: {snapshot.StoragePools.FirstOrDefault(item => item.StableId == disk?.PoolStableId)?.FriendlyName ?? "unpooled"} → {targetPool?.FriendlyName ?? "destination pool"}",
+            SimulationEditKind.DeleteEmptyStoragePool => $"Remove empty pool {pool?.FriendlyName ?? targetName}",
             SimulationEditKind.CreateTieredPool => $"Create storage pool {request.Name}",
             SimulationEditKind.CreateVirtualDisk => $"Create virtual disk {request.Name}",
             SimulationEditKind.UpdateStoragePool => UpdatePoolTitle(snapshot, request, pool),
             SimulationEditKind.FormatPartition => partition is null
-                ? $"Format partition {request.TargetProviderKey} as {request.FileSystem}"
+                ? $"Format partition {targetName} as {request.FileSystem}"
                 : $"Format disk {partition.DiskNumber} partition {partition.PartitionNumber} ({partition.DriveLetter}) as {request.FileSystem}",
-            SimulationEditKind.Rename => $"Rename {request.TargetProviderKey} to {request.Name}",
-            _ => $"{request.Kind}: {request.TargetProviderKey}"
+            SimulationEditKind.SetDiskUsage => $"Set {disk?.FriendlyName ?? targetName} usage to {(string.IsNullOrEmpty(request.DiskUsage) ? "data" : request.DiskUsage)}",
+            SimulationEditKind.Rename => $"Rename {targetName} to {request.Name}",
+            _ => $"{request.Kind}: {targetName}"
         };
     }
 
@@ -793,47 +794,4 @@ public static class SimulationDraftPlanner
         return $"{prefix}:{suffix}";
     }
 
-    public static SimulationOperationRequest ToOperation(SimulationEditRequest request) =>
-        new(
-            Enum.Parse<SimulationOperationKind>(request.Kind.ToString()),
-            request.TargetProviderKey,
-            request.Name,
-            request.DriveLetter,
-            request.FileSystem,
-            request.AllocationUnitSize,
-            request.Offline,
-            request.SizeBytes,
-            request.CreateMsr,
-            request.InterleaveBytes,
-            request.Resiliency,
-            request.MemberDiskIds,
-            request.VirtualDiskName,
-            request.PerformanceResiliency,
-            request.PerformanceInterleaveBytes,
-            request.PerformanceSizeBytes,
-            request.PerformanceDataCopies,
-            request.CapacityResiliency,
-            request.CapacityInterleaveBytes,
-            request.CapacitySizeBytes,
-            request.CapacityColumns,
-            request.CapacityToleratedFailures,
-            request.ScmResiliency,
-            request.ScmInterleaveBytes,
-            request.ScmSizeBytes,
-            request.ScmDataCopies,
-            request.PerformanceUseMaximum,
-            request.CapacityUseMaximum,
-            request.ScmUseMaximum,
-            request.ProvisioningType,
-            request.OffsetBytes,
-            request.CreatePartition,
-            request.CreateVirtualDisk,
-            request.AllocatedPoolId,
-            request.AllocatedVirtualDiskId,
-            request.AllocatedOsDiskId,
-            request.AllocatedPartitionId,
-            request.AllocatedVolumeId,
-            request.AccessPaths,
-            request.VolumeName,
-            request.PartitionKind);
 }

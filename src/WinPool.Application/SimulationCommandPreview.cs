@@ -15,98 +15,98 @@ public static class SimulationCommandPreview
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
     private const string Unbound = "# Preview only. $target* and $memberDisks are unbound CIM object placeholders; this is not a standalone script.\n";
 
-    public static IReadOnlyList<string> Build(SimulationOperationRequest step, StorageSnapshot before, StorageSnapshot after)
+    public static IReadOnlyList<string> Build(SimulationEditRequest step, StorageSnapshot before, StorageSnapshot after)
     {
         var lines = new List<string>();
         switch (step.Kind)
         {
-            case SimulationOperationKind.Rename:
-                var command = before.StoragePools.Any(x => x.StableId == step.TargetStableId) ? "Set-StoragePool -InputObject $targetPool -NewFriendlyName "
-                    : before.StorageTiers.Any(x => x.StableId == step.TargetStableId) ? "Set-StorageTier -InputObject $targetTier -NewFriendlyName "
-                    : before.PhysicalDisks.Any(x => x.StableId == step.TargetStableId) ? "Set-PhysicalDisk -InputObject $targetPhysicalDisk -NewFriendlyName "
-                    : before.VirtualDisks.Any(x => x.StableId == step.TargetStableId) ? "Set-VirtualDisk -InputObject $targetVirtualDisk -NewFriendlyName "
-                    : before.Partitions.Any(x => x.StableId == step.TargetStableId) || before.Volumes.Any(x => x.StableId == step.TargetStableId)
+            case SimulationEditKind.Rename:
+                var command = before.StoragePools.Any(x => x.StableId == step.TargetProviderKey) ? "Set-StoragePool -InputObject $targetPool -NewFriendlyName "
+                    : before.StorageTiers.Any(x => x.StableId == step.TargetProviderKey) ? "Set-StorageTier -InputObject $targetTier -NewFriendlyName "
+                    : before.PhysicalDisks.Any(x => x.StableId == step.TargetProviderKey) ? "Set-PhysicalDisk -InputObject $targetPhysicalDisk -NewFriendlyName "
+                    : before.VirtualDisks.Any(x => x.StableId == step.TargetProviderKey) ? "Set-VirtualDisk -InputObject $targetVirtualDisk -NewFriendlyName "
+                    : before.Partitions.Any(x => x.StableId == step.TargetProviderKey) || before.Volumes.Any(x => x.StableId == step.TargetProviderKey)
                         ? "Set-Volume -InputObject $targetVolume -NewFileSystemLabel " : null;
                 lines.Add(command is null ? "# This simulated display name has no corresponding Storage cmdlet." : command + Quote(step.Name));
                 break;
-            case SimulationOperationKind.ChangeDriveLetter:
+            case SimulationEditKind.ChangeDriveLetter:
                 if (!string.IsNullOrWhiteSpace(step.DriveLetter))
                     lines.Add("Set-Partition -InputObject $targetPartition -NewDriveLetter " + Quote(TopologyProjector.NormalizeDriveLetter(step.DriveLetter)));
                 else
                 {
-                    var letter = before.Partitions.FirstOrDefault(x => x.StableId == step.TargetStableId)?.DriveLetter;
+                    var letter = before.Partitions.FirstOrDefault(x => x.StableId == step.TargetProviderKey)?.DriveLetter;
                     lines.Add(string.IsNullOrWhiteSpace(letter) ? "# No existing drive-letter access path to remove."
                         : "Remove-PartitionAccessPath -InputObject $targetPartition -AccessPath " + Quote(TopologyProjector.NormalizeDriveLetter(letter) + ":\\"));
                 }
                 break;
-            case SimulationOperationKind.FormatPartition:
-                var formatted = after.Volumes.FirstOrDefault(x => x.PartitionStableId == step.TargetStableId);
+            case SimulationEditKind.FormatPartition:
+                var formatted = after.Volumes.FirstOrDefault(x => x.PartitionStableId == step.TargetProviderKey);
                 lines.Add(formatted is null ? "# No volume was formatted."
                     : Format(step with { FileSystem = formatted.FileSystem, AllocationUnitSize = formatted.AllocationUnitSize, VolumeName = formatted.FileSystemLabel }, "$targetVolume")); break;
-            case SimulationOperationKind.DeletePartition:
+            case SimulationEditKind.DeletePartition:
                 lines.Add("Remove-Partition -InputObject $targetPartition -Confirm:$false"); break;
-            case SimulationOperationKind.InitializeDisk:
-            case SimulationOperationKind.ConvertDisk:
+            case SimulationEditKind.InitializeDisk:
+            case SimulationEditKind.ConvertDisk:
                 lines.Add("Clear-Disk -InputObject $targetDisk -RemoveData -Confirm:$false");
-                lines.Add("Initialize-Disk -InputObject $targetDisk -PartitionStyle " + Quote(step.Name?.Trim().ToUpperInvariant()));
+                lines.Add("Initialize-Disk -InputObject $targetDisk -PartitionStyle " + Quote(step.PartitionStyle?.Trim().ToUpperInvariant()));
                 if (step.CreateMsr == true) lines.Add("New-Partition -InputObject $targetDisk -Size 16777216 -GptType " + Quote(PartitionTypeId(PartitionKind.MicrosoftReserved)));
                 break;
-            case SimulationOperationKind.SetDiskOffline:
+            case SimulationEditKind.SetDiskOffline:
                 lines.Add("Set-Disk -InputObject $targetDisk -IsOffline $" + (step.Offline == true ? "true" : "false")); break;
-            case SimulationOperationKind.CreatePartition:
+            case SimulationEditKind.CreatePartition:
                 foreach (var partition in after.Partitions.Where(x => !before.Partitions.Any(old => old.StableId == x.StableId)))
                     AddPartition(lines, partition, after);
                 break;
-            case SimulationOperationKind.ExtendPartition:
-            case SimulationOperationKind.ShrinkPartition:
+            case SimulationEditKind.ExtendPartition:
+            case SimulationEditKind.ShrinkPartition:
                 lines.Add("# Partition resizing is not implemented in this version; no command is emitted."); break;
-            case SimulationOperationKind.OptimizePool:
-            case SimulationOperationKind.OptimizeDrive:
+            case SimulationEditKind.OptimizePool:
+            case SimulationEditKind.OptimizeDrive:
                 lines.Add("# Simulated no-op. No optimization command or performance improvement is claimed."); break;
-            case SimulationOperationKind.CreateStoragePool:
-            case SimulationOperationKind.CreateTieredPool:
+            case SimulationEditKind.CreateStoragePool:
+            case SimulationEditKind.CreateTieredPool:
                 if (step.MemberDiskIds is not { Count: > 0 })
                 {
                     lines.Add("# Empty planning pool only. New-StoragePool requires real member disks; no creation command is available.");
                     break;
                 }
                 lines.Add("$targetPool = New-StoragePool -InputObject $targetStorageSubsystem -FriendlyName " + Quote(step.Name) + " -PhysicalDisks $memberDisks");
-                if (step.Kind == SimulationOperationKind.CreateTieredPool)
+                if (step.Kind == SimulationEditKind.CreateTieredPool)
                     foreach (var disk in after.VirtualDisks.Where(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId))) AddVirtualDisk(lines, disk, after);
                 break;
-            case SimulationOperationKind.CreateVirtualDisk:
+            case SimulationEditKind.CreateVirtualDisk:
                 var created = after.VirtualDisks.FirstOrDefault(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId));
                 if (created is not null) AddVirtualDisk(lines, created, after);
                 else lines.Add("# No new virtual disk was produced by this step.");
                 break;
-            case SimulationOperationKind.MovePhysicalDisk:
-                var sourcePool = before.PhysicalDisks.FirstOrDefault(x => x.StableId == step.TargetStableId)?.PoolStableId;
+            case SimulationEditKind.MovePhysicalDisk:
+                var sourcePool = before.PhysicalDisks.FirstOrDefault(x => x.StableId == step.TargetProviderKey)?.PoolStableId;
                 if (before.StoragePools.Any(x => x.StableId == sourcePool && !x.IsPrimordial))
                     lines.Add("Remove-PhysicalDisk -InputObject $targetSourcePool -PhysicalDisks $targetPhysicalDisk -Confirm:$false");
-                var destination = after.PhysicalDisks.FirstOrDefault(x => x.StableId == step.TargetStableId)?.PoolStableId;
+                var destination = after.PhysicalDisks.FirstOrDefault(x => x.StableId == step.TargetProviderKey)?.PoolStableId;
                 if (after.StoragePools.Any(x => x.StableId == destination && !x.IsPrimordial))
                     lines.Add("Add-PhysicalDisk -InputObject $targetDestinationPool -PhysicalDisks $targetPhysicalDisk");
                 break;
-            case SimulationOperationKind.SetDiskUsage:
-                lines.Add("Set-PhysicalDisk -InputObject $targetPhysicalDisk -Usage " + Quote(string.IsNullOrWhiteSpace(step.Name) ? "AutoSelect" : step.Name)); break;
-            case SimulationOperationKind.DeleteVirtualDisk:
+            case SimulationEditKind.SetDiskUsage:
+                lines.Add("Set-PhysicalDisk -InputObject $targetPhysicalDisk -Usage " + Quote(string.IsNullOrWhiteSpace(step.DiskUsage) ? "AutoSelect" : step.DiskUsage)); break;
+            case SimulationEditKind.DeleteVirtualDisk:
                 lines.Add("Remove-VirtualDisk -InputObject $targetVirtualDisk -Confirm:$false"); break;
-            case SimulationOperationKind.DeleteEmptyStoragePool:
+            case SimulationEditKind.DeleteEmptyStoragePool:
                 lines.Add("# Delete empty simulated planning pool. It has no bound Windows storage pool."); break;
-            case SimulationOperationKind.DissolveStoragePool:
-                if (before.StoragePools.FirstOrDefault(x => x.StableId == step.TargetStableId)?.MemberPhysicalDiskIds.Count == 0)
+            case SimulationEditKind.DissolveStoragePool:
+                if (before.StoragePools.FirstOrDefault(x => x.StableId == step.TargetProviderKey)?.MemberPhysicalDiskIds.Count == 0)
                 {
                     lines.Add("# Empty simulated planning pool. No bound Windows pool exists to remove."); break;
                 }
-                if (before.VirtualDisks.Any(x => x.PoolStableId == step.TargetStableId))
+                if (before.VirtualDisks.Any(x => x.PoolStableId == step.TargetProviderKey))
                     lines.Add("Remove-VirtualDisk -InputObject $targetPoolVirtualDisks -Confirm:$false");
                 lines.Add("Remove-StoragePool -InputObject $targetPool -Confirm:$false"); break;
-            case SimulationOperationKind.EvictPhysicalDiskFromTiers:
+            case SimulationEditKind.EvictPhysicalDiskFromTiers:
                 lines.Add("# Unallocated is a WinPool display group. Windows has no direct cmdlet to assign a physical disk to this group."); break;
-            case SimulationOperationKind.UpdateStoragePool:
+            case SimulationEditKind.UpdateStoragePool:
                 lines.Add("# Layout updates must be reviewed as member, tier and virtual-disk changes; there is no Set-StoragePool layout parameter.");
-                var oldPool = before.StoragePools.FirstOrDefault(x => x.StableId == step.TargetStableId);
-                var newPool = after.StoragePools.FirstOrDefault(x => x.StableId == step.TargetStableId);
+                var oldPool = before.StoragePools.FirstOrDefault(x => x.StableId == step.TargetProviderKey);
+                var newPool = after.StoragePools.FirstOrDefault(x => x.StableId == step.TargetProviderKey);
                 if (oldPool is not null && newPool is not null)
                 {
                     if (oldPool.MemberPhysicalDiskIds.Except(newPool.MemberPhysicalDiskIds).Any())
@@ -115,7 +115,7 @@ public static class SimulationCommandPreview
                         lines.Add("Add-PhysicalDisk -InputObject $targetPool -PhysicalDisks $targetAddedDisks");
                 }
                 var tierIndex = 0;
-                foreach (var tier in after.StorageTiers.Where(x => x.PoolStableId == step.TargetStableId))
+                foreach (var tier in after.StorageTiers.Where(x => x.PoolStableId == step.TargetProviderKey))
                 {
                     tierIndex++;
                     var old = before.StorageTiers.FirstOrDefault(x => x.StableId == tier.StableId);
@@ -124,7 +124,7 @@ public static class SimulationCommandPreview
                     else if (old is not null && !SameLayout(old, tier))
                         lines.Add("# This simulated layout change requires recreation on Windows; no in-place parameter mapping is available.");
                 }
-                foreach (var disk in after.VirtualDisks.Where(x => x.PoolStableId == step.TargetStableId))
+                foreach (var disk in after.VirtualDisks.Where(x => x.PoolStableId == step.TargetProviderKey))
                     if (before.VirtualDisks.FirstOrDefault(x => x.StableId == disk.StableId) is { } oldDisk && disk.Size > oldDisk.Size
                         && disk.ResiliencySettingName == oldDisk.ResiliencySettingName && disk.ProvisioningType == oldDisk.ProvisioningType
                         && disk.Interleave == oldDisk.Interleave && disk.NumberOfColumns == oldDisk.NumberOfColumns
@@ -145,7 +145,7 @@ public static class SimulationCommandPreview
         && before.Interleave == after.Interleave && before.NumberOfColumns == after.NumberOfColumns
         && before.NumberOfDataCopies == after.NumberOfDataCopies && before.PhysicalDiskRedundancy == after.PhysicalDiskRedundancy;
 
-    private static string Format(SimulationOperationRequest step, string? target) => "Format-Volume"
+    private static string Format(SimulationEditRequest step, string? target) => "Format-Volume"
         + (target is null ? "" : " -InputObject " + target)
         + " -FileSystem " + Quote(step.FileSystem ?? (step.PartitionKind == PartitionKind.EfiSystem ? "FAT32" : "NTFS"))
         + " -AllocationUnitSize " + Number(step.AllocationUnitSize ?? 4096)
@@ -160,7 +160,7 @@ public static class SimulationCommandPreview
             + " -Offset " + Number(partition.Offset) + " -GptType " + Quote(partition.PartitionTypeId)
             + (string.IsNullOrWhiteSpace(volume?.DriveLetter) ? "" : " -DriveLetter " + Quote(volume.DriveLetter)));
         if (volume is { FileSystem.Length: > 0 })
-            lines.Add("$newPartition | " + Format(new(SimulationOperationKind.FormatPartition, partition.StableId,
+            lines.Add("$newPartition | " + Format(new(SimulationEditKind.FormatPartition, partition.StableId,
                 FileSystem: volume.FileSystem, AllocationUnitSize: volume.AllocationUnitSize, VolumeName: volume.FileSystemLabel), null));
     }
 

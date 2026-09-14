@@ -412,7 +412,7 @@ public static class TopologyProjector
                 new StorageUnitRef(
                     $"group:direct:{pool.StableId}",
                     StorageUnitKind.DirectDiskGroup,
-                    "Unallocated"),
+                    snapshot.DirectGroupName(pool.StableId)),
                 JoinSummary(
                     $"{directMembers.Count} physical disks",
                     FormatBytes(directMembers.Sum(x => x.Size))),

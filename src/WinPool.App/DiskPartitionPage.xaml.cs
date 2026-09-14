@@ -6,8 +6,8 @@ using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
-using SimulationOperationKind = WinPool.Application.SimulationEditKind;
-using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
+using SimulationEditKind = WinPool.Application.SimulationEditKind;
+using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 
 namespace WinPool_App;
 
@@ -753,8 +753,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         await SubmitAsync(
-            new SimulationOperationRequest(
-                SimulationOperationKind.ChangeDriveLetter,
+            new SimulationEditRequest(
+                SimulationEditKind.ChangeDriveLetter,
                 partition.StableId,
                 DriveLetter: next),
             Text("盘符已更新", "Drive letter updated"),
@@ -798,8 +798,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         try
         {
             await SubmitAsync(
-                new SimulationOperationRequest(
-                    SimulationOperationKind.Rename,
+                new SimulationEditRequest(
+                    SimulationEditKind.Rename,
                     volume.StableId,
                     Name: next),
                 Text("卷标已更新", "Volume label updated"),
@@ -820,8 +820,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         await SubmitAsync(
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskOffline,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskOffline,
                 disk.StableId,
                 Offline: false),
             Text("已联机", "Disk online"),
@@ -837,8 +837,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         await SubmitAsync(
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskOffline,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskOffline,
                 disk.StableId,
                 Offline: true),
             Text("已脱机", "Disk offline"),
@@ -863,10 +863,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         await SubmitAsync(
-            new SimulationOperationRequest(
-                SimulationOperationKind.InitializeDisk,
+            new SimulationEditRequest(
+                SimulationEditKind.InitializeDisk,
                 disk.StableId,
-                Name: "GPT",
+                PartitionStyle: "GPT",
                 CreateMsr: ViewModel.CurrentPreferences.CreateMsrOnInitialize),
             Text("初始化成功", "Initialization succeeded"),
             Text("磁盘已初始化为 GPT。", "The disk was initialized as GPT."));
@@ -890,7 +890,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         await SubmitAsync(
-            new SimulationOperationRequest(SimulationOperationKind.ConvertDisk, disk.StableId, Name: "GPT"),
+            new SimulationEditRequest(SimulationEditKind.ConvertDisk, disk.StableId, PartitionStyle: "GPT"),
             Text("转换成功", "Conversion succeeded"),
             Text("磁盘已转换为 GPT。", "The disk was converted to GPT."));
     }
@@ -972,8 +972,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var diskId = _selectedDiskId;
         var offset = _selectedUnallocatedOffset;
         if (!await SubmitAsync(
-                new SimulationOperationRequest(
-                    SimulationOperationKind.CreatePartition,
+                new SimulationEditRequest(
+                    SimulationEditKind.CreatePartition,
                     diskId!,
                     Name: VolumeLabelBox.Text,
                     DriveLetter: letter,
@@ -1020,7 +1020,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var id = partition.StableId;
         if (await SubmitAsync(
-                new SimulationOperationRequest(SimulationOperationKind.DeletePartition, id),
+                new SimulationEditRequest(SimulationEditKind.DeletePartition, id),
                 Text("删除成功", "Partition deleted"),
                 Text("分区已从模拟文档中删除。", "The partition was removed from the simulation.")))
         {
@@ -1099,8 +1099,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var quick = QuickFormatSwitch.IsOn;
         var ok = await SubmitAsync(
-            new SimulationOperationRequest(
-                SimulationOperationKind.FormatPartition,
+            new SimulationEditRequest(
+                SimulationEditKind.FormatPartition,
                 partition.StableId,
                 Name: VolumeLabelBox.Text,
                 FileSystem: fileSystem,
@@ -1122,7 +1122,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             "disk-partition-editor");
 
     private async Task<bool> SubmitAsync(
-        SimulationOperationRequest request,
+        SimulationEditRequest request,
         string successTitle,
         string successMessage,
         string? failTitle = null)

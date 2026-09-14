@@ -76,7 +76,10 @@ public sealed record SimulationEditRequest(
     IReadOnlyList<string>? AccessPaths = null,
     string? DraftSourceId = null,
     string? VolumeName = null,
-    PartitionKind? PartitionKind = null);
+    PartitionKind? PartitionKind = null,
+    string? DestinationGroupId = null,
+    string? DiskUsage = null,
+    string? PartitionStyle = null);
 
 public sealed record SimulationPlanItem(
     string Id,

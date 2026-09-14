@@ -1,4 +1,4 @@
-namespace WinPool.Infrastructure.Tests;
+﻿namespace WinPool.Infrastructure.Tests;
 
 public sealed class InfrastructureTests
 {
@@ -82,33 +82,6 @@ public sealed class InfrastructureTests
     }
 
     [Fact]
-    public void KsReferenceCatalogPreservesAllStableItemIds()
-    {
-        var report = WinPool.Infrastructure.Windows.KsReferenceReportFactory.Create();
-        Assert.Equal(154, report.Items.Count);
-        Assert.Equal(154, report.Items.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(13, report.Items.Select(x => x.Category).Distinct(StringComparer.Ordinal).Count());
-        Assert.All(report.Items, item => Assert.False(string.IsNullOrWhiteSpace(item.StandardName)));
-
-        var document = new WinPool.Application.StorageSystemDocument(
-            WinPool.Application.StorageSystemDocument.CurrentSchemaVersion,
-            "simulation:test",
-            WinPool.Application.StorageSystemKind.Simulation,
-            "Test",
-            WinPool.Application.StorageSnapshot.Empty("TEST"),
-            report,
-            [],
-            DateTimeOffset.Now);
-        var redacted = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
-        foreach (var item in redacted.HardwareReport.Items.Where(x => x.Id is "0304" or "0510" or "0718" or "0803" or "1206"))
-        {
-            Assert.DoesNotContain(
-                item.FinalValue!.Value.EnumerateArray(),
-                value => value.GetString() is { Length: > 0 } text && !text.Contains('•'));
-        }
-    }
-
-    [Fact]
     public async Task PreferencesPersistThemeAndLanguageButNotExecutionMode()
     {
         var service = new WinPool.Infrastructure.Windows.LocalUserPreferencesService();
@@ -149,47 +122,9 @@ public sealed class InfrastructureTests
                 || (partition.DriveLetter.Length == 1
                     && partition.DriveLetter[0] is >= 'A' and <= 'Z')));
         Assert.Equal(3, snapshot.SchemaVersion);
-        Assert.Equal(154, document.HardwareReport.Items.Count);
-        Assert.Equal(
-            13,
-            document.HardwareReport.Items
-                .Select(x => x.Category)
-                .Distinct(StringComparer.Ordinal)
-                .Count());
-
-        var expectedUnavailable = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "0915", "1004", "1005", "1006", "1103", "1111", "1112"
-        };
-        var unavailable = document.HardwareReport.Items
-            .Where(x => x.Sources.Any(source =>
-                source.Status == WinPool.Application.CollectorSourceStatus.Unavailable))
-            .Select(x => x.Id)
-            .ToHashSet(StringComparer.Ordinal);
-        Assert.Subset(expectedUnavailable, unavailable);
-
-        foreach (var id in new[] { "0101", "0201", "0203", "0401", "0701", "0802" })
-        {
-            var item = Assert.Single(document.HardwareReport.Items, x => x.Id == id);
-            Assert.Contains(
-                item.Sources,
-                source => source.Status == WinPool.Application.CollectorSourceStatus.Success);
-        }
-
+        Assert.Contains(document.SourceFacts!.Objects, x => x.ObjectType == WinPool.Application.FactObjectType.Processor);
+        Assert.Contains(document.SourceFacts.Objects, x => x.ObjectType == WinPool.Application.FactObjectType.Volume);
         var redacted = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
-        foreach (var item in redacted.HardwareReport.Items.Where(
-                     x => x.Id is "0304" or "0510" or "0718" or "0803" or "1206"))
-        {
-            if (item.FinalValue is null)
-            {
-                continue;
-            }
-            Assert.DoesNotContain(
-                item.FinalValue.Value.EnumerateArray(),
-                value => value.GetString() is { Length: > 0 } text
-                    && text != "—"
-                    && !text.Contains('•'));
-        }
         Assert.All(
             redacted.Snapshot.PhysicalDisks,
             disk => Assert.True(

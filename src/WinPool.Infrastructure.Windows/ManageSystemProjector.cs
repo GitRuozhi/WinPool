@@ -1,4 +1,4 @@
-﻿using WinPool.Application;
+using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -121,7 +121,7 @@ public sealed class ManageSystemProjector
                 $"group:direct:{pool.StableId}",
                 ManageObjectRole.DirectDiskGroup,
                 ManageWorkspaceCategory.Tier,
-                "Unallocated",
+                snapshot.DirectGroupName(pool.StableId),
                 true,
                 pool.StableId,
                 order++));

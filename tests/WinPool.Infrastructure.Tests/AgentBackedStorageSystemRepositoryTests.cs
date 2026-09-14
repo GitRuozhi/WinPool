@@ -1,4 +1,4 @@
-using WinPool.Application;
+﻿using WinPool.Application;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
@@ -113,7 +113,6 @@ public sealed class AgentBackedStorageSystemRepositoryTests
             kind,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.MinValue),
             [],
             DateTimeOffset.FromUnixTimeSeconds(1_800_000_000));
     }

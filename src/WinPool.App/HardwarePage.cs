@@ -22,10 +22,14 @@ public sealed partial class HardwarePage : Page
     private readonly Grid body = new() { ColumnSpacing = 12 };
     private WinPoolSystem? system;
     private CancellationTokenSource? capture;
+    private bool active;
 
     public HardwarePage()
     {
         InitializeComponent();
+        AutomationProperties.SetAutomationId(categories, "HardwareCategories");
+        AutomationProperties.SetAutomationId(devices, "HardwareDevices");
+        AutomationProperties.SetAutomationId(refresh, "HardwareRefresh");
         var root = new Grid { Padding = new Thickness(12), RowSpacing = 10 };
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
         root.RowDefinitions.Add(new() { Height = GridLength.Auto });
@@ -60,6 +64,7 @@ public sealed partial class HardwarePage : Page
     {
         base.OnNavigatedTo(e);
         viewModel = (WorkspaceViewModel)e.Parameter;
+        active = true;
         viewModel.PropertyChanged += Changed;
         viewModel.WorkspaceSelectionChanged += SelectionChanged;
         viewModel.Localization.PropertyChanged += Changed;
@@ -68,6 +73,7 @@ public sealed partial class HardwarePage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        active = false;
         capture?.Cancel();
         viewModel.PropertyChanged -= Changed;
         viewModel.WorkspaceSelectionChanged -= SelectionChanged;
@@ -96,6 +102,7 @@ public sealed partial class HardwarePage : Page
             $"{(x.Purpose == CollectionPurpose.Storage ? viewModel.Localization["Manage"] : viewModel.Localization["Hardware"])}: {x.CompletedAt.LocalDateTime:G} ({ReadState(x.State)})"));
         var selected = (categories.SelectedItem as ComboBoxItem)?.Tag;
         categories.Items.Clear();
+        categories.Items.Add(new ComboBoxItem { Content = viewModel.Localization.IsChinese ? "采集状态与来源" : "Collection status and sources", Tag = "sources" });
         foreach (var type in (system?.Objects.Select(x => x.ObjectType).Distinct() ?? Enumerable.Empty<FactObjectType>()).Order())
             categories.Items.Add(new ComboBoxItem { Content = TypeName(type), Tag = type });
         categories.SelectedItem = categories.Items.OfType<ComboBoxItem>().FirstOrDefault(x => Equals(x.Tag, selected))
@@ -107,6 +114,14 @@ public sealed partial class HardwarePage : Page
     {
         var id = (devices.SelectedItem as ListViewItem)?.Tag is WinPoolObject previous ? previous.Id : null;
         devices.Items.Clear();
+        if (categories.SelectedItem is ComboBoxItem { Tag: "sources" } && system is not null)
+        {
+            foreach (var row in WinPoolHardwarePresentation.SourceRows(system))
+                devices.Items.Add(new ListViewItem { Content = $"{row.Source.ClassName} ({ReadState(row.Source.ReadState)})", Tag = row });
+            devices.SelectedItem = devices.Items.FirstOrDefault();
+            ShowProperties();
+            return;
+        }
         if (categories.SelectedItem is not ComboBoxItem { Tag: FactObjectType type } || system is null) { properties.Children.Clear(); return; }
         foreach (var item in system.Objects.Where(x => x.ObjectType == type))
             devices.Items.Add(new ListViewItem { Content = new TextBlock { Text = item.DisplayName, TextWrapping = TextWrapping.Wrap }, Tag = item });
@@ -117,6 +132,15 @@ public sealed partial class HardwarePage : Page
     private void ShowProperties()
     {
         properties.Children.Clear();
+        if (devices.SelectedItem is ListViewItem { Tag: WinPoolHardwareSourceRow row })
+        {
+            properties.Children.Add(new TextBlock { Text = $"{row.Source.Namespace} / {row.Source.ClassName}\n{ReadState(row.Source.ReadState)}\n"
+                + $"{row.Source.CapturedAt.LocalDateTime:G}\n{row.Source.ReasonCode}\n"
+                + (viewModel.Localization.IsChinese ? $"对象数：{row.ObjectCount}" : $"Objects: {row.ObjectCount}")
+                + (row.RetainedAt is { } retained ? "\n" + (viewModel.Localization.IsChinese ? "保留证据：" : "Retained evidence: ") + retained.LocalDateTime.ToString("G") : ""),
+                TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+            return;
+        }
         if (devices.SelectedItem is not ListViewItem { Tag: WinPoolObject item } || system is null) return;
         foreach (var observation in item.Sources)
         foreach (var field in observation.Fields)
@@ -124,11 +148,13 @@ public sealed partial class HardwarePage : Page
             var source = system.Sources.First(x => x.Id == field.SourceRef);
             var value = field.DisplayValue();
             if (field.Unit == "bytes" && field.TryGetInt64(out var bytes)) value = TopologyProjector.FormatBytes(bytes);
-            var label = $"{source.ClassName}.{field.Name}";
+            var label = WinPoolHardwarePresentation.FieldName(field.Name, viewModel.Localization.IsChinese);
             var state = field.IsRedacted ? viewModel.Localization["SourceRedacted"] : ReadState(field.ReadState);
-            var details = $"{viewModel.Localization["SourceRawValue"]}: {field.DisplayValue()} {field.Unit}\n{state}\n"
+            var selection = WinPoolSourceDetails.Select(item, field.Name);
+            var details = $"{source.ClassName}.{field.Name}\n{viewModel.Localization["SourceRawValue"]}: {field.DisplayValue()} {field.Unit}\n{state}\n"
                 + $"{source.Origin}: {source.Namespace} / {source.ClassName}\n{source.CapturedAt.LocalDateTime:G}"
-                + (field.ReasonCode is null ? "" : $"\n{field.ReasonCode}");
+                + (field.ReasonCode is null ? "" : $"\n{field.ReasonCode}")
+                + (selection.Candidates.Length > 1 ? $"\nWinPool.{field.Name}: {selection.Reason}" : "");
             properties.Children.Add(new Expander
             {
                 Header = new TextBlock { Text = $"{label} — {value} ({state})", TextWrapping = TextWrapping.Wrap },
@@ -144,7 +170,7 @@ public sealed partial class HardwarePage : Page
         capture = new CancellationTokenSource();
         Rebuild();
         try { await viewModel.RefreshHardwareAsync(capture.Token); }
-        finally { capture.Dispose(); capture = null; Rebuild(); }
+        finally { capture.Dispose(); capture = null; if (active) Rebuild(); }
     }
 
     private string ReadState(FieldReadState state) => viewModel.Localization["Source" + state];
@@ -153,10 +179,10 @@ public sealed partial class HardwarePage : Page
         FactObjectType.Computer => "计算机", FactObjectType.OperatingSystem => "操作系统", FactObjectType.StorageSubsystem => "存储子系统",
         FactObjectType.StoragePool => "存储池", FactObjectType.StorageTier => "存储层", FactObjectType.PhysicalDisk => "物理磁盘",
         FactObjectType.VirtualDisk => "虚拟磁盘", FactObjectType.Disk => "操作系统磁盘", FactObjectType.Partition => "分区",
-        FactObjectType.Volume => "卷", FactObjectType.NetworkDisk => "网络磁盘", FactObjectType.BaseBoard => "主板",
+        FactObjectType.Volume => "卷", FactObjectType.NetworkDisk => "网络磁盘", FactObjectType.LogicalDisk => "逻辑盘观察", FactObjectType.BaseBoard => "主板",
         FactObjectType.Bios => "固件", FactObjectType.Processor => "处理器", FactObjectType.CpuCache => "处理器缓存",
         FactObjectType.MemoryArray => "内存阵列", FactObjectType.MemoryModule => "内存", FactObjectType.PageFileSetting => "分页配置",
         FactObjectType.PageFileUsage => "分页使用", FactObjectType.VideoController => "显卡", FactObjectType.Monitor => "显示器",
-        FactObjectType.NetworkAdapter => "网络适配器", FactObjectType.Battery => "电池", _ => type.ToString()
+        FactObjectType.NetworkAdapter => "网络适配器", FactObjectType.Battery => "电池", FactObjectType.HardwareSupplement => "硬件补充来源", _ => type.ToString()
     };
 }

@@ -43,14 +43,13 @@ public sealed class SimulationOperationTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.Now),
             [],
             DateTimeOffset.Now);
     }
 
     private static StorageSystemDocument Apply(
         StorageSystemDocument document,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         var result = new SimulationOperationService().Apply(document, request);
         Assert.True(result.Succeeded, result.Error);
@@ -62,8 +61,8 @@ public sealed class SimulationOperationTests
     public void InitializeDiskCreatesMsrAndClearsPartitions()
     {
         var document = CreateDocument();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
             "osdisk:5",
             SizeBytes: 500_000_000));
         Assert.Single(document.Snapshot.Partitions);
@@ -77,10 +76,10 @@ public sealed class SimulationOperationTests
                     .ToArray()
             });
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.InitializeDisk,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.InitializeDisk,
             "osdisk:5",
-            Name: "GPT",
+            PartitionStyle: "GPT",
             CreateMsr: true));
 
         var partition = Assert.Single(document.Snapshot.Partitions);
@@ -93,8 +92,8 @@ public sealed class SimulationOperationTests
     public void CreatePoolVirtualDiskAndPartitionChainProducesUsableVolume()
     {
         var document = CreateDocument();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreateStoragePool,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreateStoragePool,
             "pool:primordial",
             Name: "Pool03",
             MemberDiskIds: ["physical:p1"]));
@@ -106,8 +105,8 @@ public sealed class SimulationOperationTests
             "physical:p1",
             document.Snapshot.StoragePools.Single(x => x.IsPrimordial).MemberPhysicalDiskIds);
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreateVirtualDisk,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreateVirtualDisk,
             pool.StableId,
             Name: "Pool03",
             Resiliency: "Simple",
@@ -118,14 +117,14 @@ public sealed class SimulationOperationTests
 
         var osDisk = Assert.Single(
             document.Snapshot.OsDisks, x => x.VirtualDiskStableId == vdisk.StableId);
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
             osDisk.StableId));
         var partition = Assert.Single(document.Snapshot.Partitions);
         Assert.Equal("BasicData", partition.Type);
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.FormatPartition,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.FormatPartition,
             partition.StableId,
             FileSystem: "NTFS",
             AllocationUnitSize: 65536));
@@ -138,8 +137,8 @@ public sealed class SimulationOperationTests
     public void ShrinkBelowUsedSpaceIsRejected()
     {
         var document = CreateDocument();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreatePartition,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
             "osdisk:5",
             SizeBytes: 500_000_000,
             FileSystem: "NTFS"));
@@ -149,8 +148,8 @@ public sealed class SimulationOperationTests
 
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.ShrinkPartition,
+            new SimulationEditRequest(
+                SimulationEditKind.ShrinkPartition,
                 usedPartition.StableId,
                 SizeBytes: 50_000_000));
         Assert.False(result.Succeeded);
@@ -202,8 +201,8 @@ public sealed class SimulationOperationTests
     [Fact]
     public void CreateTieredPoolCreatesTiersVirtualDiskAndFormattedPartition()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
@@ -233,8 +232,8 @@ public sealed class SimulationOperationTests
     [Fact]
     public void CreateTieredPoolCanSkipUserPartition()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
@@ -253,8 +252,8 @@ public sealed class SimulationOperationTests
     [Fact]
     public void MovePhysicalDiskLeavesSourceTierAndEntersMatchingTargetTier()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
@@ -262,10 +261,10 @@ public sealed class SimulationOperationTests
             FileSystem: "NTFS",
             AllocationUnitSize: 65536));
         var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.MovePhysicalDisk,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.MovePhysicalDisk,
             "physical:p2",
-            Name: pool.StableId));
+            DestinationGroupId: pool.StableId));
         var hddTier = document.Snapshot.StorageTiers.Single(tier =>
             tier.PoolStableId == pool.StableId && tier.MediaType == "HDD");
         Assert.Contains("physical:p2", hddTier.MemberPhysicalDiskIds);
@@ -277,8 +276,8 @@ public sealed class SimulationOperationTests
     [Fact]
     public void MovePhysicalDiskOntoSamePoolAssignsUnallocatedDiskToMatchingTier()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
@@ -286,15 +285,15 @@ public sealed class SimulationOperationTests
             FileSystem: "NTFS",
             AllocationUnitSize: 65536));
         var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.EvictPhysicalDiskFromTiers,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.EvictPhysicalDiskFromTiers,
             "physical:p1"));
         Assert.False(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.MovePhysicalDisk,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.MovePhysicalDisk,
             "physical:p1",
-            Name: pool.StableId));
+            DestinationGroupId: pool.StableId));
         Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
         var ssdTier = document.Snapshot.StorageTiers.Single(tier =>
             tier.PoolStableId == pool.StableId && tier.MediaType == "SSD");
@@ -307,8 +306,8 @@ public sealed class SimulationOperationTests
     [Fact]
     public void EvictPhysicalDiskFromTiersKeepsPoolMembership()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             VirtualDiskName: "SpaceA",
@@ -317,8 +316,8 @@ public sealed class SimulationOperationTests
             AllocationUnitSize: 65536));
         var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
         Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.EvictPhysicalDiskFromTiers,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.EvictPhysicalDiskFromTiers,
             "physical:p1"));
         Assert.False(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
         Assert.Contains(
@@ -332,15 +331,15 @@ public sealed class SimulationOperationTests
     [Fact]
     public void DissolveStoragePoolReturnsDisksToPrimordial()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             MemberDiskIds: ["physical:p1", "physical:p2"],
             FileSystem: "NTFS"));
         var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.DissolveStoragePool,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.DissolveStoragePool,
             pool.StableId));
         Assert.DoesNotContain(document.Snapshot.StoragePools, item => !item.IsPrimordial);
         Assert.Empty(document.Snapshot.VirtualDisks);
@@ -357,17 +356,17 @@ public sealed class SimulationOperationTests
     [Fact]
     public void MovingAMemberBackToPrimordialRestoresItsOsDiskView()
     {
-        var document = Apply(CreateDocument(), new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "primordial",
             Name: "PoolA",
             MemberDiskIds: ["physical:p1", "physical:p2"],
             FileSystem: "NTFS"));
         var primordial = document.Snapshot.StoragePools.Single(item => item.IsPrimordial);
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.MovePhysicalDisk,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.MovePhysicalDisk,
             "physical:p2",
-            Name: primordial.StableId));
+            DestinationGroupId: primordial.StableId));
         Assert.Equal(
             primordial.StableId,
             document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:p2").PoolStableId);
@@ -382,8 +381,8 @@ public sealed class SimulationOperationTests
         var busy = CreateBusyPoolDocument();
         var result = new SimulationOperationService().Apply(
             busy,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 "pool:busy",
                 Name: "Renamed"));
         Assert.False(result.Succeeded);
@@ -394,8 +393,8 @@ public sealed class SimulationOperationTests
     public void DeleteVirtualDiskRemovesOneVirtualDiskAndKeepsTheOther()
     {
         var document = CreateBusyPoolDocument();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.DeleteVirtualDisk,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.DeleteVirtualDisk,
             "vdisk:2"));
         var pool = document.Snapshot.StoragePools.Single(item => item.StableId == "pool:busy");
         var remaining = Assert.Single(document.Snapshot.VirtualDisks, item => item.PoolStableId == "pool:busy");
@@ -468,14 +467,13 @@ public sealed class SetDiskUsageTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.Now),
             [],
             DateTimeOffset.Now);
     }
 
     private static StorageSystemDocument Apply(
         StorageSystemDocument document,
-        SimulationOperationRequest request)
+        SimulationEditRequest request)
     {
         var result = new SimulationOperationService().Apply(document, request);
         Assert.True(result.Succeeded, result.Error);
@@ -487,8 +485,8 @@ public sealed class SetDiskUsageTests
     public void SetDiskUsagePersistsLayerRolesOnACommittedPool()
     {
         var document = CreateDocument();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "pool:primordial",
             Name: "Pool01",
             MemberDiskIds: ["physical:p1", "physical:p2"],
@@ -496,27 +494,27 @@ public sealed class SetDiskUsageTests
         var pool = document.Snapshot.StoragePools.First(item => item.FriendlyName == "Pool01");
         Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.SetDiskUsage,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.SetDiskUsage,
             "physical:p1",
-            Name: "Retired"));
+            DiskUsage: "Retired"));
         var retiredDisk = document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p1");
         Assert.True(retiredDisk.IsRetired);
         Assert.False(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p1"));
         Assert.True(EditWorkspace.DiskIsAssignedToTier(document.Snapshot, "physical:p2"));
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.SetDiskUsage,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.SetDiskUsage,
             "physical:p1",
-            Name: "HotSpare"));
+            DiskUsage: "HotSpare"));
         var hotDisk = document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p1");
         Assert.False(hotDisk.IsRetired);
         Assert.True(hotDisk.IsHotSpare);
 
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.SetDiskUsage,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.SetDiskUsage,
             "physical:p1",
-            Name: string.Empty));
+            DiskUsage: string.Empty));
         var clearDisk = document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p1");
         Assert.False(clearDisk.IsRetired);
         Assert.False(clearDisk.IsHotSpare);
@@ -529,27 +527,27 @@ public sealed class SetDiskUsageTests
         var document = CreateDocument();
         var primordialResult = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskUsage,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskUsage,
                 "physical:p1",
-                Name: "Retired"));
+                DiskUsage: "Retired"));
         Assert.False(primordialResult.Succeeded);
         Assert.Contains("Primordial", primordialResult.Error, StringComparison.OrdinalIgnoreCase);
 
         var missing = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskUsage,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskUsage,
                 "physical:missing",
-                Name: "Retired"));
+                DiskUsage: "Retired"));
         Assert.False(missing.Succeeded);
 
         var invalid = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskUsage,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskUsage,
                 "physical:p1",
-                Name: "Journal"));
+                DiskUsage: "Journal"));
         Assert.False(invalid.Succeeded);
     }
 
@@ -557,8 +555,8 @@ public sealed class SetDiskUsageTests
     public void SetDiskUsageClearsPageFileRoleAfterConfirmationGate()
     {
         var document = CreateDocument();
-        document = Apply(document, new SimulationOperationRequest(
-            SimulationOperationKind.CreateTieredPool,
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreateTieredPool,
             "pool:primordial",
             Name: "Pool01",
             MemberDiskIds: ["physical:p1", "physical:p2"],
@@ -572,10 +570,10 @@ public sealed class SetDiskUsageTests
         document = document.WithCandidate(withRole);
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.SetDiskUsage,
+            new SimulationEditRequest(
+                SimulationEditKind.SetDiskUsage,
                 "physical:p2",
-                Name: "HotSpare"));
+                DiskUsage: "HotSpare"));
         Assert.True(result.Succeeded, result.Error);
         var disk = result.Document.Snapshot.PhysicalDisks.First(item => item.StableId == "physical:p2");
         Assert.True(disk.IsHotSpare);
@@ -621,7 +619,6 @@ public sealed class CreateTieredPoolSkipVdiskTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.Now),
             [],
             DateTimeOffset.Now);
     }
@@ -632,8 +629,8 @@ public sealed class CreateTieredPoolSkipVdiskTests
         var document = CreateDocument();
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.CreateTieredPool,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
                 "pool:primordial",
                 Name: "Pool01",
                 MemberDiskIds: ["physical:p1", "physical:p2"],
@@ -693,7 +690,6 @@ public sealed class UpdateStoragePoolSizeTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.Now),
             [],
             DateTimeOffset.Now);
     }
@@ -738,8 +734,8 @@ public sealed class UpdateStoragePoolSizeTests
         var document = CreateDocument();
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 "pool:1",
                 Name: "Pool01",
                 PerformanceSizeBytes: 1_500_000_000_000));
@@ -756,8 +752,8 @@ public sealed class UpdateStoragePoolSizeTests
         var document = CreateDocument();
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 "pool:1",
                 Name: "Pool01",
                 PerformanceSizeBytes: 1,
@@ -777,8 +773,8 @@ public sealed class UpdateStoragePoolSizeTests
         var document = WithStoredData(CreateDocument());
         var result = new SimulationOperationService().Apply(
             document,
-            new SimulationOperationRequest(
-                SimulationOperationKind.UpdateStoragePool,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
                 "pool:1",
                 Name: "Pool01",
                 PerformanceSizeBytes: 1,
@@ -798,12 +794,12 @@ public sealed class UpdateStoragePoolSizeTests
     {
         var document = WithStoredData(CreateDocument());
         var service = new SimulationOperationService();
-        var manualRequest = new SimulationOperationRequest(
-            SimulationOperationKind.UpdateStoragePool,
+        var manualRequest = new SimulationEditRequest(
+            SimulationEditKind.UpdateStoragePool,
             "pool:1",
             PerformanceSizeBytes: 1_500_000_000_000);
-        var layoutRequest = new SimulationOperationRequest(
-            SimulationOperationKind.UpdateStoragePool,
+        var layoutRequest = new SimulationEditRequest(
+            SimulationEditKind.UpdateStoragePool,
             "pool:1",
             PerformanceUseMaximum: true,
             PerformanceResiliency: "Mirror");

@@ -15,7 +15,7 @@ public enum FactObjectType
     Computer, OperatingSystem, StorageSubsystem, StoragePool, StorageTier,
     PhysicalDisk, VirtualDisk, Disk, Partition, Volume, NetworkDisk,
     BaseBoard, Bios, Processor, CpuCache, MemoryArray, MemoryModule,
-    PageFileSetting, PageFileUsage, VideoController, Monitor, NetworkAdapter, Battery
+    PageFileSetting, PageFileUsage, VideoController, Monitor, NetworkAdapter, Battery, LogicalDisk, HardwareSupplement
 }
 public enum CollectionPurpose { Storage, Hardware }
 
@@ -97,7 +97,8 @@ public sealed record WinPoolSourceObject(
         Fields.FirstOrDefault(x => x.Name.Equals(name, StringComparison.Ordinal));
 }
 
-public sealed record WinPoolFactRelationship(string FromId, string ToId, string Kind);
+public sealed record WinPoolFactRelationship(string FromId, string ToId, string Kind,
+    DateTimeOffset? ObservedAt = null, bool IsRetained = false, string? ReasonCode = null);
 public sealed record WinPoolIdentityBinding(FactObjectType ObjectType, string SourceIdentity, string ObjectId);
 public sealed record WinPoolCollectionState(
     CollectionPurpose Purpose, DateTimeOffset StartedAt, DateTimeOffset CompletedAt,

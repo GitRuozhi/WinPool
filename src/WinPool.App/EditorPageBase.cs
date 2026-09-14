@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
-using SimulationOperationRequest = WinPool.Application.SimulationEditRequest;
+using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 using SimulationOperationResult = WinPool.Application.SimulationEditReceipt;
 
 namespace WinPool_App;
@@ -65,7 +65,7 @@ public class EditorPageBase : Page
         return true;
     }
 
-    protected async Task<SimulationOperationResult?> ApplyAsync(SimulationOperationRequest request)
+    protected async Task<SimulationOperationResult?> ApplyAsync(SimulationEditRequest request)
     {
         WinPool.Application.ApplicationResult<SimulationOperationResult> result;
         try

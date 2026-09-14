@@ -11,7 +11,7 @@ public sealed class WinPoolFactsTests
     {
         var snapshot = TestSnapshotFactory.Create();
         var original = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:original",
-            StorageSystemKind.Simulation, "Original", snapshot, HardwareInventoryReport.Empty(DateTimeOffset.Now), [], DateTimeOffset.Now);
+            StorageSystemKind.Simulation, "Original", snapshot, [], DateTimeOffset.Now);
         var copy = original.AsImportedSimulation("Copy");
         var sourceIds = original.SourceFacts!.Objects.Select(x => x.Id).ToHashSet();
         Assert.DoesNotContain(copy.SourceFacts!.Objects, x => sourceIds.Contains(x.Id));
@@ -21,7 +21,7 @@ public sealed class WinPoolFactsTests
             Assert.All(pool.MemberPhysicalDiskIds, id => Assert.Contains(copy.Snapshot.PhysicalDisks, disk => disk.StableId == id));
         });
         var target = copy.Snapshot.StoragePools[0].StableId;
-        var edited = new SimulationOperationService().Apply(copy, new(SimulationOperationKind.Rename, target, Name: "Copy changed"));
+        var edited = new SimulationOperationService().Apply(copy, new(SimulationEditKind.Rename, target, Name: "Copy changed"));
         Assert.True(edited.Succeeded);
         Assert.Equal("Copy changed", edited.Document.Unified!.Objects.Single(x => x.Id == target).DisplayName);
         Assert.NotEqual("Copy changed", original.Snapshot.StoragePools[0].FriendlyName);

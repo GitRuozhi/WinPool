@@ -8,6 +8,25 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactCaptureTests
 {
     [Fact]
+    public void LogicalDriveClassificationUsesDriveTypeAndKeepsLocalObservationWithItsVolume()
+    {
+        object Field(string name, object? value, string type = "String") => new { Name = name, Value = value, CimType = type, ReadState = "Returned" };
+        object Logical(string letter, object? driveType) => new { ClassName = "Win32_LogicalDisk", Namespace = "root/cimv2", Identity = letter,
+            Fields = new[] { Field("DeviceID", letter), Field("DriveType", driveType, "UInt32") } };
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new { SourceObservations = new object[] {
+            new { ClassName = "MSFT_Volume", Namespace = "root/microsoft/windows/storage", Identity = "volume-id",
+                Fields = new[] { Field("UniqueId", "volume-id"), Field("DriveLetter", "C") } },
+            Logical("C:", 3), Logical("D:", 3), Logical("Z:", 4), Logical("Q:", null) } }));
+        var facts = WinPoolFactCapture.Read(json.RootElement, StorageSnapshot.Empty("test"), SystemId.New(), CollectionPurpose.Hardware);
+        var system = new WinPoolSystem(facts);
+        Assert.Single(system.Objects.Where(x => x.ObjectType == FactObjectType.NetworkDisk));
+        var volume = Assert.Single(system.Objects.Where(x => x.ObjectType == FactObjectType.Volume));
+        Assert.Equal(2, volume.Sources.Length);
+        Assert.Equal(5, facts.Objects.Length);
+        Assert.Single(WinPoolStorageProjection.Project(facts).NetworkDisks);
+    }
+
+    [Fact]
     public void SuccessfulEmptyClassRemovesOldDevicesButFailedClassKeepsCachedFacts()
     {
         var system = SystemId.New();

@@ -76,7 +76,7 @@ public interface ISimulationOperationService
 {
     SimulationOperationResult Apply(
         StorageSystemDocument document,
-        SimulationOperationRequest request);
+        SimulationEditRequest request);
 
     SimulationOperationResult ApplyPlan(
         StorageSystemDocument document,

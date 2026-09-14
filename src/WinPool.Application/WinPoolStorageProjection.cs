@@ -11,7 +11,9 @@ public static class WinPoolStorageProjection
     public static StorageSnapshot Project(WinPoolFacts facts)
     {
         facts.Validate();
+        var unified = new WinPoolSystem(facts);
         var warnings = new List<InventoryWarning>();
+        var fieldIssues = new List<StorageFieldIssue>();
         var objects = facts.Objects.ToDictionary(x => x.Id, StringComparer.Ordinal);
         var sources = facts.Sources.ToDictionary(x => x.Id, StringComparer.Ordinal);
         IEnumerable<WinPoolSourceObject> Of(FactObjectType type) => facts.Objects.Where(x => x.ObjectType == type);
@@ -41,6 +43,14 @@ public static class WinPoolStorageProjection
                 if (property.Name == "StableId") { values[property.Name] = JsonSerializer.SerializeToElement(item.Id); continue; }
                 var name = property.Name switch { "MaskedSerialNumber" => "SerialNumber", "DeviceIdentifier" => "DeviceId", _ => property.Name };
                 var field = Field(item, name);
+                if (field is null && item.ObjectType == FactObjectType.StorageTier && property.Name == "AllocatedSize")
+                    field = Field(item, "FootprintOnPool");
+                if (item.ObjectType == FactObjectType.PhysicalDisk && property.Name is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump")
+                {
+                    var selected = WinPoolSourceDetails.Select(unified.Objects.Single(x => x.Id == item.Id), property.Name);
+                    field = selected.Value;
+                    if (selected.HasConflict) fieldIssues.Add(new(item.Id, property.Name, FieldReadState.Returned, "SourceConflict"));
+                }
                 if (field is null && item.ObjectType == FactObjectType.NetworkDisk)
                     field = property.Name switch
                     {
@@ -56,6 +66,8 @@ public static class WinPoolStorageProjection
                     values[property.Name] = JsonSerializer.SerializeToElement(sources[item.SourceRef].Origin == FactOrigin.Simulation
                         ? CapacitySourceKind.SimulatedEstimate : CapacitySourceKind.Collected); continue;
                 }
+                if (field is not { ReadState: FieldReadState.Returned, IsRedacted: false, Value: { ValueKind: not JsonValueKind.Null } })
+                    fieldIssues.Add(new(item.Id, property.Name, field?.ReadState ?? FieldReadState.NotCollected, field?.ReasonCode));
                 values[property.Name] = Convert(field, property.PropertyType, item.Id, warnings);
             }
             return JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToElement(values))!;
@@ -125,6 +137,8 @@ public static class WinPoolStorageProjection
                 "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7" => "BasicData",
                 _ => partition.Type
             };
+            if (kind is "BasicData" or "MicrosoftReserved" or "EfiSystem" or "WindowsRecovery")
+                fieldIssues.RemoveAll(issue => issue.ObjectId == x.Id && issue.FieldName == "Type");
             return partition with { Type = kind, PartitionTypeId = typeId ?? Field(x, "MbrType")?.DisplayValue() ?? "" };
         }).ToArray();
         var volumes = Of(FactObjectType.Volume).Select(x =>
@@ -141,7 +155,14 @@ public static class WinPoolStorageProjection
         var snapshot = new StorageSnapshot(StorageSnapshot.CurrentSchemaVersion, facts.InventoryVersion, facts.InventoryCapturedAt, computer,
             Of(FactObjectType.StorageSubsystem).Select(x => Build<StorageSubsystemInfo>(x)).ToArray(), physical, pools, tiers,
             virtualDisks, osDisks, partitions, volumes, network, [], warnings);
-        return StorageRelationshipProjector.Rebuild(snapshot);
+        return StorageRelationshipProjector.Rebuild(snapshot with
+        {
+            FieldIssues = fieldIssues,
+            UnknownTierMembershipPools = snapshot.StoragePools.Where(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Any(id =>
+                objects.TryGetValue(id, out var disk) && sources[disk.SourceRef].Origin != FactOrigin.Simulation
+                && !facts.Relationships.Any(r => r.Kind == "tier-member" && r.ToId == id)))
+                .Select(x => x.StableId).ToArray()
+        });
     }
 
     private static PropertyInfo[] Properties<T>() => PropertyCache<T>.Value;

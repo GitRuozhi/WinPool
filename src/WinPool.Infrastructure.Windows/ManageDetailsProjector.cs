@@ -1,4 +1,4 @@
-﻿using WinPool.Application;
+using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -80,7 +80,7 @@ public sealed class ManageDetailsProjector
                     .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
                         && !tierMemberIds.Contains(x.StableId))
                     .ToList();
-                rows.Add(P("Type", "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Type", pool is not null && snapshot.UnknownTierMembershipPools.Contains(pool.StableId) ? "Membership unknown" : "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
                 rows.Add(P("Capacity", TopologyProjector.FormatBytes(direct.Sum(x => x.Size))));
                 rows.Add(P("Members", direct.Count.ToString()));
                 rows.Add(P("Health", TopologyProjector.JoinSummary(
@@ -205,7 +205,7 @@ public sealed class ManageDetailsProjector
                 ? string.Empty
                 : snapshot.ScannedAt.ToString("O"),
             ManageValuePresentation.LocalDateTime));
-        return new ManageObjectDetailsView(objectId, role, title, rows);
+        return new ManageObjectDetailsView(objectId, role, title, WinPoolHardwarePresentation.MarkUnavailable(snapshot, objectId.ProviderKey, rows));
     }
 
     private static ManagePropertyView P(

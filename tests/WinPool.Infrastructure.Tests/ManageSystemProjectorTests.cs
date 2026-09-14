@@ -559,7 +559,6 @@ public sealed class ManageSystemProjectorTests
             StorageSystemKind.Simulation,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(now),
             [],
             now);
     }

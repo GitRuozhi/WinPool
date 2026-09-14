@@ -418,6 +418,9 @@ public sealed class SimulationEditCoordinator(
             ["TargetProviderKey"] = request.TargetProviderKey
         };
         Add(values, "Name", request.Name);
+        Add(values, "DestinationGroupId", request.DestinationGroupId);
+        Add(values, "DiskUsage", request.DiskUsage);
+        Add(values, "PartitionStyle", request.PartitionStyle);
         Add(values, "DriveLetter", request.DriveLetter);
         Add(values, "FileSystem", request.FileSystem);
         Add(values, "AllocationUnitSize", request.AllocationUnitSize);
@@ -588,7 +591,7 @@ public sealed class SimulationEditCoordinator(
                     ?? SimulationOperationResult.Failure(
                         current,
                         "The built-in simulation reset adapter is unavailable.")
-                : editor.Apply(current, ToApplicationRequest(request));
+                : editor.Apply(current, request);
             if (!result.Succeeded)
             {
                 FailureText = result.Error;
@@ -629,48 +632,5 @@ public sealed class SimulationEditCoordinator(
             && left.All(pair => right.TryGetValue(pair.Key, out var value)
                 && StringComparer.Ordinal.Equals(pair.Value, value));
 
-        private static SimulationOperationRequest ToApplicationRequest(SimulationEditRequest request) =>
-            new(
-                Enum.Parse<SimulationOperationKind>(request.Kind.ToString()),
-                request.TargetProviderKey,
-                request.Name,
-                request.DriveLetter,
-                request.FileSystem,
-                request.AllocationUnitSize,
-                request.Offline,
-                request.SizeBytes,
-                request.CreateMsr,
-                request.InterleaveBytes,
-                request.Resiliency,
-                request.MemberDiskIds,
-                request.VirtualDiskName,
-                request.PerformanceResiliency,
-                request.PerformanceInterleaveBytes,
-                request.PerformanceSizeBytes,
-                request.PerformanceDataCopies,
-                request.CapacityResiliency,
-                request.CapacityInterleaveBytes,
-                request.CapacitySizeBytes,
-                request.CapacityColumns,
-                request.CapacityToleratedFailures,
-                request.ScmResiliency,
-                request.ScmInterleaveBytes,
-                request.ScmSizeBytes,
-                request.ScmDataCopies,
-                request.PerformanceUseMaximum,
-                request.CapacityUseMaximum,
-                request.ScmUseMaximum,
-                request.ProvisioningType,
-                request.OffsetBytes,
-                request.CreatePartition,
-                request.CreateVirtualDisk,
-                request.AllocatedPoolId,
-                request.AllocatedVirtualDiskId,
-                request.AllocatedOsDiskId,
-                request.AllocatedPartitionId,
-                request.AllocatedVolumeId,
-                request.AccessPaths,
-                request.VolumeName,
-                request.PartitionKind);
     }
 }

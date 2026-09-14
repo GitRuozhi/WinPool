@@ -230,7 +230,6 @@ public sealed class SimulationEditCoordinatorTests
             kind,
             "Test",
             snapshot,
-            HardwareInventoryReport.Empty(DateTimeOffset.MinValue),
             [],
             DateTimeOffset.FromUnixTimeSeconds(1_800_000_001));
     }
@@ -239,7 +238,7 @@ public sealed class SimulationEditCoordinatorTests
     {
         public SimulationOperationResult Apply(
             StorageSystemDocument document,
-            SimulationOperationRequest request) =>
+            SimulationEditRequest request) =>
             throw new InvalidOperationException("The simulation editor must not be invoked.");
 
         public SimulationOperationResult ApplyPlan(

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 
@@ -162,7 +162,7 @@ public sealed class ManageComparisonProjector
                     "PoolOwner",
                     pool?.FriendlyName ?? string.Empty));
                 rows.Add(P("Media", string.Empty));
-                rows.Add(P("Type", "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Type", pool is not null && snapshot.UnknownTierMembershipPools.Contains(pool.StableId) ? "Membership unknown" : "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
                 rows.Add(P("Capacity", TopologyProjector.FormatBytes(direct.Sum(x => x.Size))));
                 rows.Add(P("PhysicalDisk", direct.Count.ToString()));
                 rows.Add(P(
@@ -313,7 +313,7 @@ public sealed class ManageComparisonProjector
                 break;
         }
 
-        return new ManageObjectComparisonView(objectId, rows);
+        return new ManageObjectComparisonView(objectId, WinPoolHardwarePresentation.MarkUnavailable(snapshot, objectId.ProviderKey, rows));
     }
 
     private static ManagePropertyView P(

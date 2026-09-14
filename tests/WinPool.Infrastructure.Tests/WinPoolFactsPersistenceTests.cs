@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using WinPool.Application;
 using WinPool.Domain;
@@ -9,12 +9,17 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactsPersistenceTests
 {
     [Fact]
+    public void CurrentDocumentHasNoIndependentHardwareReport()
+    {
+        Assert.Null(typeof(StorageSystemDocument).GetProperty("HardwareReport"));
+    }
+    [Fact]
     public void DocumentPersistsFactsAndApplicationMetadataWithoutWritableProjectionOrReport()
     {
         var time = DateTimeOffset.UtcNow;
         var snapshot = SimulationLayouts.StandardTiered();
         var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:canonical",
-            StorageSystemKind.Simulation, "Canonical", snapshot, HardwareInventoryReport.Empty(time), [], time);
+            StorageSystemKind.Simulation, "Canonical", snapshot, [], time);
         var payload = SimulationDocumentCodec.Encode(document);
         using var parsed = System.Text.Json.JsonDocument.Parse(payload.SanitizedJson);
         Assert.False(parsed.RootElement.TryGetProperty("Snapshot", out _));
@@ -46,7 +51,7 @@ public sealed class WinPoolFactsPersistenceTests
                     WinPoolSourceField.Returned("UnrecognizedVendorProperty", "ordinary-extension", FactValueType.String, "source")])],
             [], [new(FactObjectType.PhysicalDisk, "opaque", "disk")], []) { IsSimulation = true };
         var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:roundtrip",
-            StorageSystemKind.Simulation, "Roundtrip", StorageSnapshot.Empty("Example"), HardwareInventoryReport.Empty(time), [], time)
+            StorageSystemKind.Simulation, "Roundtrip", StorageSnapshot.Empty("Example"), [], time)
         { SystemId = system, SourceFacts = facts };
         var payload = SimulationDocumentCodec.Encode(document);
         Assert.DoesNotContain("secret-serial", payload.SanitizedJson);

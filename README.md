@@ -4,14 +4,17 @@
 
 WinPool is a Windows desktop application for viewing storage topology, monitoring devices, and editing simulated storage systems.
 
-The current implementation is **V0.51**. Real storage-structure changes are not enabled.
+The current implementation is **V0.52**. Real storage-structure changes are not enabled.
 
 ## What you can use
 
 - View local storage through read-only discovery and inspect pools, tiers, disks, partitions, and related information.
+- Inspect read-only hardware objects, collection status, and raw source details; request full hardware refresh separately.
 - Edit simulated systems on the Storage structure and Disk/partition pages.
 - Monitor supported devices and configure application and background preferences.
 - Use English or Simplified Chinese, themes, and keyboard navigation.
+
+Current documents use source facts (document 3 / SQLite 16 / IPC 6); older data is rejected without migration or deletion.
 
 Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
 

@@ -1,4 +1,4 @@
-﻿using WinPool.Domain;
+using WinPool.Domain;
 
 namespace WinPool.Application;
 
@@ -1043,7 +1043,7 @@ public sealed record StructureProblem(
             new StorageUnitRef(
                 $"group:direct:{pool.StableId}",
                 StorageUnitKind.DirectDiskGroup,
-                "Unallocated"),
+                snapshot.DirectGroupName(pool.StableId)),
             TopologyProjector.JoinSummary(
                 $"{directMembers.Count} physical disks",
                 TopologyProjector.FormatBytes(directMembers.Sum(item => item.Size))),

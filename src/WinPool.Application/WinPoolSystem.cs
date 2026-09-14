@@ -17,7 +17,7 @@ public class WinPoolObject
     public ImmutableArray<WinPoolSourceObject> Sources { get; }
     public string DisplayName => Primary.Field("FriendlyName")?.DisplayValue()
         ?? Primary.Field("Name")?.DisplayValue() ?? Primary.ObjectType.ToString();
-    public WinPoolSourceField? Field(string name) => Primary.Field(name);
+    public WinPoolSourceField? Field(string name) => WinPoolSourceDetails.Select(this, name).Value;
 }
 
 public sealed class WinPoolDisk : WinPoolObject
@@ -39,7 +39,7 @@ public sealed class WinPoolPartition : WinPoolObject
 }
 public sealed class WinPoolVolume : WinPoolObject
 {
-    internal WinPoolVolume(WinPoolSourceObject primary) : base(primary, [primary]) { }
+    internal WinPoolVolume(WinPoolSourceObject primary, ImmutableArray<WinPoolSourceObject> sources) : base(primary, sources) { }
 }
 public sealed class WinPoolProcessor : WinPoolObject
 {
@@ -98,13 +98,15 @@ public sealed class WinPoolSystem
         foreach (var item in facts.Objects.Where(x => x.ObjectType is not (FactObjectType.PhysicalDisk or FactObjectType.VirtualDisk)))
         {
             if (representedOsDisks.Contains(item.Id)) continue;
+            if (item.ObjectType == FactObjectType.LogicalDisk && facts.Relationships.Any(x => x.Kind == "same-volume" && x.ToId == item.Id)) continue;
             result.Add(item.ObjectType switch
             {
                 FactObjectType.Disk => new WinPoolDisk(item, [item]),
                 FactObjectType.StoragePool => new WinPoolStoragePool(item),
                 FactObjectType.StorageTier => new WinPoolStorageTier(item),
                 FactObjectType.Partition => new WinPoolPartition(item),
-                FactObjectType.Volume => new WinPoolVolume(item),
+                FactObjectType.Volume => new WinPoolVolume(item, new[] { item }.Concat(facts.Relationships
+                    .Where(x => x.Kind == "same-volume" && x.FromId == item.Id).Select(x => objects[x.ToId])).ToImmutableArray()),
                 FactObjectType.Processor => new WinPoolProcessor(item),
                 _ => new WinPoolObject(item, [item])
             });
@@ -153,17 +155,26 @@ public static class WinPoolFactRefresh
         var objectIds = objects.Select(x => x.Id).ToHashSet();
         var sources = current.Sources.Where(x => !removedSourceIds.Contains(x.Id)).Concat(accepted)
             .DistinctBy(x => x.Id).ToImmutableArray();
+        var acceptedRelations = incoming.Relationships.Where(x =>
+            (acceptedObjectIds.Contains(x.FromId) || acceptedObjectIds.Contains(x.ToId))
+            && !staleObjectIds.Contains(x.FromId) && !staleObjectIds.Contains(x.ToId)).ToArray();
+        var oldObjects = current.Objects.ToDictionary(x => x.Id);
+        var oldSources = current.Sources.ToDictionary(x => x.Id);
+        var retainedRelations = current.Relationships
+            .Where(x => !(replacedObjectIds.Contains(x.FromId) && replacedObjectIds.Contains(x.ToId)))
+            .Where(x => !acceptedRelations.Any(y => y.FromId == x.FromId && y.ToId == x.ToId && y.Kind == x.Kind))
+            .Select(x => replacedObjectIds.Contains(x.FromId) || replacedObjectIds.Contains(x.ToId)
+                ? x with { IsRetained = true, ReasonCode = "PartialCollection",
+                    ObservedAt = x.ObservedAt ?? oldSources[oldObjects[x.ToId].SourceRef].CapturedAt }
+                : x);
         var merged = current with
         {
             Revision = checked(current.Revision + 1), Sources = sources, Objects = objects,
             InventoryVersion = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryVersion : current.InventoryVersion,
             InventoryCapturedAt = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryCapturedAt : current.InventoryCapturedAt,
-            Relationships = current.Relationships
-                .Where(x => !replacedObjectIds.Contains(x.FromId) && !replacedObjectIds.Contains(x.ToId))
-                .Concat(incoming.Relationships.Where(x =>
-                    (acceptedObjectIds.Contains(x.FromId) || acceptedObjectIds.Contains(x.ToId))
-                    && !staleObjectIds.Contains(x.FromId) && !staleObjectIds.Contains(x.ToId)))
-                .Where(x => objectIds.Contains(x.FromId) && objectIds.Contains(x.ToId)).Distinct().ToImmutableArray(),
+            Relationships = retainedRelations.Concat(acceptedRelations)
+                .Where(x => objectIds.Contains(x.FromId) && objectIds.Contains(x.ToId))
+                .DistinctBy(x => (x.FromId, x.ToId, x.Kind)).ToImmutableArray(),
             Identities = current.Identities.Concat(incoming.Identities)
                 .DistinctBy(x => (x.ObjectType, x.SourceIdentity)).ToImmutableArray(),
             Collections = current.Collections.Concat(incoming.Collections).GroupBy(x => x.Purpose)

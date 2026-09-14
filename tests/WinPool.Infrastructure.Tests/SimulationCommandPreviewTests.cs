@@ -14,10 +14,10 @@ public sealed class SimulationCommandPreviewTests
         const string name = "O'Brien ’ ‘ ‚ ‛ 中文\n$(throw 'never execute') ; `n";
         var empty = StorageSnapshot.Empty("test");
         var after = SimulationLayouts.StandardTiered();
-        var texts = Enum.GetValues<SimulationOperationKind>().SelectMany(kind => SimulationCommandPreview.Build(
+        var texts = Enum.GetValues<SimulationEditKind>().SelectMany(kind => SimulationCommandPreview.Build(
             new(kind, after.StoragePools.First(x => !x.IsPrimordial).StableId, Name: name,
                 DriveLetter: "T", FileSystem: "NTFS", SizeBytes: 4294967296, MemberDiskIds: ["not-a-windows-id"], CreateMsr: true),
-            kind == SimulationOperationKind.CreateVirtualDisk ? empty : after, after)).ToArray();
+            kind == SimulationEditKind.CreateVirtualDisk ? empty : after, after)).ToArray();
         // This fixed harness parses text as data. It never invokes a command from the generated text.
         const string harness = """
             $ErrorActionPreference = 'Stop'
