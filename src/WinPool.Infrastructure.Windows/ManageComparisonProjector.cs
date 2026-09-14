@@ -41,7 +41,7 @@ public sealed class ManageComparisonProjector
                     string.IsNullOrWhiteSpace(snapshot.Computer.Ubr)
                         ? snapshot.Computer.OsBuild
                         : $"{snapshot.Computer.OsBuild}.{snapshot.Computer.Ubr}"));
-                rows.Add(P("Cpu", ReportValue(document, "0401") ?? string.Empty));
+                rows.Add(P("Cpu", document.Unified?.ProcessorNames ?? string.Empty));
                 rows.Add(P("Memory", ReportMemory(document)));
                 rows.Add(P("LocalStorage", TopologyProjector.FormatBytes(uniquePhysical.Sum(x => x.Size))));
                 if (snapshot.NetworkDisks.Count > 0)
@@ -340,71 +340,10 @@ public sealed class ManageComparisonProjector
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? string.Empty;
 
-    private static string? ReportValue(StorageSystemDocument document, string itemId)
+    private static string ReportMemory(StorageSystemDocument document) => document.Unified?.TotalMemoryBytes switch
     {
-        var item = document.HardwareReport.Items.FirstOrDefault(x => x.Id == itemId);
-        if (item?.FinalValue is not { } element || element.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-        return element.EnumerateArray()
-            .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
-            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
-    }
-
-    private static string ReportMemory(StorageSystemDocument document)
-    {
-        var item = document.HardwareReport.Items.FirstOrDefault(x => x.Id == "0504");
-        if (item?.FinalValue is not { } element || element.ValueKind != JsonValueKind.Array)
-        {
-            return string.Empty;
-        }
-        var values = element.EnumerateArray()
-            .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .ToList();
-        if (values.Count == 0)
-        {
-            return string.Empty;
-        }
-        long total = 0;
-        var parsed = 0;
-        foreach (var value in values)
-        {
-            if (TryParseByteSize(value!, out var bytes))
-            {
-                total += bytes;
-                parsed++;
-            }
-        }
-        return parsed == values.Count && parsed > 0
-            ? TopologyProjector.FormatBytes(total)
-            : string.Join(" + ", values);
-    }
-
-    private static bool TryParseByteSize(string text, out long bytes)
-    {
-        bytes = 0;
-        var parts = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2 || !double.TryParse(parts[0], out var amount))
-        {
-            return false;
-        }
-        var multiplier = parts[1] switch
-        {
-            "B" => 1L,
-            "KiB" => 1L << 10,
-            "MiB" => 1L << 20,
-            "GiB" => 1L << 30,
-            "TiB" => 1L << 40,
-            "PiB" => 1L << 50,
-            _ => 0L
-        };
-        if (multiplier == 0)
-        {
-            return false;
-        }
-        bytes = (long)(amount * multiplier);
-        return true;
-    }
+        null => string.Empty,
+        <= long.MaxValue and var bytes => TopologyProjector.FormatBytes((long)bytes),
+        var bytes => bytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + " bytes"
+    };
 }

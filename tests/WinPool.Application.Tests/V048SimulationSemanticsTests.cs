@@ -535,7 +535,8 @@ public sealed class V048SimulationSemanticsTests
 
         Assert.True(renamed.Succeeded, renamed.Error);
         Assert.Equal(beforePartition, Assert.Single(renamed.Document.Snapshot.Partitions));
-        Assert.Equal(beforeVolume, Assert.Single(renamed.Document.Snapshot.Volumes));
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(beforeVolume),
+            System.Text.Json.JsonSerializer.Serialize(Assert.Single(renamed.Document.Snapshot.Volumes)));
     }
 
     [Fact]
@@ -912,13 +913,10 @@ public sealed class V048SimulationSemanticsTests
     public void SystemDiskCannotBePersistedAsOffline()
     {
         var original = Primordial(ssdCount: 1, hddCount: 0);
-        original = original with
-        {
-            Snapshot = original.Snapshot with
+        original = original.WithCandidate(original.Snapshot with
             {
                 OsDisks = [original.Snapshot.OsDisks.Single() with { IsSystem = true }]
-            }
-        };
+            });
 
         var result = new SimulationOperationService().Apply(
             original,

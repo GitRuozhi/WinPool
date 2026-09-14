@@ -9,9 +9,9 @@ public static class WinPoolSimulationFacts
 {
     private static readonly HashSet<string> NonFields = new(StringComparer.Ordinal)
     {
-        "StableId", "IsStable", "PoolStableId", "SubsystemStableId", "VirtualDiskStableId", "PhysicalDiskStableId",
+        "StableId", "PoolStableId", "SubsystemStableId", "VirtualDiskStableId", "PhysicalDiskStableId",
         "OsDiskStableId", "PartitionStableId", "MemberPhysicalDiskIds", "TierStableIds", "OsDiskNumbers",
-        "IsRetired", "IsHotSpare", "SizeSource"
+        "IsRetired", "IsHotSpare"
     };
 
     public static WinPoolFacts Create(StorageSnapshot snapshot, SystemId systemId) =>
@@ -34,7 +34,7 @@ public static class WinPoolSimulationFacts
                 foreach (var field in newFields)
                 {
                     var old = beforeFields.TryGetValue(item.Id, out var oldFields) ? oldFields.FirstOrDefault(x => x.Name == field.Name) : null;
-                    if (!fields.ContainsKey(field.Name) || old is null || !JsonElement.DeepEquals(old.Value ?? default, field.Value ?? default))
+                    if (old is null || !JsonElement.DeepEquals(old.Value ?? default, field.Value ?? default))
                         fields[field.Name] = field;
                 }
                 objects.Add(existing with { Fields = fields.Values.ToImmutableArray() });
@@ -56,7 +56,10 @@ public static class WinPoolSimulationFacts
         var relationships = ImmutableArray.CreateBuilder<WinPoolFactRelationship>();
         void Link(string? a, string? b, string kind) { if (a is not null && b is not null && ids.Contains(a) && ids.Contains(b)) relationships.Add(new(a, b, kind)); }
         foreach (var pool in candidate.StoragePools)
+        {
+            Link(pool.SubsystemStableId, pool.StableId, "subsystem-pool");
             foreach (var disk in pool.MemberPhysicalDiskIds) Link(pool.StableId, disk, "pool-member");
+        }
         foreach (var disk in candidate.OsDisks)
         {
             Link(disk.PhysicalDiskStableId, disk.StableId, "same-device");
@@ -66,6 +69,7 @@ public static class WinPoolSimulationFacts
         {
             Link(tier.PoolStableId, tier.StableId, "pool-tier");
             Link(tier.VirtualDiskStableId, tier.StableId, "virtual-disk-tier");
+            foreach (var disk in tier.MemberPhysicalDiskIds) Link(tier.StableId, disk, "tier-member");
         }
         foreach (var disk in candidate.VirtualDisks) Link(disk.PoolStableId, disk.StableId, "pool-virtual-disk");
         foreach (var partition in candidate.Partitions) Link(partition.OsDiskStableId, partition.StableId, "disk-partition");
@@ -74,7 +78,10 @@ public static class WinPoolSimulationFacts
         var sources = (previous?.Sources.AsEnumerable() ?? []).Where(x => x.Id != sourceRef).Append(source)
             .Where(x => used.Contains(x.Id)).ToImmutableArray();
         var result = new WinPoolFacts(1, systemId, checked((previous?.Revision ?? 0) + 1), sources, objects.ToImmutable(),
-            relationships.ToImmutable(), bindings.ToImmutable(), previous?.Collections ?? []) { IsSimulation = true };
+            relationships.ToImmutable(), bindings.ToImmutable(), previous?.Collections ?? [])
+        {
+            IsSimulation = true, InventoryVersion = candidate.SnapshotVersion, InventoryCapturedAt = candidate.ScannedAt
+        };
         result.Validate();
         return result;
     }
@@ -84,10 +91,12 @@ public static class WinPoolSimulationFacts
         {
             var name = property.Name switch { "MaskedSerialNumber" => "SerialNumber", "DeviceIdentifier" => "DeviceId", _ => property.Name };
             var element = property.Value;
+            if (property.Name == "DeviceIdentifier" && element.GetString() == "" && value is PhysicalDiskInfo { DeviceId: { } number })
+                element = JsonSerializer.SerializeToElement(number.ToString(System.Globalization.CultureInfo.InvariantCulture));
             var declared = value.GetType().GetProperty(property.Name)!.PropertyType;
             declared = Nullable.GetUnderlyingType(declared) ?? declared;
             var type = declared == typeof(bool) ? FactValueType.Boolean
-                : declared == typeof(long) || declared == typeof(int) ? FactValueType.Int64
+                : declared == typeof(long) || declared == typeof(int) || declared.IsEnum ? FactValueType.Int64
                 : typeof(IEnumerable<string>).IsAssignableFrom(declared) && declared != typeof(string) ? FactValueType.StringArray
                 : element.ValueKind == JsonValueKind.Array ? FactValueType.Int64Array : FactValueType.String;
             return new WinPoolSourceField(name, type, element.Clone(), FieldReadState.Returned, sourceRef,

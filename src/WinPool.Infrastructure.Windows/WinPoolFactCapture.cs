@@ -90,7 +90,11 @@ internal static class WinPoolFactCapture
             if (from is not null && to is not null && ids.Contains(from) && ids.Contains(to)) relationships.Add(new(from, to, kind));
         }
         foreach (var pool in snapshot.StoragePools)
+        {
+            Link(pool.SubsystemStableId, pool.StableId, "subsystem-pool");
             foreach (var member in pool.MemberPhysicalDiskIds) Link(pool.StableId, member, "pool-member");
+        }
+        foreach (var disk in snapshot.VirtualDisks) Link(disk.PoolStableId, disk.StableId, "pool-virtual-disk");
         foreach (var disk in snapshot.OsDisks)
         {
             Link(disk.PhysicalDiskStableId, disk.StableId, "same-device");
@@ -105,7 +109,10 @@ internal static class WinPoolFactCapture
         }
         var state = sources.Values.Any(x => x.ReadState == FieldReadState.Failed) ? FieldReadState.Failed : FieldReadState.Returned;
         var facts = new WinPoolFacts(WinPoolFacts.CurrentFormatVersion, systemId, 0, sources.Values.ToImmutableArray(), objects.ToImmutable(),
-            relationships.ToImmutable(), bindings.ToImmutable(), [new(purpose, snapshot.ScannedAt, DateTimeOffset.Now, state)]);
+            relationships.ToImmutable(), bindings.ToImmutable(), [new(purpose, snapshot.ScannedAt, DateTimeOffset.Now, state)])
+        {
+            InventoryVersion = snapshot.SnapshotVersion, InventoryCapturedAt = snapshot.ScannedAt
+        };
         facts.Validate();
         return facts;
     }

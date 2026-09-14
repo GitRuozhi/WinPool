@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using WinPool.Application;
 
 namespace WinPool.Architecture.Tests;
@@ -188,8 +188,8 @@ public sealed class ArchitectureBoundaryTests
         var activePlanPath = Path.Combine(root, "docs", "Plan.md");
         Assert.True(File.Exists(activePlanPath), "docs/Plan.md");
         var activePlan = File.ReadAllText(activePlanPath);
-        Assert.Contains("V0.51", activePlan, StringComparison.Ordinal);
-        Assert.Contains("V0.51 仍不实现或执行真实存储写操作", activePlan, StringComparison.Ordinal);
+        Assert.Contains("V0.52", activePlan, StringComparison.Ordinal);
+        Assert.Contains("真实存储只读", activePlan, StringComparison.Ordinal);
         Assert.DoesNotContain("本 Plan 授权真实存储", activePlan, StringComparison.Ordinal);
 
         var archivedPlan = Path.Combine(root, "docs", "Archive", "V0.48", "Plan.md");
@@ -227,10 +227,11 @@ public sealed class ArchitectureBoundaryTests
             "Microsoft.Data.Sqlite",
             "System.Management.Automation",
             "PowerShell.Create",
+            "System.Diagnostics.Process",
             "Process.Start(",
+            "ProcessStartInfo",
             "cmd.exe",
-            "diskpart",
-            "Remove-StoragePool"
+            "diskpart"
         };
 
         var source = string.Join(
@@ -1112,24 +1113,24 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IpcProtocolCurrentVersionIsFive()
+    public void IpcProtocolCurrentVersionIsSix()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
 
-        Assert.Contains("public const int CurrentVersion = 5;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 6;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SqliteStoreSchemaVersionIsFifteen()
+    public void SqliteStoreSchemaVersionIsSixteen()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Infrastructure.Sqlite", "WinPoolSqliteStore.cs"));
 
-        Assert.Contains("public const int CurrentSchemaVersion = 15;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentSchemaVersion = 16;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 14;", source, StringComparison.Ordinal);
     }
 

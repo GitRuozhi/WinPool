@@ -42,14 +42,11 @@ public sealed class ManageSystemProjectorTests
         var network = new NetworkDiskInfo(
             "network:r", true, "R: Network", "R", "\\\\server\\share",
             "NTFS", 4_000_000, 1_000_000);
-        var document = source with
-        {
-            Snapshot = source.Snapshot with
+        var document = source.WithCandidate(source.Snapshot with
             {
                 NetworkDisks = [network],
                 OsDisks = source.Snapshot.OsDisks.Append(otherDisk).ToArray()
-            }
-        };
+            });
 
         var nodes = Flatten(new ManageSystemProjector().Project(document).Root)
             .ToArray();
@@ -276,13 +273,10 @@ public sealed class ManageSystemProjectorTests
             "partition:2", true, 3, 2, "WindowsRecovery", 2_000_000, 100_000,
             false, false, "", "Recovery", "", null, 0,
             "Healthy", "OK", "", "osdisk:3");
-        var document = source with
-        {
-            Snapshot = source.Snapshot with
+        var document = source.WithCandidate(source.Snapshot with
             {
                 Partitions = source.Snapshot.Partitions.Append(letterless).ToArray()
-            }
-        };
+            });
 
         var volumes = new ManageSystemProjector().Project(document).WorkspaceObjects
             .Where(item => item.Role == ManageObjectRole.Volume)
@@ -362,9 +356,7 @@ public sealed class ManageSystemProjectorTests
             TierStableIds = [],
             OsDiskNumbers = [4]
         };
-        var document = source with
-        {
-            Snapshot = source.Snapshot with
+        var document = source.WithCandidate(source.Snapshot with
             {
                 PhysicalDisks = source.Snapshot.PhysicalDisks.Append(extra).ToArray(),
                 StoragePools = [source.Snapshot.StoragePools[0] with
@@ -372,8 +364,7 @@ public sealed class ManageSystemProjectorTests
                     MemberPhysicalDiskIds = ["physical:1", "physical:2"]
                 }],
                 VirtualDisks = source.Snapshot.VirtualDisks.Append(secondVirtual).ToArray()
-            }
-        };
+            });
 
         var nodes = Flatten(new ManageSystemProjector().Project(document).Root).ToArray();
         var directGroup = Assert.Single(
@@ -408,13 +399,10 @@ public sealed class ManageSystemProjectorTests
         var letterless = new NetworkDiskInfo(
             "network:s", true, "S: Share", "S", "\\\\server\\share2",
             "NTFS", 4_000_000, 1_000_000);
-        var document = source with
-        {
-            Snapshot = source.Snapshot with
+        var document = source.WithCandidate(source.Snapshot with
             {
                 NetworkDisks = [lettered, letterless with { DriveLetter = "" }]
-            }
-        };
+            });
 
         var volumes = new ManageSystemProjector().Project(document).WorkspaceObjects
             .Where(item => item.Category == ManageWorkspaceCategory.Volume)
@@ -451,9 +439,7 @@ public sealed class ManageSystemProjectorTests
             "physical:2", true, "Spare One", "Model", "masked", "SATA", "HDD",
             2_000_000, 512, 4096, "Healthy", "OK", false, "In a pool", 2,
             false, false, false, false, "pool:1");
-        var document = source with
-        {
-            Snapshot = source.Snapshot with
+        var document = source.WithCandidate(source.Snapshot with
             {
                 PhysicalDisks = source.Snapshot.PhysicalDisks.Append(extra).ToArray(),
                 StoragePools = [source.Snapshot.StoragePools[0] with
@@ -464,8 +450,7 @@ public sealed class ManageSystemProjectorTests
                 {
                     MemberPhysicalDiskIds = ["physical:1"]
                 }]
-            }
-        };
+            });
         var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
         var id = Object(system, WinPool.Domain.StorageObjectKind.LogicalGroup, "group:direct:pool:1");
 
@@ -542,7 +527,8 @@ public sealed class ManageSystemProjectorTests
             StorageSnapshot.CurrentSchemaVersion, "test", now,
             new ComputerInfo("system:test", "TEST-PC", "Windows", "10.0", "19045", now),
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
-            [physical], [pool], [tier], [virtualDisk], [osDisk], [partition], [], [],
+            [physical], [pool], [tier], [virtualDisk], [osDisk], [partition],
+            [new VolumeInfo("volume:1", true, partition.StableId, "NTFS", "Data", 900_000, 400_000, 4096, "Healthy", "OK", ["C:\\"])], [],
             [new StorageRelationship("pool:1", "physical:1", "PoolMember")],
             []);
         return new(

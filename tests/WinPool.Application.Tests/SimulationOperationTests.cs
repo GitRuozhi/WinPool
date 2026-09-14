@@ -68,17 +68,14 @@ public sealed class SimulationOperationTests
             SizeBytes: 500_000_000));
         Assert.Single(document.Snapshot.Partitions);
 
-        document = document with
-        {
-            Snapshot = document.Snapshot with
+        document = document.WithCandidate(document.Snapshot with
             {
                 OsDisks = document.Snapshot.OsDisks
                     .Select(item => item.StableId == "osdisk:5"
                         ? item with { PartitionStyle = "RAW" }
                         : item)
                     .ToArray()
-            }
-        };
+            });
 
         document = Apply(document, new SimulationOperationRequest(
             SimulationOperationKind.InitializeDisk,
@@ -148,10 +145,7 @@ public sealed class SimulationOperationTests
             FileSystem: "NTFS"));
         var partition = Assert.Single(document.Snapshot.Partitions);
         var usedPartition = partition with { SizeRemaining = 100_000_000 };
-        document = document with
-        {
-            Snapshot = document.Snapshot with { Partitions = [usedPartition] }
-        };
+        document = document.WithCandidate(document.Snapshot with { Partitions = [usedPartition] });
 
         var result = new SimulationOperationService().Apply(
             document,
@@ -412,9 +406,7 @@ public sealed class SimulationOperationTests
     private static StorageSystemDocument CreateBusyPoolDocument()
     {
         var document = CreateDocument();
-        return document with
-        {
-            Snapshot = document.Snapshot with
+        return document.WithCandidate(document.Snapshot with
             {
                 StoragePools =
                 [
@@ -432,8 +424,7 @@ public sealed class SimulationOperationTests
                         "vdisk:2", true, "V2", "Healthy", "OK", "Simple", "Fixed",
                         1, 65536, 500_000_000, 500_000_000, "pool:busy", [], [8])
                 ]
-            }
-        };
+            });
     }
 }
 
@@ -578,7 +569,7 @@ public sealed class SetDiskUsageTests
                 .Select(item => item.StableId == "physical:p2" ? item with { IsPageFile = true } : item)
                 .ToArray()
         };
-        document = document with { Snapshot = withRole };
+        document = document.WithCandidate(withRole);
         var result = new SimulationOperationService().Apply(
             document,
             new SimulationOperationRequest(
@@ -730,16 +721,15 @@ public sealed class UpdateStoragePoolSizeTests
             "partition:1", true, 3, 1, "Basic", 1_048_576, 900_000_000_000,
             false, false, "D", "Data", "NTFS", 4096, 400_000_000_000,
             "Healthy", "OK", "D:\\", osDiskId);
-        return document with
-        {
-            Snapshot = document.Snapshot with
+        return document.WithCandidate(document.Snapshot with
             {
                 StorageTiers = tiers,
                 VirtualDisks = [virtualDisk],
                 OsDisks = [osDisk],
-                Partitions = [partition]
-            }
-        };
+                Partitions = [partition],
+                Volumes = [new VolumeInfo("volume:1", true, partition.StableId, "NTFS", "Data",
+                    partition.Size, 400_000_000_000, 4096, "Healthy", "OK", ["D:\\"])]
+            });
     }
 
     [Fact]

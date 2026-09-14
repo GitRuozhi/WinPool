@@ -117,6 +117,7 @@ public static class SimulationDocumentCodec
     public static SimulationDocumentPayload Encode(StorageSystemDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
+        document.ValidateCurrentFormat();
         if (document.Kind != StorageSystemKind.Simulation)
         {
             throw new InvalidOperationException("Only simulation documents can be encoded.");
@@ -127,7 +128,7 @@ public static class SimulationDocumentCodec
         var sha256 = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(json)))
             .ToLowerInvariant();
-        return new(
+        var payload = new SimulationDocumentPayload(
             sanitized.Id,
             sanitized.SchemaVersion,
             sanitized.DisplayName,
@@ -135,11 +136,14 @@ public static class SimulationDocumentCodec
             sha256,
             sanitized.Revision,
             sanitized.UpdatedAt);
+        StorageDocumentTransportBudget.Validate(payload);
+        return payload;
     }
 
     public static StorageSystemDocument Decode(SimulationDocumentPayload payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
+        StorageDocumentTransportBudget.Validate(payload);
         var sanitizedJson = payload.SanitizedJson ?? string.Empty;
         var bytes = Encoding.UTF8.GetBytes(sanitizedJson);
         var actual = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -154,6 +158,7 @@ public static class SimulationDocumentCodec
             ?? throw new InvalidDataException("The Agent simulation document is empty.");
         if (document.Kind != StorageSystemKind.Simulation
             || document.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion
+            || payload.DocumentSchemaVersion != StorageSystemDocument.CurrentSchemaVersion
             || document.Snapshot.SchemaVersion != StorageSnapshot.CurrentSchemaVersion
             || !StringComparer.Ordinal.Equals(document.Id, payload.DocumentId))
         {
@@ -165,13 +170,14 @@ public static class SimulationDocumentCodec
             throw new InvalidDataException("The Agent simulation document revision is inconsistent.");
         }
 
+        document.ValidateCurrentFormat();
         return StorageSystemDocumentSanitizer.RedactSensitiveData(document);
     }
 }
 
 public static class LocalInventoryDocumentCodec
 {
-    private const int MaximumPayloadBytes = 64 * 1024 * 1024;
+    private const int MaximumPayloadBytes = StorageDocumentTransportBudget.MaximumBytes;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -181,6 +187,7 @@ public static class LocalInventoryDocumentCodec
     public static LocalInventoryDocumentPayload Encode(StorageSystemDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
+        document.ValidateCurrentFormat();
         if (document.Kind != StorageSystemKind.Local)
         {
             throw new InvalidOperationException("Only local inventory documents can be encoded.");
@@ -198,18 +205,21 @@ public static class LocalInventoryDocumentCodec
             throw new InvalidDataException("The local inventory document exceeds the IPC limit.");
         }
 
-        return new(
+        var payload = new LocalInventoryDocumentPayload(
             sanitized.Id,
             sanitized.SchemaVersion,
             sanitized.DisplayName,
             json,
             Hash(bytes),
             sanitized.UpdatedAt);
+        StorageDocumentTransportBudget.Validate(payload);
+        return payload;
     }
 
     public static StorageSystemDocument Decode(LocalInventoryDocumentPayload payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
+        StorageDocumentTransportBudget.Validate(payload);
         var bytes = Encoding.UTF8.GetBytes(payload.SanitizedJson ?? string.Empty);
         if (bytes.Length == 0
             || bytes.Length > MaximumPayloadBytes
@@ -222,6 +232,7 @@ public static class LocalInventoryDocumentCodec
             ?? throw new InvalidDataException("The Agent local inventory document is empty.");
         if (document.Kind != StorageSystemKind.Local
             || document.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion
+            || payload.DocumentSchemaVersion != StorageSystemDocument.CurrentSchemaVersion
             || !StringComparer.Ordinal.Equals(document.Id, payload.DocumentId)
             || !StringComparer.Ordinal.Equals(document.DisplayName, payload.DisplayName)
             || document.UpdatedAt.ToUnixTimeMilliseconds() != payload.CapturedAtUtc.ToUnixTimeMilliseconds())
@@ -229,6 +240,7 @@ public static class LocalInventoryDocumentCodec
             throw new InvalidDataException("The Agent local inventory metadata is inconsistent.");
         }
 
+        document.ValidateCurrentFormat();
         return StorageSystemDocumentSanitizer.RedactSensitiveData(document) with
         {
             Revision = 0
@@ -261,6 +273,17 @@ public static class LocalInventoryDocumentCodec
 
     private static string Hash(byte[] bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+}
+
+internal static class StorageDocumentTransportBudget
+{
+    // Measure the escaped JSON string inside its typed payload, leaving room in the 4 MiB IPC frame.
+    public const int MaximumBytes = 3 * 1024 * 1024;
+    public static void Validate<T>(T payload)
+    {
+        if (JsonSerializer.SerializeToUtf8Bytes(payload).Length > MaximumBytes)
+            throw new InvalidDataException("The escaped document payload exceeds its IPC budget.");
+    }
 }
 
 public sealed class AgentBackedHardwareInventoryProvider(IAgentConnection connection)

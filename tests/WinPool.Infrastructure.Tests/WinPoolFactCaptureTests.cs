@@ -41,6 +41,12 @@ public sealed class WinPoolFactCaptureTests
         Assert.DoesNotContain(storage.SourceFacts.Objects, x => x.ObjectType == FactObjectType.Processor);
         Assert.Equal(CollectionPurpose.Storage, Assert.Single(storage.SourceFacts.Collections).Purpose);
         Assert.Contains(storage.SourceFacts.Objects, x => x.ObjectType == FactObjectType.PhysicalDisk);
+        var projected = WinPoolStorageProjection.Project(storage.SourceFacts);
+        Assert.Equal(storage.Snapshot.PhysicalDisks.Select(x => (x.StableId, x.Size, x.DeviceId)).OrderBy(x => x.StableId),
+            projected.PhysicalDisks.Select(x => (x.StableId, x.Size, x.DeviceId)).OrderBy(x => x.StableId));
+        Assert.Equal(storage.Snapshot.Partitions.Select(x => (x.StableId, x.Size, x.Offset, x.GptType)).OrderBy(x => x.StableId),
+            projected.Partitions.Select(x => (x.StableId, x.Size, x.Offset, x.GptType)).OrderBy(x => x.StableId));
+        Assert.All(projected.Volumes, volume => Assert.Contains(storage.SourceFacts.Objects, x => x.ObjectType == FactObjectType.Volume && x.Id == volume.StableId));
         var hardware = await provider.CollectHardwareAsync(CancellationToken.None);
         var cpu = Assert.Single(hardware.SourceFacts!.Objects.Where(x => x.ObjectType == FactObjectType.Processor));
         Assert.Equal(FieldReadState.Returned, cpu.Field("Name")!.ReadState);

@@ -119,15 +119,19 @@ public static class SimulationCommandPreview
                 {
                     tierIndex++;
                     var old = before.StorageTiers.FirstOrDefault(x => x.StableId == tier.StableId);
-                    if (old is not null && tier.Size > old.Size && tier.ResiliencySettingName == old.ResiliencySettingName
-                        && tier.Interleave == old.Interleave && tier.NumberOfColumns == old.NumberOfColumns)
+                    if (old is not null && tier.Size > old.Size && SameLayout(old, tier))
                         lines.Add("Resize-StorageTier -InputObject $targetTier" + Number(tierIndex) + " -Size " + Number(tier.Size));
-                    else if (old is not null && (tier.ResiliencySettingName != old.ResiliencySettingName || tier.Interleave != old.Interleave
-                        || tier.NumberOfColumns != old.NumberOfColumns || tier.NumberOfDataCopies != old.NumberOfDataCopies || tier.PhysicalDiskRedundancy != old.PhysicalDiskRedundancy))
+                    else if (old is not null && !SameLayout(old, tier))
                         lines.Add("# This simulated layout change requires recreation on Windows; no in-place parameter mapping is available.");
                 }
                 foreach (var disk in after.VirtualDisks.Where(x => x.PoolStableId == step.TargetStableId))
-                    if (before.VirtualDisks.FirstOrDefault(x => x.StableId == disk.StableId) is { } oldDisk && disk.Size > oldDisk.Size)
+                    if (before.VirtualDisks.FirstOrDefault(x => x.StableId == disk.StableId) is { } oldDisk && disk.Size > oldDisk.Size
+                        && disk.ResiliencySettingName == oldDisk.ResiliencySettingName && disk.ProvisioningType == oldDisk.ProvisioningType
+                        && disk.Interleave == oldDisk.Interleave && disk.NumberOfColumns == oldDisk.NumberOfColumns
+                        && disk.NumberOfDataCopies == oldDisk.NumberOfDataCopies && disk.PhysicalDiskRedundancy == oldDisk.PhysicalDiskRedundancy
+                        && disk.TierStableIds.Order().SequenceEqual(oldDisk.TierStableIds.Order())
+                        && after.StorageTiers.Where(x => disk.TierStableIds.Contains(x.StableId)).All(tier =>
+                            before.StorageTiers.FirstOrDefault(x => x.StableId == tier.StableId) is { } oldTier && SameLayout(oldTier, tier)))
                         lines.Add("Resize-VirtualDisk -InputObject $targetVirtualDisk -Size " + Number(disk.Size));
                 break;
             default: lines.Add("# Internal simulation action; no corresponding Windows command."); break;
@@ -135,6 +139,11 @@ public static class SimulationCommandPreview
         if (lines.Count == 0) lines.Add("# No Windows command is required for this step.");
         return [Unbound + string.Join("\n", lines)];
     }
+
+    private static bool SameLayout(StorageTierInfo before, StorageTierInfo after) =>
+        before.MediaType == after.MediaType && before.ResiliencySettingName == after.ResiliencySettingName
+        && before.Interleave == after.Interleave && before.NumberOfColumns == after.NumberOfColumns
+        && before.NumberOfDataCopies == after.NumberOfDataCopies && before.PhysicalDiskRedundancy == after.PhysicalDiskRedundancy;
 
     private static string Format(SimulationOperationRequest step, string? target) => "Format-Volume"
         + (target is null ? "" : " -InputObject " + target)

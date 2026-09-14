@@ -56,6 +56,27 @@ public sealed class WinPoolSystem
     public ImmutableArray<WinPoolDisplayGroup> DisplayGroups { get; }
     public ImmutableArray<WinPoolSource> Sources { get; }
     public ImmutableArray<WinPoolCollectionState> Collections { get; }
+    public string ProcessorNames => string.Join("; ", Objects.Where(x => x.ObjectType == FactObjectType.Processor)
+        .Select(x => x.Field("Name")).Where(x => x is { ReadState: FieldReadState.Returned, IsRedacted: false })
+        .Select(x => x!.DisplayValue()).Where(x => x.Length > 0));
+
+    public ulong? TotalMemoryBytes
+    {
+        get
+        {
+            var modules = Objects.Where(x => x.ObjectType == FactObjectType.MemoryModule).ToArray();
+            if (modules.Length == 0) return null;
+            ulong total = 0;
+            foreach (var module in modules)
+            {
+                if (module.Field("Capacity") is not { ReadState: FieldReadState.Returned, IsRedacted: false, Value: { } value }
+                    || value.ValueKind != System.Text.Json.JsonValueKind.Number || !value.TryGetUInt64(out var capacity)
+                    || ulong.MaxValue - total < capacity) return null;
+                total += capacity;
+            }
+            return total;
+        }
+    }
 
     public WinPoolSystem(WinPoolFacts facts)
     {
@@ -115,7 +136,7 @@ public static class WinPoolFactRefresh
         current.Validate();
         incoming.Validate();
         if (current.SystemId != incoming.SystemId) throw new InvalidOperationException("Collection belongs to another system.");
-        if (current.IsSimulation || current.Sources.Any(x => x.Origin is FactOrigin.Simulation or FactOrigin.Import))
+        if (current.IsSimulation || current.Sources.Any(x => x.Origin == FactOrigin.Simulation))
             throw new InvalidOperationException("A live collection cannot refresh a simulation or imported system.");
         static (string, string) Key(WinPoolSource source) => (source.Namespace, source.ClassName);
         var oldByKey = current.Sources.GroupBy(Key).ToDictionary(x => x.Key, x => x.Max(s => s.CapturedAt));
@@ -135,6 +156,8 @@ public static class WinPoolFactRefresh
         var merged = current with
         {
             Revision = checked(current.Revision + 1), Sources = sources, Objects = objects,
+            InventoryVersion = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryVersion : current.InventoryVersion,
+            InventoryCapturedAt = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryCapturedAt : current.InventoryCapturedAt,
             Relationships = current.Relationships
                 .Where(x => !replacedObjectIds.Contains(x.FromId) && !replacedObjectIds.Contains(x.ToId))
                 .Concat(incoming.Relationships.Where(x =>

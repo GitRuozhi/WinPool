@@ -19,6 +19,10 @@ public static class StorageEditRules
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Kind is not (SimulationOperationKind.Rename or SimulationOperationKind.OptimizePool or SimulationOperationKind.OptimizeDrive)
+            && HasUnsupportedRelatedValue(snapshot, request))
+            return Deny("storage.rule.source-value-out-of-range",
+                "A related source value exceeds the supported editing range. Inspect its original value in source details.");
         return request.Kind switch
         {
             SimulationOperationKind.Rename => Allow("storage.rule.rename"),
@@ -45,6 +49,28 @@ public static class StorageEditRules
             SimulationOperationKind.OptimizeDrive => AllowNoOp("storage.rule.optimize-drive.simulated-noop"),
             _ => Deny("storage.rule.unknown-operation", $"Operation {request.Kind} is not recognized.")
         };
+    }
+
+    private static bool HasUnsupportedRelatedValue(StorageSnapshot snapshot, SimulationOperationRequest request)
+    {
+        var invalid = snapshot.Warnings.Where(x => x.Code == "facts.numeric-out-of-range")
+            .Select(x => x.StableId).Where(x => x is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (invalid.Count == 0) return false;
+        var related = new HashSet<string>(request.MemberDiskIds ?? [], StringComparer.OrdinalIgnoreCase) { request.TargetStableId };
+        if (request.Kind == SimulationOperationKind.MovePhysicalDisk && request.Name is not null) related.Add(request.Name);
+        var relationships = StorageRelationshipProjector.Project(snapshot);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var link in relationships)
+                if (related.Contains(link.FromStableId) || related.Contains(link.ToStableId))
+                {
+                    changed |= related.Add(link.FromStableId);
+                    changed |= related.Add(link.ToStableId);
+                }
+        } while (changed);
+        return invalid.Any(x => related.Contains(x!));
     }
 
     public static IReadOnlyList<(SimulationOperationKind Kind, string Support)> OperationMatrix() =>

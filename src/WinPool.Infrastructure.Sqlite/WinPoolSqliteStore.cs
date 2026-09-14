@@ -7,7 +7,7 @@ public sealed class WinPoolSqliteStore
     // V0.48 starts from a deliberately clean schema 15 data root. Do not add
     // migrations from earlier schemas: they contain retired product domains
     // and are intentionally rejected by InitializeAsync.
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 16;
 
     private readonly string connectionString;
 

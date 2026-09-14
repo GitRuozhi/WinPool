@@ -67,12 +67,41 @@ public sealed record StorageSystemDocument(
     StorageSystemKind Kind,
     string DisplayName,
     StorageSnapshot Snapshot,
-    HardwareInventoryReport HardwareReport,
+    [property: System.Text.Json.Serialization.JsonIgnore] HardwareInventoryReport HardwareReport,
     IReadOnlyList<SimulationJob> Jobs,
     DateTimeOffset UpdatedAt,
     string? SourceHostName = null)
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
+
+    private WinPoolFacts? cachedFacts;
+    private StorageSnapshot? cachedSnapshot;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public StorageSnapshot Snapshot
+    {
+        get
+        {
+            var facts = SourceFacts ?? throw new InvalidDataException("The document has no source facts.");
+            if (!ReferenceEquals(cachedFacts, facts))
+            {
+                cachedSnapshot = WinPoolStorageProjection.Project(facts);
+                cachedFacts = facts;
+            }
+            return cachedSnapshot!;
+        }
+    }
+
+    [System.Text.Json.Serialization.JsonConstructor]
+    public StorageSystemDocument(int schemaVersion, string id, StorageSystemKind kind, string displayName,
+        WinPoolFacts sourceFacts, IReadOnlyList<SimulationJob> jobs, DateTimeOffset updatedAt, string? sourceHostName = null)
+        : this(schemaVersion, id, kind, displayName, StorageSnapshot.Empty(displayName), HardwareInventoryReport.Empty(updatedAt), jobs, updatedAt, sourceHostName)
+    {
+        if (schemaVersion != CurrentSchemaVersion || sourceFacts is null)
+            throw new InvalidDataException("The document format is unsupported or source facts are missing.");
+        sourceFacts.Validate();
+        SourceFacts = sourceFacts;
+    }
 
     public string DocumentId => Id;
 
@@ -84,8 +113,35 @@ public sealed record StorageSystemDocument(
 
     public string? ProvenanceDocumentId { get; init; }
 
-    public WinPoolFacts? SourceFacts { get; init; } = Kind == StorageSystemKind.Simulation
-        ? WinPoolSimulationFacts.Create(Snapshot, InternalStableIdentity.SystemFromDocumentId(Id)) : null;
+    [System.Text.Json.Serialization.JsonRequired]
+    public WinPoolFacts? SourceFacts { get; init; } = SeedFacts(Snapshot, InternalStableIdentity.SystemFromDocumentId(Id), Kind);
+
+    private static WinPoolFacts SeedFacts(StorageSnapshot snapshot, SystemId systemId, StorageSystemKind kind)
+    {
+        var facts = WinPoolSimulationFacts.Create(snapshot, systemId);
+        return kind == StorageSystemKind.Simulation ? facts : facts with
+        {
+            IsSimulation = false,
+            Sources = System.Collections.Immutable.ImmutableArray.ToImmutableArray(facts.Sources.Select(x => x with
+            { Origin = FactOrigin.Import, ClassName = "ProvidedStorageSnapshot" }))
+        };
+    }
+
+    public StorageSystemDocument WithCandidate(StorageSnapshot candidate) => this with
+    {
+        SourceFacts = Kind == StorageSystemKind.Simulation
+            ? WinPoolSimulationFacts.ApplyCandidate(SourceFacts, Snapshot, candidate, SystemId)
+            : SeedFacts(candidate, SystemId, Kind)
+    };
+
+    public void ValidateCurrentFormat()
+    {
+        if (SchemaVersion != CurrentSchemaVersion || !Enum.IsDefined(Kind) || string.IsNullOrWhiteSpace(Id)
+            || string.IsNullOrWhiteSpace(DisplayName) || SystemId.Value == Guid.Empty || Revision < 0 || Jobs is null
+            || SourceFacts is null || SourceFacts.SystemId != SystemId || SourceFacts.IsSimulation != (Kind == StorageSystemKind.Simulation))
+            throw new InvalidDataException("The current document metadata and source facts are inconsistent.");
+        SourceFacts.Validate();
+    }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public WinPoolSystem? Unified => SourceFacts is null ? null : new WinPoolSystem(SourceFacts);
@@ -103,7 +159,6 @@ public sealed record StorageSystemDocument(
             Id = $"simulation:{Guid.NewGuid():N}",
             SystemId = newSystemId,
             SourceFacts = (SourceFacts ?? WinPoolSimulationFacts.Create(Snapshot, SystemId)).CopyTo(newSystemId),
-            Snapshot = WinPoolSystemCopy.Snapshot(Snapshot, newSystemId),
             Jobs = [],
             Kind = StorageSystemKind.Simulation,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? DisplayName : displayName.Trim(),
@@ -130,16 +185,6 @@ public static class StorageSystemDocumentSanitizer
     public static StorageSystemDocument RedactSensitiveData(StorageSystemDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
-        var snapshot = document.Snapshot with
-        {
-            PhysicalDisks = document.Snapshot.PhysicalDisks
-                .Select(disk => disk with
-                {
-                    MaskedSerialNumber = MaskOnce(disk.MaskedSerialNumber),
-                    PnpDeviceId = string.Empty
-                })
-                .ToArray()
-        };
         var report = document.HardwareReport with
         {
             Items = document.HardwareReport.Items.Select(item =>
@@ -160,7 +205,7 @@ public static class StorageSystemDocumentSanitizer
         };
         return document with
         {
-            Snapshot = snapshot, HardwareReport = report,
+            HardwareReport = report,
             SourceFacts = document.SourceFacts is null ? null : WinPoolFactSanitizer.Redact(document.SourceFacts)
         };
     }
@@ -472,7 +517,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 true,
                 document with
                 {
-                    Snapshot = snapshot, Jobs = jobs, UpdatedAt = DateTimeOffset.Now,
+                    Jobs = jobs, UpdatedAt = DateTimeOffset.Now,
                     SourceFacts = WinPoolSimulationFacts.ApplyCandidate(document.SourceFacts, document.Snapshot, snapshot, document.SystemId)
                 },
                 string.Empty,

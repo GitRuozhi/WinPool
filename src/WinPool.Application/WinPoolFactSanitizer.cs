@@ -15,6 +15,7 @@ public static class WinPoolFactSanitizer
         "InterfaceType", "DeviceLocator", "BankLabel", "PartNumber", "Purpose", "Status", "LinkSpeed",
         "Mode", "ReleaseDate", "SystemType", "MemoryErrorCorrection", "DriveLetter", "PowerPlan",
         "MUILanguages", "InstalledUICulture", "RegionName", "TimeZoneCaption", "TimeZoneStandardName"
+        , "AccessPaths", "Path", "ProviderName", "ProviderPath", "DeviceId", "PartitionTypeId", "LastBootTime", "LastBootUpTime"
     };
 
     public static WinPoolFacts Redact(WinPoolFacts facts)

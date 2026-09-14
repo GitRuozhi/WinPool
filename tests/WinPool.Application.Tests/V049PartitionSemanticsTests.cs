@@ -97,15 +97,12 @@ public sealed class V049PartitionSemanticsTests
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
                 SizeBytes: 100_000_000));
-        document = document with
-        {
-            Snapshot = document.Snapshot with
+        document = document.WithCandidate(document.Snapshot with
             {
                 OsDisks = document.Snapshot.OsDisks
                     .Select(item => item with { PartitionStyle = "MBR" })
                     .ToArray()
-            }
-        };
+            });
 
         var converted = Apply(document, new SimulationOperationRequest(
             SimulationOperationKind.ConvertDisk,

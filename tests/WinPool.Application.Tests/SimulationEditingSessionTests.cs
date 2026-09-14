@@ -72,4 +72,23 @@ public sealed class SimulationEditingSessionTests
         Assert.Contains("'O''Brien 中文'", Assert.Single(result.Commands));
         Assert.DoesNotContain(document.Snapshot.StoragePools[0].StableId, result.Commands[0]);
     }
+
+    [Fact]
+    public void CopyCountChangeCannotBePresentedAsAnInPlaceResize()
+    {
+        var before = SimulationLayouts.StandardTiered();
+        var tier = before.StorageTiers.First();
+        var after = before with
+        {
+            StorageTiers = before.StorageTiers.Select(x => x.StableId == tier.StableId
+                ? x with { Size = x.Size + 4294967296, NumberOfDataCopies = (x.NumberOfDataCopies ?? 1) + 1 } : x).ToArray(),
+            VirtualDisks = before.VirtualDisks.Select(x => x.TierStableIds.Contains(tier.StableId)
+                ? x with { Size = x.Size + 4294967296 } : x).ToArray()
+        };
+        var preview = Assert.Single(SimulationCommandPreview.Build(
+            new(SimulationOperationKind.UpdateStoragePool, tier.PoolStableId!), before, after));
+        Assert.Contains("requires recreation", preview);
+        Assert.DoesNotContain("Resize-StorageTier", preview);
+        Assert.DoesNotContain("Resize-VirtualDisk", preview);
+    }
 }

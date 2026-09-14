@@ -114,6 +114,8 @@ public sealed record WinPoolFacts(
 {
     public const int CurrentFormatVersion = 1;
     public bool IsSimulation { get; init; }
+    public string InventoryVersion { get; init; } = string.Empty;
+    public DateTimeOffset InventoryCapturedAt { get; init; }
 
     public static WinPoolFacts Empty(SystemId systemId) =>
         new(CurrentFormatVersion, systemId, 0, [], [], [], [], []);

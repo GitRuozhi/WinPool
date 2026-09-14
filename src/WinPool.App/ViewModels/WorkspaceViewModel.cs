@@ -764,7 +764,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 ? existing with
                 {
                     DisplayName = builtin.DisplayName,
-                    Snapshot = builtin.Snapshot,
                     SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = existing.SystemId, Revision = checked((existing.SourceFacts?.Revision ?? 0) + 1) } : null,
                     HardwareReport = builtin.HardwareReport,
                     Jobs = [],
@@ -1001,7 +1000,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         foreach (var builtin in builtins)
         {
             if (!persistedById.TryGetValue(builtin.Id, out var existing)
-                || existing.Snapshot.Computer.Name != builtin.Snapshot.Computer.Name
                 || existing.Snapshot.SnapshotVersion != builtin.Snapshot.SnapshotVersion)
             {
                 var updated = existing is null
@@ -1009,7 +1007,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     : existing with
                     {
                         DisplayName = builtin.DisplayName,
-                        Snapshot = builtin.Snapshot,
                         SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = existing.SystemId, Revision = checked((existing.SourceFacts?.Revision ?? 0) + 1) } : null,
                         HardwareReport = builtin.HardwareReport,
                         Jobs = [],
@@ -1044,9 +1041,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 continue;
             }
 
-            var updated = document with
+            var updated = document.WithCandidate(ensured) with
             {
-                Snapshot = ensured,
                 Revision = checked(document.Revision + 1),
                 UpdatedAt = DateTimeOffset.Now
             };
@@ -1073,7 +1069,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             document with
             {
                 DisplayName = builtin.DisplayName,
-                Snapshot = builtin.Snapshot,
                 SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = document.SystemId, Revision = checked((document.SourceFacts?.Revision ?? 0) + 1) } : null,
                 HardwareReport = builtin.HardwareReport,
                 Jobs = [],

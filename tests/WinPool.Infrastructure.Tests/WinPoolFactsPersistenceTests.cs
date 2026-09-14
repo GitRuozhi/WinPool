@@ -9,6 +9,30 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactsPersistenceTests
 {
     [Fact]
+    public void DocumentPersistsFactsAndApplicationMetadataWithoutWritableProjectionOrReport()
+    {
+        var time = DateTimeOffset.UtcNow;
+        var snapshot = SimulationLayouts.StandardTiered();
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:canonical",
+            StorageSystemKind.Simulation, "Canonical", snapshot, HardwareInventoryReport.Empty(time), [], time);
+        var payload = SimulationDocumentCodec.Encode(document);
+        using var parsed = System.Text.Json.JsonDocument.Parse(payload.SanitizedJson);
+        Assert.False(parsed.RootElement.TryGetProperty("Snapshot", out _));
+        Assert.False(parsed.RootElement.TryGetProperty("HardwareReport", out _));
+        Assert.True(parsed.RootElement.TryGetProperty("SourceFacts", out _));
+        Assert.Null(typeof(StorageSystemDocument).GetProperty(nameof(StorageSystemDocument.Snapshot))!.SetMethod);
+        var restored = SimulationDocumentCodec.Decode(payload);
+        Assert.Equal(snapshot.Volumes.Select(x => x.DriveLetter), restored.Snapshot.Volumes.Select(x => x.DriveLetter));
+        Assert.Equal(snapshot.StoragePools.Select(x => x.Size), restored.Snapshot.StoragePools.Select(x => x.Size));
+        var oldJson = payload.SanitizedJson.Replace("\"SchemaVersion\":3", "\"SchemaVersion\":2", StringComparison.Ordinal);
+        Assert.NotEqual(payload.SanitizedJson, oldJson);
+        var old = payload with { DocumentSchemaVersion = 2, SanitizedJson = oldJson,
+            Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(oldJson))).ToLowerInvariant() };
+        Assert.Throws<InvalidDataException>(() => SimulationDocumentCodec.Decode(old));
+        Assert.Equal(oldJson, old.SanitizedJson);
+    }
+
+    [Fact]
     public void ActualDocumentCodecPreservesSourceValuesAndRedactsUnknownExtensionStrings()
     {
         var system = SystemId.New();
