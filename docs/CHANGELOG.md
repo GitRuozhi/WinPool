@@ -2,7 +2,7 @@
 
 ## 2026-09-15：硬件对象集合统一与网络过滤修正
 
-硬件页的 CPU、内存、页面文件、GPU、Monitor 和 Network 改为按统一对象类型完整生成设备列，不再按来源类名选择一组对象；字段备用来源只补值，不改变列集合。网络统一来源键保持为 `WinPool.NetworkAdapter`，内部改为直接读取 `MSFT_NetAdapter`，使用旧 KS 的 `ConnectorPresent -or InterfaceType -ne 0` 条件，并按 `InterfaceIndex` 关联全部 IPv4、IPv6 与默认路由；同一来源刷新会直接整组替换旧网络对象，不需要跨来源迁移。GPU 不按软件标志过滤，Monitor 不增加过滤，Storage 继续与管理页共用 WinPool 摘要。全套自动测试和完整 Release 构建通过；原生 WinUI 验证网络对象由旧版 46 个收敛为 7 个。
+硬件页的 CPU、内存、页面文件、GPU、Monitor 和 Network 改为按统一对象类型完整生成设备列，不再按来源类名选择一组对象；字段备用来源只补值，不改变列集合。GPU 与 Monitor 按旧 KS 的主采集边界修正为 DXGI Adapter/Output 设备列表，`Win32_VideoController`、`Win32_DesktopMonitor` 和 `WmiMonitorID` 仅作为统一层字段补充，不再形成重复设备；软件 DXGI 适配器不作过滤。网络统一来源键保持为 `WinPool.NetworkAdapter`，内部改为直接读取 `MSFT_NetAdapter`，使用旧 KS 的 `ConnectorPresent -or InterfaceType -ne 0` 条件，并按 `InterfaceIndex` 关联全部 IPv4、IPv6 与默认路由；同一来源刷新会直接整组替换旧网络对象，不需要跨来源迁移。Storage 继续与管理页共用 WinPool 摘要。550/550 自动测试及完整 Release 构建通过；原生 WinUI 刷新后 GPU 从混合来源的 7 列收敛为 4 个 DXGI Adapter，Monitor 从混合来源的 4 列收敛为 2 个 DXGI Output，Network 保持 7 个对象。
 
 ## 2026-09-15：V0.53 开发者模式与导航调整
 

@@ -62,7 +62,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 存储与完整硬件使用独立刷新用途，Agent 串行协调；较旧结果忽略。来源失败保留上次事实及关联时间，成功空集合才移除对象。层成员没有可靠关联时显示归属未知，不按介质相同猜测。
 
-完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；后者保持 `WinPool.NetworkAdapter` 统一来源键不变，内部以 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 作为对象集合边界，按接口索引关联全部 IP 地址与默认路由，并替换同次脚本采集产生的原始 `MSFT_NetAdapter` 观察。同一来源的成功刷新直接整组替换旧网络对象，不引入跨来源迁移规则。`WinPoolSystem` 是不持久化的运行时投影；入库的是来源事实，启动从来源事实重新生成统一模型，完整硬件数据仍按需刷新。GPU 不按软件标志过滤，Monitor 不在报告投影中筛除，存储摘要不增加硬件页专用条件。
+完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；`Win32_VideoController`、`Win32_DesktopMonitor` 与 `WmiMonitorID` 在统一事实中属于字段补充，不形成第二组 GPU 或 Monitor 设备，驱动、型号和厂商仍可按可靠硬件标识补入 DXGI 对象。软件 DXGI 适配器不按标志或名称过滤。网络保持 `WinPool.NetworkAdapter` 统一来源键不变，内部以 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 作为对象集合边界，按接口索引关联全部 IP 地址与默认路由，并替换同次脚本采集产生的原始 `MSFT_NetAdapter` 观察。同一来源的成功刷新直接整组替换旧网络对象，不引入跨来源迁移规则。`WinPoolSystem` 是不持久化的运行时投影；入库的是来源事实，启动从来源事实重新生成统一模型，完整硬件数据仍按需刷新。Monitor 不在报告投影中筛除，存储摘要不增加硬件页专用条件。
 
 `HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 只通过 `PropertyTableVisuals` 复用单元格样式与尺寸，不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式仍为 SQLite 16 / IPC 7 / StorageSystemDocument 3 / 来源事实 1。
 

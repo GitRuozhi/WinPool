@@ -26,11 +26,11 @@ public sealed class HardwareReportProjectorTests
             Object("array-object", FactObjectType.MemoryArray, sources[1], ("MemoryDevices", 4L), ("MemoryErrorCorrection", 3L)),
             Object("module-1", FactObjectType.MemoryModule, sources[2], ("Capacity", 16UL * 1024 * 1024 * 1024), ("PartNumber", "A")),
             Object("module-2", FactObjectType.MemoryModule, sources[2], ("Capacity", 16UL * 1024 * 1024 * 1024), ("PartNumber", "B")),
-            Object("gpu-object", FactObjectType.VideoController, sources[3], ("Name", "GPU"), ("SharedSystemMemory", 8UL * 1024 * 1024 * 1024)),
+            Object("gpu-object", FactObjectType.VideoController, sources[3], ("Name", "Software GPU"), ("SharedSystemMemory", 8UL * 1024 * 1024 * 1024)),
             Object("output-object", FactObjectType.Monitor, sources[4], ("Name", "DISPLAY1"), ("DesktopX", -100L), ("Primary", false)),
             Object("network-object", FactObjectType.NetworkAdapter, sources[5], ("Name", "Ethernet"), ("Primary", true)),
-            Object("software-gpu-object", FactObjectType.VideoController, sources[6], ("Name", "Software GPU")),
-            Object("wmi-monitor-object", FactObjectType.Monitor, sources[7], ("Name", "MONITOR\\SECOND")),
+            Object("wmi-gpu-supplement", FactObjectType.HardwareSupplement, sources[6], ("Name", "Software GPU")),
+            Object("wmi-monitor-supplement", FactObjectType.HardwareSupplement, sources[7], ("Name", "MONITOR\\SECOND")),
             Object("other-network-object", FactObjectType.NetworkAdapter, sources[8], ("Name", "Other network"), ("Primary", false))
         };
         var facts = new WinPoolFacts(1, systemId, 1, [.. sources], [.. objects], [], [],
@@ -48,8 +48,8 @@ public sealed class HardwareReportProjectorTests
         Assert.Equal("4", memory.Sections[0].Rows[0].Cells[0].Value);
         Assert.Equal(2, memory.Sections[1].Rows.Single(x => x.Label == "型号").Cells.Count);
         Assert.Equal("-100", report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "水平坐标").Cells[0].Value);
-        Assert.Equal(2, report.Single(x => x.Name == "GPU").Sections[0].Rows.Single(x => x.Label == "型号").Cells.Count);
-        Assert.Equal(2, report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "型号").Cells.Count);
+        Assert.Single(report.Single(x => x.Name == "GPU").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
+        Assert.Single(report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
         Assert.Equal(2, report.Single(x => x.Name == "Network").Sections[0].Rows.Single(x => x.Label == "名称").Cells.Count);
     }
 

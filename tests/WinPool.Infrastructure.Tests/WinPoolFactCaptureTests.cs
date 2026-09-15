@@ -8,6 +8,34 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactCaptureTests
 {
     [Fact]
+    public void GraphicsWmiClassesAreSupplementsInsteadOfSecondDeviceLists()
+    {
+        object Field(string name, object value) => new { Name = name, Value = value, CimType = "String", ReadState = "Returned" };
+        object Observation(string className, string identity) => new
+        {
+            ClassName = className,
+            Namespace = className == "WmiMonitorID" ? "root/wmi" : "root/cimv2",
+            Identity = identity,
+            Fields = new[] { Field("Name", identity) }
+        };
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            SourceObservations = new[]
+            {
+                Observation("Win32_VideoController", "GPU0"),
+                Observation("Win32_DesktopMonitor", "DISPLAY0"),
+                Observation("WmiMonitorID", "MONITOR0")
+            }
+        }));
+
+        var facts = WinPoolFactCapture.Read(json.RootElement, StorageSnapshot.Empty("test"), SystemId.New(), CollectionPurpose.Hardware);
+
+        Assert.Equal(3, facts.Objects.Length);
+        Assert.All(facts.Objects, item => Assert.Equal(FactObjectType.HardwareSupplement, item.ObjectType));
+        Assert.Empty(facts.Objects.Where(item => item.ObjectType is FactObjectType.VideoController or FactObjectType.Monitor));
+    }
+
+    [Fact]
     public void LogicalDriveClassificationUsesDriveTypeAndKeepsLocalObservationWithItsVolume()
     {
         object Field(string name, object? value, string type = "String") => new { Name = name, Value = value, CimType = type, ReadState = "Returned" };
