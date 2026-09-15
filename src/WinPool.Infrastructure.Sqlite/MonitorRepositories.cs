@@ -23,10 +23,20 @@ public sealed record PersistedMonitorSample(
     SessionId SessionId,
     string DeviceId,
     DateTimeOffset SampledAtUtc,
-    double ActivityPercent,
-    double ReadBytesPerSecond,
-    double WriteBytesPerSecond,
-    double QueueLength);
+    double? ActivityPercent,
+    double? ReadBytesPerSecond,
+    double? WriteBytesPerSecond,
+    double? ReadOperationsPerSecond,
+    double? WriteOperationsPerSecond,
+    double? QueueLength,
+    double? AverageLatencyMilliseconds,
+    double? CpuPercent,
+    double? VirtualDiskActiveBytes,
+    double? VirtualDiskMissingBytes,
+    double? VirtualDiskStaleBytes,
+    double? VirtualDiskNeedRegenerationBytes,
+    double? VirtualDiskRegeneratingBytes,
+    double? VirtualDiskPendingDeletionBytes);
 
 public readonly record struct MonitorSampleCursor(
     long TimestampUtcMilliseconds,
@@ -385,10 +395,17 @@ public sealed class MonitorSampleRepository
         command.CommandText = """
             INSERT INTO monitor_samples(
                 session_id, device_id, timestamp_utc_ms, activity_pct,
-                read_bytes_per_sec, write_bytes_per_sec, queue_length)
+                read_bytes_per_sec, write_bytes_per_sec,
+                read_operations_per_sec, write_operations_per_sec, queue_length,
+                average_latency_ms, cpu_pct, virtual_disk_active_bytes,
+                virtual_disk_missing_bytes, virtual_disk_stale_bytes,
+                virtual_disk_need_regeneration_bytes, virtual_disk_regenerating_bytes,
+                virtual_disk_pending_deletion_bytes)
             VALUES(
                 $session, $device, $timestamp, $activity,
-                $read, $write, $queue);
+                $read, $write, $readOps, $writeOps, $queue, $latency, $cpu,
+                $vdActive, $vdMissing, $vdStale, $vdNeedRegeneration,
+                $vdRegenerating, $vdPendingDeletion);
             """;
         var session = command.Parameters.Add("$session", SqliteType.Text);
         var device = command.Parameters.Add("$device", SqliteType.Text);
@@ -396,7 +413,17 @@ public sealed class MonitorSampleRepository
         var activity = command.Parameters.Add("$activity", SqliteType.Real);
         var read = command.Parameters.Add("$read", SqliteType.Real);
         var write = command.Parameters.Add("$write", SqliteType.Real);
+        var readOps = command.Parameters.Add("$readOps", SqliteType.Real);
+        var writeOps = command.Parameters.Add("$writeOps", SqliteType.Real);
         var queue = command.Parameters.Add("$queue", SqliteType.Real);
+        var latency = command.Parameters.Add("$latency", SqliteType.Real);
+        var cpu = command.Parameters.Add("$cpu", SqliteType.Real);
+        var vdActive = command.Parameters.Add("$vdActive", SqliteType.Real);
+        var vdMissing = command.Parameters.Add("$vdMissing", SqliteType.Real);
+        var vdStale = command.Parameters.Add("$vdStale", SqliteType.Real);
+        var vdNeedRegeneration = command.Parameters.Add("$vdNeedRegeneration", SqliteType.Real);
+        var vdRegenerating = command.Parameters.Add("$vdRegenerating", SqliteType.Real);
+        var vdPendingDeletion = command.Parameters.Add("$vdPendingDeletion", SqliteType.Real);
         command.Prepare();
 
         foreach (var sample in batch)
@@ -415,7 +442,17 @@ public sealed class MonitorSampleRepository
             activity.Value = Metric(sample, MonitorMetricKind.ActiveTimePercent);
             read.Value = Metric(sample, MonitorMetricKind.ReadBytesPerSecond);
             write.Value = Metric(sample, MonitorMetricKind.WriteBytesPerSecond);
+            readOps.Value = Metric(sample, MonitorMetricKind.ReadOperationsPerSecond);
+            writeOps.Value = Metric(sample, MonitorMetricKind.WriteOperationsPerSecond);
             queue.Value = Metric(sample, MonitorMetricKind.AverageQueueLength);
+            latency.Value = Metric(sample, MonitorMetricKind.AverageLatencyMilliseconds);
+            cpu.Value = Metric(sample, MonitorMetricKind.CpuPercent);
+            vdActive.Value = Metric(sample, MonitorMetricKind.VirtualDiskActiveBytes);
+            vdMissing.Value = Metric(sample, MonitorMetricKind.VirtualDiskMissingBytes);
+            vdStale.Value = Metric(sample, MonitorMetricKind.VirtualDiskStaleBytes);
+            vdNeedRegeneration.Value = Metric(sample, MonitorMetricKind.VirtualDiskNeedRegenerationBytes);
+            vdRegenerating.Value = Metric(sample, MonitorMetricKind.VirtualDiskRegeneratingBytes);
+            vdPendingDeletion.Value = Metric(sample, MonitorMetricKind.VirtualDiskPendingDeletionBytes);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -485,7 +522,12 @@ public sealed class MonitorSampleRepository
         command.CommandText = """
             SELECT
                 rowid, device_id, timestamp_utc_ms, activity_pct,
-                read_bytes_per_sec, write_bytes_per_sec, queue_length
+                read_bytes_per_sec, write_bytes_per_sec,
+                read_operations_per_sec, write_operations_per_sec, queue_length,
+                average_latency_ms, cpu_pct, virtual_disk_active_bytes,
+                virtual_disk_missing_bytes, virtual_disk_stale_bytes,
+                virtual_disk_need_regeneration_bytes, virtual_disk_regenerating_bytes,
+                virtual_disk_pending_deletion_bytes
             FROM monitor_samples
             WHERE session_id = $session
                 AND timestamp_utc_ms >= $from
@@ -526,10 +568,20 @@ public sealed class MonitorSampleRepository
                     sessionId,
                     reader.GetString(1),
                     DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(2)),
-                    reader.GetDouble(3),
-                    reader.GetDouble(4),
-                    reader.GetDouble(5),
-                    reader.GetDouble(6)));
+                    NullableDouble(reader, 3),
+                    NullableDouble(reader, 4),
+                    NullableDouble(reader, 5),
+                    NullableDouble(reader, 6),
+                    NullableDouble(reader, 7),
+                    NullableDouble(reader, 8),
+                    NullableDouble(reader, 9),
+                    NullableDouble(reader, 10),
+                    NullableDouble(reader, 11),
+                    NullableDouble(reader, 12),
+                    NullableDouble(reader, 13),
+                    NullableDouble(reader, 14),
+                    NullableDouble(reader, 15),
+                    NullableDouble(reader, 16)));
         }
 
         MonitorSampleCursor? continuation = null;
@@ -545,8 +597,13 @@ public sealed class MonitorSampleRepository
         return new MonitorSamplePage(samples, continuation);
     }
 
-    private static double Metric(MonitorSample sample, MonitorMetricKind kind) =>
-        sample.Values.FirstOrDefault(value => value.Kind == kind)?.Value ?? 0d;
+    private static object Metric(MonitorSample sample, MonitorMetricKind kind) =>
+        sample.Values.FirstOrDefault(value => value.Kind == kind) is { } value
+            ? value.Value
+            : DBNull.Value;
+
+    private static double? NullableDouble(SqliteDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
 
     private void AssertWriteOwnership()
     {

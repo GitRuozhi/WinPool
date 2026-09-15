@@ -39,6 +39,10 @@ public interface IAgentRequestOperations
         ListAgentSimulationDocumentsRequest request,
         CancellationToken cancellationToken);
 
+    Task<ApplicationResult<AgentResponse>> LoadSimulationDocumentAsync(
+        LoadAgentSimulationDocumentRequest request,
+        CancellationToken cancellationToken);
+
     Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(
         SaveAgentSimulationDocumentRequest request,
         CancellationToken cancellationToken);
@@ -185,6 +189,8 @@ public sealed class AgentSessionCoordinator
                 operations.SaveWorkspaceStateAsync(typed, cancellationToken),
             ListAgentSimulationDocumentsRequest typed =>
                 operations.ListSimulationDocumentsAsync(typed, cancellationToken),
+            LoadAgentSimulationDocumentRequest typed =>
+                operations.LoadSimulationDocumentAsync(typed, cancellationToken),
             SaveAgentSimulationDocumentRequest typed =>
                 operations.SaveSimulationDocumentAsync(typed, cancellationToken),
             DeleteAgentSimulationDocumentRequest typed =>

@@ -16,6 +16,8 @@ public static class AgentControlMessageTypes
         "agent.request.save_workspace_state";
     public const string ListSimulationDocuments =
         "agent.request.list_simulation_documents";
+    public const string LoadSimulationDocument =
+        "agent.request.load_simulation_document";
     public const string SaveSimulationDocument =
         "agent.request.save_simulation_document";
     public const string DeleteSimulationDocument =

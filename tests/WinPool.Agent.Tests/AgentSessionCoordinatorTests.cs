@@ -452,6 +452,11 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
+        public Task<ApplicationResult<AgentResponse>> LoadSimulationDocumentAsync(
+            LoadAgentSimulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Succeed(request);
+
         public Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(
             SaveAgentSimulationDocumentRequest request,
             CancellationToken cancellationToken) =>

@@ -1142,24 +1142,24 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IpcProtocolCurrentVersionIsSeven()
+    public void IpcProtocolCurrentVersionIsEight()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
 
-        Assert.Contains("public const int CurrentVersion = 7;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 8;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SqliteStoreSchemaVersionIsSixteen()
+    public void SqliteStoreSchemaVersionIsSeventeen()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Infrastructure.Sqlite", "WinPoolSqliteStore.cs"));
 
-        Assert.Contains("public const int CurrentSchemaVersion = 16;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentSchemaVersion = 17;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 14;", source, StringComparison.Ordinal);
     }
 

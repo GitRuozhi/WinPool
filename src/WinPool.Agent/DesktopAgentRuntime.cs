@@ -254,10 +254,37 @@ internal sealed class DesktopAgentRuntime :
         ListAgentSimulationDocumentsRequest request,
         CancellationToken cancellationToken)
     {
-        var documents = await simulationDocuments.ListAsync(cancellationToken);
-        return ApplicationResult<AgentResponse>.Succeeded(
-            new SimulationDocumentListResponse(documents),
-            request.CorrelationId);
+        try
+        {
+            var page = await simulationDocuments.ListMetadataAsync(
+                request.PageSize,
+                request.AfterDocumentId,
+                cancellationToken);
+            return ApplicationResult<AgentResponse>.Succeeded(page, request.CorrelationId);
+        }
+        catch (ArgumentException)
+        {
+            return Reject(request.CorrelationId, "agent.persistence.simulation_list_rejected");
+        }
+    }
+
+    public async Task<ApplicationResult<AgentResponse>> LoadSimulationDocumentAsync(
+        LoadAgentSimulationDocumentRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var document = await simulationDocuments.LoadAsync(
+                request.DocumentId,
+                cancellationToken);
+            return ApplicationResult<AgentResponse>.Succeeded(
+                new SimulationDocumentLoadedResponse(document),
+                request.CorrelationId);
+        }
+        catch (ArgumentException)
+        {
+            return Reject(request.CorrelationId, "agent.persistence.simulation_load_rejected");
+        }
     }
 
     public async Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(
@@ -306,9 +333,19 @@ internal sealed class DesktopAgentRuntime :
         LookupAgentSimulationCommitRequest request,
         CancellationToken cancellationToken)
     {
-        var document = await simulationDocuments.FindByCommitIdAsync(request.CommitId, cancellationToken);
+        var receipt = await simulationDocuments.FindByCommitIdAsync(request.CommitId, cancellationToken);
+        if (receipt is not null
+            && (receipt.Document.DocumentId != request.DocumentId
+                || receipt.BeforeSha256 != request.ExpectedBeforeSha256
+                || receipt.Document.Sha256 != request.ExpectedAfterSha256
+                || receipt.Document.Revision != request.ExpectedRevision
+                || receipt.OperationId != request.OperationId
+                || receipt.PlanHash != request.PlanHash))
+        {
+            return Reject(request.CorrelationId, "agent.persistence.simulation_commit_binding_mismatch");
+        }
         return ApplicationResult<AgentResponse>.Succeeded(
-            new SimulationCommitLookupResponse(document is not null, document),
+            new SimulationCommitLookupResponse(receipt is not null, receipt),
             request.CorrelationId);
     }
 

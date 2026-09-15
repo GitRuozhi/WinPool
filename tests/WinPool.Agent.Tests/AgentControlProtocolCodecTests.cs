@@ -179,7 +179,8 @@ public sealed class AgentControlProtocolCodecTests
             DateTimeOffset.UtcNow);
         AgentRequest[] requests =
         [
-            new ListAgentSimulationDocumentsRequest(CorrelationId.New()),
+            new ListAgentSimulationDocumentsRequest(100, null, CorrelationId.New()),
+            new LoadAgentSimulationDocumentRequest(payload.DocumentId, CorrelationId.New()),
             new SaveAgentSimulationDocumentRequest(payload, null, CorrelationId.New()),
             new DeleteAgentSimulationDocumentRequest(
                 payload.DocumentId,
@@ -189,6 +190,7 @@ public sealed class AgentControlProtocolCodecTests
         var messageTypes = new[]
         {
             AgentControlMessageTypes.ListSimulationDocuments,
+            AgentControlMessageTypes.LoadSimulationDocument,
             AgentControlMessageTypes.SaveSimulationDocument,
             AgentControlMessageTypes.DeleteSimulationDocument
         };

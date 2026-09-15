@@ -27,25 +27,71 @@ public sealed class SimulationDocumentRepository
         writeOwner.AssertOwnership(store);
     }
 
-    public async Task<IReadOnlyList<SimulationDocumentPayload>> ListAsync(
+    public async Task<SimulationDocumentListResponse> ListMetadataAsync(
+        int pageSize,
+        string? afterDocumentId,
         CancellationToken cancellationToken = default)
     {
+        if (pageSize is < 1 or > 256)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        }
+        if (afterDocumentId is not null)
+        {
+            ValidateId(afterDocumentId);
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT document_id, document_schema_version, display_name,
+                   sha256, revision, updated_at_utc_ms
+            FROM simulation_documents
+            WHERE $after IS NULL OR document_id > $after
+            ORDER BY document_id
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$after", (object?)afterDocumentId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$limit", pageSize + 1);
+        var documents = new List<SimulationDocumentMetadata>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            documents.Add(new SimulationDocumentMetadata(
+                reader.GetString(0),
+                reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetInt64(4),
+                DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(5))));
+        }
+
+        var hasMore = documents.Count > pageSize;
+        if (hasMore)
+        {
+            documents.RemoveAt(documents.Count - 1);
+        }
+        return new SimulationDocumentListResponse(
+            documents,
+            hasMore ? documents[^1].DocumentId : null);
+    }
+
+    public async Task<SimulationDocumentPayload?> LoadAsync(
+        string documentId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateId(documentId);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT document_id, document_schema_version, display_name,
                    sanitized_json, sha256, revision, updated_at_utc_ms
             FROM simulation_documents
-            ORDER BY display_name COLLATE NOCASE, document_id;
+            WHERE document_id = $id;
             """;
-        var documents = new List<SimulationDocumentPayload>();
+        command.Parameters.AddWithValue("$id", documentId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            documents.Add(Read(reader));
-        }
-
-        return documents;
+        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
     }
 
     public async Task<SimulationDocumentPayload> SaveAsync(
@@ -107,7 +153,7 @@ public sealed class SimulationDocumentRepository
         return changed == 1;
     }
 
-    public async Task<SimulationDocumentPayload?> FindByCommitIdAsync(
+    public async Task<SimulationCommitReceipt?> FindByCommitIdAsync(
         string commitId,
         CancellationToken cancellationToken = default)
     {
@@ -119,15 +165,36 @@ public sealed class SimulationDocumentRepository
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT d.document_id, d.document_schema_version, d.display_name,
-                   d.sanitized_json, d.sha256, d.revision, d.updated_at_utc_ms
+            SELECT c.commit_id, c.operation_id, c.before_sha256, p.plan_hash,
+                   c.document_id, c.document_schema_version, c.display_name,
+                   c.sanitized_json, c.after_sha256, c.document_revision,
+                   c.updated_at_utc_ms, c.committed_at_utc_ms
             FROM simulation_edit_commits c
-            JOIN simulation_documents d ON d.document_id = c.document_id
+            JOIN operation_plans p ON p.operation_id = c.operation_id
             WHERE c.commit_id = $commit;
             """;
         command.Parameters.AddWithValue("$commit", commitId.Trim());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+        var document = new SimulationDocumentPayload(
+            reader.GetString(4),
+            reader.GetInt32(5),
+            reader.GetString(6),
+            reader.GetString(7),
+            reader.GetString(8),
+            reader.GetInt64(9),
+            DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(10)));
+        Validate(document);
+        return new SimulationCommitReceipt(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            document,
+            DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(11)));
     }
 
     public async Task<SimulationDocumentPayload> CommitEditAsync(
@@ -138,15 +205,6 @@ public sealed class SimulationDocumentRepository
         string commitId = "",
         CancellationToken cancellationToken = default)
     {
-        if (!string.IsNullOrWhiteSpace(commitId))
-        {
-            var existing = await FindByCommitIdAsync(commitId, cancellationToken);
-            if (existing is not null)
-            {
-                return existing;
-            }
-        }
-
         Validate(document);
         ValidateExpectedHash(expectedPreviousSha256, allowNull: false);
         if (document.Revision < 2)
@@ -156,6 +214,22 @@ public sealed class SimulationDocumentRepository
                 nameof(document));
         }
         ValidatePlan(plan, events);
+        var normalizedCommitId = string.IsNullOrWhiteSpace(commitId)
+            ? Id(plan.OperationId.Value)
+            : commitId.Trim();
+        var existing = await FindByCommitIdAsync(normalizedCommitId, cancellationToken);
+        if (existing is not null)
+        {
+            if (DocumentsMatch(existing.Document, document)
+                && existing.BeforeSha256 == expectedPreviousSha256
+                && existing.OperationId == Id(plan.OperationId.Value)
+                && existing.PlanHash == plan.PlanHash)
+            {
+                return existing.Document;
+            }
+            throw new SimulationDocumentConflictException(
+                "The simulation commit ID is already bound to a different edit.");
+        }
         writeOwner.AssertOwnership(store);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var transaction =
@@ -174,15 +248,21 @@ public sealed class SimulationDocumentRepository
         link.CommandText = """
             INSERT INTO simulation_edit_commits(
                 operation_id, commit_id, document_id, before_sha256, after_sha256,
-                document_revision, committed_at_utc_ms)
-            VALUES($operation, $commit, $document, $before, $after, $revision, $committed);
+                document_revision, document_schema_version, display_name,
+                sanitized_json, updated_at_utc_ms, committed_at_utc_ms)
+            VALUES($operation, $commit, $document, $before, $after, $revision,
+                   $schema, $name, $json, $updated, $committed);
             """;
         link.Parameters.AddWithValue("$operation", Id(plan.OperationId.Value));
-        link.Parameters.AddWithValue("$commit", string.IsNullOrWhiteSpace(commitId) ? Id(plan.OperationId.Value) : commitId.Trim());
+        link.Parameters.AddWithValue("$commit", normalizedCommitId);
         link.Parameters.AddWithValue("$document", saved.DocumentId);
         link.Parameters.AddWithValue("$before", expectedPreviousSha256);
         link.Parameters.AddWithValue("$after", saved.Sha256);
         link.Parameters.AddWithValue("$revision", saved.Revision);
+        link.Parameters.AddWithValue("$schema", saved.DocumentSchemaVersion);
+        link.Parameters.AddWithValue("$name", saved.DisplayName);
+        link.Parameters.AddWithValue("$json", saved.Json);
+        link.Parameters.AddWithValue("$updated", saved.UpdatedAtUtc.ToUnixTimeMilliseconds());
         link.Parameters.AddWithValue("$committed", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         await link.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -431,6 +511,18 @@ public sealed class SimulationDocumentRepository
         Validate(document);
         return document;
     }
+
+    private static bool DocumentsMatch(
+        SimulationDocumentPayload left,
+        SimulationDocumentPayload right) =>
+        left.DocumentId == right.DocumentId
+        && left.DocumentSchemaVersion == right.DocumentSchemaVersion
+        && left.DisplayName == right.DisplayName
+        && left.Json == right.Json
+        && left.Sha256 == right.Sha256
+        && left.Revision == right.Revision
+        && left.UpdatedAtUtc.ToUnixTimeMilliseconds()
+            == right.UpdatedAtUtc.ToUnixTimeMilliseconds();
 
     private static string Id(Guid value) => value.ToString("N");
 }

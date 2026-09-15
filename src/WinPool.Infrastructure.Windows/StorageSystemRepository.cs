@@ -327,23 +327,50 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var response = await SendAsync(
-                new ListAgentSimulationDocumentsRequest(CorrelationId.New()),
-                cancellationToken);
-            if (response is not SimulationDocumentListResponse list)
-            {
-                throw new InvalidDataException("The Agent returned an unexpected simulation list response.");
-            }
-
             hashes.Clear();
-            var documents = new List<StorageSystemDocument>(list.Documents.Count);
-            foreach (var payload in list.Documents)
+            var documents = new List<StorageSystemDocument>();
+            string? afterDocumentId = null;
+            do
             {
-                var document = SimulationDocumentCodec.Decode(payload);
-                hashes.Add(document.Id, payload.Sha256);
-                documents.Add(document);
+                var response = await SendAsync(
+                    new ListAgentSimulationDocumentsRequest(
+                        100,
+                        afterDocumentId,
+                        CorrelationId.New()),
+                    cancellationToken);
+                if (response is not SimulationDocumentListResponse list)
+                {
+                    throw new InvalidDataException("The Agent returned an unexpected simulation list response.");
+                }
+                foreach (var metadata in list.Documents)
+                {
+                    var loaded = await SendAsync(
+                        new LoadAgentSimulationDocumentRequest(
+                            metadata.DocumentId,
+                            CorrelationId.New()),
+                        cancellationToken);
+                    if (loaded is not SimulationDocumentLoadedResponse { Document: { } payload }
+                        || payload.DocumentId != metadata.DocumentId
+                        || payload.DocumentSchemaVersion != metadata.DocumentSchemaVersion
+                        || payload.DisplayName != metadata.DisplayName
+                        || payload.Sha256 != metadata.Sha256
+                        || payload.Revision != metadata.Revision
+                        || payload.UpdatedAtUtc != metadata.UpdatedAtUtc)
+                    {
+                        throw new InvalidDataException(
+                            "The Agent returned simulation content that does not match its metadata.");
+                    }
+                    var document = SimulationDocumentCodec.Decode(payload);
+                    hashes.Add(document.Id, payload.Sha256);
+                    documents.Add(document);
+                }
+                afterDocumentId = list.NextAfterDocumentId;
             }
-            return documents;
+            while (afterDocumentId is not null);
+            return documents
+                .OrderBy(document => document.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(document => document.Id, StringComparer.Ordinal)
+                .ToArray();
         }
         finally
         {
@@ -393,9 +420,10 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
             var id = string.IsNullOrWhiteSpace(commitId)
                 ? Guid.NewGuid().ToString("N")
                 : commitId.Trim();
+            var payload = SimulationDocumentCodec.Encode(document);
             var result = await connection.SendAsync(
                 new CommitAgentSimulationEditRequest(
-                    SimulationDocumentCodec.Encode(document),
+                    payload,
                     expected,
                     plan,
                     events,
@@ -405,14 +433,27 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
             if (result.Status == ApplicationStatus.OutcomeUnknown)
             {
                 var lookup = await connection.SendAsync(
-                    new LookupAgentSimulationCommitRequest(id, CorrelationId.New()),
+                    new LookupAgentSimulationCommitRequest(
+                        id,
+                        document.Id,
+                        expected,
+                        payload.Sha256,
+                        payload.Revision,
+                        plan.OperationId.Value.ToString("N"),
+                        plan.PlanHash,
+                        CorrelationId.New()),
                     cancellationToken);
                 if (lookup.IsSuccess
                     && lookup.Value is SimulationCommitLookupResponse found
                     && found.Found
-                    && found.Document is not null)
+                    && found.Receipt is { } receipt
+                    && receipt.CommitId == id
+                    && receipt.BeforeSha256 == expected
+                    && CommitDocumentsMatch(receipt.Document, payload)
+                    && receipt.OperationId == plan.OperationId.Value.ToString("N")
+                    && receipt.PlanHash == plan.PlanHash)
                 {
-                    hashes[document.Id] = found.Document.Sha256;
+                    hashes[document.Id] = receipt.Document.Sha256;
                     return;
                 }
 
@@ -480,6 +521,18 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         }
         return result.Value;
     }
+
+    private static bool CommitDocumentsMatch(
+        SimulationDocumentPayload left,
+        SimulationDocumentPayload right) =>
+        left.DocumentId == right.DocumentId
+        && left.DocumentSchemaVersion == right.DocumentSchemaVersion
+        && left.DisplayName == right.DisplayName
+        && left.Json == right.Json
+        && left.Sha256 == right.Sha256
+        && left.Revision == right.Revision
+        && left.UpdatedAtUtc.ToUnixTimeMilliseconds()
+            == right.UpdatedAtUtc.ToUnixTimeMilliseconds();
 
     private void UpdateHash(AgentResponse response, string documentId)
     {

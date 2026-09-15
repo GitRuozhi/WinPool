@@ -393,6 +393,50 @@ public sealed class SqliteRepositoryTests
         Assert.Equal(0, stopped.DroppedSamples);
     }
 
+    [Fact]
+    public async Task MonitorPersistencePreservesEveryMetricAndExportsMissingValuesAsEmpty()
+    {
+        await using var database = await RepositoryTemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var (sessionId, target, start) =
+            await CreateSessionAndDeviceAsync(database.Store, lease);
+        var sample = new MonitorSample(
+            sessionId,
+            target,
+            start,
+            [
+                new(MonitorMetricKind.ReadOperationsPerSecond, 0),
+                new(MonitorMetricKind.WriteOperationsPerSecond, 2),
+                new(MonitorMetricKind.AverageLatencyMilliseconds, 3),
+                new(MonitorMetricKind.CpuPercent, 4),
+                new(MonitorMetricKind.VirtualDiskActiveBytes, 5),
+                new(MonitorMetricKind.VirtualDiskMissingBytes, 6),
+                new(MonitorMetricKind.VirtualDiskStaleBytes, 7),
+                new(MonitorMetricKind.VirtualDiskNeedRegenerationBytes, 8),
+                new(MonitorMetricKind.VirtualDiskRegeneratingBytes, 9),
+                new(MonitorMetricKind.VirtualDiskPendingDeletionBytes, 10)
+            ]);
+        await new MonitorSampleRepository(database.Store, lease).WriteBatchAsync([sample]);
+
+        var persisted = Assert.Single(await new MonitorSampleRepository(database.Store)
+            .ReadRangeAsync(sessionId, start, start.AddMilliseconds(1)));
+        Assert.Null(persisted.ActivityPercent);
+        Assert.Null(persisted.ReadBytesPerSecond);
+        Assert.Equal(0, persisted.ReadOperationsPerSecond);
+        Assert.Equal(10, persisted.VirtualDiskPendingDeletionBytes);
+
+        var destination = Path.Combine(database.Directory, "monitor.csv");
+        await new MonitorCsvExporter(database.Store).ExportAsync(
+            sessionId, destination, overwrite: false);
+        var lines = await File.ReadAllLinesAsync(destination);
+        Assert.Contains("VirtualDiskPendingDeletionBytes", lines[0], StringComparison.Ordinal);
+        var columns = lines[1].Split(',');
+        Assert.Equal(string.Empty, columns[2]);
+        Assert.Equal(string.Empty, columns[3]);
+        Assert.Equal("0", columns[5]);
+        Assert.Equal("10", columns[15]);
+    }
+
     private static async Task<(SessionId SessionId, StorageObjectId Target, DateTimeOffset Start)>
         CreateSessionAndDeviceAsync(
             WinPoolSqliteStore store,

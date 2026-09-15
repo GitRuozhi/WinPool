@@ -6,9 +6,10 @@ namespace WinPool.Ipc;
 
 public static class IpcProtocol
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
     public const int MaximumFrameBytes = 4 * 1024 * 1024;
     public static readonly TimeSpan MaximumHandshakeAge = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan HandshakeReadTimeout = TimeSpan.FromSeconds(5);
 }
 
 public sealed record IpcEnvelope(

@@ -7,7 +7,7 @@ public sealed class WinPoolSqliteStore
     // V0.48 starts from a deliberately clean schema 15 data root. Do not add
     // migrations from earlier schemas: they contain retired product domains
     // and are intentionally rejected by InitializeAsync.
-    public const int CurrentSchemaVersion = 16;
+    public const int CurrentSchemaVersion = 17;
 
     private readonly string connectionString;
 
@@ -598,6 +598,10 @@ public sealed class WinPoolSqliteStore
             before_sha256 TEXT NOT NULL,
             after_sha256 TEXT NOT NULL,
             document_revision INTEGER NOT NULL,
+            document_schema_version INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            sanitized_json TEXT NOT NULL,
+            updated_at_utc_ms INTEGER NOT NULL,
             committed_at_utc_ms INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS ix_simulation_edit_commits_document_revision
@@ -621,10 +625,20 @@ public sealed class WinPoolSqliteStore
             session_id TEXT NOT NULL,
             device_id TEXT NOT NULL,
             timestamp_utc_ms INTEGER NOT NULL,
-            activity_pct REAL NOT NULL,
-            read_bytes_per_sec REAL NOT NULL,
-            write_bytes_per_sec REAL NOT NULL,
-            queue_length REAL NOT NULL,
+            activity_pct REAL,
+            read_bytes_per_sec REAL,
+            write_bytes_per_sec REAL,
+            read_operations_per_sec REAL,
+            write_operations_per_sec REAL,
+            queue_length REAL,
+            average_latency_ms REAL,
+            cpu_pct REAL,
+            virtual_disk_active_bytes REAL,
+            virtual_disk_missing_bytes REAL,
+            virtual_disk_stale_bytes REAL,
+            virtual_disk_need_regeneration_bytes REAL,
+            virtual_disk_regenerating_bytes REAL,
+            virtual_disk_pending_deletion_bytes REAL,
             FOREIGN KEY(session_id, device_id)
                 REFERENCES monitor_devices(session_id, device_id) ON DELETE CASCADE
         );

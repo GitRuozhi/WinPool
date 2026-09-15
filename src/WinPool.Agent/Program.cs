@@ -100,8 +100,23 @@ internal static class Program
                         cancellationToken),
                 eventHub: agentEvents,
                 processIncarnationVerifier: processIncarnationVerifier,
-                expectedClientExecutablePath: mainApplicationExecutablePath);
+                expectedClientExecutablePath: mainApplicationExecutablePath,
+                reportConnectionFailure: (code, exception) =>
+                {
+                    Trace.TraceError("{0}: {1}", code, exception);
+                    context.NotifyControlFailure(code);
+                });
             var serverTask = Task.Run(() => server.RunAsync(pipeCancellation.Token));
+            _ = serverTask.ContinueWith(
+                task =>
+                {
+                    lifecycle.MarkFailed("agent.control.listener_failed");
+                    Trace.TraceError("agent.control.listener_failed: {0}", task.Exception);
+                    context.NotifyControlFailure("agent.control.listener_failed");
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
 
             var store = new WinPoolSqliteStore(Path.Combine(dataRoot, "winpool.db"));
             store.InitializeAsync().GetAwaiter().GetResult();

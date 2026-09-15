@@ -75,6 +75,8 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<SaveAgentWorkspaceStateRequest>(envelope),
                 AgentControlMessageTypes.ListSimulationDocuments =>
                     Deserialize<ListAgentSimulationDocumentsRequest>(envelope),
+                AgentControlMessageTypes.LoadSimulationDocument =>
+                    Deserialize<LoadAgentSimulationDocumentRequest>(envelope),
                 AgentControlMessageTypes.SaveSimulationDocument =>
                     Deserialize<SaveAgentSimulationDocumentRequest>(envelope),
                 AgentControlMessageTypes.DeleteSimulationDocument =>
@@ -210,6 +212,8 @@ public sealed class CurrentUserAgentControlServer
     private readonly IProcessIncarnationVerifier? processIncarnationVerifier;
     private readonly string? expectedClientExecutablePath;
     private readonly AgentEventHub eventHub;
+    private readonly TimeSpan handshakeReadTimeout;
+    private readonly Action<string, Exception> reportConnectionFailure;
 
     public CurrentUserAgentControlServer(
         string pipeName,
@@ -225,7 +229,9 @@ public sealed class CurrentUserAgentControlServer
         AgentEventHub? eventHub = null,
         Func<int, DateTimeOffset?>? readClientProcessStartedAtUtc = null,
         IProcessIncarnationVerifier? processIncarnationVerifier = null,
-        string? expectedClientExecutablePath = null)
+        string? expectedClientExecutablePath = null,
+        TimeSpan? handshakeReadTimeout = null,
+        Action<string, Exception>? reportConnectionFailure = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedUserSidHash);
@@ -269,6 +275,13 @@ public sealed class CurrentUserAgentControlServer
         this.eventHub = eventHub ?? new AgentEventHub();
         this.readClientProcessStartedAtUtc = readClientProcessStartedAtUtc
             ?? AgentClientProcessVerifier.TryGetStartedAtUtc;
+        this.handshakeReadTimeout = handshakeReadTimeout ?? IpcProtocol.HandshakeReadTimeout;
+        if (this.handshakeReadTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(handshakeReadTimeout));
+        }
+        this.reportConnectionFailure = reportConnectionFailure
+            ?? ((code, exception) => Trace.TraceError("{0}: {1}", code, exception));
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -286,11 +299,9 @@ public sealed class CurrentUserAgentControlServer
             {
                 return;
             }
-            catch (Exception exception) when (exception is
-                EndOfStreamException or InvalidDataException or JsonException or IOException)
+            catch (Exception exception)
             {
-                // A malformed or disconnected client owns only this connection.
-                // The listener remains available for status and shutdown retry.
+                reportConnectionFailure(ConnectionFailureCode(exception), exception);
             }
         }
     }
@@ -299,7 +310,22 @@ public sealed class CurrentUserAgentControlServer
         System.IO.Pipes.NamedPipeServerStream stream,
         CancellationToken cancellationToken)
     {
-        var handshakeEnvelope = await IpcFrameCodec.ReadAsync(stream, cancellationToken);
+        using var handshakeCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        handshakeCancellation.CancelAfter(handshakeReadTimeout);
+        IpcEnvelope handshakeEnvelope;
+        try
+        {
+            handshakeEnvelope = await IpcFrameCodec.ReadAsync(
+                stream,
+                handshakeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (
+            !cancellationToken.IsCancellationRequested
+            && handshakeCancellation.IsCancellationRequested)
+        {
+            throw new TimeoutException("The Agent control handshake timed out.");
+        }
         var handshake = codec.DecodeHandshake(handshakeEnvelope);
         var now = timeProvider.GetUtcNow();
         var validation = AgentHandshakeValidator.Validate(
@@ -507,6 +533,17 @@ public sealed class CurrentUserAgentControlServer
                 process.ShutdownDeadlineUtc),
             cancellationToken)
         ?? Task.CompletedTask;
+
+    private static string ConnectionFailureCode(Exception exception) =>
+        exception switch
+        {
+            TimeoutException => "ipc.control.handshake_timeout",
+            Microsoft.Data.Sqlite.SqliteException =>
+                "agent.persistence.process_registration_failed",
+            EndOfStreamException or InvalidDataException or JsonException or IOException =>
+                "ipc.control.client_connection_failed",
+            _ => "ipc.control.connection_failed"
+        };
 }
 
 public static class AgentClientProcessVerifier

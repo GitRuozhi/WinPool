@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using WinPool.Agent;
 using WinPool.Agent.Client;
 using WinPool.Application;
@@ -193,6 +194,174 @@ public sealed class NamedPipeAgentConnectionTests
         {
         }
         Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ProcessPersistenceFailureIsReportedAndNextConnectionStillWorks()
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var processInstanceId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        var failure = new TaskCompletionSource<string>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var failOnce = 1;
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator,
+            persistProcess: (_, _) =>
+            {
+                if (Interlocked.Exchange(ref failOnce, 0) == 1)
+                {
+                    throw new SqliteException("test", 5);
+                }
+                return Task.CompletedTask;
+            },
+            reportConnectionFailure: (code, _) => failure.TrySetResult(code));
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        await using (var first = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await first.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(first, nonce, userHash, processInstanceId, timeout.Token);
+            Assert.Equal(
+                AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(first, timeout.Token)).MessageType);
+            Assert.Equal(
+                "agent.persistence.process_registration_failed",
+                await failure.Task.WaitAsync(timeout.Token));
+        }
+
+        await using (var second = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await second.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(second, nonce, userHash, processInstanceId, timeout.Token);
+            Assert.Equal(
+                AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(second, timeout.Token)).MessageType);
+            var request = new GetAgentSnapshotRequest(CorrelationId.New());
+            await IpcFrameCodec.WriteAsync(
+                second,
+                new IpcEnvelope(
+                    IpcProtocol.CurrentVersion,
+                    Guid.NewGuid(),
+                    request.CorrelationId.Value,
+                    AgentControlMessageTypes.GetSnapshot,
+                    DateTimeOffset.UtcNow,
+                    JsonSerializer.SerializeToElement(request)),
+                timeout.Token);
+            Assert.Equal(
+                AgentControlMessageTypes.Response,
+                (await IpcFrameCodec.ReadAsync(second, timeout.Token)).MessageType);
+        }
+
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task PartialHandshakeTimesOutAndReleasesSerialListener()
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        var failure = new TaskCompletionSource<string>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator,
+            handshakeReadTimeout: TimeSpan.FromMilliseconds(100),
+            reportConnectionFailure: (code, _) => failure.TrySetResult(code));
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        await using (var stalled = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await stalled.ConnectAsync(timeout.Token);
+            await stalled.WriteAsync(new byte[] { 1 }, timeout.Token);
+            await stalled.FlushAsync(timeout.Token);
+            Assert.Equal(
+                "ipc.control.handshake_timeout",
+                await failure.Task.WaitAsync(timeout.Token));
+        }
+
+        await using (var healthy = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await healthy.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(healthy, nonce, userHash, Guid.NewGuid(), timeout.Token);
+            Assert.Equal(
+                AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(healthy, timeout.Token)).MessageType);
+        }
+
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static ValueTask WriteHandshakeAsync(
+        Stream stream,
+        Guid nonce,
+        string userHash,
+        Guid processInstanceId,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = Guid.NewGuid();
+        var handshake = new AgentHandshakeRequest(
+            IpcProtocol.CurrentVersion,
+            nonce,
+            userHash,
+            Environment.ProcessId,
+            processInstanceId,
+            DateTimeOffset.UtcNow);
+        return IpcFrameCodec.WriteAsync(
+            stream,
+            new IpcEnvelope(
+                IpcProtocol.CurrentVersion,
+                Guid.NewGuid(),
+                correlationId,
+                AgentControlMessageTypes.HandshakeRequest,
+                DateTimeOffset.UtcNow,
+                JsonSerializer.SerializeToElement(handshake)),
+            cancellationToken);
     }
 
     [Fact]
@@ -923,7 +1092,15 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new SimulationDocumentListResponse([]),
+                    new SimulationDocumentListResponse([], null),
+                    request.CorrelationId));
+
+        public Task<ApplicationResult<AgentResponse>> LoadSimulationDocumentAsync(
+            LoadAgentSimulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(
+                ApplicationResult<AgentResponse>.Succeeded(
+                    new SimulationDocumentLoadedResponse(null),
                     request.CorrelationId));
 
         public Task<ApplicationResult<AgentResponse>> SaveSimulationDocumentAsync(

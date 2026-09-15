@@ -881,6 +881,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.SaveWorkspaceState,
             ListAgentSimulationDocumentsRequest =>
                 AgentControlMessageTypes.ListSimulationDocuments,
+            LoadAgentSimulationDocumentRequest =>
+                AgentControlMessageTypes.LoadSimulationDocument,
             SaveAgentSimulationDocumentRequest =>
                 AgentControlMessageTypes.SaveSimulationDocument,
             DeleteAgentSimulationDocumentRequest =>
@@ -924,6 +926,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<WorkspaceStateSavedResponse>(JsonOptions),
             nameof(SimulationDocumentListResponse) =>
                 response.Deserialize<SimulationDocumentListResponse>(JsonOptions),
+            nameof(SimulationDocumentLoadedResponse) =>
+                response.Deserialize<SimulationDocumentLoadedResponse>(JsonOptions),
             nameof(SimulationDocumentSavedResponse) =>
                 response.Deserialize<SimulationDocumentSavedResponse>(JsonOptions),
             nameof(SimulationDocumentDeletedResponse) =>

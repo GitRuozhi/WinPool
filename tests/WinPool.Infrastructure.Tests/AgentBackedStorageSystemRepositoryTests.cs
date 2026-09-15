@@ -143,7 +143,19 @@ public sealed class AgentBackedStorageSystemRepositoryTests
             AgentResponse response = request switch
             {
                 ListAgentSimulationDocumentsRequest =>
-                    new SimulationDocumentListResponse(current is null ? [] : [current]),
+                    new SimulationDocumentListResponse(
+                        current is null
+                            ? []
+                            : [new SimulationDocumentMetadata(
+                                current.DocumentId,
+                                current.DocumentSchemaVersion,
+                                current.DisplayName,
+                                current.Sha256,
+                                current.Revision,
+                                current.UpdatedAtUtc)],
+                        null),
+                LoadAgentSimulationDocumentRequest =>
+                    new SimulationDocumentLoadedResponse(current),
                 SaveAgentSimulationDocumentRequest save => Save(save),
                 CaptureAgentManageInventoryRequest => CaptureLocal(),
                 LoadAgentManageInventoryRequest =>

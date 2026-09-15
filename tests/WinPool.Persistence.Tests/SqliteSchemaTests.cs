@@ -261,7 +261,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 16, 0);
+        VALUES(1, 17, 0);
         """,
         "schema_info.checks")]
     [InlineData(
@@ -312,7 +312,13 @@ public sealed class SqliteSchemaTests
                 new(MonitorMetricKind.ActiveTimePercent, 42),
                 new(MonitorMetricKind.ReadBytesPerSecond, 1_024),
                 new(MonitorMetricKind.WriteBytesPerSecond, 2_048),
-                new(MonitorMetricKind.AverageQueueLength, 3)
+                new(MonitorMetricKind.AverageQueueLength, 3),
+                new(MonitorMetricKind.VirtualDiskActiveBytes, 11),
+                new(MonitorMetricKind.VirtualDiskMissingBytes, 12),
+                new(MonitorMetricKind.VirtualDiskStaleBytes, 13),
+                new(MonitorMetricKind.VirtualDiskNeedRegenerationBytes, 14),
+                new(MonitorMetricKind.VirtualDiskRegeneratingBytes, 15),
+                new(MonitorMetricKind.VirtualDiskPendingDeletionBytes, 16)
             ]);
         var persistedDeviceId = MonitorSampleBatchWriter.PersistedDeviceId(first);
 
@@ -351,7 +357,9 @@ public sealed class SqliteSchemaTests
         await using var verify = await database.Store.OpenConnectionAsync();
         await using var query = verify.CreateCommand();
         query.CommandText = """
-            SELECT COUNT(*), MIN(activity_pct)
+            SELECT COUNT(*), MIN(activity_pct),
+                   MIN(virtual_disk_pending_deletion_bytes),
+                   SUM(CASE WHEN cpu_pct IS NULL THEN 1 ELSE 0 END)
             FROM monitor_samples
             WHERE session_id=$session AND device_id=$device;
             """;
@@ -361,6 +369,8 @@ public sealed class SqliteSchemaTests
         Assert.True(await reader.ReadAsync());
         Assert.Equal(2, reader.GetInt64(0));
         Assert.Equal(42, reader.GetDouble(1));
+        Assert.Equal(16, reader.GetDouble(2));
+        Assert.Equal(2, reader.GetInt64(3));
         Assert.DoesNotContain("SECRET", persistedDeviceId, StringComparison.Ordinal);
     }
 

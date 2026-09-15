@@ -26,6 +26,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private AgentSessionCoordinator? coordinator;
     private UserPreferences preferences = new();
     private MonitoringSession? monitoringSession;
+    private readonly HashSet<string> reportedControlFailures = new(StringComparer.Ordinal);
 
     public TrayApplicationContext(
         IUserPreferencesReader userPreferencesReader,
@@ -222,6 +223,23 @@ internal sealed class TrayApplicationContext : ApplicationContext
             startInfo.ArgumentList.Add(page);
         }
         Process.Start(startInfo);
+    }
+
+    internal void NotifyControlFailure(string code)
+    {
+        uiContext.Post(_ =>
+        {
+            if (!reportedControlFailures.Add(code))
+            {
+                return;
+            }
+            Trace.TraceError("WinPool Agent control failure: {0}", code);
+            trayIcon.ShowBalloonTip(
+                4_000,
+                "WinPool",
+                $"Agent control service reported {code}.",
+                ToolTipIcon.Warning);
+        }, null);
     }
 
     private async Task ToggleMonitoringAsync()

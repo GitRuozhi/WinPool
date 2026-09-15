@@ -11,6 +11,30 @@ namespace WinPool.Persistence.Tests;
 public sealed class SimulationDocumentRepositoryTests
 {
     [Fact]
+    public async Task MetadataPagesStayBoundedWhileLargeDocumentsLoadIndividually()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var repository = new SimulationDocumentRepository(database.Store, lease);
+        var largeValue = new string('x', 2_200_000);
+        var first = await repository.SaveAsync(Payload("simulation:a", largeValue, 1), null);
+        var second = await repository.SaveAsync(Payload("simulation:b", largeValue, 1), null);
+
+        var firstPage = await repository.ListMetadataAsync(1, null);
+        var secondPage = await repository.ListMetadataAsync(1, firstPage.NextAfterDocumentId);
+
+        Assert.Single(firstPage.Documents);
+        Assert.NotNull(firstPage.NextAfterDocumentId);
+        Assert.Single(secondPage.Documents);
+        Assert.Null(secondPage.NextAfterDocumentId);
+        Assert.True(Encoding.UTF8.GetByteCount(
+            System.Text.Json.JsonSerializer.Serialize(firstPage)) < 4 * 1024 * 1024);
+        Assert.True(first.Json.Length + second.Json.Length > 4 * 1024 * 1024);
+        Assert.Equal(first.Sha256, (await repository.LoadAsync(first.DocumentId))!.Sha256);
+        Assert.Equal(second.Sha256, (await repository.LoadAsync(second.DocumentId))!.Sha256);
+    }
+
+    [Fact]
     public async Task SaveUsesOptimisticHashAndIncrementsRevision()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
@@ -24,7 +48,7 @@ public sealed class SimulationDocumentRepositoryTests
 
         Assert.Equal(1, saved.Revision);
         Assert.Equal(2, updated.Revision);
-        Assert.Equal(second.Sha256, Assert.Single(await repository.ListAsync()).Sha256);
+        Assert.Equal(second.Sha256, (await repository.LoadAsync(first.DocumentId))!.Sha256);
         await Assert.ThrowsAsync<SimulationDocumentConflictException>(
             () => repository.SaveAsync(Payload(first.DocumentId, "stale", 2), saved.Sha256));
     }
@@ -76,9 +100,51 @@ public sealed class SimulationDocumentRepositoryTests
             plan,
             [new ExecutionEvent(plan.OperationId, ExecutionEventKind.Failed, plan.CreatedAt, "failed", "")])) ;
 
-        var actual = Assert.Single(await repository.ListAsync());
+        var actual = (await repository.LoadAsync(initial.DocumentId))!;
         Assert.Equal(initial.Sha256, actual.Sha256);
         Assert.Null(await new OperationPlanRepository(database.Store).GetAsync(plan.OperationId));
+    }
+
+    [Fact]
+    public async Task CommitIdIsBoundAndLookupReturnsImmutableCommittedDocument()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var repository = new SimulationDocumentRepository(database.Store, lease);
+        var initial = await repository.SaveAsync(Payload("simulation:test", "one", 1), null);
+        var firstPlan = Plan();
+        var firstEvents = CompletedEvents(firstPlan);
+        var edited = Payload(initial.DocumentId, "two", 2);
+
+        var first = await repository.CommitEditAsync(
+            edited, initial.Sha256, firstPlan, firstEvents, "fixed-commit");
+        var retry = await repository.CommitEditAsync(
+            edited, initial.Sha256, firstPlan, firstEvents, "fixed-commit");
+        Assert.Equal(first.Sha256, retry.Sha256);
+
+        await Assert.ThrowsAsync<SimulationDocumentConflictException>(() =>
+            repository.CommitEditAsync(
+                Payload(initial.DocumentId, "different", 2),
+                initial.Sha256,
+                firstPlan,
+                firstEvents,
+                "fixed-commit"));
+
+        var secondPlan = Plan();
+        await repository.CommitEditAsync(
+            Payload(initial.DocumentId, "three", 3),
+            edited.Sha256,
+            secondPlan,
+            CompletedEvents(secondPlan),
+            "second-commit");
+        var receipt = await repository.FindByCommitIdAsync("fixed-commit");
+        Assert.NotNull(receipt);
+        Assert.Equal("fixed-commit", receipt.CommitId);
+        Assert.Equal(initial.Sha256, receipt.BeforeSha256);
+        Assert.Equal(edited.Sha256, receipt.Document.Sha256);
+        Assert.Equal(2, receipt.Document.Revision);
+        Assert.Equal(edited.Json, receipt.Document.Json);
+        Assert.Equal(firstPlan.PlanHash, receipt.PlanHash);
     }
 
     private static SimulationDocumentPayload Payload(string id, string value, long revision)
@@ -114,6 +180,12 @@ public sealed class SimulationDocumentRepositoryTests
             new AlgorithmIdentity("ALG-TEST", "1", AlgorithmConfidence.Proven, "unit-test"),
             request.RequestedAt);
     }
+
+    private static ExecutionEvent[] CompletedEvents(OperationPlan plan) =>
+    [
+        new(plan.OperationId, ExecutionEventKind.Started, plan.CreatedAt, "started", ""),
+        new(plan.OperationId, ExecutionEventKind.Completed, plan.CreatedAt.AddMilliseconds(1), "completed", "")
+    ];
 
     private sealed class TemporaryDatabase : IAsyncDisposable
     {

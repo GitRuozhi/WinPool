@@ -65,6 +65,14 @@ public sealed record SimulationDocumentPayload(
     long Revision,
     DateTimeOffset UpdatedAtUtc);
 
+public sealed record SimulationDocumentMetadata(
+    string DocumentId,
+    int DocumentSchemaVersion,
+    string DisplayName,
+    string Sha256,
+    long Revision,
+    DateTimeOffset UpdatedAtUtc);
+
 public sealed record LocalInventoryDocumentPayload(
     string DocumentId,
     int DocumentSchemaVersion,
@@ -73,7 +81,15 @@ public sealed record LocalInventoryDocumentPayload(
     string Sha256,
     DateTimeOffset CapturedAtUtc);
 
-public sealed record ListAgentSimulationDocumentsRequest(CorrelationId CorrelationId)
+public sealed record ListAgentSimulationDocumentsRequest(
+    int PageSize,
+    string? AfterDocumentId,
+    CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
+public sealed record LoadAgentSimulationDocumentRequest(
+    string DocumentId,
+    CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
 public sealed record SaveAgentSimulationDocumentRequest(
@@ -99,12 +115,26 @@ public sealed record CommitAgentSimulationEditRequest(
 
 public sealed record LookupAgentSimulationCommitRequest(
     string CommitId,
+    string DocumentId,
+    string ExpectedBeforeSha256,
+    string ExpectedAfterSha256,
+    long ExpectedRevision,
+    string OperationId,
+    string PlanHash,
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
+public sealed record SimulationCommitReceipt(
+    string CommitId,
+    string OperationId,
+    string BeforeSha256,
+    string PlanHash,
+    SimulationDocumentPayload Document,
+    DateTimeOffset CommittedAtUtc);
+
 public sealed record SimulationCommitLookupResponse(
     bool Found,
-    SimulationDocumentPayload? Document)
+    SimulationCommitReceipt? Receipt)
     : AgentResponse;
 
 public sealed record CaptureAgentInventoryRequest(
@@ -200,7 +230,12 @@ public sealed record WorkspaceStateSavedResponse(WorkspaceSessionState State)
     : AgentResponse;
 
 public sealed record SimulationDocumentListResponse(
-    IReadOnlyList<SimulationDocumentPayload> Documents)
+    IReadOnlyList<SimulationDocumentMetadata> Documents,
+    string? NextAfterDocumentId)
+    : AgentResponse;
+
+public sealed record SimulationDocumentLoadedResponse(
+    SimulationDocumentPayload? Document)
     : AgentResponse;
 
 public sealed record SimulationDocumentSavedResponse(
