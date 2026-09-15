@@ -26,10 +26,13 @@ public sealed class HardwareReportProjectorTests
             Object("array-object", FactObjectType.MemoryArray, sources[1], ("MemoryDevices", 4L), ("MemoryErrorCorrection", 3L)),
             Object("module-1", FactObjectType.MemoryModule, sources[2], ("Capacity", 16UL * 1024 * 1024 * 1024), ("PartNumber", "A")),
             Object("module-2", FactObjectType.MemoryModule, sources[2], ("Capacity", 16UL * 1024 * 1024 * 1024), ("PartNumber", "B")),
-            Object("gpu-object", FactObjectType.VideoController, sources[3], ("Name", "Software GPU"), ("SharedSystemMemory", 8UL * 1024 * 1024 * 1024)),
+            Object("gpu-object", FactObjectType.VideoController, sources[3], ("Name", "GameViewer Virtual Display Adapter"),
+                ("VendorId", 0x8086UL), ("DeviceId", 0x4C8AUL), ("IndirectDisplayDevice", true),
+                ("SharedSystemMemory", 8UL * 1024 * 1024 * 1024)),
             Object("output-object", FactObjectType.Monitor, sources[4], ("Name", "DISPLAY1"), ("DesktopX", -100L), ("Primary", false)),
             Object("network-object", FactObjectType.NetworkAdapter, sources[5], ("Name", "Ethernet"), ("Primary", true)),
-            Object("wmi-gpu-supplement", FactObjectType.HardwareSupplement, sources[6], ("Name", "Software GPU")),
+            Object("wmi-gpu-supplement", FactObjectType.HardwareSupplement, sources[6], ("Name", "Intel(R) UHD Graphics 750"),
+                ("PNPDeviceID", "PCI\\VEN_8086&DEV_4C8A"), ("DriverVersion", "32.0.101.7085")),
             Object("wmi-monitor-supplement", FactObjectType.HardwareSupplement, sources[7], ("Name", "MONITOR\\SECOND")),
             Object("other-network-object", FactObjectType.NetworkAdapter, sources[8], ("Name", "Other network"), ("Primary", false))
         };
@@ -48,7 +51,10 @@ public sealed class HardwareReportProjectorTests
         Assert.Equal("4", memory.Sections[0].Rows[0].Cells[0].Value);
         Assert.Equal(2, memory.Sections[1].Rows.Single(x => x.Label == "型号").Cells.Count);
         Assert.Equal("-100", report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "水平坐标").Cells[0].Value);
-        Assert.Single(report.Single(x => x.Name == "GPU").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
+        var gpu = report.Single(x => x.Name == "GPU").Sections[0];
+        Assert.Equal("GameViewer Virtual Display Adapter", Assert.Single(gpu.Rows.Single(x => x.Label == "型号").Cells).Value);
+        Assert.Equal("—", Assert.Single(gpu.Rows.Single(x => x.Label == "驱动").Cells).Value);
+        Assert.Equal("—", Assert.Single(gpu.Rows.Single(x => x.Label == "总线").Cells).Value);
         Assert.Single(report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
         var network = report.Single(x => x.Name == "Network").Sections[0];
         Assert.Equal(2, network.Rows.Single(x => x.Label == "名称").Cells.Count);

@@ -8,6 +8,13 @@ namespace WinPool.Infrastructure.Windows;
 internal static class WindowsGraphicsFactCollector
 {
     private const int DxgiErrorNotFound = unchecked((int)0x887A0002);
+    private const int AdapterRegistryInfo = 8;
+    private const int AdapterType = 15;
+    private const int DriverDescription = 65;
+    private const int DriverDescriptionRender = 66;
+    private const uint IndirectDisplayDevice = 1u << 6;
+    private const int MaxPath = 260;
+    private const int DriverDescriptionLength = 4096;
     private static readonly Guid Factory1 = new("770aae78-f26f-4dba-a829-253c83d1b387");
     private static readonly Guid Output6 = new("068346e8-9ecf-42c6-a15d-eb0c5d9a6b8f");
     private static readonly Guid D3D12Device = new("189819f1-1db6-4b57-be54-1821339b85f7");
@@ -38,7 +45,12 @@ internal static class WindowsGraphicsFactCollector
                     Number("DedicatedVideoMemory", adapter.DedicatedVideoMemory, adapterSource.Id, "bytes"),
                     Number("SharedSystemMemory", adapter.SharedSystemMemory, adapterSource.Id, "bytes"),
                     Number("TotalVideoMemory", checked(adapter.DedicatedVideoMemory + adapter.SharedSystemMemory), adapterSource.Id, "bytes"),
-                    Text("DirectXFeatureLevel", adapter.DirectXFeatureLevel, adapterSource.Id)
+                    Text("DirectXFeatureLevel", adapter.DirectXFeatureLevel, adapterSource.Id),
+                    Text("DxgiDescription", adapter.DxgiDescription, adapterSource.Id),
+                    Text("DisplayDriverDescription", adapter.DisplayDriverDescription, adapterSource.Id),
+                    Text("RenderDriverDescription", adapter.RenderDriverDescription, adapterSource.Id),
+                    OptionalNumber("AdapterTypeFlags", adapter.AdapterTypeFlags, adapterSource.Id),
+                    OptionalFlag("IndirectDisplayDevice", adapter.IsIndirectDisplayDevice, adapterSource.Id)
                 ]));
                 identities.Add(new(FactObjectType.VideoController, adapterOpaque, adapterId));
                 foreach (var output in adapter.Outputs)
@@ -93,10 +105,16 @@ internal static class WindowsGraphicsFactCollector
         : WinPoolSourceField.Returned(name, value, FactValueType.String, source);
     private static WinPoolSourceField Number(string name, ulong value, string source, string? unit = null) =>
         WinPoolSourceField.Returned(name, value, FactValueType.UInt64, source, unit);
+    private static WinPoolSourceField OptionalNumber(string name, uint? value, string source) => value is { } number
+        ? Number(name, number, source)
+        : WinPoolSourceField.Missing(name, FactValueType.UInt64, source, FieldReadState.Unavailable, "NativeValueUnavailable");
     private static WinPoolSourceField Signed(string name, long value, string source) =>
         WinPoolSourceField.Returned(name, value, FactValueType.Int64, source);
     private static WinPoolSourceField Flag(string name, bool value, string source) =>
         WinPoolSourceField.Returned(name, value, FactValueType.Boolean, source);
+    private static WinPoolSourceField OptionalFlag(string name, bool? value, string source) => value is { } flag
+        ? Flag(name, flag, source)
+        : WinPoolSourceField.Missing(name, FactValueType.Boolean, source, FieldReadState.Unavailable, "NativeValueUnavailable");
 
     private static IReadOnlyList<AdapterInfo> ReadAdapters()
     {
@@ -115,15 +133,67 @@ internal static class WindowsGraphicsFactCollector
                     var desc = new AdapterDescription1();
                     Marshal.ThrowExceptionForHR(Method<GetAdapterDescription1>(adapter, 10)(adapter, ref desc));
                     var outputs = ReadOutputs(adapter);
-                    result.Add(new(desc.Description.TrimEnd('\0'), desc.VendorId, desc.DeviceId,
+                    var dxgiDescription = desc.Description.TrimEnd('\0');
+                    var kernel = ReadKernelAdapterInfo(desc.AdapterLuid);
+                    var name = kernel.IsIndirectDisplayDevice == true && !string.IsNullOrWhiteSpace(kernel.DisplayDriverDescription)
+                        ? kernel.DisplayDriverDescription : dxgiDescription;
+                    result.Add(new(name, dxgiDescription, desc.VendorId, desc.DeviceId,
                         (ulong)desc.DedicatedVideoMemory, (ulong)desc.SharedSystemMemory,
-                        desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart, FeatureLevel(adapter), outputs));
+                        desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart, FeatureLevel(adapter), outputs,
+                        kernel.AdapterTypeFlags, kernel.IsIndirectDisplayDevice,
+                        kernel.DisplayDriverDescription, kernel.RenderDriverDescription));
                 }
                 finally { Marshal.Release(adapter); }
             }
         }
         finally { Marshal.Release(factory); }
         return result;
+    }
+
+    private static KernelAdapterInfo ReadKernelAdapterInfo(Luid luid)
+    {
+        var open = new OpenAdapterFromLuid { AdapterLuid = luid };
+        if (D3DKMTOpenAdapterFromLuid(ref open) != 0 || open.Adapter == 0)
+            return new(null, null, string.Empty, string.Empty);
+        try
+        {
+            var flags = QueryUInt32(open.Adapter, AdapterType);
+            var display = QueryText(open.Adapter, DriverDescription, DriverDescriptionLength * sizeof(char));
+            if (string.IsNullOrWhiteSpace(display))
+                display = QueryText(open.Adapter, AdapterRegistryInfo, 4 * MaxPath * sizeof(char));
+            var render = QueryText(open.Adapter, DriverDescriptionRender, DriverDescriptionLength * sizeof(char));
+            return new(flags, flags is { } value ? (value & IndirectDisplayDevice) != 0 : null, display, render);
+        }
+        finally
+        {
+            var close = new CloseAdapter(open.Adapter);
+            _ = D3DKMTCloseAdapter(in close);
+        }
+    }
+
+    private static uint? QueryUInt32(uint adapter, int type)
+    {
+        var buffer = Marshal.AllocHGlobal(sizeof(uint));
+        try
+        {
+            Marshal.WriteInt32(buffer, 0);
+            var query = new QueryAdapterInfo(adapter, type, buffer, sizeof(uint));
+            return D3DKMTQueryAdapterInfo(in query) == 0 ? unchecked((uint)Marshal.ReadInt32(buffer)) : null;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static string QueryText(uint adapter, int type, int byteCount)
+    {
+        var buffer = Marshal.AllocHGlobal(byteCount);
+        try
+        {
+            for (var offset = 0; offset < byteCount; offset += sizeof(long)) Marshal.WriteInt64(buffer, offset, 0);
+            var query = new QueryAdapterInfo(adapter, type, buffer, (uint)byteCount);
+            return D3DKMTQueryAdapterInfo(in query) == 0
+                ? Marshal.PtrToStringUni(buffer)?.TrimEnd('\0') ?? string.Empty : string.Empty;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static IReadOnlyList<OutputInfo> ReadOutputs(IntPtr adapter)
@@ -200,6 +270,9 @@ internal static class WindowsGraphicsFactCollector
 
     [DllImport("dxgi.dll", ExactSpelling = true)] private static extern int CreateDXGIFactory1(in Guid riid, out IntPtr factory);
     [DllImport("d3d12.dll", ExactSpelling = true)] private static extern int D3D12CreateDevice(IntPtr adapter, uint minimumFeatureLevel, in Guid riid, out IntPtr device);
+    [DllImport("gdi32.dll", ExactSpelling = true)] private static extern int D3DKMTOpenAdapterFromLuid(ref OpenAdapterFromLuid open);
+    [DllImport("gdi32.dll", ExactSpelling = true)] private static extern int D3DKMTQueryAdapterInfo(in QueryAdapterInfo query);
+    [DllImport("gdi32.dll", ExactSpelling = true)] private static extern int D3DKMTCloseAdapter(in CloseAdapter close);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumDisplayDevices(string device, uint index, ref DisplayDevice displayDevice, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] [return: MarshalAs(UnmanagedType.Bool)]
@@ -212,6 +285,21 @@ internal static class WindowsGraphicsFactCollector
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetOutputDescription1(IntPtr self, ref OutputDescription1 desc);
 
     [StructLayout(LayoutKind.Sequential)] private struct Luid { public uint LowPart; public int HighPart; }
+    [StructLayout(LayoutKind.Sequential)] private struct OpenAdapterFromLuid { public Luid AdapterLuid; public uint Adapter; }
+    [StructLayout(LayoutKind.Sequential)] private readonly struct CloseAdapter
+    {
+        public readonly uint Adapter;
+        public CloseAdapter(uint adapter) => Adapter = adapter;
+    }
+    [StructLayout(LayoutKind.Sequential)] private readonly struct QueryAdapterInfo
+    {
+        public readonly uint Adapter;
+        public readonly int Type;
+        public readonly IntPtr PrivateDriverData;
+        public readonly uint PrivateDriverDataSize;
+        public QueryAdapterInfo(uint adapter, int type, IntPtr data, uint size) =>
+            (Adapter, Type, PrivateDriverData, PrivateDriverDataSize) = (adapter, type, data, size);
+    }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct AdapterDescription1
     {
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Description;
@@ -262,8 +350,12 @@ internal static class WindowsGraphicsFactCollector
         public int IcmMethod, IcmIntent, MediaType, DitherType, Reserved1, Reserved2, PanningWidth, PanningHeight;
     }
 
-    private sealed record AdapterInfo(string Name, uint VendorId, uint DeviceId, ulong DedicatedVideoMemory,
-        ulong SharedSystemMemory, int LuidHigh, uint LuidLow, string DirectXFeatureLevel, IReadOnlyList<OutputInfo> Outputs);
+    private sealed record AdapterInfo(string Name, string DxgiDescription, uint VendorId, uint DeviceId,
+        ulong DedicatedVideoMemory, ulong SharedSystemMemory, int LuidHigh, uint LuidLow, string DirectXFeatureLevel,
+        IReadOnlyList<OutputInfo> Outputs, uint? AdapterTypeFlags, bool? IsIndirectDisplayDevice,
+        string DisplayDriverDescription, string RenderDriverDescription);
+    private sealed record KernelAdapterInfo(uint? AdapterTypeFlags, bool? IsIndirectDisplayDevice,
+        string DisplayDriverDescription, string RenderDriverDescription);
     private sealed record OutputInfo(string DeviceName, int X, int Y, int Width, int Height,
         uint RefreshRate, uint BitsPerPixel, uint BitsPerColor, string ColorSpace, string DynamicRange);
 }

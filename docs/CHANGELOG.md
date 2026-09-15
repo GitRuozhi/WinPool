@@ -8,7 +8,7 @@
 
 ## 2026-09-15：硬件对象集合统一与网络过滤修正
 
-硬件页的 CPU、内存、页面文件、GPU、Monitor 和 Network 改为按统一对象类型完整生成设备列，不再按来源类名选择一组对象；字段备用来源只补值，不改变列集合。GPU 与 Monitor 按旧 KS 的主采集边界修正为 DXGI Adapter/Output 设备列表，`Win32_VideoController`、`Win32_DesktopMonitor` 和 `WmiMonitorID` 仅作为统一层字段补充，不再形成重复设备；软件 DXGI 适配器不作过滤。网络统一来源键保持为 `WinPool.NetworkAdapter`，内部改为直接读取 `MSFT_NetAdapter`，使用旧 KS 的 `ConnectorPresent -or InterfaceType -ne 0` 条件，并按 `InterfaceIndex` 关联全部 IPv4、IPv6 与默认路由；同一来源刷新会直接整组替换旧网络对象，不需要跨来源迁移。“主网络”只在真值时显示“是/Yes”，假值留空，统一事实仍保留原布尔值。Storage 继续与管理页共用 WinPool 摘要。550/550 自动测试及完整 Release 构建通过；原生 WinUI 刷新后 GPU 从混合来源的 7 列收敛为 4 个 DXGI Adapter，Monitor 从混合来源的 4 列收敛为 2 个 DXGI Output，Network 保持 7 个对象。
+硬件页的 CPU、内存、页面文件、GPU、Monitor 和 Network 改为按统一对象类型完整生成设备列，不再按来源类名选择一组对象；字段备用来源只补值，不改变列集合。GPU 与 Monitor 按旧 KS 的主采集边界修正为 DXGI Adapter/Output 设备列表，`Win32_VideoController`、`Win32_DesktopMonitor` 和 `WmiMonitorID` 仅作为统一层字段补充，不再形成重复设备；软件 DXGI 适配器不作过滤。进一步按 DXGI LUID 查询 D3DKMT 类型和显示/渲染侧描述：间接显示适配器保留独立对象并使用显示侧名称，不再显示成关联的物理 GPU，也不再借用其 WMI 驱动和 PCI 位置。网络统一来源键保持为 `WinPool.NetworkAdapter`，内部改为直接读取 `MSFT_NetAdapter`，使用旧 KS 的 `ConnectorPresent -or InterfaceType -ne 0` 条件，并按 `InterfaceIndex` 关联全部 IPv4、IPv6 与默认路由；同一来源刷新会直接整组替换旧网络对象，不需要跨来源迁移。“主网络”只在真值时显示“是/Yes”，假值留空，统一事实仍保留原布尔值。Storage 继续与管理页共用 WinPool 摘要。550/550 自动测试及完整 Release 构建通过；原生 WinUI 刷新后 GPU 保持 4 个对象，其中 Intel 核显由重复 2 列修正为 1 列物理 GPU 和 1 列 GameViewer Virtual Display Adapter，后者的驱动与总线不再显示 Intel 数据；Monitor 保持 2 个 DXGI Output，Network 保持 7 个对象。
 
 ## 2026-09-15：V0.53 开发者模式与导航调整
 

@@ -112,6 +112,15 @@ public sealed class WinPoolFactCaptureTests
                 Assert.Equal("bytes", item.Field("DedicatedVideoMemory")!.Unit);
                 Assert.Equal("bytes", item.Field("SharedSystemMemory")!.Unit);
                 Assert.Equal(FieldReadState.Returned, item.Field("DirectXFeatureLevel")!.ReadState);
+                Assert.NotNull(item.Field("DxgiDescription"));
+                Assert.NotNull(item.Field("AdapterTypeFlags"));
+                Assert.NotNull(item.Field("IndirectDisplayDevice"));
+                if (item.Field("IndirectDisplayDevice") is { ReadState: FieldReadState.Returned, Value: { } value }
+                    && value.GetBoolean())
+                {
+                    Assert.Equal(FieldReadState.Returned, item.Field("DisplayDriverDescription")!.ReadState);
+                    Assert.Equal(item.Field("DisplayDriverDescription")!.Value!.Value.GetString(), item.Field("Name")!.Value!.Value.GetString());
+                }
             });
         }
         var networkSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "WinPool.NetworkAdapter"));

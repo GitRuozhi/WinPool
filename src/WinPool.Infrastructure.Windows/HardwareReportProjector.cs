@@ -221,6 +221,7 @@ public static class HardwareReportProjector
     private static WinPoolObject? MatchedVideoController(WinPoolSystem system, WinPoolObject gpu)
     {
         if (SourceClass(system, gpu) == "Win32_VideoController") return gpu;
+        if (gpu.Field("IndirectDisplayDevice") is { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.True } }) return null;
         if (!uint.TryParse(Text(gpu, "VendorId"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var vendor)
             || !uint.TryParse(Text(gpu, "DeviceId"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var device)) return null;
         var signature = $"VEN_{vendor:X4}&DEV_{device:X4}";
