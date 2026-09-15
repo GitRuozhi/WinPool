@@ -124,7 +124,7 @@
                     VerticalScrollMode="Enabled">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="96" />
+                            <ColumnDefinition x:Name="LabelColumnDefinition" Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid x:Name="LabelColumnGrid" Grid.Column="0" />

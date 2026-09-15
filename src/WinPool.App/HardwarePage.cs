@@ -15,10 +15,10 @@ namespace WinPool_App;
 /// <summary>Read-only hardware report. Source matching and value selection stay outside the UI.</summary>
 public sealed partial class HardwarePage : Page
 {
-    private const double LabelWidth = PropertyTableVisuals.LabelColumnWidth;
+    private const double LabelMaxWidth = PropertyTableVisuals.LabelColumnMaxWidth;
     private const double ColumnGap = PropertyTableVisuals.ColumnGap;
     private const double RowHeight = PropertyTableVisuals.RowHeight;
-    private const double MaxValueWidth = 250;
+    private const double MaxValueWidth = PropertyTableVisuals.ValueColumnMaxWidth;
     private readonly TextBlock status = new()
     {
         TextWrapping = TextWrapping.Wrap,
@@ -144,7 +144,7 @@ public sealed partial class HardwarePage : Page
         {
             var section = category.Sections[sectionIndex];
             var table = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
-            table.ColumnDefinitions.Add(new() { Width = new GridLength(LabelWidth) });
+            table.ColumnDefinitions.Add(new() { Width = GridLength.Auto, MaxWidth = LabelMaxWidth });
             table.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             var labels = new Grid();
             var values = new Grid { HorizontalAlignment = HorizontalAlignment.Left };
@@ -165,7 +165,7 @@ public sealed partial class HardwarePage : Page
                 values.RowDefinitions.Add(new() { Height = GridLength.Auto });
                 var row = section.Rows[rowIndex];
                 var label = BorderCell(new TextBlock { Text = row.Label, Padding = new Thickness(10, 6, 10, 6),
-                    VerticalAlignment = VerticalAlignment.Center, Opacity = 0.72,
+                    VerticalAlignment = VerticalAlignment.Center, MaxWidth = LabelMaxWidth, Opacity = 0.72,
                     TextTrimming = TextTrimming.CharacterEllipsis });
                 Grid.SetRow(label, rowIndex);
                 labels.Children.Add(label);

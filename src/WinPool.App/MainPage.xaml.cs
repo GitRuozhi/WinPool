@@ -54,10 +54,10 @@ public sealed partial class MainPage : Page
         return ShellExecuteEx(ref info);
     }
 
-    private const double LabelColumnWidth = PropertyTableVisuals.LabelColumnWidth;
+    private const double LabelColumnMaxWidth = PropertyTableVisuals.LabelColumnMaxWidth;
     private const double ColumnGap = PropertyTableVisuals.ColumnGap;
     private const double RowHeight = PropertyTableVisuals.RowHeight;
-    private const double MaxValueWidth = 250;
+    private const double MaxValueWidth = PropertyTableVisuals.ValueColumnMaxWidth;
     private readonly Dictionary<string, int> _columnIndexByKey = new(StringComparer.Ordinal);
     private readonly List<Border> _columnCells = [];
     private string? _hoveredColumnKey;
@@ -68,6 +68,7 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        LabelColumnDefinition.MaxWidth = LabelColumnMaxWidth;
         Loaded += MainPage_Loaded;
     }
 
@@ -195,6 +196,7 @@ public sealed partial class MainPage : Page
                     VerticalAlignment = VerticalAlignment.Center,
                     Foreground = secondaryBrush,
                     IsTextSelectionEnabled = true,
+                    MaxWidth = LabelColumnMaxWidth,
                     Text = labels[rowIndex],
                     TextTrimming = TextTrimming.CharacterEllipsis
                 }, dividerBrush);

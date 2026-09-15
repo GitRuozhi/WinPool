@@ -6,7 +6,8 @@ namespace WinPool_App.Controls;
 
 internal static class PropertyTableVisuals
 {
-    internal const double LabelColumnWidth = 96;
+    internal const double LabelColumnMaxWidth = 220;
+    internal const double ValueColumnMaxWidth = 250;
     internal const double ColumnGap = 8;
     internal const double RowHeight = 32;
 
