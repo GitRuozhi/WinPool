@@ -97,30 +97,6 @@ public sealed class WinPoolFactsTests
     }
 
     [Fact]
-    public void MsftNetworkRefreshReplacesTheRetiredNativeNetworkSource()
-    {
-        var now = DateTimeOffset.UtcNow;
-        WinPoolFacts NetworkFacts(DateTimeOffset time, bool legacy)
-        {
-            var source = new WinPoolSource(legacy ? "legacy-source" : "msft-source", legacy ? FactOrigin.Native : FactOrigin.StorageCim,
-                legacy ? "winpool/native" : "root/standardcimv2", legacy ? "WinPool.NetworkAdapter" : "MSFT_NetAdapter",
-                time, CollectionPurpose.Hardware);
-            var objectId = legacy ? "legacy-adapter" : "msft-adapter";
-            return new(1, System, 1, [source],
-                [new(objectId, FactObjectType.NetworkAdapter, source.Id, legacy ? "legacy-identity" : "msft-identity", true,
-                    [WinPoolSourceField.Returned("Name", legacy ? "Legacy" : "Ethernet", FactValueType.String, source.Id)])],
-                [], [new(FactObjectType.NetworkAdapter, legacy ? "legacy-identity" : "msft-identity", objectId)],
-                [new(CollectionPurpose.Hardware, time, time, FieldReadState.Returned)]);
-        }
-
-        var merged = WinPoolFactRefresh.Merge(NetworkFacts(now, legacy: true), NetworkFacts(now.AddSeconds(1), legacy: false));
-
-        Assert.Equal("msft-adapter", Assert.Single(merged.Objects).Id);
-        Assert.DoesNotContain(merged.Sources, source => source.ClassName == "WinPool.NetworkAdapter");
-        Assert.Contains(merged.Sources, source => source.ClassName == "MSFT_NetAdapter");
-    }
-
-    [Fact]
     public void RejectsForeignSystemUnknownTypeInvalidNumbersAndDanglingReferences()
     {
         var facts = Example(DateTimeOffset.UtcNow);

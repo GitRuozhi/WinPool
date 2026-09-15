@@ -164,11 +164,7 @@ public static class WinPoolFactRefresh
         if (current.SystemId != incoming.SystemId) throw new InvalidOperationException("Collection belongs to another system.");
         if (current.IsSimulation || current.Sources.Any(x => x.Origin == FactOrigin.Simulation))
             throw new InvalidOperationException("A live collection cannot refresh a simulation or imported system.");
-        static (string, string) Key(WinPoolSource source) =>
-            (source.Namespace, source.ClassName) is ("winpool/native", "WinPool.NetworkAdapter")
-                or ("root/standardcimv2", "MSFT_NetAdapter")
-                ? ("root/standardcimv2", "MSFT_NetAdapter")
-                : (source.Namespace, source.ClassName);
+        static (string, string) Key(WinPoolSource source) => (source.Namespace, source.ClassName);
         var oldByKey = current.Sources.GroupBy(Key).ToDictionary(x => x.Key, x => x.Max(s => s.CapturedAt));
         var accepted = incoming.Sources.Where(x => !oldByKey.TryGetValue(Key(x), out var time) || x.CapturedAt > time).ToArray();
         if (accepted.Length == 0) return current;

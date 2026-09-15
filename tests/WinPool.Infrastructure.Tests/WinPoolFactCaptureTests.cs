@@ -86,7 +86,7 @@ public sealed class WinPoolFactCaptureTests
                 Assert.Equal(FieldReadState.Returned, item.Field("DirectXFeatureLevel")!.ReadState);
             });
         }
-        var networkSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "MSFT_NetAdapter"));
+        var networkSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "WinPool.NetworkAdapter"));
         Assert.Equal(FieldReadState.Returned, networkSource.ReadState);
         var networkAdapters = hardware.SourceFacts.Objects.Where(x => x.SourceRef == networkSource.Id).ToArray();
         Assert.NotEmpty(networkAdapters);

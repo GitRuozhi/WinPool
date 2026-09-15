@@ -12,10 +12,12 @@ internal static class WindowsNetworkFactCollector
 
     public static WinPoolFacts AddTo(WinPoolFacts facts, DateTimeOffset capturedAt)
     {
-        var source = Source("root/standardcimv2", "MSFT_NetAdapter", FactOrigin.StorageCim, capturedAt);
+        var source = Source("winpool/native", "WinPool.NetworkAdapter", FactOrigin.Native, capturedAt);
         var platformSource = Source("WinPool.Platform", capturedAt);
-        var replacedSourceIds = facts.Sources.Where(x => x.Namespace.Equals(source.Namespace, StringComparison.OrdinalIgnoreCase)
-            && x.ClassName == source.ClassName).Select(x => x.Id).ToHashSet();
+        var replacedSourceIds = facts.Sources.Where(x =>
+            x.Namespace.Equals("root/standardcimv2", StringComparison.OrdinalIgnoreCase) && x.ClassName == "MSFT_NetAdapter"
+            || x.Namespace.Equals(source.Namespace, StringComparison.OrdinalIgnoreCase) && x.ClassName == source.ClassName)
+            .Select(x => x.Id).ToHashSet();
         var replacedObjectIds = facts.Objects.Where(x => replacedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
         var sources = facts.Sources.Where(x => !replacedSourceIds.Contains(x.Id)).ToImmutableArray().Add(source).Add(platformSource);
         var objects = facts.Objects.Where(x => !replacedObjectIds.Contains(x.Id)).ToImmutableArray().ToBuilder();
