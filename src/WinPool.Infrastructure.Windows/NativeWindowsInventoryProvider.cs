@@ -87,10 +87,7 @@ public sealed class NativeWindowsInventoryProvider : IInventoryProvider
                     ["logicalSectorSizeBytes"] = Number(disk.BytesPerSector),
                     ["removable"] = disk.Removable ? "true" : "false"
                 };
-                if (request.IncludeSensitiveValuesInMemory)
-                {
-                    properties["serialNumber"] = disk.SerialNumber;
-                }
+                properties["serialNumber"] = disk.SerialNumber;
 
                 objects.Add(
                     new(
@@ -135,10 +132,7 @@ public sealed class NativeWindowsInventoryProvider : IInventoryProvider
                     ["maximumComponentLength"] = Number(volume.MaximumComponentLength),
                     ["fileSystemFlags"] = volume.FileSystemFlags.ToString("X8")
                 };
-                if (request.IncludeSensitiveValuesInMemory)
-                {
-                    properties["volumeGuid"] = volume.VolumeGuid;
-                }
+                properties["volumeGuid"] = volume.VolumeGuid;
 
                 objects.Add(
                     new StorageObjectView(

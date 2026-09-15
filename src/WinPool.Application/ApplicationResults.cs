@@ -33,7 +33,7 @@ public enum ApplicationMessageSeverity
 }
 
 /// <summary>
-/// A persistence-safe application message. DiagnosticText must already be redacted.
+/// An application message that can cross process and persistence boundaries.
 /// </summary>
 public sealed record ApplicationMessage(
     string Code,

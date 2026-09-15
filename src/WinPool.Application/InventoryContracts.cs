@@ -24,7 +24,6 @@ public enum InventoryCaptureReason
 public sealed record InventoryRequest(
     SystemId SystemId,
     InventoryCaptureReason Reason,
-    bool IncludeSensitiveValuesInMemory,
     string? ExpectedInventoryVersion = null);
 
 public sealed record InventoryIdentityDiagnostic(

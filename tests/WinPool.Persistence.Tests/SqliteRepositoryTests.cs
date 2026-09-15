@@ -92,7 +92,7 @@ public sealed class SqliteRepositoryTests
         Assert.Equal(MonitoringSessionState.Running, actualSession.State);
         var device = Assert.Single(actualDevices);
         Assert.Equal("device-hash", device.DeviceId);
-        Assert.Equal("物理磁盘 0", device.SanitizedName);
+        Assert.Equal("物理磁盘 0", device.DisplayName);
 
         await Assert.ThrowsAsync<AgentWriteOwnershipException>(
             () => readOnlyDevices.UpsertAsync(device));

@@ -34,7 +34,7 @@ public enum ApplicationTaskEventKind
 
 /// <summary>
 /// Common event envelope for every observable long-running Application task.
-/// DiagnosticText must be redacted before the event crosses this boundary.
+/// DiagnosticText is preserved across process and persistence boundaries.
 /// </summary>
 public sealed record ApplicationTaskEvent(
     ApplicationTaskId TaskId,

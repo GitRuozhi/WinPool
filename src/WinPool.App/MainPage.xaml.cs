@@ -429,7 +429,7 @@ public sealed partial class MainPage : Page
         return commands;
     }
 
-    private WinPoolSystem? SelectedSourceSystem() => ViewModel.SelectedSystem.SourceFacts is { } facts ? new WinPoolSystem(WinPoolFactSanitizer.Redact(facts)) : null;
+    private WinPoolSystem? SelectedSourceSystem() => ViewModel.SelectedSystem.SourceFacts is { } facts ? new WinPoolSystem(facts) : null;
 
     private WinPoolObject? SelectedSourceObject() => SelectedSourceSystem()?.Objects.FirstOrDefault(x =>
         x.Id == ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey

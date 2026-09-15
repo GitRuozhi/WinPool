@@ -126,8 +126,8 @@ public sealed class ManageSystemProjectorTests
             Object(system, WinPool.Domain.StorageObjectKind.PhysicalDisk, "physical:1"),
             ManageObjectRole.PhysicalDisk);
         var serial = physicalView.Properties.Single(property => property.PropertyTextKey == "Serial");
-        Assert.Equal("masked", serial.RawValue);
-        Assert.Equal(ManageValuePresentation.MaskedSerial, serial.Presentation);
+        Assert.Equal("SERIAL-123", serial.RawValue);
+        Assert.Equal(ManageValuePresentation.SerialNumber, serial.Presentation);
 
         var partitionView = projector.Project(
             document,
@@ -179,7 +179,7 @@ public sealed class ManageSystemProjectorTests
             ["Model", "Serial", "Bus", "Media", "Capacity", "Health", "CanPool", "CannotPoolReason", "LastScan"],
             physical.Properties.Select(property => property.PropertyTextKey));
         Assert.Equal(
-            ManageValuePresentation.MaskedSerial,
+            ManageValuePresentation.SerialNumber,
             physical.Properties.Single(property => property.PropertyTextKey == "Serial").Presentation);
         Assert.Equal(
             ManageValuePresentation.LocalizationKey,
@@ -378,7 +378,7 @@ public sealed class ManageSystemProjectorTests
     {
         var source = Document();
         var extra = new PhysicalDiskInfo(
-            "physical:2", true, "Spare One", "Model", "masked", "SATA", "HDD",
+            "physical:2", true, "Spare One", "Model", "SERIAL-123", "SATA", "HDD",
             2_000_000, 512, 4096, "Healthy", "OK", false, "In a pool", 2,
             false, false, false, false, "pool:1");
         var secondVirtual = source.Snapshot.VirtualDisks[0] with
@@ -468,7 +468,7 @@ public sealed class ManageSystemProjectorTests
     {
         var source = Document();
         var extra = new PhysicalDiskInfo(
-            "physical:2", true, "Spare One", "Model", "masked", "SATA", "HDD",
+            "physical:2", true, "Spare One", "Model", "SERIAL-123", "SATA", "HDD",
             2_000_000, 512, 4096, "Healthy", "OK", false, "In a pool", 2,
             false, false, false, false, "pool:1");
         var document = source.WithCandidate(source.Snapshot with
@@ -536,7 +536,7 @@ public sealed class ManageSystemProjectorTests
     {
         var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
         var physical = new PhysicalDiskInfo(
-            "physical:1", true, "Disk One", "Model", "masked", "SATA", "HDD",
+            "physical:1", true, "Disk One", "Model", "SERIAL-123", "SATA", "HDD",
             2_000_000, 512, 4096, "Healthy", "OK", false, "In a pool", 1,
             false, false, false, false, "pool:1");
         var pool = new StoragePoolInfo(

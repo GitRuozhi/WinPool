@@ -80,7 +80,7 @@ public sealed class LocalInventoryDocumentRepository
         command.Parameters.AddWithValue("$document", document.DocumentId);
         command.Parameters.AddWithValue("$schema", document.DocumentSchemaVersion);
         command.Parameters.AddWithValue("$display", document.DisplayName);
-        command.Parameters.AddWithValue("$json", document.SanitizedJson);
+        command.Parameters.AddWithValue("$json", document.Json);
         command.Parameters.AddWithValue("$sha", document.Sha256);
         command.Parameters.AddWithValue(
             "$captured",
@@ -94,8 +94,8 @@ public sealed class LocalInventoryDocumentRepository
         if (string.IsNullOrWhiteSpace(document.DocumentId)
             || document.DocumentSchemaVersion <= 0
             || string.IsNullOrWhiteSpace(document.DisplayName)
-            || string.IsNullOrWhiteSpace(document.SanitizedJson)
-            || System.Text.Encoding.UTF8.GetByteCount(document.SanitizedJson) > MaximumDocumentBytes
+            || string.IsNullOrWhiteSpace(document.Json)
+            || System.Text.Encoding.UTF8.GetByteCount(document.Json) > MaximumDocumentBytes
             || document.Sha256.Length != 64
             || !document.Sha256.All(Uri.IsHexDigit))
         {

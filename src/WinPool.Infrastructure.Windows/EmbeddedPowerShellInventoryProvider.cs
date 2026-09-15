@@ -40,8 +40,7 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
             var document = await provider.CollectLocalAsync(cancellationToken);
             var snapshot = Project(
                 request.SystemId,
-                document.Snapshot,
-                request.IncludeSensitiveValuesInMemory);
+                document.Snapshot);
             if (!string.IsNullOrWhiteSpace(request.ExpectedInventoryVersion)
                 && !string.Equals(
                     request.ExpectedInventoryVersion,
@@ -82,8 +81,7 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
 
     public static InventorySnapshot Project(
         SystemId systemId,
-        StorageSnapshot source,
-        bool includeSensitiveValuesInMemory)
+        StorageSnapshot source)
     {
         ArgumentNullException.ThrowIfNull(source);
         var objects = new List<StorageObjectView>();
@@ -159,7 +157,7 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
             var properties = Properties(
                 ("friendlyName", item.FriendlyName),
                 ("model", item.Model),
-                ("serialNumber", item.MaskedSerialNumber),
+                ("serialNumber", item.SerialNumber),
                 ("busType", item.BusType),
                 ("mediaType", item.MediaType),
                 ("sizeBytes", Number(item.Size)),
@@ -180,10 +178,7 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
                 ("usage", item.Usage),
                 ("isRetired", Bool(item.IsRetired)),
                 ("isHotSpare", Bool(item.IsHotSpare)));
-            if (includeSensitiveValuesInMemory)
-            {
-                properties["pnpDeviceId"] = item.PnpDeviceId;
-            }
+            properties["pnpDeviceId"] = item.PnpDeviceId;
 
             Add(
                 StorageObjectKind.PhysicalDisk,
@@ -276,7 +271,7 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
                     ("sizeRemainingBytes", Number(item.SizeRemaining)),
                     ("allocationUnitSize", Number(item.AllocationUnitSize)),
                     ("accessPaths", string.Join(";", item.AccessPaths)),
-                    ("volumeIdentity", includeSensitiveValuesInMemory ? item.VolumeIdentity : string.Empty)));
+                    ("volumeIdentity", item.VolumeIdentity)));
         }
 
         foreach (var item in source.NetworkDisks)
@@ -289,9 +284,7 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
                 systemObject,
                 Properties(
                     ("driveLetter", item.DriveLetter),
-                    ("providerPath", includeSensitiveValuesInMemory
-                        ? item.ProviderPath
-                        : string.Empty),
+                    ("providerPath", item.ProviderPath),
                     ("fileSystem", item.FileSystem),
                     ("sizeBytes", Number(item.Size)),
                     ("sizeRemainingBytes", Number(item.SizeRemaining))));

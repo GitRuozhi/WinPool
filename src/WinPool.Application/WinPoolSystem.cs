@@ -57,7 +57,7 @@ public sealed class WinPoolSystem
     public ImmutableArray<WinPoolSource> Sources { get; }
     public ImmutableArray<WinPoolCollectionState> Collections { get; }
     public string ProcessorNames => string.Join("; ", Objects.Where(x => x.ObjectType == FactObjectType.Processor)
-        .Select(x => x.Field("Name")).Where(x => x is { ReadState: FieldReadState.Returned, IsRedacted: false })
+        .Select(x => x.Field("Name")).Where(x => x is { ReadState: FieldReadState.Returned })
         .Select(x => x!.DisplayValue()).Where(x => x.Length > 0));
 
     public ulong? TotalMemoryBytes
@@ -69,7 +69,7 @@ public sealed class WinPoolSystem
             ulong total = 0;
             foreach (var module in modules)
             {
-                if (module.Field("Capacity") is not { ReadState: FieldReadState.Returned, IsRedacted: false, Value: { } value }
+                if (module.Field("Capacity") is not { ReadState: FieldReadState.Returned, Value: { } value }
                     || value.ValueKind != System.Text.Json.JsonValueKind.Number || !value.TryGetUInt64(out var capacity)
                     || ulong.MaxValue - total < capacity) return null;
                 total += capacity;
@@ -116,7 +116,7 @@ public sealed class WinPoolSystem
         DisplayGroups = facts.Objects.Where(x => x.ObjectType == FactObjectType.PhysicalDisk)
             .Select(x => (Item: x, Usage: x.Field("Usage"), Pool: facts.Relationships
                 .FirstOrDefault(r => r.ToId == x.Id && r.Kind == "pool-member")?.FromId))
-            .Where(x => x.Usage is { ReadState: FieldReadState.Returned, IsRedacted: false } && x.Pool is not null)
+            .Where(x => x.Usage is { ReadState: FieldReadState.Returned } && x.Pool is not null)
             .Select(x => (x.Item.Id, x.Pool, Kind: x.Usage!.DisplayValue() switch
             {
                 "HotSpare" or "3" => "HotSpare",

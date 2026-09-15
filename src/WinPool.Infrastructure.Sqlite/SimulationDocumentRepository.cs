@@ -233,7 +233,7 @@ public sealed class SimulationDocumentRepository
         command.Parameters.AddWithValue("$id", document.DocumentId);
         command.Parameters.AddWithValue("$schema", document.DocumentSchemaVersion);
         command.Parameters.AddWithValue("$name", document.DisplayName.Trim());
-        command.Parameters.AddWithValue("$json", document.SanitizedJson);
+        command.Parameters.AddWithValue("$json", document.Json);
         command.Parameters.AddWithValue("$sha", document.Sha256);
         command.Parameters.AddWithValue("$targetRevision", document.Revision);
         command.Parameters.AddWithValue("$now", now.ToUnixTimeMilliseconds());
@@ -352,7 +352,7 @@ public sealed class SimulationDocumentRepository
         {
             throw new ArgumentException("The simulation document metadata is invalid.", nameof(document));
         }
-        var bytes = Encoding.UTF8.GetBytes(document.SanitizedJson ?? string.Empty);
+        var bytes = Encoding.UTF8.GetBytes(document.Json ?? string.Empty);
         if (bytes.Length == 0 || bytes.Length > MaximumDocumentBytes)
         {
             throw new ArgumentException("The simulation document payload size is invalid.", nameof(document));

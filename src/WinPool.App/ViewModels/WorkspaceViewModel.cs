@@ -185,8 +185,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public async Task ConvertLocalToSimulationAsync(CancellationToken cancellationToken = default)
     {
         var local = SystemCatalog.Systems.First(x => x.IsLocal);
-        var copy = StorageSystemDocumentSanitizer.RedactSensitiveData(local)
-            .AsImportedSimulation(
+        var copy = local.AsImportedSimulation(
                 $"{local.Snapshot.Computer.Name} {DateTime.Now:yyyy-MM-dd HH:mm}") with
         {
             SourceHostName = Environment.MachineName,
@@ -666,14 +665,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
-    public async Task SetShowHardwareIdsAsync(bool show)
-    {
-        CurrentPreferences = CurrentPreferences with { ShowHardwareIds = show };
-        BuildDetails();
-        RebuildComparisonColumns();
-        await _preferencesService.SaveAsync(CurrentPreferences);
-    }
-
     public async Task SetCreateMsrOnInitializeAsync(bool create)
     {
         CurrentPreferences = CurrentPreferences with { CreateMsrOnInitialize = create };
@@ -837,11 +828,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         CurrentAgentPreferences = saved.Preferences;
         OnPropertyChanged(nameof(CurrentAgentPreferences));
     }
-
-    public string FormatSerial(string? serial) =>
-        CurrentPreferences.ShowHardwareIds
-            ? (string.IsNullOrWhiteSpace(serial) ? "—" : serial)
-            : StableId.MaskSerial(serial);
 
     public async Task<string?> ExportActiveSystemAsync(
         CancellationToken cancellationToken = default) =>
@@ -1747,8 +1733,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 Localization[property.RawValue],
             WinPool.Application.ManageValuePresentation.PartitionType =>
                 PartitionTypeName(property.RawValue),
-            WinPool.Application.ManageValuePresentation.MaskedSerial =>
-                FormatSerial(property.RawValue),
+            WinPool.Application.ManageValuePresentation.SerialNumber => property.RawValue,
             WinPool.Application.ManageValuePresentation.ProductName =>
                 ProductDisplayName(property.RawValue),
             WinPool.Application.ManageValuePresentation.LocalDateTime =>

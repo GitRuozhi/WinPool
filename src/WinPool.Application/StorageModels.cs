@@ -78,7 +78,7 @@ public sealed record PhysicalDiskInfo(
     bool IsStable,
     string FriendlyName,
     string Model,
-    string MaskedSerialNumber,
+    string SerialNumber,
     string BusType,
     string MediaType,
     long Size,
@@ -481,22 +481,6 @@ public static class StableId
             fallbackParts.Select(x => Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture)?.Trim() ?? string.Empty));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return ($"{kind}:unstable:{hash[..24]}", false);
-    }
-
-    public static string MaskSerial(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "—";
-        }
-
-        var normalized = value.Trim();
-        if (normalized.Length <= 4)
-        {
-            return new string('•', normalized.Length);
-        }
-
-        return $"{normalized[..2]}{new string('•', Math.Min(10, normalized.Length - 4))}{normalized[^2..]}";
     }
 
     private static string Normalize(string value) =>

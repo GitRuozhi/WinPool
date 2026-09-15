@@ -25,7 +25,6 @@ public sealed partial class SettingsPage : Page
     private bool _updatingDataLocation;
     private bool _updatingLanguage;
     private bool _updatingMsr;
-    private bool _updatingHardwareIds;
     private bool _updatingStartup;
     private bool _updatingPartitionGap;
     private bool _updatingDataCapacity;
@@ -49,9 +48,6 @@ public sealed partial class SettingsPage : Page
         _updatingMsr = true;
         MsrSwitch.IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
         _updatingMsr = false;
-        _updatingHardwareIds = true;
-        ShowHardwareIdsSwitch.IsOn = ViewModel.CurrentPreferences.ShowHardwareIds;
-        _updatingHardwareIds = false;
         _updatingStartup = true;
         StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
         _updatingStartup = false;
@@ -614,51 +610,6 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private async void ShowHardwareIdsSwitch_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (!_ready || _updatingHardwareIds)
-        {
-            return;
-        }
-
-        if (ShowHardwareIdsSwitch.IsOn)
-        {
-            var l = ViewModel.Localization;
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
-                Title = l["PrivacyWarningTitle"],
-                Content = l["PrivacyWarningMessage"],
-                PrimaryButtonText = l["Confirm"],
-                CloseButtonText = l["Cancel"],
-                DefaultButton = ContentDialogButton.Close
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                _updatingHardwareIds = true;
-                ShowHardwareIdsSwitch.IsOn = false;
-                _updatingHardwareIds = false;
-                return;
-            }
-        }
-
-        try
-        {
-            await ViewModel.SetShowHardwareIdsAsync(ShowHardwareIdsSwitch.IsOn);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException)
-        {
-            _updatingHardwareIds = true;
-            ShowHardwareIdsSwitch.IsOn = ViewModel.CurrentPreferences.ShowHardwareIds;
-            _updatingHardwareIds = false;
-            PublishPreferenceFailure(exception);
-        }
-    }
-
     private void WelcomeButton_Click(object sender, RoutedEventArgs e)
     {
         if (App.Window is MainWindow mainWindow)
@@ -746,9 +697,6 @@ public sealed partial class SettingsPage : Page
             _updatingMsr = true;
             MsrSwitch.IsOn = preferences.CreateMsrOnInitialize;
             _updatingMsr = false;
-            _updatingHardwareIds = true;
-            ShowHardwareIdsSwitch.IsOn = preferences.ShowHardwareIds;
-            _updatingHardwareIds = false;
             _updatingPartitionGap = true;
             PartitionGapBox.Text = MiBText(preferences.PartitionIgnoreSizeBytes);
             _updatingPartitionGap = false;
@@ -792,7 +740,6 @@ public sealed partial class SettingsPage : Page
             l["DataCapacityLimitHint"]);
         ResetAllTitle.Text = l["ResetAllTitle"];
         ResetAllButtonText.Text = l["ResetAllButton"];
-        PrivacyTitle.Text = l["ShowHardwareIds"];
         WelcomeTitle.Text = l["Welcome"];
         WelcomeButtonText.Text = l["OpenWelcome"];
         StartupAgentTitle.Text = l["Startup"];

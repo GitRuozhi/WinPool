@@ -48,7 +48,7 @@ public sealed class LocalStorageSystemRepository : IStorageSystemRepository
                     && document.Kind == StorageSystemKind.Simulation
                     && !string.IsNullOrWhiteSpace(document.Id))
                 {
-                    documents.Add(StorageSystemDocumentSanitizer.RedactSensitiveData(document));
+                    documents.Add(document);
                 }
             }
             catch (Exception ex) when (
@@ -69,8 +69,6 @@ public sealed class LocalStorageSystemRepository : IStorageSystemRepository
         {
             throw new InvalidOperationException("Only simulated systems can be persisted.");
         }
-        document = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
-
         Directory.CreateDirectory(DirectoryPath);
         var safeId = string.Concat(document.Id.Select(ch =>
             char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
@@ -123,19 +121,18 @@ public static class SimulationDocumentCodec
             throw new InvalidOperationException("Only simulation documents can be encoded.");
         }
 
-        var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
-        var json = JsonSerializer.Serialize(sanitized, JsonOptions);
+        var json = JsonSerializer.Serialize(document, JsonOptions);
         var sha256 = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(json)))
             .ToLowerInvariant();
         var payload = new SimulationDocumentPayload(
-            sanitized.Id,
-            sanitized.SchemaVersion,
-            sanitized.DisplayName,
+            document.Id,
+            document.SchemaVersion,
+            document.DisplayName,
             json,
             sha256,
-            sanitized.Revision,
-            sanitized.UpdatedAt);
+            document.Revision,
+            document.UpdatedAt);
         StorageDocumentTransportBudget.Validate(payload);
         return payload;
     }
@@ -144,8 +141,8 @@ public static class SimulationDocumentCodec
     {
         ArgumentNullException.ThrowIfNull(payload);
         StorageDocumentTransportBudget.Validate(payload);
-        var sanitizedJson = payload.SanitizedJson ?? string.Empty;
-        var bytes = Encoding.UTF8.GetBytes(sanitizedJson);
+        var json = payload.Json ?? string.Empty;
+        var bytes = Encoding.UTF8.GetBytes(json);
         var actual = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         if (!StringComparer.Ordinal.Equals(actual, payload.Sha256))
         {
@@ -153,7 +150,7 @@ public static class SimulationDocumentCodec
         }
 
         var document = JsonSerializer.Deserialize<StorageSystemDocument>(
-                sanitizedJson,
+                json,
                 JsonOptions)
             ?? throw new InvalidDataException("The Agent simulation document is empty.");
         if (document.Kind != StorageSystemKind.Simulation
@@ -171,7 +168,7 @@ public static class SimulationDocumentCodec
         }
 
         document.ValidateCurrentFormat();
-        return StorageSystemDocumentSanitizer.RedactSensitiveData(document);
+        return document;
     }
 }
 
@@ -193,12 +190,12 @@ public static class LocalInventoryDocumentCodec
             throw new InvalidOperationException("Only local inventory documents can be encoded.");
         }
 
-        var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document) with
+        document = document with
         {
             UpdatedAt = DateTimeOffset.FromUnixTimeMilliseconds(
                 document.UpdatedAt.ToUnixTimeMilliseconds())
         };
-        var json = JsonSerializer.Serialize(sanitized, JsonOptions);
+        var json = JsonSerializer.Serialize(document, JsonOptions);
         var bytes = Encoding.UTF8.GetBytes(json);
         if (bytes.Length > MaximumPayloadBytes)
         {
@@ -206,12 +203,12 @@ public static class LocalInventoryDocumentCodec
         }
 
         var payload = new LocalInventoryDocumentPayload(
-            sanitized.Id,
-            sanitized.SchemaVersion,
-            sanitized.DisplayName,
+            document.Id,
+            document.SchemaVersion,
+            document.DisplayName,
             json,
             Hash(bytes),
-            sanitized.UpdatedAt);
+            document.UpdatedAt);
         StorageDocumentTransportBudget.Validate(payload);
         return payload;
     }
@@ -220,7 +217,7 @@ public static class LocalInventoryDocumentCodec
     {
         ArgumentNullException.ThrowIfNull(payload);
         StorageDocumentTransportBudget.Validate(payload);
-        var bytes = Encoding.UTF8.GetBytes(payload.SanitizedJson ?? string.Empty);
+        var bytes = Encoding.UTF8.GetBytes(payload.Json ?? string.Empty);
         if (bytes.Length == 0
             || bytes.Length > MaximumPayloadBytes
             || !StringComparer.Ordinal.Equals(Hash(bytes), payload.Sha256))
@@ -241,7 +238,7 @@ public static class LocalInventoryDocumentCodec
         }
 
         document.ValidateCurrentFormat();
-        return StorageSystemDocumentSanitizer.RedactSensitiveData(document) with
+        return document with
         {
             Revision = 0
         };

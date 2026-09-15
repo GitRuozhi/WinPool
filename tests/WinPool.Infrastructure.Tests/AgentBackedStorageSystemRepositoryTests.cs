@@ -49,7 +49,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
     }
 
     [Fact]
-    public async Task ManageInventoryUsesAgentAndValidatesTheSanitizedDocumentEnvelope()
+    public async Task ManageInventoryUsesAgentAndValidatesTheDocumentEnvelope()
     {
         var connection = new RecordingConnection();
         var provider = new AgentBackedHardwareInventoryProvider(connection);
@@ -68,7 +68,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         Assert.Equal(64, payload.Sha256.Length);
         Assert.Throws<InvalidDataException>(
             () => LocalInventoryDocumentCodec.Decode(
-                payload with { SanitizedJson = payload.SanitizedJson + " " }));
+                payload with { Json = payload.Json + " " }));
     }
 
     [Fact]

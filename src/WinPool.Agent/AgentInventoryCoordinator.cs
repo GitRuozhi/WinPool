@@ -71,40 +71,37 @@ internal sealed class AgentInventoryCoordinator
                 ? await manageProvider.CollectHardwareAsync(cancellationToken)
                 : await manageProvider.CollectLocalAsync(cancellationToken);
             CachePhysicalDeviceIds(document);
-            var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
             var provisional = EmbeddedPowerShellInventoryProvider.Project(
-                sanitized.SystemId,
-                sanitized.Snapshot,
-                includeSensitiveValuesInMemory: false);
+                document.SystemId,
+                document.Snapshot);
             var preferredSystemId = await TryReadPreferredLocalSystemIdAsync(cancellationToken);
             var identity = await localIdentity.ResolveAsync(
                 Environment.MachineName,
                 preferredSystemId,
                 cancellationToken);
             var canonicalSystemId = identity.SystemId;
-            sanitized = sanitized with
+            document = document with
             {
                 SystemId = canonicalSystemId,
-                SourceFacts = sanitized.SourceFacts is null ? null : sanitized.SourceFacts with { SystemId = canonicalSystemId }
+                SourceFacts = document.SourceFacts is null ? null : document.SourceFacts with { SystemId = canonicalSystemId }
             };
             var cached = await localDocument.LoadAsync(cancellationToken);
-            if (cached is not null && sanitized.SourceFacts is not null)
+            if (cached is not null && document.SourceFacts is not null)
             {
                 var previous = LocalInventoryDocumentCodec.Decode(cached.Document);
                 if (previous.SystemId == canonicalSystemId && previous.SourceFacts is not null)
-                    sanitized = sanitized with { SourceFacts = WinPoolFactRefresh.Merge(previous.SourceFacts, sanitized.SourceFacts) };
+                    document = document with { SourceFacts = WinPoolFactRefresh.Merge(previous.SourceFacts, document.SourceFacts) };
             }
             var projected = EmbeddedPowerShellInventoryProvider.Project(
                 canonicalSystemId,
-                sanitized.Snapshot,
-                includeSensitiveValuesInMemory: false);
+                document.Snapshot);
             var saved = await snapshots.SaveAsync(
                 projected,
                 PersistedSystemKind.Local,
                 Environment.MachineName,
                 cancellationToken,
                 LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
-            var payload = LocalInventoryDocumentCodec.Encode(sanitized);
+            var payload = LocalInventoryDocumentCodec.Encode(document);
             if (LocalInventoryDocumentCodec.Decode(payload).SystemId != canonicalSystemId
                 || projected.SystemId != canonicalSystemId
                 || saved.Snapshot.SystemId != canonicalSystemId)
@@ -165,8 +162,7 @@ internal sealed class AgentInventoryCoordinator
         await localCaptureGate.WaitAsync(cancellationToken);
         var captureRequest = new InventoryRequest(
             SystemId.New(),
-            InventoryCaptureReason.Comparison,
-            IncludeSensitiveValuesInMemory: false);
+            InventoryCaptureReason.Comparison);
         try
         {
             var native = await nativeProvider.CaptureAsync(captureRequest, cancellationToken);

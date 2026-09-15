@@ -25,13 +25,12 @@ public sealed class LocalMachineRecordService : IMachineRecordService
             return;
         }
 
-        var redacted = StorageSystemDocumentSanitizer.RedactSensitiveData(localDocument);
         var directory = Path.GetDirectoryName(RecordPath)!;
         Directory.CreateDirectory(directory);
         var temporaryPath = RecordPath + ".tmp";
         await using (var stream = File.Create(temporaryPath))
         {
-            await JsonSerializer.SerializeAsync(stream, redacted, JsonOptions, cancellationToken);
+            await JsonSerializer.SerializeAsync(stream, localDocument, JsonOptions, cancellationToken);
         }
         File.Move(temporaryPath, RecordPath, true);
     }
@@ -79,7 +78,7 @@ public sealed class AgentBackedMachineRecordService(IAgentConnection connection)
         }
 
         // AgentBackedHardwareInventoryProvider asks the Agent to persist the
-        // same sanitized document before returning it to the workspace.
+        // same document before returning it to the workspace.
         return Task.CompletedTask;
     }
 

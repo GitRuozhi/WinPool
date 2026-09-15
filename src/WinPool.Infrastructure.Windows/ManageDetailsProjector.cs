@@ -5,7 +5,7 @@ namespace WinPool.Infrastructure.Windows;
 
 /// <summary>
 /// Transitional details projection for the accepted V0.13 snapshot model.
-/// It preserves the frozen row order while keeping localization and privacy
+/// It preserves the frozen row order while keeping localization and display
 /// presentation in the App.
 /// </summary>
 public sealed class ManageDetailsProjector
@@ -86,7 +86,7 @@ public sealed class ManageDetailsProjector
             {
                 var disk = snapshot.PhysicalDisks.First(x => x.StableId == objectId.ProviderKey);
                 rows.Add(P("Model", disk.Model));
-                rows.Add(P("Serial", disk.MaskedSerialNumber, ManageValuePresentation.MaskedSerial));
+                rows.Add(P("Serial", disk.SerialNumber, ManageValuePresentation.SerialNumber));
                 rows.Add(P("Bus", disk.BusType));
                 rows.Add(P("Media", disk.MediaType));
                 rows.Add(P("Capacity", TopologyProjector.FormatBytes(disk.Size)));

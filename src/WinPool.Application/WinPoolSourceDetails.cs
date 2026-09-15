@@ -17,11 +17,11 @@ public static class WinPoolSourceDetails
         if (item.ObjectType == FactObjectType.PhysicalDisk && name is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump")
             candidates.AddRange(item.Sources.Where(x => x.ObjectType == FactObjectType.Disk)
                 .Select(x => x.Field(name)).OfType<WinPoolSourceField>());
-        var available = candidates.Where(x => x is { ReadState: FieldReadState.Returned, IsRedacted: false,
+        var available = candidates.Where(x => x is { ReadState: FieldReadState.Returned,
             Value: { ValueKind: not JsonValueKind.Null } }).ToArray();
         var conflict = available.Skip(1).Any(x => !JsonElement.DeepEquals(x.Value!.Value, available[0].Value!.Value));
         // The primary provider owns this semantic field; fallback requires exactly one usable observation.
-        var chosen = primary is { ReadState: FieldReadState.Returned, IsRedacted: false, Value: { ValueKind: not JsonValueKind.Null } }
+        var chosen = primary is { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } }
             ? primary : available.Length == 1 ? available[0] : primary;
         return new(chosen, candidates.ToImmutableArray(), conflict,
             conflict ? "SourceConflict" : chosen is null ? "NotCollected" : ReferenceEquals(chosen, primary) ? "PrimaryProvider" : "AssociatedOsDiskFallback");

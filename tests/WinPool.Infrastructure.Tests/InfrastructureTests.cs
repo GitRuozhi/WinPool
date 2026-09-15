@@ -124,13 +124,6 @@ public sealed class InfrastructureTests
         Assert.Equal(3, snapshot.SchemaVersion);
         Assert.Contains(document.SourceFacts!.Objects, x => x.ObjectType == WinPool.Application.FactObjectType.Processor);
         Assert.Contains(document.SourceFacts.Objects, x => x.ObjectType == WinPool.Application.FactObjectType.Volume);
-        var redacted = WinPool.Application.StorageSystemDocumentSanitizer.RedactSensitiveData(document);
-        Assert.All(
-            redacted.Snapshot.PhysicalDisks,
-            disk => Assert.True(
-                !disk.MaskedSerialNumber.Any(char.IsLetterOrDigit)
-                || disk.MaskedSerialNumber.Contains('•')));
-
         var systemId = WinPool.Domain.SystemId.New();
         var compatibilityProvider =
             new WinPool.Infrastructure.Windows.EmbeddedPowerShellInventoryProvider(
@@ -138,8 +131,7 @@ public sealed class InfrastructureTests
         var projected = await compatibilityProvider.CaptureAsync(
             new WinPool.Application.InventoryRequest(
                 systemId,
-                WinPool.Application.InventoryCaptureReason.Comparison,
-                IncludeSensitiveValuesInMemory: false),
+                WinPool.Application.InventoryCaptureReason.Comparison),
             CancellationToken.None);
         Assert.True(projected.IsSuccess);
         Assert.Equal(
@@ -155,13 +147,12 @@ public sealed class InfrastructureTests
         Assert.All(
             projected.Value.Objects.Where(
                 item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk),
-            item => Assert.False(item.Properties.ContainsKey("pnpDeviceId")));
+            item => Assert.True(item.Properties.ContainsKey("pnpDeviceId")));
 
         var stale = await compatibilityProvider.CaptureAsync(
             new WinPool.Application.InventoryRequest(
                 systemId,
                 WinPool.Application.InventoryCaptureReason.PreExecutionValidation,
-                IncludeSensitiveValuesInMemory: false,
                 ExpectedInventoryVersion: "stale-version"),
             CancellationToken.None);
         Assert.Equal(WinPool.Application.ApplicationStatus.Rejected, stale.Status);
@@ -169,15 +160,14 @@ public sealed class InfrastructureTests
     }
 
     [Fact]
-    public async Task NativeReadOnlyScanReturnsSystemAndMountedVolumesWithoutSensitiveIds()
+    public async Task NativeReadOnlyScanReturnsSystemMountedVolumesAndIdentifiers()
     {
         var provider =
             new WinPool.Infrastructure.Windows.NativeWindowsInventoryProvider();
         var result = await provider.CaptureAsync(
             new WinPool.Application.InventoryRequest(
                 WinPool.Domain.SystemId.New(),
-                WinPool.Application.InventoryCaptureReason.Comparison,
-                IncludeSensitiveValuesInMemory: false),
+                WinPool.Application.InventoryCaptureReason.Comparison),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
@@ -202,8 +192,8 @@ public sealed class InfrastructureTests
             result.Value.Objects,
             item => Assert.Equal(64, item.Id.ProviderKey.Length));
         Assert.All(
-            result.Value.Objects,
-            item => Assert.False(item.Properties.ContainsKey("volumeGuid")));
+            result.Value.Objects.Where(item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Volume),
+            item => Assert.True(item.Properties.ContainsKey("volumeGuid")));
         Assert.NotEmpty(result.Value.Relationships ?? []);
         var objectIds = result.Value.Objects.Select(item => item.Id).ToHashSet();
         Assert.All(

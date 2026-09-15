@@ -93,7 +93,7 @@ public static class WinPoolSimulationFacts
     private static ImmutableArray<WinPoolSourceField> Fields(object value, string sourceRef) => JsonSerializer.SerializeToElement(value)
         .EnumerateObject().Where(x => !NonFields.Contains(x.Name) && x.Name != "DeviceId").Select(property =>
         {
-            var name = property.Name switch { "MaskedSerialNumber" => "SerialNumber", "DeviceIdentifier" => "DeviceId", _ => property.Name };
+            var name = property.Name switch { "DeviceIdentifier" => "DeviceId", _ => property.Name };
             var element = property.Value;
             if (property.Name == "DeviceIdentifier" && element.GetString() == "" && value is PhysicalDiskInfo { DeviceId: { } number })
                 element = JsonSerializer.SerializeToElement(number.ToString(System.Globalization.CultureInfo.InvariantCulture));

@@ -90,7 +90,7 @@ public enum ManageValuePresentation
     Plain,
     LocalizationKey,
     PartitionType,
-    MaskedSerial,
+    SerialNumber,
     ProductName,
     LocalDateTime
 }

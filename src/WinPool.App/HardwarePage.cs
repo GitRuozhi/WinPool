@@ -97,7 +97,7 @@ public sealed partial class HardwarePage : Page
         cancel.IsEnabled = capture is not null;
         AutomationProperties.SetName(categories, viewModel.Localization["Hardware"]);
         AutomationProperties.SetName(devices, viewModel.Localization["HardwareReadOnly"]);
-        system = viewModel.SelectedSystem.SourceFacts is { } facts ? new WinPoolSystem(WinPoolFactSanitizer.Redact(facts)) : null;
+        system = viewModel.SelectedSystem.SourceFacts is { } facts ? new WinPoolSystem(facts) : null;
         status.Text = system is null ? viewModel.Localization["HardwareEmpty"] : string.Join(" · ", system.Collections.Select(x =>
             $"{(x.Purpose == CollectionPurpose.Storage ? viewModel.Localization["Manage"] : viewModel.Localization["Hardware"])}: {x.CompletedAt.LocalDateTime:G} ({ReadState(x.State)})"));
         var selected = (categories.SelectedItem as ComboBoxItem)?.Tag;
@@ -149,7 +149,7 @@ public sealed partial class HardwarePage : Page
             var value = field.DisplayValue();
             if (field.Unit == "bytes" && field.TryGetInt64(out var bytes)) value = TopologyProjector.FormatBytes(bytes);
             var label = WinPoolHardwarePresentation.FieldName(field.Name, viewModel.Localization.IsChinese);
-            var state = field.IsRedacted ? viewModel.Localization["SourceRedacted"] : ReadState(field.ReadState);
+            var state = ReadState(field.ReadState);
             var selection = WinPoolSourceDetails.Select(item, field.Name);
             var details = $"{source.ClassName}.{field.Name}\n{viewModel.Localization["SourceRawValue"]}: {field.DisplayValue()} {field.Unit}\n{state}\n"
                 + $"{source.Origin}: {source.Namespace} / {source.ClassName}\n{source.CapturedAt.LocalDateTime:G}"

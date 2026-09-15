@@ -116,7 +116,7 @@ internal sealed class SqliteMonitorSessionPersistence
                 new PersistedMonitorDevice(
                     session.SessionId,
                     MonitorSampleBatchWriter.PersistedDeviceId(sampleIdentity),
-                    SanitizeName(target),
+                    NormalizeName(target),
                     (int)target.ObjectId.Kind),
                 cancellationToken);
         }
@@ -188,7 +188,7 @@ internal sealed class SqliteMonitorSessionPersistence
         }
     }
 
-    private static string SanitizeName(MonitorTarget target)
+    private static string NormalizeName(MonitorTarget target)
     {
         var name = target.CounterIdentity.Trim();
         if (name.Length > 128)

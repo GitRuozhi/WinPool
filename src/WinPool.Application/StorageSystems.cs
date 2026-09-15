@@ -134,15 +134,6 @@ public sealed record StorageSystemDocument(
     }
 }
 
-public static class StorageSystemDocumentSanitizer
-{
-    public static StorageSystemDocument RedactSensitiveData(StorageSystemDocument document)
-    {
-        ArgumentNullException.ThrowIfNull(document);
-        return document with { SourceFacts = document.SourceFacts is null ? null : WinPoolFactSanitizer.Redact(document.SourceFacts) };
-    }
-}
-
 public sealed class StorageSystemCatalog
 {
     private readonly List<StorageSystemDocument> _systems = [];

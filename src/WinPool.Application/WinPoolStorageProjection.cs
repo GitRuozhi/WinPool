@@ -41,7 +41,7 @@ public static class WinPoolStorageProjection
                     values[property.Name] = JsonSerializer.SerializeToElement(replacement); continue;
                 }
                 if (property.Name == "StableId") { values[property.Name] = JsonSerializer.SerializeToElement(item.Id); continue; }
-                var name = property.Name switch { "MaskedSerialNumber" => "SerialNumber", "DeviceIdentifier" => "DeviceId", _ => property.Name };
+                var name = property.Name switch { "DeviceIdentifier" => "DeviceId", _ => property.Name };
                 var field = Field(item, name);
                 if (field is null && item.ObjectType == FactObjectType.StorageTier && property.Name == "AllocatedSize")
                     field = Field(item, "FootprintOnPool");
@@ -66,7 +66,7 @@ public static class WinPoolStorageProjection
                     values[property.Name] = JsonSerializer.SerializeToElement(sources[item.SourceRef].Origin == FactOrigin.Simulation
                         ? CapacitySourceKind.SimulatedEstimate : CapacitySourceKind.Collected); continue;
                 }
-                if (field is not { ReadState: FieldReadState.Returned, IsRedacted: false, Value: { ValueKind: not JsonValueKind.Null } })
+                if (field is not { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } })
                     fieldIssues.Add(new(item.Id, property.Name, field?.ReadState ?? FieldReadState.NotCollected, field?.ReasonCode));
                 values[property.Name] = Convert(field, property.PropertyType, item.Id, warnings);
             }
@@ -178,9 +178,9 @@ public static class WinPoolStorageProjection
         object? fallback = nullable is not null ? null : type == typeof(string) ? ""
             : type == typeof(IReadOnlyList<string>) ? Array.Empty<string>()
             : type == typeof(IReadOnlyList<int>) ? Array.Empty<int>() : type.IsValueType ? Activator.CreateInstance(type) : null;
-        if (field is not { ReadState: FieldReadState.Returned, IsRedacted: false, Value: { } value }
+        if (field is not { ReadState: FieldReadState.Returned, Value: { } value }
             || value.ValueKind == JsonValueKind.Null)
-            return JsonSerializer.SerializeToElement(field?.IsRedacted == true && type == typeof(string) ? "••••" : fallback);
+            return JsonSerializer.SerializeToElement(fallback);
         if (type == typeof(string))
         {
             var text = value.ValueKind == JsonValueKind.String ? value.GetString() ?? ""

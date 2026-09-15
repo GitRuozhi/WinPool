@@ -8,7 +8,7 @@ namespace WinPool.Persistence.Tests;
 public sealed class InventoryRepositoryTests
 {
     [Fact]
-    public async Task SnapshotRoundTripHashesIdsAndOmitsSensitiveFields()
+    public async Task SnapshotRoundTripPreservesIdsPropertiesAndDiagnostics()
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
@@ -26,19 +26,11 @@ public sealed class InventoryRepositoryTests
 
         Assert.NotNull(loaded);
         Assert.Equal(snapshot.InventoryVersion, loaded.Snapshot.InventoryVersion);
-        Assert.All(
-            loaded.Snapshot.Objects,
-            item =>
-            {
-                Assert.Equal(64, item.Id.ProviderKey.Length);
-                Assert.DoesNotContain(
-                    item.Properties.Keys,
-                    key => key.Contains("serial", StringComparison.OrdinalIgnoreCase)
-                           || key.Contains("guid", StringComparison.OrdinalIgnoreCase));
-            });
-        Assert.All(
-            loaded.Snapshot.IdentityDiagnostics,
-            item => Assert.Empty(item.DiagnosticText));
+        Assert.Contains(loaded.Snapshot.Objects, item => item.Id.ProviderKey == "RAW-SYSTEM-ID"
+            && item.Properties["serialNumber"] == "SECRET-SERIAL");
+        Assert.Contains(loaded.Snapshot.Objects, item => item.Id.ProviderKey == "RAW-VOLUME-ID"
+            && item.Properties["volumeGuid"] == "SECRET-GUID");
+        Assert.Contains(loaded.Snapshot.IdentityDiagnostics, item => item.DiagnosticText == "SECRET-DIAGNOSTIC");
         var relationship = Assert.Single(loaded.Snapshot.Relationships!);
         Assert.Contains(
             loaded.Snapshot.Objects,
@@ -59,10 +51,10 @@ public sealed class InventoryRepositoryTests
             saved.SnapshotId.ToString("N"));
         var databaseText = Assert.IsType<string>(
             await command.ExecuteScalarAsync());
-        Assert.DoesNotContain("RAW-SYSTEM-ID", databaseText, StringComparison.Ordinal);
-        Assert.DoesNotContain("RAW-VOLUME-ID", databaseText, StringComparison.Ordinal);
-        Assert.DoesNotContain("SECRET-SERIAL", databaseText, StringComparison.Ordinal);
-        Assert.DoesNotContain("SECRET-DIAGNOSTIC", databaseText, StringComparison.Ordinal);
+        Assert.Contains("RAW-SYSTEM-ID", databaseText, StringComparison.Ordinal);
+        Assert.Contains("RAW-VOLUME-ID", databaseText, StringComparison.Ordinal);
+        Assert.Contains("SECRET-SERIAL", databaseText, StringComparison.Ordinal);
+        Assert.Contains("SECRET-DIAGNOSTIC", databaseText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,7 +87,7 @@ public sealed class InventoryRepositoryTests
     }
 
     [Fact]
-    public async Task ComparisonRoundTripRedactsSensitiveDifferenceValues()
+    public async Task ComparisonRoundTripPreservesDifferenceValues()
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
@@ -133,8 +125,8 @@ public sealed class InventoryRepositoryTests
 
         Assert.NotNull(loaded);
         var difference = Assert.Single(loaded.Comparison.Differences);
-        Assert.Equal("[redacted]", difference.ReferenceValue);
-        Assert.Equal("[redacted]", difference.CandidateValue);
+        Assert.Equal("SECRET-LEFT", difference.ReferenceValue);
+        Assert.Equal("SECRET-RIGHT", difference.CandidateValue);
     }
 
     [Fact]
@@ -151,7 +143,7 @@ public sealed class InventoryRepositoryTests
     }
 
     [Fact]
-    public async Task LatestSanitizedManageDocumentIsBoundToItsNormalizedSnapshot()
+    public async Task LatestManageDocumentIsBoundToItsInventorySnapshot()
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");

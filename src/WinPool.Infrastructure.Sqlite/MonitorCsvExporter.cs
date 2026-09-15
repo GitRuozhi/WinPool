@@ -118,10 +118,10 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
 
     private static string Csv(string value)
     {
-        var sanitized = value.Replace('\r', ' ').Replace('\n', ' ');
-        return sanitized.IndexOfAny([',', '"']) < 0
-            ? sanitized
-            : $"\"{sanitized.Replace("\"", "\"\"")}\"";
+        var normalized = value.Replace('\r', ' ').Replace('\n', ' ');
+        return normalized.IndexOfAny([',', '"']) < 0
+            ? normalized
+            : $"\"{normalized.Replace("\"", "\"\"")}\"";
     }
 
     private static async Task<string> HashAsync(

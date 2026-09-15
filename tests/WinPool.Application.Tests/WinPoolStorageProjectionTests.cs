@@ -58,10 +58,10 @@ public sealed class WinPoolStorageProjectionTests
     }
 
     [Fact]
-    public void SanitizedFactsStillRebuildDriveLettersDirectoryMountsAndPartitionTypes()
+    public void FactsRoundTripRebuildsDriveLettersDirectoryMountsAndPartitionTypes()
     {
         var snapshot = SimulationLayouts.StandardTiered();
-        var facts = WinPoolFactSanitizer.Redact(WinPoolSimulationFacts.Create(snapshot, SystemId.New()));
+        var facts = WinPoolSimulationFacts.Create(snapshot, SystemId.New());
         var result = WinPoolStorageProjection.Project(WinPoolFactsCodec.Decode(WinPoolFactsCodec.Encode(facts)));
         Assert.Equal(snapshot.Volumes.Select(x => string.Join(";", x.AccessPaths)), result.Volumes.Select(x => string.Join(";", x.AccessPaths)));
         Assert.Equal(snapshot.Partitions.Select(x => x.PartitionTypeId), result.Partitions.Select(x => x.PartitionTypeId));

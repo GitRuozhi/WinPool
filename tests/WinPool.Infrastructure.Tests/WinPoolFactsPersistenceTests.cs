@@ -21,7 +21,7 @@ public sealed class WinPoolFactsPersistenceTests
         var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:canonical",
             StorageSystemKind.Simulation, "Canonical", snapshot, [], time);
         var payload = SimulationDocumentCodec.Encode(document);
-        using var parsed = System.Text.Json.JsonDocument.Parse(payload.SanitizedJson);
+        using var parsed = System.Text.Json.JsonDocument.Parse(payload.Json);
         Assert.False(parsed.RootElement.TryGetProperty("Snapshot", out _));
         Assert.False(parsed.RootElement.TryGetProperty("HardwareReport", out _));
         Assert.True(parsed.RootElement.TryGetProperty("SourceFacts", out _));
@@ -29,16 +29,16 @@ public sealed class WinPoolFactsPersistenceTests
         var restored = SimulationDocumentCodec.Decode(payload);
         Assert.Equal(snapshot.Volumes.Select(x => x.DriveLetter), restored.Snapshot.Volumes.Select(x => x.DriveLetter));
         Assert.Equal(snapshot.StoragePools.Select(x => x.Size), restored.Snapshot.StoragePools.Select(x => x.Size));
-        var oldJson = payload.SanitizedJson.Replace("\"SchemaVersion\":3", "\"SchemaVersion\":2", StringComparison.Ordinal);
-        Assert.NotEqual(payload.SanitizedJson, oldJson);
-        var old = payload with { DocumentSchemaVersion = 2, SanitizedJson = oldJson,
+        var oldJson = payload.Json.Replace("\"SchemaVersion\":3", "\"SchemaVersion\":2", StringComparison.Ordinal);
+        Assert.NotEqual(payload.Json, oldJson);
+        var old = payload with { DocumentSchemaVersion = 2, Json = oldJson,
             Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(oldJson))).ToLowerInvariant() };
         Assert.Throws<InvalidDataException>(() => SimulationDocumentCodec.Decode(old));
-        Assert.Equal(oldJson, old.SanitizedJson);
+        Assert.Equal(oldJson, old.Json);
     }
 
     [Fact]
-    public void ActualDocumentCodecPreservesOrdinaryStringsAndRedactsHardwareIdentifiers()
+    public void ActualDocumentCodecPreservesAllSourceValues()
     {
         var system = SystemId.New();
         var time = DateTimeOffset.UtcNow;
@@ -54,18 +54,15 @@ public sealed class WinPoolFactsPersistenceTests
             StorageSystemKind.Simulation, "Roundtrip", StorageSnapshot.Empty("Example"), [], time)
         { SystemId = system, SourceFacts = facts };
         var payload = SimulationDocumentCodec.Encode(document);
-        Assert.DoesNotContain("secret-serial", payload.SanitizedJson);
-        Assert.Contains("ordinary-storage-id", payload.SanitizedJson);
-        Assert.Contains("ordinary-extension", payload.SanitizedJson);
+        Assert.Contains("secret-serial", payload.Json);
+        Assert.Contains("ordinary-storage-id", payload.Json);
+        Assert.Contains("ordinary-extension", payload.Json);
         var restored = SimulationDocumentCodec.Decode(payload);
         var disk = restored.Unified!.Objects.Single();
         Assert.Equal(ulong.MaxValue, disk.Field("Size")!.Value!.Value.GetUInt64());
-        Assert.True(disk.Field("SerialNumber")!.IsRedacted);
+        Assert.Equal("secret-serial", disk.Field("SerialNumber")!.DisplayValue());
         Assert.Equal(FieldReadState.Returned, disk.Field("SerialNumber")!.ReadState);
-        Assert.False(disk.Field("ObjectId")!.IsRedacted);
         Assert.Equal("ordinary-storage-id", disk.Field("ObjectId")!.DisplayValue());
-        Assert.False(disk.Field("UnrecognizedVendorProperty")!.IsRedacted);
         Assert.Equal("ordinary-extension", disk.Field("UnrecognizedVendorProperty")!.DisplayValue());
-        Assert.False(facts.Objects[0].Field("SerialNumber")!.IsRedacted);
     }
 }

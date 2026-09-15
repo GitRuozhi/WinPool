@@ -52,7 +52,7 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         var picker = new FileSavePicker
         {
             SuggestedFileName =
-                $"WinPool-{SanitizeFileName(document.DisplayName)}-{DateTime.Now:yyyyMMdd-HHmmss}.winpool"
+                $"WinPool-{NormalizeFileName(document.DisplayName)}-{DateTime.Now:yyyyMMdd-HHmmss}.winpool"
         };
         picker.FileTypeChoices.Add("WinPool system", [".json"]);
         picker.FileTypeChoices.Add("JSON", [".json"]);
@@ -63,7 +63,6 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
             return null;
         }
 
-        document = StorageSystemDocumentSanitizer.RedactSensitiveData(document);
         await using var stream = File.Create(file.Path);
         await JsonSerializer.SerializeAsync(
             stream,
@@ -123,9 +122,8 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         {
             throw new InvalidDataException("The WinPool import version is not supported.");
         }
-        var sanitized = StorageSystemDocumentSanitizer.RedactSensitiveData(envelope.System);
-        Validate(sanitized);
-        return sanitized.AsImportedSimulation();
+        Validate(envelope.System);
+        return envelope.System.AsImportedSimulation();
     }
 
     private static void Validate(StorageSystemDocument document)
@@ -148,15 +146,9 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         {
             throw new InvalidDataException("The imported system contains invalid or duplicate object IDs.");
         }
-        if (document.Snapshot.PhysicalDisks.Any(x =>
-                x.MaskedSerialNumber.Any(char.IsLetterOrDigit)
-                && !x.MaskedSerialNumber.Contains('•')))
-        {
-            throw new InvalidDataException("The imported system contains an unmasked disk serial number.");
-        }
     }
 
-    private static string SanitizeFileName(string value)
+    private static string NormalizeFileName(string value)
     {
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());

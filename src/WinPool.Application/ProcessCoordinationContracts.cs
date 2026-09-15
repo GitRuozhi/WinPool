@@ -60,7 +60,7 @@ public sealed record SimulationDocumentPayload(
     string DocumentId,
     int DocumentSchemaVersion,
     string DisplayName,
-    string SanitizedJson,
+    string Json,
     string Sha256,
     long Revision,
     DateTimeOffset UpdatedAtUtc);
@@ -69,7 +69,7 @@ public sealed record LocalInventoryDocumentPayload(
     string DocumentId,
     int DocumentSchemaVersion,
     string DisplayName,
-    string SanitizedJson,
+    string Json,
     string Sha256,
     DateTimeOffset CapturedAtUtc);
 

@@ -195,7 +195,7 @@ public sealed class SafeOperationExecutorTests
                 ExecutionEventKind.Progress,
                 historicalAt,
                 "historical.measurement",
-                "A sanitized historical measurement.")
+                "A historical measurement.")
         ]);
         var executor = new ReplayExecutor(source, fixture.Clock);
 

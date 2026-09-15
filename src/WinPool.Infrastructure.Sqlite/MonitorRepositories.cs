@@ -15,7 +15,7 @@ public sealed record PersistedMonitorSession(
 public sealed record PersistedMonitorDevice(
     SessionId SessionId,
     string DeviceId,
-    string SanitizedName,
+    string DisplayName,
     int SourceKind);
 
 public sealed record PersistedMonitorSample(
@@ -266,7 +266,7 @@ public sealed class MonitorDeviceRepository
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentException.ThrowIfNullOrWhiteSpace(device.DeviceId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(device.SanitizedName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(device.DisplayName);
 
         AssertWriteOwnership();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
@@ -283,7 +283,7 @@ public sealed class MonitorDeviceRepository
             "$session",
             MonitorSessionRepository.ToDatabaseId(device.SessionId));
         command.Parameters.AddWithValue("$device", device.DeviceId.Trim());
-        command.Parameters.AddWithValue("$name", device.SanitizedName.Trim());
+        command.Parameters.AddWithValue("$name", device.DisplayName.Trim());
         command.Parameters.AddWithValue("$source", device.SourceKind);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }

@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
@@ -20,11 +18,6 @@ public sealed record PersistedInventorySnapshot(
     Guid SnapshotId,
     InventorySnapshot Snapshot);
 
-/// <summary>
-/// Persists only a defense-in-depth sanitized projection. Provider keys are
-/// deterministically hashed, sensitive property keys are omitted, and free-form
-/// identity diagnostics are not stored.
-/// </summary>
 public sealed class InventorySnapshotRepository
 {
     private static readonly JsonSerializerOptions JsonOptions =
@@ -64,12 +57,11 @@ public sealed class InventorySnapshotRepository
         }
 
         AssertWriteOwnership();
-        var sanitized = InventoryPersistenceSanitizer.Sanitize(snapshot);
         var persistedMachineBinding = systemKind == PersistedSystemKind.Local
             ? !string.IsNullOrWhiteSpace(canonicalLocalSystemBinding)
                 ? canonicalLocalSystemBinding
-                : sanitized.MachineBinding
-            : sanitized.MachineBinding;
+                : snapshot.MachineBinding
+            : snapshot.MachineBinding;
         var snapshotId = Guid.NewGuid();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var transaction =
@@ -94,7 +86,7 @@ public sealed class InventorySnapshotRepository
             systemCommand.Parameters.AddWithValue("$binding", persistedMachineBinding);
             systemCommand.Parameters.AddWithValue(
                 "$created",
-                sanitized.CapturedAtUtc.ToUnixTimeMilliseconds());
+                snapshot.CapturedAtUtc.ToUnixTimeMilliseconds());
             await systemCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -109,20 +101,20 @@ public sealed class InventorySnapshotRepository
                 """;
             snapshotCommand.Parameters.AddWithValue("$snapshot", Id(snapshotId));
             snapshotCommand.Parameters.AddWithValue("$system", Id(snapshot.SystemId.Value));
-            snapshotCommand.Parameters.AddWithValue("$version", sanitized.InventoryVersion);
+            snapshotCommand.Parameters.AddWithValue("$version", snapshot.InventoryVersion);
             snapshotCommand.Parameters.AddWithValue(
                 "$captured",
-                sanitized.CapturedAtUtc.ToUnixTimeMilliseconds());
+                snapshot.CapturedAtUtc.ToUnixTimeMilliseconds());
             snapshotCommand.Parameters.AddWithValue(
                 "$provider",
-                (int)sanitized.ProviderKind);
+                (int)snapshot.ProviderKind);
             snapshotCommand.Parameters.AddWithValue(
                 "$json",
-                JsonSerializer.Serialize(sanitized, JsonOptions));
+                JsonSerializer.Serialize(snapshot, JsonOptions));
             await snapshotCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var persistedIds = sanitized.Objects.ToDictionary(
+        var persistedIds = snapshot.Objects.ToDictionary(
             item => item.Id,
             item => ObjectId(item.Id));
         await using (var objectCommand = connection.CreateCommand())
@@ -145,7 +137,7 @@ public sealed class InventorySnapshotRepository
             var jsonParameter =
                 objectCommand.Parameters.Add("$json", SqliteType.Text);
             objectCommand.Prepare();
-            foreach (var item in sanitized.Objects)
+            foreach (var item in snapshot.Objects)
             {
                 snapshotParameter.Value = Id(snapshotId);
                 objectParameter.Value = persistedIds[item.Id];
@@ -173,7 +165,7 @@ public sealed class InventorySnapshotRepository
             var kindParameter =
                 relationshipCommand.Parameters.Add("$kind", SqliteType.Text);
             relationshipCommand.Prepare();
-            foreach (var relationship in sanitized.Relationships ?? [])
+            foreach (var relationship in snapshot.Relationships ?? [])
             {
                 snapshotParameter.Value = Id(snapshotId);
                 fromParameter.Value = persistedIds[relationship.FromObjectId];
@@ -184,7 +176,7 @@ public sealed class InventorySnapshotRepository
         }
 
         await transaction.CommitAsync(cancellationToken);
-        return new PersistedInventorySnapshot(snapshotId, sanitized);
+        return new PersistedInventorySnapshot(snapshotId, snapshot);
     }
 
     public async Task<PersistedInventorySnapshot?> GetAsync(
@@ -316,7 +308,6 @@ public sealed class InventoryComparisonRepository
         }
 
         AssertWriteOwnership();
-        var sanitized = InventoryPersistenceSanitizer.Sanitize(comparison);
         var comparisonId = Guid.NewGuid();
         var createdAt = DateTimeOffset.UtcNow;
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
@@ -332,14 +323,14 @@ public sealed class InventoryComparisonRepository
         command.Parameters.AddWithValue("$candidate", InventorySnapshotRepository.Id(candidateSnapshotId));
         command.Parameters.AddWithValue(
             "$json",
-            JsonSerializer.Serialize(sanitized, JsonOptions));
+            JsonSerializer.Serialize(comparison, JsonOptions));
         command.Parameters.AddWithValue("$created", createdAt.ToUnixTimeMilliseconds());
         await command.ExecuteNonQueryAsync(cancellationToken);
         return new(
             comparisonId,
             referenceSnapshotId,
             candidateSnapshotId,
-            sanitized,
+            comparison,
             createdAt);
     }
 
@@ -386,102 +377,6 @@ public sealed class InventoryComparisonRepository
 
         writeOwner.AssertOwnership(store);
     }
-}
-
-internal static class InventoryPersistenceSanitizer
-{
-    private static readonly string[] SensitivePropertyFragments =
-    [
-        "serial",
-        "guid",
-        "pnp",
-        "mac",
-        "hardwareid",
-        "deviceid",
-        "uniqueid"
-    ];
-
-    public static InventorySnapshot Sanitize(InventorySnapshot snapshot)
-    {
-        var idMap = snapshot.Objects
-            .Select(item => item.Id)
-            .Distinct()
-            .ToDictionary(id => id, SanitizeId);
-        StorageObjectId Map(StorageObjectId id) =>
-            idMap.TryGetValue(id, out var mapped) ? mapped : SanitizeId(id);
-
-        var objects = snapshot.Objects
-            .Select(item =>
-                item with
-                {
-                    Id = Map(item.Id),
-                    ParentId = item.ParentId is { } parent ? Map(parent) : null,
-                    Properties = item.Properties
-                        .Where(pair => !IsSensitive(pair.Key))
-                        .ToDictionary(
-                            pair => pair.Key,
-                            pair => pair.Value,
-                            StringComparer.Ordinal)
-                })
-            .ToArray();
-        var diagnostics = snapshot.IdentityDiagnostics
-            .Select(item =>
-                item with
-                {
-                    ObjectId = Map(item.ObjectId),
-                    DiagnosticText = string.Empty
-                })
-            .ToArray();
-        var relationships = (snapshot.Relationships ?? [])
-            .Select(item =>
-                item with
-                {
-                    FromObjectId = Map(item.FromObjectId),
-                    ToObjectId = Map(item.ToObjectId)
-                })
-            .ToArray();
-        return snapshot with
-        {
-            Objects = objects,
-            IdentityDiagnostics = diagnostics,
-            Relationships = relationships
-        };
-    }
-
-    public static InventoryComparison Sanitize(InventoryComparison comparison) =>
-        comparison with
-        {
-            Differences = comparison.Differences
-                .Select(item =>
-                    IsSensitive(item.PropertyKey)
-                        ? item with
-                        {
-                            ReferenceValue = "[redacted]",
-                            CandidateValue = "[redacted]"
-                        }
-                        : item)
-                .ToArray()
-        };
-
-    private static StorageObjectId SanitizeId(StorageObjectId id) =>
-        new(id.System, id.Kind, Hash(id.ProviderKey));
-
-    private static bool IsSensitive(string key)
-    {
-        var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
-            .Replace("-", string.Empty, StringComparison.Ordinal);
-        return SensitivePropertyFragments.Any(
-            fragment => normalized.Contains(fragment, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string Hash(string value) =>
-        Convert.ToHexString(
-                SHA256.HashData(
-                    Encoding.UTF8.GetBytes(
-                        string.IsNullOrWhiteSpace(value)
-                            ? "<empty>"
-                            : value.Trim().ToUpperInvariant())))
-            .ToLowerInvariant();
 }
 
 internal static class InventoryPersistenceJson

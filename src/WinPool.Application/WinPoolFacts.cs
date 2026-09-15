@@ -27,8 +27,7 @@ public sealed record WinPoolSourceField(
     FieldReadState ReadState,
     string SourceRef,
     string? Unit = null,
-    string? ReasonCode = null,
-    bool IsRedacted = false)
+    string? ReasonCode = null)
 {
     public static WinPoolSourceField Returned<T>(string name, T value, FactValueType type,
         string sourceRef, string? unit = null) =>
@@ -45,11 +44,11 @@ public sealed record WinPoolSourceField(
     public bool TryGetInt64(out long value)
     {
         value = 0;
-        return ReadState == FieldReadState.Returned && !IsRedacted
+        return ReadState == FieldReadState.Returned
             && Value is { ValueKind: JsonValueKind.Number } element && element.TryGetInt64(out value);
     }
 
-    public string DisplayValue() => IsRedacted ? "••••" : Value switch
+    public string DisplayValue() => Value switch
     {
         null => ReadState == FieldReadState.Returned ? "null" : string.Empty,
         { ValueKind: JsonValueKind.Null } => "null",
@@ -64,7 +63,7 @@ public sealed record WinPoolSourceField(
             throw new InvalidDataException("Invalid source field metadata.");
         if (ReadState != FieldReadState.Returned && Value is not null)
             throw new InvalidDataException("A failed or uncollected field cannot contain a returned value.");
-        if (Value is null || Value.Value.ValueKind == JsonValueKind.Null || IsRedacted)
+        if (Value is null || Value.Value.ValueKind == JsonValueKind.Null)
             return;
         var v = Value.Value;
         var valid = ValueType switch

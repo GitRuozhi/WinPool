@@ -28,7 +28,7 @@ public sealed class SamplingDiagnosticsTests
     }
 
     [Fact]
-    public void EmptyFailureCodeIsRedactedToStableDiagnosticCode()
+    public void EmptyFailureCodeIsNormalizedToStableDiagnosticCode()
     {
         var tracker = new SamplingDiagnosticsTracker();
 

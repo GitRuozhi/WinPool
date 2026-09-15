@@ -203,7 +203,7 @@ public sealed class SimulationEditCoordinatorTests
             [new StorageSubsystemInfo("subsystem:1", "Storage Spaces", "Healthy", "OK")],
             [
                 new PhysicalDiskInfo(
-                    "physical:p1", true, "Disk One", "Model", "masked", "SATA", "SSD",
+                    "physical:p1", true, "Disk One", "Model", "SERIAL-123", "SATA", "SSD",
                     1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 5,
                     false, false, false, false, "pool:primordial")
             ],

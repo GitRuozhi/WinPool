@@ -6,8 +6,8 @@ namespace WinPool.Infrastructure.Windows;
 
 /// <summary>
 /// Transitional comparison projection for the accepted V0.13 snapshot model.
-/// Values stay UI-neutral; localization, privacy masking, and display-only
-/// normalization are applied by the App from the presentation hint.
+/// Values stay UI-neutral; localization and display-only normalization are
+/// applied by the App from the presentation hint.
 /// </summary>
 public sealed class ManageComparisonProjector
     : IManageComparisonProjector<StorageSystemDocument>
@@ -187,10 +187,10 @@ public sealed class ManageComparisonProjector
                 rows.Add(P("Model", Empty(physical.Model)));
                 rows.Add(P(
                     "Serial",
-                    string.IsNullOrWhiteSpace(physical.MaskedSerialNumber) || physical.MaskedSerialNumber == "—"
+                    string.IsNullOrWhiteSpace(physical.SerialNumber) || physical.SerialNumber == "—"
                         ? string.Empty
-                        : physical.MaskedSerialNumber,
-                    ManageValuePresentation.MaskedSerial));
+                        : physical.SerialNumber,
+                    ManageValuePresentation.SerialNumber));
                 rows.Add(P("Firmware", Empty(physical.FirmwareVersion)));
                 rows.Add(P("Bus", Empty(physical.BusType)));
                 rows.Add(P("InterfaceType", Empty(physical.InterfaceType)));
