@@ -60,7 +60,7 @@ internal static class WinPoolFactCapture
             sources.TryAdd(sourceRef, new(sourceRef, Origin(sourceNamespace, className), sourceNamespace, className, snapshot.ScannedAt, purpose));
             var fields = observation.GetProperty("Fields").EnumerateArray().Select(field => ReadField(field, sourceRef)).ToImmutableArray();
             if (className == "Win32_LogicalDisk" && fields.FirstOrDefault(x => x.Name == "DriveType") is { } driveType
-                && driveType.TryGetInt64(out var driveCode) && driveCode == 4) type = FactObjectType.NetworkDisk;
+                && TryGetInteger(driveType, out var driveCode) && driveCode == 4) type = FactObjectType.NetworkDisk;
             string Text(string name) => fields.FirstOrDefault(x => x.Name == name)?.Value is { ValueKind: JsonValueKind.String } text ? text.GetString() ?? "" : "";
             var uniqueId = Text(type == FactObjectType.Partition ? "Guid" : "UniqueId");
             var objectId = Text("ObjectId");
@@ -154,8 +154,8 @@ internal static class WinPoolFactCapture
         foreach (var supplement in objects.Where(x => sources[x.SourceRef].ClassName is "Win32_DiskDrive" or "Windows.DiskRoles"))
         {
             var number = supplement.Field(sources[supplement.SourceRef].ClassName == "Win32_DiskDrive" ? "Index" : "DiskNumber");
-            if (number is null || !number.TryGetInt64(out var index)) continue;
-            var matches = objects.Where(x => x.ObjectType == FactObjectType.Disk && x.Field("Number") is { } n && n.TryGetInt64(out var value) && value == index).ToArray();
+            if (number is null || !TryGetInteger(number, out var index)) continue;
+            var matches = objects.Where(x => x.ObjectType == FactObjectType.Disk && x.Field("Number") is { } n && TryGetInteger(n, out var value) && value == index).ToArray();
             if (matches.Length == 1) Link(matches[0].Id, supplement.Id, "disk-supplement");
         }
         var state = sources.Values.Any(x => x.ReadState == FieldReadState.Failed) ? FieldReadState.Failed : FieldReadState.Returned;
@@ -166,6 +166,18 @@ internal static class WinPoolFactCapture
         };
         facts.Validate();
         return facts;
+    }
+
+    private static bool TryGetInteger(WinPoolSourceField field, out long value)
+    {
+        value = 0;
+        if (field.ReadState != FieldReadState.Returned
+            || field.Value is not { ValueKind: JsonValueKind.Number } number)
+            return false;
+        if (number.TryGetInt64(out value)) return true;
+        if (!number.TryGetUInt64(out var unsigned) || unsigned > long.MaxValue) return false;
+        value = (long)unsigned;
+        return true;
     }
 
     private static WinPoolSourceField ReadField(JsonElement field, string sourceRef)

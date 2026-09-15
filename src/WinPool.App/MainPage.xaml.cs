@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Navigation;
 using System.Runtime.InteropServices;
 using WinPool.App.ViewModels;
 using WinPool.Application;
+using WinPool_App.Controls;
 
 namespace WinPool_App;
 
@@ -53,9 +54,9 @@ public sealed partial class MainPage : Page
         return ShellExecuteEx(ref info);
     }
 
-    private const double LabelColumnWidth = 96;
-    private const double ColumnGap = 8;
-    private const double RowHeight = 32;
+    private const double LabelColumnWidth = PropertyTableVisuals.LabelColumnWidth;
+    private const double ColumnGap = PropertyTableVisuals.ColumnGap;
+    private const double RowHeight = PropertyTableVisuals.RowHeight;
     private const double MaxValueWidth = 250;
     private readonly Dictionary<string, int> _columnIndexByKey = new(StringComparer.Ordinal);
     private readonly List<Border> _columnCells = [];
@@ -187,12 +188,8 @@ public sealed partial class MainPage : Page
 
         for (var rowIndex = 0; rowIndex < labels.Count; rowIndex++)
         {
-            var labelCell = new Border
-            {
-                MinHeight = RowHeight,
-                BorderBrush = dividerBrush,
-                BorderThickness = new Thickness(0, 0, 0, 1),
-                Child = new TextBlock
+            var labelCell = PropertyTableVisuals.CreateCell(
+                new TextBlock
                 {
                     Padding = new Thickness(10, 0, 10, 0),
                     VerticalAlignment = VerticalAlignment.Center,
@@ -200,8 +197,7 @@ public sealed partial class MainPage : Page
                     IsTextSelectionEnabled = true,
                     Text = labels[rowIndex],
                     TextTrimming = TextTrimming.CharacterEllipsis
-                }
-            };
+                }, dividerBrush);
             Grid.SetRow(labelCell, rowIndex);
             labelGrid.Children.Add(labelCell);
 
@@ -240,15 +236,11 @@ public sealed partial class MainPage : Page
                     text.Padding = new Thickness(0);
                     content = selector;
                 }
-                var cell = new Border
-                {
-                    MinHeight = RowHeight,
-                    Margin = new Thickness(i == 0 ? 0 : ColumnGap, 0, 0, 0),
-                    BorderBrush = dividerBrush,
-                    BorderThickness = new Thickness(0, 0, 0, 1),
-                    Child = content,
-                    Tag = columns[i].Key
-                };
+                var cell = PropertyTableVisuals.CreateCell(
+                    content,
+                    dividerBrush,
+                    i == 0 ? 0 : ColumnGap,
+                    tag: columns[i].Key);
                 cell.Tapped += ColumnCell_Tapped;
                 cell.PointerEntered += ColumnCell_PointerEntered;
                 cell.PointerExited += ColumnCell_PointerExited;

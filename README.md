@@ -9,12 +9,12 @@ The current implementation is **V0.52**. Real storage-structure changes are not 
 ## What you can use
 
 - View local storage through read-only discovery and inspect pools, tiers, disks, partitions, and related information.
-- Inspect read-only hardware objects, collection status, and raw source details; request full hardware refresh separately.
+- Review a read-only ten-section hardware report with per-device properties, source details, local refresh, and complete system JSON export.
 - Edit simulated systems on the Storage structure and Disk/partition pages.
 - Monitor supported devices and configure application and background preferences.
 - Use English or Simplified Chinese, themes, and keyboard navigation.
 
-Current documents use source facts (document 3 / SQLite 16 / IPC 6); older data is rejected without migration or deletion.
+Current documents use source facts (document 3 / SQLite 16 / IPC 7); older data is rejected without migration or deletion.
 
 Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
 

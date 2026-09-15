@@ -19,8 +19,12 @@ public sealed class WinPoolFactCaptureTests
             Logical("C:", 3), Logical("D:", 3), Logical("Z:", 4), Logical("Q:", null) } }));
         var facts = WinPoolFactCapture.Read(json.RootElement, StorageSnapshot.Empty("test"), SystemId.New(), CollectionPurpose.Hardware);
         var system = new WinPoolSystem(facts);
-        Assert.Single(system.Objects.Where(x => x.ObjectType == FactObjectType.NetworkDisk));
-        var volume = Assert.Single(system.Objects.Where(x => x.ObjectType == FactObjectType.Volume));
+        Assert.Single(facts.Objects.Where(x => x.ObjectType == FactObjectType.NetworkDisk));
+        var network = Assert.Single(system.Objects.Where(x => x.ObjectType == FactObjectType.Partition
+            && x.Sources.Any(source => source.ObjectType == FactObjectType.NetworkDisk)));
+        Assert.Single(network.Sources);
+        var volume = Assert.Single(system.Objects.Where(x => x.ObjectType == FactObjectType.Partition
+            && x.Sources.Any(source => source.ObjectType == FactObjectType.Volume)));
         Assert.Equal(2, volume.Sources.Length);
         Assert.Equal(5, facts.Objects.Length);
         Assert.Single(WinPoolStorageProjection.Project(facts).NetworkDisks);
@@ -70,6 +74,21 @@ public sealed class WinPoolFactCaptureTests
         var cpu = Assert.Single(hardware.SourceFacts!.Objects.Where(x => x.ObjectType == FactObjectType.Processor));
         Assert.Equal(FieldReadState.Returned, cpu.Field("Name")!.ReadState);
         Assert.Equal(FactValueType.UInt64, cpu.Field("NumberOfCores")!.ValueType);
+        var graphicsSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "WinPool.GraphicsAdapter"));
+        if (graphicsSource.ReadState == FieldReadState.Returned)
+        {
+            var graphics = hardware.SourceFacts.Objects.Where(x => x.SourceRef == graphicsSource.Id).ToArray();
+            Assert.NotEmpty(graphics);
+            Assert.All(graphics, item =>
+            {
+                Assert.Equal("bytes", item.Field("DedicatedVideoMemory")!.Unit);
+                Assert.Equal("bytes", item.Field("SharedSystemMemory")!.Unit);
+                Assert.Equal(FieldReadState.Returned, item.Field("DirectXFeatureLevel")!.ReadState);
+            });
+        }
+        var networkSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "WinPool.NetworkAdapter"));
+        Assert.Equal(FieldReadState.Returned, networkSource.ReadState);
+        Assert.NotEmpty(hardware.SourceFacts.Objects.Where(x => x.SourceRef == networkSource.Id));
         var merged = WinPoolFactRefresh.Merge(storage.SourceFacts, hardware.SourceFacts);
         Assert.Equal(2, merged.Collections.Length);
         Assert.Equal(merged.Objects.Length, merged.Objects.Select(x => x.Id).Distinct().Count());

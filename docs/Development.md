@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前阶段结果见 [V0.52 归档](Archive/V0.52/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.52。统一数据与模拟编辑升级已完成，实际验证及边界见 [实施核对](Reference/V0.52-实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前阶段结果见 [V0.52 归档](Archive/V0.52/README.md)和[硬件报告执行归档](Archive/20260915-hardware-report/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.52。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Reference/20260915_硬件报告实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
@@ -61,6 +61,8 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 `WinPoolFacts` 保存带来源、时间、类型、读取状态的原始对象及关联；`WinPoolSystem` 与 `StorageSnapshot` 是只读派生结果。跨来源选值由 `WinPoolSourceDetails` 维护，只有明确等价的字段参与备用或冲突判断。缺少安全字段、关联冲突和数值超范围不能变成允许；所有采集字段保持原值，不设置脱敏状态或按隐私开关裁剪。
 
 存储与完整硬件使用独立刷新用途，Agent 串行协调；较旧结果忽略。来源失败保留上次事实及关联时间，成功空集合才移除对象。层成员没有可靠关联时显示归属未知，不按介质相同猜测。
+
+完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；后者以接口 ID 保存地址、MAC、链路速度和默认路由状态。`HardwareReportProjector` 负责十段只读报告、可靠关联和字段详情；`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 只通过 `PropertyTableVisuals` 复用单元格样式与尺寸，不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式仍为 SQLite 16 / IPC 7 / StorageSystemDocument 3 / 来源事实 1。
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 

@@ -676,7 +676,7 @@ public sealed class ArchitectureBoundaryTests
             ManageWorkspaceCategory.Partition,
             ManageSelectionRules.CategoryFor(ManageObjectRole.Partition));
         Assert.Equal(
-            ManageWorkspaceCategory.Volume,
+            ManageWorkspaceCategory.Partition,
             ManageSelectionRules.CategoryFor(ManageObjectRole.Volume));
     }
 

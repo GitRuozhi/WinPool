@@ -812,7 +812,8 @@ public sealed partial class MainWindow : Window
 
     private void UpdateShellNavigationTextVisibility()
     {
-        var compact = RootGrid.ActualWidth > 0 && RootGrid.ActualWidth < 1180;
+        var compactThreshold = ViewModel.Localization.IsChinese ? 1180 : 1500;
+        var compact = RootGrid.ActualWidth > 0 && RootGrid.ActualWidth < compactThreshold;
         foreach (var item in ShellNavigationItems)
         {
             var showText = !compact || item == SelectedShellItem;

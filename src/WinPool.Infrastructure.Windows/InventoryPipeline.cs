@@ -160,8 +160,14 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
                 SnapshotVersion = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(result.StandardOutput))) };
             var id = $"local:{context.Computer.StableId}";
             var system = InternalStableIdentity.SystemFromDocumentId(id);
+            var facts = WinPoolFactCapture.Read(root, context, system, _purpose);
+            if (_purpose == CollectionPurpose.Hardware)
+            {
+                facts = WindowsGraphicsFactCollector.AddTo(facts, capturedAt);
+                facts = WindowsNetworkFactCollector.AddTo(facts, capturedAt);
+            }
             return new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, id, StorageSystemKind.Local,
-                name, WinPoolFactCapture.Read(root, context, system, _purpose), [], capturedAt);
+                name, facts, [], capturedAt);
         }
         catch (JsonException ex)
         {

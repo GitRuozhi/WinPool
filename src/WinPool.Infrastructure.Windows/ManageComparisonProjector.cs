@@ -33,9 +33,6 @@ public sealed class ManageComparisonProjector
         {
             case ManageObjectRole.System:
             {
-                var uniquePhysical = snapshot.PhysicalDisks
-                    .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
                 rows.Add(P("HostName", snapshot.Computer.Name));
                 rows.Add(P("Version", snapshot.Computer.WindowsProductName, ManageValuePresentation.ProductName));
                 rows.Add(P("VersionNumber", snapshot.Computer.DisplayVersion));
@@ -44,21 +41,7 @@ public sealed class ManageComparisonProjector
                     string.IsNullOrWhiteSpace(snapshot.Computer.Ubr)
                         ? snapshot.Computer.OsBuild
                         : $"{snapshot.Computer.OsBuild}.{snapshot.Computer.Ubr}"));
-                rows.Add(P("LocalStorage", TopologyProjector.FormatBytes(uniquePhysical.Sum(x => x.Size))));
-                if (snapshot.NetworkDisks.Count > 0)
-                {
-                    rows.Add(P("ExternalStorage", TopologyProjector.FormatBytes(snapshot.NetworkDisks.Sum(x => x.Size))));
-                }
-                rows.Add(P("StoragePool", snapshot.StoragePools.Count.ToString()));
-                rows.Add(P("PhysicalDisk", uniquePhysical.Count.ToString()));
-                if (snapshot.VirtualDisks.Count > 0)
-                {
-                    rows.Add(P("VirtualDisk", snapshot.VirtualDisks.Count.ToString()));
-                }
-                rows.Add(P("Partition", snapshot.PartitionUnions.Count.ToString()));
-                rows.Add(P(
-                    "AccessibleVolumes",
-                    snapshot.PartitionUnions.Count(x => x.AccessPaths.Count > 0 || !string.IsNullOrWhiteSpace(x.DriveLetter)).ToString()));
+                rows.AddRange(ManageSystemSummaryProjector.Project(document));
                 break;
             }
             case ManageObjectRole.StoragePool:

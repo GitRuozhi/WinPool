@@ -37,8 +37,7 @@ public sealed class ManageSystemProjectorTests
         Assert.Equal(
             [ManageObjectRole.System, ManageObjectRole.StoragePool,
              ManageObjectRole.StorageTier, ManageObjectRole.PhysicalDisk,
-             ManageObjectRole.VirtualDisk, ManageObjectRole.Partition,
-             ManageObjectRole.Volume],
+             ManageObjectRole.VirtualDisk, ManageObjectRole.Partition],
             projection.WorkspaceObjects.Select(item => item.Role));
     }
 
@@ -90,8 +89,8 @@ public sealed class ManageSystemProjectorTests
                 document.Id),
             ManageObjectRole.System);
         Assert.Equal(
-            ["HostName", "Version", "VersionNumber", "OsBuild", "Cpu", "Memory",
-             "LocalStorage", "StoragePool", "PhysicalDisk", "VirtualDisk",
+            ["HostName", "Version", "VersionNumber", "OsBuild", "LocalStorage",
+             "ExternalStorage", "StoragePool", "PhysicalDisk", "VirtualDisk",
              "Partition", "AccessibleVolumes"],
             systemView.Properties.Select(property => property.PropertyTextKey));
         Assert.Equal(
@@ -135,7 +134,7 @@ public sealed class ManageSystemProjectorTests
             ManageObjectRole.Partition);
         Assert.Equal(
             ["OwningDisk", "Type", "FileSystem", "AllocationUnit", "Capacity",
-             "Available", "SystemPartition", "PartitionStatus", "StartOffset",
+             "Available", "SystemPartition", "PartitionStatus", "Health", "StartOffset",
              "DriveLetter", "VolumeLabel", "Path"],
             partitionView.Properties.Select(property => property.PropertyTextKey));
         Assert.Equal(
@@ -195,11 +194,12 @@ public sealed class ManageSystemProjectorTests
             "fallback");
         Assert.Equal("C: Data", partition.DisplayName);
         Assert.Equal(
-            ["Type", "FileSystem", "AllocationUnit", "Capacity", "Available", "Health", "Path", "LastScan"],
+            ["OwningDisk", "Type", "FileSystem", "AllocationUnit", "Capacity", "Available",
+             "SystemPartition", "PartitionStatus", "Health", "StartOffset", "DriveLetter", "VolumeLabel", "Path"],
             partition.Properties.Select(property => property.PropertyTextKey));
         Assert.Equal(
             ManageValuePresentation.PartitionType,
-            partition.Properties[0].Presentation);
+            partition.Properties.Single(x => x.PropertyTextKey == "Type").Presentation);
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
-    public void VolumeWorkspaceObjectsUseVolumeIdentityInsteadOfPartitionIdentity()
+    public void PartitionWorkspaceUsesTheUnionIdentityAndKeepsVolumeSourceResolvable()
     {
         var source = Document();
         var letterless = new PartitionInfo(
@@ -288,15 +288,16 @@ public sealed class ManageSystemProjectorTests
                 Partitions = source.Snapshot.Partitions.Append(letterless).ToArray()
             });
 
-        var volumes = new ManageSystemProjector().Project(document).WorkspaceObjects
-            .Where(item => item.Role == ManageObjectRole.Volume)
+        var partitions = new ManageSystemProjector().Project(document).WorkspaceObjects
+            .Where(item => item.Role == ManageObjectRole.Partition)
             .ToList();
 
-        var volume = Assert.Single(volumes);
-        Assert.Equal(ManageWorkspaceCategory.Volume, volume.Category);
-        Assert.Equal("volume:1", volume.Id.ProviderKey);
-        Assert.Equal("C: Data", volume.DisplayName);
-        Assert.Equal(WinPool.Domain.StorageObjectKind.Volume, volume.Id.Kind);
+        Assert.Equal(2, partitions.Count);
+        var primary = Assert.Single(partitions, item => item.Id.ProviderKey == "partition:1");
+        Assert.Equal(ManageWorkspaceCategory.Partition, primary.Category);
+        Assert.Equal("C: Data", primary.DisplayName);
+        Assert.Equal(WinPool.Domain.StorageObjectKind.Partition, primary.Id.Kind);
+        Assert.Equal(primary.Id.ProviderKey, document.Snapshot.ResolvePartitionUnion("volume:1")!.Id);
     }
 
     [Fact]
@@ -309,14 +310,15 @@ public sealed class ManageSystemProjectorTests
         var comparison = new ManageComparisonProjector().Project(document, id, ManageObjectRole.Volume);
         Assert.Equal(
             ["OwningDisk", "Type", "FileSystem", "AllocationUnit", "Capacity",
-             "Available", "SystemPartition", "PartitionStatus", "StartOffset",
+             "Available", "SystemPartition", "PartitionStatus", "Health", "StartOffset",
              "DriveLetter", "VolumeLabel", "Path"],
             comparison.Properties.Select(property => property.PropertyTextKey));
 
         var details = new ManageDetailsProjector().Project(document, id, ManageObjectRole.Volume, "fallback");
         Assert.Equal("C: Data", details.DisplayName);
         Assert.Equal(
-            ["Type", "FileSystem", "AllocationUnit", "Capacity", "Available", "Health", "Path", "LastScan"],
+            ["OwningDisk", "Type", "FileSystem", "AllocationUnit", "Capacity", "Available",
+             "SystemPartition", "PartitionStatus", "Health", "StartOffset", "DriveLetter", "VolumeLabel", "Path"],
             details.Properties.Select(property => property.PropertyTextKey));
 
         var navigation = new ManageNavigationProjector().Project(document, id, ManageObjectRole.Volume);
@@ -361,13 +363,13 @@ public sealed class ManageSystemProjectorTests
         };
         var document = original.WithCandidate(original.Snapshot with { Volumes = [volume] });
         var item = Assert.Single(new ManageSystemProjector().Project(document).WorkspaceObjects,
-            x => x.Role == ManageObjectRole.Volume);
+            x => x.Role == ManageObjectRole.Partition && x.Id.ProviderKey == volume.StableId);
         var details = new ManageDetailsProjector().Project(document, item.Id, item.Role, item.DisplayName);
         Assert.Equal(TopologyProjector.FormatBytes(volume.Size), details.Properties.Single(x => x.PropertyTextKey == "Capacity").RawValue);
         Assert.Equal(volume.AccessPaths[0], details.Properties.Single(x => x.PropertyTextKey == "Path").RawValue);
         var navigation = new ManageNavigationProjector().Project(document, item.Id, item.Role);
-        Assert.Null(navigation.RelatedSelections[ManageWorkspaceCategory.Partition]);
-        Assert.Equal(volume.StableId, navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Id.ProviderKey);
+        Assert.Equal(volume.StableId, navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Id.ProviderKey);
+        Assert.Null(navigation.RelatedSelections[ManageWorkspaceCategory.Volume]);
         var commands = new ManageCommandProjector().Project(document, document with { Kind = StorageSystemKind.Local }, item.Id, item.Role, item.Category);
         Assert.False(commands.Commands.Single(x => x.Kind == ManageCommandKind.EditPartition).IsEnabled);
         Assert.False(commands.SystemDialogTarget.HasResolvedPartition);
@@ -422,7 +424,7 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
-    public void NetworkDisksWithDriveLettersAppearInTheVolumeCategory()
+    public void NetworkDisksAppearInTheUnifiedPartitionCategory()
     {
         var source = Document();
         var lettered = new NetworkDiskInfo(
@@ -436,31 +438,23 @@ public sealed class ManageSystemProjectorTests
                 NetworkDisks = [lettered, letterless with { DriveLetter = "" }]
             });
 
-        var volumes = new ManageSystemProjector().Project(document).WorkspaceObjects
-            .Where(item => item.Category == ManageWorkspaceCategory.Volume)
+        var partitions = new ManageSystemProjector().Project(document).WorkspaceObjects
+            .Where(item => item.Category == ManageWorkspaceCategory.Partition)
             .ToList();
 
-        Assert.Equal(ManageObjectRole.Volume, volumes[0].Role);
-        Assert.Equal("volume:1", volumes[0].Id.ProviderKey);
-        var networkVolume = Assert.Single(
-            volumes,
-            item => item.Role == ManageObjectRole.NetworkDisk);
-        Assert.Equal("network:r", networkVolume.Id.ProviderKey);
-        Assert.DoesNotContain(volumes, item => item.Id.ProviderKey == "network:s");
+        Assert.All(partitions, item => Assert.Equal(ManageObjectRole.Partition, item.Role));
+        Assert.Contains(partitions, item => item.Id.ProviderKey == "partition:1");
+        Assert.Contains(partitions, item => item.Id.ProviderKey == "network:r");
+        Assert.Contains(partitions, item => item.Id.ProviderKey == "network:s");
 
         var navigation = new ManageNavigationProjector().Project(
             document,
-            networkVolume.Id,
-            ManageObjectRole.NetworkDisk);
+            partitions.Single(item => item.Id.ProviderKey == "network:r").Id,
+            ManageObjectRole.Partition);
         Assert.Equal(
             "network:r",
             navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Id.ProviderKey);
-        Assert.Equal(
-            "network:r",
-            navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Id.ProviderKey);
-        Assert.Equal(
-            ManageObjectRole.NetworkDisk,
-            navigation.RelatedSelections[ManageWorkspaceCategory.Volume]!.Role);
+        Assert.Null(navigation.RelatedSelections[ManageWorkspaceCategory.Volume]);
     }
 
     [Fact]

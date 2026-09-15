@@ -40,7 +40,8 @@ public static class WinPoolSourceDetails
         var chosen = primary is { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } }
             ? primary : available.FirstOrDefault() ?? primary;
         return new(chosen, candidates.ToImmutableArray(), conflict,
-            conflict ? "SourceConflict" : chosen is null ? "NotCollected" : ReferenceEquals(chosen, primary) ? "PrimaryProvider" : "AssociatedSourceFallback");
+            conflict ? "SourceConflict" : chosen is null ? "NotCollected"
+                : chosen.SourceRef == item.Primary.SourceRef ? "PrimaryProvider" : "AssociatedSourceFallback");
     }
 
     public static string Describe(WinPoolSystem system, WinPoolObject item)

@@ -74,7 +74,8 @@ public static class WinPoolStorageProjection
                 }
                 if (field is not { ReadState: FieldReadState.Returned })
                     fieldIssues.Add(new(item.Id, property.Name, field?.ReadState ?? FieldReadState.NotCollected, field?.ReasonCode));
-                else if (field.Value is { ValueKind: JsonValueKind.Null } && property.PropertyType.IsValueType && Nullable.GetUnderlyingType(property.PropertyType) is null)
+                else if ((field.Value is null || field.Value is { ValueKind: JsonValueKind.Null })
+                    && property.PropertyType.IsValueType && Nullable.GetUnderlyingType(property.PropertyType) is null)
                     fieldIssues.Add(new(item.Id, property.Name, FieldReadState.Unavailable, "ReturnedNull"));
                 values[property.Name] = Convert(field, property.PropertyType, item.Id, warnings);
             }

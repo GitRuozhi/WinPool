@@ -21,7 +21,7 @@ public sealed class V052BugRegressionTests
             ? x with { FileSystemLabel = "Renamed" } : x).ToArray() };
         var result = WinPoolSimulationFacts.ApplyCandidate(facts, snapshot, candidate, facts.SystemId);
         Assert.Contains(result.Relationships, x => x.Kind == "same-volume" && x.ToId == "logical-observation");
-        Assert.Equal(2, new WinPoolSystem(result).Objects.Single(x => x.Id == volume.StableId).Sources.Length);
+        Assert.Equal(3, new WinPoolSystem(result).Resolve(volume.StableId)!.Sources.Length);
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class V052BugRegressionTests
         Assert.Contains(WinPoolStorageProjection.Project(facts).FieldIssues, x => x.ObjectId == "physical" && x.Reason == "SourceConflict");
         var fallback = facts with { Objects = facts.Objects.Select(x => x.Id == "physical" ? x with { Fields = [] } : x).ToImmutableArray() };
         var resolved = WinPoolSourceDetails.Select(Assert.Single(new WinPoolSystem(fallback).Objects), "IsSystem");
-        Assert.Equal("AssociatedOsDiskFallback", resolved.Reason);
+        Assert.Equal("AssociatedSourceFallback", resolved.Reason);
         Assert.Equal("true", resolved.Value!.DisplayValue());
     }
 
