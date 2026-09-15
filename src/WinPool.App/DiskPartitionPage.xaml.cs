@@ -41,7 +41,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         {
             ViewModel = parameter.ViewModel;
             var targetPartition = ViewModel.EffectiveActiveSnapshot.Partitions.FirstOrDefault(item =>
-                item.StableId.Equals(parameter.TargetStableId, StringComparison.OrdinalIgnoreCase));
+                item.StableId.Equals(ViewModel.EffectiveActiveSnapshot.ResolvePartitionUnion(parameter.TargetStableId)?.Id ?? parameter.TargetStableId, StringComparison.OrdinalIgnoreCase));
             _selectedPartitionId = targetPartition?.StableId;
             _selectedDiskId = targetPartition?.OsDiskStableId ?? ResolveOsDiskId(parameter.TargetStableId);
         }

@@ -45,9 +45,9 @@ public static class WinPoolStorageProjection
                 var field = Field(item, name);
                 if (field is null && item.ObjectType == FactObjectType.StorageTier && property.Name == "AllocatedSize")
                     field = Field(item, "FootprintOnPool");
-                if (item.ObjectType == FactObjectType.PhysicalDisk && property.Name is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump")
+                if (item.ObjectType == FactObjectType.PhysicalDisk || (item.ObjectType == FactObjectType.Disk && property.Name is "IsPageFile" or "IsCrashDump") || (item.ObjectType == FactObjectType.Partition && property.Name is "FileSystem" or "FileSystemLabel" or "AllocationUnitSize" or "SizeRemaining" or "HealthStatus" or "OperationalStatus" or "DriveLetter"))
                 {
-                    var selected = WinPoolSourceDetails.Select(unified.Objects.Single(x => x.Id == item.Id), property.Name);
+                    var selected = WinPoolSourceDetails.Select(unified.Resolve(item.Id)!, name);
                     field = selected.Value;
                     if (selected.HasConflict) fieldIssues.Add(new(item.Id, property.Name, FieldReadState.Returned, "SourceConflict"));
                 }
@@ -57,6 +57,12 @@ public static class WinPoolStorageProjection
                         "SizeRemaining" => Field(item, "FreeSpace"), "ProviderPath" => Field(item, "ProviderName"),
                         "DriveLetter" => Field(item, "DeviceID"), _ => null
                     };
+                if (item.ObjectType == FactObjectType.Volume && property.Name is "FileSystem" or "FileSystemLabel" or "SizeRemaining" or "Size" )
+                {
+                    var logical = facts.Relationships.Where(r => r.Kind == "same-volume" && r.FromId == item.Id).Select(r => objects[r.ToId]).ToArray();
+                    if (logical.Length == 1 && field is not { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } })
+                        field = Field(logical[0], property.Name switch { "SizeRemaining" => "FreeSpace", "FileSystemLabel" => "VolumeName", _ => property.Name });
+                }
                 if (property.Name == "IsStable" && field is null)
                 {
                     values[property.Name] = JsonSerializer.SerializeToElement(item.HasReliableIdentity); continue;
@@ -66,8 +72,10 @@ public static class WinPoolStorageProjection
                     values[property.Name] = JsonSerializer.SerializeToElement(sources[item.SourceRef].Origin == FactOrigin.Simulation
                         ? CapacitySourceKind.SimulatedEstimate : CapacitySourceKind.Collected); continue;
                 }
-                if (field is not { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } })
+                if (field is not { ReadState: FieldReadState.Returned })
                     fieldIssues.Add(new(item.Id, property.Name, field?.ReadState ?? FieldReadState.NotCollected, field?.ReasonCode));
+                else if (field.Value is { ValueKind: JsonValueKind.Null } && property.PropertyType.IsValueType && Nullable.GetUnderlyingType(property.PropertyType) is null)
+                    fieldIssues.Add(new(item.Id, property.Name, FieldReadState.Unavailable, "ReturnedNull"));
                 values[property.Name] = Convert(field, property.PropertyType, item.Id, warnings);
             }
             return JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToElement(values))!;
@@ -75,22 +83,23 @@ public static class WinPoolStorageProjection
 
         var computerSource = Of(FactObjectType.Computer).FirstOrDefault();
         var osSource = Of(FactObjectType.OperatingSystem).FirstOrDefault();
+        var registry = facts.Objects.FirstOrDefault(x => sources[x.SourceRef].ClassName == "Registry.CurrentVersion");
+        var computerOverrides = new Dictionary<string, object?>();
+        void Context(string target, WinPoolSourceObject? source, string name)
+        {
+            var own = computerSource is null ? null : Field(computerSource, target);
+            var value = own is { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } } ? own
+                : source is null ? null : Field(source, name);
+            if (value is { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } })
+                computerOverrides[target] = target == "LastBootTime" && DateTimeOffset.TryParse(value.DisplayValue(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
+                    ? time : value.DisplayValue();
+        }
+        Context("WindowsProductName", osSource, "Caption"); Context("WindowsVersion", osSource, "Version");
+        Context("OsBuild", osSource, "BuildNumber"); Context("LastBootTime", osSource, "LastBootUpTime");
+        Context("DisplayVersion", registry, "DisplayVersion"); Context("Ubr", registry, "UBR");
         var computer = computerSource is null
             ? new ComputerInfo(WinPoolIdentityRegistry.ScopedId(facts.SystemId, FactObjectType.Computer, "context"), "System", "", "", "", DateTimeOffset.MinValue)
-            : Build<ComputerInfo>(computerSource);
-        if (osSource is not null)
-        {
-            string Context(string own, string sourceName) => Field(computerSource ?? osSource, own)?.Value is { ValueKind: JsonValueKind.String } existing
-                ? existing.GetString() ?? "" : Field(osSource, sourceName)?.DisplayValue() ?? "";
-            var boot = Field(osSource, "LastBootUpTime");
-            computer = computer with
-            {
-                WindowsProductName = Context("WindowsProductName", "Caption"),
-                WindowsVersion = Context("WindowsVersion", "Version"), OsBuild = Context("OsBuild", "BuildNumber"),
-                LastBootTime = boot?.Value is { ValueKind: JsonValueKind.String } date && DateTimeOffset.TryParse(date.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
-                    ? time : computer.LastBootTime
-            };
-        }
+            : Build<ComputerInfo>(computerSource, computerOverrides);
         var pools = Of(FactObjectType.StoragePool).Select(x => Build<StoragePoolInfo>(x, new()
         {
             ["SubsystemStableId"] = Parent(x.Id, "subsystem-pool"), ["MemberPhysicalDiskIds"] = Children(x.Id, "pool-member")
@@ -139,11 +148,13 @@ public static class WinPoolStorageProjection
             };
             if (kind is "BasicData" or "MicrosoftReserved" or "EfiSystem" or "WindowsRecovery")
                 fieldIssues.RemoveAll(issue => issue.ObjectId == x.Id && issue.FieldName == "Type");
+            if (!string.IsNullOrWhiteSpace(typeId)) fieldIssues.RemoveAll(issue => issue.ObjectId == x.Id && issue.FieldName == "PartitionTypeId");
             return partition with { Type = kind, PartitionTypeId = typeId ?? Field(x, "MbrType")?.DisplayValue() ?? "" };
         }).ToArray();
         var volumes = Of(FactObjectType.Volume).Select(x =>
         {
             var parent = Parent(x.Id, "partition-volume");
+            if (parent is not null && unified.Resolve(x.Id)?.Id != parent) parent = null;
             var paths = Field(x, "AccessPaths") ?? (parent is null ? null : Field(objects[parent], "AccessPaths"));
             var pathsValue = Convert(paths, typeof(IReadOnlyList<string>), x.Id, warnings).Deserialize<string[]>() ?? [];
             if (pathsValue.Length == 0 && Field(x, "DriveLetter")?.DisplayValue() is { Length: > 0 } letter
@@ -155,7 +166,7 @@ public static class WinPoolStorageProjection
         var snapshot = new StorageSnapshot(StorageSnapshot.CurrentSchemaVersion, facts.InventoryVersion, facts.InventoryCapturedAt, computer,
             Of(FactObjectType.StorageSubsystem).Select(x => Build<StorageSubsystemInfo>(x)).ToArray(), physical, pools, tiers,
             virtualDisks, osDisks, partitions, volumes, network, [], warnings);
-        return StorageRelationshipProjector.Rebuild(snapshot with
+        var rebuilt = StorageRelationshipProjector.Rebuild(snapshot with
         {
             FieldIssues = fieldIssues,
             UnknownTierMembershipPools = snapshot.StoragePools.Where(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Any(id =>
@@ -163,6 +174,39 @@ public static class WinPoolStorageProjection
                 && !facts.Relationships.Any(r => r.Kind == "tier-member" && r.ToId == id)))
                 .Select(x => x.StableId).ToArray()
         });
+        foreach (var partition in rebuilt.Partitions)
+        {
+            var volume = rebuilt.VolumeForPartition(partition.StableId);
+            if (volume is not null)
+            {
+                var shared = new[] { "FileSystem", "FileSystemLabel", "AllocationUnitSize", "SizeRemaining", "HealthStatus", "OperationalStatus", "Path", "DriveLetter" };
+                fieldIssues.RemoveAll(x => x.ObjectId == partition.StableId && shared.Contains(x.FieldName) && x.Reason != "SourceConflict");
+                foreach (var issue in fieldIssues.Where(x => x.ObjectId == volume.StableId && shared.Contains(x.FieldName)).ToArray())
+                    fieldIssues.Add(issue with { ObjectId = partition.StableId });
+            }
+            else
+            {
+                // No filesystem source is legitimate for an unformatted/reserved partition.
+                fieldIssues.RemoveAll(x => x.ObjectId == partition.StableId && x.State == FieldReadState.NotCollected
+                    && x.FieldName is "FileSystem" or "FileSystemLabel" or "AllocationUnitSize" or "SizeRemaining" or "Path" or "HealthStatus");
+            }
+        }
+        return rebuilt with
+        {
+            PartitionSourceIds = unified.Objects.OfType<WinPoolPartition>().SelectMany(x => x.Sources.Select(source => (source.Id, Union: x.Id)))
+                .ToDictionary(x => x.Id, x => x.Union),
+            UnattachedPartitions = unified.Objects.OfType<WinPoolPartition>().Where(x => x.Primary.ObjectType == FactObjectType.LogicalDisk)
+                .Select(x =>
+                {
+                    string Text(string name) => x.Field(name) is { ReadState: FieldReadState.Returned, Value: { ValueKind: not JsonValueKind.Null } } f ? f.DisplayValue() : "";
+                    long? Number(string name) => x.Field(name) is { } f && f.TryGetInt64(out var value) ? value : null;
+                    var letter = Text("DriveLetter").TrimEnd(':');
+                    return new StoragePartitionUnion(x.Id, x.Primary.HasReliableIdentity, string.IsNullOrEmpty(letter) ? "Unknown" : letter + ":",
+                        null, "Unknown", null, Number("Size"), null, Text("FileSystem"), Text("FileSystemLabel"), letter, null,
+                        Number("SizeRemaining"), "", "", string.IsNullOrEmpty(letter) ? [] : [letter + ":\\"], null, null, false, false,
+                        x.Sources.Select(s => s.Id).ToArray());
+                }).ToArray()
+        };
     }
 
     private static PropertyInfo[] Properties<T>() => PropertyCache<T>.Value;
@@ -212,7 +256,7 @@ public static class WinPoolStorageProjection
         return name switch
         {
             "HealthStatus" => code switch { 0 => "Healthy", 1 => "Warning", 2 => "Unhealthy", 5 => "Unknown", _ => Number(code) },
-            "OperationalStatus" => code switch { 0 => "Unknown", 2 => "OK", 3 => "Degraded", 6 => "Error", 10 => "Stopped", 12 => "NoContact", 13 => "LostCommunication", _ => Number(code) },
+            "OperationalStatus" => code switch { 0 => "Unknown", 1 => "Other", 2 => "OK", 3 => "Degraded", 6 => "Error", 10 => "Stopped", 12 => "NoContact", 13 => "LostCommunication", _ => Number(code) },
             "MediaType" => code switch { 0 => "Unspecified", 3 => "HDD", 4 => "SSD", 5 => "SCM", _ => Number(code) },
             "Usage" => code switch { 0 => "Unknown", 1 => "AutoSelect", 2 => "ManualSelect", 3 => "HotSpare", 4 => "Retired", 5 => "Journal", _ => Number(code) },
             "PartitionStyle" => code switch { 0 => "RAW", 1 => "MBR", 2 => "GPT", _ => Number(code) },

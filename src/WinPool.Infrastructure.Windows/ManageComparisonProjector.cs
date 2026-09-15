@@ -25,6 +25,9 @@ public sealed class ManageComparisonProjector
         }
 
         var snapshot = document.Snapshot;
+        if (role is ManageObjectRole.Partition or ManageObjectRole.Volume or ManageObjectRole.NetworkDisk
+            && snapshot.ResolvePartitionUnion(objectId.ProviderKey) is { } union)
+            return new ManageObjectComparisonView(objectId, ManagePartitionProjector.Properties(snapshot, union));
         var rows = new List<ManagePropertyView>();
         switch (role)
         {
@@ -41,8 +44,6 @@ public sealed class ManageComparisonProjector
                     string.IsNullOrWhiteSpace(snapshot.Computer.Ubr)
                         ? snapshot.Computer.OsBuild
                         : $"{snapshot.Computer.OsBuild}.{snapshot.Computer.Ubr}"));
-                rows.Add(P("Cpu", document.Unified?.ProcessorNames ?? string.Empty));
-                rows.Add(P("Memory", ReportMemory(document)));
                 rows.Add(P("LocalStorage", TopologyProjector.FormatBytes(uniquePhysical.Sum(x => x.Size))));
                 if (snapshot.NetworkDisks.Count > 0)
                 {
@@ -54,11 +55,10 @@ public sealed class ManageComparisonProjector
                 {
                     rows.Add(P("VirtualDisk", snapshot.VirtualDisks.Count.ToString()));
                 }
-                rows.Add(P("Partition", snapshot.Partitions.Count.ToString()));
+                rows.Add(P("Partition", snapshot.PartitionUnions.Count.ToString()));
                 rows.Add(P(
                     "AccessibleVolumes",
-                    (snapshot.Partitions.Count(x => !string.IsNullOrWhiteSpace(x.Path))
-                        + snapshot.NetworkDisks.Count(x => !string.IsNullOrWhiteSpace(x.DriveLetter))).ToString()));
+                    snapshot.PartitionUnions.Count(x => x.AccessPaths.Count > 0 || !string.IsNullOrWhiteSpace(x.DriveLetter)).ToString()));
                 break;
             }
             case ManageObjectRole.StoragePool:
@@ -233,59 +233,6 @@ public sealed class ManageComparisonProjector
                     "RunningStatus",
                     osDisk.IsOffline ? "Offline" : "Online",
                     ManageValuePresentation.LocalizationKey));
-                break;
-            }
-            case ManageObjectRole.Partition:
-            {
-                var partition = snapshot.Partitions.First(x => x.StableId == objectId.ProviderKey);
-                rows.Add(P("OwningDisk", PartitionOwnerName(snapshot, partition)));
-                rows.Add(P("Type", partition.Type, ManageValuePresentation.PartitionType));
-                rows.Add(P("FileSystem", string.IsNullOrWhiteSpace(partition.FileSystem) ? string.Empty : partition.FileSystem));
-                rows.Add(P(
-                    "AllocationUnit",
-                    partition.AllocationUnitSize is null
-                        ? string.Empty
-                        : TopologyProjector.FormatBytes(partition.AllocationUnitSize.Value)));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(partition.Size)));
-                rows.Add(P(
-                    "Available",
-                    string.IsNullOrWhiteSpace(partition.FileSystem)
-                        ? string.Empty
-                        : TopologyProjector.FormatBytes(partition.SizeRemaining)));
-                rows.Add(P("SystemPartition", partition.IsBoot || partition.IsSystem ? "✓" : string.Empty));
-                rows.Add(P("PartitionStatus", Empty(partition.OperationalStatus)));
-                rows.Add(P("StartOffset", TopologyProjector.FormatBytes(partition.Offset)));
-                rows.Add(P("DriveLetter", Empty(TopologyProjector.NormalizeDriveLetter(partition.DriveLetter))));
-                rows.Add(P("VolumeLabel", Empty(partition.FileSystemLabel.Replace('\0', ' ').Trim())));
-                rows.Add(P("Path", string.IsNullOrWhiteSpace(partition.Path) ? string.Empty : partition.Path));
-                break;
-            }
-            case ManageObjectRole.Volume:
-            {
-                var volume = snapshot.Volumes.First(x => x.StableId == objectId.ProviderKey);
-                var partition = ManageSelectionRules.ResolvePartition(snapshot, objectId.ProviderKey, role);
-                rows.Add(P("OwningDisk", partition is null ? string.Empty : PartitionOwnerName(snapshot, partition)));
-                rows.Add(P("Type", partition?.Type ?? "Unknown", ManageValuePresentation.PartitionType));
-                rows.Add(P("FileSystem", volume.FileSystem));
-                rows.Add(P("AllocationUnit", volume.AllocationUnitSize is { } unit ? TopologyProjector.FormatBytes(unit) : string.Empty));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(volume.Size)));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(volume.SizeRemaining)));
-                rows.Add(P("SystemPartition", partition is { IsBoot: true } or { IsSystem: true } ? "✓" : string.Empty));
-                rows.Add(P("PartitionStatus", partition?.OperationalStatus ?? string.Empty));
-                rows.Add(P("StartOffset", partition is null ? string.Empty : TopologyProjector.FormatBytes(partition.Offset)));
-                rows.Add(P("DriveLetter", volume.DriveLetter));
-                rows.Add(P("VolumeLabel", volume.FileSystemLabel));
-                rows.Add(P("Path", string.Join("; ", volume.AccessPaths)));
-                break;
-            }
-            case ManageObjectRole.NetworkDisk:
-            {
-                var network = snapshot.NetworkDisks.First(x => x.StableId == objectId.ProviderKey);
-                rows.Add(P("FileSystem", Empty(network.FileSystem)));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(network.Size)));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(network.SizeRemaining)));
-                rows.Add(P("DriveLetter", Empty(TopologyProjector.NormalizeDriveLetter(network.DriveLetter))));
-                rows.Add(P("Path", Empty(network.ProviderPath)));
                 break;
             }
             case ManageObjectRole.NetworkGroup:

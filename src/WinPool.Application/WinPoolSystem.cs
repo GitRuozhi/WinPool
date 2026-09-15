@@ -12,10 +12,10 @@ public class WinPoolObject
         Sources = sources;
     }
     public string Id => Primary.Id;
-    public FactObjectType ObjectType => Primary.ObjectType;
+    public virtual FactObjectType ObjectType => Primary.ObjectType;
     public WinPoolSourceObject Primary { get; }
     public ImmutableArray<WinPoolSourceObject> Sources { get; }
-    public string DisplayName => Primary.Field("FriendlyName")?.DisplayValue()
+    public virtual string DisplayName => Primary.Field("FriendlyName")?.DisplayValue()
         ?? Primary.Field("Name")?.DisplayValue() ?? Primary.ObjectType.ToString();
     public WinPoolSourceField? Field(string name) => WinPoolSourceDetails.Select(this, name).Value;
 }
@@ -35,11 +35,11 @@ public sealed class WinPoolStorageTier : WinPoolObject
 }
 public sealed class WinPoolPartition : WinPoolObject
 {
-    internal WinPoolPartition(WinPoolSourceObject primary) : base(primary, [primary]) { }
-}
-public sealed class WinPoolVolume : WinPoolObject
-{
-    internal WinPoolVolume(WinPoolSourceObject primary, ImmutableArray<WinPoolSourceObject> sources) : base(primary, sources) { }
+    internal WinPoolPartition(WinPoolSourceObject primary, ImmutableArray<WinPoolSourceObject> sources) : base(primary, sources) { }
+    public override FactObjectType ObjectType => FactObjectType.Partition;
+    public override string DisplayName => Field("DriveLetter")?.DisplayValue() is { Length: > 0 } letter
+        ? letter.TrimEnd(':') + ": " + (Field("FileSystemLabel")?.DisplayValue() ?? "")
+        : Field("FileSystemLabel")?.DisplayValue() is { Length: > 0 } label ? label : base.DisplayName;
 }
 public sealed class WinPoolProcessor : WinPoolObject
 {
@@ -49,7 +49,8 @@ public sealed record WinPoolDisplayGroup(string Kind, string? PoolId, ImmutableA
 
 public sealed class WinPoolSystem
 {
-    public const int ProjectionVersion = 1;
+    public const int ProjectionVersion = 2;
+    public WinPoolObject? Resolve(string sourceId) => Objects.FirstOrDefault(x => x.Id == sourceId || x.Sources.Any(s => s.Id == sourceId));
     public SystemId SystemId { get; }
     public long Revision { get; }
     public ImmutableArray<WinPoolObject> Objects { get; }
@@ -93,20 +94,43 @@ public sealed class WinPoolSystem
             var views = facts.Relationships.Where(x => x.FromId == primary.Id && x.Kind == "same-device")
                 .Select(x => objects[x.ToId]).Where(x => x.ObjectType == FactObjectType.Disk).ToArray();
             foreach (var view in views) representedOsDisks.Add(view.Id);
-            result.Add(new WinPoolDisk(primary, new[] { primary }.Concat(views).ToImmutableArray()));
+            var supplements = facts.Relationships.Where(x => x.Kind == "disk-supplement" && views.Any(d => d.Id == x.FromId))
+                .Select(x => objects[x.ToId]).ToArray();
+            foreach (var supplement in supplements) representedOsDisks.Add(supplement.Id);
+            result.Add(new WinPoolDisk(primary, new[] { primary }.Concat(views).Concat(supplements).ToImmutableArray()));
+        }
+        foreach (var relation in facts.Relationships.Where(x => x.Kind == "disk-supplement"))
+            representedOsDisks.Add(relation.ToId);
+        var represented = new HashSet<string>();
+        bool IsPartitionSource(WinPoolSourceObject x) => x.ObjectType is FactObjectType.Partition or FactObjectType.Volume or FactObjectType.LogicalDisk or FactObjectType.NetworkDisk;
+        foreach (var primary in facts.Objects.Where(IsPartitionSource).OrderBy(x => x.ObjectType switch
+                 { FactObjectType.Partition => 0, FactObjectType.Volume => 1, _ => 2 }))
+        {
+            if (represented.Contains(primary.Id)) continue;
+            var members = new List<WinPoolSourceObject> { primary };
+            // Only unambiguous observed associations join a union. Never infer one from a label.
+            void Attach(string from, string kind)
+            {
+                var edges = facts.Relationships.Where(r => r.FromId == from && r.Kind == kind).ToArray();
+                if (edges.Length != 1) return;
+                var edge = edges[0];
+                if (facts.Relationships.Count(r => r.ToId == edge.ToId && r.Kind == kind) != 1 || represented.Contains(edge.ToId)) return;
+                members.Add(objects[edge.ToId]);
+            }
+            if (primary.ObjectType == FactObjectType.Partition) Attach(primary.Id, "partition-volume");
+            foreach (var volume in members.Where(x => x.ObjectType == FactObjectType.Volume).ToArray()) Attach(volume.Id, "same-volume");
+            foreach (var member in members) represented.Add(member.Id);
+            result.Add(new WinPoolPartition(primary, members.ToImmutableArray()));
         }
         foreach (var item in facts.Objects.Where(x => x.ObjectType is not (FactObjectType.PhysicalDisk or FactObjectType.VirtualDisk)))
         {
-            if (representedOsDisks.Contains(item.Id)) continue;
-            if (item.ObjectType == FactObjectType.LogicalDisk && facts.Relationships.Any(x => x.Kind == "same-volume" && x.ToId == item.Id)) continue;
+            if (representedOsDisks.Contains(item.Id) || represented.Contains(item.Id)) continue;
             result.Add(item.ObjectType switch
             {
-                FactObjectType.Disk => new WinPoolDisk(item, [item]),
+                FactObjectType.Disk => new WinPoolDisk(item, new[] { item }.Concat(facts.Relationships
+                    .Where(r => r.Kind == "disk-supplement" && r.FromId == item.Id).Select(r => objects[r.ToId])).ToImmutableArray()),
                 FactObjectType.StoragePool => new WinPoolStoragePool(item),
                 FactObjectType.StorageTier => new WinPoolStorageTier(item),
-                FactObjectType.Partition => new WinPoolPartition(item),
-                FactObjectType.Volume => new WinPoolVolume(item, new[] { item }.Concat(facts.Relationships
-                    .Where(x => x.Kind == "same-volume" && x.FromId == item.Id).Select(x => objects[x.ToId])).ToImmutableArray()),
                 FactObjectType.Processor => new WinPoolProcessor(item),
                 _ => new WinPoolObject(item, [item])
             });
@@ -167,6 +191,9 @@ public static class WinPoolFactRefresh
                 ? x with { IsRetained = true, ReasonCode = "PartialCollection",
                     ObservedAt = x.ObservedAt ?? oldSources[oldObjects[x.ToId].SourceRef].CapturedAt }
                 : x);
+        var usedSources = objects.Select(x => x.SourceRef).Concat(objects.SelectMany(x => x.Fields.Select(f => f.SourceRef))).ToHashSet();
+        var latestSources = sources.GroupBy(Key).Select(x => x.MaxBy(s => s.CapturedAt)!.Id).ToHashSet();
+        sources = sources.Where(x => usedSources.Contains(x.Id) || latestSources.Contains(x.Id)).ToImmutableArray();
         var merged = current with
         {
             Revision = checked(current.Revision + 1), Sources = sources, Objects = objects,

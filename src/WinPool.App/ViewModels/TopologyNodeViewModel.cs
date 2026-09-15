@@ -771,7 +771,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             StorageUnitKind.Partition => EditWorkspace.IsUnallocated(unit.StableId)
                 ? owner.Localization["Unallocated"]
                 : owner.PartitionTypeName(
-                    snapshot.Partitions.FirstOrDefault(x => x.StableId == unit.StableId)?.Type ?? "Unknown"),
+                    snapshot.ResolvePartitionUnion(unit.StableId)?.Type ?? "Unknown"),
             StorageUnitKind.OsDisk => snapshot.OsDisks.FirstOrDefault(
                     item => item.StableId == unit.StableId) is { } osDisk
                 ? string.IsNullOrWhiteSpace(osDisk.VirtualDiskStableId)

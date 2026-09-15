@@ -51,7 +51,14 @@ public static class WinPoolSimulationFacts
         foreach (var item in prior.Values.Where(x => x.ObjectType is not (
             FactObjectType.Computer or FactObjectType.StorageSubsystem or FactObjectType.StoragePool or FactObjectType.StorageTier
             or FactObjectType.PhysicalDisk or FactObjectType.VirtualDisk or FactObjectType.Disk or FactObjectType.Partition or FactObjectType.Volume or FactObjectType.NetworkDisk)))
+        {
+            // Removing a union removes its attached observations, but preserves genuine orphans.
+            if (item.ObjectType == FactObjectType.LogicalDisk && previous!.Relationships.Any(edge => edge.Kind == "same-volume"
+                && edge.ToId == item.Id && candidate.Volumes.All(v => v.StableId != edge.FromId))) continue;
+            if (item.ObjectType == FactObjectType.HardwareSupplement && previous!.Relationships.Any(edge => edge.Kind == "disk-supplement"
+                && edge.ToId == item.Id && candidate.OsDisks.All(d => d.StableId != edge.FromId))) continue;
             objects.Add(item);
+        }
         var ids = objects.Select(x => x.Id).ToHashSet();
         var relationships = ImmutableArray.CreateBuilder<WinPoolFactRelationship>();
         void Link(string? a, string? b, string kind) { if (a is not null && b is not null && ids.Contains(a) && ids.Contains(b)) relationships.Add(new(a, b, kind)); }
@@ -76,7 +83,7 @@ public static class WinPoolSimulationFacts
         foreach (var volume in candidate.Volumes) Link(volume.PartitionStableId, volume.StableId, "partition-volume");
         // Supplementary source associations survive storage edits when both observations still exist.
         if (previous is not null)
-            relationships.AddRange(previous.Relationships.Where(x => x.Kind == "same-volume"
+            relationships.AddRange(previous.Relationships.Where(x => x.Kind is "same-volume" or "disk-supplement"
                 && ids.Contains(x.FromId) && ids.Contains(x.ToId)));
         var used = objects.Select(x => x.SourceRef).Concat(objects.SelectMany(x => x.Fields.Select(f => f.SourceRef))).ToHashSet();
         var sources = (previous?.Sources.AsEnumerable() ?? []).Where(x => x.Id != sourceRef).Append(source)

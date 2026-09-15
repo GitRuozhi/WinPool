@@ -251,8 +251,7 @@ public static class ManageSelectionRules
 
     public static PartitionInfo? ResolvePartition(StorageSnapshot snapshot, string providerKey, ManageObjectRole role)
     {
-        var key = role == ManageObjectRole.Volume
-            ? snapshot.Volumes.FirstOrDefault(x => x.StableId == providerKey)?.PartitionStableId : providerKey;
+        var key = snapshot.ResolvePartitionUnion(providerKey)?.Id ?? providerKey;
         return snapshot.Partitions.FirstOrDefault(x => x.StableId == key);
     }
 
@@ -261,8 +260,8 @@ public static class ManageSelectionRules
         : $"{volume.DriveLetter}: {volume.FileSystemLabel}".Trim();
 
     public static ManageObjectTarget TopologyTargetFor(ManageSelectionKey selection, StorageSnapshot snapshot) =>
-        selection.Role == ManageObjectRole.Volume && ResolvePartition(snapshot, selection.Id.ProviderKey, selection.Role) is { } partition
-            ? new ManageObjectTarget(new StorageObjectId(selection.Id.System, StorageObjectKind.Partition, partition.StableId), ManageObjectRole.Partition)
+        snapshot.ResolvePartitionUnion(selection.Id.ProviderKey) is { } partition
+            ? new ManageObjectTarget(new StorageObjectId(selection.Id.System, StorageObjectKind.Partition, partition.Id), ManageObjectRole.Partition)
             : new ManageObjectTarget(selection.Id, selection.Role);
 
     public static ManageWorkspaceCategory CategoryFor(ManageObjectRole role) =>
@@ -279,7 +278,7 @@ public static class ManageSelectionRules
                 ManageWorkspaceCategory.Disk,
             ManageObjectRole.Partition or ManageObjectRole.NetworkDisk =>
                 ManageWorkspaceCategory.Partition,
-            ManageObjectRole.Volume => ManageWorkspaceCategory.Volume,
+            ManageObjectRole.Volume => ManageWorkspaceCategory.Partition,
             _ => throw new ArgumentOutOfRangeException(nameof(role))
         };
 }

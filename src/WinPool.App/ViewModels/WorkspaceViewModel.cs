@@ -540,7 +540,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
         if (SelectedCategory != state.Category)
         {
-            SelectedCategory = state.Category;
+            SelectedCategory = state.Category == ManageWorkspaceCategory.Volume ? ManageWorkspaceCategory.Partition : state.Category;
         }
 
         var topologyTarget = ResolveTopologyTarget(
@@ -1350,7 +1350,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Categories.Add(new CategoryItem(ManageWorkspaceCategory.Tier, Localization["Tier"], "\uE8FD"));
         Categories.Add(new CategoryItem(ManageWorkspaceCategory.Disk, Localization["Disk"], "\uEDA2"));
         Categories.Add(new CategoryItem(ManageWorkspaceCategory.Partition, Localization["Partition"], "\uE7C3"));
-        Categories.Add(new CategoryItem(ManageWorkspaceCategory.Volume, Localization["Volume"], "\uE7C3"));
+
         SelectedCategoryItem = Categories.FirstOrDefault(x => x.Category == category);
         OnPropertyChanged(nameof(SelectedCategoryTitle));
         RebuildObjects(
@@ -1449,8 +1449,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         ManageWorkspaceCategory category,
         string providerKey) =>
         _manageProjector.Project(document).WorkspaceObjects.FirstOrDefault(candidate =>
-            candidate.Category == category
-            && candidate.Id.ProviderKey.Equals(providerKey, StringComparison.OrdinalIgnoreCase));
+            candidate.Category == (category == ManageWorkspaceCategory.Volume ? ManageWorkspaceCategory.Partition : category)
+            && candidate.Id.ProviderKey.Equals(document.Snapshot.ResolvePartitionUnion(providerKey)?.Id ?? providerKey, StringComparison.OrdinalIgnoreCase));
 
     private ManageObjectTarget? ResolveTopologyTarget(
         StorageSystemDocument document,
@@ -1462,7 +1462,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         var node = Flatten(_manageProjector.Project(document).Root).FirstOrDefault(candidate =>
-            candidate.Id.ProviderKey.Equals(providerKey, StringComparison.OrdinalIgnoreCase));
+            candidate.Id.ProviderKey.Equals(document.Snapshot.ResolvePartitionUnion(providerKey)?.Id ?? providerKey, StringComparison.OrdinalIgnoreCase));
         return node is null ? null : new ManageObjectTarget(node.Id, node.Role);
     }
 
@@ -1843,6 +1843,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public string PartitionTypeName(string type) => type switch
     {
+        "Network" => Localization["NetworkDisk"],
         "Primary" => Localization["PrimaryPartition"],
         "BasicData" => Localization["PrimaryPartition"],
         "Extended" => Localization["ExtendedPartition"],

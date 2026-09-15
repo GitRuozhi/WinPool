@@ -8,8 +8,9 @@ public static class WinPoolHardwarePresentation
         rows.Select(row =>
         {
             var field = row.PropertyTextKey switch { "Capacity" => "Size", "Available" => "SizeRemaining", "Allocated" => "AllocatedSize",
-                "AllocationUnit" => "AllocationUnitSize", "PartitionTable" => "PartitionStyle", "RunningStatus" => "IsOffline", _ => row.PropertyTextKey };
-            return snapshot.FieldIssues.Any(x => x.ObjectId == objectId && x.FieldName == field)
+                "AllocationUnit" => "AllocationUnitSize", "PartitionTable" => "PartitionStyle", "RunningStatus" or "PartitionStatus" => "OperationalStatus", "Health" => "HealthStatus",
+                "VolumeLabel" => "FileSystemLabel", "VersionNumber" => "DisplayVersion", "Version" => "WindowsProductName", _ => row.PropertyTextKey };
+            return snapshot.FieldIssues.Any(x => x.ObjectId == objectId && x.FieldName == field && x.Reason != "SourceConflict")
                 || (field == "Size" && snapshot.Warnings.Any(x => x.StableId == objectId && x.Code == "facts.numeric-out-of-range"))
                 ? row with { RawValue = "—", Presentation = ManageValuePresentation.Plain } : row;
         }).ToArray();

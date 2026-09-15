@@ -28,6 +28,10 @@ public sealed class ManageDetailsProjector
 
         var snapshot = document.Snapshot;
         var title = displayName;
+        if (role is ManageObjectRole.Partition or ManageObjectRole.Volume or ManageObjectRole.NetworkDisk
+            && snapshot.ResolvePartitionUnion(objectId.ProviderKey) is { } union)
+            return new ManageObjectDetailsView(objectId, ManageObjectRole.Partition, union.DisplayName,
+                ManagePartitionProjector.Properties(snapshot, union));
         var rows = new List<ManagePropertyView>();
         switch (role)
         {
@@ -38,7 +42,7 @@ public sealed class ManageDetailsProjector
                 rows.Add(P("StorageTier", snapshot.StorageTiers.Count.ToString()));
                 rows.Add(P("VirtualDisk", snapshot.VirtualDisks.Count.ToString()));
                 rows.Add(P("NetworkDisk", snapshot.NetworkDisks.Count.ToString()));
-                rows.Add(P("Partition", snapshot.Partitions.Count.ToString()));
+                rows.Add(P("Partition", snapshot.PartitionUnions.Count.ToString()));
                 break;
             case ManageObjectRole.StoragePool:
             {
@@ -113,54 +117,6 @@ public sealed class ManageDetailsProjector
                     virtualDisk.Interleave is null
                         ? "—"
                         : TopologyProjector.FormatBytes(virtualDisk.Interleave.Value)));
-                break;
-            }
-            case ManageObjectRole.Partition:
-            {
-                var partition = snapshot.Partitions.First(x => x.StableId == objectId.ProviderKey);
-                title = TopologyProjector.PartitionDisplayName(partition);
-                rows.Add(P("Type", partition.Type, ManageValuePresentation.PartitionType));
-                rows.Add(P(
-                    "FileSystem",
-                    string.IsNullOrWhiteSpace(partition.FileSystem) ? "Unknown" : partition.FileSystem,
-                    string.IsNullOrWhiteSpace(partition.FileSystem)
-                        ? ManageValuePresentation.LocalizationKey
-                        : ManageValuePresentation.Plain));
-                rows.Add(P(
-                    "AllocationUnit",
-                    partition.AllocationUnitSize is null
-                        ? "Unknown"
-                        : TopologyProjector.FormatBytes(partition.AllocationUnitSize.Value),
-                    partition.AllocationUnitSize is null
-                        ? ManageValuePresentation.LocalizationKey
-                        : ManageValuePresentation.Plain));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(partition.Size)));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(partition.SizeRemaining)));
-                rows.Add(P("Health", TopologyProjector.JoinSummary(partition.HealthStatus, partition.OperationalStatus)));
-                rows.Add(P("Path", string.IsNullOrWhiteSpace(partition.Path) ? "—" : partition.Path));
-                break;
-            }
-            case ManageObjectRole.Volume:
-            {
-                var volume = snapshot.Volumes.First(x => x.StableId == objectId.ProviderKey);
-                title = ManageSelectionRules.VolumeDisplayName(volume);
-                var partition = ManageSelectionRules.ResolvePartition(snapshot, objectId.ProviderKey, role);
-                rows.Add(P("Type", partition?.Type ?? "Unknown", ManageValuePresentation.PartitionType));
-                rows.Add(P("FileSystem", string.IsNullOrWhiteSpace(volume.FileSystem) ? "Unknown" : volume.FileSystem));
-                rows.Add(P("AllocationUnit", volume.AllocationUnitSize is { } unit ? TopologyProjector.FormatBytes(unit) : "—"));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(volume.Size)));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(volume.SizeRemaining)));
-                rows.Add(P("Health", TopologyProjector.JoinSummary(volume.HealthStatus, volume.OperationalStatus)));
-                rows.Add(P("Path", string.Join("; ", volume.AccessPaths)));
-                break;
-            }
-            case ManageObjectRole.NetworkDisk:
-            {
-                var network = snapshot.NetworkDisks.First(x => x.StableId == objectId.ProviderKey);
-                rows.Add(P("FileSystem", network.FileSystem));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(network.Size)));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(network.SizeRemaining)));
-                rows.Add(P("Path", network.ProviderPath));
                 break;
             }
             case ManageObjectRole.NetworkGroup:

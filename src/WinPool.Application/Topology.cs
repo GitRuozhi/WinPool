@@ -110,6 +110,20 @@ public static class TopologyProjector
     {
         var root = ProjectCore(snapshot);
         RemoveDuplicateOccurrences(root, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var unattached = snapshot.PartitionUnions.Where(x => !x.IsNetwork && (x.OsDiskId is null || snapshot.OsDisks.All(d => d.StableId != x.OsDiskId))).ToArray();
+        if (unattached.Length > 0)
+        {
+            var other = root.Children.FirstOrDefault(x => x.Unit.StableId == OtherGroupStableId(snapshot));
+            if (other is null)
+            {
+                other = new TopologyNode(new StorageUnitRef(OtherGroupStableId(snapshot), StorageUnitKind.OtherDiskGroup, "Other"), "",
+                    childrenLayout: TopologyChildrenLayout.Flow);
+                root.Children.Add(other);
+            }
+            foreach (var union in unattached)
+                other.Children.Add(new TopologyNode(new StorageUnitRef(union.Id, StorageUnitKind.Partition, union.DisplayName, union.IsStable),
+                    JoinSummary(union.FileSystem, union.Size is { } size ? FormatBytes(size) : "Unknown")));
+        }
         return root;
     }
 
@@ -460,7 +474,7 @@ public static class TopologyProjector
 
     private static TopologyNode CreateNetworkDiskNode(NetworkDiskInfo disk) =>
         new(
-            new StorageUnitRef(disk.StableId, StorageUnitKind.NetworkDisk, disk.Name, disk.IsStable),
+            new StorageUnitRef(disk.StableId, StorageUnitKind.Partition, disk.Name, disk.IsStable),
             JoinSummary("Network", FormatBytes(disk.Size)));
 
     private static void AddPartitions(TopologyNode parent, OsDiskInfo osDisk, StorageSnapshot snapshot)

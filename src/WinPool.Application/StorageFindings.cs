@@ -80,9 +80,7 @@ public static class StorageFindingInspector
     }
 
     public static bool IsUnhealthy(string? healthStatus, string? operationalStatus) =>
-        !(string.IsNullOrWhiteSpace(healthStatus)
-          || healthStatus.Equals("Healthy", StringComparison.OrdinalIgnoreCase))
-        || !(string.IsNullOrWhiteSpace(operationalStatus)
-             || operationalStatus.Equals("OK", StringComparison.OrdinalIgnoreCase)
-             || operationalStatus.Equals("Other", StringComparison.OrdinalIgnoreCase));
+        healthStatus is "Warning" or "Unhealthy"
+        || (operationalStatus ?? "").Split([',', ';'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Any(x => x is "Degraded" or "Error" or "Non-Recoverable Error" or "LostCommunication" or "NoContact" or "Predictive Failure");
 }

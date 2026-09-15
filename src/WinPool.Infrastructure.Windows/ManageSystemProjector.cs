@@ -145,41 +145,11 @@ public sealed class ManageSystemProjector
         }
 
         order = 0;
-        foreach (var partition in OrderPartitions(snapshot))
-        {
-            result.Add(Item(
-                systemId, partition.StableId, ManageObjectRole.Partition,
-                ManageWorkspaceCategory.Partition,
-                TopologyProjector.PartitionDisplayName(partition),
-                partition.IsStable, partition.OsDiskStableId, order++,
+        var partitionOrder = OrderPartitions(snapshot).Select((p, index) => (p.StableId, index)).ToDictionary(x => x.StableId, x => x.index);
+        foreach (var partition in snapshot.PartitionUnions.OrderBy(p => partitionOrder.GetValueOrDefault(p.Id, int.MaxValue)))
+            result.Add(Item(systemId, partition.Id, ManageObjectRole.Partition, ManageWorkspaceCategory.Partition,
+                partition.DisplayName, partition.IsStable, partition.OsDiskId, order++,
                 new Dictionary<string, string?> { ["partitionType"] = partition.Type }));
-        }
-        order = 0;
-        foreach (var volume in snapshot.Volumes.OrderBy(x => x.DriveLetter).ThenBy(x => x.FileSystemLabel))
-        {
-            var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == volume.PartitionStableId);
-            var label = ManageSelectionRules.VolumeDisplayName(volume);
-            result.Add(Item(systemId, volume.StableId, ManageObjectRole.Volume, ManageWorkspaceCategory.Volume,
-                string.IsNullOrWhiteSpace(label) ? volume.StableId : label, volume.IsStable, volume.PartitionStableId, order++,
-                new Dictionary<string, string?> { ["partitionType"] = partition?.Type }));
-        }
-        foreach (var network in snapshot.NetworkDisks
-                     .Where(x => !string.IsNullOrWhiteSpace(TopologyProjector.NormalizeDriveLetter(x.DriveLetter)))
-                     .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-        {
-            result.Add(Item(
-                systemId, network.StableId, ManageObjectRole.NetworkDisk,
-                ManageWorkspaceCategory.Volume, network.Name,
-                network.IsStable, null, order++));
-        }
-        foreach (var network in snapshot.NetworkDisks
-                     .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-        {
-            result.Add(Item(
-                systemId, network.StableId, ManageObjectRole.NetworkDisk,
-                ManageWorkspaceCategory.Partition, network.Name,
-                network.IsStable, null, order++));
-        }
         return result
             .DistinctBy(
                 item => $"{(int)item.Id.Kind}:{item.Id.ProviderKey}:{(int)item.Role}:{(int)item.Category}",

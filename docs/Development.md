@@ -118,3 +118,11 @@ Product 管产品、Development 管技术、Quality 管验证、Plan 管当前�
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 
 项目不能通过相对路径、复制运行文件、子模块或运行时导入依赖其他仓库。软件资源使用受版本控制的 `assets`，不让代码依赖忽略目录。
+
+## 分区联合体投影（2026-09-15）
+
+`WinPoolSystem` 将唯一的 partition-volume / same-volume 关联组合为 `WinPoolPartition`，`Resolve` 接受所有成员来源 ID。`StorageSnapshot.PartitionUnions` 是管理与业务导出的单层表面，`PartitionSourceIds` 负责旧来源选择恢复。PartitionInfo / VolumeInfo / NetworkDiskInfo 仍作为采集、持久化和现有编辑命令的内部适配记录；不得再次据此建立独立卷属性分类。文件系统属性由同一个 `ManagePartitionProjector` 输出。
+
+磁盘补充事实通过 disk-supplement 关联匹配唯一 Disk.Number。OS 磁盘的 Number、PartitionStyle 等仍读取自己的来源，不能被物理磁盘主来源覆盖。单例 Computer/OperatingSystem 身份按系统和类名确定。按来源刷新只替换本次成功的来源；保留仍被事实字段引用的历史来源及每类最新状态，避免重复失败状态增长。模拟提交保留仍有效的补充关系，删除联合体时同时去掉其附属逻辑来源，真正孤立来源继续保留。
+
+此轮按用户要求只构建和人工检查，不运行自动测试。原生 UI 验收使用独立运行目录和数据库副本；固定采集脚本始终内嵌，经标准输入执行，不输出独立 inventory 脚本。

@@ -35,8 +35,14 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         {
             Product = "WinPool",
             ReadOnly = true,
-            SelectedUnit = selectedUnit,
-            Snapshot = snapshot
+            SelectedUnit = selectedUnit is null ? null : snapshot.FindUnit(selectedUnit.StableId) ?? selectedUnit,
+            Snapshot = new
+            {
+                snapshot.SchemaVersion, snapshot.SnapshotVersion, snapshot.ScannedAt, snapshot.Computer,
+                snapshot.StorageSubsystems, snapshot.PhysicalDisks, snapshot.StoragePools, snapshot.StorageTiers,
+                snapshot.VirtualDisks, snapshot.OsDisks, Partitions = snapshot.PartitionUnions,
+                snapshot.Warnings
+            }
         };
         await File.WriteAllTextAsync(
             file.Path,

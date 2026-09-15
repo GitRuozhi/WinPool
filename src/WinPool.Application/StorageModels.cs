@@ -276,6 +276,12 @@ public sealed record StorageSnapshot(
     IReadOnlyList<InventoryWarning> Warnings)
 {
     public const int CurrentSchemaVersion = 3;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<StoragePartitionUnion> PartitionUnions => StoragePartitionUnion.Project(this);
+    public IReadOnlyList<StoragePartitionUnion> UnattachedPartitions { get; init; } = [];
+    public IReadOnlyDictionary<string, string> PartitionSourceIds { get; init; } = new Dictionary<string, string>();
+    public StoragePartitionUnion? ResolvePartitionUnion(string? id) => id is null ? null
+        : PartitionUnions.FirstOrDefault(x => x.Id == PartitionSourceIds.GetValueOrDefault(id, id) || x.SourceIds.Contains(id));
     public IReadOnlyList<StorageFieldIssue> FieldIssues { get; init; } = [];
     public IReadOnlyList<string> UnknownTierMembershipPools { get; init; } = [];
     public string DirectGroupName(string poolId) => UnknownTierMembershipPools.Contains(poolId) ? "Membership unknown" : "Unallocated";
@@ -320,6 +326,9 @@ public sealed record StorageSnapshot(
         {
             return null;
         }
+
+        if (ResolvePartitionUnion(stableId) is { } union)
+            return new StorageUnitRef(union.Id, StorageUnitKind.Partition, union.DisplayName, union.IsStable, union.OsDiskId);
 
         if (Computer.StableId == stableId)
         {

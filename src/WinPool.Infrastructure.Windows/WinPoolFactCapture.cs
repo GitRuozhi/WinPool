@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
@@ -23,6 +23,7 @@ internal static class WinPoolFactCapture
         ["WmiMonitorID"] = FactObjectType.Monitor, ["MSFT_NetAdapter"] = FactObjectType.NetworkAdapter,
         ["Win32_NetworkAdapter"] = FactObjectType.NetworkAdapter, ["Win32_Battery"] = FactObjectType.Battery,
         ["Win32_LogicalDisk"] = FactObjectType.LogicalDisk,
+        ["Windows.DiskRoles"] = FactObjectType.HardwareSupplement,
         ["Win32_DiskDrive"] = FactObjectType.HardwareSupplement, ["Win32_TimeZone"] = FactObjectType.HardwareSupplement,
         ["SoftwareLicensingProduct"] = FactObjectType.HardwareSupplement,
         ["BatteryStaticData"] = FactObjectType.HardwareSupplement, ["BatteryStatus"] = FactObjectType.HardwareSupplement,
@@ -66,6 +67,7 @@ internal static class WinPoolFactCapture
             var rawIdentity = !string.IsNullOrWhiteSpace(uniqueId) ? uniqueId : objectId;
             if (rawIdentity.Length == 0 && !className.StartsWith("MSFT_", StringComparison.Ordinal)
                 && observation.TryGetProperty("Identity", out var key)) rawIdentity = key.GetString() ?? "";
+            if (type is FactObjectType.Computer or FactObjectType.OperatingSystem) rawIdentity = systemId.Value.ToString("N") + ":" + className;
             var reliable = !string.IsNullOrWhiteSpace(rawIdentity);
             var opaque = reliable ? WinPoolIdentityRegistry.OpaqueSourceIdentity(sourceNamespace, className, rawIdentity) : string.Empty;
             var prefix = type switch
@@ -88,8 +90,11 @@ internal static class WinPoolFactCapture
             if (!Classes.ContainsKey(className)) continue;
             var ns = Namespace(failure.TryGetProperty("Namespace", out var namespaceValue) ? namespaceValue.GetString() ?? "" : "root/cimv2");
             var id = SourceId(ns, className);
-            sources[id] = new(id, Origin(ns, className), ns, className, snapshot.ScannedAt, purpose, FieldReadState.Failed,
-                failure.TryGetProperty("ReasonCode", out var code) ? code.GetString() : "QueryFailed");
+            var reason = failure.TryGetProperty("ReasonCode", out var code) ? code.GetString() : "QueryFailed";
+            var unsupported = className is "BatteryStaticData" or "BatteryStatus"
+                && reason?.Contains("0x80041010", StringComparison.OrdinalIgnoreCase) == true;
+            sources[id] = new(id, Origin(ns, className), ns, className, snapshot.ScannedAt, purpose,
+                unsupported ? FieldReadState.Unavailable : FieldReadState.Failed, unsupported ? "UnsupportedClass" : reason);
         }
         var relationships = ImmutableArray.CreateBuilder<WinPoolFactRelationship>();
         var ids = objects.Select(x => x.Id).ToHashSet();
@@ -145,6 +150,13 @@ internal static class WinPoolFactCapture
                 && StorageAccessPath.TryGetDriveLetter(x.Field("DriveLetter")?.DisplayValue(), out var mounted)
                 && mounted == letter).ToArray();
             if (matches.Length == 1) Link(matches[0].Id, logical.Id, "same-volume");
+        }
+        foreach (var supplement in objects.Where(x => sources[x.SourceRef].ClassName is "Win32_DiskDrive" or "Windows.DiskRoles"))
+        {
+            var number = supplement.Field(sources[supplement.SourceRef].ClassName == "Win32_DiskDrive" ? "Index" : "DiskNumber");
+            if (number is null || !number.TryGetInt64(out var index)) continue;
+            var matches = objects.Where(x => x.ObjectType == FactObjectType.Disk && x.Field("Number") is { } n && n.TryGetInt64(out var value) && value == index).ToArray();
+            if (matches.Length == 1) Link(matches[0].Id, supplement.Id, "disk-supplement");
         }
         var state = sources.Values.Any(x => x.ReadState == FieldReadState.Failed) ? FieldReadState.Failed : FieldReadState.Returned;
         var facts = new WinPoolFacts(WinPoolFacts.CurrentFormatVersion, systemId, 0, sources.Values.ToImmutableArray(), objects.ToImmutable(),
