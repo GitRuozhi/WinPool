@@ -31,7 +31,7 @@ public sealed partial class HardwarePage : Page
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto
     };
     private readonly List<Border> groupCells = [];
-    private readonly List<(Grid Labels, Grid Values)> tables = [];
+    private readonly List<(Grid Labels, Grid Values, ScrollViewer Horizontal)> tables = [];
     private WorkspaceViewModel viewModel = null!;
     private CancellationTokenSource? capture;
     private string? selectedGroupKey;
@@ -200,7 +200,7 @@ public sealed partial class HardwarePage : Page
             Grid.SetColumn(horizontal, 1);
             table.Children.Add(horizontal);
             values.PointerWheelChanged += Values_PointerWheelChanged;
-            tables.Add((labels, values));
+            tables.Add((labels, values, horizontal));
             panel.Children.Add(table);
         }
         return panel;
@@ -222,7 +222,7 @@ public sealed partial class HardwarePage : Page
 
     private void SyncLabelRowHeights()
     {
-        foreach (var (labels, values) in tables)
+        foreach (var (labels, values, _) in tables)
         {
             for (var row = 0; row < labels.RowDefinitions.Count && row < values.RowDefinitions.Count; row++)
             {
@@ -248,6 +248,9 @@ public sealed partial class HardwarePage : Page
     {
         selectedGroupKey = ((FrameworkElement)sender).Tag as string;
         ApplyGroupHighlight();
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            CenterSelectedGroup);
     }
 
     private void GroupCell_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -277,6 +280,22 @@ public sealed partial class HardwarePage : Page
             if (selected) text.Foreground = accentForeground;
             else text.ClearValue(TextBlock.ForegroundProperty);
             text.IsTextSelectionEnabled = selected;
+        }
+    }
+
+    private void CenterSelectedGroup()
+    {
+        if (selectedGroupKey is null) return;
+        foreach (var (_, values, horizontal) in tables)
+        {
+            var cell = values.Children.OfType<Border>().FirstOrDefault(item =>
+                Grid.GetRow(item) == 0 && Equals(item.Tag, selectedGroupKey));
+            if (cell is null) continue;
+            var bounds = cell.TransformToVisual(values).TransformBounds(
+                new Windows.Foundation.Rect(0, 0, cell.ActualWidth, cell.ActualHeight));
+            var target = bounds.X - ((horizontal.ViewportWidth - bounds.Width) / 2);
+            horizontal.ChangeView(Math.Max(0, target), null, null, disableAnimation: false);
+            return;
         }
     }
 
