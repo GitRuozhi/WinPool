@@ -62,7 +62,9 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 存储与完整硬件使用独立刷新用途，Agent 串行协调；较旧结果忽略。来源失败保留上次事实及关联时间，成功空集合才移除对象。层成员没有可靠关联时显示归属未知，不按介质相同猜测。
 
-完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；后者以接口 ID 保存地址、MAC、链路速度和默认路由状态。`HardwareReportProjector` 负责十段只读报告、可靠关联和字段详情；`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 只通过 `PropertyTableVisuals` 复用单元格样式与尺寸，不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式仍为 SQLite 16 / IPC 7 / StorageSystemDocument 3 / 来源事实 1。
+完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；后者以 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 作为网络对象集合边界，按接口索引关联全部 IP 地址与默认路由。统一层替换采集脚本产生的同类原始观察，避免同一适配器形成两组对象。GPU 不按软件标志过滤，Monitor 不在报告投影中筛除，存储摘要不增加硬件页专用条件。
+
+`HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 只通过 `PropertyTableVisuals` 复用单元格样式与尺寸，不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式仍为 SQLite 16 / IPC 7 / StorageSystemDocument 3 / 来源事实 1。
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 

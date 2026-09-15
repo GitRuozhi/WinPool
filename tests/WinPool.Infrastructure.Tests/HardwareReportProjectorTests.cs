@@ -16,7 +16,9 @@ public sealed class HardwareReportProjectorTests
         {
             Source("computer", "Win32_ComputerSystem", time), Source("array", "Win32_PhysicalMemoryArray", time),
             Source("module", "Win32_PhysicalMemory", time), Source("gpu", "WinPool.GraphicsAdapter", time),
-            Source("output", "WinPool.GraphicsOutput", time), Source("network", "WinPool.NetworkAdapter", time)
+            Source("output", "WinPool.GraphicsOutput", time), Source("network", "MSFT_NetAdapter", time),
+            Source("software-gpu", "Win32_VideoController", time), Source("wmi-monitor", "WmiMonitorID", time),
+            Source("other-network", "Win32_NetworkAdapter", time)
         };
         var objects = new[]
         {
@@ -26,7 +28,10 @@ public sealed class HardwareReportProjectorTests
             Object("module-2", FactObjectType.MemoryModule, sources[2], ("Capacity", 16UL * 1024 * 1024 * 1024), ("PartNumber", "B")),
             Object("gpu-object", FactObjectType.VideoController, sources[3], ("Name", "GPU"), ("SharedSystemMemory", 8UL * 1024 * 1024 * 1024)),
             Object("output-object", FactObjectType.Monitor, sources[4], ("Name", "DISPLAY1"), ("DesktopX", -100L), ("Primary", false)),
-            Object("network-object", FactObjectType.NetworkAdapter, sources[5], ("Name", "Ethernet"), ("Primary", true))
+            Object("network-object", FactObjectType.NetworkAdapter, sources[5], ("Name", "Ethernet"), ("Primary", true)),
+            Object("software-gpu-object", FactObjectType.VideoController, sources[6], ("Name", "Software GPU")),
+            Object("wmi-monitor-object", FactObjectType.Monitor, sources[7], ("Name", "MONITOR\\SECOND")),
+            Object("other-network-object", FactObjectType.NetworkAdapter, sources[8], ("Name", "Other network"), ("Primary", false))
         };
         var facts = new WinPoolFacts(1, systemId, 1, [.. sources], [.. objects], [], [],
             [new(CollectionPurpose.Hardware, time, time, FieldReadState.Returned)]) { InventoryCapturedAt = time };
@@ -43,6 +48,9 @@ public sealed class HardwareReportProjectorTests
         Assert.Equal("4", memory.Sections[0].Rows[0].Cells[0].Value);
         Assert.Equal(2, memory.Sections[1].Rows.Single(x => x.Label == "型号").Cells.Count);
         Assert.Equal("-100", report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "水平坐标").Cells[0].Value);
+        Assert.Equal(2, report.Single(x => x.Name == "GPU").Sections[0].Rows.Single(x => x.Label == "型号").Cells.Count);
+        Assert.Equal(2, report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "型号").Cells.Count);
+        Assert.Equal(2, report.Single(x => x.Name == "Network").Sections[0].Rows.Single(x => x.Label == "名称").Cells.Count);
     }
 
     [Fact]

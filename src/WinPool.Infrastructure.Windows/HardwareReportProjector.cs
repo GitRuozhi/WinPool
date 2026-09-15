@@ -16,14 +16,14 @@ public static class HardwareReportProjector
         if (document.Unified is not { } system) return [];
         string T(string zh, string en) => chinese ? zh : en;
         var categories = new List<HardwareReportCategory>();
-        var computer = ByClass(system, "Win32_ComputerSystem").FirstOrDefault();
-        var os = ByClass(system, "Win32_OperatingSystem").FirstOrDefault();
+        var computer = ByType(system, FactObjectType.Computer).FirstOrDefault();
+        var os = ByType(system, FactObjectType.OperatingSystem).FirstOrDefault();
         var registry = ByClass(system, "Registry.CurrentVersion").FirstOrDefault();
         var licensing = ByClass(system, "SoftwareLicensingProduct").FirstOrDefault();
         var session = ByClass(system, "Windows.Session").FirstOrDefault();
         var platform = ByClass(system, "WinPool.Platform").FirstOrDefault();
-        var board = ByClass(system, "Win32_BaseBoard").FirstOrDefault();
-        var bios = ByClass(system, "Win32_BIOS").FirstOrDefault();
+        var board = ByType(system, FactObjectType.BaseBoard).FirstOrDefault();
+        var bios = ByType(system, FactObjectType.Bios).FirstOrDefault();
 
         categories.Add(Single(T("Computer", "Computer"),
             R(T("主机名", "Host name"), Cell(system, computer, "Name")),
@@ -47,8 +47,8 @@ public static class HardwareReportProjector
             R(T("BIOS 版本", "BIOS version"), Cell(system, bios, "SMBIOSBIOSVersion", "Version")),
             R(T("BIOS 厂商", "BIOS manufacturer"), Cell(system, bios, "Manufacturer"))));
 
-        var processors = ByClass(system, "Win32_Processor");
-        var caches = ByClass(system, "Win32_CacheMemory");
+        var processors = ByType(system, FactObjectType.Processor);
+        var caches = ByType(system, FactObjectType.CpuCache);
         categories.Add(Multi(T("CPU", "CPU"), processors,
             (T("型号", "Model"), p => Cell(system, p, "Name")),
             (T("基准速度", "Base speed"), p => Numeric(system, p, "MaxClockSpeed", " MHz")),
@@ -60,8 +60,8 @@ public static class HardwareReportProjector
             (T("二级缓存", "L2 cache"), p => Cell(system, p, "L2CacheSize", suffix: " KiB")),
             (T("三级缓存", "L3 cache"), p => Cell(system, p, "L3CacheSize", suffix: " KiB"))));
 
-        var arrays = ByClass(system, "Win32_PhysicalMemoryArray");
-        var modules = ByClass(system, "Win32_PhysicalMemory");
+        var arrays = ByType(system, FactObjectType.MemoryArray);
+        var modules = ByType(system, FactObjectType.MemoryModule);
         var totalSlots = Sum(arrays, "MemoryDevices");
         var ecc = string.Join(", ", arrays.Select(x => MemoryEcc(Text(x, "MemoryErrorCorrection"))).Where(x => x.Length > 0).Distinct());
         categories.Add(new(T("Memory", "Memory"),
@@ -76,8 +76,7 @@ public static class HardwareReportProjector
                 (T("型号", "Model"), x => Cell(system, x, "PartNumber")))
         ]));
 
-        var pageFiles = ByClass(system, "Win32_PageFileSetting");
-        if (pageFiles.Count == 0) pageFiles = ByClass(system, "Win32_PageFileUsage");
+        var pageFiles = ByTypes(system, FactObjectType.PageFileSetting, FactObjectType.PageFileUsage);
         categories.Add(Multi(T("VirtualMemory", "Virtual memory"), pageFiles,
             (T("初始大小", "Initial size"), x => MegaBytes(system, x, "InitialSize", "AllocatedBaseSize")),
             (T("最大值", "Maximum size"), x => MegaBytes(system, x, "MaximumSize", "AllocatedBaseSize")),
@@ -89,8 +88,7 @@ public static class HardwareReportProjector
                 new HardwareReportCell(document.Id, x.Presentation == ManageValuePresentation.LocalizationKey ? T("未知", "Unknown") : x.RawValue,
                     StorageDetails(system, x.PropertyTextKey, chinese)))).ToArray()));
 
-        var gpus = ByClass(system, "WinPool.GraphicsAdapter");
-        if (gpus.Count == 0) gpus = ByClass(system, "Win32_VideoController");
+        var gpus = ByType(system, FactObjectType.VideoController);
         categories.Add(Multi(T("GPU", "GPU"), gpus,
             (T("型号", "Model"), x => Cell(system, x, "Name")),
             (T("驱动", "Driver"), x => GpuFallback(system, x, "DriverVersion")),
@@ -102,8 +100,7 @@ public static class HardwareReportProjector
             (T("设备", "Device"), x => GpuLocation(system, x, 1)),
             (T("功能", "Function"), x => GpuLocation(system, x, 2))));
 
-        var monitors = ByClass(system, "WinPool.GraphicsOutput");
-        if (monitors.Count == 0) monitors = ByClass(system, "WmiMonitorID");
+        var monitors = ByType(system, FactObjectType.Monitor);
         categories.Add(Multi(T("Monitor", "Monitor"), monitors,
             (T("型号", "Model"), x => MonitorEdid(system, x, "UserFriendlyName", "Name")),
             (T("制造商", "Manufacturer"), x => MonitorEdid(system, x, "ManufacturerName")),
@@ -118,8 +115,7 @@ public static class HardwareReportProjector
             (T("颜色格式", "Color format"), x => Cell(system, x, "ColorSpace")),
             (T("动态范围", "Dynamic range"), x => Cell(system, x, "DynamicRange"))));
 
-        var networks = ByClass(system, "WinPool.NetworkAdapter");
-        if (networks.Count == 0) networks = ByClass(system, "MSFT_NetAdapter");
+        var networks = ByType(system, FactObjectType.NetworkAdapter);
         categories.Add(Multi(T("Network", "Network"), networks,
             (T("名称", "Name"), x => Cell(system, x, "Name")),
             (T("硬件", "Hardware"), x => Cell(system, x, "InterfaceDescription", "DriverDescription")),
@@ -139,6 +135,10 @@ public static class HardwareReportProjector
         new(rows.Select(row => R(row.Label, objects.Count == 0 ? [Missing()] : objects.Select(row.Cell).ToArray())).ToArray());
     private static HardwareReportRow R(string label, params HardwareReportCell[] cells) => new(label, cells);
     private static HardwareReportCell Missing(string reason = "Not collected") => new(string.Empty, "—", reason);
+    private static IReadOnlyList<WinPoolObject> ByType(WinPoolSystem system, FactObjectType type) => system.Objects
+        .Where(x => x.ObjectType == type).ToArray();
+    private static IReadOnlyList<WinPoolObject> ByTypes(WinPoolSystem system, params FactObjectType[] types) => system.Objects
+        .Where(x => types.Contains(x.ObjectType)).ToArray();
     private static IReadOnlyList<WinPoolObject> ByClass(WinPoolSystem system, string className) => system.Objects
         .Where(x => x.Sources.Any(s => system.Sources.Any(source => source.Id == s.SourceRef && source.ClassName == className))).ToArray();
     private static string SourceClass(WinPoolSystem system, WinPoolObject item) =>
@@ -220,6 +220,7 @@ public static class HardwareReportProjector
     }
     private static WinPoolObject? MatchedVideoController(WinPoolSystem system, WinPoolObject gpu)
     {
+        if (SourceClass(system, gpu) == "Win32_VideoController") return gpu;
         if (!uint.TryParse(Text(gpu, "VendorId"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var vendor)
             || !uint.TryParse(Text(gpu, "DeviceId"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var device)) return null;
         var signature = $"VEN_{vendor:X4}&DEV_{device:X4}";

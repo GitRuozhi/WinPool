@@ -86,9 +86,16 @@ public sealed class WinPoolFactCaptureTests
                 Assert.Equal(FieldReadState.Returned, item.Field("DirectXFeatureLevel")!.ReadState);
             });
         }
-        var networkSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "WinPool.NetworkAdapter"));
+        var networkSource = Assert.Single(hardware.SourceFacts.Sources.Where(x => x.ClassName == "MSFT_NetAdapter"));
         Assert.Equal(FieldReadState.Returned, networkSource.ReadState);
-        Assert.NotEmpty(hardware.SourceFacts.Objects.Where(x => x.SourceRef == networkSource.Id));
+        var networkAdapters = hardware.SourceFacts.Objects.Where(x => x.SourceRef == networkSource.Id).ToArray();
+        Assert.NotEmpty(networkAdapters);
+        Assert.All(networkAdapters, adapter =>
+        {
+            Assert.Equal(FieldReadState.Returned, adapter.Field("InterfaceIndex")!.ReadState);
+            Assert.True(adapter.Field("ConnectorPresent")!.Value!.Value.GetBoolean()
+                || adapter.Field("InterfaceType")!.Value!.Value.GetUInt64() != 0);
+        });
         var merged = WinPoolFactRefresh.Merge(storage.SourceFacts, hardware.SourceFacts);
         Assert.Equal(2, merged.Collections.Length);
         Assert.Equal(merged.Objects.Length, merged.Objects.Select(x => x.Id).Distinct().Count());
