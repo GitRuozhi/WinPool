@@ -95,7 +95,8 @@ public sealed class WinPoolSystem
                 .Select(x => objects[x.ToId]).Where(x => x.ObjectType == FactObjectType.Disk).ToArray();
             foreach (var view in views) representedOsDisks.Add(view.Id);
             var supplements = facts.Relationships.Where(x => x.Kind == "disk-supplement" && views.Any(d => d.Id == x.FromId))
-                .Select(x => objects[x.ToId]).ToArray();
+                .Concat(facts.Relationships.Where(x => x.Kind == "disk-supplement" && x.FromId == primary.Id))
+                .Select(x => objects[x.ToId]).DistinctBy(x => x.Id).ToArray();
             foreach (var supplement in supplements) representedOsDisks.Add(supplement.Id);
             result.Add(new WinPoolDisk(primary, new[] { primary }.Concat(views).Concat(supplements).ToImmutableArray()));
         }

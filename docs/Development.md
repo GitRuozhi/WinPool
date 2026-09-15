@@ -66,6 +66,8 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 `HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 直接调用现有系统切换入口；选择变化后的下拉项重建延后到当前输入事件结束，避免在 WinUI 弹出层仍打开时使其失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式仍为 SQLite 16 / IPC 7 / StorageSystemDocument 3 / 来源事实 1。
 
+内置模拟继续以 `StorageSnapshot` 作为编辑模型，但持久化前由 `WinPoolSimulationFacts` 生成 Windows 形态的来源事实。来源仍明确标记为 `FactOrigin.Simulation`，命名空间、类名、字段名、CIM 数字枚举、数组类型和 bytes 单位分别对齐 `Win32_ComputerSystem`、`Win32_OperatingSystem`、`Registry.CurrentVersion`、`MSFT_*`、`Win32_LogicalDisk`、`Win32_DiskDrive` 与磁盘角色补充来源。Partition、Volume 和 LogicalDisk 按真实来源拆分并用关系组合；模拟模型无法提供的 Windows 属性不伪造。系统版本号与 DisplayVersion 分开，系统卷使用 4096 bytes 分配单元，存储空间数据卷继续使用当前测试布局的 65536 bytes。
+
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 
 ## 数据与生命周期

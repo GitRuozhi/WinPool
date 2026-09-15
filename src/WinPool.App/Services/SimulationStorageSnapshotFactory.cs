@@ -12,7 +12,7 @@ public static class SimulationStorageSnapshotFactory
 
     public const string SimulatedComputerName = "DESKTOP-PL96UKD";
 
-    public const string SimulatedSnapshotVersion = "simulation-winpool-v03";
+    public const string SimulatedSnapshotVersion = "simulation-winpool-v04";
 
     public static StorageSnapshot Create()
     {
@@ -54,15 +54,15 @@ public static class SimulationStorageSnapshotFactory
                 "sim:pool:primordial", true, "Primordial", true, "Healthy", "OK",
                 46909252583424, 28760329945088,
                 "sim:subsystem:spaces",
-                disks.Where(x => x.PoolStableId == "sim:pool:primordial").Select(x => x.StableId).ToArray()),
+                disks.Where(x => x.PoolStableId == "sim:pool:primordial").Select(x => x.StableId).ToArray(), 512, 4096, "Fixed"),
             new StoragePoolInfo(
                 "sim:pool:01", true, "Pool01", false, "Healthy", "OK",
                 12255069470720, 12244146454528, "sim:subsystem:spaces",
-                disks.Where(x => x.PoolStableId == "sim:pool:01").Select(x => x.StableId).ToArray()),
+                disks.Where(x => x.PoolStableId == "sim:pool:01").Select(x => x.StableId).ToArray(), 512, 512, "Fixed"),
             new StoragePoolInfo(
                 "sim:pool:02", true, "Pool02", false, "Healthy", "OK",
                 16499891765248, 16332150013952, "sim:subsystem:spaces",
-                disks.Where(x => x.PoolStableId == "sim:pool:02").Select(x => x.StableId).ToArray())
+                disks.Where(x => x.PoolStableId == "sim:pool:02").Select(x => x.StableId).ToArray(), 512, 512, "Fixed")
         };
 
         var tiers = new[]
@@ -129,7 +129,7 @@ public static class SimulationStorageSnapshotFactory
                 ComputerId,
                 SimulatedComputerName,
                 "Windows 10 Pro",
-                "22H2",
+                "10.0.19045",
                 "19045",
                 DateTimeOffset.Now.AddDays(-3),
                 "22H2",

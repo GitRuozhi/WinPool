@@ -158,6 +158,8 @@ public static class WinPoolStorageProjection
             if (parent is not null && unified.Resolve(x.Id)?.Id != parent) parent = null;
             var paths = Field(x, "AccessPaths") ?? (parent is null ? null : Field(objects[parent], "AccessPaths"));
             var pathsValue = Convert(paths, typeof(IReadOnlyList<string>), x.Id, warnings).Deserialize<string[]>() ?? [];
+            if (pathsValue.Length == 0 && Field(x, "Path") is { ReadState: FieldReadState.Returned } path
+                && path.DisplayValue() is { Length: > 0 } returnedPath) pathsValue = [returnedPath];
             if (pathsValue.Length == 0 && Field(x, "DriveLetter")?.DisplayValue() is { Length: > 0 } letter
                 && StorageAccessPath.TryGetDriveLetter(letter, out var normalized)) pathsValue = [normalized + ":\\"];
             return Build<VolumeInfo>(x, new() { ["PartitionStableId"] = parent, ["AccessPaths"] = pathsValue, ["VolumeIdentity"] = x.Id });
@@ -260,6 +262,7 @@ public static class WinPoolStorageProjection
             "OperationalStatus" => code switch { 0 => "Unknown", 1 => "Other", 2 => "OK", 3 => "Degraded", 6 => "Error", 10 => "Stopped", 12 => "NoContact", 13 => "LostCommunication", _ => Number(code) },
             "MediaType" => code switch { 0 => "Unspecified", 3 => "HDD", 4 => "SSD", 5 => "SCM", _ => Number(code) },
             "Usage" => code switch { 0 => "Unknown", 1 => "AutoSelect", 2 => "ManualSelect", 3 => "HotSpare", 4 => "Retired", 5 => "Journal", _ => Number(code) },
+            "CannotPoolReason" => code switch { 0 => "Unknown", 1 => "Other", 2 => "InPool", 3 => "NotHealthy", 4 => "RemovableMedia", 5 => "InUseByCluster", 6 => "Offline", 7 => "InsufficientCapacity", 8 => "SpareDisk", 9 => "ReservedBySubsystem", 10 => "Starting", 11 => "MicrosoftReservedPartition", 12 => "GptProtectivePartition", 13 => "ForeignDisk", 14 => "UnsupportedSectorSize", _ => Number(code) },
             "PartitionStyle" => code switch { 0 => "RAW", 1 => "MBR", 2 => "GPT", _ => Number(code) },
             "ProvisioningType" or "ProvisioningTypeDefault" => code switch { 1 => "Thin", 2 => "Fixed", _ => Number(code) },
             "BusType" => code switch { 0 => "Unknown", 1 => "SCSI", 2 => "ATAPI", 3 => "ATA", 7 => "USB", 8 => "RAID", 10 => "SAS", 11 => "SATA", 14 => "Virtual", 15 => "FileBackedVirtual", 16 => "StorageSpaces", 17 => "NVMe", 18 => "SCM", _ => Number(code) },

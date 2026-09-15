@@ -11,16 +11,11 @@ public sealed class V052BugRegressionTests
         var snapshot = SimulationLayouts.StandardTiered();
         var facts = WinPoolSimulationFacts.Create(snapshot, SystemId.New());
         var volume = snapshot.Volumes.First();
-        facts = facts with
-        {
-            Objects = facts.Objects.Add(new("logical-observation", FactObjectType.LogicalDisk, facts.Sources[0].Id,
-                "logical", true, [])),
-            Relationships = facts.Relationships.Add(new(volume.StableId, "logical-observation", "same-volume"))
-        };
+        var logical = facts.Relationships.Single(x => x.FromId == volume.StableId && x.Kind == "same-volume").ToId;
         var candidate = snapshot with { Volumes = snapshot.Volumes.Select(x => x.StableId == volume.StableId
             ? x with { FileSystemLabel = "Renamed" } : x).ToArray() };
         var result = WinPoolSimulationFacts.ApplyCandidate(facts, snapshot, candidate, facts.SystemId);
-        Assert.Contains(result.Relationships, x => x.Kind == "same-volume" && x.ToId == "logical-observation");
+        Assert.Contains(result.Relationships, x => x.Kind == "same-volume" && x.ToId == logical);
         Assert.Equal(3, new WinPoolSystem(result).Resolve(volume.StableId)!.Sources.Length);
     }
 
@@ -133,7 +128,7 @@ public sealed class V052BugRegressionTests
         var facts = WinPoolSimulationFacts.Create(snapshot, SystemId.New());
         facts = facts with { Objects = facts.Objects.Select(x => x with
         {
-            Fields = x.Fields.Add(WinPoolSourceField.Missing("Description", FactValueType.String, x.SourceRef, FieldReadState.Failed))
+            Fields = x.Fields.Add(WinPoolSourceField.Missing("UnrelatedDescription", FactValueType.String, x.SourceRef, FieldReadState.Failed))
         }).ToImmutableArray() };
         var view = WinPoolStorageProjection.Project(facts);
         var target = view.Partitions.First(x => x.Type is "BasicData" or "Primary" && !x.IsBoot && !x.IsSystem);
