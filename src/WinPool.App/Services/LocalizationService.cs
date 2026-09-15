@@ -144,6 +144,8 @@ public sealed class LocalizationService : ObservableObject
             ["Light"] = ("亮色", "Light"),
             ["Dark"] = ("暗色", "Dark"),
             ["Language"] = ("语言", "Language"),
+            ["DeveloperMode"] = ("开发者模式", "Developer mode"),
+            ["DeveloperModeDescription"] = ("显示硬件、测试和开发页面。", "Show the Hardware, Test, and Development pages."),
             ["SystemLanguage"] = ("跟随系统", "System default"),
             ["Chinese"] = ("中文", "Chinese"),
             ["English"] = ("English", "English"),

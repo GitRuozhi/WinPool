@@ -38,6 +38,7 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -86,6 +87,21 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         SelectionChanged="LanguageOptions_SelectionChanged" />
+                    <TextBlock
+                        x:Name="DeveloperModeTitle"
+                        Grid.Row="3"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="开发者模式" />
+                    <ToggleSwitch
+                        x:Name="DeveloperModeSwitch"
+                        Grid.Row="3"
+                        Grid.Column="1"
+                        MinHeight="32"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        OffContent=""
+                        OnContent=""
+                        Toggled="DeveloperModeSwitch_Toggled" />
                 </Grid>
             </Border>
 

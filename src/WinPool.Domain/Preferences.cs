@@ -42,6 +42,7 @@ public sealed record UserPreferences(
     bool CreateMsrOnInitialize = true,
     long PartitionIgnoreSizeBytes = 8L * 1024 * 1024,
     string LastActivePage = "Manage",
+    bool DeveloperMode = false,
     int FormatVersion = 1);
 
 /// <summary>

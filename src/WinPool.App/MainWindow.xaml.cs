@@ -143,6 +143,7 @@ public sealed partial class MainWindow : Window
         {
             await ViewModel.InitializePreferencesAsync();
             _preferredShellPage = ViewModel.CurrentPreferences.LastActivePage;
+            BuildShellNavigation();
         }
         catch (Exception exception)
         {
@@ -564,15 +565,40 @@ public sealed partial class MainWindow : Window
 
     private void BuildShellNavigation()
     {
+        _updatingNavigation = true;
+        ShellNavigationItems.Clear();
+        if (ViewModel.CurrentPreferences.DeveloperMode)
+        {
+            ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Hardware, string.Empty, "\uE950"));
+        }
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Manage, string.Empty, "\uE80F"));
-        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Hardware, string.Empty, "\uE950"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.StorageStructure, string.Empty, "\uE710"));
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.DiskPartition, string.Empty, "\uEDA2"));
-        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Test, string.Empty, "\uE768"));
+        if (ViewModel.CurrentPreferences.DeveloperMode)
+        {
+            ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Test, string.Empty, "\uE768"));
+        }
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Monitor, string.Empty, "\uE9D9"));
-        ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Development, string.Empty, "\uE943"));
+        if (ViewModel.CurrentPreferences.DeveloperMode)
+        {
+            ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Development, string.Empty, "\uE943"));
+        }
         ShellNavigationItems.Add(new ShellNavigationItem(ShellPageKind.Settings, string.Empty, "\uE713"));
+        _updatingNavigation = false;
         RefreshShellNavigationText();
+    }
+
+    private static bool IsDeveloperPage(ShellPageKind page) =>
+        page is ShellPageKind.Hardware or ShellPageKind.Test or ShellPageKind.Development;
+
+    private bool IsShellPageAvailable(ShellPageKind page) =>
+        !IsDeveloperPage(page) || ViewModel.CurrentPreferences.DeveloperMode;
+
+    private void RefreshDeveloperNavigation()
+    {
+        var selectedPage = SelectedShellItem?.Page ?? ShellPageKind.Manage;
+        BuildShellNavigation();
+        SelectShellPage(IsShellPageAvailable(selectedPage) ? selectedPage : ShellPageKind.Manage);
     }
 
     private void RegisterShellKeyboardAccelerators()
@@ -627,6 +653,11 @@ public sealed partial class MainWindow : Window
 
     private void SelectShellPage(ShellPageKind page, string? editorTargetStableId = null)
     {
+        if (!IsShellPageAvailable(page))
+        {
+            page = ShellPageKind.Manage;
+            editorTargetStableId = null;
+        }
         var item = ShellNavigationItems.First(candidate => candidate.Page == page);
         _updatingNavigation = true;
         SelectedShellItem = item;
@@ -710,6 +741,10 @@ public sealed partial class MainWindow : Window
         {
             UpdateActiveSystemName();
             PersistWorkspaceState();
+        }
+        else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
+        {
+            RefreshDeveloperNavigation();
         }
     }
 

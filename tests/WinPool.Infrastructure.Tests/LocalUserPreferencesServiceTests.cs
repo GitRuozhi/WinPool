@@ -6,6 +6,40 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class LocalUserPreferencesServiceTests
 {
     [Fact]
+    public async Task DeveloperModeDefaultsOffAndRoundTripsWhenEnabled()
+    {
+        using var location = TemporaryLocation.Create();
+        var service = new LocalUserPreferencesService(location.Root);
+
+        Assert.False((await service.LoadAsync()).DeveloperMode);
+
+        await service.SaveAsync(new UserPreferences(DeveloperMode: true));
+
+        Assert.True((await service.LoadAsync()).DeveloperMode);
+    }
+
+    [Fact]
+    public async Task ExistingFormatWithoutDeveloperModeLoadsWithItDisabled()
+    {
+        using var location = TemporaryLocation.Create();
+        var service = new LocalUserPreferencesService(location.Root);
+        await File.WriteAllTextAsync(
+            service.SettingsPath,
+            """
+            {
+              "Theme": "System",
+              "AccentColor": "System",
+              "Language": "SystemDefault",
+              "FormatVersion": 1
+            }
+            """);
+
+        var loaded = await service.LoadAsync();
+
+        Assert.False(loaded.DeveloperMode);
+    }
+
+    [Fact]
     public async Task SaveReplacesExistingPreferencesWithoutLeavingTemporaryFiles()
     {
         using var location = TemporaryLocation.Create();

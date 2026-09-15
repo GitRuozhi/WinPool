@@ -651,6 +651,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
+    public async Task SetDeveloperModeAsync(bool enabled)
+    {
+        var updated = CurrentPreferences with { DeveloperMode = enabled };
+        await _preferencesService.SaveAsync(updated);
+        CurrentPreferences = updated;
+        OnPropertyChanged(nameof(CurrentPreferences));
+    }
+
     public async Task SetLastActivePageAsync(string page)
     {
         if (string.IsNullOrWhiteSpace(page))

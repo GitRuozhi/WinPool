@@ -770,6 +770,27 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void DeveloperNavigationIsDisabledByDefaultAndGatesAllThreePages()
+    {
+        var root = FindRepositoryRoot();
+        var preferences = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Domain", "Preferences.cs"));
+        var mainWindow = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+        var settings = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml"));
+
+        Assert.Contains("bool DeveloperMode = false", preferences, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.CurrentPreferences.DeveloperMode", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("IsDeveloperPage(page)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ShellPageKind.Hardware or ShellPageKind.Test or ShellPageKind.Development", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DeveloperModeSwitch\"", settings, StringComparison.Ordinal);
+        Assert.True(
+            mainWindow.IndexOf("ShellPageKind.Hardware, string.Empty", StringComparison.Ordinal)
+            < mainWindow.IndexOf("ShellPageKind.Manage, string.Empty", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ProductFacingVersionUsesTheRepositoryVersionSource()
     {
         var root = FindRepositoryRoot();
@@ -786,7 +807,7 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
         Assert.Contains("<WinPoolVersionMinor>5</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>2</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
+        Assert.Contains("<WinPoolVersionIteration>3</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)0", versionSource, StringComparison.Ordinal);
         Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
         Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);

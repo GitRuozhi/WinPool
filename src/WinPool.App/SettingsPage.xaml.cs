@@ -24,6 +24,7 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMode;
     private bool _updatingDataLocation;
     private bool _updatingLanguage;
+    private bool _updatingDeveloperMode;
     private bool _updatingMsr;
     private bool _updatingStartup;
     private bool _updatingPartitionGap;
@@ -45,6 +46,9 @@ public sealed partial class SettingsPage : Page
         ThemeOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Theme;
         AccentOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.AccentColor;
         LanguageOptions.SelectedIndex = (int)ViewModel.CurrentPreferences.Language;
+        _updatingDeveloperMode = true;
+        DeveloperModeSwitch.IsOn = ViewModel.CurrentPreferences.DeveloperMode;
+        _updatingDeveloperMode = false;
         _updatingMsr = true;
         MsrSwitch.IsOn = ViewModel.CurrentPreferences.CreateMsrOnInitialize;
         _updatingMsr = false;
@@ -377,6 +381,29 @@ public sealed partial class SettingsPage : Page
         }
     }
 
+    private async void DeveloperModeSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || _updatingDeveloperMode)
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.SetDeveloperModeAsync(DeveloperModeSwitch.IsOn);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            _updatingDeveloperMode = true;
+            DeveloperModeSwitch.IsOn = ViewModel.CurrentPreferences.DeveloperMode;
+            _updatingDeveloperMode = false;
+            PublishPreferenceFailure(exception);
+        }
+    }
+
     private async void SettingsExecutionModeSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (!_ready || _updatingMode)
@@ -694,6 +721,9 @@ public sealed partial class SettingsPage : Page
             ThemeOptions.SelectedIndex = (int)preferences.Theme;
             AccentOptions.SelectedIndex = (int)preferences.AccentColor;
             LanguageOptions.SelectedIndex = (int)preferences.Language;
+            _updatingDeveloperMode = true;
+            DeveloperModeSwitch.IsOn = preferences.DeveloperMode;
+            _updatingDeveloperMode = false;
             _updatingMsr = true;
             MsrSwitch.IsOn = preferences.CreateMsrOnInitialize;
             _updatingMsr = false;
@@ -730,6 +760,11 @@ public sealed partial class SettingsPage : Page
         ThemeTitle.Text = l["Theme"];
         AccentTitle.Text = l["AccentColor"];
         LanguageTitle.Text = l["Language"];
+        DeveloperModeTitle.Text = l["DeveloperMode"];
+        DeveloperModeSwitch.SetValue(
+            AutomationProperties.NameProperty,
+            l["DeveloperMode"]);
+        ToolTipService.SetToolTip(DeveloperModeSwitch, l["DeveloperModeDescription"]);
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
         PartitionGapTitle.Text = l["PartitionGapThreshold"];
