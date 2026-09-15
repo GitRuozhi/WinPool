@@ -109,6 +109,7 @@
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 AutomationProperties.Name="Storage system"
+                DropDownClosed="ActiveSystemSelector_DropDownClosed"
                 SelectionChanged="ActiveSystemSelector_SelectionChanged"
                 Visibility="Collapsed" />
 

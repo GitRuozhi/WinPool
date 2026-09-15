@@ -34,6 +34,8 @@ public sealed partial class MainWindow : Window
     private bool _updatingMode;
     private bool _updatingNavigation;
     private bool _updatingSystemSelector;
+    private bool _systemSelectorRefreshPending;
+    private string? _pendingSystemSelectionId;
     private bool _requestingElevation;
     private bool _realWarningDismissed;
     private readonly ApplicationStartupTarget _startupTarget;
@@ -372,6 +374,13 @@ public sealed partial class MainWindow : Window
 
     private void UpdateActiveSystemName()
     {
+        if (ActiveSystemSelector.IsDropDownOpen)
+        {
+            _systemSelectorRefreshPending = true;
+            return;
+        }
+
+        _systemSelectorRefreshPending = false;
         var system = ViewModel.SelectedSystem;
         _updatingSystemSelector = true;
         try
@@ -408,7 +417,28 @@ public sealed partial class MainWindow : Window
     {
         if (_updatingSystemSelector
             || ActiveSystemSelector.SelectedItem is not ComboBoxItem { Tag: string systemId }) return;
+
+        if (ActiveSystemSelector.IsDropDownOpen)
+        {
+            _pendingSystemSelectionId = systemId;
+            return;
+        }
+
         ViewModel.SelectSystem(systemId);
+    }
+
+    private void ActiveSystemSelector_DropDownClosed(object sender, object e)
+    {
+        if (_pendingSystemSelectionId is { } systemId)
+        {
+            _pendingSystemSelectionId = null;
+            ViewModel.SelectSystem(systemId);
+        }
+
+        if (_systemSelectorRefreshPending)
+        {
+            UpdateActiveSystemName();
+        }
     }
 
     private void UpdateCaptionInset()

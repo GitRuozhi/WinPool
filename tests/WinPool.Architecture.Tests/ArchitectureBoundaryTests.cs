@@ -938,9 +938,13 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("x:Name=\"ActiveSystemSelector\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("DropDownClosed=\"ActiveSystemSelector_DropDownClosed\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("SelectionChanged=\"ActiveSystemSelector_SelectionChanged\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
+        Assert.Contains("if (ActiveSystemSelector.IsDropDownOpen)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("_systemSelectorRefreshPending = true", windowSource, StringComparison.Ordinal);
+        Assert.Contains("_pendingSystemSelectionId = systemId", windowSource, StringComparison.Ordinal);
         Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
         Assert.Contains("elements.Add(ActiveSystemSelector)", windowSource, StringComparison.Ordinal);
     }
 

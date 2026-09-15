@@ -1,5 +1,9 @@
 # WinPool 变更记录
 
+## 2026-09-15：标题栏切换模拟系统不再闪退
+
+标题栏系统下拉菜单不再在 WinUI 弹出层仍打开时立即切换工作区并重建页面。选择结果先暂存，待 `DropDownClosed` 后再切换系统；系统列表若需要刷新也等待下拉关闭。原生硬件页已连续往返切换本机、参考模拟、标准两层池、超多磁盘服务器和其它与网络共 7 次，进程均保持存活和响应。
+
 ## 2026-09-15：模拟系统来源事实贴近 Windows
 
 12 个内置模拟不再把 `StorageSnapshot` 属性直接保存成单一 `Simulation` 类。模拟编辑模型保持不变，输出事实按真实采集边界拆成 `Win32_ComputerSystem`、`Win32_OperatingSystem`、`Registry.CurrentVersion`、各 `MSFT_*` 存储类、`Win32_LogicalDisk`、`Win32_DiskDrive` 和磁盘角色补充来源；来源仍明确标记为 Simulation。能从模拟场景确定的字段采用 Windows 字段名、UInt64/数组类型、数字枚举和 bytes 单位，Partition、Volume、LogicalDisk 通过真实关系组合，无法确定的 Windows 属性不伪造。
