@@ -123,7 +123,7 @@ public static class HardwareReportProjector
             ("IPv4", x => Cell(system, x, "IPv4Addresses")),
             ("IPv6", x => Cell(system, x, "IPv6Addresses")),
             ("MAC", x => Cell(system, x, "MacAddress", "PermanentAddress")),
-            (T("主网络", "Primary network"), x => Boolean(system, x, "Primary", T("是", "Yes"), T("否", "No")))));
+            (T("主网络", "Primary network"), x => Boolean(system, x, "Primary", T("是", "Yes"), string.Empty))));
         return categories;
     }
 

@@ -50,7 +50,9 @@ public sealed class HardwareReportProjectorTests
         Assert.Equal("-100", report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "水平坐标").Cells[0].Value);
         Assert.Single(report.Single(x => x.Name == "GPU").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
         Assert.Single(report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
-        Assert.Equal(2, report.Single(x => x.Name == "Network").Sections[0].Rows.Single(x => x.Label == "名称").Cells.Count);
+        var network = report.Single(x => x.Name == "Network").Sections[0];
+        Assert.Equal(2, network.Rows.Single(x => x.Label == "名称").Cells.Count);
+        Assert.Equal(new[] { "是", string.Empty }, network.Rows.Single(x => x.Label == "主网络").Cells.Select(x => x.Value));
     }
 
     [Fact]
