@@ -19,7 +19,12 @@ public sealed partial class HardwarePage : Page
     private const double ColumnGap = PropertyTableVisuals.ColumnGap;
     private const double RowHeight = PropertyTableVisuals.RowHeight;
     private const double MaxValueWidth = 250;
-    private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+    private readonly TextBlock status = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        IsTextSelectionEnabled = true,
+        Visibility = Visibility.Collapsed
+    };
     private readonly Button refresh = new();
     private readonly Button export = new();
     private readonly StackPanel report = new() { Spacing = 20, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -46,7 +51,7 @@ public sealed partial class HardwarePage : Page
         var actions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            HorizontalAlignment = HorizontalAlignment.Left,
             Spacing = 8
         };
         actions.Children.Add(refresh);
@@ -105,9 +110,7 @@ public sealed partial class HardwarePage : Page
         SetButtonContent(export, "\uEDE1", viewModel.Localization["HardwareExport"]);
         refresh.IsEnabled = capture is not null || viewModel.SelectedSystem.IsLocal && !viewModel.IsScanning;
         export.IsEnabled = capture is null;
-        var unified = viewModel.SelectedSystem.Unified;
-        status.Text = unified is null ? viewModel.Localization["HardwareEmpty"] : string.Join(" · ", unified.Collections.Select(x =>
-            $"{(x.Purpose == CollectionPurpose.Storage ? viewModel.Localization["Manage"] : viewModel.Localization["Hardware"])}: {x.CompletedAt.LocalDateTime:G} ({viewModel.Localization["Source" + x.State]})"));
+        SetStatus(null);
         report.Children.Clear();
         groupCells.Clear();
         tables.Clear();
@@ -220,6 +223,12 @@ public sealed partial class HardwarePage : Page
         AutomationProperties.SetName(button, text);
     }
 
+    private void SetStatus(string? text)
+    {
+        status.Text = text ?? string.Empty;
+        status.Visibility = string.IsNullOrWhiteSpace(text) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void SyncLabelRowHeights()
     {
         foreach (var (labels, values, _) in tables)
@@ -312,11 +321,15 @@ public sealed partial class HardwarePage : Page
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
         export.IsEnabled = false;
+        SetStatus(null);
         try
         {
             var targetId = viewModel.SelectedSystem.Id;
             var path = await viewModel.ExportActiveSystemAsync();
-            if (path is not null && active && viewModel.SelectedSystem.Id == targetId) status.Text = viewModel.Localization["Exported"];
+            if (path is not null && active && viewModel.SelectedSystem.Id == targetId)
+            {
+                SetStatus(viewModel.Localization["Exported"]);
+            }
         }
         finally { if (active) export.IsEnabled = true; }
     }
