@@ -927,7 +927,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void TitleBarSeparatesTheActiveSystemFromNavigation()
+    public void TitleBarProvidesStorageSystemSelector()
     {
         var root = FindRepositoryRoot();
         var windowXaml = File.ReadAllText(
@@ -935,13 +935,13 @@ public sealed class ArchitectureBoundaryTests
         var windowSource = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
 
-        Assert.Contains("x:Name=\"ActiveSystemBadge\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ActiveSystemSelector\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("BorderThickness=\"1\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("CornerRadius=\"4\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("ActiveSystemBadge.BorderBrush = accent", windowSource, StringComparison.Ordinal);
-        Assert.Contains("ActiveSystemBadge.Visibility = system is null", windowSource, StringComparison.Ordinal);
+        Assert.Contains("SelectionChanged=\"ActiveSystemSelector_SelectionChanged\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("elements.Add(ActiveSystemSelector)", windowSource, StringComparison.Ordinal);
     }
 
     [Fact]

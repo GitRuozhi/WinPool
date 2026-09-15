@@ -1085,6 +1085,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public Task RefreshHardwareAsync(CancellationToken cancellationToken) =>
         SelectedSystem.IsLocal ? ScanCoreAsync(CollectionPurpose.Hardware, cancellationToken) : Task.CompletedTask;
 
+    public bool SelectSystem(string systemId) => SwitchSystem(systemId);
+
     private async Task ScanCoreAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
     {
         if (!await _scanGate.WaitAsync(0))

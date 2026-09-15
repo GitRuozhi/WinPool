@@ -100,26 +100,17 @@
                 </ListView.ItemTemplate>
             </ListView>
 
-            <Border
-                x:Name="ActiveSystemBadge"
+            <ComboBox
+                x:Name="ActiveSystemSelector"
                 Grid.Column="2"
                 Margin="24,0,12,0"
-                Padding="10,3"
+                MinWidth="180"
+                MaxWidth="420"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
-                BorderBrush="{StaticResource WinPoolAccentBrush}"
-                BorderThickness="1"
-                CornerRadius="4"
-                IsHitTestVisible="False"
-                Visibility="Collapsed">
-                <TextBlock
-                    x:Name="ActiveSystemNameText"
-                    VerticalAlignment="Center"
-                    MaxWidth="420"
-                    FontSize="13"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextTrimming="CharacterEllipsis" />
-            </Border>
+                AutomationProperties.Name="Storage system"
+                SelectionChanged="ActiveSystemSelector_SelectionChanged"
+                Visibility="Collapsed" />
 
             <StackPanel
                 x:Name="ModeControls"

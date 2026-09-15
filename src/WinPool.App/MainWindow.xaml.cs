@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
     private bool _initialized;
     private bool _updatingMode;
     private bool _updatingNavigation;
+    private bool _updatingSystemSelector;
     private bool _requestingElevation;
     private bool _realWarningDismissed;
     private readonly ApplicationStartupTarget _startupTarget;
@@ -371,18 +372,43 @@ public sealed partial class MainWindow : Window
 
     private void UpdateActiveSystemName()
     {
-        // The field is always visible in the title bar, independent of the
-        // currently selected shell page.
         var system = ViewModel.SelectedSystem;
-        var prefix = system is null
-            ? string.Empty
-            : system.IsLocal
-                ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
-                : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-        ActiveSystemBadge.Visibility = system is null
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        ActiveSystemNameText.Text = system is null ? string.Empty : $"{prefix} {system.DisplayName}";
+        _updatingSystemSelector = true;
+        try
+        {
+            ActiveSystemSelector.Items.Clear();
+            ComboBoxItem? selected = null;
+            foreach (var candidate in ViewModel.SystemCatalog.Systems)
+            {
+                var prefix = candidate.IsLocal
+                    ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
+                    : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
+                var item = new ComboBoxItem
+                {
+                    Content = $"{prefix} {candidate.DisplayName}",
+                    Tag = candidate.Id,
+                    MaxWidth = 390
+                };
+                ActiveSystemSelector.Items.Add(item);
+                if (candidate.Id.Equals(system?.Id, StringComparison.OrdinalIgnoreCase)) selected = item;
+            }
+            ActiveSystemSelector.SelectedItem = selected;
+            ActiveSystemSelector.Visibility = system is null ? Visibility.Collapsed : Visibility.Visible;
+            AutomationProperties.SetName(ActiveSystemSelector,
+                ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "存储系统" : "Storage system");
+        }
+        finally
+        {
+            _updatingSystemSelector = false;
+        }
+        DispatcherQueue.TryEnqueue(UpdateTitleBarPassthroughRegions);
+    }
+
+    private void ActiveSystemSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingSystemSelector
+            || ActiveSystemSelector.SelectedItem is not ComboBoxItem { Tag: string systemId }) return;
+        ViewModel.SelectSystem(systemId);
     }
 
     private void UpdateCaptionInset()
@@ -739,7 +765,10 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSystem))
         {
-            UpdateActiveSystemName();
+            // Rebuilding ComboBox items inside its SelectionChanged callback can
+            // invalidate WinUI's open flyout. Defer the title-bar refresh until
+            // the current input event has completed.
+            DispatcherQueue.TryEnqueue(UpdateActiveSystemName);
             PersistWorkspaceState();
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
@@ -873,7 +902,7 @@ public sealed partial class MainWindow : Window
                 ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A)
                 : Color.FromArgb(255, 0xFF, 0xFF, 0xFF));
         WindowTitleText.Foreground = normalForeground;
-        ActiveSystemBadge.BorderBrush = accent;
+        ActiveSystemSelector.BorderBrush = accent;
         LocalRealOperationsLabel.Foreground = normalForeground;
         foreach (var item in ShellNavigationItems)
         {
@@ -903,11 +932,9 @@ public sealed partial class MainWindow : Window
         RectInt32[] regions;
         try
         {
-            regions =
-            [
-                GetPhysicalRect(ShellNavigationList, scale),
-                GetPhysicalRect(ModeControls, scale)
-            ];
+            var elements = new List<FrameworkElement> { ShellNavigationList, ModeControls };
+            if (ActiveSystemSelector.Visibility == Visibility.Visible) elements.Add(ActiveSystemSelector);
+            regions = elements.Select(element => GetPhysicalRect(element, scale)).ToArray();
         }
         catch (Exception exception) when (
             exception is InvalidOperationException or ArgumentException)

@@ -15,15 +15,27 @@ namespace WinPool_App;
 /// <summary>Read-only hardware report. Source matching and value selection stay outside the UI.</summary>
 public sealed partial class HardwarePage : Page
 {
-    private const double LabelWidth = 142;
-    private const double CellMinWidth = 170;
-    private readonly TextBlock title = new() { FontSize = 22, FontWeight = FontWeights.SemiBold };
+    private const double LabelWidth = PropertyTableVisuals.LabelColumnWidth;
+    private const double ColumnGap = PropertyTableVisuals.ColumnGap;
+    private const double RowHeight = PropertyTableVisuals.RowHeight;
+    private const double MaxValueWidth = 250;
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly Button refresh = new();
     private readonly Button export = new();
-    private readonly StackPanel report = new() { Spacing = 20 };
+    private readonly StackPanel report = new() { Spacing = 20, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ScrollViewer pageScroll = new()
+    {
+        HorizontalScrollMode = ScrollMode.Disabled,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        VerticalScrollMode = ScrollMode.Enabled,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+    };
+    private readonly List<Border> groupCells = [];
+    private readonly List<(Grid Labels, Grid Values)> tables = [];
     private WorkspaceViewModel viewModel = null!;
     private CancellationTokenSource? capture;
+    private string? selectedGroupKey;
+    private string? hoveredGroupKey;
     private bool active;
 
     public HardwarePage()
@@ -31,24 +43,25 @@ public sealed partial class HardwarePage : Page
         InitializeComponent();
         AutomationProperties.SetAutomationId(refresh, "HardwareRefresh");
         AutomationProperties.SetAutomationId(export, "HardwareExport");
-        var root = new Grid { Padding = new Thickness(12), RowSpacing = 10 };
-        root.RowDefinitions.Add(new() { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new() { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
-        var header = new Grid { ColumnSpacing = 10 };
-        header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-        header.Children.Add(title);
-        Grid.SetColumn(refresh, 1); header.Children.Add(refresh);
-        Grid.SetColumn(export, 2); header.Children.Add(export);
-        root.Children.Add(header);
-        Grid.SetRow(status, 1); root.Children.Add(status);
-        var scroll = new ScrollViewer { Content = report, HorizontalScrollMode = ScrollMode.Disabled,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollMode = ScrollMode.Enabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Grid.SetRow(scroll, 2); root.Children.Add(scroll);
-        Content = root;
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8
+        };
+        actions.Children.Add(refresh);
+        actions.Children.Add(export);
+        var content = new StackPanel
+        {
+            Margin = new Thickness(12),
+            Spacing = 10,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        content.Children.Add(actions);
+        content.Children.Add(status);
+        content.Children.Add(report);
+        pageScroll.Content = content;
+        Content = pageScroll;
         refresh.Click += Refresh_Click;
         export.Click += Export_Click;
     }
@@ -87,61 +100,108 @@ public sealed partial class HardwarePage : Page
 
     private void Rebuild()
     {
-        title.Text = viewModel.Localization["HardwareReadOnly"];
-        refresh.Content = capture is null ? viewModel.Localization["HardwareRefresh"] : viewModel.Localization["Cancel"];
-        export.Content = viewModel.Localization["Export"];
+        SetButtonContent(refresh, capture is null ? "\uE72C" : "\uE711",
+            capture is null ? viewModel.Localization["HardwareRefresh"] : viewModel.Localization["Cancel"]);
+        SetButtonContent(export, "\uEDE1", viewModel.Localization["HardwareExport"]);
         refresh.IsEnabled = capture is not null || viewModel.SelectedSystem.IsLocal && !viewModel.IsScanning;
         export.IsEnabled = capture is null;
         var unified = viewModel.SelectedSystem.Unified;
         status.Text = unified is null ? viewModel.Localization["HardwareEmpty"] : string.Join(" · ", unified.Collections.Select(x =>
             $"{(x.Purpose == CollectionPurpose.Storage ? viewModel.Localization["Manage"] : viewModel.Localization["Hardware"])}: {x.CompletedAt.LocalDateTime:G} ({viewModel.Localization["Source" + x.State]})"));
         report.Children.Clear();
+        groupCells.Clear();
+        tables.Clear();
+        hoveredGroupKey = null;
         var categories = HardwareReportProjector.Project(viewModel.SelectedSystem, viewModel.Localization.IsChinese);
         if (categories.Count == 0)
         {
             report.Children.Add(new TextBlock { Text = viewModel.Localization["HardwareEmpty"], TextWrapping = TextWrapping.Wrap });
             return;
         }
-        foreach (var category in categories) report.Children.Add(BuildCategory(category));
+        for (var index = 0; index < categories.Count; index++)
+        {
+            report.Children.Add(BuildCategory(categories[index], index));
+        }
+        if (selectedGroupKey is not null && !groupCells.Any(cell => Equals(cell.Tag, selectedGroupKey)))
+        {
+            selectedGroupKey = null;
+        }
+        ApplyGroupHighlight();
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            SyncLabelRowHeights);
     }
 
-    private FrameworkElement BuildCategory(HardwareReportCategory category)
+    private FrameworkElement BuildCategory(HardwareReportCategory category, int categoryIndex)
     {
         var panel = new StackPanel { Spacing = 8 };
         var heading = new TextBlock { Text = category.Name, FontSize = 18, FontWeight = FontWeights.SemiBold };
         panel.Children.Add(heading);
-        foreach (var section in category.Sections)
+        for (var sectionIndex = 0; sectionIndex < category.Sections.Count; sectionIndex++)
         {
-            var grid = new Grid();
-            grid.ColumnDefinitions.Add(new() { Width = new GridLength(LabelWidth) });
+            var section = category.Sections[sectionIndex];
+            var table = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+            table.ColumnDefinitions.Add(new() { Width = new GridLength(LabelWidth) });
+            table.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            var labels = new Grid();
+            var values = new Grid { HorizontalAlignment = HorizontalAlignment.Left };
             var count = Math.Max(1, section.Rows.Select(x => x.Cells.Count).DefaultIfEmpty(1).Max());
-            for (var column = 0; column < count; column++) grid.ColumnDefinitions.Add(new() { Width = new GridLength(CellMinWidth) });
+            var keys = Enumerable.Range(0, count).Select(column =>
+            {
+                var objectId = section.Rows.Select(row => row.Cells.ElementAtOrDefault(column)?.ObjectId)
+                    .FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+                return $"{categoryIndex}:{sectionIndex}:{objectId ?? column.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            }).ToArray();
+            for (var column = 0; column < count; column++)
+            {
+                values.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            }
             for (var rowIndex = 0; rowIndex < section.Rows.Count; rowIndex++)
             {
-                grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+                labels.RowDefinitions.Add(new() { Height = GridLength.Auto });
+                values.RowDefinitions.Add(new() { Height = GridLength.Auto });
                 var row = section.Rows[rowIndex];
                 var label = BorderCell(new TextBlock { Text = row.Label, Padding = new Thickness(10, 6, 10, 6),
                     VerticalAlignment = VerticalAlignment.Center, Opacity = 0.72,
-                    TextWrapping = TextWrapping.Wrap });
-                Grid.SetRow(label, rowIndex); grid.Children.Add(label);
-                for (var column = 0; column < row.Cells.Count; column++)
+                    TextTrimming = TextTrimming.CharacterEllipsis });
+                Grid.SetRow(label, rowIndex);
+                labels.Children.Add(label);
+                for (var column = 0; column < count; column++)
                 {
-                    var cell = row.Cells[column];
-                    var button = new Button { Content = new TextBlock { Text = cell.Value, TextWrapping = TextWrapping.Wrap,
-                        IsTextSelectionEnabled = true }, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                        BorderThickness = new Thickness(0), Padding = new Thickness(10, 6, 10, 6),
-                        HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left,
-                        Tag = (category.Name, row.Label, cell) };
-                    AutomationProperties.SetName(button, $"{category.Name}, {row.Label}, {cell.Value}");
-                    ToolTipService.SetToolTip(button, viewModel.Localization.IsChinese ? "查看来源与原值" : "View source and raw value");
-                    button.Click += Detail_Click;
-                    var border = BorderCell(button);
-                    Grid.SetRow(border, rowIndex); Grid.SetColumn(border, column + 1); grid.Children.Add(border);
+                    var cell = row.Cells.ElementAtOrDefault(column);
+                    var text = new TextBlock
+                    {
+                        Text = cell?.Value ?? string.Empty,
+                        Padding = new Thickness(10, 5, 10, 5),
+                        MaxWidth = MaxValueWidth,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        TextWrapping = TextWrapping.WrapWholeWords
+                    };
+                    AutomationProperties.SetName(text, $"{category.Name}, {row.Label}, {text.Text}");
+                    var border = PropertyTableVisuals.CreateCell(
+                        text,
+                        (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+                        column == 0 ? 0 : ColumnGap,
+                        tag: keys[column]);
+                    border.Tapped += GroupCell_Tapped;
+                    border.PointerEntered += GroupCell_PointerEntered;
+                    border.PointerExited += GroupCell_PointerExited;
+                    Grid.SetRow(border, rowIndex);
+                    Grid.SetColumn(border, column);
+                    values.Children.Add(border);
+                    groupCells.Add(border);
                 }
             }
-            panel.Children.Add(new ScrollViewer { Content = grid, HorizontalScrollMode = ScrollMode.Enabled,
+            Grid.SetColumn(labels, 0);
+            table.Children.Add(labels);
+            var horizontal = new ScrollViewer { Content = values, HorizontalScrollMode = ScrollMode.Enabled,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            Grid.SetColumn(horizontal, 1);
+            table.Children.Add(horizontal);
+            values.PointerWheelChanged += Values_PointerWheelChanged;
+            tables.Add((labels, values));
+            panel.Children.Add(table);
         }
         return panel;
     }
@@ -151,13 +211,73 @@ public sealed partial class HardwarePage : Page
         (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
         minHeight: 34);
 
-    private async void Detail_Click(object sender, RoutedEventArgs e)
+    private static void SetButtonContent(Button button, string glyph, string text)
     {
-        if (sender is not Button { Tag: ValueTuple<string, string, HardwareReportCell> data }) return;
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = $"{data.Item1} · {data.Item2}",
-            CloseButtonText = viewModel.Localization["Close"], Content = new ScrollViewer { MaxHeight = 520,
-                Content = new TextBlock { Text = data.Item3.Details, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } } };
-        await dialog.ShowAsync();
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+        content.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
+        content.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
+        button.Content = content;
+        AutomationProperties.SetName(button, text);
+    }
+
+    private void SyncLabelRowHeights()
+    {
+        foreach (var (labels, values) in tables)
+        {
+            for (var row = 0; row < labels.RowDefinitions.Count && row < values.RowDefinitions.Count; row++)
+            {
+                var height = values.Children.OfType<FrameworkElement>()
+                    .Where(item => Grid.GetRow(item) == row)
+                    .Select(item => item.ActualHeight)
+                    .DefaultIfEmpty(RowHeight)
+                    .Max();
+                labels.RowDefinitions[row].Height = new GridLength(Math.Max(RowHeight, height));
+            }
+        }
+    }
+
+    private void Values_PointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var delta = e.GetCurrentPoint((UIElement)sender).Properties.MouseWheelDelta;
+        if (delta == 0) return;
+        e.Handled = true;
+        pageScroll.ChangeView(null, pageScroll.VerticalOffset - ((delta / 120.0) * 48), null, disableAnimation: true);
+    }
+
+    private void GroupCell_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        selectedGroupKey = ((FrameworkElement)sender).Tag as string;
+        ApplyGroupHighlight();
+    }
+
+    private void GroupCell_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        hoveredGroupKey = ((FrameworkElement)sender).Tag as string;
+        ApplyGroupHighlight();
+    }
+
+    private void GroupCell_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        hoveredGroupKey = null;
+        ApplyGroupHighlight();
+    }
+
+    private void ApplyGroupHighlight()
+    {
+        var accent = (Brush)Application.Current.Resources["WinPoolAccentBrush"];
+        var accentForeground = (Brush)Application.Current.Resources["WinPoolAccentForegroundBrush"];
+        var hover = (Brush)Application.Current.Resources["WinPoolAccentHoverBrush"];
+        var transparent = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        foreach (var cell in groupCells)
+        {
+            var key = cell.Tag as string;
+            var selected = key is not null && key == selectedGroupKey;
+            cell.Background = selected ? accent : key is not null && key == hoveredGroupKey ? hover : transparent;
+            if (cell.Child is not TextBlock text) continue;
+            if (selected) text.Foreground = accentForeground;
+            else text.ClearValue(TextBlock.ForegroundProperty);
+            text.IsTextSelectionEnabled = selected;
+        }
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)

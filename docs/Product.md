@@ -68,7 +68,7 @@ Windows 11 has not yet received equivalent testing because current storage hardw
 
 1.x 聚焦拓扑、管理编辑、监控、设置、数据安全和交付质量。“测试”“开发”页面只显示简单路线说明；完整测试工作区、外部基准执行、开发者和 AI 工作区留到 2.0，不因设计储备已有详细方案而提前加入。设置中的开发者模式默认关闭；启用后才显示硬件、测试、开发三页，并将硬件排在管理之前。关闭后这些页面不能通过导航、快捷键、记忆页面或启动参数进入。
 
-保留 WinUI App + 每用户可见托盘 Agent 两进程，类型化命名管道和 Agent 单 SQLite 写入方；不引入 Windows 服务。详细技术所有权归 [Development](Development.md)。保留现有拓扑布局。只读硬件页以 Computer、System、Mainboard、CPU、Memory、VirtualMemory、Storage、GPU、Monitor、Network 十段纵向报告显示友好值，Memory 总体与模组分段，每段可横向查看多设备。设备列与统一模型中的同类对象保持一致，界面只决定显示哪些字段，不按来源或设备属性隐藏对象；不隐藏软件 GPU 或 Monitor。网络对象在统一层采用 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 条件，Storage 按 WinPool 管理页口径且不增加硬件页专用过滤。属性详情保留标准字段、原值、单位、状态、来源、时间和原因；本机可独立刷新，当前系统可导出完整 JSON。模拟系统的非存储硬件只读。Storage 与管理页共用摘要及未知/失败/零值口径。采集、显示、缓存与导出保持原值，不做脱敏或隐私裁剪。
+保留 WinUI App + 每用户可见托盘 Agent 两进程，类型化命名管道和 Agent 单 SQLite 写入方；不引入 Windows 服务。详细技术所有权归 [Development](Development.md)。标题栏以存储系统下拉框显示和切换当前本机或模拟系统。保留现有拓扑布局。只读硬件页不显示重复页标题，以 Computer、System、Mainboard、CPU、Memory、VirtualMemory、Storage、GPU、Monitor、Network 十段纵向报告显示友好值，Memory 总体与模组分段，每段可横向查看多设备。项名固定在横向滚动区外，设备列按内容自动宽度并设上限；单击项值选中同一设备组，组内文本可选择复制，不弹出原始字段对话框。页面操作、状态和各报告段使用同一纵向滚动。设备列与统一模型中的同类对象保持一致，界面只决定显示哪些字段，不按来源或设备属性隐藏对象；不隐藏软件 GPU 或 Monitor。网络对象在统一层采用 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 条件，Storage 按 WinPool 管理页口径且不增加硬件页专用过滤。本机可独立刷新，当前系统可导出完整 JSON。模拟系统的非存储硬件只读。Storage 与管理页共用摘要及未知/失败/零值口径。采集、显示、缓存与导出保持原值，不做脱敏或隐私裁剪。
 
 ## 路线
 

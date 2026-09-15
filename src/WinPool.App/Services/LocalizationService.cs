@@ -13,7 +13,8 @@ public sealed class LocalizationService : ObservableObject
         {
             ["Manage"] = ("管理", "Manage"),
             ["Hardware"] = ("硬件", "Hardware"),
-            ["HardwareRefresh"] = ("刷新完整硬件", "Refresh all hardware"),
+            ["HardwareRefresh"] = ("刷新", "Refresh"),
+            ["HardwareExport"] = ("导出", "Export"),
             ["HardwareEmpty"] = ("此系统没有已采集的硬件事实。", "This system has no collected hardware facts."),
             ["HardwareReadOnly"] = ("只读硬件信息", "Read-only hardware information"),
             ["SourceDetails"] = ("来源详情", "Source details"),
