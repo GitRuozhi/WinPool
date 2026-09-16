@@ -94,7 +94,7 @@ public sealed class WinPoolStorageProjectionTests
             versions);
 
         var products = SimulationLayouts.CreateAll()
-            .Select(layout => layout.Snapshot.Computer.ProductName)
+            .Select(layout => layout.Snapshot.Computer.WindowsProductName)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
