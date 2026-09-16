@@ -1,8 +1,14 @@
 # WinPool 验证与验收
 
-本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前 V0.53 自动门为全套 603/603 测试、完整 Release 构建 0 警告/0 错误、依赖审计无已知漏洞包。隔离原生 WinUI 已验证开发者模式默认关闭、三页同时显示/隐藏、硬件位于管理之前及设置跨完全重启保留；管理页和硬件页已验证项名自动宽度及上限，硬件页还验证了横向滚动时项名保持显示、自动且有上限的设备列、分离的横纵滚动条、整页纵向滚动、设备列选择后自动居中与文本选择、无详情弹窗。标题栏已在硬件页连续往返切换本机、参考模拟、标准两层池、超多磁盘服务器和其它与网络共 7 次，进程保持存活和响应。网络来源整组刷新后由旧版 46 个对象收敛为 7 个，GPU 从混合来源的 7 列收敛为 4 个 DXGI Adapter，Monitor 从混合来源的 4 列收敛为 2 个 DXGI Output。D3DKMT 间接显示识别在本机刷新后仍保留 4 个 GPU 对象，其中 Intel 核显只有 1 列，另一列正确显示为 GameViewer Virtual Display Adapter，且不再借用 Intel 驱动和 PCI 位置。12 个内置模拟已在实际运行时重建为 Windows 形态来源事实，并核对系统版本、系统卷分配单元、物理磁盘数值类型、扇区单位和硬件页存储摘要。硬件报告、统一存储摘要与本机只读补充采集的有限原生结果见[硬件报告实施核对](Archive/20260915-hardware-report/实施核对.md)；当前机器只覆盖 96 DPI，192 DPI 为 `unverified`。更早 V0.52 统一事实与模拟编辑证据见 [V0.52 实施核对](Archive/V0.52/实施核对.md)。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
+本文件规定验证选择与结果含义。有活动阶段时，具体用例和进度归 `docs/Plan.md`。当前 V0.53 自动门为全套 613/613 测试、完整 Release 构建 0 警告/0 错误、依赖审计无已知漏洞包。隔离原生 WinUI 已验证开发者模式默认关闭、三页同时显示/隐藏、硬件位于管理之前及设置跨完全重启保留；管理页和硬件页已验证项名自动宽度及上限，硬件页还验证了横向滚动时项名保持显示、自动且有上限的设备列、分离的横纵滚动条、整页纵向滚动、设备列选择后自动居中与文本选择、无详情弹窗。标题栏已在硬件页连续往返切换本机、参考模拟、标准两层池、超多磁盘服务器和其它与网络共 7 次，进程保持存活和响应。网络来源整组刷新后由旧版 46 个对象收敛为 7 个，GPU 从混合来源的 7 列收敛为 4 个 DXGI Adapter，Monitor 从混合来源的 4 列收敛为 2 个 DXGI Output。D3DKMT 间接显示识别在本机刷新后仍保留 4 个 GPU 对象，其中 Intel 核显只有 1 列，另一列正确显示为 GameViewer Virtual Display Adapter，且不再借用 Intel 驱动和 PCI 位置。12 个内置模拟已在实际运行时重建为 Windows 形态来源事实，并核对系统版本、系统卷分配单元、物理磁盘数值类型、扇区单位和硬件页存储摘要。硬件报告、统一存储摘要与本机只读补充采集的有限原生结果见[硬件报告实施核对](Archive/20260915-hardware-report/实施核对.md)；当前机器只覆盖 96 DPI，192 DPI 为 `unverified`。更早 V0.52 统一事实与模拟编辑证据见 [V0.52 实施核对](Archive/V0.52/实施核对.md)。文档位置和语言规则归 [Development](Development.md)，真实操作边界归 [Product](Product.md)。
 
 ## 选择验证范围
+
+2026-09-16 统一层模拟池/模拟层：以 `6de94cd` 加本轮工作区改动运行全套 Release，11 个测试项目合计 613/613（0 失败、0 跳过）；主代理逐份解析 `artifacts/unified-projection-test-v5/full-release-complete/*.trx` 核对。完整 Release 构建 0 警告/0 错误，运行树为 `artifacts/unified-projection-release-v5/runtime`。回归覆盖热备/退役优先且来源关系保留、未知归属、用途/成员变更后重新派生、孤立联合体导航、假对象无容量、真实层容量缺失/零、来源往返不含假对象，以及服务入口拒绝假对象编辑。同期其它任务归档设计文档，旧架构路径与版本措辞断言据实际状态同步后重跑全套。
+
+执行命令为 `dotnet restore WinPool.slnx`、`dotnet build WinPool.slnx --configuration Release --no-restore -m:1 -nodeReuse:false`（覆盖 `WinPoolLocalTreeRoot` 至 v5 的 `trees/Release`，覆盖合并命令以延后合并）、`dotnet test WinPool.slnx --configuration Release --no-build --no-restore --results-directory artifacts/unified-projection-test-v5/full-release-complete --logger "trx;LogFilePrefix=full-release" -m:1 -nodeReuse:false`。随后用既有合并脚本生成 v5 runtime，288 个共享文件、293 个 App 独有文件、7 个 Agent 独有文件，0 冲突。`dotnet list WinPool.slnx package --vulnerable --include-transitive` 的 22 个项目均无已知漏洞包。实现提交为 `9e15f54`，文档归档断言同步为 `98f69b7`。
+
+有限原生 WinUI 使用独立 Debug `artifacts/unified-projection-build-v3/runtime/Data`，未改用户数据根：中文三个模拟层、两个模拟池均可在管理页选中，假对象类型、空容量、禁用修改命令正确；热备层和其它磁盘池的原始字段弹窗显示“无原始来源”。真实层 928 GiB 与成员 931.32 GiB 分别显示。英文未划层显示 `Unallocated layer / Synthetic tier`，原始字段为 `No original source.`。截图为 `artifacts/unified-tiers-qa.png`、`unified-pools-qa.png`、`unified-no-source-qa.png`、`unified-english-qa.png`。完整主题/DPI/拖放验收为 `unverified`，未执行真实存储写入；不宣称生命周期退出通过，QA App 关闭后仅结束了隔离 QA Agent。
 
 2026-09-16 采集状态通知：全套 Release 603/603（0 失败、0 跳过），完整 Release 构建 0 警告/0 错误；隔离产物为 `artifacts/InventoryNotifications`。通知工厂覆盖自动两种用途的开始/成功/失败和手动事件去重；观察者验证历史/缓存无采集成功通知、应用成功后才通知、损坏报告不通知成功；Agent 与真实命名管道覆盖开始/终态顺序和自动来源标记。原生弹出效果及真实硬件运行仍为 `unverified`，未替换或退出用户正在运行的旧版本。
 
@@ -19,7 +25,7 @@
 ## 文档与架构检查
 
 - 当前内部文档为中文单一权威，仅根 README 成对维护；历史副本原样保留，不要求归档一律配对或翻译。
-- 有活动阶段时只有一个 `docs/Plan.md`；无活动阶段时该文件不存在。Design 不被枚举为待执行计划；标题或旧正文中的命令式措辞不改变其状态。
+- 有活动阶段时只有一个 `docs/Plan.md`。用户要求保留的待执行计划可继续留在该文件中，但须明确标记“未激活”，不得当作当前实施授权；本轮监控数据库轮换计划按此保留，不归档。Design 不被枚举为待执行计划；标题或旧正文中的命令式措辞不改变其状态。
 - 检查当前文档链接和路径、当前版本与目标版本的区分、已实现与待验证的区分。
 - 历史文档的原相对链接按归档说明追溯，不为修历史链接重写当前规则。
 - 保留真正的依赖、单写入方、类型化命令与默认拒绝边界测试。文档检查验证当前约定，不依赖整段固定句子或把所有旧文件数量当成永久产品要求。
