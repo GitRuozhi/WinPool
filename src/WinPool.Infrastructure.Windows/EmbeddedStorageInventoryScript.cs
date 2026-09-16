@@ -14,10 +14,68 @@ internal static class EmbeddedStorageInventoryScript
 
     public static string ForPurpose(WinPool.Application.CollectionPurpose purpose)
     {
-            var compressed = Convert.FromBase64String(CompressedBase64);
-            using var input = new MemoryStream(compressed);
-            using var gzip = new GZipStream(input, CompressionMode.Decompress);
-            using var reader = new StreamReader(gzip, Encoding.UTF8);
-            return "$WinPoolIncludeHardware = " + (purpose == WinPool.Application.CollectionPurpose.Hardware ? "$true" : "$false") + "\n" + reader.ReadToEnd();
+        var compressed = Convert.FromBase64String(CompressedBase64);
+        using var input = new MemoryStream(compressed);
+        using var gzip = new GZipStream(input, CompressionMode.Decompress);
+        using var reader = new StreamReader(gzip, Encoding.UTF8);
+        var source = AddPhysicalDiskAssociationFallback(reader.ReadToEnd());
+        return "$WinPoolIncludeHardware = " + (purpose == WinPool.Application.CollectionPurpose.Hardware ? "$true" : "$false") + "\n" + source;
+    }
+
+    private static string AddPhysicalDiskAssociationFallback(string source)
+    {
+        const string existing = """
+$diskPhysicalMap = @{}
+foreach ($disk in $diskObjects) {
+    try {
+        $physicalMatch = @($disk | Get-PhysicalDisk | Select-Object -First 1)
+        if ($physicalMatch.Count -gt 0) {
+            $diskPhysicalMap[[int]$disk.Number] = Get-AssociationKey $physicalMatch[0] "$($physicalMatch[0].DeviceId)|$($physicalMatch[0].FriendlyName)|$($physicalMatch[0].Size)"
+        }
+    }
+    catch {
+    }
+}
+
+""";
+        const string corrected = """
+$physicalByDeviceNumber = @{}
+foreach ($physical in $physicalObjects) {
+    $number = 0
+    if ([int]::TryParse([string]$physical.DeviceId, [ref]$number)) {
+        if (-not $physicalByDeviceNumber.ContainsKey($number)) {
+            $physicalByDeviceNumber[$number] = @()
+        }
+        $physicalByDeviceNumber[$number] += $physical
+    }
+}
+
+$diskPhysicalMap = @{}
+foreach ($disk in $diskObjects) {
+    $physicalMatch = @()
+    try {
+        $physicalMatch = @($disk | Get-PhysicalDisk | Select-Object -First 1)
+    }
+    catch {
+    }
+    # Removable USB media can lack this provider association even when its disk number is known.
+    if ($physicalMatch.Count -eq 0 -and $physicalByDeviceNumber.ContainsKey([int]$disk.Number)) {
+        $candidates = @($physicalByDeviceNumber[[int]$disk.Number])
+        if ($candidates.Count -eq 1) {
+            $physicalMatch = $candidates
+        }
+    }
+    if ($physicalMatch.Count -eq 1) {
+        $diskPhysicalMap[[int]$disk.Number] = Get-AssociationKey $physicalMatch[0] "$($physicalMatch[0].DeviceId)|$($physicalMatch[0].FriendlyName)|$($physicalMatch[0].Size)"
+    }
+}
+
+""";
+        var normalized = source.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (!normalized.Contains(existing, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("The embedded physical-disk association block was not found.");
+        }
+        return normalized.Replace(existing, corrected, StringComparison.Ordinal);
     }
 }

@@ -55,6 +55,8 @@ public sealed class InfrastructureTests
         Assert.Contains("Get-VirtualDisk", script);
         Assert.Contains("Win32_LogicalDisk", script);
         Assert.Contains("NetworkDisks", script);
+        Assert.Contains("$physicalByDeviceNumber", script);
+        Assert.Contains("Removable USB media", script);
         Assert.DoesNotContain(" Volumes = @(", script);
         Assert.EndsWith(
             @"WindowsPowerShell\v1.0\powershell.exe",
