@@ -220,11 +220,12 @@ public static class SimulationLayouts
     {
         var b = new LayoutBuilder("on");
         b.SystemPhysical(0, "Boot NVMe");
-        b.Primordial(0);
-        b.OtherNtfs(40, "USB-Other");
+        b.UsbPhysical(1, "USB Flash Drive 64GB");
+        b.Primordial(0, 1);
+        b.OtherNtfs(40, "Basic-Disk-Other");
         b.Network("R", "share-r");
         b.Network("S", "share-s");
-        return b.Build("其它与网络", "layout-other-network-v5", Windows11Pro_24H2);
+        return b.Build("其它与网络", "layout-other-network-v6", Windows11Pro_24H2);
     }
 
     private sealed record SimulatedWindowsRelease(
@@ -487,6 +488,43 @@ public static class SimulationLayouts
             AddPartition(
                 osId, osNumber, ref part, ref offset, size - offset, "Primary", "NTFS", TakeLetter(),
                 cluster: 65536, label: name);
+        }
+
+        public void UsbPhysical(int number, string name)
+        {
+            var size = DecimalGigabytes(64);
+            var disk = new PhysicalDiskInfo(
+                Id($"disk:{number:00}"),
+                true,
+                name,
+                name,
+                $"SIM-USB••{number:00}",
+                "USB",
+                "Unspecified",
+                size,
+                512,
+                512,
+                "Healthy",
+                "OK",
+                false,
+                "RemovableMedia",
+                number,
+                false,
+                false,
+                false,
+                false,
+                Id("pool:primordial"),
+                "1.00",
+                "USB",
+                "Removable",
+                $"USBSTOR\\DISK&VEN_WINPOOL&PROD_USB_FLASH_{number:00}");
+            _disks.Add(disk);
+            var osId = AddOs(number, name, size, disk.StableId, null, "MBR", false, false);
+            var offset = Megabyte;
+            var part = 1;
+            AddPartition(
+                osId, number, ref part, ref offset, size - offset, "Primary", "exFAT", TakeLetter(),
+                cluster: 32768, label: "USB");
         }
 
         public void Network(string letter, string label)

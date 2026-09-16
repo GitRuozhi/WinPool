@@ -361,9 +361,18 @@ public static class WinPoolSimulationFacts
     {
         "MBR" => 1, "GPT" => 2, _ => 0
     };
-    private static ulong[] CannotPoolReasons(PhysicalDiskInfo disk) => disk.CanPool ? []
-        : disk.PoolStableId is not null && !disk.PoolStableId.EndsWith(":primordial", StringComparison.OrdinalIgnoreCase) ? [2]
-        : [7];
+    private static ulong[] CannotPoolReasons(PhysicalDiskInfo disk)
+    {
+        if (disk.CanPool) return [];
+        if (disk.CannotPoolReason.Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Equals("RemovableMedia", StringComparison.OrdinalIgnoreCase))
+        {
+            return [4];
+        }
+        return disk.PoolStableId is not null && !disk.PoolStableId.EndsWith(":primordial", StringComparison.OrdinalIgnoreCase)
+            ? [2]
+            : [7];
+    }
     private static string GptType(PartitionInfo partition)
     {
         if (partition.GptType.Length > 0) return partition.GptType;

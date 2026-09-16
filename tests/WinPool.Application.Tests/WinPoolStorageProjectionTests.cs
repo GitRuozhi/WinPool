@@ -114,6 +114,29 @@ public sealed class WinPoolStorageProjectionTests
     }
 
     [Fact]
+    public void OtherAndNetworkSimulationPlacesItsUsbDiskInThePrimordialPool()
+    {
+        var snapshot = SimulationLayouts.OtherAndNetwork();
+        var usb = Assert.Single(snapshot.PhysicalDisks, disk => disk.FriendlyName == "USB Flash Drive 64GB");
+        var primordial = Assert.Single(snapshot.StoragePools, pool => pool.IsPrimordial);
+        var osDisk = Assert.Single(snapshot.OsDisks, disk => disk.PhysicalDiskStableId == usb.StableId);
+
+        Assert.Equal("USB", usb.BusType);
+        Assert.False(usb.CanPool);
+        Assert.Equal("RemovableMedia", usb.CannotPoolReason);
+        Assert.Contains(usb.StableId, primordial.MemberPhysicalDiskIds);
+        Assert.Equal("MBR", osDisk.PartitionStyle);
+
+        var facts = WinPoolSimulationFacts.Create(snapshot, SystemId.New());
+        var physical = Assert.Single(facts.Objects, item => item.Id == usb.StableId);
+        Assert.Equal("[4]", physical.Field("CannotPoolReason")!.DisplayValue());
+        Assert.Contains(facts.Relationships, relation =>
+            relation.FromId == usb.StableId
+            && relation.ToId == osDisk.StableId
+            && relation.Kind == "same-device");
+    }
+
+    [Fact]
     public void UnsignedCapacityOverflowIsRetainedAndFlaggedForReadOnlyProjection()
     {
         var system = SystemId.New();
