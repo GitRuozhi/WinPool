@@ -166,18 +166,23 @@ public sealed class ArchitectureBoundaryTests
         Assert.True(File.Exists(designIndex), "docs/Design/README.md");
         var design = File.ReadAllText(designIndex);
         Assert.Contains("设计储备", design, StringComparison.Ordinal);
-        Assert.Contains("未纳入 V0.48", design, StringComparison.Ordinal);
         Assert.Contains("不自动成为当前要求", design, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(
+        var supersededDesignArchive = Path.Combine(
             root,
             "docs",
-            "Design",
+            "Archive",
+            "20260916-design-review");
+        Assert.True(File.Exists(Path.Combine(supersededDesignArchive, "README.md")));
+        Assert.True(File.Exists(Path.Combine(
+            supersededDesignArchive,
             "WinPool-Hardware-Inventory-Analysis-and-Refactor-Plan.md")));
         Assert.True(File.Exists(Path.Combine(
-            root,
-            "docs",
-            "Design",
+            supersededDesignArchive,
             "WinPool-Multi-Edition-Plan-Simplified.md")));
+        Assert.Contains(
+            "已被替代",
+            File.ReadAllText(Path.Combine(supersededDesignArchive, "README.md")),
+            StringComparison.Ordinal);
 
         var activePlanPath = Path.Combine(root, "docs", "Plan.md");
         // A completed phase has no active Plan.md; any future active plan remains Chinese.
