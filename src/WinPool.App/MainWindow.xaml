@@ -115,6 +115,7 @@
                 PointerExited="ActiveSystemSelectorHost_PointerExited">
                 <ComboBox
                     x:Name="ActiveSystemSelector"
+                    Width="320"
                     MinWidth="178"
                     Background="Transparent"
                     BorderThickness="0"

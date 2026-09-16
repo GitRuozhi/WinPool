@@ -989,16 +989,32 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSystem))
         {
-            // Rebuilding title-bar menu items while the Flyout is closing can
-            // invalidate WinUI's popup. Defer the refresh until the current
-            // input event has completed.
-            DispatcherQueue.TryEnqueue(UpdateActiveSystemName);
+            // The editor pages bind the active system snapshot on navigation.
+            // Re-create only the visible editor after the ComboBox has closed,
+            // so it cannot retain the previous system's pool/disk snapshot.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateActiveSystemName();
+                RefreshSelectedSystemEditor();
+            });
             PersistWorkspaceState();
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
         {
             RefreshDeveloperNavigation();
         }
+    }
+
+    private void RefreshSelectedSystemEditor()
+    {
+        if (SelectedShellItem?.Page is not (ShellPageKind.StorageStructure or ShellPageKind.DiskPartition))
+        {
+            return;
+        }
+
+        // Do not carry a stable ID from the former system into the newly
+        // selected system. The editor resolves its normal initial selection.
+        SelectShellPage(SelectedShellItem.Page);
     }
 
     private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e) =>

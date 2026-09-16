@@ -957,6 +957,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("<ComboBox", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"320\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("DropDownClosed=\"ActiveSystemSelector_DropDownClosed\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("SelectionChanged=\"ActiveSystemSelector_SelectionChanged\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment\" Value=\"Left\"", windowXaml, StringComparison.Ordinal);
@@ -965,6 +966,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("_systemSelectorRefreshPending = true", windowSource, StringComparison.Ordinal);
         Assert.Contains("_pendingSystemSelectionId = systemId", windowSource, StringComparison.Ordinal);
         Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("RefreshSelectedSystemEditor();", windowSource, StringComparison.Ordinal);
+        Assert.Contains("ShellPageKind.StorageStructure or ShellPageKind.DiskPartition", windowSource, StringComparison.Ordinal);
         Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
         Assert.Contains("elements.Add(ActiveSystemSelector)", windowSource, StringComparison.Ordinal);
     }
