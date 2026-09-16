@@ -972,6 +972,14 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("_pendingSystemSelectionId = systemId", windowSource, StringComparison.Ordinal);
         Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
         Assert.Contains("RefreshSelectedSystemEditor();", windowSource, StringComparison.Ordinal);
+        var refreshEditor = windowSource[windowSource.IndexOf(
+            "private void RefreshSelectedSystemEditor()", StringComparison.Ordinal)..];
+        refreshEditor = refreshEditor[..refreshEditor.IndexOf(
+            "private void ViewModel_WorkspaceSelectionChanged", StringComparison.Ordinal)];
+        Assert.Contains("if (_editorSystemId == ViewModel.SelectedSystem.SystemId)", refreshEditor, StringComparison.Ordinal);
+        Assert.True(refreshEditor.IndexOf("if (_editorSystemId ==", StringComparison.Ordinal)
+            < refreshEditor.IndexOf("SelectShellPage(SelectedShellItem.Page)", StringComparison.Ordinal));
+        Assert.Equal(2, windowSource.Split("_editorSystemId = ViewModel.SelectedSystem.SystemId;").Length - 1);
         Assert.Contains("ShellPageKind.StorageStructure or ShellPageKind.DiskPartition", windowSource, StringComparison.Ordinal);
         Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
         Assert.Contains("elements.Add(ActiveSystemSelector)", windowSource, StringComparison.Ordinal);

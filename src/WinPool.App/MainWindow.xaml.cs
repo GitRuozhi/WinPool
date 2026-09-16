@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     private bool _updatingSystemSelector;
     private bool _systemSelectorRefreshPending;
     private string? _pendingSystemSelectionId;
+    private SystemId? _editorSystemId;
     private bool _requestingElevation;
     private bool _closingForElevationHandoff;
     private bool _realWarningDismissed;
@@ -944,14 +945,20 @@ public sealed partial class MainWindow : Window
                 RootFrame.Navigate(typeof(HardwarePage), ViewModel);
                 break;
             case ShellPageKind.StorageStructure:
-                RootFrame.Navigate(
+                if (RootFrame.Navigate(
                     typeof(StorageStructurePage),
-                    new EditorNavigationParameter(ViewModel, editorTargetStableId));
+                    new EditorNavigationParameter(ViewModel, editorTargetStableId)))
+                {
+                    _editorSystemId = ViewModel.SelectedSystem.SystemId;
+                }
                 break;
             case ShellPageKind.DiskPartition:
-                RootFrame.Navigate(
+                if (RootFrame.Navigate(
                     typeof(DiskPartitionPage),
-                    new EditorNavigationParameter(ViewModel, editorTargetStableId));
+                    new EditorNavigationParameter(ViewModel, editorTargetStableId)))
+                {
+                    _editorSystemId = ViewModel.SelectedSystem.SystemId;
+                }
                 break;
             case ShellPageKind.Test:
                 RootFrame.Navigate(typeof(TestPage), ViewModel);
@@ -990,8 +997,8 @@ public sealed partial class MainWindow : Window
         else if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSystem))
         {
             // The editor pages bind the active system snapshot on navigation.
-            // Re-create only the visible editor after the ComboBox has closed,
-            // so it cannot retain the previous system's pool/disk snapshot.
+            // Defer until the ComboBox has closed. Same-system commits also
+            // raise this event; only an actual identity change needs navigation.
             DispatcherQueue.TryEnqueue(() =>
             {
                 UpdateActiveSystemName();
@@ -1008,6 +1015,15 @@ public sealed partial class MainWindow : Window
     private void RefreshSelectedSystemEditor()
     {
         if (SelectedShellItem?.Page is not (ShellPageKind.StorageStructure or ShellPageKind.DiskPartition))
+        {
+            return;
+        }
+
+        // The editors already refresh their own content after a commit.
+        // Re-navigating for a new revision of the same system replaces the
+        // entire page, flashes, and discards its selection and scroll state.
+        // Compare at dispatch time so queued duplicate notifications coalesce.
+        if (_editorSystemId == ViewModel.SelectedSystem.SystemId)
         {
             return;
         }
