@@ -870,6 +870,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         payload.EventType switch
         {
             nameof(AgentTaskEvent) => payload.Event.Deserialize<AgentTaskEvent>(JsonOptions),
+            nameof(AgentInventoryUpdatedEvent) => payload.Event.Deserialize<AgentInventoryUpdatedEvent>(JsonOptions),
+            nameof(AgentInventoryFailedEvent) => payload.Event.Deserialize<AgentInventoryFailedEvent>(JsonOptions),
             nameof(AgentMonitorSampleEvent) =>
                 payload.Event.Deserialize<AgentMonitorSampleEvent>(JsonOptions),
             nameof(AgentProcessStateEvent) =>

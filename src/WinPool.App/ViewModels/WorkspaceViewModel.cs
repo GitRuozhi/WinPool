@@ -415,11 +415,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     {
         await InitializePreferencesAsync();
         var cachedLocal = await TryLoadCachedLocalAsync();
-        HasCachedLocalInventory = cachedLocal is not null;
         if (cachedLocal is not null)
         {
-            SystemCatalog.ReplaceLocal(cachedLocal);
-            OnPropertyChanged(nameof(Snapshot));
+            ApplyLocalInventory(cachedLocal);
         }
 
         var persisted = (await _systemRepository.LoadSimulationsAsync()).ToList();
@@ -630,10 +628,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public double TopologyHorizontalOffset { get; set; }
 
     public double TopologyVerticalOffset { get; set; }
-
-    public bool AutoScanAttempted { get; set; }
-
-    public bool HasCachedLocalInventory { get; private set; }
 
     public async Task SetThemeAsync(ThemePreference theme)
     {
@@ -1086,6 +1080,30 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     [RelayCommand]
     public Task ScanAsync() => ScanCoreAsync(CollectionPurpose.Storage, CancellationToken.None);
 
+    public void ApplyLocalInventory(StorageSystemDocument document)
+    {
+        if (!SystemCatalog.TryReplaceLocalReport(document)) return;
+        var restoring = _restoreInProgress;
+        _restoreInProgress = true;
+        try
+        {
+            // The startup placeholder need not have the persisted local ID.
+            // Keep a selected simulation selected when a background report arrives.
+            if (SelectedSystem.IsLocal)
+            {
+                SelectedSystem = document;
+                OnPropertyChanged(nameof(SelectedSystem));
+                OnPropertyChanged(nameof(ActiveDocument));
+                OnPropertyChanged(nameof(ActiveSnapshot));
+                OnPropertyChanged(nameof(IsSelectedSystemLocalConsistent));
+            }
+            RefreshLocalizedContent();
+            if (_workspaceStateLoadAttempted && !_persistAllowed) ApplyRestoredUiState();
+            OnPropertyChanged(nameof(Snapshot));
+        }
+        finally { _restoreInProgress = restoring; }
+    }
+
     public Task RefreshHardwareAsync(CancellationToken cancellationToken) =>
         SelectedSystem.IsLocal ? ScanCoreAsync(CollectionPurpose.Hardware, cancellationToken) : Task.CompletedTask;
 
@@ -1104,7 +1122,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         StatusMessage = Localization["Scanning"];
         _notificationService.DismissByKey(ScanningNotificationKey);
         PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted());
-        var previous = _selectedSelection;
         try
         {
             var localDocument = purpose == CollectionPurpose.Hardware
@@ -1123,33 +1140,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
             }
-            SystemCatalog.ReplaceLocal(localDocument);
-            OnPropertyChanged(nameof(Snapshot));
-            BindSelectedSystemToCatalog();
-            _restoreInProgress = true;
-            try
-            {
-                RebuildTopology();
-                if (!_persistAllowed)
-                {
-                    ApplyRestoredUiState();
-                }
-                else if (SelectedSystem.IsLocal)
-                {
-                    var keep = _selectedSelection ?? previous;
-                    RebuildObjects(
-                        keep is null
-                            ? null
-                            : ResolveSelection(
-                                localDocument,
-                                SelectedCategory,
-                                keep.Id.ProviderKey));
-                }
-            }
-            finally
-            {
-                _restoreInProgress = false;
-            }
+            ApplyLocalInventory(localDocument);
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
             _notificationService.DismissByKey(ScanningNotificationKey);
             PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanCompleted(

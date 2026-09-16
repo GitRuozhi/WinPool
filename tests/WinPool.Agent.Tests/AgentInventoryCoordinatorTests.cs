@@ -14,6 +14,57 @@ public sealed class AgentInventoryCoordinatorTests
     private static readonly string[] OtherObjectIds =
         ["computer", "cpu", "gpu", "monitor", "gpu-supplement", "monitor-supplement"];
 
+    [Fact]
+    public async Task StartupCapturesStorageThenHardwareOnceAndPublishesPersistedReports()
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        await harness.CaptureAsync(NetworkCapture(-1, ["history"], includeOtherObjects: true));
+        harness.Events.Clear();
+        harness.provider.Sequence.Enqueue((CollectionPurpose.Storage, NetworkCapture(0, [], includeOtherObjects: true)));
+        harness.provider.Sequence.Enqueue((CollectionPurpose.Hardware, NetworkCapture(1, ["ethernet"])));
+        await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
+        await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
+        Assert.Empty(harness.provider.Sequence);
+        var reports = harness.Events.OfType<AgentInventoryUpdatedEvent>().ToArray();
+        Assert.Equal(new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware }, reports.Select(x => x.Purpose));
+        Assert.Equal(reports[1].Document, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync()));
+        AssertMembership(LocalInventoryDocumentCodec.Decode(reports[1].Document), ["ethernet"]);
+
+        // Manual commands still capture and publish after the one-time startup sequence.
+        await harness.CaptureAsync(NetworkCapture(2, ["ethernet", "wifi"]), CollectionPurpose.Storage);
+        await harness.CaptureAsync(NetworkCapture(3, ["wifi"]), CollectionPurpose.Hardware);
+        Assert.Equal(4, harness.Events.OfType<AgentInventoryUpdatedEvent>().Count());
+    }
+
+    [Fact]
+    public async Task StartupStorageFailureStillAttemptsHardwareAndCancellationStopsTheSequence()
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        harness.provider.Sequence.Enqueue((CollectionPurpose.Storage, null));
+        harness.provider.Sequence.Enqueue((CollectionPurpose.Hardware, NetworkCapture(1, ["ethernet"], includeOtherObjects: true)));
+        await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
+        Assert.IsType<AgentInventoryFailedEvent>(harness.Events[0]);
+        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[1]).Purpose);
+
+        await using var cancelled = await InventoryHarness.CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.coordinator.CaptureStartupAsync(cancellation.Token));
+        Assert.Empty(cancelled.Events);
+    }
+
+    [Fact]
+    public async Task FailedFullCaptureKeepsTheSuccessfulStorageReportInHistory()
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        harness.provider.Sequence.Enqueue((CollectionPurpose.Storage, NetworkCapture(0, ["storage"], includeOtherObjects: true)));
+        harness.provider.Sequence.Enqueue((CollectionPurpose.Hardware, null));
+        await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
+        var saved = Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[0]);
+        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryFailedEvent>(harness.Events[1]).Purpose);
+        Assert.Equal(saved.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -212,11 +263,12 @@ public sealed class AgentInventoryCoordinatorTests
 
     private sealed class InventoryHarness : IAsyncDisposable
     {
-        private readonly string databasePath;
-        private readonly FixedHardwareProvider provider = new();
+        public readonly string databasePath;
+        public readonly FixedHardwareProvider provider = new();
         private WinPoolSqliteStore store = null!;
         private AgentWriteOwnerLease lease = null!;
-        private AgentInventoryCoordinator coordinator = null!;
+        public AgentInventoryCoordinator coordinator = null!;
+        public List<AgentEvent> Events { get; } = [];
 
         private InventoryHarness(string databasePath) => this.databasePath = databasePath;
 
@@ -237,7 +289,7 @@ public sealed class AgentInventoryCoordinatorTests
             coordinator = new(unused, unused, provider, new InventoryComparer(),
                 new InventorySnapshotRepository(store, lease), new InventoryComparisonRepository(store, lease),
                 new LocalInventoryDocumentRepository(store, lease), new LocalSystemIdentityResolver(store, lease),
-                new UnusedDeviceResolver());
+                new UnusedDeviceResolver(), Events.Add);
         }
 
         public async Task<StorageSystemDocument> CaptureAsync(StorageSystemDocument input,
@@ -282,12 +334,20 @@ public sealed class AgentInventoryCoordinatorTests
 
     private sealed class FixedHardwareProvider : IHardwareInventoryProvider
     {
+        public Queue<(CollectionPurpose Purpose, StorageSystemDocument? Document)> Sequence { get; } = new();
         public StorageSystemDocument? Next { get; set; }
         public CollectionPurpose ExpectedPurpose { get; set; }
         public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken) => Take(CollectionPurpose.Storage);
         public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) => Take(CollectionPurpose.Hardware);
         private Task<StorageSystemDocument> Take(CollectionPurpose purpose)
         {
+            if (Sequence.TryDequeue(out var capture))
+            {
+                Assert.Equal(capture.Purpose, purpose);
+                return capture.Document is null
+                    ? Task.FromException<StorageSystemDocument>(new InventoryScanException("Injected failure", "test"))
+                    : Task.FromResult(capture.Document);
+            }
             Assert.Equal(ExpectedPurpose, purpose);
             var document = Assert.IsType<StorageSystemDocument>(Next);
             Next = null;

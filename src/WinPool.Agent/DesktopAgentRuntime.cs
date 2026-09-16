@@ -36,6 +36,8 @@ internal sealed class DesktopAgentRuntime :
     private readonly object storageHealthEventSync = new();
     private readonly Queue<StorageHealthEvent> recentStorageHealthEvents = new();
     private readonly Task storageHealthEventTask;
+    private readonly CancellationTokenSource inventoryCancellation = new();
+    private Task startupInventoryTask = Task.CompletedTask;
 
     public DesktopAgentRuntime(
         TrayApplicationContext tray,
@@ -95,7 +97,8 @@ internal sealed class DesktopAgentRuntime :
             inventoryComparisons,
             localInventoryDocument,
             localSystemIdentity,
-            physicalDiskDeviceResolver ?? new WindowsPhysicalDiskDeviceResolver());
+            physicalDiskDeviceResolver ?? new WindowsPhysicalDiskDeviceResolver(),
+            agentEvents.Publish);
         this.storageHealthEventSource = storageHealthEventSource
             ?? throw new ArgumentNullException(nameof(storageHealthEventSource));
         this.storageHealthEventRepository = storageHealthEventRepository
@@ -516,6 +519,16 @@ internal sealed class DesktopAgentRuntime :
         }
     }
 
+    public void StartStartupInventory() =>
+        startupInventoryTask = Task.Run(() => inventoryCoordinator.CaptureStartupAsync(inventoryCancellation.Token));
+
+    public async Task StopInventoryAsync(CancellationToken cancellationToken)
+    {
+        inventoryCancellation.Cancel();
+        try { await startupInventoryTask.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (inventoryCancellation.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { }
+    }
+
     public Task NotifyClientsAsync(
         ShutdownReason reason,
         CancellationToken cancellationToken) =>
@@ -523,6 +536,7 @@ internal sealed class DesktopAgentRuntime :
 
     public async Task StopMonitoringAsync(CancellationToken cancellationToken)
     {
+        await StopInventoryAsync(cancellationToken);
         var session = monitoring.CurrentSession;
         if (session is not null)
         {

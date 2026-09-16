@@ -527,6 +527,22 @@ public sealed class NamedPipeAgentConnectionTests
         var manageInventory = Assert.IsType<ManageInventoryCaptureResponse>(
             manageInventoryResponse.Value);
         Assert.Equal("local:test", manageInventory.Document.DocumentId);
+        // Both startup phases and failures cross the real named event pipe to every App watcher.
+        foreach (var purpose in new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware })
+        {
+            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, manageInventory.Document, occurredAt));
+            Assert.True(await eventEnumerator.MoveNextAsync());
+            var report = Assert.IsType<AgentInventoryUpdatedEvent>(eventEnumerator.Current);
+            Assert.Equal(purpose, report.Purpose);
+            Assert.Equal(manageInventory.Document, report.Document);
+            Assert.True(await secondEventEnumerator.MoveNextAsync());
+            Assert.Equal(report, Assert.IsType<AgentInventoryUpdatedEvent>(secondEventEnumerator.Current));
+        }
+        eventHub.Publish(new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "test.capture_failed", occurredAt));
+        Assert.True(await eventEnumerator.MoveNextAsync());
+        Assert.IsType<AgentInventoryFailedEvent>(eventEnumerator.Current);
+        Assert.True(await secondEventEnumerator.MoveNextAsync());
+        Assert.IsType<AgentInventoryFailedEvent>(secondEventEnumerator.Current);
         var cachedInventoryResponse = await connection.SendAsync(
             new LoadAgentManageInventoryRequest(CorrelationId.New()),
             CancellationToken.None);

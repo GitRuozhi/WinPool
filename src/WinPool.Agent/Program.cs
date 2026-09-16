@@ -183,6 +183,7 @@ internal static class Program
                         recoveryCancellation.Token).ConfigureAwait(false);
                     lifecycle.MarkReady();
                     context.AttachCoordinator(coordinator);
+                    runtime.StartStartupInventory();
                 }
                 catch (OperationCanceledException) when (recoveryCancellation.IsCancellationRequested)
                 {
@@ -205,6 +206,7 @@ internal static class Program
                 recoveryTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
                     .GetAwaiter()
                     .GetResult();
+                runtime.StopInventoryAsync(CancellationToken.None).GetAwaiter().GetResult();
                 pipeCancellation.Cancel();
                 serverTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
                     .GetAwaiter()

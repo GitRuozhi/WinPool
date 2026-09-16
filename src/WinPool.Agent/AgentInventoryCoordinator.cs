@@ -19,6 +19,8 @@ internal sealed class AgentInventoryCoordinator
     private readonly LocalSystemIdentityResolver localIdentity;
     private readonly ConcurrentDictionary<int, string> physicalDeviceIds = new();
     private readonly SemaphoreSlim localCaptureGate = new(1, 1);
+    private readonly Action<AgentEvent> publish;
+    private int startupStarted;
 
     public AgentInventoryCoordinator(
         IInventoryProvider nativeProvider,
@@ -29,7 +31,8 @@ internal sealed class AgentInventoryCoordinator
         InventoryComparisonRepository comparisons,
         LocalInventoryDocumentRepository localDocument,
         LocalSystemIdentityResolver localIdentity,
-        IPhysicalDiskDeviceResolver deviceResolver)
+        IPhysicalDiskDeviceResolver deviceResolver,
+        Action<AgentEvent>? publish = null)
     {
         this.nativeProvider = nativeProvider ?? throw new ArgumentNullException(nameof(nativeProvider));
         this.legacyProvider = legacyProvider ?? throw new ArgumentNullException(nameof(legacyProvider));
@@ -40,6 +43,28 @@ internal sealed class AgentInventoryCoordinator
         this.localDocument = localDocument ?? throw new ArgumentNullException(nameof(localDocument));
         this.localIdentity = localIdentity ?? throw new ArgumentNullException(nameof(localIdentity));
         this.deviceResolver = deviceResolver ?? throw new ArgumentNullException(nameof(deviceResolver));
+        this.publish = publish ?? (_ => { });
+    }
+
+    public async Task CaptureStartupAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref startupStarted, 1) != 0) return;
+        foreach (var purpose in new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware })
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await CaptureManageAsync(new CaptureAgentManageInventoryRequest(CorrelationId.New(), purpose), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                // A native provider failure must not fault an unobserved startup task
+                // or prevent the independent full-hardware attempt.
+                System.Diagnostics.Trace.TraceError("agent.inventory.startup_failed: {0}", exception);
+                publish(new AgentInventoryFailedEvent(purpose, "agent.inventory.startup_failed", DateTimeOffset.UtcNow));
+            }
+        }
     }
 
     public string? ResolvePhysicalDeviceId(int diskNumber)
@@ -109,6 +134,7 @@ internal sealed class AgentInventoryCoordinator
                 throw new InvalidDataException("The Local inventory identity is inconsistent.");
             }
             await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
+            publish(new AgentInventoryUpdatedEvent(request.Purpose, payload, DateTimeOffset.UtcNow));
             return Succeeded(
                 new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
                 request.CorrelationId,
@@ -124,9 +150,12 @@ internal sealed class AgentInventoryCoordinator
             exception is InventoryScanException
                 or IOException
                 or InvalidDataException
+                or InvalidOperationException
+                or ArgumentException
                 or Microsoft.Data.Sqlite.SqliteException
                 or UnauthorizedAccessException)
         {
+            publish(new AgentInventoryFailedEvent(request.Purpose, "agent.inventory.manage_capture_failed", DateTimeOffset.UtcNow));
             return Failed(request.CorrelationId, "agent.inventory.manage_capture_failed");
         }
         finally

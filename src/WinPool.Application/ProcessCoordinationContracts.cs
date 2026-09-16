@@ -308,6 +308,16 @@ public sealed record AgentSnapshot(
 
 public abstract record AgentEvent(DateTimeOffset OccurredAtUtc);
 
+public sealed record AgentInventoryUpdatedEvent(
+    CollectionPurpose Purpose,
+    LocalInventoryDocumentPayload Document,
+    DateTimeOffset OccurredAtUtc) : AgentEvent(OccurredAtUtc);
+
+public sealed record AgentInventoryFailedEvent(
+    CollectionPurpose Purpose,
+    string Code,
+    DateTimeOffset OccurredAtUtc) : AgentEvent(OccurredAtUtc);
+
 public sealed record AgentTaskEvent(ApplicationTaskEvent TaskEvent)
     : AgentEvent(TaskEvent.OccurredAtUtc);
 

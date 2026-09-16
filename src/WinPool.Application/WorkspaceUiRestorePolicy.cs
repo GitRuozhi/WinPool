@@ -20,9 +20,6 @@ public static class WorkspaceUiRestorePolicy
         bool workspaceStateLoadAttempted) =>
         !restoreInProgress && workspaceStateLoadAttempted;
 
-    public static bool ShouldAutoScanOnStartup(bool hasCachedLocalInventory) =>
-        !hasCachedLocalInventory;
-
     public static string? WantedObjectKey(WorkspaceUiState state)
     {
         ArgumentNullException.ThrowIfNull(state);

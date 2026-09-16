@@ -934,6 +934,8 @@ public sealed class ArchitectureBoundaryTests
             "await App.InitialAgentConnectionTask",
             StringComparison.Ordinal);
         Assert.True(navigate >= 0 && wait > navigate);
+        var history = loaded.IndexOf("await _agentInventorySynchronizer.LoadHistoryAsync()", StringComparison.Ordinal);
+        Assert.True(history > navigate && history < wait);
         Assert.DoesNotContain("ProgressRing", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
         Assert.Contains("SolidBackgroundFillColorBaseBrush", windowXaml, StringComparison.Ordinal);
@@ -1175,13 +1177,13 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IpcProtocolCurrentVersionIsEight()
+    public void IpcProtocolCurrentVersionIsNine()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
 
-        Assert.Contains("public const int CurrentVersion = 8;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 9;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
     }
 

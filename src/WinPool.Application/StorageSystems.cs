@@ -140,6 +140,15 @@ public sealed class StorageSystemCatalog
 
     public IReadOnlyList<StorageSystemDocument> Systems => _systems;
 
+    public bool TryReplaceLocalReport(StorageSystemDocument local)
+    {
+        if (!local.IsLocal) throw new ArgumentException("A local inventory report is required.", nameof(local));
+        var previous = _systems.FirstOrDefault(system => system.IsLocal);
+        if (previous is not null && previous.UpdatedAt >= local.UpdatedAt) return false;
+        ReplaceLocal(local);
+        return true;
+    }
+
     public void ReplaceLocal(StorageSystemDocument local)
     {
         ArgumentNullException.ThrowIfNull(local);

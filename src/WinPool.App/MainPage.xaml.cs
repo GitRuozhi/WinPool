@@ -117,25 +117,6 @@ public sealed partial class MainPage : Page
         await ViewModel.WhenWorkspaceReady;
         RebuildComparisonTable();
         BuildCommandButtons();
-        if (!ViewModel.AutoScanAttempted && !ViewModel.IsScanning)
-        {
-            ViewModel.AutoScanAttempted = true;
-            if (WorkspaceUiRestorePolicy.ShouldAutoScanOnStartup(ViewModel.HasCachedLocalInventory))
-            {
-                _ = RefreshLocalInventoryAsync();
-            }
-        }
-    }
-
-    private async Task RefreshLocalInventoryAsync()
-    {
-        await App.InitialAgentConnectionTask;
-        await ViewModel.ScanAsync();
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            RebuildComparisonTable();
-            BuildCommandButtons();
-        });
     }
 
     private void RebuildComparisonTable()

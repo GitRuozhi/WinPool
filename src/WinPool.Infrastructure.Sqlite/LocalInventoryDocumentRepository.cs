@@ -25,6 +25,13 @@ public sealed class LocalInventoryDocumentRepository
         CancellationToken cancellationToken = default)
     {
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        return await ReadAsync(connection, cancellationToken);
+    }
+
+    internal static async Task<PersistedLocalInventoryDocument?> ReadAsync(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT snapshot_id, document_id, document_schema_version,

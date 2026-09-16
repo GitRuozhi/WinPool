@@ -47,6 +47,7 @@ public sealed partial class MainWindow : Window
     private readonly IElevationRestartService _elevationRestartService;
     private readonly IWorkspaceStateService _workspaceStateService;
     private readonly AgentPreferencesSynchronizer _agentPreferencesSynchronizer;
+    private readonly AgentInventorySynchronizer _agentInventorySynchronizer;
     private readonly DispatcherTimer _notificationDismissTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
     private WelcomeWindow? _welcomeWindow;
@@ -135,6 +136,7 @@ public sealed partial class MainWindow : Window
             agentConnection,
             DispatcherQueue);
         _agentPreferencesSynchronizer.Start();
+        _agentInventorySynchronizer = new AgentInventorySynchronizer(ViewModel, agentConnection, DispatcherQueue);
     }
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
@@ -165,8 +167,8 @@ public sealed partial class MainWindow : Window
         ViewModel.BeginWorkspacePrepare();
         try
         {
-            // Show the shell first. Agent readiness is required for SQLite
-            // restore and inventory, not for painting tab structure.
+            await _agentInventorySynchronizer.LoadHistoryAsync();
+            // History is already visible; only Agent-owned workspace restore waits for IPC.
             await App.InitialAgentConnectionTask;
             ViewModel.NotifyWorkspaceLoading();
             await ViewModel.InitializeAsync();
@@ -231,6 +233,7 @@ public sealed partial class MainWindow : Window
     {
         App.StopActivationChannel();
         _agentPreferencesSynchronizer.Dispose();
+        _agentInventorySynchronizer.Dispose();
 
         if (_closingForElevationHandoff)
         {

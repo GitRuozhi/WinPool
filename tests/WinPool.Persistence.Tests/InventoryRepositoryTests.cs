@@ -167,6 +167,35 @@ public sealed class InventoryRepositoryTests
         Assert.NotNull(loaded);
         Assert.Equal(snapshot.SnapshotId, loaded.SnapshotId);
         Assert.Equal(payload, loaded.Document);
+        // App can read committed history while the Agent owns the database.
+        var history = await new ReadOnlyLocalInventoryReader(database.Store.DatabasePath).LoadAsync();
+        Assert.Equal(payload, history);
+    }
+
+    [Fact]
+    public async Task MissingStartupHistoryDoesNotCreateDatabaseOrDirectory()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WinPool.MissingHistory.Tests", Guid.NewGuid().ToString("N"));
+        Assert.Null(await new ReadOnlyLocalInventoryReader(Path.Combine(directory, "winpool.db")).LoadAsync());
+        Assert.False(Directory.Exists(directory));
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(18)]
+    public async Task StartupHistoryRejectsOtherSchemasWithoutChangingThem(int version)
+    {
+        await using var database = await InventoryDatabase.CreateAsync();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE schema_info SET schema_version = $version;";
+            command.Parameters.AddWithValue("$version", version);
+            await command.ExecuteNonQueryAsync();
+        }
+        var reader = new ReadOnlyLocalInventoryReader(database.Store.DatabasePath);
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => reader.LoadAsync());
+        Assert.Equal(version, (await new SqliteSchemaVersionReader(database.Store).ReadAsync())!.Version);
     }
 
     [Fact]
