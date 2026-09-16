@@ -393,8 +393,10 @@ public sealed class SqliteRepositoryTests
         Assert.Equal(0, stopped.DroppedSamples);
     }
 
-    [Fact]
-    public async Task MonitorPersistencePreservesEveryMetricAndExportsMissingValuesAsEmpty()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MonitorPersistencePreservesEveryMetricAndCsvColumn(bool useBatchWriter)
     {
         await using var database = await RepositoryTemporaryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
@@ -405,36 +407,158 @@ public sealed class SqliteRepositoryTests
             target,
             start,
             [
-                new(MonitorMetricKind.ReadOperationsPerSecond, 0),
-                new(MonitorMetricKind.WriteOperationsPerSecond, 2),
-                new(MonitorMetricKind.AverageLatencyMilliseconds, 3),
-                new(MonitorMetricKind.CpuPercent, 4),
-                new(MonitorMetricKind.VirtualDiskActiveBytes, 5),
-                new(MonitorMetricKind.VirtualDiskMissingBytes, 6),
-                new(MonitorMetricKind.VirtualDiskStaleBytes, 7),
-                new(MonitorMetricKind.VirtualDiskNeedRegenerationBytes, 8),
-                new(MonitorMetricKind.VirtualDiskRegeneratingBytes, 9),
-                new(MonitorMetricKind.VirtualDiskPendingDeletionBytes, 10)
+                // Input order deliberately differs from the database and CSV order.
+                new(MonitorMetricKind.VirtualDiskPendingDeletionBytes, 14014),
+                new(MonitorMetricKind.CpuPercent, 8.75),
+                new(MonitorMetricKind.WriteBytesPerSecond, 3003),
+                new(MonitorMetricKind.VirtualDiskStaleBytes, 11011),
+                new(MonitorMetricKind.ActiveTimePercent, 1.25),
+                new(MonitorMetricKind.VirtualDiskNeedRegenerationBytes, 12012),
+                new(MonitorMetricKind.ReadOperationsPerSecond, 44),
+                new(MonitorMetricKind.AverageQueueLength, 6.5),
+                new(MonitorMetricKind.VirtualDiskActiveBytes, 9009),
+                new(MonitorMetricKind.ReadBytesPerSecond, 2002),
+                new(MonitorMetricKind.VirtualDiskRegeneratingBytes, 13013),
+                new(MonitorMetricKind.AverageLatencyMilliseconds, 7.125),
+                new(MonitorMetricKind.WriteOperationsPerSecond, 55),
+                new(MonitorMetricKind.VirtualDiskMissingBytes, 10010)
             ]);
-        await new MonitorSampleRepository(database.Store, lease).WriteBatchAsync([sample]);
+        Assert.Equal(
+            Enum.GetValues<MonitorMetricKind>(),
+            sample.Values.Select(value => value.Kind).OrderBy(kind => kind));
+        await WriteMonitorSamplesAsync(database.Store, lease, [sample], useBatchWriter);
 
         var persisted = Assert.Single(await new MonitorSampleRepository(database.Store)
             .ReadRangeAsync(sessionId, start, start.AddMilliseconds(1)));
-        Assert.Null(persisted.ActivityPercent);
-        Assert.Null(persisted.ReadBytesPerSecond);
-        Assert.Equal(0, persisted.ReadOperationsPerSecond);
-        Assert.Equal(10, persisted.VirtualDiskPendingDeletionBytes);
+        Assert.True(persisted.RowId > 0);
+        Assert.Equal(
+            new PersistedMonitorSample(
+                persisted.RowId, sessionId, MonitorSampleBatchWriter.PersistedDeviceId(sample), start,
+                ActivityPercent: 1.25,
+                ReadBytesPerSecond: 2002,
+                WriteBytesPerSecond: 3003,
+                ReadOperationsPerSecond: 44,
+                WriteOperationsPerSecond: 55,
+                QueueLength: 6.5,
+                AverageLatencyMilliseconds: 7.125,
+                CpuPercent: 8.75,
+                VirtualDiskActiveBytes: 9009,
+                VirtualDiskMissingBytes: 10010,
+                VirtualDiskStaleBytes: 11011,
+                VirtualDiskNeedRegenerationBytes: 12012,
+                VirtualDiskRegeneratingBytes: 13013,
+                VirtualDiskPendingDeletionBytes: 14014),
+            persisted);
 
         var destination = Path.Combine(database.Directory, "monitor.csv");
-        await new MonitorCsvExporter(database.Store).ExportAsync(
+        var exported = await new MonitorCsvExporter(database.Store).ExportAsync(
             sessionId, destination, overwrite: false);
         var lines = await File.ReadAllLinesAsync(destination);
-        Assert.Contains("VirtualDiskPendingDeletionBytes", lines[0], StringComparison.Ordinal);
-        var columns = lines[1].Split(',');
-        Assert.Equal(string.Empty, columns[2]);
-        Assert.Equal(string.Empty, columns[3]);
-        Assert.Equal("0", columns[5]);
-        Assert.Equal("10", columns[15]);
+        Assert.Equal(1, exported.RowCount);
+        Assert.Equal(2, lines.Length);
+        Assert.Equal(MonitorCsvHeader, lines[0]);
+        Assert.Equal(
+            $"{start:O},Disk,1.25,2002,3003,44,55,6.5,7.125,8.75,9009,10010,11011,12012,13013,14014",
+            lines[1]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MonitorPersistenceDistinguishesEveryMissingMetricFromTrueZero(bool useBatchWriter)
+    {
+        await using var database = await RepositoryTemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var (sessionId, target, start) =
+            await CreateSessionAndDeviceAsync(database.Store, lease);
+        var zero = new MonitorSample(sessionId, target, start,
+            Enum.GetValues<MonitorMetricKind>()
+                .Select(kind => new MonitorMetricValue(kind, 0)).ToArray());
+        var missing = new MonitorSample(sessionId, target, start.AddMilliseconds(1), []);
+        var partial = new MonitorSample(sessionId, target, start.AddMilliseconds(2),
+            [new(MonitorMetricKind.ReadOperationsPerSecond, 0)]);
+        // Reusing a prepared batch command must clear the preceding sample's values.
+        await WriteMonitorSamplesAsync(database.Store, lease, [zero, missing, partial], useBatchWriter);
+
+        var persisted = await new MonitorSampleRepository(database.Store)
+            .ReadRangeAsync(sessionId, start, start.AddMilliseconds(3));
+        Assert.Equal(3, persisted.Count);
+        Assert.Equal(start, persisted[0].SampledAtUtc);
+        Assert.Equal(start.AddMilliseconds(1), persisted[1].SampledAtUtc);
+        Assert.Equal(start.AddMilliseconds(2), persisted[2].SampledAtUtc);
+        AssertEveryPersistedMetric(persisted[0], 0);
+        AssertEveryPersistedMetric(persisted[1], null);
+        Assert.Equal(0, persisted[2].ReadOperationsPerSecond);
+        AssertEveryPersistedMetric(persisted[2] with { ReadOperationsPerSecond = null }, null);
+
+        var destination = Path.Combine(database.Directory, "monitor.csv");
+        var exported = await new MonitorCsvExporter(database.Store).ExportAsync(
+            sessionId, destination, overwrite: false);
+        var lines = await File.ReadAllLinesAsync(destination);
+        Assert.Equal(3, exported.RowCount);
+        Assert.Equal(4, lines.Length);
+        Assert.Equal(MonitorCsvHeader, lines[0]);
+        Assert.Equal($"{start:O},Disk,0,0,0,0,0,0,0,0,0,0,0,0,0,0", lines[1]);
+        var missingColumns = lines[2].Split(',');
+        Assert.Equal(16, missingColumns.Length);
+        Assert.Equal($"{missing.SampledAtUtc:O}", missingColumns[0]);
+        Assert.Equal("Disk", missingColumns[1]);
+        Assert.All(missingColumns.Skip(2), value => Assert.Equal(string.Empty, value));
+        var partialColumns = lines[3].Split(',');
+        Assert.Equal(16, partialColumns.Length);
+        Assert.Equal($"{partial.SampledAtUtc:O}", partialColumns[0]);
+        Assert.Equal("Disk", partialColumns[1]);
+        Assert.Equal("0", partialColumns[5]);
+        Assert.All(partialColumns.Skip(2).Where((_, index) => index != 3),
+            value => Assert.Equal(string.Empty, value));
+    }
+
+    private const string MonitorCsvHeader =
+        "TimestampUtc,Device,ActivityPercent,ReadBytesPerSecond," +
+        "WriteBytesPerSecond,ReadOperationsPerSecond,WriteOperationsPerSecond," +
+        "QueueLength,AverageLatencyMilliseconds,CpuPercent,VirtualDiskActiveBytes," +
+        "VirtualDiskMissingBytes,VirtualDiskStaleBytes,VirtualDiskNeedRegenerationBytes," +
+        "VirtualDiskRegeneratingBytes,VirtualDiskPendingDeletionBytes";
+
+    private static void AssertEveryPersistedMetric(PersistedMonitorSample sample, double? expected)
+    {
+        Assert.Equal(expected, sample.ActivityPercent);
+        Assert.Equal(expected, sample.ReadBytesPerSecond);
+        Assert.Equal(expected, sample.WriteBytesPerSecond);
+        Assert.Equal(expected, sample.ReadOperationsPerSecond);
+        Assert.Equal(expected, sample.WriteOperationsPerSecond);
+        Assert.Equal(expected, sample.QueueLength);
+        Assert.Equal(expected, sample.AverageLatencyMilliseconds);
+        Assert.Equal(expected, sample.CpuPercent);
+        Assert.Equal(expected, sample.VirtualDiskActiveBytes);
+        Assert.Equal(expected, sample.VirtualDiskMissingBytes);
+        Assert.Equal(expected, sample.VirtualDiskStaleBytes);
+        Assert.Equal(expected, sample.VirtualDiskNeedRegenerationBytes);
+        Assert.Equal(expected, sample.VirtualDiskRegeneratingBytes);
+        Assert.Equal(expected, sample.VirtualDiskPendingDeletionBytes);
+    }
+
+    private static async Task WriteMonitorSamplesAsync(
+        WinPoolSqliteStore store,
+        AgentWriteOwnerLease lease,
+        IReadOnlyList<MonitorSample> samples,
+        bool useBatchWriter)
+    {
+        if (!useBatchWriter)
+        {
+            await new MonitorSampleRepository(store, lease).WriteBatchAsync(samples);
+            return;
+        }
+
+        await using var writer = new MonitorSampleBatchWriter(
+            store, lease, capacity: 16, maximumBatchSize: 10,
+            maximumBatchDelay: TimeSpan.FromMinutes(1));
+        foreach (var sample in samples)
+        {
+            await writer.EnqueueAsync(sample);
+        }
+        await writer.CompleteAndFlushAsync();
+        Assert.Equal(0, writer.RejectedSamples);
     }
 
     private static async Task<(SessionId SessionId, StorageObjectId Target, DateTimeOffset Start)>
