@@ -81,16 +81,36 @@ public sealed class WinPoolStorageProjectionTests
     }
 
     [Fact]
-    public void CuratedLayoutsUseDistinctSupportedWindowsVersionProfiles()
+    public void CuratedLayoutsUseDistinctWindowsEditionAndVersionProfiles()
     {
         var versions = SimulationLayouts.CreateAll()
             .Select(layout => layout.Snapshot.Computer.WindowsVersion)
             .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(
-            ["10.0.19045", "10.0.26100", "10.0.26200"],
+            ["10.0.19045", "10.0.20348", "10.0.26100", "10.0.26200"],
             versions);
+
+        var products = SimulationLayouts.CreateAll()
+            .Select(layout => layout.Snapshot.Computer.ProductName)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "Windows 10 Home",
+                "Windows 10 Pro",
+                "Windows 11 Home",
+                "Windows 11 Pro",
+                "Windows 11 Pro for Workstations",
+                "Windows Server 2022 Standard",
+                "Windows Server 2025 Datacenter",
+                "Windows Server 2025 Standard"
+            ],
+            products);
     }
 
     [Fact]

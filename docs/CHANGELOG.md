@@ -6,7 +6,7 @@
 
 系统选择菜单不再使用会围绕当前选项定位的 `ComboBox` 弹出层，改为固定 `BottomEdgeAlignedLeft` 的菜单浮出层：菜单的左边缘以标题栏按钮的左边缘为锚点，不因当前选中前几个或后几个项目而水平移动。选择结果仍在菜单关闭后应用，保持切换工作区时不在打开的 WinUI 浮出层中重建页面。
 
-11 个策划内置模拟按 Windows 10 22H2、Windows 11 24H2、Windows 11 25H2 三种版本档案生成，快照版本已递增，现有内置文档会在下次加载时刷新。模拟版本仅用于参考展示，不构成 Windows 平台或真实存储配置的测试证据。
+11 个策划内置模拟现在覆盖 Windows 10 Home / Pro、Windows 11 Home / Pro / Pro for Workstations、Windows Server 2022 Standard、Windows Server 2025 Standard / Datacenter；内核版本覆盖 10.0.19045、10.0.20348、10.0.26100、10.0.26200。快照版本已再次递增，现有内置文档会在下次加载时刷新。模拟版本仅用于参考展示，不构成 Windows 平台或真实存储配置的测试证据。
 
 ## 2026-09-16：设置布局、IPC 交接与整套提权重启修复
 

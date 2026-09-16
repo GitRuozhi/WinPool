@@ -8,14 +8,29 @@ namespace WinPool.Application;
 /// </summary>
 public static class SimulationLayouts
 {
-    private static readonly SimulatedWindowsRelease Windows10_22H2 =
-        new("Windows 10 Pro", "10.0.19045", "19045", "22H2", "7184");
+    private static readonly SimulatedWindowsRelease Windows10Home_22H2 =
+        new("Windows 10 Home", "10.0.19045", "19045", "22H2", "7184");
 
-    private static readonly SimulatedWindowsRelease Windows11_24H2 =
+    private static readonly SimulatedWindowsRelease Windows10Pro_22H2 =
+        new("Windows 10 Pro", "10.0.19045", "19045", "22H2", "7463");
+
+    private static readonly SimulatedWindowsRelease Windows11Home_24H2 =
+        new("Windows 11 Home", "10.0.26100", "26100", "24H2", "7171");
+
+    private static readonly SimulatedWindowsRelease Windows11Pro_24H2 =
         new("Windows 11 Pro", "10.0.26100", "26100", "24H2", "7171");
 
-    private static readonly SimulatedWindowsRelease Windows11_25H2 =
-        new("Windows 11 Pro", "10.0.26200", "26200", "25H2", "7623");
+    private static readonly SimulatedWindowsRelease Windows11ProForWorkstations_25H2 =
+        new("Windows 11 Pro for Workstations", "10.0.26200", "26200", "25H2", "7623");
+
+    private static readonly SimulatedWindowsRelease WindowsServer2022Standard =
+        new("Windows Server 2022 Standard", "10.0.20348", "20348", "21H2", "3453");
+
+    private static readonly SimulatedWindowsRelease WindowsServer2025Standard =
+        new("Windows Server 2025 Standard", "10.0.26100", "26100", "24H2", "8501");
+
+    private static readonly SimulatedWindowsRelease WindowsServer2025Datacenter =
+        new("Windows Server 2025 Datacenter", "10.0.26100", "26100", "24H2", "8501");
 
     public static IReadOnlyList<(string Id, string Name, StorageSnapshot Snapshot)> CreateAll() =>
     [
@@ -43,7 +58,7 @@ public static class SimulationLayouts
         b.RawPhysical(5, "RAW-HDD-3", "HDD");
         b.GptEmptyPhysical(6, "GPT-empty-SSD", "SSD");
         b.Primordial(0, 1, 2, 3, 4, 5, 6);
-        return b.Build("建池与初始化", "layout-primordial-ready-v4", Windows10_22H2);
+        return b.Build("建池与初始化", "layout-primordial-ready-v5", Windows10Home_22H2);
     }
 
     public static StorageSnapshot StandardTiered()
@@ -62,7 +77,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 3, 4, 5, 6);
         b.VirtualDisk("vd", "Pool01", "pool", "Mirror", 1, 2, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Pool01");
-        return b.Build("标准两层池", "layout-standard-tiered-v4", Windows11_24H2);
+        return b.Build("标准两层池", "layout-standard-tiered-v5", Windows11Pro_24H2);
     }
 
     public static StorageSnapshot TripleTier()
@@ -87,7 +102,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 7, 8, 9, 10, 11, 12, 13, 14);
         b.VirtualDisk("vd", "TripleVD", "pool", "Mirror", 1, 2, 20, "cache", "perf", "cap");
         b.OsForVirtualNtfs("vd", "TripleVD");
-        return b.Build("三层池", "layout-triple-tier-v5", Windows11_25H2);
+        return b.Build("三层池", "layout-triple-tier-v6", Windows11ProForWorkstations_25H2);
     }
 
     public static StorageSnapshot ManyPartitions()
@@ -96,7 +111,7 @@ public static class SimulationLayouts
         b.SystemPhysical(0, "8-partition NVMe", size: DecimalTerabytes(2), extraDataPartitions: 4);
         b.RawPhysical(1, "Empty-HDD", "HDD");
         b.Primordial(0, 1);
-        return b.Build("超多分区系统盘", "layout-tall-system-v5", Windows10_22H2);
+        return b.Build("超多分区系统盘", "layout-tall-system-v6", Windows10Pro_22H2);
     }
 
     public static StorageSnapshot DenseServer()
@@ -123,7 +138,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", Enumerable.Range(9, 28).ToArray());
         b.VirtualDisk("vd", "DataPool", "pool", "Simple", 1, 1, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "DataPool");
-        return b.Build("超多磁盘服务器", "layout-dense-server-v4", Windows11_24H2);
+        return b.Build("超多磁盘服务器", "layout-dense-server-v5", WindowsServer2025Datacenter);
     }
 
     public static StorageSnapshot PoolWithoutVirtualDisk()
@@ -137,7 +152,7 @@ public static class SimulationLayouts
         b.Disk(5, "HDD-3", "HDD", "pool");
         b.Primordial(0);
         b.Pool("pool", "EmptyPool", 1, 2, 3, 4, 5);
-        return b.Build("空池待建虚拟磁盘", "layout-pool-no-vdisk-v4", Windows11_25H2);
+        return b.Build("空池待建虚拟磁盘", "layout-pool-no-vdisk-v5", WindowsServer2022Standard);
     }
 
     public static StorageSnapshot SingleDiskPool()
@@ -147,7 +162,7 @@ public static class SimulationLayouts
         b.Disk(1, "Solo-SSD", "SSD", "pool");
         b.Primordial(0);
         b.Pool("pool", "SoloPool", 1);
-        return b.Build("单盘池", "layout-single-disk-pool-v4", Windows10_22H2);
+        return b.Build("单盘池", "layout-single-disk-pool-v5", Windows11Home_24H2);
     }
 
     public static StorageSnapshot SpareAndRetired()
@@ -166,7 +181,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 2, 3, 4);
         b.VirtualDisk("vd", "Data", "pool", "Simple", 1, 1, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Data");
-        return b.Build("热备与退役", "layout-spare-retired-v4", Windows11_24H2);
+        return b.Build("热备与退役", "layout-spare-retired-v5", WindowsServer2025Standard);
     }
 
     public static StorageSnapshot DualVirtualDisk()
@@ -186,7 +201,7 @@ public static class SimulationLayouts
         b.VirtualDisk("vd2", "LogVD", "pool", "Simple", 1, 1, 22);
         b.OsForVirtualNtfs("vd1", "DataVD");
         b.OsForVirtualNtfs("vd2", "LogVD");
-        return b.Build("双虚拟磁盘", "layout-dual-vd-v5", Windows11_25H2);
+        return b.Build("双虚拟磁盘", "layout-dual-vd-v6", Windows11ProForWorkstations_25H2);
     }
 
     public static StorageSnapshot PartitionEdges()
@@ -198,7 +213,7 @@ public static class SimulationLayouts
         b.MixedFileSystemPhysical(3, "FS-mix-SSD", "SSD");
         b.OfflineNtfsPhysical(4, "Offline-HDD", "HDD");
         b.Primordial(0, 1, 2, 3, 4);
-        return b.Build("分区边界", "layout-partition-edges-v4", Windows10_22H2);
+        return b.Build("分区边界", "layout-partition-edges-v5", Windows10Home_22H2);
     }
 
     public static StorageSnapshot OtherAndNetwork()
@@ -209,7 +224,7 @@ public static class SimulationLayouts
         b.OtherNtfs(40, "USB-Other");
         b.Network("R", "share-r");
         b.Network("S", "share-s");
-        return b.Build("其它与网络", "layout-other-network-v4", Windows11_24H2);
+        return b.Build("其它与网络", "layout-other-network-v5", Windows11Pro_24H2);
     }
 
     private sealed record SimulatedWindowsRelease(
