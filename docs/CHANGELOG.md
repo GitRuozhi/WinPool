@@ -54,7 +54,7 @@ Agent 控制管道把已接通客户端的正常提前断开和断管视为连�
 
 修复控制管道被零字节或半帧握手长期占用，以及单次进程登记持久化异常终止监听的问题。握手读取现在有独立 5 秒期限；连接级异常以稳定诊断代码报告并释放当前连接，监听器继续接收后续客户端；监听任务自身若意外终止则进入 Failed 并通过托盘呈现。
 
-SQLite schema 升至 17，监控样本保存当前全部 14 类指标，缺失写为 NULL、真实零仍为零，读取和 CSV 均保持区别。模拟文档 IPC 升至 8，列表改为最多 256 项的元数据分页，正文按 ID 单独读取，多个合法文档合计超过 4 MiB 时不再组成超限单帧。CommitId 现在绑定文档、前后哈希、修订、OperationId 和 PlanHash；幂等重试返回提交时的不可变文档回执，冲突请求明确拒绝，结果未知查询由 Agent 与客户端双重核验。审查输入保存在 [WinPool-static-review-7cd2b7c](WinPool-static-review-7cd2b7c.md)。全套 556/556 Release 测试通过，完整 Release 构建 0 警告、0 错误，依赖审计无已知漏洞包；未执行原生 UI 或真实存储操作。
+SQLite schema 升至 17，监控样本保存当前全部 14 类指标，缺失写为 NULL、真实零仍为零，读取和 CSV 均保持区别。模拟文档 IPC 升至 8，列表改为最多 256 项的元数据分页，正文按 ID 单独读取，多个合法文档合计超过 4 MiB 时不再组成超限单帧。CommitId 现在绑定文档、前后哈希、修订、OperationId 和 PlanHash；幂等重试返回提交时的不可变文档回执，冲突请求明确拒绝，结果未知查询由 Agent 与客户端双重核验。审查输入保存在 [WinPool-static-review-7cd2b7c](Archive/20260915-static-review-fixes/WinPool-static-review-7cd2b7c.md)。全套 556/556 Release 测试通过，完整 Release 构建 0 警告、0 错误，依赖审计无已知漏洞包；未执行原生 UI 或真实存储操作。
 
 ## 2026-09-15：标题栏切换模拟系统不再闪退
 
@@ -94,7 +94,7 @@ SQLite schema 升至 17，监控样本保存当前全部 14 类指标，缺失�
 
 Release App/Agent 编译 0 警告、0 错误。按用户要求未运行自动测试。使用 native-winui-control 在独立运行目录与数据库副本上检查：本机属性补齐；连续两次存储刷新及一次完整硬件刷新后均为 67 条来源对象、33 个来源、29 条关联（原始来源计数，并非界面业务对象数）；可选电池来源不可用，整体采集成功。模拟卷标编辑在编辑页与管理页一致生效；导入断开分区—卷关联的副本后，孤立文件系统仍显示，磁盘/偏移未知且几何编辑禁用。未进行真实存储写操作；不将这些人工检查宣称为全部设备场景验收。
 
-这里只记录重要结果与当前限制，开发过程由 Git 保存。当前实现为 V0.52，已完成结果见 [V0.52 归档](Archive/V0.52/README.md)。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
+这里只记录重要结果与当前限制，开发过程由 Git 保存。V0.52 阶段结果见 [归档](Archive/V0.52/README.md)，当前产品版本以 Directory.Build.props 为准。2026-09-10 以前的完整历史保存在[英文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.md)和[中文原件](Archive/20260910-documentation-reset/original/docs/CHANGELOG.zh-CN.md)，不追溯改写。
 
 ## 2026-09-15：移除隐私与脱敏功能
 
