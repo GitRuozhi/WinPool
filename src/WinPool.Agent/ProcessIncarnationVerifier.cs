@@ -1,4 +1,5 @@
-using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace WinPool.Agent;
 
@@ -20,6 +21,8 @@ public interface IProcessIncarnationVerifier
 
 public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerifier
 {
+    private const uint ProcessQueryLimitedInformation = 0x1000;
+
     public ProcessIncarnation? TryRead(int processId)
     {
         if (processId <= 0)
@@ -29,16 +32,24 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
 
         try
         {
-            using var process = Process.GetProcessById(processId);
-            if (process.HasExited || process.MainModule?.FileName is not { } imagePath)
+            var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+            if (handle == nint.Zero)
             {
                 return null;
             }
 
-            return new(
-                processId,
-                Path.GetFullPath(imagePath),
-                process.StartTime.ToUniversalTime());
+            try
+            {
+                var imagePath = ReadImagePath(handle);
+                var startedAtUtc = ReadStartedAtUtc(handle);
+                return imagePath is null || startedAtUtc is null
+                    ? null
+                    : new(processId, imagePath, startedAtUtc.Value);
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
         }
         catch (Exception exception) when (
             exception is ArgumentException
@@ -63,6 +74,52 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
             TryRead(registration.ProcessId),
             registration,
             expectedExecutablePath);
+
+    private static string? ReadImagePath(nint handle)
+    {
+        var buffer = new StringBuilder(32_768);
+        var length = buffer.Capacity;
+        return QueryFullProcessImageName(handle, 0, buffer, ref length)
+            ? Path.GetFullPath(buffer.ToString())
+            : null;
+    }
+
+    private static DateTimeOffset? ReadStartedAtUtc(nint handle)
+    {
+        return GetProcessTimes(handle, out var created, out _, out _, out _)
+            ? new DateTimeOffset(DateTime.FromFileTimeUtc(created.ToFileTime()))
+            : null;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct NativeFileTime(uint lowDateTime, uint highDateTime)
+    {
+        public long ToFileTime() => checked((long)(((ulong)highDateTime << 32) | lowDateTime));
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint OpenProcess(uint desiredAccess, bool inheritHandle, int processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(
+        nint process,
+        uint flags,
+        StringBuilder executablePath,
+        ref int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessTimes(
+        nint process,
+        out NativeFileTime creationTime,
+        out NativeFileTime exitTime,
+        out NativeFileTime kernelTime,
+        out NativeFileTime userTime);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint handle);
 }
 
 public static class ProcessIncarnationMatcher

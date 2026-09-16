@@ -61,4 +61,15 @@ public sealed class AgentClientProcessVerifierTests
         Assert.False(ProcessIncarnationMatcher.Matches(
             matching with { StartedAtUtc = started.AddSeconds(1) }, registration, expectedImage));
     }
+
+    [Fact]
+    public void LimitedProcessQueryReadsTheCurrentProcessWitness()
+    {
+        var witness = new WindowsProcessIncarnationVerifier().TryRead(Environment.ProcessId);
+
+        Assert.NotNull(witness);
+        Assert.Equal(Environment.ProcessId, witness.ProcessId);
+        Assert.True(Path.IsPathFullyQualified(witness.ImagePath));
+        Assert.True(witness.StartedAtUtc <= DateTimeOffset.UtcNow);
+    }
 }

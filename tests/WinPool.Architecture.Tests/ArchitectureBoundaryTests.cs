@@ -785,6 +785,27 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void SettingsKeepDeveloperModeOutOfTheAppearanceCardAndStopUpdatingAfterElevationHandoff()
+    {
+        var root = FindRepositoryRoot();
+        var settingsMarkup = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml"));
+        var settingsCode = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+
+        var firstCardEnd = settingsMarkup.IndexOf("</Border>", StringComparison.Ordinal);
+        var developerMode = settingsMarkup.IndexOf("x:Name=\"DeveloperModeSwitch\"", StringComparison.Ordinal);
+
+        Assert.True(firstCardEnd >= 0);
+        Assert.True(developerMode > firstCardEnd);
+        Assert.Contains("if (await mainWindow.RequestExecutionModeAsync(requestedMode))", settingsCode, StringComparison.Ordinal);
+        Assert.Contains("return true;", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (!closingForElevationHandoff)", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProductFacingVersionUsesTheRepositoryVersionSource()
     {
         var root = FindRepositoryRoot();

@@ -104,6 +104,11 @@ internal static class Program
                 reportConnectionFailure: (code, exception) =>
                 {
                     Trace.TraceError("{0}: {1}", code, exception);
+                    DiagnosticLog.AppendFailure(
+                        dataRoot,
+                        "agent-control.jsonl",
+                        code,
+                        exception);
                     context.NotifyControlFailure(code);
                 });
             var serverTask = Task.Run(() => server.RunAsync(pipeCancellation.Token));

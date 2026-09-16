@@ -197,6 +197,61 @@ public sealed class NamedPipeAgentConnectionTests
     }
 
     [Fact]
+    public async Task AbandonedHandshakeDoesNotReportAControlServiceFailure()
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("Current SID unavailable.");
+        var userHash = IpcIdentity.HashUserSid(sid);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(
+            new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry),
+            registry);
+        var failure = new TaskCompletionSource<string>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(
+            pipeName,
+            nonce,
+            userHash,
+            sessionId,
+            Environment.ProcessId,
+            coordinator,
+            reportConnectionFailure: (code, _) => failure.TrySetResult(code));
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        await using (var abandoned = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await abandoned.ConnectAsync(timeout.Token);
+        }
+
+        await using (var healthy = CurrentUserPipeFactory.CreateClient(pipeName))
+        {
+            await healthy.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(healthy, nonce, userHash, Guid.NewGuid(), timeout.Token);
+            Assert.Equal(
+                AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(healthy, timeout.Token)).MessageType);
+        }
+
+        await Task.Delay(100, timeout.Token);
+        Assert.False(failure.Task.IsCompleted);
+
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    [Fact]
     public async Task ProcessPersistenceFailureIsReportedAndNextConnectionStillWorks()
     {
         var sid = WindowsIdentity.GetCurrent().User?.Value

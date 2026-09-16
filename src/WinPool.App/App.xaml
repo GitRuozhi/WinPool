@@ -26,11 +26,13 @@
             <Color x:Key="WinPoolAccentColor">#0078D4</Color>
             <Color x:Key="WinPoolAccentHoverColor">#330078D4</Color>
             <Color x:Key="WinPoolAccentPressedColor">#4D0078D4</Color>
+            <Color x:Key="WinPoolTitleBarSelectorHoverColor">#660078D4</Color>
             <Color x:Key="WinPoolAccentBorderColor">#60CDFF</Color>
             <Color x:Key="WinPoolAccentForegroundColor">#FFFFFF</Color>
             <SolidColorBrush x:Key="WinPoolAccentBrush" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="WinPoolAccentHoverBrush" Color="{StaticResource WinPoolAccentHoverColor}" />
             <SolidColorBrush x:Key="WinPoolAccentPressedBrush" Color="{StaticResource WinPoolAccentPressedColor}" />
+            <SolidColorBrush x:Key="WinPoolTitleBarSelectorHoverBrush" Color="{StaticResource WinPoolTitleBarSelectorHoverColor}" />
             <SolidColorBrush x:Key="WinPoolAccentBorderBrush" Color="{StaticResource WinPoolAccentBorderColor}" />
             <SolidColorBrush x:Key="WinPoolAccentForegroundBrush" Color="{StaticResource WinPoolAccentForegroundColor}" />
 

@@ -39,6 +39,7 @@ public sealed partial class MainWindow : Window
     private bool _requestingElevation;
     private bool _realWarningDismissed;
     private readonly ApplicationStartupTarget _startupTarget;
+    private readonly bool _enteredRealModeAfterElevation;
     private string _preferredShellPage = "Manage";
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
@@ -67,6 +68,7 @@ public sealed partial class MainWindow : Window
             ? new EphemeralWorkspaceStateService()
             : new AgentBackedWorkspaceStateService(agentConnection);
         _startupTarget = startupOptions.Target;
+        _enteredRealModeAfterElevation = startupOptions.EnterRealModeAfterElevation;
         var importExportService = new DesktopExportService();
         ViewModel = new WorkspaceViewModel(
             agentConnection is null
@@ -190,6 +192,14 @@ public sealed partial class MainWindow : Window
             {
                 SelectShellPage(SelectedShellItem.Page);
             }
+        }
+        if (_enteredRealModeAfterElevation && ViewModel.IsRealMode && ViewModel.CanUseRealMode)
+        {
+            NotificationService.PublishInfo(
+                ViewModel.Localization["ElevationTitle"],
+                ViewModel.Localization["ElevationRestarted"],
+                "elevation",
+                "elevation-restarted");
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
@@ -441,6 +451,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ActiveSystemSelectorHost_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (_accessibilitySettings.HighContrast)
+        {
+            return;
+        }
+
+        ActiveSystemSelectorHost.Background =
+            (Brush)Application.Current.Resources["WinPoolTitleBarSelectorHoverBrush"];
+    }
+
+    private void ActiveSystemSelectorHost_PointerExited(object sender, PointerRoutedEventArgs e) =>
+        ActiveSystemSelectorHost.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+
     private void UpdateCaptionInset()
     {
         var right = Math.Max(8, AppWindow.TitleBar.RightInset + 8);
@@ -460,7 +484,12 @@ public sealed partial class MainWindow : Window
                 : ExecutionMode.Simulation);
     }
 
-    public async Task RequestExecutionModeAsync(ExecutionMode requestedMode)
+    /// <summary>
+    /// Requests the execution mode change. Returns <see langword="true"/> only
+    /// when this window has handed off to an elevated replacement and is closing.
+    /// Callers must not update this window after that handoff.
+    /// </summary>
+    public async Task<bool> RequestExecutionModeAsync(ExecutionMode requestedMode)
     {
         if (requestedMode == ExecutionMode.Simulation)
         {
@@ -468,16 +497,17 @@ public sealed partial class MainWindow : Window
             _realWarningDismissed = false;
             LocalRealOperationsWarning.IsOpen = false;
             SyncModeSwitch();
-            return;
+            return false;
         }
 
         SyncModeSwitch();
         if (_requestingElevation || RootGrid.XamlRoot is null)
         {
-            return;
+            return false;
         }
 
         _requestingElevation = true;
+        var closingForElevationHandoff = false;
         try
         {
             var localization = ViewModel.Localization;
@@ -496,7 +526,7 @@ public sealed partial class MainWindow : Window
             var result = await dialog.ShowAsync();
             if (result != ContentDialogResult.Primary)
             {
-                return;
+                return false;
             }
 
             if (ViewModel.CanUseRealMode)
@@ -504,15 +534,16 @@ public sealed partial class MainWindow : Window
                 ViewModel.TrySetExecutionMode(ExecutionMode.Real);
                 _realWarningDismissed = false;
                 LocalRealOperationsWarning.IsOpen = true;
-                return;
+                return false;
             }
 
             var restart = await _elevationRestartService.RestartElevatedAsync(
                 ApplicationStartupOptions.ElevatedRealArgument);
             if (restart.Status == ElevationRestartStatus.Started)
             {
+                closingForElevationHandoff = true;
                 Close();
-                return;
+                return true;
             }
 
             if (restart.Status == ElevationRestartStatus.Failed)
@@ -527,8 +558,13 @@ public sealed partial class MainWindow : Window
         finally
         {
             _requestingElevation = false;
-            SyncModeSwitch();
+            if (!closingForElevationHandoff)
+            {
+                SyncModeSwitch();
+            }
         }
+
+        return false;
     }
 
     private void SyncModeSwitch()
@@ -582,6 +618,7 @@ public sealed partial class MainWindow : Window
         var foreground = ContrastingText(color);
         var hover = Color.FromArgb(0x36, color.R, color.G, color.B);
         var pressed = Color.FromArgb(0x58, color.R, color.G, color.B);
+        var titleBarSelectorHover = Color.FromArgb(0x66, color.R, color.G, color.B);
         var currentIsLight = RootGrid.ActualTheme == ElementTheme.Light;
         var fill = currentIsLight ? dark1 : light2;
         var text = currentIsLight ? dark2 : light3;
@@ -594,11 +631,13 @@ public sealed partial class MainWindow : Window
         SetOwnedColor("WinPoolAccentColor", color);
         SetOwnedColor("WinPoolAccentHoverColor", hover);
         SetOwnedColor("WinPoolAccentPressedColor", pressed);
+        SetOwnedColor("WinPoolTitleBarSelectorHoverColor", titleBarSelectorHover);
         SetOwnedColor("WinPoolAccentBorderColor", fill);
         SetOwnedColor("WinPoolAccentForegroundColor", foreground);
         SetOwnedBrushColor("WinPoolAccentBrush", color);
         SetOwnedBrushColor("WinPoolAccentHoverBrush", hover);
         SetOwnedBrushColor("WinPoolAccentPressedBrush", pressed);
+        SetOwnedBrushColor("WinPoolTitleBarSelectorHoverBrush", titleBarSelectorHover);
         SetOwnedBrushColor("WinPoolAccentBorderBrush", fill);
         SetOwnedBrushColor("WinPoolAccentForegroundBrush", foreground);
         SetOwnedBrushColor("AccentFillColorDefaultBrush", fill);
@@ -933,6 +972,7 @@ public sealed partial class MainWindow : Window
                 : Color.FromArgb(255, 0xFF, 0xFF, 0xFF));
         WindowTitleText.Foreground = normalForeground;
         ActiveSystemSelector.BorderBrush = accent;
+        ActiveSystemSelectorHost.BorderBrush = accent;
         LocalRealOperationsLabel.Foreground = normalForeground;
         foreach (var item in ShellNavigationItems)
         {

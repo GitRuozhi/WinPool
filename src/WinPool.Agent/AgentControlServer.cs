@@ -290,14 +290,27 @@ public sealed class CurrentUserAgentControlServer
                && coordinator.State != AgentLifecycleState.Stopped)
         {
             await using var server = CurrentUserPipeFactory.CreateServer(pipeName);
-            await server.WaitForConnectionAsync(cancellationToken);
+            var clientConnected = false;
             try
             {
+                await server.WaitForConnectionAsync(cancellationToken);
+                clientConnected = true;
                 await ServeConnectionAsync(server, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
+            }
+            catch (EndOfStreamException) when (clientConnected)
+            {
+                // A same-user client may abandon a connection before completing
+                // its handshake. The listener remains healthy and this is not a
+                // product-visible Agent failure.
+            }
+            catch (IOException) when (clientConnected)
+            {
+                // Broken pipes are expected when a client exits or is replaced
+                // during a normal handoff. Do not emit a tray warning for them.
             }
             catch (Exception exception)
             {

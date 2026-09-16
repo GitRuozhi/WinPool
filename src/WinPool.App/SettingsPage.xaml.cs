@@ -414,9 +414,17 @@ public sealed partial class SettingsPage : Page
         var requestedMode = SettingsExecutionModeSwitch.IsOn
             ? ExecutionMode.Real
             : ExecutionMode.Simulation;
-        await ((MainWindow)App.Window).RequestExecutionModeAsync(requestedMode);
+        var mainWindow = (MainWindow)App.Window;
+        if (await mainWindow.RequestExecutionModeAsync(requestedMode))
+        {
+            // The replacement process owns the UI now. Refreshing the closing
+            // WinUI window can raise "The WinUI Desktop Window object has
+            // already been closed" as an unhandled Xaml exception.
+            return;
+        }
+
         SyncExecutionMode();
-        ((MainWindow)App.Window).RefreshChrome();
+        mainWindow.RefreshChrome();
     }
 
     private void PartitionGapBox_TextChanged(object sender, TextChangedEventArgs e) =>

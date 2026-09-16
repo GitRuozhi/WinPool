@@ -51,6 +51,9 @@ public sealed class LocalizationService : ObservableObject
             ["Cancel"] = ("取消", "Cancel"),
             ["Close"] = ("关闭", "Close"),
             ["ElevationFailed"] = ("无法以管理员身份重新启动 WinPool。", "WinPool could not restart as administrator."),
+            ["ElevationRestarted"] = (
+                "WinPool 已以管理员身份重新启动，真实执行模式已开启。本机存储仍保持只读。",
+                "WinPool restarted as administrator and real execution mode is enabled. Local storage remains read-only."),
             ["Warning"] = ("警告", "Warning"),
             ["Error"] = ("错误", "Error"),
             ["OperationFailed"] = ("操作失败。", "The operation failed."),

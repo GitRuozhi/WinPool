@@ -100,18 +100,29 @@
                 </ListView.ItemTemplate>
             </ListView>
 
-            <ComboBox
-                x:Name="ActiveSystemSelector"
+            <Border
+                x:Name="ActiveSystemSelectorHost"
                 Grid.Column="2"
                 Margin="24,0,12,0"
                 MinWidth="180"
                 MaxWidth="420"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
-                AutomationProperties.Name="Storage system"
-                DropDownClosed="ActiveSystemSelector_DropDownClosed"
-                SelectionChanged="ActiveSystemSelector_SelectionChanged"
-                Visibility="Collapsed" />
+                Background="Transparent"
+                BorderThickness="1"
+                CornerRadius="4"
+                PointerEntered="ActiveSystemSelectorHost_PointerEntered"
+                PointerExited="ActiveSystemSelectorHost_PointerExited">
+                <ComboBox
+                    x:Name="ActiveSystemSelector"
+                    MinWidth="178"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    AutomationProperties.Name="Storage system"
+                    DropDownClosed="ActiveSystemSelector_DropDownClosed"
+                    SelectionChanged="ActiveSystemSelector_SelectionChanged"
+                    Visibility="Collapsed" />
+            </Border>
 
             <StackPanel
                 x:Name="ModeControls"
