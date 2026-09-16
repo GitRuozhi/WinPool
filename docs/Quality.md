@@ -10,6 +10,8 @@
 
 ## 选择验证范围
 
+2026-09-16 编辑页整页重建修复：主代理执行 `TitleBarProvidesStorageSystemSelector` 单项架构检查，1/1 通过；这是系统身份导航守卫的源码回归检查，不是原生交互测试。隔离编译 `WinPool.App.csproj -c Release --no-restore` 及其 Agent 目标通过，0 警告/0 错误，输出在 `artifacts/editor-refresh-check/trees/Release`。用户要求不跑完整测试，本轮未重跑全套；保留正在运行的 `artifacts/Release`，原生操作后不闪烁的目视复测为 `unverified`。监控数据库轮换计划没有因此开始实施。
+
 - 纯文档任务：检查内容一致性、当前链接、归档完整性及 Git 范围；不运行代码、原生、设备或视觉测试。
 - 普通修复/小功能：运行能验证风险的直接相关检查，不自动扩成全套验收。低影响、可逆修改不为凑数量添加测试。
 - 执行已确认 Plan：其中明确要求的回归和自动门属于任务本身，无须重复申请；阶段收口运行 Plan 指定范围。
