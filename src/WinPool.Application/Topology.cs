@@ -89,9 +89,9 @@ public static class WorkspaceMapper
                 new WorkspaceSelection(WorkspaceCategory.System, snapshot.Computer.StableId),
             StorageUnitKind.StoragePool =>
                 new WorkspaceSelection(WorkspaceCategory.Pool, unit.StableId),
-            StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup =>
+            StorageUnitKind.SyntheticStoragePool or StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup =>
                 new WorkspaceSelection(WorkspaceCategory.Pool, unit.StableId),
-            StorageUnitKind.StorageTier or StorageUnitKind.DirectDiskGroup =>
+            StorageUnitKind.StorageTier or StorageUnitKind.SyntheticStorageTier or StorageUnitKind.DirectDiskGroup =>
                 new WorkspaceSelection(WorkspaceCategory.Tier, unit.StableId),
             StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk
                 or StorageUnitKind.OsDisk or StorageUnitKind.VirtualDiskGroup =>
@@ -110,20 +110,6 @@ public static class TopologyProjector
     {
         var root = ProjectCore(snapshot);
         RemoveDuplicateOccurrences(root, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-        var unattached = snapshot.PartitionUnions.Where(x => !x.IsNetwork && (x.OsDiskId is null || snapshot.OsDisks.All(d => d.StableId != x.OsDiskId))).ToArray();
-        if (unattached.Length > 0)
-        {
-            var other = root.Children.FirstOrDefault(x => x.Unit.StableId == OtherGroupStableId(snapshot));
-            if (other is null)
-            {
-                other = new TopologyNode(new StorageUnitRef(OtherGroupStableId(snapshot), StorageUnitKind.OtherDiskGroup, "Other"), "",
-                    childrenLayout: TopologyChildrenLayout.Flow);
-                root.Children.Add(other);
-            }
-            foreach (var union in unattached)
-                other.Children.Add(new TopologyNode(new StorageUnitRef(union.Id, StorageUnitKind.Partition, union.DisplayName, union.IsStable),
-                    JoinSummary(union.FileSystem, union.Size is { } size ? FormatBytes(size) : "Unknown")));
-        }
         return root;
     }
 
@@ -137,6 +123,7 @@ public static class TopologyProjector
 
     private static TopologyNode ProjectCore(StorageSnapshot snapshot)
     {
+        var synthetic = SyntheticStorageProjection.For(snapshot);
         var uniquePhysical = snapshot.PhysicalDisks
             .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -158,48 +145,13 @@ public static class TopologyProjector
                      .OrderByDescending(x => x.IsPrimordial)
                      .ThenBy(x => x.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            root.Children.Add(CreatePoolNode(pool, snapshot));
+            root.Children.Add(CreatePoolNode(pool, snapshot, synthetic));
         }
 
-        if (snapshot.NetworkDisks.Count > 0)
+        foreach (var pool in synthetic.Where(item => item.Kind == SyntheticStorageObjectKind.Pool)
+                     .OrderBy(item => item.Name))
         {
-            var networkGroup = new TopologyNode(
-                new StorageUnitRef(
-                    NetworkGroupStableId(snapshot),
-                    StorageUnitKind.NetworkDiskGroup,
-                    "Network"),
-                JoinSummary(
-                    $"{snapshot.NetworkDisks.Count} network disks",
-                    FormatBytes(snapshot.NetworkDisks.Sum(x => x.Size))),
-                childrenLayout: TopologyChildrenLayout.Flow,
-                layoutWeight: snapshot.NetworkDisks.Count);
-            networkGroup.Children.AddRange(snapshot.NetworkDisks.Select(CreateNetworkDiskNode));
-            root.Children.Add(networkGroup);
-        }
-
-        var otherOsDisks = GetOtherOsDisks(snapshot);
-        if (otherOsDisks.Count > 0)
-        {
-            var otherGroup = new TopologyNode(
-                new StorageUnitRef(
-                    OtherGroupStableId(snapshot),
-                    StorageUnitKind.OtherDiskGroup,
-                    "Other"),
-                JoinSummary(
-                    $"{otherOsDisks.Count} other disks",
-                    $"{snapshot.Partitions.Count(x => x.OsDiskStableId is not null && otherOsDisks.Any(disk => disk.StableId == x.OsDiskStableId))} partitions",
-                    FormatBytes(otherOsDisks.Sum(x => x.Size))),
-                childrenLayout: TopologyChildrenLayout.Flow,
-                layoutWeight: otherOsDisks.Count);
-            foreach (var osDisk in otherOsDisks)
-            {
-                var node = new TopologyNode(
-                    new StorageUnitRef(osDisk.StableId, StorageUnitKind.OsDisk, osDisk.FriendlyName),
-                    JoinSummary(osDisk.PartitionStyle, FormatBytes(osDisk.Size)));
-                AddPartitions(node, osDisk, snapshot);
-                otherGroup.Children.Add(node);
-            }
-            root.Children.Add(otherGroup);
+            root.Children.Add(CreateSyntheticPoolNode(pool, snapshot));
         }
 
         return root;
@@ -228,10 +180,10 @@ public static class TopologyProjector
         $"{(int)node.Unit.Kind}:{node.Unit.StableId}";
 
     public static string NetworkGroupStableId(StorageSnapshot snapshot) =>
-        $"group:network:{snapshot.Computer.StableId}";
+        SyntheticStorageProjection.NetworkPoolStableId(snapshot);
 
     public static string OtherGroupStableId(StorageSnapshot snapshot) =>
-        $"group:other:{snapshot.Computer.StableId}";
+        SyntheticStorageProjection.OtherPoolStableId(snapshot);
 
     public static IReadOnlyList<OsDiskInfo> GetOtherOsDisks(StorageSnapshot snapshot) =>
         snapshot.OsDisks
@@ -325,7 +277,26 @@ public static class TopologyProjector
         return $"{value:0.##} {units[index]}";
     }
 
-    private static TopologyNode CreatePoolNode(StoragePoolInfo pool, StorageSnapshot snapshot)
+    /// <summary>
+    /// A tier has its own capacity field. Source failure leaves that value
+    /// blank, while an explicitly collected zero remains a real zero.
+    /// </summary>
+    public static string TierCapacityText(StorageSnapshot snapshot, StorageTierInfo tier)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(tier);
+        return snapshot.FieldIssues.Any(issue =>
+            issue.ObjectId.Equals(tier.StableId, StringComparison.OrdinalIgnoreCase)
+            && issue.FieldName.Equals(nameof(StorageTierInfo.Size), StringComparison.OrdinalIgnoreCase)
+            && issue.State != FieldReadState.Returned)
+            ? string.Empty
+            : FormatBytes(tier.Size);
+    }
+
+    private static TopologyNode CreatePoolNode(
+        StoragePoolInfo pool,
+        StorageSnapshot snapshot,
+        IReadOnlyList<SyntheticStorageObject> synthetic)
     {
         var members = snapshot.PhysicalDisks
             .Where(x => pool.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
@@ -333,7 +304,17 @@ public static class TopologyProjector
             .ToList();
         var virtualDisks = snapshot.VirtualDisks.Where(x => x.PoolStableId == pool.StableId).ToList();
         var poolTiers = snapshot.StorageTiers.Where(x => x.PoolStableId == pool.StableId).ToList();
-        var tierMemberIds = poolTiers.SelectMany(x => x.MemberPhysicalDiskIds)
+        var syntheticTiers = synthetic.Where(item => item.Kind == SyntheticStorageObjectKind.Tier
+                         && string.Equals(item.ParentStableId, pool.StableId, StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(item => item.Name)
+                     .ToArray();
+        // Usage marks for hot-spare and retired disks take visual precedence
+        // over a concurrently reported tier-member relationship. The original
+        // relationship remains in the snapshot and the empty/trimmed real tier
+        // stays selectable for its source-backed details.
+        var syntheticPriorityMemberIds = syntheticTiers
+            .Where(item => item.Name is SyntheticStorageName.HotSpareLayer or SyntheticStorageName.RetiredLayer)
+            .SelectMany(item => item.MemberStableIds)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var poolNode = new TopologyNode(
             new StorageUnitRef(pool.StableId, StorageUnitKind.StoragePool, pool.IsPrimordial ? "Primordial" : pool.FriendlyName, pool.IsStable),
@@ -375,14 +356,22 @@ public static class TopologyProjector
             poolNode.Children.Add(virtualGroup);
         }
 
-        foreach (var tier in poolTiers.OrderBy(x => TierSortOrder(x.MediaType)))
+        foreach (var tier in syntheticTiers)
         {
             var tierMembers = snapshot.PhysicalDisks
-                .Where(x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
-                .ToList();
+                .Where(member => tier.MemberStableIds.Contains(member.StableId, StringComparer.OrdinalIgnoreCase))
+                .ToArray();
             var tierNode = new TopologyNode(
-                new StorageUnitRef(tier.StableId, StorageUnitKind.StorageTier, tier.FriendlyName, tier.IsStable, pool.StableId),
-                JoinSummary($"{tierMembers.Count} physical disks", FormatBytes(tierMembers.Sum(x => x.Size))),
+                new StorageUnitRef(
+                    tier.StableId,
+                    StorageUnitKind.SyntheticStorageTier,
+                    tier.Name.ToString(),
+                    true,
+                    pool.StableId,
+                    tier.Name),
+                JoinSummary(
+                    $"{tierMembers.Length} physical disks",
+                    tier.UnknownMemberStableIds.Count > 0 ? "Membership unknown" : null),
                 childrenLayout: TopologyChildrenLayout.Flow);
             foreach (var member in tierMembers)
             {
@@ -391,53 +380,67 @@ public static class TopologyProjector
             poolNode.Children.Add(tierNode);
         }
 
-        foreach (var usage in new[] { "HotSpare", "Retired" })
+        foreach (var tier in poolTiers.OrderBy(x => TierSortOrder(x.MediaType)))
         {
-            var usageMembers = members.Where(member =>
-                    usage == "HotSpare" ? member.IsHotSpare : member.IsRetired)
+            var tierMembers = snapshot.PhysicalDisks
+                .Where(x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase)
+                    && !syntheticPriorityMemberIds.Contains(x.StableId))
                 .ToList();
-            if (usageMembers.Count == 0)
-            {
-                continue;
-            }
-
-            var usageNode = new TopologyNode(
-                new StorageUnitRef(
-                    EditWorkspace.SimulatedLayerId(pool.StableId, usage),
-                    StorageUnitKind.StorageTier,
-                    usage == "HotSpare" ? "Hot spare" : "Retired",
-                    false,
-                    pool.StableId),
-                JoinSummary($"{usageMembers.Count} physical disks", FormatBytes(usageMembers.Sum(x => x.Size))),
-                isSelectable: false,
+            var tierNode = new TopologyNode(
+                new StorageUnitRef(tier.StableId, StorageUnitKind.StorageTier, tier.FriendlyName, tier.IsStable, pool.StableId),
+                JoinSummary($"{tierMembers.Count} physical disks", TierCapacityText(snapshot, tier)),
                 childrenLayout: TopologyChildrenLayout.Flow);
-            foreach (var member in usageMembers)
+            foreach (var member in tierMembers)
             {
-                usageNode.Children.Add(CreatePhysicalDiskNode(member, snapshot, true, includeOsChildren: false));
+                tierNode.Children.Add(CreatePhysicalDiskNode(member, snapshot, true, includeOsChildren: false));
             }
-            poolNode.Children.Add(usageNode);
-        }
-
-        var directMembers = snapshot.DirectPoolMembers(pool.StableId);
-        if (directMembers.Count > 0)
-        {
-            var directGroup = new TopologyNode(
-                new StorageUnitRef(
-                    $"group:direct:{pool.StableId}",
-                    StorageUnitKind.DirectDiskGroup,
-                    snapshot.DirectGroupName(pool.StableId)),
-                JoinSummary(
-                    $"{directMembers.Count} physical disks",
-                    FormatBytes(directMembers.Sum(x => x.Size))),
-                childrenLayout: TopologyChildrenLayout.Flow);
-            foreach (var member in directMembers)
-            {
-                directGroup.Children.Add(CreatePhysicalDiskNode(member, snapshot, true, includeOsChildren: false));
-            }
-            poolNode.Children.Add(directGroup);
+            poolNode.Children.Add(tierNode);
         }
 
         return poolNode;
+    }
+
+    private static TopologyNode CreateSyntheticPoolNode(
+        SyntheticStorageObject pool,
+        StorageSnapshot snapshot)
+    {
+        var node = new TopologyNode(
+            new StorageUnitRef(
+                pool.StableId,
+                StorageUnitKind.SyntheticStoragePool,
+                pool.Name.ToString(),
+                true,
+                null,
+                pool.Name),
+            JoinSummary($"{pool.MemberStableIds.Count} members"),
+            childrenLayout: TopologyChildrenLayout.Flow,
+            layoutWeight: Math.Max(1, pool.MemberStableIds.Count));
+        foreach (var memberId in pool.MemberStableIds)
+        {
+            if (snapshot.OsDisks.FirstOrDefault(disk => disk.StableId == memberId) is { } osDisk)
+            {
+                var diskNode = new TopologyNode(
+                    new StorageUnitRef(osDisk.StableId, StorageUnitKind.OsDisk, osDisk.FriendlyName),
+                    JoinSummary(osDisk.PartitionStyle, FormatBytes(osDisk.Size)));
+                AddPartitions(diskNode, osDisk, snapshot);
+                node.Children.Add(diskNode);
+                continue;
+            }
+
+            if (snapshot.NetworkDisks.FirstOrDefault(disk => disk.StableId == memberId) is { } networkDisk)
+            {
+                node.Children.Add(CreateNetworkDiskNode(networkDisk));
+                continue;
+            }
+
+            if (snapshot.PartitionUnions.FirstOrDefault(union => union.Id == memberId) is { } union)
+            {
+                node.Children.Add(new TopologyNode(
+                    new StorageUnitRef(union.Id, StorageUnitKind.Partition, union.DisplayName, union.IsStable),
+                    JoinSummary(union.FileSystem, union.Size is { } size ? FormatBytes(size) : "Unknown")));
+            }
+        }
+        return node;
     }
 
     private static TopologyNode CreateVirtualDiskNode(VirtualDiskInfo disk, StorageSnapshot snapshot)

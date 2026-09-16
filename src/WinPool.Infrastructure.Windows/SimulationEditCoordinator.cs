@@ -488,6 +488,13 @@ public sealed class SimulationEditCoordinator(
         var direct = snapshot.FindUnit(request.TargetProviderKey);
         if (direct is not null)
         {
+            if (direct.Kind is StorageUnitKind.SyntheticStoragePool
+                or StorageUnitKind.SyntheticStorageTier)
+            {
+                // Unified synthetic containers are display/navigation-only,
+                // never valid simulation mutation targets.
+                return null;
+            }
             return direct;
         }
 

@@ -33,6 +33,8 @@ public sealed class ManageCommandProjector
 
         var isSimulation = !activeDocument.IsLocal;
         var localConsistent = activeDocument.IsLocal;
+        var isSynthetic = role is ManageObjectRole.SyntheticStoragePool
+            or ManageObjectRole.SyntheticStorageTier;
         var commands = new List<ManageCommandView>();
         switch (category)
         {
@@ -51,14 +53,14 @@ public sealed class ManageCommandProjector
             {
                 var pool = activeDocument.Snapshot.StoragePools.FirstOrDefault(
                     item => item.StableId == objectId.ProviderKey);
-                var editable = isSimulation && pool is { IsPrimordial: false };
+                var editable = !isSynthetic && isSimulation && pool is { IsPrimordial: false };
                 Add(commands, ManageCommandKind.RenamePool, editable);
-                Add(commands, ManageCommandKind.CreatePool, isSimulation && pool is not null);
+                Add(commands, ManageCommandKind.CreatePool, !isSynthetic && isSimulation && pool is not null);
                 Add(commands, ManageCommandKind.EditPool, editable);
                 break;
             }
             case ManageWorkspaceCategory.Tier:
-                Add(commands, ManageCommandKind.EditTier, isSimulation);
+                Add(commands, ManageCommandKind.EditTier, !isSynthetic && isSimulation);
                 break;
             case ManageWorkspaceCategory.Disk:
             {

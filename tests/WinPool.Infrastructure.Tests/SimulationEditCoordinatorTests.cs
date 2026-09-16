@@ -97,6 +97,50 @@ public sealed class SimulationEditCoordinatorTests
     }
 
     [Fact]
+    public async Task SyntheticUnifiedTargetIsRejectedBeforeSimulationEditorOrCommit()
+    {
+        var active = CreateDocument(StorageSystemKind.Simulation);
+        var managedPool = new StoragePoolInfo(
+            "pool:managed", true, "Managed", false, "Healthy", "OK",
+            1_000_000_000, 0, "subsystem:1", ["physical:p1"]);
+        active = active.WithCandidate(active.Snapshot with
+        {
+            PhysicalDisks =
+            [
+                active.Snapshot.PhysicalDisks.Single() with
+                {
+                    PoolStableId = managedPool.StableId,
+                    Usage = "HotSpare"
+                }
+            ],
+            StoragePools = [active.Snapshot.StoragePools.Single(), managedPool]
+        });
+        var syntheticTarget = SyntheticStorageProjection.TierStableId(
+            managedPool.StableId,
+            SyntheticStorageName.HotSpareLayer);
+        var committed = false;
+        var coordinator = new SimulationEditCoordinator(
+            () => active,
+            (_, _) =>
+            {
+                committed = true;
+                return Task.CompletedTask;
+            },
+            new ThrowingSimulationEditor());
+
+        var result = await coordinator.ExecuteAsync(
+            new SimulationEditRequest(
+                SimulationEditKind.Rename,
+                syntheticTarget,
+                Name: "Must not mutate"),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Equal("simulation.target-missing", Assert.Single(result.Messages).Code);
+        Assert.False(committed);
+    }
+
+    [Fact]
     public async Task PrimordialUiAliasResolvesToStablePoolAndBindsMemberDisk()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);

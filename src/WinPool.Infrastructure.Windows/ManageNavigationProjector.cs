@@ -53,12 +53,16 @@ public sealed class ManageNavigationProjector
         switch (origin.Role)
         {
             case ManageObjectRole.StoragePool:
+            case ManageObjectRole.SyntheticStoragePool:
             case ManageObjectRole.NetworkGroup:
             case ManageObjectRole.OtherGroup:
                 return origin;
             case ManageObjectRole.StorageTier:
                 return Target(snapshot, systemId,
                     snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.PoolStableId);
+            case ManageObjectRole.SyntheticStorageTier:
+                return Target(snapshot, systemId,
+                    snapshot.FindSyntheticStorageObject(key)?.ParentStableId);
             case ManageObjectRole.DirectDiskGroup:
                 return Target(snapshot, systemId, DirectGroupPoolStableId(snapshot, key));
             case ManageObjectRole.PhysicalDisk:
@@ -94,7 +98,14 @@ public sealed class ManageNavigationProjector
                     snapshot,
                     systemId,
                     ManageSelectionRules.ResolvePartition(snapshot, key, origin.Role));
-                return backing is null ? null : RelatedPool(snapshot, systemId, backing);
+                if (backing is not null)
+                {
+                    return RelatedPool(snapshot, systemId, backing);
+                }
+                return Target(snapshot, systemId, snapshot.GetSyntheticStorageObjects()
+                    .FirstOrDefault(item => item.Kind == SyntheticStorageObjectKind.Pool
+                        && item.MemberStableIds.Contains(key, StringComparer.OrdinalIgnoreCase))
+                    ?.StableId);
             }
             default:
                 return null;
@@ -110,14 +121,23 @@ public sealed class ManageNavigationProjector
         switch (origin.Role)
         {
             case ManageObjectRole.StorageTier:
+            case ManageObjectRole.SyntheticStorageTier:
             case ManageObjectRole.DirectDiskGroup:
                 return origin;
             case ManageObjectRole.StoragePool:
                 return Target(snapshot, systemId,
-                    snapshot.StorageTiers.FirstOrDefault(x => x.PoolStableId == key)?.StableId);
+                    snapshot.StorageTiers.FirstOrDefault(x => x.PoolStableId == key)?.StableId
+                    ?? snapshot.GetSyntheticStorageObjects()
+                        .FirstOrDefault(item => item.Kind == SyntheticStorageObjectKind.Tier
+                            && string.Equals(item.ParentStableId, key, StringComparison.OrdinalIgnoreCase))
+                        ?.StableId);
             case ManageObjectRole.PhysicalDisk:
                 return Target(snapshot, systemId,
-                    snapshot.StorageTiers.FirstOrDefault(
+                    snapshot.GetSyntheticStorageObjects()
+                        .FirstOrDefault(item => item.Kind == SyntheticStorageObjectKind.Tier
+                            && item.MemberStableIds.Contains(key, StringComparer.OrdinalIgnoreCase))
+                        ?.StableId
+                    ?? snapshot.StorageTiers.FirstOrDefault(
                         x => x.MemberPhysicalDiskIds.Contains(key, StringComparer.OrdinalIgnoreCase))?.StableId);
             case ManageObjectRole.VirtualDisk:
                 return Target(snapshot, systemId,
@@ -155,6 +175,9 @@ public sealed class ManageNavigationProjector
             case ManageObjectRole.StorageTier:
                 return Target(snapshot, systemId,
                     snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.MemberPhysicalDiskIds.FirstOrDefault());
+            case ManageObjectRole.SyntheticStorageTier:
+            case ManageObjectRole.SyntheticStoragePool:
+                return FirstSyntheticDiskMember(snapshot, systemId, key);
             case ManageObjectRole.DirectDiskGroup:
                 return Target(snapshot, systemId, FirstDirectMember(snapshot, key));
             case ManageObjectRole.StoragePool:
@@ -212,6 +235,19 @@ public sealed class ManageNavigationProjector
                 var disk = RelatedDisk(snapshot, systemId, origin);
                 return disk is null ? null : RelatedPartition(snapshot, systemId, disk);
             }
+            case ManageObjectRole.SyntheticStoragePool:
+            case ManageObjectRole.SyntheticStorageTier:
+            {
+                var synthetic = snapshot.FindSyntheticStorageObject(key);
+                var directPartition = synthetic?.MemberStableIds.FirstOrDefault(memberId =>
+                    snapshot.ResolvePartitionUnion(memberId) is not null);
+                if (directPartition is not null)
+                {
+                    return Target(snapshot, systemId, directPartition);
+                }
+                var disk = RelatedDisk(snapshot, systemId, origin);
+                return disk is null ? null : RelatedPartition(snapshot, systemId, disk);
+            }
             default:
                 return null;
         }
@@ -253,10 +289,14 @@ public sealed class ManageNavigationProjector
         {
             ManageObjectRole.StoragePool =>
                 snapshot.StoragePools.FirstOrDefault(x => x.StableId == key)?.MemberPhysicalDiskIds.FirstOrDefault(),
+            ManageObjectRole.SyntheticStoragePool =>
+                snapshot.FindSyntheticStorageObject(key)?.MemberStableIds.FirstOrDefault(),
             ManageObjectRole.NetworkGroup => snapshot.NetworkDisks.FirstOrDefault()?.StableId,
             ManageObjectRole.OtherGroup => TopologyProjector.GetOtherOsDisks(snapshot).FirstOrDefault()?.StableId,
             ManageObjectRole.StorageTier =>
                 snapshot.StorageTiers.FirstOrDefault(x => x.StableId == key)?.PoolStableId,
+            ManageObjectRole.SyntheticStorageTier =>
+                snapshot.FindSyntheticStorageObject(key)?.ParentStableId,
             ManageObjectRole.DirectDiskGroup =>
                 DirectGroupPoolStableId(snapshot, key),
             ManageObjectRole.VirtualDisk =>
@@ -318,6 +358,31 @@ public sealed class ManageNavigationProjector
         return snapshot.DirectPoolMembers(poolStableId).FirstOrDefault()?.StableId;
     }
 
+    private static ManageObjectTarget? FirstSyntheticDiskMember(
+        StorageSnapshot snapshot,
+        SystemId systemId,
+        string syntheticStableId)
+    {
+        var synthetic = snapshot.FindSyntheticStorageObject(syntheticStableId);
+        if (synthetic is null)
+        {
+            return null;
+        }
+
+        foreach (var memberId in synthetic.MemberStableIds)
+        {
+            var target = Target(snapshot, systemId, memberId);
+            if (target?.Role is ManageObjectRole.PhysicalDisk
+                or ManageObjectRole.VirtualDisk
+                or ManageObjectRole.NetworkDisk
+                or ManageObjectRole.OsDisk)
+            {
+                return target;
+            }
+        }
+        return null;
+    }
+
     private static ManageObjectTarget? Target(
         StorageSnapshot snapshot,
         SystemId systemId,
@@ -326,6 +391,22 @@ public sealed class ManageNavigationProjector
         if (string.IsNullOrWhiteSpace(providerKey))
         {
             return null;
+        }
+
+        if (snapshot.FindSyntheticStorageObject(providerKey) is { } synthetic)
+        {
+            return new ManageObjectTarget(
+                new StorageObjectId(systemId, StorageObjectKind.LogicalGroup, synthetic.StableId),
+                synthetic.Kind == SyntheticStorageObjectKind.Pool
+                    ? ManageObjectRole.SyntheticStoragePool
+                    : ManageObjectRole.SyntheticStorageTier);
+        }
+
+        if (snapshot.ResolvePartitionUnion(providerKey) is { } union)
+        {
+            return new ManageObjectTarget(
+                new StorageObjectId(systemId, StorageObjectKind.Partition, union.Id),
+                ManageObjectRole.Partition);
         }
 
         (StorageObjectKind Kind, ManageObjectRole Role)? identity =

@@ -982,11 +982,12 @@ public sealed record StructureProblem(
         var members = snapshot.PhysicalDisks
             .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
             .ToList();
-        // The tier card mirrors every spec the property panel saves: the
-        // resiliency / stripe spec, and the tier's CAPACITY reservation
-        // (an unset capacity means "member capacity"). Saved edits are
-        // therefore visible on the left after each save.
-        var tierCapacity = tier.Size > 0 ? tier.Size : members.Sum(item => item.Size);
+        // Only a new draft may use its planned member capacity before a
+        // capacity is explicitly saved. Existing source-backed tiers retain
+        // their own Size: unavailable remains blank and zero stays zero.
+        var tierCapacityText = IsDraftPool(pool.StableId) && tier.Size <= 0
+            ? TopologyProjector.FormatBytes(members.Sum(item => item.Size))
+            : TopologyProjector.TierCapacityText(snapshot, tier);
         var spec = tier.Interleave is { } interleave and > 0
             ? $"{tier.ResiliencySettingName} {interleave / 1024}K"
             : tier.ResiliencySettingName;
@@ -1000,7 +1001,7 @@ public sealed record StructureProblem(
             TopologyProjector.JoinSummary(
                 spec,
                 $"{members.Count} physical disks",
-                TopologyProjector.FormatBytes(tierCapacity)),
+                tierCapacityText),
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in members)
         {
@@ -1035,8 +1036,7 @@ public sealed record StructureProblem(
                 StorageUnitKind.DirectDiskGroup,
                 snapshot.DirectGroupName(pool.StableId)),
             TopologyProjector.JoinSummary(
-                $"{directMembers.Count} physical disks",
-                TopologyProjector.FormatBytes(directMembers.Sum(item => item.Size))),
+                $"{directMembers.Count} physical disks"),
             childrenLayout: TopologyChildrenLayout.Flow);
         foreach (var member in directMembers)
         {
@@ -1086,8 +1086,7 @@ public sealed record StructureProblem(
                     false,
                     pool.StableId),
                 TopologyProjector.JoinSummary(
-                    $"{layerMembers.Count} physical disks",
-                    TopologyProjector.FormatBytes(layerMembers.Sum(item => item.Size))),
+                    $"{layerMembers.Count} physical disks"),
                 childrenLayout: TopologyChildrenLayout.Flow);
             foreach (var member in layerMembers)
             {
@@ -1334,9 +1333,8 @@ public sealed record StructureProblem(
     }
 
     /// <summary>
-    /// A tier whose capacity was never set (Size <= 0) means "the member
-    /// capacity": its recommended maximum. Normalizes the working copy so the
-    /// form shows and edits a real number instead of a bare zero.
+    /// Draft-only planning fills a newly created tier's capacity from its
+    /// members. Existing source-backed tiers never inherit a member sum.
     /// </summary>
     public static StorageSnapshot NormalizeTierCapacities(StorageSnapshot snapshot)
     {
@@ -1345,7 +1343,9 @@ public sealed record StructureProblem(
         var tiers = snapshot.StorageTiers
             .Select(tier =>
             {
-                if (tier.Size > 0 || tier.MemberPhysicalDiskIds.Count == 0)
+                if (tier.Size > 0
+                    || tier.MemberPhysicalDiskIds.Count == 0
+                    || !IsDraftPool(tier.PoolStableId))
                 {
                     return tier;
                 }

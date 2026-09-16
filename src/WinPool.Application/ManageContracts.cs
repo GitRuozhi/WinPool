@@ -19,7 +19,9 @@ public enum ManageObjectRole
     NetworkGroup,
     OtherGroup,
     DirectDiskGroup,
-    VirtualDiskGroup
+    VirtualDiskGroup,
+    SyntheticStoragePool,
+    SyntheticStorageTier
 }
 
 public enum ManageTopologyLayout
@@ -73,7 +75,8 @@ public sealed record ManageTopologyNodeView(
     bool ShowsEditStatus = false,
     bool HasStoredData = false,
     bool CannotLeave = false,
-    bool AdaptiveHeaderEnabled = false);
+    bool AdaptiveHeaderEnabled = false,
+    SyntheticStorageName? SyntheticName = null);
 
 public sealed record ManageSystemProjection(
     SystemId SystemId,
@@ -268,9 +271,9 @@ public static class ManageSelectionRules
         {
             ManageObjectRole.System or ManageObjectRole.StorageSubsystem =>
                 ManageWorkspaceCategory.System,
-            ManageObjectRole.StoragePool or ManageObjectRole.NetworkGroup
+            ManageObjectRole.StoragePool or ManageObjectRole.SyntheticStoragePool or ManageObjectRole.NetworkGroup
                 or ManageObjectRole.OtherGroup => ManageWorkspaceCategory.Pool,
-            ManageObjectRole.StorageTier or ManageObjectRole.DirectDiskGroup =>
+            ManageObjectRole.StorageTier or ManageObjectRole.SyntheticStorageTier or ManageObjectRole.DirectDiskGroup =>
                 ManageWorkspaceCategory.Tier,
             ManageObjectRole.PhysicalDisk or ManageObjectRole.VirtualDisk
                 or ManageObjectRole.OsDisk or ManageObjectRole.VirtualDiskGroup =>

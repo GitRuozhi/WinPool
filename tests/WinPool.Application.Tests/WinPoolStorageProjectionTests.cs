@@ -178,4 +178,54 @@ public sealed class WinPoolStorageProjectionTests
         Assert.Equal(snapshot.PhysicalDisks.Select(x => x.DeviceId), result.PhysicalDisks.Select(x => x.DeviceId));
         Assert.Equal(snapshot.Computer.LastBootTime, result.Computer.LastBootTime);
     }
+
+    [Fact]
+    public void SyntheticObjectsAreDerivedFreshAndNeverAmendSourceFacts()
+    {
+        var snapshot = SimulationLayouts.SpareAndRetired();
+        var facts = WinPoolSimulationFacts.Create(snapshot, SystemId.New());
+        var before = WinPoolFactsCodec.Encode(facts);
+        var projected = WinPoolStorageProjection.Project(facts);
+        var initial = projected.GetSyntheticStorageObjects();
+
+        Assert.Contains(initial, item => item.Name == SyntheticStorageName.HotSpareLayer);
+        Assert.Contains(initial, item => item.Name == SyntheticStorageName.RetiredLayer);
+        Assert.All(initial, item => Assert.False(item.HasOriginalSource));
+        Assert.DoesNotContain(new WinPoolSystem(facts).Objects,
+            item => item.Id.StartsWith("synthetic:", StringComparison.OrdinalIgnoreCase));
+
+        var changedUsage = projected with
+        {
+            PhysicalDisks = projected.PhysicalDisks.Select(disk => disk with
+            {
+                Usage = disk.IsHotSpare || disk.IsRetired
+                    ? PhysicalDiskUsage.AutoSelect
+                    : disk.Usage
+            }).ToArray()
+        };
+        var refreshed = changedUsage.GetSyntheticStorageObjects();
+        Assert.DoesNotContain(refreshed, item => item.Name == SyntheticStorageName.HotSpareLayer);
+        Assert.DoesNotContain(refreshed, item => item.Name == SyntheticStorageName.RetiredLayer);
+        Assert.Contains(refreshed, item => item.Name == SyntheticStorageName.UnallocatedLayer);
+
+        var removedMember = changedUsage.PhysicalDisks.First(disk => disk.FriendlyName == "Spare-HDD").StableId;
+        var removed = changedUsage with
+        {
+            PhysicalDisks = changedUsage.PhysicalDisks
+                .Where(disk => disk.StableId != removedMember)
+                .ToArray(),
+            StoragePools = changedUsage.StoragePools.Select(pool => pool with
+            {
+                MemberPhysicalDiskIds = pool.MemberPhysicalDiskIds
+                    .Where(id => id != removedMember)
+                    .ToArray()
+            }).ToArray()
+        };
+        Assert.DoesNotContain(
+            removed.GetSyntheticStorageObjects().SelectMany(item => item.MemberStableIds),
+            id => id == removedMember);
+
+        Assert.Equal(before, WinPoolFactsCodec.Encode(facts));
+        Assert.DoesNotContain("synthetic:", before, StringComparison.OrdinalIgnoreCase);
+    }
 }

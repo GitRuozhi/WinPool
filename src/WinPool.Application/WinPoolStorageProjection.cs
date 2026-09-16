@@ -169,12 +169,23 @@ public static class WinPoolStorageProjection
         var snapshot = new StorageSnapshot(StorageSnapshot.CurrentSchemaVersion, facts.InventoryVersion, facts.InventoryCapturedAt, computer,
             Of(FactObjectType.StorageSubsystem).Select(x => Build<StorageSubsystemInfo>(x)).ToArray(), physical, pools, tiers,
             virtualDisks, osDisks, partitions, volumes, network, [], warnings);
+        var unknownTierMembershipDisks = snapshot.StoragePools
+            .Where(pool => !pool.IsPrimordial)
+            .SelectMany(pool => pool.MemberPhysicalDiskIds)
+            .Where(id => objects.TryGetValue(id, out var disk)
+                && sources[disk.SourceRef].Origin != FactOrigin.Simulation
+                && !facts.Relationships.Any(relationship =>
+                    relationship.Kind == "tier-member" && relationship.ToId == id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var rebuilt = StorageRelationshipProjector.Rebuild(snapshot with
         {
             FieldIssues = fieldIssues,
-            UnknownTierMembershipPools = snapshot.StoragePools.Where(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Any(id =>
-                objects.TryGetValue(id, out var disk) && sources[disk.SourceRef].Origin != FactOrigin.Simulation
-                && !facts.Relationships.Any(r => r.Kind == "tier-member" && r.ToId == id)))
+            UnknownTierMembershipPhysicalDiskIds = unknownTierMembershipDisks,
+            UnknownTierMembershipPools = snapshot.StoragePools.Where(pool => !pool.IsPrimordial
+                && pool.MemberPhysicalDiskIds.Any(id => unknownTierMembershipDisks.Contains(
+                    id,
+                    StringComparer.OrdinalIgnoreCase)))
                 .Select(x => x.StableId).ToArray()
         });
         foreach (var partition in rebuilt.Partitions)
@@ -194,7 +205,7 @@ public static class WinPoolStorageProjection
                     && x.FieldName is "FileSystem" or "FileSystemLabel" or "AllocationUnitSize" or "SizeRemaining" or "Path" or "HealthStatus");
             }
         }
-        return rebuilt with
+        var projected = rebuilt with
         {
             PartitionSourceIds = unified.Objects.OfType<WinPoolPartition>().SelectMany(x => x.Sources.Select(source => (source.Id, Union: x.Id)))
                 .ToDictionary(x => x.Id, x => x.Union),
@@ -210,6 +221,7 @@ public static class WinPoolStorageProjection
                         x.Sources.Select(s => s.Id).ToArray());
                 }).ToArray()
         };
+        return projected;
     }
 
     private static PropertyInfo[] Properties<T>() => PropertyCache<T>.Value;

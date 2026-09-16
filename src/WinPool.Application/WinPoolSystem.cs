@@ -50,11 +50,30 @@ public sealed record WinPoolDisplayGroup(string Kind, string? PoolId, ImmutableA
 public sealed class WinPoolSystem
 {
     public const int ProjectionVersion = 2;
+    private readonly Lazy<ImmutableArray<SyntheticStorageObject>> _syntheticStorageObjects;
     public WinPoolObject? Resolve(string sourceId) => Objects.FirstOrDefault(x => x.Id == sourceId || x.Sources.Any(s => s.Id == sourceId));
     public SystemId SystemId { get; }
     public long Revision { get; }
     public ImmutableArray<WinPoolObject> Objects { get; }
-    public ImmutableArray<WinPoolDisplayGroup> DisplayGroups { get; }
+    public ImmutableArray<WinPoolDisplayGroup> DisplayGroups => SyntheticStorageObjects
+        .Where(item => item.Kind == SyntheticStorageObjectKind.Tier
+            && item.Name is SyntheticStorageName.HotSpareLayer or SyntheticStorageName.RetiredLayer)
+        .Select(item => new WinPoolDisplayGroup(
+            item.Name == SyntheticStorageName.HotSpareLayer ? "HotSpare" : "Retired",
+            item.ParentStableId,
+            item.MemberStableIds.ToImmutableArray()))
+        .ToImmutableArray();
+    /// <summary>
+    /// Source-less pool and tier containers owned by the unified projection.
+    /// They are deliberately separate from <see cref="Objects"/>, whose
+    /// entries always retain a real source observation.
+    /// </summary>
+    public ImmutableArray<SyntheticStorageObject> SyntheticStorageObjects => _syntheticStorageObjects.Value;
+    public SyntheticStorageObject? FindSyntheticStorageObject(string? stableId) =>
+        string.IsNullOrWhiteSpace(stableId)
+            ? null
+            : SyntheticStorageObjects.FirstOrDefault(item =>
+                item.StableId.Equals(stableId, StringComparison.OrdinalIgnoreCase));
     public ImmutableArray<WinPoolSource> Sources { get; }
     public ImmutableArray<WinPoolCollectionState> Collections { get; }
     public string ProcessorNames => string.Join("; ", Objects.Where(x => x.ObjectType == FactObjectType.Processor)
@@ -82,6 +101,8 @@ public sealed class WinPoolSystem
     public WinPoolSystem(WinPoolFacts facts)
     {
         facts.Validate();
+        _syntheticStorageObjects = new Lazy<ImmutableArray<SyntheticStorageObject>>(
+            () => WinPoolStorageProjection.Project(facts).GetSyntheticStorageObjects().ToImmutableArray());
         SystemId = facts.SystemId;
         Revision = facts.Revision;
         Sources = facts.Sources;
@@ -137,21 +158,6 @@ public sealed class WinPoolSystem
             });
         }
         Objects = result.ToImmutable();
-        // Only known Usage and known membership can create a group. Missing evidence is not "unallocated".
-        DisplayGroups = facts.Objects.Where(x => x.ObjectType == FactObjectType.PhysicalDisk)
-            .Select(x => (Item: x, Usage: x.Field("Usage"), Pool: facts.Relationships
-                .FirstOrDefault(r => r.ToId == x.Id && r.Kind == "pool-member")?.FromId))
-            .Where(x => x.Usage is { ReadState: FieldReadState.Returned } && x.Pool is not null)
-            .Select(x => (x.Item.Id, x.Pool, Kind: x.Usage!.DisplayValue() switch
-            {
-                "HotSpare" or "3" => "HotSpare",
-                "Retired" or "4" => "Retired",
-                _ => string.Empty
-            }))
-            .Where(x => x.Kind.Length > 0)
-            .GroupBy(x => (x.Kind, x.Pool))
-            .Select(x => new WinPoolDisplayGroup(x.Key.Kind, x.Key.Pool, x.Select(y => y.Id).ToImmutableArray()))
-            .ToImmutableArray();
     }
 }
 

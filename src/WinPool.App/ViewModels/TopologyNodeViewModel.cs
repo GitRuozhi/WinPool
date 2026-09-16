@@ -393,8 +393,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public string TypeGlyph => Unit.Kind switch
     {
         StorageUnitKind.System => "\uE7F8",
-        StorageUnitKind.StoragePool => "\uE8F1",
-        StorageUnitKind.StorageTier or StorageUnitKind.DirectDiskGroup => "\uE8FD",
+        StorageUnitKind.StoragePool or StorageUnitKind.SyntheticStoragePool => "\uE8F1",
+        StorageUnitKind.StorageTier or StorageUnitKind.SyntheticStorageTier or StorageUnitKind.DirectDiskGroup => "\uE8FD",
         StorageUnitKind.NetworkDisk or StorageUnitKind.NetworkDiskGroup => "\uE774",
         StorageUnitKind.OtherDiskGroup => "\uE8B7",
         StorageUnitKind.Partition => "\uE7C3",
@@ -416,8 +416,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public double PreferredWidth => Unit.Kind switch
     {
         StorageUnitKind.System => double.NaN,
-        StorageUnitKind.StoragePool => double.NaN,
-        StorageUnitKind.StorageTier => double.NaN,
+        StorageUnitKind.StoragePool or StorageUnitKind.SyntheticStoragePool => double.NaN,
+        StorageUnitKind.StorageTier or StorageUnitKind.SyntheticStorageTier => double.NaN,
         StorageUnitKind.VirtualDisk => double.NaN,
         StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup
             or StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup => double.NaN,
@@ -530,6 +530,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private static string LocalizeName(StorageUnitRef unit, WorkspaceViewModel owner) =>
         unit.StableId switch
         {
+            _ when unit.SyntheticName is { } syntheticName => LocalizeSyntheticName(syntheticName, owner),
             _ when EditWorkspace.IsPlus(unit.StableId) => "+",
             _ when EditWorkspace.IsPoolRow(unit.StableId) => string.Empty,
             _ when EditWorkspace.IsUnallocated(unit.StableId) => owner.Localization["Unallocated"],
@@ -578,6 +579,23 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 TopologyProjector.FormatBytes(unallocatedSize));
         }
 
+        if (unit.Kind == StorageUnitKind.SyntheticStoragePool
+            && snapshot.FindSyntheticStorageObject(unit.StableId) is { } syntheticPool)
+        {
+            return TopologyProjector.JoinSummary(
+                $"{syntheticPool.MemberStableIds.Count} {owner.Localization["Members"]}");
+        }
+
+        if (unit.Kind == StorageUnitKind.SyntheticStorageTier
+            && snapshot.FindSyntheticStorageObject(unit.StableId) is { } syntheticTier)
+        {
+            return TopologyProjector.JoinSummary(
+                $"{node.Children.Count} {owner.Localization["PhysicalDisk"]}",
+                syntheticTier.UnknownMemberStableIds.Count > 0
+                    ? owner.Localization["MembershipUnknown"]
+                    : null);
+        }
+
         if (unit.Kind == StorageUnitKind.StoragePool)
         {
             var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == unit.StableId);
@@ -606,22 +624,17 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 return node.Summary;
             }
 
-            var members = snapshot.PhysicalDisks
-                .Where(x => tier.MemberPhysicalDiskIds.Contains(x.StableId, StringComparer.OrdinalIgnoreCase))
-                .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            // The tier card mirrors every spec the property panel saves:
-            // resiliency / stripe and the tier's capacity reservation (an
-            // unset capacity means "member capacity"). Saved edits are
-            // therefore visible on the left after each save.
-            var capacity = tier.Size > 0 ? tier.Size : members.Sum(x => x.Size);
+            // Children are already filtered by the unified topology when a
+            // hot-spare or retired usage takes visual precedence over a real
+            // tier-member relationship. Keep this card's count in sync.
+            var visibleMemberCount = node.Children.Count;
             var spec = tier.Interleave is { } interleave and > 0
                 ? $"{tier.ResiliencySettingName} {interleave / 1024}K"
                 : tier.ResiliencySettingName;
             return TopologyProjector.JoinSummary(
                 spec,
-                $"{members.Count} {owner.Localization["PhysicalDisk"]}",
-                TopologyProjector.FormatBytes(capacity));
+                $"{visibleMemberCount} {owner.Localization["PhysicalDisk"]}",
+                TopologyProjector.TierCapacityText(snapshot, tier));
         }
 
         if (unit.Kind == StorageUnitKind.PhysicalDisk)
@@ -653,8 +666,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         if (unit.Kind == StorageUnitKind.NetworkDiskGroup)
         {
             return TopologyProjector.JoinSummary(
-                $"{snapshot.NetworkDisks.Count} {owner.Localization["NetworkDisk"]}",
-                TopologyProjector.FormatBytes(snapshot.NetworkDisks.Sum(x => x.Size)));
+                $"{snapshot.NetworkDisks.Count} {owner.Localization["NetworkDisk"]}");
         }
 
         if (unit.Kind == StorageUnitKind.OtherDiskGroup)
@@ -663,8 +675,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             var otherIds = otherDisks.Select(x => x.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             return TopologyProjector.JoinSummary(
                 $"{otherDisks.Count} {owner.Localization["OtherDisk"]}",
-                $"{snapshot.Partitions.Count(x => x.OsDiskStableId is not null && otherIds.Contains(x.OsDiskStableId))} {owner.Localization["Partition"]}",
-                TopologyProjector.FormatBytes(otherDisks.Sum(x => x.Size)));
+                $"{snapshot.Partitions.Count(x => x.OsDiskStableId is not null && otherIds.Contains(x.OsDiskStableId))} {owner.Localization["Partition"]}");
         }
 
         if (unit.Kind == StorageUnitKind.DirectDiskGroup)
@@ -684,8 +695,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                     && !tierMemberIds.Contains(x.StableId))
                 .ToList();
             return TopologyProjector.JoinSummary(
-                $"{direct.Count} {owner.Localization["PhysicalDisk"]}",
-                TopologyProjector.FormatBytes(direct.Sum(x => x.Size)));
+                $"{direct.Count} {owner.Localization["PhysicalDisk"]}");
         }
 
         if (unit.Kind == StorageUnitKind.VirtualDiskGroup)
@@ -726,6 +736,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             ManageObjectRole.StorageSubsystem => StorageUnitKind.StorageSubsystem,
             ManageObjectRole.StoragePool => StorageUnitKind.StoragePool,
             ManageObjectRole.StorageTier => StorageUnitKind.StorageTier,
+            ManageObjectRole.SyntheticStoragePool => StorageUnitKind.SyntheticStoragePool,
+            ManageObjectRole.SyntheticStorageTier => StorageUnitKind.SyntheticStorageTier,
             ManageObjectRole.PhysicalDisk => StorageUnitKind.PhysicalDisk,
             ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
             ManageObjectRole.NetworkDisk => StorageUnitKind.NetworkDisk,
@@ -742,6 +754,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         {
             StorageUnitKind.StorageTier =>
                 snapshot.StorageTiers.FirstOrDefault(item => item.StableId == key)?.PoolStableId,
+            StorageUnitKind.SyntheticStorageTier =>
+                snapshot.FindSyntheticStorageObject(key)?.ParentStableId,
             StorageUnitKind.PhysicalDisk =>
                 snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == key)?.PoolStableId,
             StorageUnitKind.VirtualDisk =>
@@ -754,7 +768,13 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 ?? snapshot.OsDisks.FirstOrDefault(item => item.StableId == key)?.VirtualDiskStableId,
             _ => null
         };
-        return new StorageUnitRef(key, kind, node.DisplayName, node.IsStableIdentity, parent);
+        return new StorageUnitRef(
+            key,
+            kind,
+            node.DisplayName,
+            node.IsStableIdentity,
+            parent,
+            node.SyntheticName ?? snapshot.FindSyntheticStorageObject(key)?.Name);
     }
 
     private static string LocalizeType(StorageUnitRef unit, WorkspaceViewModel owner, StorageSnapshot snapshot) =>
@@ -763,8 +783,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
             StorageUnitKind.System => owner.Localization["System"],
             StorageUnitKind.StoragePool =>
                 SnapshotPoolType(unit, owner, snapshot),
+            StorageUnitKind.StorageTier when EditWorkspace.IsSimulatedLayer(unit.StableId) =>
+                owner.Localization["SyntheticStorageTier"],
             StorageUnitKind.StorageTier =>
                 SnapshotTierType(unit, owner, snapshot),
+            StorageUnitKind.SyntheticStoragePool => owner.Localization["SyntheticStoragePool"],
+            StorageUnitKind.SyntheticStorageTier => owner.Localization["SyntheticStorageTier"],
             StorageUnitKind.PhysicalDisk => owner.Localization["PhysicalDisk"],
             StorageUnitKind.VirtualDisk => owner.Localization["VirtualDisk"],
             StorageUnitKind.NetworkDisk => owner.Localization["NetworkDisk"],
@@ -780,7 +804,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 : owner.Localization["OtherDisk"],
             StorageUnitKind.NetworkDiskGroup => owner.Localization["NetworkStorageGroup"],
             StorageUnitKind.OtherDiskGroup => owner.Localization["OtherStorageGroup"],
-            StorageUnitKind.DirectDiskGroup => owner.Localization["UnallocatedLayer"],
+            StorageUnitKind.DirectDiskGroup => owner.Localization["SyntheticStorageTier"],
             StorageUnitKind.VirtualDiskGroup => owner.Localization["VirtualDisks"],
             _ => unit.Kind.ToString()
         };
@@ -808,4 +832,16 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                     ? owner.Localization["DedicatedTier"]
                     : owner.Localization["StorageTier"];
     }
+
+    private static string LocalizeSyntheticName(
+        SyntheticStorageName name,
+        WorkspaceViewModel owner) => name switch
+    {
+        SyntheticStorageName.HotSpareLayer => owner.Localization["HotSpareLayer"],
+        SyntheticStorageName.RetiredLayer => owner.Localization["RetiredLayer"],
+        SyntheticStorageName.UnallocatedLayer => owner.Localization["UnallocatedLayer"],
+        SyntheticStorageName.OtherDiskPool => owner.Localization["OtherDiskPool"],
+        SyntheticStorageName.NetworkDiskPool => owner.Localization["NetworkDiskPool"],
+        _ => name.ToString()
+    };
 }

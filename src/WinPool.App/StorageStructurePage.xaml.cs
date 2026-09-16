@@ -1355,8 +1355,21 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         SetResiliency(group.ResiliencyBox, tier.ResiliencySettingName);
         SetInterleave(group.InterleaveBox, tier.Interleave ?? 65536);
-        var tierBytes = tier.Size > 0 ? tier.Size : TierCapacityMaxBytes(group.Media);
-        SetNum(group.SizeBox, tierBytes > 0 ? Math.Round(tierBytes / 1024d / 1024d / 1024d, 2) : null);
+        var isDraft = EditWorkspace.IsDraftPool(tier.PoolStableId);
+        var capacityUnavailable = _working.FieldIssues.Any(issue =>
+            issue.ObjectId.Equals(tier.StableId, StringComparison.OrdinalIgnoreCase)
+            && issue.FieldName.Equals(nameof(StorageTierInfo.Size), StringComparison.OrdinalIgnoreCase)
+            && issue.State != FieldReadState.Returned);
+        var tierBytes = tier.Size > 0
+            ? tier.Size
+            : isDraft ? TierCapacityMaxBytes(group.Media) : 0;
+        // Only a new draft has a planner default. A real tier with a missing
+        // source Size stays blank; a returned zero is intentionally shown.
+        SetNum(
+            group.SizeBox,
+            isDraft || !capacityUnavailable
+                ? Math.Round(tierBytes / 1024d / 1024d / 1024d, 2)
+                : null);
         SetNum(group.ColumnsBox, tier.NumberOfColumns);
         SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? 1);
         SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? 1);

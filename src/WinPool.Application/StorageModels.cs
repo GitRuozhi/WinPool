@@ -29,7 +29,9 @@ public enum StorageUnitKind
     NetworkDiskGroup,
     OtherDiskGroup,
     DirectDiskGroup,
-    VirtualDiskGroup
+    VirtualDiskGroup,
+    SyntheticStoragePool,
+    SyntheticStorageTier
 }
 
 public sealed record StorageUnitRef(
@@ -37,7 +39,38 @@ public sealed record StorageUnitRef(
     StorageUnitKind Kind,
     string DisplayName,
     bool IsStable = true,
-    string? ParentStableId = null);
+    string? ParentStableId = null,
+    SyntheticStorageName? SyntheticName = null);
+
+/// <summary>
+/// A source-less object introduced by the unified projection for navigation
+/// and presentation. It is never a Windows/CIM object or an editing target.
+/// </summary>
+public enum SyntheticStorageObjectKind
+{
+    Pool,
+    Tier
+}
+
+public enum SyntheticStorageName
+{
+    HotSpareLayer,
+    RetiredLayer,
+    UnallocatedLayer,
+    OtherDiskPool,
+    NetworkDiskPool
+}
+
+public sealed record SyntheticStorageObject(
+    string StableId,
+    SyntheticStorageObjectKind Kind,
+    SyntheticStorageName Name,
+    string? ParentStableId,
+    IReadOnlyList<string> MemberStableIds,
+    IReadOnlyList<string> UnknownMemberStableIds)
+{
+    public bool HasOriginalSource => false;
+}
 
 public sealed record StorageRelationship(
     string FromStableId,
@@ -280,11 +313,22 @@ public sealed record StorageSnapshot(
     public IReadOnlyList<StoragePartitionUnion> PartitionUnions => StoragePartitionUnion.Project(this);
     public IReadOnlyList<StoragePartitionUnion> UnattachedPartitions { get; init; } = [];
     public IReadOnlyDictionary<string, string> PartitionSourceIds { get; init; } = new Dictionary<string, string>();
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string> UnknownTierMembershipPhysicalDiskIds { get; init; } = [];
     public StoragePartitionUnion? ResolvePartitionUnion(string? id) => id is null ? null
         : PartitionUnions.FirstOrDefault(x => x.Id == PartitionSourceIds.GetValueOrDefault(id, id) || x.SourceIds.Contains(id));
+    public IReadOnlyList<SyntheticStorageObject> GetSyntheticStorageObjects() =>
+        SyntheticStorageProjection.Project(this);
+    public SyntheticStorageObject? FindSyntheticStorageObject(string? stableId) =>
+        string.IsNullOrWhiteSpace(stableId)
+            ? null
+            : GetSyntheticStorageObjects().FirstOrDefault(x =>
+                x.StableId.Equals(stableId, StringComparison.OrdinalIgnoreCase));
     public IReadOnlyList<StorageFieldIssue> FieldIssues { get; init; } = [];
     public IReadOnlyList<string> UnknownTierMembershipPools { get; init; } = [];
-    public string DirectGroupName(string poolId) => UnknownTierMembershipPools.Contains(poolId) ? "Membership unknown" : "Unallocated";
+    public string DirectGroupName(string poolId) => UnknownTierMembershipPools.Contains(
+        poolId,
+        StringComparer.OrdinalIgnoreCase) ? "Membership unknown" : "Unallocated";
 
     public IReadOnlyList<PhysicalDiskInfo> DirectPoolMembers(string poolId)
     {
@@ -333,6 +377,19 @@ public sealed record StorageSnapshot(
         if (Computer.StableId == stableId)
         {
             return new StorageUnitRef(stableId, StorageUnitKind.System, Computer.Name);
+        }
+
+        if (FindSyntheticStorageObject(stableId) is { } synthetic)
+        {
+            return new StorageUnitRef(
+                synthetic.StableId,
+                synthetic.Kind == SyntheticStorageObjectKind.Pool
+                    ? StorageUnitKind.SyntheticStoragePool
+                    : StorageUnitKind.SyntheticStorageTier,
+                synthetic.Name.ToString(),
+                true,
+                synthetic.ParentStableId,
+                synthetic.Name);
         }
 
         if (NetworkDisks.Count > 0 && TopologyProjector.NetworkGroupStableId(this) == stableId)

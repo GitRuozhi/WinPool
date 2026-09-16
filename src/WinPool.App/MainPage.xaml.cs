@@ -438,6 +438,10 @@ public sealed partial class MainPage : Page
         var document = workspaceItem.StorageSystemId is null
             ? ViewModel.ActiveDocument
             : ViewModel.SystemCatalog.Find(workspaceItem.StorageSystemId);
+        if (document?.Snapshot.FindSyntheticStorageObject(workspaceItem.Projection.Id.ProviderKey) is not null)
+        {
+            return ViewModel.Localization["NoOriginalSource"];
+        }
         var system = document?.Unified;
         var source = system?.Objects.FirstOrDefault(item =>
             item.Id == workspaceItem.Projection.Id.ProviderKey

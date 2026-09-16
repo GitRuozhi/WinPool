@@ -6,13 +6,19 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class ManageSystemProjectorTests
 {
     [Fact]
-    public void SpecialRoleDisksAreNotDuplicatedInUnallocatedWorkspaceGroup()
+    public void SpecialRoleDisksProjectAsSyntheticLayersNotUnallocated()
     {
         var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:groups",
             StorageSystemKind.Simulation, "Groups", SimulationLayouts.SpareAndRetired(), [], DateTimeOffset.UtcNow);
         var projection = new ManageSystemProjector().Project(document);
         Assert.DoesNotContain(projection.WorkspaceObjects, x => x.Role == ManageObjectRole.DirectDiskGroup);
         Assert.DoesNotContain(Flatten(projection.Root), x => x.Role == ManageObjectRole.DirectDiskGroup);
+        Assert.Contains(projection.WorkspaceObjects, item =>
+            item.Role == ManageObjectRole.SyntheticStorageTier
+            && item.Metadata["syntheticName"] == nameof(SyntheticStorageName.HotSpareLayer));
+        Assert.Contains(projection.WorkspaceObjects, item =>
+            item.Role == ManageObjectRole.SyntheticStorageTier
+            && item.Metadata["syntheticName"] == nameof(SyntheticStorageName.RetiredLayer));
     }
 
     [Fact]
@@ -42,7 +48,7 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
-    public void LogicalGroupsKeepDistinctPresentationRolesWithoutBecomingPools()
+    public void SyntheticPoolsKeepLogicalIdentityWithoutBecomingRealPools()
     {
         var source = Document();
         var otherDisk = new OsDiskInfo(
@@ -61,10 +67,12 @@ public sealed class ManageSystemProjectorTests
             .ToArray();
         var networkGroup = Assert.Single(
             nodes,
-            node => node.Role == ManageObjectRole.NetworkGroup);
+            node => node.Role == ManageObjectRole.SyntheticStoragePool
+                && node.SyntheticName == SyntheticStorageName.NetworkDiskPool);
         var otherGroup = Assert.Single(
             nodes,
-            node => node.Role == ManageObjectRole.OtherGroup);
+            node => node.Role == ManageObjectRole.SyntheticStoragePool
+                && node.SyntheticName == SyntheticStorageName.OtherDiskPool);
 
         Assert.Equal(WinPool.Domain.StorageObjectKind.LogicalGroup, networkGroup.Id.Kind);
         Assert.Equal(WinPool.Domain.StorageObjectKind.LogicalGroup, otherGroup.Id.Kind);
@@ -403,7 +411,7 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
-    public void PoolMemberGroupsKeepNamedLayersInsteadOfHeadlessNodes()
+    public void PoolMemberGroupsProjectAsNamedSyntheticLayers()
     {
         var source = Document();
         var extra = new PhysicalDiskInfo(
@@ -430,12 +438,13 @@ public sealed class ManageSystemProjectorTests
         var nodes = Flatten(new ManageSystemProjector().Project(document).Root).ToArray();
         var directGroup = Assert.Single(
             nodes,
-            node => node.Role == ManageObjectRole.DirectDiskGroup);
+            node => node.Role == ManageObjectRole.SyntheticStorageTier
+                && node.SyntheticName == SyntheticStorageName.UnallocatedLayer);
         var virtualGroup = Assert.Single(
             nodes,
             node => node.Role == ManageObjectRole.VirtualDiskGroup);
 
-        Assert.Equal("Unallocated", directGroup.DisplayName);
+        Assert.Equal(nameof(SyntheticStorageName.UnallocatedLayer), directGroup.DisplayName);
         Assert.True(directGroup.IsSelectable);
         Assert.Contains("physical disks", directGroup.Summary, StringComparison.Ordinal);
         Assert.Equal("Virtual disks", virtualGroup.DisplayName);
@@ -445,9 +454,11 @@ public sealed class ManageSystemProjectorTests
         var projection = new ManageSystemProjector().Project(document);
         var unallocatedItem = Assert.Single(
             projection.WorkspaceObjects,
-            item => item.Role == ManageObjectRole.DirectDiskGroup);
+            item => item.Role == ManageObjectRole.SyntheticStorageTier);
         Assert.Equal(ManageWorkspaceCategory.Tier, unallocatedItem.Category);
-        Assert.Equal("group:direct:pool:1", unallocatedItem.Id.ProviderKey);
+        Assert.Equal(
+            SyntheticStorageProjection.TierStableId("pool:1", SyntheticStorageName.UnallocatedLayer),
+            unallocatedItem.Id.ProviderKey);
     }
 
     [Fact]
@@ -485,7 +496,45 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
-    public void UnallocatedGroupProjectsLikeATierAcrossDetailsAndComparison()
+    public void OtherSyntheticPoolIncludesAnOrphanUnionWithoutAnOsDisk()
+    {
+        var source = Document();
+        var orphan = new VolumeInfo(
+            "volume:orphan",
+            true,
+            null,
+            "NTFS",
+            "Orphan",
+            7_000_000,
+            2_000_000,
+            4096,
+            "Healthy",
+            "OK",
+            ["X:\\"]);
+        var document = source.WithCandidate(source.Snapshot with
+        {
+            Volumes = source.Snapshot.Volumes.Append(orphan).ToArray()
+        });
+        var projection = new ManageSystemProjector().Project(document);
+        var other = Assert.Single(projection.WorkspaceObjects, item =>
+            item.Role == ManageObjectRole.SyntheticStoragePool
+            && item.Metadata["syntheticName"] == nameof(SyntheticStorageName.OtherDiskPool));
+
+        var details = new ManageDetailsProjector().Project(document, other.Id, other.Role, other.DisplayName);
+        Assert.Equal(string.Empty, details.Properties.Single(item => item.PropertyTextKey == "Capacity").RawValue);
+        Assert.Equal(string.Empty, details.Properties.Single(item => item.PropertyTextKey == "Available").RawValue);
+
+        var navigation = new ManageNavigationProjector().Project(document, other.Id, other.Role);
+        Assert.Null(navigation.RelatedSelections[ManageWorkspaceCategory.Disk]);
+        Assert.Equal(
+            orphan.StableId,
+            navigation.RelatedSelections[ManageWorkspaceCategory.Partition]!.Id.ProviderKey);
+        Assert.Equal(ManageObjectRole.Partition, navigation.PrimaryTarget!.Role);
+        Assert.Equal(orphan.StableId, navigation.PrimaryTarget.Id.ProviderKey);
+    }
+
+    [Fact]
+    public void UnallocatedSyntheticLayerHasNoAggregatedCapacityOrSourceFields()
     {
         var source = Document();
         var extra = new PhysicalDiskInfo(
@@ -505,36 +554,51 @@ public sealed class ManageSystemProjectorTests
                 }]
             });
         var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
-        var id = Object(system, WinPool.Domain.StorageObjectKind.LogicalGroup, "group:direct:pool:1");
+        var syntheticId = SyntheticStorageProjection.TierStableId(
+            "pool:1",
+            SyntheticStorageName.UnallocatedLayer);
+        var id = Object(system, WinPool.Domain.StorageObjectKind.LogicalGroup, syntheticId);
 
         var comparison = new ManageComparisonProjector().Project(
-            document, id, ManageObjectRole.DirectDiskGroup);
+            document, id, ManageObjectRole.SyntheticStorageTier);
         Assert.Contains(
             comparison.Properties,
-            property => property.PropertyTextKey == "Type" && property.RawValue == "UnallocatedLayer");
+            property => property.PropertyTextKey == "Type" && property.RawValue == "SyntheticStorageTier");
         Assert.Contains(
             comparison.Properties,
             property => property.PropertyTextKey == "PhysicalDisk" && property.RawValue == "1");
         Assert.Contains(
             comparison.Properties,
             property => property.PropertyTextKey == "Capacity"
-                && property.RawValue == TopologyProjector.FormatBytes(2_000_000));
+                && property.RawValue == string.Empty);
 
         var details = new ManageDetailsProjector().Project(
-            document, id, ManageObjectRole.DirectDiskGroup, "Unallocated");
-        Assert.Equal("Unallocated", details.DisplayName);
+            document, id, ManageObjectRole.SyntheticStorageTier, "Unallocated layer");
+        Assert.Equal("Unallocated layer", details.DisplayName);
         Assert.Contains(
             details.Properties,
             property => property.PropertyTextKey == "Members" && property.RawValue == "1");
+        Assert.All(
+            details.Properties.Where(property => property.PropertyTextKey is "Capacity" or "Resiliency" or "Columns" or "Interleave"),
+            property => Assert.Equal(string.Empty, property.RawValue));
 
         var navigation = new ManageNavigationProjector().Project(
-            document, id, ManageObjectRole.DirectDiskGroup);
+            document, id, ManageObjectRole.SyntheticStorageTier);
         Assert.Equal(
             "pool:1",
             navigation.RelatedSelections[ManageWorkspaceCategory.Pool]!.Id.ProviderKey);
         Assert.Equal(
-            "group:direct:pool:1",
+            syntheticId,
             navigation.RelatedSelections[ManageWorkspaceCategory.Tier]!.Id.ProviderKey);
+
+        var commands = new ManageCommandProjector().Project(
+            document,
+            document with { Id = "local:synthetic-test", Kind = StorageSystemKind.Local },
+            id,
+            ManageObjectRole.SyntheticStorageTier,
+            ManageWorkspaceCategory.Tier);
+        Assert.False(commands.Commands.Single(command =>
+            command.Kind == ManageCommandKind.EditTier).IsEnabled);
     }
 
     private static WinPool.Domain.StorageObjectId Object(

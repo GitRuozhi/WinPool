@@ -1187,6 +1187,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             StorageUnitKind.StorageSubsystem => WinPool.Application.ManageObjectRole.StorageSubsystem,
             StorageUnitKind.StoragePool => WinPool.Application.ManageObjectRole.StoragePool,
             StorageUnitKind.StorageTier => WinPool.Application.ManageObjectRole.StorageTier,
+            StorageUnitKind.SyntheticStoragePool => WinPool.Application.ManageObjectRole.SyntheticStoragePool,
+            StorageUnitKind.SyntheticStorageTier => WinPool.Application.ManageObjectRole.SyntheticStorageTier,
             StorageUnitKind.PhysicalDisk => WinPool.Application.ManageObjectRole.PhysicalDisk,
             StorageUnitKind.VirtualDisk => WinPool.Application.ManageObjectRole.VirtualDisk,
             StorageUnitKind.NetworkDisk => WinPool.Application.ManageObjectRole.NetworkDisk,
@@ -1206,6 +1208,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     or WinPool.Application.ManageObjectRole.OtherGroup
                     or WinPool.Application.ManageObjectRole.DirectDiskGroup
                     or WinPool.Application.ManageObjectRole.VirtualDiskGroup
+                    or WinPool.Application.ManageObjectRole.SyntheticStoragePool
+                    or WinPool.Application.ManageObjectRole.SyntheticStorageTier
                     ? WinPool.Domain.StorageObjectKind.LogicalGroup
                     : MapDomainKind(role),
                 unit.StableId),
@@ -1265,6 +1269,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole.StorageSubsystem => WinPool.Domain.StorageObjectKind.StorageSubsystem,
         WinPool.Application.ManageObjectRole.StoragePool => WinPool.Domain.StorageObjectKind.StoragePool,
         WinPool.Application.ManageObjectRole.StorageTier => WinPool.Domain.StorageObjectKind.StorageTier,
+        WinPool.Application.ManageObjectRole.SyntheticStoragePool
+            or WinPool.Application.ManageObjectRole.SyntheticStorageTier => WinPool.Domain.StorageObjectKind.LogicalGroup,
         WinPool.Application.ManageObjectRole.PhysicalDisk => WinPool.Domain.StorageObjectKind.PhysicalDisk,
         WinPool.Application.ManageObjectRole.VirtualDisk => WinPool.Domain.StorageObjectKind.VirtualDisk,
         WinPool.Application.ManageObjectRole.OsDisk => WinPool.Domain.StorageObjectKind.OsDisk,
@@ -1613,6 +1619,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WinPool.Application.ManageObjectRole.System => StorageUnitKind.System,
             WinPool.Application.ManageObjectRole.StoragePool => StorageUnitKind.StoragePool,
             WinPool.Application.ManageObjectRole.StorageTier => StorageUnitKind.StorageTier,
+            WinPool.Application.ManageObjectRole.SyntheticStoragePool => StorageUnitKind.SyntheticStoragePool,
+            WinPool.Application.ManageObjectRole.SyntheticStorageTier => StorageUnitKind.SyntheticStorageTier,
             WinPool.Application.ManageObjectRole.PhysicalDisk => StorageUnitKind.PhysicalDisk,
             WinPool.Application.ManageObjectRole.VirtualDisk => StorageUnitKind.VirtualDisk,
             WinPool.Application.ManageObjectRole.OsDisk => StorageUnitKind.OsDisk,
@@ -1634,6 +1642,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WinPool.Application.ManageObjectRole.NetworkGroup => Localization["Network"],
             WinPool.Application.ManageObjectRole.OtherGroup => Localization["Other"],
             WinPool.Application.ManageObjectRole.DirectDiskGroup => Localization["UnallocatedLayer"],
+            WinPool.Application.ManageObjectRole.SyntheticStoragePool
+                or WinPool.Application.ManageObjectRole.SyntheticStorageTier =>
+                LocalizeSyntheticName(item.Metadata.GetValueOrDefault("syntheticName")),
             WinPool.Application.ManageObjectRole.Partition when string.IsNullOrWhiteSpace(item.DisplayName) =>
                 PartitionTypeName(item.Metadata.GetValueOrDefault("partitionType") ?? "Unknown"),
             _ => item.DisplayName
@@ -1646,7 +1657,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 kind,
                 title,
                 item.IsStableIdentity,
-                item.ParentProviderKey),
+                item.ParentProviderKey,
+                SyntheticNameFor(item)),
             false,
             storageSystemId,
             item);
@@ -1780,6 +1792,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole.System => Localization["System"],
         WinPool.Application.ManageObjectRole.StoragePool => Localization["StoragePool"],
         WinPool.Application.ManageObjectRole.StorageTier => Localization["StorageTier"],
+        WinPool.Application.ManageObjectRole.SyntheticStoragePool => Localization["SyntheticStoragePool"],
+        WinPool.Application.ManageObjectRole.SyntheticStorageTier => Localization["SyntheticStorageTier"],
         WinPool.Application.ManageObjectRole.PhysicalDisk => Localization["PhysicalDisk"],
         WinPool.Application.ManageObjectRole.VirtualDisk => Localization["VirtualDisk"],
         WinPool.Application.ManageObjectRole.NetworkDisk => Localization["NetworkDisk"],
@@ -1791,6 +1805,28 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.ManageObjectRole.Volume => Localization["Volume"],
         _ => role.ToString()
     };
+
+    private SyntheticStorageName? SyntheticNameFor(
+        WinPool.Application.ManageObjectListItemView item) =>
+        Enum.TryParse<SyntheticStorageName>(
+            item.Metadata.GetValueOrDefault("syntheticName"),
+            ignoreCase: false,
+            out var name)
+            ? name
+            : null;
+
+    private string LocalizeSyntheticName(string? rawName) =>
+        Enum.TryParse<SyntheticStorageName>(rawName, ignoreCase: false, out var name)
+            ? name switch
+            {
+                SyntheticStorageName.HotSpareLayer => Localization["HotSpareLayer"],
+                SyntheticStorageName.RetiredLayer => Localization["RetiredLayer"],
+                SyntheticStorageName.UnallocatedLayer => Localization["UnallocatedLayer"],
+                SyntheticStorageName.OtherDiskPool => Localization["OtherDiskPool"],
+                SyntheticStorageName.NetworkDiskPool => Localization["NetworkDiskPool"],
+                _ => rawName ?? string.Empty
+            }
+            : rawName ?? string.Empty;
 
     private bool SwitchSystem(string? systemId, ManageSelectionKey? preferredSelection = null)
     {

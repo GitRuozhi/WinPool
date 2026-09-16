@@ -68,7 +68,7 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
-    public void DirectDiskGroupCanBeResolvedForSelectionRestore()
+    public void SyntheticUnallocatedLayerCanBeResolvedForSelectionRestore()
     {
         var source = TestSnapshotFactory.Create();
         var direct = source.PhysicalDisks[0] with
@@ -88,11 +88,80 @@ public sealed class ApplicationBehaviorTests
             ]
         };
 
-        var group = snapshot.FindUnit("group:direct:pool:1");
+        var group = snapshot.FindUnit(
+            WinPool.Application.SyntheticStorageProjection.TierStableId(
+                "pool:1",
+                WinPool.Application.SyntheticStorageName.UnallocatedLayer));
 
         Assert.NotNull(group);
-        Assert.Equal(WinPool.Application.StorageUnitKind.DirectDiskGroup, group.Kind);
+        Assert.Equal(WinPool.Application.StorageUnitKind.SyntheticStorageTier, group.Kind);
         Assert.Equal("pool:1", group.ParentStableId);
+        Assert.Equal(WinPool.Application.SyntheticStorageName.UnallocatedLayer, group.SyntheticName);
+    }
+
+    [Theory]
+    [InlineData("HotSpare", WinPool.Application.SyntheticStorageName.HotSpareLayer)]
+    [InlineData("Retired", WinPool.Application.SyntheticStorageName.RetiredLayer)]
+    public void SpecialUsageWinsTopologyPlacementOverAnExistingRealTierMembership(
+        string usage,
+        WinPool.Application.SyntheticStorageName expectedLayer)
+    {
+        var source = TestSnapshotFactory.Create();
+        var snapshot = source with
+        {
+            PhysicalDisks =
+            [
+                source.PhysicalDisks[0] with { Usage = usage }
+            ]
+        };
+
+        var root = WinPool.Application.TopologyProjector.Project(snapshot);
+        var nodes = WinPool.Application.TopologyProjector.Flatten(root).ToArray();
+        var specialLayer = Assert.Single(nodes, node =>
+            node.Unit.Kind == WinPool.Application.StorageUnitKind.SyntheticStorageTier
+            && node.Unit.SyntheticName == expectedLayer);
+        var realTier = Assert.Single(nodes, node => node.Unit.StableId == "tier:1");
+
+        Assert.Contains(specialLayer.Children, child => child.Unit.StableId == "physical:1");
+        Assert.Empty(realTier.Children);
+        Assert.Contains("0 physical disks", realTier.Summary, StringComparison.Ordinal);
+        Assert.Contains("physical:1", snapshot.StorageTiers.Single().MemberPhysicalDiskIds);
+    }
+
+    [Fact]
+    public void UnknownTierMembershipStaysInUnallocatedSyntheticLayer()
+    {
+        var source = TestSnapshotFactory.Create();
+        var unknown = source.PhysicalDisks[0] with
+        {
+            StableId = "physical:unknown",
+            FriendlyName = "Unknown member",
+            PoolStableId = "pool:1",
+            Usage = "AutoSelect"
+        };
+        var snapshot = source with
+        {
+            PhysicalDisks = source.PhysicalDisks.Append(unknown).ToArray(),
+            StoragePools =
+            [
+                source.StoragePools[0] with
+                {
+                    MemberPhysicalDiskIds = ["physical:1", unknown.StableId]
+                }
+            ],
+            UnknownTierMembershipPhysicalDiskIds = [unknown.StableId]
+        };
+
+        var layer = Assert.Single(
+            snapshot.GetSyntheticStorageObjects(),
+            item => item.Name == WinPool.Application.SyntheticStorageName.UnallocatedLayer);
+
+        Assert.Contains(unknown.StableId, layer.MemberStableIds);
+        Assert.Contains(unknown.StableId, layer.UnknownMemberStableIds);
+        var node = WinPool.Application.TopologyProjector.Flatten(
+                WinPool.Application.TopologyProjector.Project(snapshot))
+            .Single(item => item.Unit.StableId == layer.StableId);
+        Assert.Contains("Membership unknown", node.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -498,7 +567,7 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
-    public void NetworkAndOtherGroupsAreSelectablePoolCategoryObjectsButNotPools()
+    public void NetworkAndOtherSyntheticPoolsAreSelectableWithoutAggregatedCapacity()
     {
         var source = TestSnapshotFactory.Create();
         var network = new WinPool.Application.NetworkDiskInfo(
@@ -521,8 +590,10 @@ public sealed class ApplicationBehaviorTests
         };
 
         var root = WinPool.Application.TopologyProjector.Project(snapshot);
-        var networkGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Application.StorageUnitKind.NetworkDiskGroup);
-        var otherGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Application.StorageUnitKind.OtherDiskGroup);
+        var networkGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Application.StorageUnitKind.SyntheticStoragePool
+            && x.Unit.SyntheticName == WinPool.Application.SyntheticStorageName.NetworkDiskPool);
+        var otherGroup = root.Children.Single(x => x.Unit.Kind == WinPool.Application.StorageUnitKind.SyntheticStoragePool
+            && x.Unit.SyntheticName == WinPool.Application.SyntheticStorageName.OtherDiskPool);
 
         Assert.True(networkGroup.IsSelectable);
         Assert.True(otherGroup.IsSelectable);
@@ -534,6 +605,8 @@ public sealed class ApplicationBehaviorTests
             WinPool.Application.WorkspaceMapper.FromUnit(otherGroup.Unit, snapshot).Category);
         Assert.NotNull(snapshot.FindUnit(networkGroup.Unit.StableId));
         Assert.NotNull(snapshot.FindUnit(otherGroup.Unit.StableId));
+        Assert.DoesNotContain(WinPool.Application.TopologyProjector.FormatBytes(network.Size), networkGroup.Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain(WinPool.Application.TopologyProjector.FormatBytes(otherDisk.Size), otherGroup.Summary, StringComparison.Ordinal);
         Assert.StartsWith("1 pools  1 physical disks  1 virtual disks  1 network disks  ", root.Summary);
     }
 
@@ -543,10 +616,10 @@ public sealed class ApplicationBehaviorTests
         var snapshot = TestSnapshotFactory.Create();
 
         Assert.Equal(
-            "group:network:system:test",
+            "synthetic:pool:network:system:test",
             WinPool.Application.TopologyProjector.NetworkGroupStableId(snapshot));
         Assert.Equal(
-            "group:other:system:test",
+            "synthetic:pool:other:system:test",
             WinPool.Application.TopologyProjector.OtherGroupStableId(snapshot));
     }
 

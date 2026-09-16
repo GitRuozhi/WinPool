@@ -69,29 +69,20 @@ public sealed class ManageSystemProjector
                     ["isPrimordial"] = pool.IsPrimordial.ToString()
                 }));
         }
-        if (snapshot.NetworkDisks.Count > 0)
+        foreach (var pool in snapshot.GetSyntheticStorageObjects()
+                     .Where(item => item.Kind == SyntheticStorageObjectKind.Pool)
+                     .OrderBy(item => item.Name))
         {
             result.Add(Item(
                 systemId,
-                TopologyProjector.NetworkGroupStableId(snapshot),
-                ManageObjectRole.NetworkGroup,
+                pool.StableId,
+                ManageObjectRole.SyntheticStoragePool,
                 ManageWorkspaceCategory.Pool,
-                "Network",
+                pool.Name.ToString(),
                 true,
                 null,
-                order++));
-        }
-        if (TopologyProjector.GetOtherOsDisks(snapshot).Count > 0)
-        {
-            result.Add(Item(
-                systemId,
-                TopologyProjector.OtherGroupStableId(snapshot),
-                ManageObjectRole.OtherGroup,
-                ManageWorkspaceCategory.Pool,
-                "Other",
-                true,
-                null,
-                order++));
+                order++,
+                SyntheticMetadata(pool)));
         }
 
         order = 0;
@@ -102,22 +93,21 @@ public sealed class ManageSystemProjector
                 ManageWorkspaceCategory.Tier, tier.FriendlyName,
                 tier.IsStable, tier.PoolStableId, order++));
         }
-        foreach (var pool in snapshot.StoragePools.Where(x => !x.IsPrimordial))
+        foreach (var tier in snapshot.GetSyntheticStorageObjects()
+                     .Where(item => item.Kind == SyntheticStorageObjectKind.Tier)
+                     .OrderBy(item => item.ParentStableId, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.Name))
         {
-            var direct = snapshot.DirectPoolMembers(pool.StableId);
-            if (direct.Count == 0)
-            {
-                continue;
-            }
             result.Add(Item(
                 systemId,
-                $"group:direct:{pool.StableId}",
-                ManageObjectRole.DirectDiskGroup,
+                tier.StableId,
+                ManageObjectRole.SyntheticStorageTier,
                 ManageWorkspaceCategory.Tier,
-                snapshot.DirectGroupName(pool.StableId),
+                tier.Name.ToString(),
                 true,
-                pool.StableId,
-                order++));
+                tier.ParentStableId,
+                order++,
+                SyntheticMetadata(tier)));
         }
 
         order = 0;
@@ -176,6 +166,15 @@ public sealed class ManageSystemProjector
             parent,
             order,
             metadata ?? new Dictionary<string, string?>());
+
+    private static IReadOnlyDictionary<string, string?> SyntheticMetadata(
+        SyntheticStorageObject item) =>
+        new Dictionary<string, string?>
+        {
+            ["syntheticName"] = item.Name.ToString(),
+            ["hasOriginalSource"] = "False",
+            ["memberCount"] = item.MemberStableIds.Count.ToString()
+        };
 
     private static IReadOnlyList<PhysicalDiskInfo> OrderPhysicalDisks(
         StorageSnapshot snapshot)
@@ -288,7 +287,15 @@ public sealed class ManageSystemProjector
                 _ => throw new ArgumentOutOfRangeException(nameof(node))
             },
             node.LayoutWeight,
-            children);
+            children,
+            node.NoWrapChildren,
+            node.DistributeByCapacity,
+            node.CapacityWeights,
+            node.ShowsEditStatus,
+            node.HasStoredData,
+            node.CannotLeave,
+            node.AdaptiveHeaderEnabled,
+            node.Unit.SyntheticName);
     }
 
     private static ManageObjectRole MapRole(StorageUnitKind kind) => kind switch
@@ -297,6 +304,8 @@ public sealed class ManageSystemProjector
         StorageUnitKind.StorageSubsystem => ManageObjectRole.StorageSubsystem,
         StorageUnitKind.StoragePool => ManageObjectRole.StoragePool,
         StorageUnitKind.StorageTier => ManageObjectRole.StorageTier,
+        StorageUnitKind.SyntheticStoragePool => ManageObjectRole.SyntheticStoragePool,
+        StorageUnitKind.SyntheticStorageTier => ManageObjectRole.SyntheticStorageTier,
         StorageUnitKind.PhysicalDisk => ManageObjectRole.PhysicalDisk,
         StorageUnitKind.VirtualDisk => ManageObjectRole.VirtualDisk,
         StorageUnitKind.NetworkDisk => ManageObjectRole.NetworkDisk,
@@ -315,6 +324,7 @@ public sealed class ManageSystemProjector
         ManageObjectRole.StorageSubsystem => StorageObjectKind.StorageSubsystem,
         ManageObjectRole.StoragePool => StorageObjectKind.StoragePool,
         ManageObjectRole.StorageTier => StorageObjectKind.StorageTier,
+        ManageObjectRole.SyntheticStoragePool or ManageObjectRole.SyntheticStorageTier => StorageObjectKind.LogicalGroup,
         ManageObjectRole.PhysicalDisk => StorageObjectKind.PhysicalDisk,
         ManageObjectRole.VirtualDisk => StorageObjectKind.VirtualDisk,
         ManageObjectRole.NetworkDisk => StorageObjectKind.NetworkDisk,

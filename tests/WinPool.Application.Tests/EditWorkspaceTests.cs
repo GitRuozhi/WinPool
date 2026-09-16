@@ -872,7 +872,7 @@ public sealed class TierCardCapacityTests
     }
 
     [Fact]
-    public void UnsetTierCapacityFallsBackToMemberDiskSum()
+    public void ReturnedZeroTierCapacityIsNotReplacedWithMemberDiskSum()
     {
         var snapshot = TestSnapshotFactory.Create();
         var unset = snapshot with
@@ -884,8 +884,33 @@ public sealed class TierCardCapacityTests
         var root = EditWorkspace.ProjectPoolWorkspaceRoot(unset);
         var tierNode = FindNode(root, StorageUnitKind.StorageTier);
         Assert.NotNull(tierNode);
-        // 2_000_000 bytes -> "1.91 MiB": the member-disk fallback.
-        Assert.Contains("1.91 MiB", tierNode.Summary, StringComparison.Ordinal);
+        Assert.Contains("0 B", tierNode.Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("1.91 MiB", tierNode.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingTierCapacityRemainsBlankInsteadOfUsingMemberDiskSum()
+    {
+        var snapshot = TestSnapshotFactory.Create() with
+        {
+            StorageTiers = TestSnapshotFactory.Create().StorageTiers
+                .Select(tier => tier with { Size = 0, FootprintOnPool = 0 })
+                .ToArray(),
+            FieldIssues =
+            [
+                new StorageFieldIssue(
+                    "tier:1",
+                    nameof(StorageTierInfo.Size),
+                    FieldReadState.Unavailable,
+                    "not-collected")
+            ]
+        };
+        var root = EditWorkspace.ProjectPoolWorkspaceRoot(snapshot);
+        var tierNode = FindNode(root, StorageUnitKind.StorageTier);
+
+        Assert.NotNull(tierNode);
+        Assert.DoesNotContain("1.91 MiB", tierNode.Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 B", tierNode.Summary, StringComparison.Ordinal);
     }
 }
 

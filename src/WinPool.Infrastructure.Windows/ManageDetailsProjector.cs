@@ -32,6 +32,7 @@ public sealed class ManageDetailsProjector
             && snapshot.ResolvePartitionUnion(objectId.ProviderKey) is { } union)
             return new ManageObjectDetailsView(objectId, ManageObjectRole.Partition, union.DisplayName,
                 ManagePartitionProjector.Properties(snapshot, union));
+        var synthetic = snapshot.FindSyntheticStorageObject(objectId.ProviderKey);
         var rows = new List<ManagePropertyView>();
         switch (role)
         {
@@ -62,10 +63,45 @@ public sealed class ManageDetailsProjector
                 var tier = snapshot.StorageTiers.First(x => x.StableId == objectId.ProviderKey);
                 rows.Add(P("Media", tier.MediaType));
                 rows.Add(P("Role", tier.ResiliencySettingName));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(tier.Size)));
+                rows.Add(P("Capacity", TopologyProjector.TierCapacityText(snapshot, tier)));
                 rows.Add(P("Members", tier.MemberPhysicalDiskIds.Count.ToString()));
                 break;
             }
+            case ManageObjectRole.SyntheticStoragePool when synthetic is { Kind: SyntheticStorageObjectKind.Pool }:
+                rows.Add(P("Type", "SyntheticStoragePool", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Health", string.Empty));
+                rows.Add(P("Capacity", string.Empty));
+                rows.Add(P("Allocated", string.Empty));
+                rows.Add(P("Available", string.Empty));
+                rows.Add(P("Members", synthetic.MemberStableIds.Count.ToString()));
+                rows.Add(P("ProvisioningType", string.Empty));
+                rows.Add(P("Resiliency", string.Empty));
+                rows.Add(P("FaultTolerance", string.Empty));
+                rows.Add(P("Columns", string.Empty));
+                rows.Add(P("Interleave", string.Empty));
+                break;
+            case ManageObjectRole.SyntheticStorageTier when synthetic is { Kind: SyntheticStorageObjectKind.Tier }:
+                rows.Add(P(
+                    "PoolOwner",
+                    snapshot.StoragePools.FirstOrDefault(pool => pool.StableId == synthetic.ParentStableId)?.FriendlyName
+                    ?? string.Empty));
+                rows.Add(P("Media", string.Empty));
+                rows.Add(P("Type", "SyntheticStorageTier", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Capacity", string.Empty));
+                rows.Add(P("ProvisioningType", string.Empty));
+                rows.Add(P("Resiliency", string.Empty));
+                rows.Add(P("FaultTolerance", string.Empty));
+                rows.Add(P("Members", synthetic.MemberStableIds.Count.ToString()));
+                rows.Add(P("Columns", string.Empty));
+                rows.Add(P("Interleave", string.Empty));
+                rows.Add(P("AllocationUnit", string.Empty));
+                rows.Add(P(
+                    "Membership",
+                    synthetic.UnknownMemberStableIds.Count == 0 ? string.Empty : "MembershipUnknown",
+                    synthetic.UnknownMemberStableIds.Count == 0
+                        ? ManageValuePresentation.Plain
+                        : ManageValuePresentation.LocalizationKey));
+                break;
             case ManageObjectRole.DirectDiskGroup:
             {
                 var pool = snapshot.StoragePools.FirstOrDefault(
@@ -77,13 +113,10 @@ public sealed class ManageDetailsProjector
                     break;
                 }
                 var direct = snapshot.DirectPoolMembers(pool.StableId);
-                rows.Add(P("Type", pool is not null && snapshot.UnknownTierMembershipPools.Contains(pool.StableId) ? "Membership unknown" : "UnallocatedLayer", ManageValuePresentation.LocalizationKey));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(direct.Sum(x => x.Size))));
+                rows.Add(P("Type", "SyntheticStorageTier", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Capacity", string.Empty));
                 rows.Add(P("Members", direct.Count.ToString()));
-                rows.Add(P("Health", TopologyProjector.JoinSummary(
-                    direct.Select(x => x.HealthStatus)
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToArray())));
+                rows.Add(P("Health", string.Empty));
                 break;
             }
             case ManageObjectRole.PhysicalDisk:
@@ -120,23 +153,18 @@ public sealed class ManageDetailsProjector
                 break;
             }
             case ManageObjectRole.NetworkGroup:
-                rows.Add(P("Type", "NetworkStorageGroup", ManageValuePresentation.LocalizationKey));
-                rows.Add(P("NetworkDisk", snapshot.NetworkDisks.Count.ToString()));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(snapshot.NetworkDisks.Sum(x => x.Size))));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(snapshot.NetworkDisks.Sum(x => x.SizeRemaining))));
+                rows.Add(P("Type", "SyntheticStoragePool", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Members", snapshot.NetworkDisks.Count.ToString()));
+                rows.Add(P("Capacity", string.Empty));
+                rows.Add(P("Available", string.Empty));
                 break;
             case ManageObjectRole.OtherGroup:
             {
                 var otherDisks = TopologyProjector.GetOtherOsDisks(snapshot);
-                var otherIds = otherDisks.Select(x => x.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var otherPartitions = snapshot.Partitions
-                    .Where(x => x.OsDiskStableId is not null && otherIds.Contains(x.OsDiskStableId))
-                    .ToList();
-                rows.Add(P("Type", "OtherStorageGroup", ManageValuePresentation.LocalizationKey));
-                rows.Add(P("OtherDisk", otherDisks.Count.ToString()));
-                rows.Add(P("Partition", otherPartitions.Count.ToString()));
-                rows.Add(P("Capacity", TopologyProjector.FormatBytes(otherDisks.Sum(x => x.Size))));
-                rows.Add(P("Available", TopologyProjector.FormatBytes(otherPartitions.Sum(x => x.SizeRemaining))));
+                rows.Add(P("Type", "SyntheticStoragePool", ManageValuePresentation.LocalizationKey));
+                rows.Add(P("Members", otherDisks.Count.ToString()));
+                rows.Add(P("Capacity", string.Empty));
+                rows.Add(P("Available", string.Empty));
                 break;
             }
             case ManageObjectRole.OsDisk:

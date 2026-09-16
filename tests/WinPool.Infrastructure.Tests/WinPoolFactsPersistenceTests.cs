@@ -38,6 +38,30 @@ public sealed class WinPoolFactsPersistenceTests
     }
 
     [Fact]
+    public void DocumentRoundTripDoesNotPersistSyntheticProjectionObjects()
+    {
+        var snapshot = SimulationLayouts.SpareAndRetired();
+        var document = new StorageSystemDocument(
+            StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:synthetic-roundtrip",
+            StorageSystemKind.Simulation,
+            "Synthetic roundtrip",
+            snapshot,
+            [],
+            DateTimeOffset.UtcNow);
+
+        Assert.NotEmpty(document.Snapshot.GetSyntheticStorageObjects());
+        var payload = SimulationDocumentCodec.Encode(document);
+        Assert.DoesNotContain("synthetic:", payload.Json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SyntheticStorageObject", payload.Json, StringComparison.Ordinal);
+
+        var restored = SimulationDocumentCodec.Decode(payload);
+        Assert.DoesNotContain(restored.SourceFacts!.Objects,
+            item => item.Id.StartsWith("synthetic:", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(restored.Snapshot.GetSyntheticStorageObjects());
+    }
+
+    [Fact]
     public void ActualDocumentCodecPreservesAllSourceValues()
     {
         var system = SystemId.New();
