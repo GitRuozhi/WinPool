@@ -118,10 +118,17 @@
                     MinWidth="178"
                     Background="Transparent"
                     BorderThickness="0"
+                    HorizontalContentAlignment="Left"
                     AutomationProperties.Name="Storage system"
                     DropDownClosed="ActiveSystemSelector_DropDownClosed"
                     SelectionChanged="ActiveSystemSelector_SelectionChanged"
-                    Visibility="Collapsed" />
+                    Visibility="Collapsed">
+                    <ComboBox.ItemContainerStyle>
+                        <Style TargetType="ComboBoxItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Left" />
+                        </Style>
+                    </ComboBox.ItemContainerStyle>
+                </ComboBox>
             </Border>
 
             <StackPanel
@@ -134,7 +141,7 @@
                     x:Name="LocalRealOperationsLabel"
                     VerticalAlignment="Center"
                     FontSize="13"
-                    Text="本机真实操作" />
+                    Text="真实编辑" />
                 <ToggleSwitch
                     x:Name="LocalRealOperationsSwitch"
                     MinWidth="0"
@@ -142,7 +149,7 @@
                     OffContent=""
                     OnContent=""
                     Toggled="LocalRealOperationsSwitch_Toggled"
-                    AutomationProperties.Name="Local real operations" />
+                    AutomationProperties.Name="Real editing" />
             </StackPanel>
         </Grid>
 

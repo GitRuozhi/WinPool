@@ -954,6 +954,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("x:Name=\"ActiveSystemSelector\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalContentAlignment=\"Left\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("<ComboBox.ItemContainerStyle>", windowXaml, StringComparison.Ordinal);
         Assert.Contains("DropDownClosed=\"ActiveSystemSelector_DropDownClosed\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("SelectionChanged=\"ActiveSystemSelector_SelectionChanged\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("if (ActiveSystemSelector.IsDropDownOpen)", windowSource, StringComparison.Ordinal);
@@ -962,6 +964,19 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
         Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
         Assert.Contains("elements.Add(ActiveSystemSelector)", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FreshWorkspaceDefaultsToTheLocalSystem()
+    {
+        var root = FindRepositoryRoot();
+        var workspace = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "ViewModels", "WorkspaceViewModel.cs"));
+
+        Assert.Contains(
+            "SelectedSystem = SystemCatalog.Systems.First(system => system.IsLocal);",
+            workspace,
+            StringComparison.Ordinal);
     }
 
     [Fact]

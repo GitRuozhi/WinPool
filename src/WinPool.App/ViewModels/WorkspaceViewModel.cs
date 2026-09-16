@@ -97,7 +97,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             SystemCatalog.AddSimulation(simulation);
         }
-        SelectedSystem = SystemCatalog.Systems.First(system => !system.IsLocal);
+        // A new workspace has no remembered system selection. Start from the
+        // local placeholder so the first usable screen always represents this
+        // computer; a persisted workspace state may still select a simulation
+        // during RestoreWorkspaceUiStateAsync.
+        SelectedSystem = SystemCatalog.Systems.First(system => system.IsLocal);
         Localization = new LocalizationService();
         _selectedCategory = ManageWorkspaceCategory.System;
         RefreshLocalizedContent();

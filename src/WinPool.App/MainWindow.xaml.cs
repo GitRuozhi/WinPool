@@ -417,7 +417,8 @@ public sealed partial class MainWindow : Window
                 {
                     Content = $"{prefix} {candidate.DisplayName}",
                     Tag = candidate.Id,
-                    MaxWidth = 390
+                    MaxWidth = 390,
+                    HorizontalContentAlignment = HorizontalAlignment.Left
                 };
                 ActiveSystemSelector.Items.Add(item);
                 if (candidate.Id.Equals(system?.Id, StringComparison.OrdinalIgnoreCase)) selected = item;

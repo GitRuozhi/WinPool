@@ -48,7 +48,7 @@ public sealed class WinPoolStorageProjectionTests
             var computer = Assert.Single(facts.Objects, x => x.ObjectType == FactObjectType.Computer);
             Assert.Null(computer.Field("WindowsVersion"));
             var operatingSystem = Assert.Single(facts.Objects, x => x.ObjectType == FactObjectType.OperatingSystem);
-            Assert.Equal("10.0.19045", operatingSystem.Field("Version")!.DisplayValue());
+            Assert.Equal(layout.Snapshot.Computer.WindowsVersion, operatingSystem.Field("Version")!.DisplayValue());
 
             foreach (var disk in facts.Objects.Where(x => x.ObjectType == FactObjectType.PhysicalDisk))
             {
@@ -78,6 +78,19 @@ public sealed class WinPoolStorageProjectionTests
             Assert.Equal(4096, projected.Partitions.Single(x => x.IsBoot).AllocationUnitSize);
             Assert.DoesNotContain(projected.FieldIssues, x => x.FieldName is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump");
         }
+    }
+
+    [Fact]
+    public void CuratedLayoutsUseDistinctSupportedWindowsVersionProfiles()
+    {
+        var versions = SimulationLayouts.CreateAll()
+            .Select(layout => layout.Snapshot.Computer.WindowsVersion)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            ["10.0.19045", "10.0.26100", "10.0.26200"],
+            versions);
     }
 
     [Fact]

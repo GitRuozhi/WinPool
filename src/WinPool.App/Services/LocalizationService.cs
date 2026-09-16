@@ -35,7 +35,7 @@ public sealed class LocalizationService : ObservableObject
             ["Real"] = ("真实执行", "Real execution"),
             ["SimulationShort"] = ("模拟", "Simulation"),
             ["RealShort"] = ("真实", "Real"),
-            ["LocalRealOperations"] = ("本机真实操作", "Local real operations"),
+            ["LocalRealOperations"] = ("真实编辑", "Real editing"),
             ["PreviewWarningTitle"] = ("测试版本", "Preview warning"),
             ["PreviewWarningMessage"] = (
                 "本软件仍处于测试阶段。本机存储写操作尚未开放，所有本机修改按钮仍保持禁用。",
@@ -184,7 +184,7 @@ public sealed class LocalizationService : ObservableObject
             ["SimulationData"] = ("仿真数据", "Simulation data"),
             ["SimulatedComputerSubtitle"] = ("前端参考数据  与本机隔离", "Frontend reference data  isolated from this computer"),
             ["ExecutionMode"] = ("执行模式", "Execution mode"),
-            ["ExecutionDescription"] = ("本机真实操作仍处于测试阶段。标准用户确认后可请求管理员重启；本机存储目前始终只读，勾选状态不会跨普通启动保存。", "Local real operations remain experimental. A standard user can request an administrator restart after confirming; local storage remains read-only, and the checked state is not persisted across normal launches."),
+            ["ExecutionDescription"] = ("真实编辑仍处于测试阶段。标准用户确认后可请求管理员重启；本机存储目前始终只读，勾选状态不会跨普通启动保存。", "Real editing remains experimental. A standard user can request an administrator restart after confirming; local storage remains read-only, and the checked state is not persisted across normal launches."),
             ["PrimaryPartition"] = ("主分区", "Primary partition"),
             ["ExtendedPartition"] = ("扩展分区", "Extended partition"),
             ["SimpleVolume"] = ("简单卷", "Simple volume"),

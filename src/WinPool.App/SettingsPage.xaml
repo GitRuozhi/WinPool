@@ -162,7 +162,7 @@
                         x:Name="ExecutionTitle"
                         Grid.Row="3"
                         Style="{StaticResource SettingsFieldLabel}"
-                        Text="本机真实操作" />
+                        Text="真实编辑" />
                     <ToggleSwitch
                         x:Name="SettingsExecutionModeSwitch"
                         Grid.Row="3"

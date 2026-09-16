@@ -8,6 +8,15 @@ namespace WinPool.Application;
 /// </summary>
 public static class SimulationLayouts
 {
+    private static readonly SimulatedWindowsRelease Windows10_22H2 =
+        new("Windows 10 Pro", "10.0.19045", "19045", "22H2", "7184");
+
+    private static readonly SimulatedWindowsRelease Windows11_24H2 =
+        new("Windows 11 Pro", "10.0.26100", "26100", "24H2", "7171");
+
+    private static readonly SimulatedWindowsRelease Windows11_25H2 =
+        new("Windows 11 Pro", "10.0.26200", "26200", "25H2", "7623");
+
     public static IReadOnlyList<(string Id, string Name, StorageSnapshot Snapshot)> CreateAll() =>
     [
         ("simulation:builtin:layout-primordial-ready", "建池与初始化", PrimordialReady()),
@@ -34,7 +43,7 @@ public static class SimulationLayouts
         b.RawPhysical(5, "RAW-HDD-3", "HDD");
         b.GptEmptyPhysical(6, "GPT-empty-SSD", "SSD");
         b.Primordial(0, 1, 2, 3, 4, 5, 6);
-        return b.Build("建池与初始化", "layout-primordial-ready-v3");
+        return b.Build("建池与初始化", "layout-primordial-ready-v4", Windows10_22H2);
     }
 
     public static StorageSnapshot StandardTiered()
@@ -53,7 +62,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 3, 4, 5, 6);
         b.VirtualDisk("vd", "Pool01", "pool", "Mirror", 1, 2, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Pool01");
-        return b.Build("标准两层池", "layout-standard-tiered-v3");
+        return b.Build("标准两层池", "layout-standard-tiered-v4", Windows11_24H2);
     }
 
     public static StorageSnapshot TripleTier()
@@ -78,7 +87,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 7, 8, 9, 10, 11, 12, 13, 14);
         b.VirtualDisk("vd", "TripleVD", "pool", "Mirror", 1, 2, 20, "cache", "perf", "cap");
         b.OsForVirtualNtfs("vd", "TripleVD");
-        return b.Build("三层池", "layout-triple-tier-v4");
+        return b.Build("三层池", "layout-triple-tier-v5", Windows11_25H2);
     }
 
     public static StorageSnapshot ManyPartitions()
@@ -87,7 +96,7 @@ public static class SimulationLayouts
         b.SystemPhysical(0, "8-partition NVMe", size: DecimalTerabytes(2), extraDataPartitions: 4);
         b.RawPhysical(1, "Empty-HDD", "HDD");
         b.Primordial(0, 1);
-        return b.Build("超多分区系统盘", "layout-tall-system-v4");
+        return b.Build("超多分区系统盘", "layout-tall-system-v5", Windows10_22H2);
     }
 
     public static StorageSnapshot DenseServer()
@@ -114,7 +123,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", Enumerable.Range(9, 28).ToArray());
         b.VirtualDisk("vd", "DataPool", "pool", "Simple", 1, 1, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "DataPool");
-        return b.Build("超多磁盘服务器", "layout-dense-server-v3");
+        return b.Build("超多磁盘服务器", "layout-dense-server-v4", Windows11_24H2);
     }
 
     public static StorageSnapshot PoolWithoutVirtualDisk()
@@ -128,7 +137,7 @@ public static class SimulationLayouts
         b.Disk(5, "HDD-3", "HDD", "pool");
         b.Primordial(0);
         b.Pool("pool", "EmptyPool", 1, 2, 3, 4, 5);
-        return b.Build("空池待建虚拟磁盘", "layout-pool-no-vdisk-v3");
+        return b.Build("空池待建虚拟磁盘", "layout-pool-no-vdisk-v4", Windows11_25H2);
     }
 
     public static StorageSnapshot SingleDiskPool()
@@ -138,7 +147,7 @@ public static class SimulationLayouts
         b.Disk(1, "Solo-SSD", "SSD", "pool");
         b.Primordial(0);
         b.Pool("pool", "SoloPool", 1);
-        return b.Build("单盘池", "layout-single-disk-pool-v3");
+        return b.Build("单盘池", "layout-single-disk-pool-v4", Windows10_22H2);
     }
 
     public static StorageSnapshot SpareAndRetired()
@@ -157,7 +166,7 @@ public static class SimulationLayouts
         b.Tier("cap", "Capacity", "HDD", "pool", "vd", 2, 3, 4);
         b.VirtualDisk("vd", "Data", "pool", "Simple", 1, 1, 20, "perf", "cap");
         b.OsForVirtualNtfs("vd", "Data");
-        return b.Build("热备与退役", "layout-spare-retired-v3");
+        return b.Build("热备与退役", "layout-spare-retired-v4", Windows11_24H2);
     }
 
     public static StorageSnapshot DualVirtualDisk()
@@ -177,7 +186,7 @@ public static class SimulationLayouts
         b.VirtualDisk("vd2", "LogVD", "pool", "Simple", 1, 1, 22);
         b.OsForVirtualNtfs("vd1", "DataVD");
         b.OsForVirtualNtfs("vd2", "LogVD");
-        return b.Build("双虚拟磁盘", "layout-dual-vd-v4");
+        return b.Build("双虚拟磁盘", "layout-dual-vd-v5", Windows11_25H2);
     }
 
     public static StorageSnapshot PartitionEdges()
@@ -189,7 +198,7 @@ public static class SimulationLayouts
         b.MixedFileSystemPhysical(3, "FS-mix-SSD", "SSD");
         b.OfflineNtfsPhysical(4, "Offline-HDD", "HDD");
         b.Primordial(0, 1, 2, 3, 4);
-        return b.Build("分区边界", "layout-partition-edges-v3");
+        return b.Build("分区边界", "layout-partition-edges-v4", Windows10_22H2);
     }
 
     public static StorageSnapshot OtherAndNetwork()
@@ -200,8 +209,15 @@ public static class SimulationLayouts
         b.OtherNtfs(40, "USB-Other");
         b.Network("R", "share-r");
         b.Network("S", "share-s");
-        return b.Build("其它与网络", "layout-other-network-v3");
+        return b.Build("其它与网络", "layout-other-network-v4", Windows11_24H2);
     }
+
+    private sealed record SimulatedWindowsRelease(
+        string ProductName,
+        string Version,
+        string Build,
+        string DisplayVersion,
+        string Ubr);
 
     private sealed class LayoutBuilder
     {
@@ -472,7 +488,10 @@ public static class SimulationLayouts
                 Gib(400)));
         }
 
-        public StorageSnapshot Build(string computerName, string version)
+        public StorageSnapshot Build(
+            string computerName,
+            string version,
+            SimulatedWindowsRelease windows)
         {
             var allocated = _virtualDisks.Sum(item => item.FootprintOnPool);
             var pools = _pools
@@ -489,12 +508,12 @@ public static class SimulationLayouts
                 new ComputerInfo(
                     $"simulation:system:{_prefix}",
                     computerName,
-                    "Windows 10 Pro",
-                    "10.0.19045",
-                    "19045",
+                    windows.ProductName,
+                    windows.Version,
+                    windows.Build,
                     DateTimeOffset.UnixEpoch,
-                    "22H2",
-                    "7184"),
+                    windows.DisplayVersion,
+                    windows.Ubr),
                 [new StorageSubsystemInfo(_subsystemId, "Windows Storage Spaces", "Healthy", "OK")],
                 _disks,
                 pools,
