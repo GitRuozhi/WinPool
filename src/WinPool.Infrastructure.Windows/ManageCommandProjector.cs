@@ -109,8 +109,6 @@ public sealed class ManageCommandProjector
             default:
                 throw new ArgumentOutOfRangeException(nameof(category));
         }
-        Add(commands, ManageCommandKind.ExportCategory, true);
-
         return new ManageCommandSurfaceView(
             objectId,
             commands,

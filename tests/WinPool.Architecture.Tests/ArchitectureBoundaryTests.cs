@@ -629,7 +629,15 @@ public sealed class ArchitectureBoundaryTests
             mainPage,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ManageCategoryCsvExporter.Create(",
+            "PropertyTableContextMenu.Show(",
+            mainPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ManageCategoryCsvExporter",
+            mainPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ShowSourceDetailsAsync",
             mainPage,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -675,28 +683,20 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void ManageCategoryCsvExporterPreservesUnionOrderAndEscaping()
+    public void PropertyTablesExposeOnlyExplicitCopyAndRawFieldContextActions()
     {
-        var csv = ManageCategoryCsvExporter.Create(
-            "Name",
-            [
-                new ManageExportColumn(
-                    "Disk A",
-                    [new("Model", "Alpha"), new("Path", "C:\\A,B")]),
-                new ManageExportColumn(
-                    "Disk B",
-                    [new("Model", "Beta"), new("Extra", "say \"hi\"")])
-            ]);
+        var root = FindRepositoryRoot();
+        var contextMenu = File.ReadAllText(Path.Combine(
+            root, "src", "WinPool.App", "Controls", "PropertyTableContextMenu.cs"));
+        var mainPage = File.ReadAllText(Path.Combine(root, "src", "WinPool.App", "MainPage.xaml.cs"));
+        var hardwarePage = File.ReadAllText(Path.Combine(root, "src", "WinPool.App", "HardwarePage.cs"));
 
-        Assert.Equal(
-            string.Join(
-                Environment.NewLine,
-                "Name,Disk A,Disk B",
-                "Model,Alpha,Beta",
-                "Path,\"C:\\A,B\",",
-                "Extra,,\"say \"\"hi\"\"\"",
-                string.Empty),
-            csv);
+        Assert.Contains("CopyCurrentValueText", contextMenu, StringComparison.Ordinal);
+        Assert.Contains("CopyGroupText", contextMenu, StringComparison.Ordinal);
+        Assert.Contains("RawFieldsText", contextMenu, StringComparison.Ordinal);
+        Assert.DoesNotContain("Select all", contextMenu, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ColumnCell_RightTapped", mainPage, StringComparison.Ordinal);
+        Assert.Contains("GroupCell_RightTapped", hardwarePage, StringComparison.Ordinal);
     }
 
     [Fact]

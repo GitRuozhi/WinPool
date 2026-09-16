@@ -3,6 +3,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
@@ -37,6 +38,8 @@ public sealed partial class HardwarePage : Page
     };
     private readonly List<Border> groupCells = [];
     private readonly List<(Grid Labels, Grid Values, ScrollViewer Horizontal)> tables = [];
+    private readonly Dictionary<Border, TableCellContext> tableCellContexts = [];
+    private readonly Dictionary<string, TableGroupContext> tableGroupContexts = new(StringComparer.Ordinal);
     private WorkspaceViewModel viewModel = null!;
     private CancellationTokenSource? capture;
     private string? selectedGroupKey;
@@ -114,6 +117,8 @@ public sealed partial class HardwarePage : Page
         report.Children.Clear();
         groupCells.Clear();
         tables.Clear();
+        tableCellContexts.Clear();
+        tableGroupContexts.Clear();
         hoveredGroupKey = null;
         var categories = HardwareReportProjector.Project(viewModel.SelectedSystem, viewModel.Localization.IsChinese);
         if (categories.Count == 0)
@@ -157,6 +162,25 @@ public sealed partial class HardwarePage : Page
             }).ToArray();
             for (var column = 0; column < count; column++)
             {
+                var rows = section.Rows.Select(row =>
+                {
+                    var cell = row.Cells.ElementAtOrDefault(column);
+                    return new PropertyTableCopyRow(row.Label, cell?.Value ?? string.Empty);
+                }).ToArray();
+                var rawFields = section.Rows
+                    .Select(row => row.Cells.ElementAtOrDefault(column)?.RawFields)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                tableGroupContexts[keys[column]] = new(
+                    category.Name,
+                    rows,
+                    rawFields.Length == 0
+                        ? viewModel.Localization["RawFieldsUnavailable"]
+                        : string.Join(Environment.NewLine + Environment.NewLine, rawFields));
+            }
+            for (var column = 0; column < count; column++)
+            {
                 values.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
             }
             for (var rowIndex = 0; rowIndex < section.Rows.Count; rowIndex++)
@@ -187,12 +211,14 @@ public sealed partial class HardwarePage : Page
                         column == 0 ? 0 : ColumnGap,
                         tag: keys[column]);
                     border.Tapped += GroupCell_Tapped;
+                    border.RightTapped += GroupCell_RightTapped;
                     border.PointerEntered += GroupCell_PointerEntered;
                     border.PointerExited += GroupCell_PointerExited;
                     Grid.SetRow(border, rowIndex);
                     Grid.SetColumn(border, column);
                     values.Children.Add(border);
                     groupCells.Add(border);
+                    tableCellContexts[border] = new(keys[column], cell?.Value ?? string.Empty);
                 }
             }
             Grid.SetColumn(labels, 0);
@@ -262,6 +288,32 @@ public sealed partial class HardwarePage : Page
             CenterSelectedGroup);
     }
 
+    private void GroupCell_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Border cell
+            || !tableCellContexts.TryGetValue(cell, out var context)
+            || context.GroupKey != selectedGroupKey
+            || !tableGroupContexts.TryGetValue(context.GroupKey, out var group))
+        {
+            return;
+        }
+
+        PropertyTableContextMenu.Show(
+            cell,
+            e.GetPosition(cell),
+            XamlRoot,
+            new PropertyTableContextMenuRequest(
+                context.Value,
+                group.Title,
+                group.Rows,
+                group.RawFields,
+                viewModel.Localization["CopyCurrentValue"],
+                viewModel.Localization["CopyGroup"],
+                viewModel.Localization["RawFields"],
+                viewModel.Localization["Close"]));
+    }
+
     private void GroupCell_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         hoveredGroupKey = ((FrameworkElement)sender).Tag as string;
@@ -288,7 +340,7 @@ public sealed partial class HardwarePage : Page
             if (cell.Child is not TextBlock text) continue;
             if (selected) text.Foreground = accentForeground;
             else text.ClearValue(TextBlock.ForegroundProperty);
-            text.IsTextSelectionEnabled = selected;
+            text.IsTextSelectionEnabled = false;
         }
     }
 
@@ -307,6 +359,13 @@ public sealed partial class HardwarePage : Page
             return;
         }
     }
+
+    private sealed record TableCellContext(string GroupKey, string Value);
+
+    private sealed record TableGroupContext(
+        string Title,
+        IReadOnlyList<PropertyTableCopyRow> Rows,
+        string RawFields);
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using System.Runtime.InteropServices;
@@ -60,6 +61,7 @@ public sealed partial class MainPage : Page
     private const double MaxValueWidth = PropertyTableVisuals.ValueColumnMaxWidth;
     private readonly Dictionary<string, int> _columnIndexByKey = new(StringComparer.Ordinal);
     private readonly List<Border> _columnCells = [];
+    private readonly Dictionary<Border, TableCellContext> _tableCellContexts = [];
     private string? _hoveredColumnKey;
     private string _renderedSignature = string.Empty;
 
@@ -147,6 +149,7 @@ public sealed partial class MainPage : Page
         labelGrid.RowDefinitions.Clear();
         _columnIndexByKey.Clear();
         _columnCells.Clear();
+        _tableCellContexts.Clear();
         _hoveredColumnKey = null;
 
         var columns = ViewModel.ComparisonColumns;
@@ -244,12 +247,14 @@ public sealed partial class MainPage : Page
                     i == 0 ? 0 : ColumnGap,
                     tag: columns[i].Key);
                 cell.Tapped += ColumnCell_Tapped;
+                cell.RightTapped += ColumnCell_RightTapped;
                 cell.PointerEntered += ColumnCell_PointerEntered;
                 cell.PointerExited += ColumnCell_PointerExited;
                 Grid.SetRow(cell, rowIndex);
                 Grid.SetColumn(cell, i);
                 grid.Children.Add(cell);
                 _columnCells.Add(cell);
+                _tableCellContexts[cell] = new(columns[i].Key, value);
             }
         }
 
@@ -312,6 +317,37 @@ public sealed partial class MainPage : Page
 
     private void ColumnCell_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
         SelectColumn(((FrameworkElement)sender).Tag as string);
+
+    private void ColumnCell_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Border cell
+            || !_tableCellContexts.TryGetValue(cell, out var context)
+            || context.GroupKey != ViewModel.SelectedWorkspaceItem?.Key)
+        {
+            return;
+        }
+
+        var column = ViewModel.ComparisonColumns.FirstOrDefault(item => item.Key == context.GroupKey);
+        if (column is null)
+        {
+            return;
+        }
+
+        PropertyTableContextMenu.Show(
+            cell,
+            e.GetPosition(cell),
+            XamlRoot,
+            new PropertyTableContextMenuRequest(
+                context.Value,
+                column.Name,
+                column.Rows.Select(row => new PropertyTableCopyRow(row.Label, row.Value)).ToArray(),
+                RawFieldsForComparisonGroup(context.GroupKey),
+                ViewModel.Localization["CopyCurrentValue"],
+                ViewModel.Localization["CopyGroup"],
+                ViewModel.Localization["RawFields"],
+                ViewModel.Localization["Close"]));
+    }
 
     private void ColumnHeader_Click(object sender, RoutedEventArgs e) =>
         SelectColumn(((FrameworkElement)sender).Tag as string);
@@ -387,7 +423,7 @@ public sealed partial class MainPage : Page
                 {
                     text.ClearValue(TextBlock.ForegroundProperty);
                 }
-                text.IsTextSelectionEnabled = isSelected;
+                text.IsTextSelectionEnabled = false;
             }
         }
 
@@ -408,6 +444,28 @@ public sealed partial class MainPage : Page
 
     private sealed record CommandSpec(string Text, string Glyph, bool Enabled, Func<Task> Action);
 
+    private sealed record TableCellContext(string GroupKey, string Value);
+
+    private string RawFieldsForComparisonGroup(string groupKey)
+    {
+        var workspaceItem = ViewModel.Objects.FirstOrDefault(item => item.Key == groupKey);
+        if (workspaceItem?.Projection is null)
+        {
+            return ViewModel.Localization["RawFieldsUnavailable"];
+        }
+
+        var document = workspaceItem.StorageSystemId is null
+            ? ViewModel.ActiveDocument
+            : ViewModel.SystemCatalog.Find(workspaceItem.StorageSystemId);
+        var system = document?.Unified;
+        var source = system?.Objects.FirstOrDefault(item =>
+            item.Id == workspaceItem.Projection.Id.ProviderKey
+            || item.Sources.Any(observation => observation.Id == workspaceItem.Projection.Id.ProviderKey));
+        return source is null || system is null
+            ? ViewModel.Localization["RawFieldsUnavailable"]
+            : WinPoolSourceDetails.Describe(system, source);
+    }
+
     private List<CommandSpec> BuildCommandSpecs()
     {
         var selected = ViewModel.SelectedWorkspaceItem;
@@ -418,28 +476,7 @@ public sealed partial class MainPage : Page
 
         var surface = ViewModel.GetSelectedCommandSurface();
         var commands = surface is null ? new List<CommandSpec>() : surface.Commands.Select(BuildCommandSpec).ToList();
-        if (SelectedSourceObject() is not null)
-            commands.Add(new(Text("来源详情", "Source details"), "\uE946", true, ShowSourceDetailsAsync));
         return commands;
-    }
-
-    private WinPoolSystem? SelectedSourceSystem() => ViewModel.SelectedSystem.SourceFacts is { } facts ? new WinPoolSystem(facts) : null;
-
-    private WinPoolObject? SelectedSourceObject() => SelectedSourceSystem()?.Objects.FirstOrDefault(x =>
-        x.Id == ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey
-        || x.Sources.Any(source => source.Id == ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey));
-
-    private async Task ShowSourceDetailsAsync()
-    {
-        var item = SelectedSourceObject();
-        var system = SelectedSourceSystem();
-        if (item is null || system is null) return;
-        await new ContentDialog
-        {
-            XamlRoot = XamlRoot, Title = Text("来源详情", "Source details"), CloseButtonText = ViewModel.Localization["Close"],
-            Content = new ScrollViewer { MaxHeight = 500, Content = new TextBlock
-                { Text = WinPoolSourceDetails.Describe(system, item), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } }
-        }.ShowAsync();
     }
 
     private CommandSpec BuildCommandSpec(ManageCommandView command) =>
@@ -497,14 +534,6 @@ public sealed partial class MainPage : Page
                 Spec("删除分区", "Delete partition", "\uE74D", command, NavigatePartitionAsync),
             ManageCommandKind.OptimizeDrive =>
                 Spec("优化驱动器", "Optimize drive", "\uE945", command, OptimizeDrivesAsync),
-            ManageCommandKind.ExportCategory =>
-                new CommandSpec(
-                    Text(
-                        $"导出 [{ViewModel.SelectedCategoryTitle}] 信息列表",
-                        $"Export [{ViewModel.SelectedCategoryTitle}] info list"),
-                    "\uE8B6",
-                    command.IsEnabled,
-                    ExportListAsync),
             _ => throw new ArgumentOutOfRangeException(nameof(command))
         };
 
@@ -630,31 +659,6 @@ public sealed partial class MainPage : Page
     }
 
     private async Task RescanAsync() => await ViewModel.ScanAsync();
-
-    private async Task ExportListAsync()
-    {
-        var columns = ViewModel.ComparisonColumns;
-        if (columns.Count == 0)
-        {
-            return;
-        }
-
-        var csv = ManageCategoryCsvExporter.Create(
-            ViewModel.Localization["Name"],
-            columns.Select(column => new ManageExportColumn(
-                column.Name,
-                column.Rows.Select(row => new ManageExportProperty(row.Label, row.Value)).ToArray()))
-                .ToArray());
-
-        var path = await new WinPool.App.Services.DesktopExportService().ExportCsvAsync(
-            $"WinPool-{ViewModel.SelectedCategory}-{DateTime.Now:yyyyMMdd-HHmmss}",
-            csv);
-        if (path is not null)
-        {
-            ViewModel.PresentNotification(WorkspaceNotificationFactory.ExportCompleted(
-                $"export-list:{DateTimeOffset.UtcNow.Ticks}"));
-        }
-    }
 
     private async Task ExportAsync()
     {

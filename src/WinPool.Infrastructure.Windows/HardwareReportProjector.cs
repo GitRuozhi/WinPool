@@ -4,7 +4,7 @@ using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 
-public sealed record HardwareReportCell(string ObjectId, string Value, string Details);
+public sealed record HardwareReportCell(string ObjectId, string Value, string RawFields);
 public sealed record HardwareReportRow(string Label, IReadOnlyList<HardwareReportCell> Cells);
 public sealed record HardwareReportSection(IReadOnlyList<HardwareReportRow> Rows);
 public sealed record HardwareReportCategory(string Name, IReadOnlyList<HardwareReportSection> Sections);
@@ -86,7 +86,7 @@ public static class HardwareReportProjector
         categories.Add(Single(T("Storage", "Storage"), summary.Select(x =>
             R(T(StorageZh(x.PropertyTextKey), StorageEn(x.PropertyTextKey)),
                 new HardwareReportCell(document.Id, x.Presentation == ManageValuePresentation.LocalizationKey ? T("未知", "Unknown") : x.RawValue,
-                    StorageDetails(system, x.PropertyTextKey, chinese)))).ToArray()));
+                    StorageRawFields(system, x.PropertyTextKey, chinese)))).ToArray()));
 
         var gpus = ByType(system, FactObjectType.VideoController);
         categories.Add(Multi(T("GPU", "GPU"), gpus,
@@ -229,7 +229,7 @@ public static class HardwareReportProjector
             .Where(x => Text(x, "PNPDeviceID").Contains(signature, StringComparison.OrdinalIgnoreCase)).ToArray();
         return matches.Length == 1 ? matches[0] : null;
     }
-    private static string StorageDetails(WinPoolSystem system, string key, bool chinese)
+    private static string StorageRawFields(WinPoolSystem system, string key, bool chinese)
     {
         var classes = key switch
         {
@@ -240,15 +240,16 @@ public static class HardwareReportProjector
             "Partition" => ["MSFT_Partition"],
             _ => ["MSFT_Volume", "Win32_LogicalDisk"]
         };
-        var lines = classes.Select(className => system.Sources
-            .Where(x => x.ClassName.Equals(className, StringComparison.Ordinal))
-            .OrderByDescending(x => x.CapturedAt).FirstOrDefault())
-            .Select(source => source is null
-                ? (chinese ? "未采集" : "Not collected")
-                : $"{source.ClassName}: {source.ReadState}, {source.CapturedAt.LocalDateTime:G}"
-                    + (string.IsNullOrWhiteSpace(source.ReasonCode) ? "" : $", {source.ReasonCode}"));
-        return (chinese ? "与管理页系统摘要共用同一投影。" : "Uses the same projection as the Manage system summary.")
-            + Environment.NewLine + string.Join(Environment.NewLine, lines);
+        var rawFields = system.Objects
+            .Where(item => item.Sources.Any(observation => system.Sources.Any(source =>
+                source.Id == observation.SourceRef && classes.Contains(source.ClassName, StringComparer.Ordinal))))
+            .Select(item => WinPoolSourceDetails.Describe(system, item))
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return rawFields.Length == 0
+            ? (chinese ? "未采集" : "Not collected")
+            : string.Join(Environment.NewLine + Environment.NewLine, rawFields);
     }
     private static HardwareReportCell MonitorEdid(WinPoolSystem system, WinPoolObject monitor, string field, string? fallback = null)
     {

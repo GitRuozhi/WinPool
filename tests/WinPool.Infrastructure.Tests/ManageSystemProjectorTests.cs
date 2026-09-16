@@ -257,8 +257,6 @@ public sealed class ManageSystemProjectorTests
             command.Kind == ManageCommandKind.OpenExplorer).IsEnabled);
         Assert.False(partition.Commands.Single(command =>
             command.Kind == ManageCommandKind.ShowSystemProperties).IsEnabled);
-        Assert.True(partition.Commands.Single(command =>
-            command.Kind == ManageCommandKind.ExportCategory).IsEnabled);
         Assert.False(partition.SystemDialogTarget.HasResolvedPartition);
         Assert.Empty(partition.SystemDialogTarget.PartitionPath);
         Assert.Empty(partition.SystemDialogTarget.DriveLetter);
@@ -270,9 +268,7 @@ public sealed class ManageSystemProjectorTests
             Object(localSystem, WinPool.Domain.StorageObjectKind.StoragePool, "pool:1"),
             ManageObjectRole.StoragePool,
             ManageWorkspaceCategory.Pool);
-        Assert.All(
-            localPool.Commands.Where(command => command.Kind != ManageCommandKind.ExportCategory),
-            command => Assert.False(command.IsEnabled));
+        Assert.All(localPool.Commands, command => Assert.False(command.IsEnabled));
     }
 
     [Fact]

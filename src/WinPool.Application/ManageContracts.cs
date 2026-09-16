@@ -151,8 +151,7 @@ public enum ManageCommandKind
     FormatPartition,
     EditPartition,
     DeletePartition,
-    OptimizeDrive,
-    ExportCategory
+    OptimizeDrive
 }
 
 public sealed record ManageCommandView(
