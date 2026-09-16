@@ -25,6 +25,11 @@ public sealed class AgentInventoryCoordinatorTests
         await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
         await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
         Assert.Empty(harness.provider.Sequence);
+        Assert.Collection(harness.Events,
+            e => Assert.True(Assert.IsType<AgentInventoryStartedEvent>(e).IsAutomatic),
+            e => Assert.True(Assert.IsType<AgentInventoryUpdatedEvent>(e).IsAutomatic),
+            e => Assert.True(Assert.IsType<AgentInventoryStartedEvent>(e).IsAutomatic),
+            e => Assert.True(Assert.IsType<AgentInventoryUpdatedEvent>(e).IsAutomatic));
         var reports = harness.Events.OfType<AgentInventoryUpdatedEvent>().ToArray();
         Assert.Equal(new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware }, reports.Select(x => x.Purpose));
         Assert.Equal(reports[1].Document, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync()));
@@ -34,6 +39,8 @@ public sealed class AgentInventoryCoordinatorTests
         await harness.CaptureAsync(NetworkCapture(2, ["ethernet", "wifi"]), CollectionPurpose.Storage);
         await harness.CaptureAsync(NetworkCapture(3, ["wifi"]), CollectionPurpose.Hardware);
         Assert.Equal(4, harness.Events.OfType<AgentInventoryUpdatedEvent>().Count());
+        Assert.All(harness.Events.Skip(4).OfType<AgentInventoryStartedEvent>(), e => Assert.False(e.IsAutomatic));
+        Assert.All(harness.Events.Skip(4).OfType<AgentInventoryUpdatedEvent>(), e => Assert.False(e.IsAutomatic));
     }
 
     [Fact]
@@ -43,8 +50,10 @@ public sealed class AgentInventoryCoordinatorTests
         harness.provider.Sequence.Enqueue((CollectionPurpose.Storage, null));
         harness.provider.Sequence.Enqueue((CollectionPurpose.Hardware, NetworkCapture(1, ["ethernet"], includeOtherObjects: true)));
         await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
-        Assert.IsType<AgentInventoryFailedEvent>(harness.Events[0]);
-        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[1]).Purpose);
+        Assert.True(Assert.IsType<AgentInventoryStartedEvent>(harness.Events[0]).IsAutomatic);
+        Assert.True(Assert.IsType<AgentInventoryFailedEvent>(harness.Events[1]).IsAutomatic);
+        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryStartedEvent>(harness.Events[2]).Purpose);
+        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[3]).Purpose);
 
         await using var cancelled = await InventoryHarness.CreateAsync();
         using var cancellation = new CancellationTokenSource();
@@ -60,8 +69,8 @@ public sealed class AgentInventoryCoordinatorTests
         harness.provider.Sequence.Enqueue((CollectionPurpose.Storage, NetworkCapture(0, ["storage"], includeOtherObjects: true)));
         harness.provider.Sequence.Enqueue((CollectionPurpose.Hardware, null));
         await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
-        var saved = Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[0]);
-        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryFailedEvent>(harness.Events[1]).Purpose);
+        var saved = Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[1]);
+        Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryFailedEvent>(harness.Events[3]).Purpose);
         Assert.Equal(saved.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
     }
 

@@ -7,6 +7,44 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class LocalInventoryObserverTests
 {
     [Fact]
+    public async Task CaptureLifecycleIsForwardedButHistoryAndCacheAreNotCaptureSuccesses()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var connection = new Connection { Cached = Payload(1, "cache") };
+        var reports = new List<AgentEvent>();
+        var failures = new List<string>();
+        var applied = new List<string>();
+        var observer = new LocalInventoryObserver(connection, document =>
+        {
+            applied.Add(document.DisplayName);
+            return Task.CompletedTask;
+        }, (code, _) => failures.Add(code), report =>
+        {
+            if (report is AgentInventoryUpdatedEvent) Assert.Contains("captured", applied);
+            reports.Add(report);
+        });
+        await observer.LoadHistoryAsync(() => Task.FromResult<LocalInventoryDocumentPayload?>(Payload(0, "history")));
+        var watching = observer.RunAsync(Task.CompletedTask, timeout.Token);
+        Assert.Empty(reports);
+        AgentEvent[] expected =
+        [
+            new AgentInventoryStartedEvent(CollectionPurpose.Storage, DateTimeOffset.UtcNow, true),
+            new AgentInventoryUpdatedEvent(CollectionPurpose.Storage, Payload(2, "captured"), DateTimeOffset.UtcNow, true),
+            new AgentInventoryStartedEvent(CollectionPurpose.Hardware, DateTimeOffset.UtcNow, true),
+            new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "test.failure", DateTimeOffset.UtcNow, true)
+        ];
+        foreach (var report in expected) connection.Events.Writer.TryWrite(report);
+        // Invalid reports must never display a successful-capture notification.
+        connection.Events.Writer.TryWrite(new AgentInventoryUpdatedEvent(CollectionPurpose.Hardware,
+            Payload(3, "invalid") with { Sha256 = new string('0', 64) }, DateTimeOffset.UtcNow, true));
+        connection.Events.Writer.TryComplete();
+        await watching.WaitAsync(timeout.Token);
+        Assert.Equal(expected, reports);
+        Assert.Equal(new[] { "history", "cache", "captured" }, applied);
+        Assert.Equal("inventory.report.apply_failed", Assert.Single(failures));
+    }
+
+    [Fact]
     public async Task HistoryIsVisibleBeforeAgentReadyThenBothReportsReplaceItWithoutRescanning()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

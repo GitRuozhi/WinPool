@@ -530,17 +530,24 @@ public sealed class NamedPipeAgentConnectionTests
         // Both startup phases and failures cross the real named event pipe to every App watcher.
         foreach (var purpose in new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware })
         {
-            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, manageInventory.Document, occurredAt));
+            var started = new AgentInventoryStartedEvent(purpose, occurredAt, IsAutomatic: true);
+            eventHub.Publish(started);
+            Assert.True(await eventEnumerator.MoveNextAsync());
+            Assert.Equal(started, Assert.IsType<AgentInventoryStartedEvent>(eventEnumerator.Current));
+            Assert.True(await secondEventEnumerator.MoveNextAsync());
+            Assert.Equal(started, Assert.IsType<AgentInventoryStartedEvent>(secondEventEnumerator.Current));
+            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, manageInventory.Document, occurredAt, IsAutomatic: true));
             Assert.True(await eventEnumerator.MoveNextAsync());
             var report = Assert.IsType<AgentInventoryUpdatedEvent>(eventEnumerator.Current);
             Assert.Equal(purpose, report.Purpose);
+            Assert.True(report.IsAutomatic);
             Assert.Equal(manageInventory.Document, report.Document);
             Assert.True(await secondEventEnumerator.MoveNextAsync());
             Assert.Equal(report, Assert.IsType<AgentInventoryUpdatedEvent>(secondEventEnumerator.Current));
         }
-        eventHub.Publish(new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "test.capture_failed", occurredAt));
+        eventHub.Publish(new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "test.capture_failed", occurredAt, IsAutomatic: true));
         Assert.True(await eventEnumerator.MoveNextAsync());
-        Assert.IsType<AgentInventoryFailedEvent>(eventEnumerator.Current);
+        Assert.True(Assert.IsType<AgentInventoryFailedEvent>(eventEnumerator.Current).IsAutomatic);
         Assert.True(await secondEventEnumerator.MoveNextAsync());
         Assert.IsType<AgentInventoryFailedEvent>(secondEventEnumerator.Current);
         var cachedInventoryResponse = await connection.SendAsync(

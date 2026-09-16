@@ -54,7 +54,7 @@ internal sealed class AgentInventoryCoordinator
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await CaptureManageAsync(new CaptureAgentManageInventoryRequest(CorrelationId.New(), purpose), cancellationToken);
+                await CaptureManageAsync(new CaptureAgentManageInventoryRequest(CorrelationId.New(), purpose), cancellationToken, isAutomatic: true);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
@@ -62,7 +62,7 @@ internal sealed class AgentInventoryCoordinator
                 // A native provider failure must not fault an unobserved startup task
                 // or prevent the independent full-hardware attempt.
                 System.Diagnostics.Trace.TraceError("agent.inventory.startup_failed: {0}", exception);
-                publish(new AgentInventoryFailedEvent(purpose, "agent.inventory.startup_failed", DateTimeOffset.UtcNow));
+                publish(new AgentInventoryFailedEvent(purpose, "agent.inventory.startup_failed", DateTimeOffset.UtcNow, IsAutomatic: true));
             }
         }
     }
@@ -86,12 +86,14 @@ internal sealed class AgentInventoryCoordinator
 
     public async Task<ApplicationResult<AgentResponse>> CaptureManageAsync(
         CaptureAgentManageInventoryRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isAutomatic = false)
     {
         await localCaptureGate.WaitAsync(cancellationToken);
         try
         {
             if (!Enum.IsDefined(request.Purpose)) return Failed(request.CorrelationId, "agent.inventory.invalid_purpose");
+            publish(new AgentInventoryStartedEvent(request.Purpose, DateTimeOffset.UtcNow, isAutomatic));
             var document = request.Purpose == CollectionPurpose.Hardware
                 ? await manageProvider.CollectHardwareAsync(cancellationToken)
                 : await manageProvider.CollectLocalAsync(cancellationToken);
@@ -134,7 +136,7 @@ internal sealed class AgentInventoryCoordinator
                 throw new InvalidDataException("The Local inventory identity is inconsistent.");
             }
             await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
-            publish(new AgentInventoryUpdatedEvent(request.Purpose, payload, DateTimeOffset.UtcNow));
+            publish(new AgentInventoryUpdatedEvent(request.Purpose, payload, DateTimeOffset.UtcNow, isAutomatic));
             return Succeeded(
                 new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
                 request.CorrelationId,
@@ -142,6 +144,7 @@ internal sealed class AgentInventoryCoordinator
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            publish(new AgentInventoryFailedEvent(request.Purpose, "agent.inventory.cancelled", DateTimeOffset.UtcNow, isAutomatic));
             return ApplicationResult<AgentResponse>.FromStatus(
                 ApplicationStatus.Cancelled,
                 request.CorrelationId);
@@ -155,7 +158,7 @@ internal sealed class AgentInventoryCoordinator
                 or Microsoft.Data.Sqlite.SqliteException
                 or UnauthorizedAccessException)
         {
-            publish(new AgentInventoryFailedEvent(request.Purpose, "agent.inventory.manage_capture_failed", DateTimeOffset.UtcNow));
+            publish(new AgentInventoryFailedEvent(request.Purpose, "agent.inventory.manage_capture_failed", DateTimeOffset.UtcNow, isAutomatic));
             return Failed(request.CorrelationId, "agent.inventory.manage_capture_failed");
         }
         finally

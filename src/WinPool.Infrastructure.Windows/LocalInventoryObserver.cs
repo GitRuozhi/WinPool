@@ -6,7 +6,8 @@ namespace WinPool.Infrastructure.Windows;
 public sealed class LocalInventoryObserver(
     IAgentConnection connection,
     Func<StorageSystemDocument, Task> apply,
-    Action<string, Exception?> reportFailure)
+    Action<string, Exception?> reportFailure,
+    Action<AgentEvent>? reportCapture = null)
 {
     public async Task LoadHistoryAsync(Func<Task<LocalInventoryDocumentPayload?>> read)
     {
@@ -36,13 +37,19 @@ public sealed class LocalInventoryObserver(
                 {
                     switch (events.Current)
                     {
+                        case AgentInventoryStartedEvent started:
+                            reportCapture?.Invoke(started);
+                            break;
                         case AgentInventoryUpdatedEvent updated:
                             await apply(LocalInventoryDocumentCodec.Decode(updated.Document));
+                            reportCapture?.Invoke(updated);
                             break;
                         case AgentInventoryFailedEvent failed:
-                            reportFailure($"{failed.Code}.{failed.Purpose}", null);
+                            if (reportCapture is not null) reportCapture(failed);
+                            else reportFailure($"{failed.Code}.{failed.Purpose}", null);
                             break;
-                        case AgentStateReseedEvent:
+                        case AgentStateReseedEvent reseed:
+                            reportCapture?.Invoke(reseed);
                             await ReloadAsync(cancellationToken);
                             break;
                     }
