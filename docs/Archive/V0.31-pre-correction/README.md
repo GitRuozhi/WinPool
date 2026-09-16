@@ -16,7 +16,7 @@
 
 ## 参考资料
 
-1. [Reference/AI-Agent-Harness-项目管理架构参考.md](../../Reference/AI-Agent-Harness-项目管理架构参考.md)
+1. [AI-Agent-Harness-项目管理架构参考.md](../AI-Agent-Harness-项目管理架构参考.md)
    - 非权威的项目管理参考。它提供方法，不替代 WinPool 的 AGENTS、产品边界或质量门。
 
 V0.2 的历史计划、实施记录和手动验收原文已归档到项目根

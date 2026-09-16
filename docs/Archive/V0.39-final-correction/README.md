@@ -24,4 +24,4 @@ Evidence recorded in the frozen Plan and changelog:
 - No real storage-structure mutation or test-directory write was performed.
 
 The next normal implementation phase is V0.40. Broader deferred work is recorded
-in [`../../Reference/V0.8-V0.9-技术债务参考.md`](../../Reference/V0.8-V0.9-技术债务参考.md).
+in [`../V0.8-V0.9-技术债务参考.md`](../V0.8-V0.9-技术债务参考.md).

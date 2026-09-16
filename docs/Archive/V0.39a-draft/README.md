@@ -10,5 +10,5 @@ fixed timeout assumptions, and completion checklist did not conform to the curre
 `Va.bc` version rule or the final V0.3 scope decision.
 
 The reusable observations were revised into
-[`../../Reference/V0.8-V0.9-技术债务参考.md`](../../Reference/V0.8-V0.9-技术债务参考.md).
+[`../V0.8-V0.9-技术债务参考.md`](../V0.8-V0.9-技术债务参考.md).
 The draft is historical input only and does not define current requirements.

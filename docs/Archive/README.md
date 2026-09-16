@@ -21,6 +21,9 @@
 | [release-notes-v0.42.md](release-notes-v0.42.md) | 过期阶段性说明；不是现行 CHANGELOG | 2026-09-10 | 原 `temp/release-notes-v0.42.md` | V0.42 工作笔记；正式记录已在文档重构归档的 CHANGELOG 原件 |
 | [文档瘦身.txt](文档瘦身.txt) | 已替代的文档整理手稿 | 2026-09-10 | 原 `Ref/文档瘦身.txt` | 文档瘦身计划原稿；已由 20260910 文档重构落地，不作为当前要求 |
 | [20260910-documentation-reset](20260910-documentation-reset/README.md) | 已替代的文档原件；旧控件实现有缺陷，未宣告验收完成 | 2026-09-10 | V0.47；39f0d4e | 内部单语言切换前原件、原 V0.47 控件计划和历史变更记录；其后活动计划为 V0.48，现已归档 |
+| [轻松交流.txt](轻松交流.txt) | 已归档的社区链接接入原始片段；当前实现以代码为准 | 2026-08-31 | 原 `docs/Reference/轻松交流.txt` | QQ 群 HTML、iOS 与 Android 示例；不是 WinPool 当前开发方法或事实源 |
+| [V0.8–V0.9 技术债务参考](V0.8-V0.9-技术债务参考.md) | 基于 V0.39 的过期候选清单；未来阶段须按届时代码重新审计 | 2026-08-14 | V0.39a 草案及后续审查 | 包含已退出的页面、Worker、Broker、外部工具与旧脱敏边界；不转为当前 Design 或 Plan |
+| [AI Agent Harness 项目管理架构参考](AI-Agent-Harness-项目管理架构参考.md) | 文档体系历史来源；有效做法已由当前 AGENTS、Development 和 Quality 接替 | 2026-08-10 | 文档架构提交 `236eb3f` | 面向新项目的通用管理方法，不是 WinPool 当前要求 |
 | [`V0.47-editor-pages/`](V0.47-editor-pages/) | 开发者结束；拆页已落地；原生 PE8 未验证 | 2026-09-07 | V0.47；实现 `ca03c69`…`3305261` | 用存储结构编辑和磁盘分区编辑替换编辑页 |
 | [`V0.47-standalone-pool-editor/`](V0.47-standalone-pool-editor/) | 已认可产品设计 | 2026-09-07 | V0.47 | 单机存储池编辑产品设计 |
 | [`V0.2/`](V0.2/) | archived | 2026-08-10 | V0.2；源码基线 `ec8b34a` | 15 份架构、实现、验收和人工测试计划及其冻结索引 |

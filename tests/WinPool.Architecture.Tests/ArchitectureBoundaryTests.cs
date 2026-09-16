@@ -136,12 +136,6 @@ public sealed class ArchitectureBoundaryTests
         var archive = Path.Combine(root, "docs", "Archive", "V0.2");
         Assert.Equal(16, Directory.EnumerateFiles(archive, "*.md").Count());
         Assert.True(File.Exists(Path.Combine(root, "docs", "Archive", "README.md")));
-        Assert.True(File.Exists(Path.Combine(
-            root,
-            "docs",
-            "Reference",
-            "AI-Agent-Harness-项目管理架构参考.md")));
-
         var operationalRules = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
         var currentPlan = File.ReadAllText(
             Path.Combine(root, "docs", "Archive", "V0.32", "Plan.md"));
