@@ -109,6 +109,8 @@ Windows 11 has not yet received equivalent testing because current storage hardw
 
 ## Windows 与交付
 
+2026-09-16 确认：只提供便携版与安装版两种交付方式，两者使用同一产品版本并具有相同功能。相关页面统一由软件内置开发者模式控制，不再划分 Standard、Preview 等功能版本，不建立按发行版本区分的功能或数据模型。交付储备及实施前待核对项见[便携版与安装版交付方案](Design/WinPool-Distribution-Plan.md)。
+
 最低受支持系统为 Windows 10 22H2 x64，主要平台为 Windows 11 24H2 / 25H2 x64；这是软件支持范围，不意味着所有 SKU/提供程序均可创建同一存储配置，也不意味着研究已经完成 Windows 11 等价测试。编译 TFM 不等于最低支持系统。ARM64、x86 和更早系统不属于公开保证。
 
 当前只交付完整目录形式的无打包、自包含 x64 便携版。数据默认位于 `%LocalAppData%/WinPool`，可显式选择可写的程序旁 `Data`。签名 MSIX 在 V0.8–V0.9，Store 在 V1.0 完成之后；目前没有已发布的 MSIX 或 Store 页面。安装方式不增加存储权限，不改变进程架构；账号、包上传和正式发布另行授权。
