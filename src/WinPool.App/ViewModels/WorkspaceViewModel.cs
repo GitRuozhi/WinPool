@@ -1744,7 +1744,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             WinPool.Application.ManageValuePresentation.LocalDateTime =>
                 DateTimeOffset.TryParse(property.RawValue, out var timestamp)
                     ? timestamp.LocalDateTime.ToString("G")
-                    : "—",
+                    : string.Empty,
             _ => throw new ArgumentOutOfRangeException(nameof(property))
         };
 

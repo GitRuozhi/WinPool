@@ -12,7 +12,7 @@ public static class WinPoolHardwarePresentation
                 "VolumeLabel" => "FileSystemLabel", "VersionNumber" => "DisplayVersion", "Version" => "WindowsProductName", _ => row.PropertyTextKey };
             return snapshot.FieldIssues.Any(x => x.ObjectId == objectId && x.FieldName == field && x.Reason != "SourceConflict")
                 || (field == "Size" && snapshot.Warnings.Any(x => x.StableId == objectId && x.Code == "facts.numeric-out-of-range"))
-                ? row with { RawValue = "—", Presentation = ManageValuePresentation.Plain } : row;
+                ? row with { RawValue = string.Empty, Presentation = ManageValuePresentation.Plain } : row;
         }).ToArray();
 
     public static IReadOnlyList<WinPoolHardwareSourceRow> SourceRows(WinPoolSystem system) => system.Sources

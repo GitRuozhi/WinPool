@@ -7,7 +7,7 @@ internal static class ManagePartitionProjector
 {
     internal static IReadOnlyList<ManagePropertyView> Properties(StorageSnapshot snapshot, StoragePartitionUnion item)
     {
-        string Bytes(long? value) => value is { } bytes ? TopologyProjector.FormatBytes(bytes) : "—";
+        string Bytes(long? value) => value is { } bytes ? TopologyProjector.FormatBytes(bytes) : string.Empty;
         var os = snapshot.OsDisks.FirstOrDefault(x => x.StableId == item.OsDiskId);
         var owner = snapshot.PhysicalDisks.FirstOrDefault(x => x.StableId == os?.PhysicalDiskStableId)?.FriendlyName
             ?? snapshot.VirtualDisks.FirstOrDefault(x => x.StableId == os?.VirtualDiskStableId)?.FriendlyName ?? os?.FriendlyName ?? "";

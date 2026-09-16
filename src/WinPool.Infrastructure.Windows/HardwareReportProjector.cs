@@ -134,7 +134,7 @@ public static class HardwareReportProjector
         params (string Label, Func<WinPoolObject, HardwareReportCell> Cell)[] rows) =>
         new(rows.Select(row => R(row.Label, objects.Count == 0 ? [Missing()] : objects.Select(row.Cell).ToArray())).ToArray());
     private static HardwareReportRow R(string label, params HardwareReportCell[] cells) => new(label, cells);
-    private static HardwareReportCell Missing(string reason = "Not collected") => new(string.Empty, "—", reason);
+    private static HardwareReportCell Missing(string reason = "Not collected") => new(string.Empty, string.Empty, reason);
     private static IReadOnlyList<WinPoolObject> ByType(WinPoolSystem system, FactObjectType type) => system.Objects
         .Where(x => x.ObjectType == type).ToArray();
     private static IReadOnlyList<WinPoolObject> ByTypes(WinPoolSystem system, params FactObjectType[] types) => system.Objects
@@ -151,17 +151,17 @@ public static class HardwareReportProjector
     {
         if (item is null) return Missing();
         var field = names.Select(item.Field).FirstOrDefault(x => x is { ReadState: FieldReadState.Returned, Value: not null });
-        var value = field is null ? "—" : Display(field);
-        if (value != "—" && suffix is not null) value += suffix;
+        var value = field is null ? string.Empty : Display(field);
+        if (value.Length > 0 && suffix is not null) value += suffix;
         return new(item.Id, value, WinPoolSourceDetails.Describe(system, item));
     }
     private static HardwareReportCell Literal(WinPoolSystem system, WinPoolObject? item, string value) => item is null
-        ? new(string.Empty, value.Length == 0 ? "—" : value, "Derived value")
-        : new(item.Id, value.Length == 0 ? "—" : value, WinPoolSourceDetails.Describe(system, item));
+        ? new(string.Empty, value, "Derived value")
+        : new(item.Id, value, WinPoolSourceDetails.Describe(system, item));
     private static HardwareReportCell Transform(WinPoolSystem system, WinPoolObject? item, string field, Func<string, string> transform)
     {
         var cell = Cell(system, item, field);
-        return cell.Value == "—" ? cell : cell with { Value = transform(cell.Value) };
+        return cell.Value.Length == 0 ? cell : cell with { Value = transform(cell.Value) };
     }
     private static HardwareReportCell Boolean(WinPoolSystem system, WinPoolObject? item, string field, string yes, string no)
     {
@@ -171,7 +171,7 @@ public static class HardwareReportProjector
     private static HardwareReportCell BoolCode(WinPoolSystem system, WinPoolObject? item, string field, string trueCode, string yes, string no)
     {
         var cell = Cell(system, item, field);
-        return cell.Value == "—" ? cell : cell with { Value = cell.Value == trueCode ? yes : no };
+        return cell.Value.Length == 0 ? cell : cell with { Value = cell.Value == trueCode ? yes : no };
     }
     private static HardwareReportCell Numeric(WinPoolSystem system, WinPoolObject item, string field, string suffix, string? fallback = null) =>
         Cell(system, item, fallback is null ? [field] : [field, fallback], suffix);
@@ -205,7 +205,7 @@ public static class HardwareReportProjector
     private static HardwareReportCell GpuFallback(WinPoolSystem system, WinPoolObject gpu, string field)
     {
         var direct = Cell(system, gpu, field);
-        if (direct.Value != "—") return direct;
+        if (direct.Value.Length > 0) return direct;
         var fallback = MatchedVideoController(system, gpu);
         return Cell(system, fallback, field);
     }
@@ -278,7 +278,7 @@ public static class HardwareReportProjector
     }
     private static string Display(WinPoolSourceField field)
     {
-        if (field.Value is not { } value) return "—";
+        if (field.Value is not { } value) return string.Empty;
         if (value.ValueKind == JsonValueKind.Array)
             return string.Join(", ", value.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : x.GetRawText()).Where(x => !string.IsNullOrWhiteSpace(x)));
         return field.DisplayValue();

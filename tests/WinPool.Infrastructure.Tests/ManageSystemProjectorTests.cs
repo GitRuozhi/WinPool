@@ -203,6 +203,37 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
+    public void ManagementTablesLeaveMissingValuesBlank()
+    {
+        var source = Document();
+        var document = source.WithCandidate(source.Snapshot with
+        {
+            VirtualDisks = [source.Snapshot.VirtualDisks[0] with
+            {
+                NumberOfColumns = null,
+                Interleave = null
+            }],
+            Partitions = [source.Snapshot.Partitions[0] with { AllocationUnitSize = null }],
+            Volumes = [source.Snapshot.Volumes[0] with { AllocationUnitSize = null }]
+        });
+        var system = InternalStableIdentity.SystemFromDocumentId(document.Id);
+
+        var virtualDisk = new ManageDetailsProjector().Project(
+            document,
+            Object(system, WinPool.Domain.StorageObjectKind.VirtualDisk, "virtual:1"),
+            ManageObjectRole.VirtualDisk,
+            "Virtual01");
+        Assert.Equal(string.Empty, virtualDisk.Properties.Single(x => x.PropertyTextKey == "Columns").RawValue);
+        Assert.Equal(string.Empty, virtualDisk.Properties.Single(x => x.PropertyTextKey == "Interleave").RawValue);
+
+        var partition = new ManageComparisonProjector().Project(
+            document,
+            Object(system, WinPool.Domain.StorageObjectKind.Partition, "partition:1"),
+            ManageObjectRole.Partition);
+        Assert.Equal(string.Empty, partition.Properties.Single(x => x.PropertyTextKey == "AllocationUnit").RawValue);
+    }
+
+    [Fact]
     public void NavigationProjectionMapsPartitionAcrossAllRelatedCategories()
     {
         var document = Document();

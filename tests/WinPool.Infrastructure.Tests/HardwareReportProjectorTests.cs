@@ -53,8 +53,8 @@ public sealed class HardwareReportProjectorTests
         Assert.Equal("-100", report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "水平坐标").Cells[0].Value);
         var gpu = report.Single(x => x.Name == "GPU").Sections[0];
         Assert.Equal("GameViewer Virtual Display Adapter", Assert.Single(gpu.Rows.Single(x => x.Label == "型号").Cells).Value);
-        Assert.Equal("—", Assert.Single(gpu.Rows.Single(x => x.Label == "驱动").Cells).Value);
-        Assert.Equal("—", Assert.Single(gpu.Rows.Single(x => x.Label == "总线").Cells).Value);
+        Assert.Equal(string.Empty, Assert.Single(gpu.Rows.Single(x => x.Label == "驱动").Cells).Value);
+        Assert.Equal(string.Empty, Assert.Single(gpu.Rows.Single(x => x.Label == "总线").Cells).Value);
         Assert.Single(report.Single(x => x.Name == "Monitor").Sections[0].Rows.Single(x => x.Label == "型号").Cells);
         var network = report.Single(x => x.Name == "Network").Sections[0];
         Assert.Equal(2, network.Rows.Single(x => x.Label == "名称").Cells.Count);

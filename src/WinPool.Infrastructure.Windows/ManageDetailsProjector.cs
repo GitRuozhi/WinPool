@@ -111,11 +111,11 @@ public sealed class ManageDetailsProjector
                 rows.Add(P("Health", TopologyProjector.JoinSummary(virtualDisk.HealthStatus, virtualDisk.OperationalStatus)));
                 rows.Add(P("Role", virtualDisk.ResiliencySettingName));
                 rows.Add(P("Capacity", TopologyProjector.FormatBytes(virtualDisk.Size)));
-                rows.Add(P("Columns", virtualDisk.NumberOfColumns?.ToString() ?? "—"));
+                rows.Add(P("Columns", virtualDisk.NumberOfColumns?.ToString() ?? string.Empty));
                 rows.Add(P(
                     "Interleave",
                     virtualDisk.Interleave is null
-                        ? "—"
+                        ? string.Empty
                         : TopologyProjector.FormatBytes(virtualDisk.Interleave.Value)));
                 break;
             }
