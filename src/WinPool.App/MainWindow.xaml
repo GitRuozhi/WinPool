@@ -113,47 +113,22 @@
                 CornerRadius="4"
                 PointerEntered="ActiveSystemSelectorHost_PointerEntered"
                 PointerExited="ActiveSystemSelectorHost_PointerExited">
-                <Button
+                <ComboBox
                     x:Name="ActiveSystemSelector"
                     MinWidth="178"
-                    Padding="10,0,8,0"
                     Background="Transparent"
                     BorderThickness="0"
-                    HorizontalContentAlignment="Stretch"
+                    HorizontalContentAlignment="Left"
                     AutomationProperties.Name="Storage system"
+                    DropDownClosed="ActiveSystemSelector_DropDownClosed"
+                    SelectionChanged="ActiveSystemSelector_SelectionChanged"
                     Visibility="Collapsed">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock
-                            x:Name="ActiveSystemSelectorText"
-                            VerticalAlignment="Center"
-                            HorizontalAlignment="Left"
-                            TextTrimming="CharacterEllipsis" />
-                        <FontIcon
-                            Grid.Column="1"
-                            Width="16"
-                            Height="16"
-                            VerticalAlignment="Center"
-                            Glyph="&#xE70D;" />
-                    </Grid>
-                    <Button.Flyout>
-                        <MenuFlyout
-                            x:Name="ActiveSystemSelectorFlyout"
-                            Placement="BottomEdgeAlignedLeft"
-                            Opening="ActiveSystemSelectorFlyout_Opening"
-                            Closed="ActiveSystemSelectorFlyout_Closed">
-                            <MenuFlyout.MenuFlyoutPresenterStyle>
-                                <Style TargetType="MenuFlyoutPresenter">
-                                    <Setter Property="MinWidth" Value="180" />
-                                    <Setter Property="MaxWidth" Value="420" />
-                                </Style>
-                            </MenuFlyout.MenuFlyoutPresenterStyle>
-                        </MenuFlyout>
-                    </Button.Flyout>
-                </Button>
+                    <ComboBox.ItemContainerStyle>
+                        <Style TargetType="ComboBoxItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Left" />
+                        </Style>
+                    </ComboBox.ItemContainerStyle>
+                </ComboBox>
             </Border>
 
             <StackPanel

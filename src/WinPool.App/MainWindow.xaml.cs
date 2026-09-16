@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
     private bool _initialized;
     private bool _updatingMode;
     private bool _updatingNavigation;
+    private bool _updatingSystemSelector;
     private bool _systemSelectorRefreshPending;
     private string? _pendingSystemSelectionId;
     private bool _requestingElevation;
@@ -397,7 +398,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateActiveSystemName()
     {
-        if (ActiveSystemSelectorFlyout.IsOpen)
+        if (ActiveSystemSelector.IsDropDownOpen)
         {
             _systemSelectorRefreshPending = true;
             return;
@@ -405,59 +406,53 @@ public sealed partial class MainWindow : Window
 
         _systemSelectorRefreshPending = false;
         var system = ViewModel.SelectedSystem;
-        ActiveSystemSelectorFlyout.Items.Clear();
-        var selectorWidth = Math.Clamp(ActiveSystemSelector.ActualWidth, 180d, 420d);
-        foreach (var candidate in ViewModel.SystemCatalog.Systems)
+        _updatingSystemSelector = true;
+        try
         {
-            var prefix = candidate.IsLocal
-                ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
-                : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-            var item = new MenuFlyoutItem
+            ActiveSystemSelector.Items.Clear();
+            ComboBoxItem? selected = null;
+            foreach (var candidate in ViewModel.SystemCatalog.Systems)
             {
-                Text = $"{prefix} {candidate.DisplayName}",
-                Tag = candidate.Id,
-                MinWidth = selectorWidth,
-                MaxWidth = 420,
-                HorizontalContentAlignment = HorizontalAlignment.Left
-            };
-            item.Click += ActiveSystemSelectorItem_Click;
-            ActiveSystemSelectorFlyout.Items.Add(item);
+                var prefix = candidate.IsLocal
+                    ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
+                    : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
+                var item = new ComboBoxItem
+                {
+                    Content = $"{prefix} {candidate.DisplayName}",
+                    Tag = candidate.Id,
+                    MaxWidth = 390,
+                    HorizontalContentAlignment = HorizontalAlignment.Left
+                };
+                ActiveSystemSelector.Items.Add(item);
+                if (candidate.Id.Equals(system?.Id, StringComparison.OrdinalIgnoreCase)) selected = item;
+            }
+            ActiveSystemSelector.SelectedItem = selected;
+            ActiveSystemSelector.Visibility = system is null ? Visibility.Collapsed : Visibility.Visible;
+            AutomationProperties.SetName(ActiveSystemSelector,
+                ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "存储系统" : "Storage system");
         }
-        ActiveSystemSelectorText.Text = system is null
-            ? string.Empty
-            : GetActiveSystemSelectorText(system);
-        ActiveSystemSelector.Visibility = system is null ? Visibility.Collapsed : Visibility.Visible;
-        AutomationProperties.SetName(ActiveSystemSelector,
-            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "存储系统" : "Storage system");
+        finally
+        {
+            _updatingSystemSelector = false;
+        }
         DispatcherQueue.TryEnqueue(UpdateTitleBarPassthroughRegions);
     }
 
-    private string GetActiveSystemSelectorText(StorageSystemDocument system)
+    private void ActiveSystemSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var prefix = system.IsLocal
-            ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
-            : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-        return $"{prefix} {system.DisplayName}";
-    }
+        if (_updatingSystemSelector
+            || ActiveSystemSelector.SelectedItem is not ComboBoxItem { Tag: string systemId }) return;
 
-    private void ActiveSystemSelectorItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { Tag: string systemId })
+        if (ActiveSystemSelector.IsDropDownOpen)
         {
             _pendingSystemSelectionId = systemId;
+            return;
         }
+
+        ViewModel.SelectSystem(systemId);
     }
 
-    private void ActiveSystemSelectorFlyout_Opening(object sender, object e)
-    {
-        var selectorWidth = Math.Clamp(ActiveSystemSelector.ActualWidth, 180d, 420d);
-        foreach (var item in ActiveSystemSelectorFlyout.Items.OfType<MenuFlyoutItem>())
-        {
-            item.MinWidth = selectorWidth;
-        }
-    }
-
-    private void ActiveSystemSelectorFlyout_Closed(object sender, object e)
+    private void ActiveSystemSelector_DropDownClosed(object sender, object e)
     {
         if (_pendingSystemSelectionId is { } systemId)
         {

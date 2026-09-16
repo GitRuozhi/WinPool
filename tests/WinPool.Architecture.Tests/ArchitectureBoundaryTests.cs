@@ -956,13 +956,12 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("x:Name=\"ActiveSystemSelector\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("<Button", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"ActiveSystemSelectorFlyout\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("Placement=\"BottomEdgeAlignedLeft\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("Closed=\"ActiveSystemSelectorFlyout_Closed\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment=\"Left\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("<ComboBox", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("DropDownClosed=\"ActiveSystemSelector_DropDownClosed\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("SelectionChanged=\"ActiveSystemSelector_SelectionChanged\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalContentAlignment\" Value=\"Left\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment = HorizontalAlignment.Left", windowSource, StringComparison.Ordinal);
-        Assert.Contains("if (ActiveSystemSelectorFlyout.IsOpen)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("if (ActiveSystemSelector.IsDropDownOpen)", windowSource, StringComparison.Ordinal);
         Assert.Contains("_systemSelectorRefreshPending = true", windowSource, StringComparison.Ordinal);
         Assert.Contains("_pendingSystemSelectionId = systemId", windowSource, StringComparison.Ordinal);
         Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
