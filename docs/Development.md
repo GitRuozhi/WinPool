@@ -90,7 +90,7 @@ V0.53 在 `UserPreferences` 中保存默认关闭的 `DeveloperMode`，旧格式
 
 数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；测试使用隔离新根。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、冲突检测和故障恢复要求。
 
-普通启动采用 Windows App SDK 单实例机制；重复启动激活已有窗口。必要的提权交接等待旧实例退出后再取得实例键。SQLite 不是实时 Windows 状态的权威，未来真实操作执行前必须重新核对对象及前置条件。
+普通启动采用 Windows App SDK 单实例机制；重复启动激活已有窗口。提权交接是整套 App + Agent 重启：新管理员 bootstrap 以 SID 绑定的 ready/continuation 事件进入等待，期间不初始化 WinUI、不取得实例键、也不连接或复用旧 Agent。旧 App 保存工作区并获得旧 Agent 的后台有序关闭确认后才允许 bootstrap 继续；后者必须按 PID、启动时间和路径核验旧 App、旧 Agent 均已退出，才进入普通启动并创建新的管理员 Agent。取消、事件失败、身份不符或超时均不得接管实例、复用旧 endpoint 或强杀旧进程。等待失败诊断写入数据根 `Diagnostics/elevation-handoff.jsonl`；IPC 正常断开不等同于 Agent 故障。SQLite 不是实时 Windows 状态的权威，未来真实操作执行前必须重新核对对象及前置条件。
 
 ## 构建与运行树
 

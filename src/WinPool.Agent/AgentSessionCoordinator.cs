@@ -89,6 +89,7 @@ public sealed class AgentSessionCoordinator
     private readonly AgentLifecycleStateStore lifecycle;
     private readonly Func<AgentSnapshot>? recoveringSnapshotFactory;
     private AgentShutdownExecution? shutdownExecution;
+    private Task<AgentShutdownExecution>? shutdownTask;
 
     public AgentSessionCoordinator(
         IAgentRequestOperations operations,
@@ -222,6 +223,7 @@ public sealed class AgentSessionCoordinator
             return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
         }
 
+        Task<AgentShutdownExecution> executionTask;
         await shutdownGate.WaitAsync(CancellationToken.None);
         try
         {
@@ -232,24 +234,49 @@ public sealed class AgentSessionCoordinator
                     return ResultForExecution(shutdownExecution, request.CorrelationId);
                 }
 
-                // The gate guarantees one workflow. A second request joins the first,
-                // then retries only after the first has reached ShutdownPending.
-                lifecycle.MarkShuttingDown(DateTimeOffset.UtcNow);
+                if (shutdownTask is { IsCompleted: false })
+                {
+                    executionTask = shutdownTask;
+                }
+                else
+                {
+                    // The gate guarantees one workflow. A subsequent request starts
+                    // another attempt only after a completed pending shutdown.
+                    lifecycle.MarkShuttingDown(DateTimeOffset.UtcNow);
+                    shutdownTask = Task.Run(() => CompleteShutdownAsync(request.Reason));
+                    executionTask = shutdownTask;
+                }
             }
 
-            var execution = await shutdownWorkflow.ExecuteAsync(request.Reason);
-            lock (stateLock)
+            if (request.BeginInBackground)
             {
-                shutdownExecution = execution;
-                lifecycle.RecordExecution(execution);
+                // The old App needs this reply before it closes. The workflow
+                // then observes that exact App instance leave and only then lets
+                // the old Agent release its endpoint and SQLite writer lease.
+                return ApplicationResult<AgentResponse>.Succeeded(
+                    new AgentAcknowledgement(),
+                    request.CorrelationId);
             }
-
-            return ResultForExecution(execution, request.CorrelationId);
         }
         finally
         {
             shutdownGate.Release();
         }
+
+        var execution = await executionTask;
+        return ResultForExecution(execution, request.CorrelationId);
+    }
+
+    private async Task<AgentShutdownExecution> CompleteShutdownAsync(ShutdownReason reason)
+    {
+        var execution = await shutdownWorkflow.ExecuteAsync(reason).ConfigureAwait(false);
+        lock (stateLock)
+        {
+            shutdownExecution = execution;
+            lifecycle.RecordExecution(execution);
+        }
+
+        return execution;
     }
 
     private Task<ApplicationResult<AgentResponse>> RecoveringSnapshotAsync(

@@ -1,6 +1,6 @@
 # 提权重启与 Agent 连接复发修复 Plan
 
-状态：待执行；仅完成计划编制。日期：2026-09-16；代码基线：`ed688d6`（V0.53）。本计划不代表已修复，也不授权真实存储写操作。
+状态：已完成并归档。日期：2026-09-16；计划基线：`ed688d6`（V0.53）。本记录的实现、自动门和隔离原生验证均已完成；未执行真实存储写操作。
 
 ## 目标与范围
 
@@ -33,10 +33,10 @@
 
 | 阶段 | 工作与交付 | 状态 |
 | --- | --- | --- |
-| P1 复现定位 | 记录 App/Agent 路径、文件版本或哈希、PID、启动时间、权限、数据根、Agent session；关联 `app-crash.jsonl`、`agent-control.jsonl` 与连接结果。复现一次正常交接及当前失败，标明最早偏离预期的阶段。必要时加最少量阶段日志，不凭“弃连”字样认定根因。 | 未开始 |
-| P2 整套重启 | 实现上面的确定流程，收口旧 App 全部窗口/任务及旧 Agent 监控/写入/连接，核验两者退出后启动管理员 App + Agent；覆盖 UAC 取消、部分退出与超时。 | 未开始 |
-| P3 新连接就绪 | 新 App 只连接新 Agent；核对新 session/endpoint，完成控制握手、事件订阅和恢复快照。正常旧连接结束不误报，真实拒绝/超时/持久化失败可追溯，不靠吞异常掩盖问题。 | 未开始 |
-| P4 验证收口 | 用失败用例验证修复，再执行下表及相关项目测试和 Release 构建；记录实际命令、运行树及结果。更新受影响的 Development/CHANGELOG，完成后归档本 Plan。 | 未开始 |
+| P1 复现定位 | 已完成。初次隔离交接在 `ElevationHandoffVerify2` 复现“新 bootstrap 未进入等待态”；新增阶段日志记录为 `elevation.handoff.signal_invalid`。原因是 Windows 提权服务使用大写十六进制 SID 哈希，而 bootstrap 使用 IPC 的小写哈希校验同一事件名。另发现 `artifacts/Release` 曾因运行时锁定而混入旧 App 二进制，后续验证全部使用全新、完整的隔离并集运行树。 | 已验证 |
+| P2 整套重启 | 已完成。新管理员 bootstrap 先验证双进程 witness 与同用户事件名、发出 ready 后等待 continuation；它在此之前不初始化 WinUI、不抢单实例、不启动或连接 Agent。旧 App 保存工作区后让旧 Agent 后台确认有序关闭，才释放 continuation 并关闭自己的全部窗口。新 bootstrap 按 PID、启动时间和路径核验旧 App、旧 Agent 都已消失才正常启动；身份不符、不可读或超时均不强杀、不接回旧 Agent。 | 已验证 |
+| P3 新连接就绪 | 已完成。`NamedPipeAgentConnection` 只在控制握手、事件握手和恢复快照都完成后公开活动 handshake；新 App 以该实际 Agent PID/启动时间建立交接 witness。正常旧管道断开不弹误报；真实交接阶段写入隔离数据根的 `Diagnostics/elevation-handoff.jsonl`。 | 已验证 |
+| P4 验证收口 | 已完成。完成三轮原生 WinUI 的普通→管理员整套交接、取消和 continuation 超时保护；运行 restore、586 项 Release 自动测试、Release 并集构建与依赖审计。 | 已验证 |
 
 P1 用于定位和验证，不再重新讨论是否复用旧 Agent。后台监控按既有偏好在新 Agent 恢复；旧监控会话先明确结束，不冒充连续采样。新软件尚未完成连接时不宣布“重启成功”。
 
@@ -57,6 +57,14 @@ P1 用于定位和验证，不再重新讨论是否复用旧 Agent。后台监�
 
 原生验收从设置页和主窗口实际入口执行；在隔离运行树中连续完成至少三轮“普通启动 → 旧 App/Agent 全退出 → 管理员整套启动 → 连接恢复”，同时覆盖取消及退出超时。UAC 安全桌面由用户交互，不绕过系统确认。验证期间仅使用只读请求，不执行磁盘修改。缺少实际提权重启验证时标记 `unverified`，不得以自动测试通过宣告本问题已修复。
 
-## 本轮编制结果
+## 实际执行结果
 
-已阅读相关实现、`116ac08` 修复记录及现有测试入口；尚未复现、修改业务代码、构建、测试或操作运行实例。执行后再填写 P1 根因与各项证据，不预写通过结果。
+- 隔离数据和运行树：`artifacts/ElevationHandoffVerify2` 至 `ElevationHandoffVerify6`；均为新建便携 `Data` 根，未接触 `%LocalAppData%/WinPool`，也未执行任何真实存储结构命令。
+- 完整交接三轮均由设置页“本机真实操作 → 以管理员身份重启”触发：
+  - `Verify3`：旧 App/Agent `36008`/`33072` 退出；新管理员 App/Agent `10760`/`35476`，窗口为 `WinPool [管理员]`，endpoint session 为 `20ec144b-f9e4-4694-aeb2-cc15a82aec8d`。
+  - `Verify5`：旧 `29108`/`22120` 退出；新 `27204`/`36764`，endpoint session 为 `f84168c4-cd87-4146-beaa-8de11ca4fe2d`。
+  - `Verify6`：旧 `37188`/`27816` 退出；新 `23640`/`21364`，endpoint session 为 `96e1a496-c9a0-49c1-bdc9-083382d4d6d2`。
+- 取消确认时，`Verify4` 的 App/Agent `34108`/`37468` 均保持原 PID；无新增 WinPool 进程。有效等待协议不发送 continuation 时，bootstrap `35600` 发出 ready、没有业务窗口，约 30 秒后自行退出并记录 `elevation.handoff.continuation_timeout`；原 `34108`/`37468` 仍运行。
+- 自动验证：`dotnet restore WinPool.slnx` 成功；`dotnet test WinPool.slnx -c Release --no-build --no-restore --maxcpucount:1 -m:1` 为 586/586；`dotnet build WinPool.slnx -c Release --no-restore -m:1` 为 0 警告、0 错误，运行树合并为 288 个共享、293 个 App 专有、7 个 Agent 专有文件且 0 碰撞；`dotnet list WinPool.slnx package --vulnerable --include-transitive` 未发现易受攻击包。
+
+隔离运行使用默认关闭的连续监控，因此没有把“监控已开启时恢复采样”冒充为本轮人工通过；该产品场景保持 `unverified`，不影响本次已验证的整套进程交接、取消和超时边界。

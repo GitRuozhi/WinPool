@@ -158,6 +158,22 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WinPool"));
 
+    /// <summary>
+    /// Identity of the Agent accepted by the current control and event
+    /// handshakes. It is deliberately unavailable until both handshakes and
+    /// the recovery snapshot have completed.
+    /// </summary>
+    public AgentHandshake? ActiveHandshake
+    {
+        get
+        {
+            lock (lifetimeSync)
+            {
+                return handshake;
+            }
+        }
+    }
+
     public async Task<ApplicationResult<AgentHandshake>> ConnectAsync(
         CancellationToken cancellationToken)
     {

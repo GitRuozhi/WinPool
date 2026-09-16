@@ -802,7 +802,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.True(developerMode > firstCardEnd);
         Assert.Contains("if (await mainWindow.RequestExecutionModeAsync(requestedMode))", settingsCode, StringComparison.Ordinal);
         Assert.Contains("return true;", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("if (!closingForElevationHandoff)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (_closingForElevationHandoff)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.Monitoring.Dispose();", mainWindow, StringComparison.Ordinal);
     }
 
     [Fact]

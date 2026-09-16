@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.ComponentModel;
 using System.Security.Principal;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Application;
@@ -25,46 +27,124 @@ public sealed class WindowsPrivilegeService : IPrivilegeService
 
 public sealed class WindowsElevationRestartService : IElevationRestartService
 {
-    public Task<ElevationRestartResult> RestartElevatedAsync(
+    private static readonly TimeSpan BootstrapReadyTimeout = TimeSpan.FromSeconds(12);
+
+    public async Task<ElevationRestartResult> RestartElevatedAsync(
         string startupArgument,
+        ProcessHandoffWitness agentProcess,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var executablePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            return Task.FromResult(new ElevationRestartResult(
+            return new ElevationRestartResult(
                 ElevationRestartStatus.Failed,
-                "The WinPool executable path could not be determined."));
+                "The WinPool executable path could not be determined.");
         }
+
+        if (agentProcess.ProcessId <= 0 || agentProcess.StartedAtUtc == default)
+        {
+            return new ElevationRestartResult(
+                ElevationRestartStatus.Failed,
+                "The current WinPool Agent identity is unavailable.");
+        }
+
+        using var currentProcess = Process.GetCurrentProcess();
+        var appProcess = new ProcessHandoffWitness(
+            currentProcess.Id,
+            currentProcess.StartTime.ToUniversalTime());
+        using var identity = WindowsIdentity.GetCurrent();
+        var sid = identity.User?.Value;
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            return new ElevationRestartResult(
+                ElevationRestartStatus.Failed,
+                "The current Windows user identity is unavailable.");
+        }
+
+        var handoffId = Guid.NewGuid();
+        var userHash = HashUserSid(sid);
+        var readyEventName = CreateHandoffEventName("Ready", userHash, handoffId);
+        var continueEventName = CreateHandoffEventName("Continue", userHash, handoffId);
+        using var readyEvent = new EventWaitHandle(
+            false,
+            EventResetMode.AutoReset,
+            readyEventName);
+        using var continueEvent = new EventWaitHandle(
+            false,
+            EventResetMode.AutoReset,
+            continueEventName);
 
         try
         {
-            var process = Process.Start(new ProcessStartInfo
+            var startInfo = new ProcessStartInfo
             {
                 FileName = executablePath,
-                Arguments =
-                    $"{startupArgument} {ApplicationStartupOptions.WaitForProcessArgument} {Environment.ProcessId}",
                 UseShellExecute = true,
                 Verb = "runas",
                 WorkingDirectory = AppContext.BaseDirectory
-            });
-            return Task.FromResult(process is null
-                ? new ElevationRestartResult(
+            };
+            startInfo.ArgumentList.Add(startupArgument);
+            startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForProcessArgument);
+            startInfo.ArgumentList.Add(appProcess.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForProcessStartedAtArgument);
+            startInfo.ArgumentList.Add(appProcess.StartedAtUtc.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForAgentProcessArgument);
+            startInfo.ArgumentList.Add(agentProcess.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForAgentProcessStartedAtArgument);
+            startInfo.ArgumentList.Add(agentProcess.StartedAtUtc.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(ApplicationStartupOptions.ElevationReadyEventArgument);
+            startInfo.ArgumentList.Add(readyEventName);
+            startInfo.ArgumentList.Add(ApplicationStartupOptions.ElevationContinueEventArgument);
+            startInfo.ArgumentList.Add(continueEventName);
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return new ElevationRestartResult(
                     ElevationRestartStatus.Failed,
-                    "Windows did not start the elevated WinPool process.")
-                : new ElevationRestartResult(ElevationRestartStatus.Started));
+                    "Windows did not start the elevated WinPool process.");
+            }
+
+            var bootstrapReady = await Task.Run(
+                () => readyEvent.WaitOne(BootstrapReadyTimeout),
+                cancellationToken).ConfigureAwait(false);
+            return bootstrapReady
+                ? new ElevationRestartResult(
+                    ElevationRestartStatus.Started,
+                    Handoff: new ElevationHandoff(continueEventName))
+                : new ElevationRestartResult(
+                    ElevationRestartStatus.Failed,
+                    "The elevated WinPool bootstrap did not enter its waiting stage.");
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            return Task.FromResult(new ElevationRestartResult(ElevationRestartStatus.Cancelled));
+            return new ElevationRestartResult(ElevationRestartStatus.Cancelled);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
-            return Task.FromResult(new ElevationRestartResult(
+            return new ElevationRestartResult(
                 ElevationRestartStatus.Failed,
-                ex.Message));
+                ex.Message);
         }
+    }
+
+    private static string CreateHandoffEventName(string stage, string userHash, Guid handoffId) =>
+        $"Local\\WinPool.Elevation.{stage}.{userHash[..24]}.{handoffId:N}";
+
+    /// <summary>
+    /// Uses the same normalized, lower-case SID fingerprint as the IPC
+    /// endpoints. The elevation bootstrap validates these names before it
+    /// opens either event, so a case-only mismatch would prevent a legitimate
+    /// same-user handoff from ever becoming ready.
+    /// </summary>
+    internal static string HashUserSid(string sid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sid);
+        return Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(sid.Trim().ToUpperInvariant())))
+            .ToLowerInvariant();
     }
 }
 

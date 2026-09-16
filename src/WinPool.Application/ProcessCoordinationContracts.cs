@@ -158,7 +158,8 @@ public sealed record ExportAgentMonitorCsvRequest(
 
 public sealed record RequestAgentShutdownRequest(
     ShutdownReason Reason,
-    CorrelationId CorrelationId)
+    CorrelationId CorrelationId,
+    bool BeginInBackground = false)
     : AgentRequest(CorrelationId);
 
 public enum AgentPreferenceField
@@ -406,6 +407,7 @@ public enum ShutdownReason
     OperatingSystemShutdown,
     Update,
     DevelopmentRestart,
+    ElevationRestart,
     StorageLocationSwitch
 }
 

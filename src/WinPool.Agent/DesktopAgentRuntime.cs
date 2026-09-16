@@ -597,13 +597,13 @@ internal sealed class DesktopAgentRuntime :
             await Task.Delay(50, cancellationToken);
         }
 
-        foreach (var registration in registrations)
+        if (registrations.Any(registration =>
+                processIncarnationVerifier.Matches(
+                    registration,
+                    mainApplicationExecutablePath)))
         {
-            processRegistry.TryMarkExited(
-                registration.ProcessInstanceId,
-                registration.ProcessId,
-                DateTimeOffset.UtcNow,
-                out _);
+            throw new TimeoutException(
+                "A registered WinPool App instance did not exit before the Agent shutdown deadline.");
         }
     }
 

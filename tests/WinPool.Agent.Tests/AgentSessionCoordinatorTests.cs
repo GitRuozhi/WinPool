@@ -289,6 +289,37 @@ public sealed class AgentSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task ElevationRestartAcknowledgesBeforeItClosesTheRegisteredAppAndAgent()
+    {
+        var actions = new RecordingShutdownActions { PauseNotification = true };
+        var coordinator = CreateCoordinator(actions);
+
+        var result = await coordinator.HandleAsync(
+            new RequestAgentShutdownRequest(
+                ShutdownReason.ElevationRestart,
+                CorrelationId.New(),
+                BeginInBackground: true));
+
+        Assert.Equal(ApplicationStatus.Succeeded, result.Status);
+        Assert.IsType<AgentAcknowledgement>(result.Value);
+        Assert.Equal(AgentLifecycleState.ShuttingDown, coordinator.State);
+        await actions.NotificationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.DoesNotContain(AgentShutdownStep.CloseMainApplication, actions.Calls);
+
+        actions.ContinueNotification.SetResult();
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (coordinator.State != AgentLifecycleState.Stopped
+               && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(AgentLifecycleState.Stopped, coordinator.State);
+        Assert.Contains(AgentShutdownStep.CloseMainApplication, actions.Calls);
+        Assert.Contains(AgentShutdownStep.ExitAgent, actions.Calls);
+    }
+
+    [Fact]
     public async Task ProcessRegistrationIsClosedAfterShutdownBegins()
     {
         var actions = new RecordingShutdownActions { PauseNotification = true };

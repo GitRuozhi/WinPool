@@ -11,6 +11,7 @@ using Windows.Graphics;
 using Windows.System;
 using Windows.UI;
 using Windows.UI.ViewManagement;
+using WinPool.Agent.Client;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
@@ -37,6 +38,7 @@ public sealed partial class MainWindow : Window
     private bool _systemSelectorRefreshPending;
     private string? _pendingSystemSelectionId;
     private bool _requestingElevation;
+    private bool _closingForElevationHandoff;
     private bool _realWarningDismissed;
     private readonly ApplicationStartupTarget _startupTarget;
     private readonly bool _enteredRealModeAfterElevation;
@@ -230,6 +232,15 @@ public sealed partial class MainWindow : Window
     {
         App.StopActivationChannel();
         _agentPreferencesSynchronizer.Dispose();
+
+        if (_closingForElevationHandoff)
+        {
+            // The old Agent owns the ordered monitoring stop, endpoint release
+            // and SQLite lease release. The App has already persisted its
+            // workspace before it authorized that Agent shutdown.
+            ViewModel.Monitoring.Dispose();
+            return;
+        }
 
         // Persistence runs before the monitoring detach and each segment owns
         // its failure: the process may not stay alive long, so the cheapest,
@@ -507,7 +518,6 @@ public sealed partial class MainWindow : Window
         }
 
         _requestingElevation = true;
-        var closingForElevationHandoff = false;
         try
         {
             var localization = ViewModel.Localization;
@@ -537,11 +547,56 @@ public sealed partial class MainWindow : Window
                 return false;
             }
 
+            var agentProcess = await GetCurrentAgentProcessForElevationAsync(localization);
+            if (agentProcess is null)
+            {
+                return false;
+            }
+
             var restart = await _elevationRestartService.RestartElevatedAsync(
-                ApplicationStartupOptions.ElevatedRealArgument);
+                ApplicationStartupOptions.ElevatedRealArgument,
+                agentProcess);
             if (restart.Status == ElevationRestartStatus.Started)
             {
-                closingForElevationHandoff = true;
+                if (restart.Handoff is null
+                    || !await PersistWorkspaceForElevationHandoffAsync(localization))
+                {
+                    return false;
+                }
+
+                using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                var shutdown = await ViewModel.AgentConnection!.SendAsync(
+                    new RequestAgentShutdownRequest(
+                        ShutdownReason.ElevationRestart,
+                        CorrelationId.New(),
+                        BeginInBackground: true),
+                    shutdownTimeout.Token);
+                if (!shutdown.IsSuccess || shutdown.Value is not AgentAcknowledgement)
+                {
+                    NotificationService.PublishError(
+                        localization["Error"],
+                        localization["ElevationAgentShutdownFailed"],
+                        "elevation",
+                        $"elevation-agent-shutdown:{DateTimeOffset.UtcNow.Ticks}");
+                    return false;
+                }
+
+                // The Agent has accepted a background, ordered shutdown. Only
+                // now may the elevated bootstrap leave its waiting stage. If
+                // that signal cannot be sent, it times out without opening a
+                // business window; this window retains the explanatory error.
+                if (!TryContinueElevatedHandoff(restart.Handoff))
+                {
+                    NotificationService.PublishError(
+                        localization["Error"],
+                        localization["ElevationHandoffFailed"],
+                        "elevation",
+                        $"elevation-continuation:{DateTimeOffset.UtcNow.Ticks}");
+                    return false;
+                }
+
+                _closingForElevationHandoff = true;
+                _welcomeWindow?.Close();
                 Close();
                 return true;
             }
@@ -558,13 +613,109 @@ public sealed partial class MainWindow : Window
         finally
         {
             _requestingElevation = false;
-            if (!closingForElevationHandoff)
+            if (!_closingForElevationHandoff)
             {
                 SyncModeSwitch();
             }
         }
 
         return false;
+    }
+
+    private async Task<ProcessHandoffWitness?> GetCurrentAgentProcessForElevationAsync(
+        LocalizationService localization)
+    {
+        if (ViewModel.AgentConnection is not NamedPipeAgentConnection connection)
+        {
+            NotificationService.PublishError(
+                localization["Error"],
+                localization["ElevationAgentUnavailable"],
+                "elevation",
+                $"elevation-agent-unavailable:{DateTimeOffset.UtcNow.Ticks}");
+            return null;
+        }
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var connected = await connection.ConnectAsync(timeout.Token);
+            var handshake = connection.ActiveHandshake ?? connected.Value;
+            if (!connected.IsSuccess
+                || handshake is null
+                || handshake.ProcessId <= 0
+                || handshake.StartedAtUtc == default)
+            {
+                NotificationService.PublishError(
+                    localization["Error"],
+                    localization["ElevationAgentUnavailable"],
+                    "elevation",
+                    $"elevation-agent-unavailable:{DateTimeOffset.UtcNow.Ticks}");
+                return null;
+            }
+
+            return new ProcessHandoffWitness(
+                handshake.ProcessId,
+                handshake.StartedAtUtc);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or OperationCanceledException)
+        {
+            NotificationService.PublishError(
+                localization["Error"],
+                localization["ElevationAgentUnavailable"],
+                "elevation",
+                $"elevation-agent-unavailable:{DateTimeOffset.UtcNow.Ticks}");
+            return null;
+        }
+    }
+
+    private async Task<bool> PersistWorkspaceForElevationHandoffAsync(
+        LocalizationService localization)
+    {
+        try
+        {
+            if (ViewModel.CanPersistWorkspaceUiState)
+            {
+                await _workspaceStateService.SaveAsync(
+                    ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+            }
+
+            await ViewModel.SetLastActivePageAsync(
+                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            NotificationService.PublishError(
+                localization["Error"],
+                localization["ElevationHandoffFailed"],
+                "elevation",
+                $"elevation-workspace-save:{DateTimeOffset.UtcNow.Ticks}");
+            return false;
+        }
+    }
+
+    private static bool TryContinueElevatedHandoff(ElevationHandoff handoff)
+    {
+        try
+        {
+            using var continuation = EventWaitHandle.OpenExisting(handoff.ContinuationEventName);
+            return continuation.Set();
+        }
+        catch (WaitHandleCannotBeOpenedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void SyncModeSwitch()

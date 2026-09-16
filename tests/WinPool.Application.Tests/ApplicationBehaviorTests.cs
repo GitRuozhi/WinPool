@@ -338,6 +338,34 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
+    public void ElevatedRestartRequiresBothExactOldProcessWitnessesAndBothSignals()
+    {
+        var appStartedAt = DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000);
+        var agentStartedAt = appStartedAt.AddSeconds(2);
+        var arguments = new[]
+        {
+            WinPool.Application.ApplicationStartupOptions.ElevatedRealArgument,
+            WinPool.Application.ApplicationStartupOptions.WaitForProcessArgument, "42",
+            WinPool.Application.ApplicationStartupOptions.WaitForProcessStartedAtArgument,
+            appStartedAt.ToUnixTimeMilliseconds().ToString(),
+            WinPool.Application.ApplicationStartupOptions.WaitForAgentProcessArgument, "84",
+            WinPool.Application.ApplicationStartupOptions.WaitForAgentProcessStartedAtArgument,
+            agentStartedAt.ToUnixTimeMilliseconds().ToString(),
+            WinPool.Application.ApplicationStartupOptions.ElevationReadyEventArgument, "Local\\WinPool.Elevation.Ready.test",
+            WinPool.Application.ApplicationStartupOptions.ElevationContinueEventArgument, "Local\\WinPool.Elevation.Continue.test"
+        };
+
+        Assert.True(WinPool.Application.ApplicationStartupOptions.TryGetElevationHandoff(arguments, out var handoff));
+        Assert.Equal(42, handoff.AppProcess.ProcessId);
+        Assert.Equal(appStartedAt, handoff.AppProcess.StartedAtUtc);
+        Assert.Equal(84, handoff.AgentProcess.ProcessId);
+        Assert.Equal(agentStartedAt, handoff.AgentProcess.StartedAtUtc);
+        Assert.False(WinPool.Application.ApplicationStartupOptions.TryGetElevationHandoff(
+            arguments.Where(argument => argument != "84").ToArray(),
+            out _));
+    }
+
+    [Fact]
     public void PartitionTopologySummaryOmitsClusterSize()
     {
         var root = WinPool.Application.TopologyProjector.Project(TestSnapshotFactory.Create());

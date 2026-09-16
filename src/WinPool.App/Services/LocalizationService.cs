@@ -54,6 +54,15 @@ public sealed class LocalizationService : ObservableObject
             ["ElevationRestarted"] = (
                 "WinPool 已以管理员身份重新启动，真实执行模式已开启。本机存储仍保持只读。",
                 "WinPool restarted as administrator and real execution mode is enabled. Local storage remains read-only."),
+            ["ElevationAgentUnavailable"] = (
+                "无法确认当前 Agent，管理员重启已取消，原软件保持运行。",
+                "The current Agent could not be verified. Administrator restart was cancelled and the current software remains running."),
+            ["ElevationAgentShutdownFailed"] = (
+                "Agent 未确认完整退出，管理员重启未继续。原软件保持运行。",
+                "The Agent did not accept complete shutdown. Administrator restart did not continue and the current software remains running."),
+            ["ElevationHandoffFailed"] = (
+                "保存当前工作区或继续管理员交接失败，原软件保持运行。",
+                "Saving the workspace or continuing the elevation handoff failed. The current software remains running."),
             ["Warning"] = ("警告", "Warning"),
             ["Error"] = ("错误", "Error"),
             ["OperationFailed"] = ("操作失败。", "The operation failed."),

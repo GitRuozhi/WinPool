@@ -324,8 +324,9 @@ public sealed class AgentControlProtocolCodecTests
     {
         var correlationId = CorrelationId.New();
         var request = new RequestAgentShutdownRequest(
-            ShutdownReason.TrayExit,
-            correlationId);
+            ShutdownReason.ElevationRestart,
+            correlationId,
+            BeginInBackground: true);
         var decoded = new AgentControlProtocolCodec().DecodeRequest(
             Envelope(
                 AgentControlMessageTypes.Shutdown,
@@ -333,7 +334,9 @@ public sealed class AgentControlProtocolCodecTests
                 JsonSerializer.SerializeToElement(request, SerializerOptions)));
 
         Assert.True(decoded.IsAccepted);
-        Assert.IsType<RequestAgentShutdownRequest>(decoded.Request);
+        var decodedRequest = Assert.IsType<RequestAgentShutdownRequest>(decoded.Request);
+        Assert.Equal(ShutdownReason.ElevationRestart, decodedRequest.Reason);
+        Assert.True(decodedRequest.BeginInBackground);
     }
 
     [Fact]

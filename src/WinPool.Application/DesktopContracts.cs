@@ -173,11 +173,27 @@ public enum ElevationRestartStatus
     Failed
 }
 
-public sealed record ElevationRestartResult(ElevationRestartStatus Status, string? ErrorMessage = null);
+/// <summary>
+/// A PID plus its start witness. The witness prevents a waiting replacement
+/// process from treating a reused PID as the process it was asked to replace.
+/// </summary>
+public sealed record ProcessHandoffWitness(int ProcessId, DateTimeOffset StartedAtUtc);
+
+/// <summary>
+/// The elevated bootstrap owns the continuation event. The old App signals it
+/// only after the old Agent has accepted its complete-shutdown request.
+/// </summary>
+public sealed record ElevationHandoff(string ContinuationEventName);
+
+public sealed record ElevationRestartResult(
+    ElevationRestartStatus Status,
+    string? ErrorMessage = null,
+    ElevationHandoff? Handoff = null);
 
 public interface IElevationRestartService
 {
     Task<ElevationRestartResult> RestartElevatedAsync(
         string startupArgument,
+        ProcessHandoffWitness agentProcess,
         CancellationToken cancellationToken = default);
 }

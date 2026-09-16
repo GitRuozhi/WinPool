@@ -1,12 +1,12 @@
 # WinPool 变更记录
 
-## 2026-09-16：设置布局、IPC 交接与提权重启修复
+## 2026-09-16：设置布局、IPC 交接与整套提权重启修复
 
 “开发者模式”已从外观卡片移至通用设置，外观卡片只保留主题、强调色和语言。标题栏的系统选择框新增与强调色联动的 40% 透明悬停底色和边框；高对比度模式不覆写系统可访问性外观。
 
-真实执行模式的 UAC 交接现在把“旧窗口正在关闭”显式返回给设置页，交接启动后不会再刷新已关闭的 WinUI 窗口，修复 `The WinUI Desktop Window object has already been closed` 未处理异常。原生检查确认旧 App 进程已被新的管理员 App 进程替换，窗口标题为 `WinPool [管理员]`；每用户托盘 Agent 按设计保持运行，并不作为提权的一部分重启。
+真实执行模式的 UAC 交接现在是整套重启，而非“仅把 GUI 提权”：新管理员 bootstrap 在 WinUI、单实例和 Agent 连接之前等待；旧 App 保存工作区，旧 Agent 按既有顺序停止监控、写入、租约与管道，二者都退出后才创建新的管理员 App + Agent。新实例用 PID、启动时间和路径核验旧实例，不一致、取消、信号失败或超时不会接管、复用旧 endpoint 或强杀进程。修复了 SID 事件名哈希大小写不一致导致 bootstrap 误判 `signal_invalid` 的实际故障；阶段失败写入 `Diagnostics/elevation-handoff.jsonl`。交接启动后也不会再刷新已关闭的 WinUI 窗口，修复 `The WinUI Desktop Window object has already been closed` 未处理异常。
 
-Agent 控制管道把已接通客户端的正常提前断开和断管视为连接结束，不再弹出误导性的 IPC 故障提示；其它真正异常仍会报告，并追加到数据目录 `Diagnostics/agent-control.jsonl`。进程身份核验改用受限进程查询，因此普通完整性的 Agent 可以核验 UAC 提升后的 App，不再依赖可能被拒绝访问的 `Process.MainModule`。全套 558 项 Release 测试通过；Release 源代码编译 0 警告、0 错误。未执行真实存储写操作。
+Agent 控制管道把已接通客户端的正常提前断开和断管视为连接结束，不再弹出误导性的 IPC 故障提示；其它真正异常仍会报告，并追加到数据目录 `Diagnostics/agent-control.jsonl`。进程身份核验改用受限进程查询，因此普通完整性的 Agent 可以核验 UAC 提升后的 App，不再依赖可能被拒绝访问的 `Process.MainModule`。隔离原生 WinUI 已连续三次验证旧 App+Agent 全退出、新 App 标题为 `WinPool [管理员]`、新 endpoint session 与 Agent PID 更换；取消和 30 秒 continuation 超时均保留旧实例。586/586 Release 测试通过，Release 源代码编译 0 警告、0 错误，依赖审计无已知漏洞包。未执行真实存储写操作。
 
 ## 2026-09-15：静态审查五项可靠性问题修复
 
