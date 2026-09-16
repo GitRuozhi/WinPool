@@ -31,7 +31,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 | 身份 | 内部稳定 ID、系统 ID 和提供程序定位信息分工明确；盘符、名称、列表顺序、DiskNumber 不能单独作为持久身份。名称变化不得改变身份、关系或目标定位；缺少可靠 ID 时不以名称猜测跨采集关联。保留稳定性/未知标记 |
 | 实体 | PhysicalDisk、StoragePool、StorageTier、VirtualDisk、OS Disk、Partition、Volume 各有明确身份；分区描述几何和分区类型，卷描述文件系统与挂载。无卷的分区也是合法事实 |
 | 关系 | 来源事实中的对象关联是唯一事实源；通用关系图、导航和显示是其派生投影，不各自维护另一套可修改关系 |
-| 显示分组 | 备用/退役/介质分组不冒充真实 StorageTier。推导的关联带来源，不能自动升级为可执行事实 |
+| 显示对象 | 模拟层、模拟池是统一层派生对象，沿用真实层/池的适用属性结构，但没有来源字段和容量；不得进入来源事实、持久化或真实命令目标。详细产品语义见 [UnifiedModel](UnifiedModel.md) |
 | 未知 | 未采集、读取失败、不支持、否、零、空集合分别按含义表达；不得把缺失状态静默补成健康、可写或无系统角色 |
 | 草稿 | 记录用户意图和基线修订。临时输入不完整不等于允许生成非法模拟文档 |
 | 操作 | 一次生成类型化操作序列，预览、校验和提交共用它；模拟命令文本只作解释，不再由文本反推执行 |
@@ -123,7 +123,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 
 内部开发文档只维护中文无语言后缀版本。根目录 `README.md`（英文）和 `README.zh-CN.md`（中文）保持用户信息一致；其他目录中的索引 README 不因此需要双语。历史双语原件不追溯翻译。代码/API 标识和微软原名保持英文。
 
-Product 管产品、Development 管技术、Quality 管验证、Plan 管当前阶段（若有）、CHANGELOG 管重要结果；AGENTS 管操作规则。Design 保存未排期方案，Reference 保存方法，Archive 保存被替代/结束的历史。一个事实一个维护位置，其余用短摘要和链接。
+Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生属性专项设计；Development 管技术、Quality 管验证、Plan 管当前阶段（若有）、CHANGELOG 管重要结果；AGENTS 管操作规则。Design 保存未排期方案，Reference 保存方法，Archive 保存被替代/结束的历史。一个事实一个维护位置，其余用短摘要和链接。
 
 设计只需状态、基线/条件、未决问题三个说明，不引入复杂审批体系。讨论中的设计不等于当前规范；方向已认可也不代表细节冻结。纳入版本时重新核对代码，明确采纳部分并写入唯一活动 Plan，长期决定归各自所有者。无须为每份设计新建一个 Plan。
 
