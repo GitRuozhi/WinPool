@@ -4,6 +4,14 @@
 
 ## 最近已记录的验证基线
 
+2026-09-21 V0.54 设置页小幅调整：7Z 同宽对齐、删除浏览按钮并显示路径、选择自定义调起选择器、MSR 简称及版本更新。按用户要求不重跑自动测试或原生验收，只执行一次隔离编译，产物位于 `artifacts/settings-tools-v054/Release`，未替换现有运行树。构建执行未返回最终退出码/汇总，完成状态为 `unverified`，不以产物存在代替通过；未为取得结果重复编译。此前设置页验证仅覆盖下述初稿，不视为 V0.54 最终界面验证。
+
+2026-09-21 设置页工具布局初稿：基线 `600dc25` 加当时改动，隔离 App/Agent Release 构建 0 警告/0 错误；`WinPool.Application.Tests` 中 `AgentPreferencesReloadCoordinatorTests` 3/3 passed（`dotnet test -c Release --no-restore --filter FullyQualifiedName~AgentPreferencesReloadCoordinatorTests --maxcpucount:1 -m:1`）。结果保留于执行终端，未另存 TRX；不是全套回归。主代理核对初稿 XAML 中 9 个 Button 均包含图标，这是源码检查，不代替视觉验收。
+
+有限 WinApp CLI / UIA 验证覆盖卡片顺序及控件存在、7Z 默认/自定义选项、调起 EXE 选择器、取消后保持默认且 Agent 偏好仍为空。测试使用隔离程序树、现有标准数据根，未迁移或清理数据，App/Agent 正常退出。自定义成功保存、两处 Explorer 实际打开目标、中英文窄窗及完整视觉为 `unverified`；`artifacts/settings-tools-check/evidence/` 中截图全黑或被遮挡，不能作为视觉通过证据。
+
+首轮隔离构建遗漏最终合并命令覆盖，部分清理了旧运行目录的 17 个资源。旧目录已保留于项目根 `Rubbish/20260921_settings-build-recovery/Program/WinPool/artifacts/Release`，完整运行树恢复后与隔离树逐文件 SHA-256 比较一致（591 文件）；最终更新在 App/Agent 退出后执行。标准 AppData 数据不在该清理范围。构建隔离注意事项已记入 Development。
+
 2026-09-21 监控轮换阶段：基线 `92047b9` 加本轮实现，最终完整 Release 测试 655 passed、0 failed、3 个门控测量 NotExecuted；完整 Release 构建 0 警告/0 错误，22 项目依赖审计无已知漏洞包。最终日志与 11 份 TRX 位于本地 `artifacts/test-results/20260921-full-gate-runtime-closeout-final/`。三个跳过的测量已分别执行，包括真实 1 GiB 阈值轮换及压缩期间新活动库继续写入、原始参数测量和两组压缩参数比较；不是把跳过当作通过。
 
 有限原生 WinApp CLI 验证覆盖正常运行/停止、页面重入同会话时长、归档失败关闭后新失败重现、恢复默认 7Z 后成功隐藏、中英文窄窗单行异常、7Z 设置及托盘正常退出。双库/归档往返使用生产迁移器和真实 SQLite/7z，quiesce 为接口替身；不冒充原生设置迁移验证。实际 DPI/主题全矩阵、跨 Windows 会话、强制断联未知状态注入和本轮 UAC 全流程未重跑，保持 `unverified`；未做真实存储结构修改。详见[阶段记录](Archive/20260921-monitoring-rotation/README.md)。
