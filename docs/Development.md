@@ -60,7 +60,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 ## 统一事实与采集链路
 
-采集通知使用同一套状态文案。Agent 的 Started、Updated、Failed 事件带自动来源标记；自动阶段由 `LocalInventoryObserver` 转交通知，成功仅在文档验证并应用后呈现。手动请求仍由请求/响应路径通知，包含连接或传输失败；事件不再重复通知手动采集。自动存储、自动完整硬件及手动刷新使用独立进度键；失败、断流或重连清理未完成的自动进度。新增事件使 IPC 升至 10，App 与 Agent 须成套重启。
+采集通知使用同一套状态文案。Agent 的 Started、Updated、Failed 事件带自动来源标记；自动阶段由 `LocalInventoryObserver` 转交通知，成功仅在文档验证并应用后呈现。手动请求仍由请求/响应路径通知，包含连接或传输失败；事件不再重复通知手动采集。自动存储、自动完整硬件及手动刷新使用独立进度键；失败、断流或重连清理未完成的自动进度。采集事件与监控诊断共用严格版本握手；当前 IPC 为 11，App 与 Agent 须成套重启。
 
 `WinPoolFacts` 保存带来源、时间、类型、读取状态的原始对象及关联；`WinPoolSystem` 与 `StorageSnapshot` 是只读派生结果。跨来源选值由 `WinPoolSourceDetails` 维护，只有明确等价的字段参与备用或冲突判断。缺少安全字段、关联冲突和数值超范围不能变成允许；所有采集字段保持原值，不设置脱敏状态或按隐私开关裁剪。
 
@@ -70,11 +70,11 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 存储与完整硬件使用独立刷新用途，Agent 串行协调；较旧结果忽略。来源失败保留上次事实及关联时间，成功空集合才移除对象。层成员没有可靠关联时显示归属未知，不按介质相同猜测。
 
-App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提交的本机事实，不初始化数据库、不取得写租约；校验现有 schema、文档格式和哈希后先呈现历史。Agent 就绪后自动顺序执行 Storage、Hardware 两次采集，沿用同一串行采集/合并/持久化入口，成功落库后发送类型化库存事件，失败发送失败事件且仍尝试下一阶段。App 的 `LocalInventoryObserver` 在工作区初始化前订阅，初始化后接收阶段结果；晚连接与重连补读 Agent 缓存。UI 线程统一应用新结果，拒绝旧/重复回报，保留模拟选择；两页手动刷新仍触发各自用途的采集。退出、提权交接与切换数据根前取消并等待启动采集，避免继续写旧数据根。IPC 为 10，SQLite schema 仍为 17。
+App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提交的本机事实，不初始化数据库、不取得写租约；校验现有 schema、文档格式和哈希后先呈现历史。Agent 就绪后自动顺序执行 Storage、Hardware 两次采集，沿用同一串行采集/合并/持久化入口，成功落库后发送类型化库存事件，失败发送失败事件且仍尝试下一阶段。App 的 `LocalInventoryObserver` 在工作区初始化前订阅，初始化后接收阶段结果；晚连接与重连补读 Agent 缓存。UI 线程统一应用新结果，拒绝旧/重复回报，保留模拟选择；两页手动刷新仍触发各自用途的采集。退出、提权交接与切换数据根前取消并等待启动采集，避免继续写旧数据根。IPC 为 11，核心 SQLite schema 仍为 17。
 
 完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；同一 LUID 通过 D3DKMT 保存适配器类型标志、显示侧描述和渲染侧描述。`IndirectDisplayDevice` 为真时统一对象使用显示侧名称，保留 DXGI 原始描述，并禁止按相同 `VEN/DEV` 借用物理 GPU 的驱动和 PCI 位置。`Win32_VideoController`、`Win32_DesktopMonitor` 与 `WmiMonitorID` 在统一事实中属于字段补充，不形成第二组 GPU 或 Monitor 设备，驱动、型号和厂商仍可按可靠硬件标识补入 DXGI 对象。软件或间接显示 DXGI 适配器均不按标志或名称过滤。网络保持 `WinPool.NetworkAdapter` 统一来源键不变，内部以 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 作为对象集合边界，按接口索引关联全部 IP 地址与默认路由，并替换同次脚本采集产生的原始 `MSFT_NetAdapter` 观察。同一来源的成功刷新直接整组替换旧网络对象，不引入跨来源迁移规则。`WinPoolSystem` 是不持久化的运行时投影；入库的是来源事实，启动从来源事实重新生成统一模型，完整硬件在 Agent 启动第二阶段自动刷新，也可手动刷新。Monitor 不在报告投影中筛除，存储摘要不增加硬件页专用条件。
 
-`HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 复用现有系统切换入口；下拉选择先暂存，待 `DropDownClosed` 后再切换工作区和重建列表，避免在 WinUI 弹出层仍打开时使控件集合失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式为 SQLite 17 / IPC 10 / StorageSystemDocument 3 / 来源事实 1。
+`HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 复用现有系统切换入口；下拉选择先暂存，待 `DropDownClosed` 后再切换工作区和重建列表，避免在 WinUI 弹出层仍打开时使控件集合失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式为核心 SQLite 17 / 监控 SQLite 1 / IPC 11 / StorageSystemDocument 3 / 来源事实 1。
 
 内置模拟继续以 `StorageSnapshot` 作为编辑模型，但持久化前由 `WinPoolSimulationFacts` 生成 Windows 形态的来源事实。来源仍明确标记为 `FactOrigin.Simulation`，命名空间、类名、字段名、CIM 数字枚举、数组类型和 bytes 单位分别对齐 `Win32_ComputerSystem`、`Win32_OperatingSystem`、`Registry.CurrentVersion`、`MSFT_*`、`Win32_LogicalDisk`、`Win32_DiskDrive` 与磁盘角色补充来源。Partition、Volume 和 LogicalDisk 按真实来源拆分并用关系组合；模拟模型无法提供的 Windows 属性不伪造。系统版本号与 DisplayVersion 分开，系统卷使用 4096 bytes 分配单元，存储空间数据卷继续使用当前测试布局的 65536 bytes。
 
@@ -87,12 +87,22 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 | 持久化来源 | 唯一写入者与用途 |
 | --- | --- |
 | `app-settings.json` | App；语言、主题、当前页面等前台偏好，Agent 只读所需项 |
-| `agent-settings.json` | Agent；持续监控、采样率、自启等关闭 App 后仍有效的偏好；App 经类型化请求修改 |
-| `winpool.db` | Agent；系统和采集快照、模拟文档、工作区、监控、执行与会话记录 |
+| `agent-settings.json` | Agent；持续监控、采样率、自启及可选的 7z 绝对路径覆盖；App 经类型化请求修改 |
+| `winpool.db` | Agent；系统和采集快照、模拟文档、工作区、存储健康事件、执行与 Agent 会话记录；旧监控表和记录保留 |
+| `monitoring.db` | Agent；新监控会话、设备与原始样本，独立格式版本，不迁移旧核心库监控记录 |
+| `MonitoringArchives` | Agent；封存库、临时压缩包、完成归档及恢复记录；不是历史查询数据库 |
 
 偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
 
-V0.53 当前实施代码为 SQLite schema 17、IPC 10、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
+监控拆库与归档已完成，证据见[阶段归档](Archive/20260921-monitoring-rotation/README.md)。核心库保持 schema 17 和旧监控结构；监控库独立 schema 1。固定活动路径为 `monitoring.db`，主文件与 WAL 达到 1 GiB 时触发轮换：采样继续进入有界内存，旧写入排空、TRUNCATE checkpoint 成功并关闭连接后，仅将自包含主库改名封存，再创建固定名称新库。CSV 读租约与切换互斥。切换允许短暂推迟落盘，不承诺进程崩溃时内存不丢失。
+
+CSV 仅导出当前活动监控库中的可用记录，不跨归档补齐会话。持久化诊断区分正常待写数量、最老待写年龄和确知未保存数量；正常 250 ms 攒批不是丢样，最老待写达到 2 秒时报告延迟。故障写入器的未提交数量按写入器身份只累计一次，恢复后的写入器失败另计；队列拒绝与已接受但未保存的样本分别计数，无法确认的异常结束缺口不编造条数。会话时长使用单调计时，归档诊断在停止采样后仍可刷新；通信成功不代替采样或落库成功。
+
+归档在 `MonitoringArchives/sealed` 与 `MonitoringArchives/packages` 管理，恢复记录 `archive-ledger.json` 持久化归档根内相对路径，迁移数据根后按新根解析，不访问旧根。已完成归档不自动淘汰，不提供历史读取或解压缓存。后台串行压缩采用临时包，完整性、流式数据库 SHA-256 和清单内容核验通过后发布，才可释放本功能封存的原库；失败保留有效数据。故障恢复、缓冲计数与阶段验证状态见上述归档。
+
+`ControlledProcessRunner` 与 `SevenZipArchiveAdapter` 是现有 SQLite 基础设施内的两个小型职责，不恢复旧工具管理项目。7z 默认相对运行目录解析为 `Tools/7zip/7za.exe`，随附资源来自 `assets/ThirdParty/7zip/26.03`，许可证和来源说明一并打包。自定义覆盖只检查绝对路径和文件存在，失败不回退，不执行能力或版本预检；压缩及校验固定使用本次任务开始时取得的路径。产品不提供工具安装、更新或搜索。
+
+V0.53 当前实施代码为核心 SQLite schema 17、监控 SQLite schema 1、IPC 11、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
 
 V0.53 在 `UserPreferences` 中保存默认关闭的 `DeveloperMode`，旧格式缺少字段时按关闭处理，不升级偏好格式。主窗口从偏好重建可用导航；Hardware、Test、Development 同受该门控制，隐藏状态下启动目标、快捷键和记忆页面均回到 Manage。开发者导航顺序以 Hardware 在 Manage 之前开始。
 
@@ -133,7 +143,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 
 有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。监控数据库轮换与 7z 归档计划已按用户后续决定转为当前激活，实施尚未开始。
+用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。监控数据库轮换与 7z 归档阶段已完成并归档，当前没有活动 Plan；未激活 Design 不因此获得执行授权。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 
