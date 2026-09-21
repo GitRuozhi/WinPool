@@ -94,62 +94,6 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="ExternalToolsTitle"
-                        Grid.ColumnSpan="2"
-                        FontSize="16"
-                        FontWeight="SemiBold"
-                        Text="外部工具" />
-                    <TextBlock
-                        x:Name="SevenZipTitle"
-                        Grid.Row="1"
-                        Style="{StaticResource SettingsFieldLabel}"
-                        Text="7Z" />
-                    <Grid
-                        Grid.Row="1"
-                        Grid.Column="1"
-                        ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox
-                            x:Name="SevenZipPathBox"
-                            MinWidth="280"
-                            MinHeight="32"
-                            VerticalAlignment="Center"
-                            ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
-                            KeyDown="SevenZipPathBox_KeyDown"
-                            LostFocus="SevenZipPathBox_LostFocus" />
-                        <Button
-                            x:Name="SevenZipBrowseButton"
-                            Grid.Column="1"
-                            MinHeight="32"
-                            Click="SevenZipBrowseButton_Click">
-                            <TextBlock x:Name="SevenZipBrowseButtonText" Text="浏览" />
-                        </Button>
-                        <Button
-                            x:Name="SevenZipRestoreDefaultButton"
-                            Grid.Column="2"
-                            MinHeight="32"
-                            Click="SevenZipRestoreDefaultButton_Click">
-                            <TextBlock x:Name="SevenZipRestoreDefaultButtonText" Text="恢复默认" />
-                        </Button>
-                    </Grid>
-                </Grid>
-            </Border>
-
-            <Border Style="{StaticResource SettingsCardBorder}">
-                <Grid ColumnSpacing="16" RowSpacing="16">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
@@ -232,7 +176,7 @@
                         x:Name="MsrTitle"
                         Grid.Row="4"
                         Style="{StaticResource SettingsFieldLabel}"
-                        Text="初始化磁盘时创建微软保留分区" />
+                        Text="创建微软保留分区" />
                     <ToggleSwitch
                         x:Name="MsrSwitch"
                         Grid.Row="4"
@@ -282,6 +226,7 @@
                         ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <ComboBox
@@ -292,9 +237,20 @@
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
                             SelectionChanged="DataLocationOptions_SelectionChanged" />
+                        <Button
+                            x:Name="OpenDataLocationButton"
+                            Grid.Column="1"
+                            MinHeight="32"
+                            Margin="0,0,0,0"
+                            Click="OpenDataLocationButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon FontSize="14" Glyph="&#xE8B7;" />
+                                <TextBlock x:Name="OpenDataLocationButtonText" Text="打开路径" />
+                            </StackPanel>
+                        </Button>
                         <TextBlock
                             x:Name="DataLocationPath"
-                            Grid.Column="1"
+                            Grid.Column="2"
                             VerticalAlignment="Center"
                             FontSize="14"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -325,6 +281,55 @@
                                 Text="全部恢复默认" />
                         </StackPanel>
                     </Button>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SettingsCardBorder}">
+                <Grid ColumnSpacing="16" RowSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="SevenZipTitle"
+                        Style="{StaticResource SettingsFieldLabel}"
+                        Text="7Z" />
+                    <Grid
+                        Grid.Column="1"
+                        ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            x:Name="SevenZipOptions"
+                            MinWidth="220"
+                            MinHeight="32"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            DropDownOpened="SevenZipOptions_DropDownOpened"
+                            DropDownClosed="SevenZipOptions_DropDownClosed"
+                            SelectionChanged="SevenZipOptions_SelectionChanged" />
+                        <Button
+                            x:Name="OpenSevenZipLocationButton"
+                            Grid.Column="1"
+                            MinHeight="32"
+                            Click="OpenSevenZipLocationButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon FontSize="14" Glyph="&#xE8B7;" />
+                                <TextBlock x:Name="OpenSevenZipLocationButtonText" Text="打开路径" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock
+                            x:Name="SevenZipPath"
+                            Grid.Column="2"
+                            VerticalAlignment="Center"
+                            FontSize="14"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+                    </Grid>
                 </Grid>
             </Border>
 

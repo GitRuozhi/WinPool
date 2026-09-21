@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.Windows.Storage.Pickers;
 using WinPool.Agent.Client;
 using WinPool.Application;
 using WinPool.App.Services;
@@ -28,10 +29,10 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMsr;
     private bool _updatingStartup;
     private bool _updatingPartitionGap;
-    private bool _updatingSevenZipPath;
+    private bool _updatingSevenZipOptions;
+    private bool _savingSevenZipOptions;
+    private bool _sevenZipPickerPending;
     private bool _resetAllRunning;
-    private readonly SemaphoreSlim _sevenZipPathCommitGate = new(1, 1);
-    private long _sevenZipPathCommitGeneration;
 
     public SettingsPage()
     {
@@ -61,7 +62,7 @@ public sealed partial class SettingsPage : Page
         PartitionGapBox.Text = MiBText(
             ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
         _updatingPartitionGap = false;
-        SyncSevenZipPath();
+        SyncSevenZipOptions();
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
@@ -87,6 +88,26 @@ public sealed partial class SettingsPage : Page
         };
         LanguageOptions.ItemsSource = new[] { l["SystemLanguage"], l["Chinese"], l["English"] };
         DataLocationOptions.ItemsSource = new[] { l["StandardLocation"], l["PortableLocation"] };
+        RefreshSevenZipOptionItems();
+    }
+
+    private void RefreshSevenZipOptionItems()
+    {
+        _updatingSevenZipOptions = true;
+        try
+        {
+            SevenZipOptions.ItemsSource = new[]
+            {
+                ViewModel.Localization["SevenZipBundled"],
+                ViewModel.Localization["SevenZipCustom"]
+            };
+            SevenZipOptions.SelectedIndex = string.IsNullOrWhiteSpace(
+                ViewModel.CurrentAgentPreferences.SevenZipExecutablePath) ? 0 : 1;
+        }
+        finally
+        {
+            _updatingSevenZipOptions = false;
+        }
     }
 
     private async void DataLocationOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -287,6 +308,45 @@ public sealed partial class SettingsPage : Page
             $"preference:{DateTimeOffset.UtcNow.Ticks}");
     }
 
+    private void PublishPathOpenFailure(string path)
+    {
+        var l = ViewModel.Localization;
+        ViewModel.NotificationService.PublishError(
+            l["OpenPathFailed"],
+            string.Format(l["OpenPathFailedDescription"], path),
+            "settings",
+            $"open-path:{DateTimeOffset.UtcNow.Ticks}");
+    }
+
+    private void OpenExistingDirectory(string directoryPath)
+    {
+        if (!Directory.Exists(directoryPath))
+        {
+            PublishPathOpenFailure(directoryPath);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{directoryPath}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception
+                or UnauthorizedAccessException)
+        {
+            PublishPathOpenFailure(directoryPath);
+        }
+    }
+
+    private void OpenDataLocationButton_Click(object sender, RoutedEventArgs e) =>
+        OpenExistingDirectory(StorageDataLocations.CurrentRoot);
+
     private static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -476,150 +536,124 @@ public sealed partial class SettingsPage : Page
         _updatingPartitionGap = false;
     }
 
-    private void SevenZipPathBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void SevenZipOptions_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (e.Key == Windows.System.VirtualKey.Enter)
+        if (!_ready || _updatingSevenZipOptions || _savingSevenZipOptions || SevenZipOptions.SelectedIndex < 0)
         {
-            CommitSevenZipPathAsync();
+            return;
+        }
+
+        if (SevenZipOptions.SelectedIndex == 0)
+        {
+            await SaveSevenZipPathAsync(null);
+            return;
+        }
+
+        _sevenZipPickerPending = true;
+    }
+
+    private void SevenZipOptions_DropDownOpened(object sender, object e)
+    {
+        if (!_ready || _updatingSevenZipOptions || _savingSevenZipOptions)
+        {
+            return;
+        }
+
+        // Clear an already-selected Custom item while its popup is open so a
+        // second selection raises SelectionChanged. Closing without selecting
+        // then restores the effective persisted mode below.
+        if (SevenZipOptions.SelectedIndex == 1)
+        {
+            SetSevenZipOptionSelection(-1);
         }
     }
 
-    private void SevenZipPathBox_LostFocus(object sender, RoutedEventArgs e) =>
-        CommitSevenZipPathAsync();
-
-    private async void SevenZipBrowseButton_Click(object sender, RoutedEventArgs e)
+    private async void SevenZipOptions_DropDownClosed(object sender, object e)
     {
-        try
+        if (!_ready
+            || _updatingSevenZipOptions
+            || _savingSevenZipOptions)
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker();
-            picker.FileTypeFilter.Add(".exe");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-            var selected = await picker.PickSingleFileAsync();
-            if (selected is null)
-            {
-                return;
-            }
-
-            SevenZipPathBox.Text = selected.Path;
-            await QueueSevenZipPathCommitAsync(selected.Path);
+            return;
         }
-        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
+
+        if (_sevenZipPickerPending)
         {
-            SyncSevenZipPath();
-            PublishPreferenceFailure(exception);
+            _sevenZipPickerPending = false;
+            await PickCustomSevenZipAsync();
+        }
+        else
+        {
+            SyncSevenZipOptions();
         }
     }
 
-    private async void SevenZipRestoreDefaultButton_Click(object sender, RoutedEventArgs e)
+    private async Task PickCustomSevenZipAsync()
     {
-        try
-        {
-            await QueueSevenZipPathCommitAsync(null);
-        }
-        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
-        {
-            SyncSevenZipPath();
-            PublishPreferenceFailure(exception);
-        }
-    }
-
-    private async void CommitSevenZipPathAsync()
-    {
-        if (!_ready || _updatingSevenZipPath)
+        if (_savingSevenZipOptions)
         {
             return;
         }
 
         try
         {
-            await QueueSevenZipPathCommitAsync(SevenZipPathBox.Text);
+            var picker = new FileOpenPicker(SevenZipOptions.XamlRoot.ContentIslandEnvironment.AppWindowId);
+            picker.FileTypeFilter.Add(".exe");
+            var selected = await picker.PickSingleFileAsync();
+            if (selected is not null)
+            {
+                await SaveSevenZipPathAsync(selected.Path);
+            }
+            else
+            {
+                SyncSevenZipOptions();
+            }
         }
         catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
         {
-            SyncSevenZipPath();
+            SyncSevenZipOptions();
             PublishPreferenceFailure(exception);
         }
     }
 
-    private async Task QueueSevenZipPathCommitAsync(string? candidate)
+    private async Task SaveSevenZipPathAsync(string? candidate)
     {
-        var generation = Interlocked.Increment(ref _sevenZipPathCommitGeneration);
-        await _sevenZipPathCommitGate.WaitAsync();
+        if (_savingSevenZipOptions)
+        {
+            return;
+        }
+
+        _savingSevenZipOptions = true;
+        SevenZipOptions.IsEnabled = false;
         try
         {
-            // A prior LostFocus commit may still be queued when Browse or
-            // Restore default is clicked. Only the most recent user intent
-            // can reach the Agent, so an older text value cannot overwrite it
-            // after the picker returns.
-            if (generation != Volatile.Read(ref _sevenZipPathCommitGeneration))
+            var normalized = candidate?.Trim();
+            if (string.IsNullOrWhiteSpace(normalized)
+                || string.Equals(normalized, DefaultSevenZipPath(), StringComparison.OrdinalIgnoreCase))
             {
+                await ViewModel.SetSevenZipExecutablePathAsync(null);
                 return;
             }
 
-            await CommitSevenZipPathCoreAsync(candidate, generation);
+            // Configuration accepts only an existing absolute executable. Do
+            // not inspect its capabilities or version here.
+            if (!Path.IsPathFullyQualified(normalized) || !File.Exists(normalized))
+            {
+                await ShowMessageDialogAsync(ViewModel.Localization["SevenZipPathInvalid"]);
+                return;
+            }
+
+            await ViewModel.SetSevenZipExecutablePathAsync(normalized);
+        }
+        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
+        {
+            PublishPreferenceFailure(exception);
         }
         finally
         {
-            _sevenZipPathCommitGate.Release();
-        }
-    }
-
-    private async Task CommitSevenZipPathCoreAsync(string? candidate, long generation)
-    {
-        var normalized = candidate?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized)
-            || string.Equals(normalized, DefaultSevenZipPath(), StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                await ViewModel.SetSevenZipExecutablePathAsync(null);
-                SyncSevenZipPathIfCurrent(generation);
-            }
-            catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
-            {
-                if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
-                {
-                    SyncSevenZipPath();
-                    PublishPreferenceFailure(exception);
-                }
-            }
-
-            return;
-        }
-
-        // This is deliberately the only UI-side probe: configuration accepts
-        // an absolute file path, while execution errors remain an Agent task.
-        if (!Path.IsPathFullyQualified(normalized) || !File.Exists(normalized))
-        {
-            if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
-            {
-                await ShowMessageDialogAsync(ViewModel.Localization["SevenZipPathInvalid"]);
-                SyncSevenZipPath();
-            }
-
-            return;
-        }
-
-        try
-        {
-            await ViewModel.SetSevenZipExecutablePathAsync(normalized);
-            SyncSevenZipPathIfCurrent(generation);
-        }
-        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
-        {
-            if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
-            {
-                SyncSevenZipPath();
-                PublishPreferenceFailure(exception);
-            }
-        }
-    }
-
-    private void SyncSevenZipPathIfCurrent(long generation)
-    {
-        if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
-        {
-            SyncSevenZipPath();
+            _savingSevenZipOptions = false;
+            SevenZipOptions.IsEnabled = true;
+            SyncSevenZipOptions();
         }
     }
 
@@ -631,12 +665,45 @@ public sealed partial class SettingsPage : Page
             or System.ComponentModel.Win32Exception
             or System.Runtime.InteropServices.COMException;
 
-    private void SyncSevenZipPath()
+    private void SyncSevenZipOptions()
     {
-        _updatingSevenZipPath = true;
-        SevenZipPathBox.Text = ViewModel.CurrentAgentPreferences.SevenZipExecutablePath
-            ?? DefaultSevenZipPath();
-        _updatingSevenZipPath = false;
+        SetSevenZipOptionSelection(
+            string.IsNullOrWhiteSpace(ViewModel.CurrentAgentPreferences.SevenZipExecutablePath) ? 0 : 1);
+        var effectivePath = EffectiveSevenZipPath();
+        ToolTipService.SetToolTip(
+            SevenZipOptions,
+            $"{ViewModel.Localization["SevenZipPathHint"]}\n{effectivePath}");
+        SevenZipOptions.SetValue(AutomationProperties.NameProperty, ViewModel.Localization["SevenZip"]);
+        SevenZipPath.Text = effectivePath;
+    }
+
+    private void SetSevenZipOptionSelection(int index)
+    {
+        _updatingSevenZipOptions = true;
+        SevenZipOptions.SelectedIndex = index;
+        _updatingSevenZipOptions = false;
+    }
+
+    private string EffectiveSevenZipPath() =>
+        ViewModel.CurrentAgentPreferences.SevenZipExecutablePath ?? DefaultSevenZipPath();
+
+    private void OpenSevenZipLocationButton_Click(object sender, RoutedEventArgs e)
+    {
+        var executablePath = EffectiveSevenZipPath();
+        if (!File.Exists(executablePath))
+        {
+            PublishPathOpenFailure(executablePath);
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(executablePath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            PublishPathOpenFailure(executablePath);
+            return;
+        }
+
+        OpenExistingDirectory(directory);
     }
 
     private static string DefaultSevenZipPath() =>
@@ -823,7 +890,7 @@ public sealed partial class SettingsPage : Page
             _updatingStartup = true;
             StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
             _updatingStartup = false;
-            SyncSevenZipPath();
+            SyncSevenZipOptions();
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
         {
@@ -888,18 +955,19 @@ public sealed partial class SettingsPage : Page
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
         PartitionGapTitle.Text = l["PartitionGapThreshold"];
-        ExternalToolsTitle.Text = l["ExternalTools"];
         SevenZipTitle.Text = l["SevenZip"];
-        SevenZipBrowseButtonText.Text = l["Browse"];
-        SevenZipRestoreDefaultButtonText.Text = l["RestoreDefault"];
-        SevenZipPathBox.SetValue(AutomationProperties.NameProperty, l["SevenZip"]);
-        ToolTipService.SetToolTip(SevenZipPathBox, l["SevenZipPathHint"]);
+        OpenSevenZipLocationButtonText.Text = l["OpenPath"];
+        OpenSevenZipLocationButton.SetValue(AutomationProperties.NameProperty, l["OpenPath"]);
+        RefreshSevenZipOptionItems();
+        SyncSevenZipOptions();
         ResetAllTitle.Text = l["ResetAllTitle"];
         ResetAllButtonText.Text = l["ResetAllButton"];
         WelcomeTitle.Text = l["Welcome"];
         WelcomeButtonText.Text = l["OpenWelcome"];
         StartupAgentTitle.Text = l["Startup"];
         DataLocationTitle.Text = l["DataLocation"];
+        OpenDataLocationButtonText.Text = l["OpenPath"];
+        OpenDataLocationButton.SetValue(AutomationProperties.NameProperty, l["OpenPath"]);
         DataLocationPath.Text = StorageDataLocations.CurrentRoot;
         _updatingDataLocation = true;
         DataLocationOptions.ItemsSource = new[] { l["StandardLocation"], l["PortableLocation"] };

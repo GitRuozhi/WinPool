@@ -231,15 +231,21 @@ public sealed class LocalizationService : ObservableObject
             ["Community"] = ("轻松交流", "Community"),
             ["CommunityPending"] = ("QQ 群（暂未开放）", "QQ group (not available yet)"),
             ["InitializeDisk"] = ("初始化磁盘", "Disk initialization"),
-            ["CreateMsrOnInitialize"] = ("初始化磁盘时创建微软保留分区", "Create a Microsoft Reserved Partition when initializing disks"),
+            ["CreateMsrOnInitialize"] = ("创建微软保留分区", "Create a Microsoft Reserved Partition"),
             ["PartitionGapThreshold"] = ("分区缝隙隐藏阈值", "Partition gap hiding threshold"),
             ["ExternalTools"] = ("外部工具", "External tools"),
             ["SevenZip"] = ("7Z", "7Z"),
-            ["Browse"] = ("浏览", "Browse"),
+            ["OpenPath"] = ("打开路径", "Open location"),
+            ["SevenZipBundled"] = ("默认", "Default"),
+            ["SevenZipCustom"] = ("自定义", "Custom"),
             ["RestoreDefault"] = ("恢复默认", "Restore default"),
             ["SevenZipPathHint"] = (
                 "默认使用便携目录中的 7Z 组件；自定义路径必须是存在的绝对 .exe 文件。",
                 "Uses the portable 7Z component by default; a custom path must be an existing absolute .exe file."),
+            ["OpenPathFailed"] = ("无法打开路径", "Could not open location"),
+            ["OpenPathFailedDescription"] = (
+                "路径不存在或无法打开：{0}",
+                "The location does not exist or could not be opened: {0}"),
             ["SevenZipPathInvalid"] = (
                 "7Z 路径必须是存在的绝对 .exe 文件。自定义路径失效时不会自动改用随附组件。",
                 "The 7Z path must be an existing absolute .exe file. An invalid custom path does not fall back to the bundled component."),
