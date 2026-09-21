@@ -59,6 +59,13 @@ public sealed class IpcProtocolTests
 
         Assert.True(AgentHandshakeValidator.Validate(valid, nonce, userHash, now).IsAccepted);
         Assert.Equal(
+            HandshakeRejection.ProtocolMismatch,
+            AgentHandshakeValidator.Validate(
+                valid with { ProtocolVersion = IpcProtocol.CurrentVersion - 1 },
+                nonce,
+                userHash,
+                now).Rejection);
+        Assert.Equal(
             HandshakeRejection.NonceMismatch,
             AgentHandshakeValidator.Validate(valid, Guid.NewGuid(), userHash, now).Rejection);
         Assert.Equal(
@@ -120,6 +127,14 @@ public sealed class IpcProtocolTests
                 123,
                 123,
                 now).IsAccepted);
+        Assert.Equal(
+            HandshakeRejection.ProtocolMismatch,
+            AgentEventHandshakeValidator.Validate(
+                request with { ProtocolVersion = IpcProtocol.CurrentVersion - 1 },
+                endpoint,
+                123,
+                123,
+                now).Rejection);
         Assert.Equal(
             HandshakeRejection.InvalidProcess,
             AgentEventHandshakeValidator.Validate(

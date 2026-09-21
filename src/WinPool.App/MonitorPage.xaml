@@ -33,13 +33,43 @@
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top"
                     Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                    CornerRadius="4"
-                    IsHitTestVisible="False">
-                    <TextBlock
-                        x:Name="MonitorStatusText"
-                        MaxWidth="520"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        TextWrapping="Wrap" />
+                    CornerRadius="4">
+                    <StackPanel MaxWidth="520" Spacing="3">
+                        <TextBlock
+                            x:Name="MonitorStatusText"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap" />
+                        <ItemsControl x:Name="MonitorIssueRows">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MaxWidth="520" HorizontalAlignment="Stretch">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                            Text="{Binding Text}"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap"
+                                            ToolTipService.ToolTip="{Binding Text}" />
+                                        <Button
+                                            Grid.Column="1"
+                                            Margin="4,0,0,0"
+                                            Padding="4,0"
+                                            VerticalAlignment="Center"
+                                            AutomationProperties.Name="{Binding DismissAutomationName}"
+                                            Click="DismissMonitorIssue_Click"
+                                            Tag="{Binding Key}"
+                                            ToolTipService.ToolTip="{Binding DismissAutomationName}">
+                                            <TextBlock Text="×" />
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Border>

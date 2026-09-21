@@ -40,6 +40,22 @@ public sealed class SamplingDiagnosticsTests
     }
 
     [Fact]
+    public void CommunicationSuccessClearsTransportFailureWithoutInventingASample()
+    {
+        var tracker = new SamplingDiagnosticsTracker();
+        var lastActualSample = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        tracker.RecordSuccess(lastActualSample);
+        tracker.RecordFailure("agent.snapshot-unavailable");
+
+        tracker.RecordCommunicationSuccess();
+        var recovered = tracker.Snapshot(0);
+
+        Assert.Equal(0, recovered.ConsecutiveFailures);
+        Assert.Null(recovered.LastFailureCode);
+        Assert.Equal(lastActualSample, recovered.LastSuccessfulSampleUtc);
+    }
+
+    [Fact]
     public void AgentDropSourcesAndQueuePressureRemainSeparated()
     {
         var tracker = new SamplingDiagnosticsTracker();

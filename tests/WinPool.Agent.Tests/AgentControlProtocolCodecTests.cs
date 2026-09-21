@@ -399,6 +399,31 @@ public sealed class AgentControlProtocolCodecTests
         Assert.Equal(7.5, typed.NumberValue);
     }
 
+    [Fact]
+    public void CodecPreservesSevenZipPreferencePath()
+    {
+        var codec = new AgentControlProtocolCodec();
+        var correlationId = CorrelationId.New();
+        var executablePath = Path.Combine(Path.GetTempPath(), "WinPool", "7za.exe");
+        var request = new SetAgentPreferenceRequest(
+            AgentPreferenceField.SevenZipExecutablePath,
+            BooleanValue: null,
+            NumberValue: null,
+            CorrelationId: correlationId,
+            TextValue: executablePath);
+        var envelope = Envelope(
+            AgentControlMessageTypes.SetAgentPreference,
+            correlationId,
+            JsonSerializer.SerializeToElement(request, SerializerOptions));
+
+        var decoded = codec.DecodeRequest(envelope);
+
+        Assert.True(decoded.IsAccepted);
+        var typed = Assert.IsType<SetAgentPreferenceRequest>(decoded.Request);
+        Assert.Equal(AgentPreferenceField.SevenZipExecutablePath, typed.Field);
+        Assert.Equal(executablePath, typed.TextValue);
+    }
+
     private static IpcEnvelope Envelope(
         string messageType,
         CorrelationId correlationId,

@@ -28,8 +28,10 @@ public sealed partial class SettingsPage : Page
     private bool _updatingMsr;
     private bool _updatingStartup;
     private bool _updatingPartitionGap;
-    private bool _updatingDataCapacity;
+    private bool _updatingSevenZipPath;
     private bool _resetAllRunning;
+    private readonly SemaphoreSlim _sevenZipPathCommitGate = new(1, 1);
+    private long _sevenZipPathCommitGeneration;
 
     public SettingsPage()
     {
@@ -59,10 +61,7 @@ public sealed partial class SettingsPage : Page
         PartitionGapBox.Text = MiBText(
             ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
         _updatingPartitionGap = false;
-        _updatingDataCapacity = true;
-        DataCapacityBox.Text = MiBText(
-            ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
-        _updatingDataCapacity = false;
+        SyncSevenZipPath();
         _updatingDataLocation = true;
         DataLocationOptions.SelectedIndex = (int)StorageDataLocations.Mode;
         _updatingDataLocation = false;
@@ -477,55 +476,171 @@ public sealed partial class SettingsPage : Page
         _updatingPartitionGap = false;
     }
 
-    private void DataCapacityBox_TextChanged(object sender, TextChangedEventArgs e) =>
-        KeepDigitsOnly(DataCapacityBox);
-
-    private void DataCapacityBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    private void SevenZipPathBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            CommitDataCapacityAsync();
+            CommitSevenZipPathAsync();
         }
     }
 
-    private void DataCapacityBox_LostFocus(object sender, RoutedEventArgs e) =>
-        CommitDataCapacityAsync();
+    private void SevenZipPathBox_LostFocus(object sender, RoutedEventArgs e) =>
+        CommitSevenZipPathAsync();
 
-    private async void CommitDataCapacityAsync()
+    private async void SevenZipBrowseButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_ready || _updatingDataCapacity)
+        try
         {
-            return;
-        }
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            picker.FileTypeFilter.Add(".exe");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+            var selected = await picker.PickSingleFileAsync();
+            if (selected is null)
+            {
+                return;
+            }
 
-        if (!TryReadMib(DataCapacityBox, out var mib))
+            SevenZipPathBox.Text = selected.Path;
+            await QueueSevenZipPathCommitAsync(selected.Path);
+        }
+        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
         {
-            RevertDataCapacity();
+            SyncSevenZipPath();
+            PublishPreferenceFailure(exception);
+        }
+    }
+
+    private async void SevenZipRestoreDefaultButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await QueueSevenZipPathCommitAsync(null);
+        }
+        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
+        {
+            SyncSevenZipPath();
+            PublishPreferenceFailure(exception);
+        }
+    }
+
+    private async void CommitSevenZipPathAsync()
+    {
+        if (!_ready || _updatingSevenZipPath)
+        {
             return;
         }
 
         try
         {
-            await ViewModel.SetDataCapacityLimitMibAsync(mib);
+            await QueueSevenZipPathCommitAsync(SevenZipPathBox.Text);
         }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or ArgumentOutOfRangeException)
+        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
         {
-            RevertDataCapacity();
+            SyncSevenZipPath();
             PublishPreferenceFailure(exception);
         }
     }
 
-    private void RevertDataCapacity()
+    private async Task QueueSevenZipPathCommitAsync(string? candidate)
     {
-        _updatingDataCapacity = true;
-        DataCapacityBox.Text = MiBText(
-            ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
-        _updatingDataCapacity = false;
+        var generation = Interlocked.Increment(ref _sevenZipPathCommitGeneration);
+        await _sevenZipPathCommitGate.WaitAsync();
+        try
+        {
+            // A prior LostFocus commit may still be queued when Browse or
+            // Restore default is clicked. Only the most recent user intent
+            // can reach the Agent, so an older text value cannot overwrite it
+            // after the picker returns.
+            if (generation != Volatile.Read(ref _sevenZipPathCommitGeneration))
+            {
+                return;
+            }
+
+            await CommitSevenZipPathCoreAsync(candidate, generation);
+        }
+        finally
+        {
+            _sevenZipPathCommitGate.Release();
+        }
     }
+
+    private async Task CommitSevenZipPathCoreAsync(string? candidate, long generation)
+    {
+        var normalized = candidate?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)
+            || string.Equals(normalized, DefaultSevenZipPath(), StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await ViewModel.SetSevenZipExecutablePathAsync(null);
+                SyncSevenZipPathIfCurrent(generation);
+            }
+            catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
+            {
+                if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
+                {
+                    SyncSevenZipPath();
+                    PublishPreferenceFailure(exception);
+                }
+            }
+
+            return;
+        }
+
+        // This is deliberately the only UI-side probe: configuration accepts
+        // an absolute file path, while execution errors remain an Agent task.
+        if (!Path.IsPathFullyQualified(normalized) || !File.Exists(normalized))
+        {
+            if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
+            {
+                await ShowMessageDialogAsync(ViewModel.Localization["SevenZipPathInvalid"]);
+                SyncSevenZipPath();
+            }
+
+            return;
+        }
+
+        try
+        {
+            await ViewModel.SetSevenZipExecutablePathAsync(normalized);
+            SyncSevenZipPathIfCurrent(generation);
+        }
+        catch (Exception exception) when (IsSevenZipPathUiFailure(exception))
+        {
+            if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
+            {
+                SyncSevenZipPath();
+                PublishPreferenceFailure(exception);
+            }
+        }
+    }
+
+    private void SyncSevenZipPathIfCurrent(long generation)
+    {
+        if (generation == Volatile.Read(ref _sevenZipPathCommitGeneration))
+        {
+            SyncSevenZipPath();
+        }
+    }
+
+    private static bool IsSevenZipPathUiFailure(Exception exception) =>
+        exception is IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ArgumentException
+            or System.ComponentModel.Win32Exception
+            or System.Runtime.InteropServices.COMException;
+
+    private void SyncSevenZipPath()
+    {
+        _updatingSevenZipPath = true;
+        SevenZipPathBox.Text = ViewModel.CurrentAgentPreferences.SevenZipExecutablePath
+            ?? DefaultSevenZipPath();
+        _updatingSevenZipPath = false;
+    }
+
+    private static string DefaultSevenZipPath() =>
+        Path.Combine(AppContext.BaseDirectory, SevenZipArchiveAdapter.BundledRelativeExecutablePath);
 
     /// <summary>
     /// Numeric boxes select their whole value on focus so a typed digit
@@ -708,10 +823,7 @@ public sealed partial class SettingsPage : Page
             _updatingStartup = true;
             StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
             _updatingStartup = false;
-            _updatingDataCapacity = true;
-            DataCapacityBox.Text = MiBText(
-                ViewModel.CurrentAgentPreferences.DataCapacityLimitBytes);
-            _updatingDataCapacity = false;
+            SyncSevenZipPath();
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
         {
@@ -776,11 +888,12 @@ public sealed partial class SettingsPage : Page
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
         PartitionGapTitle.Text = l["PartitionGapThreshold"];
-        DataCapacityTitle.Text = l["DataCapacityLimit"];
-        DataCapacityHint.Text = l["DataCapacityLimitHint"];
-        ToolTipService.SetToolTip(
-            DataCapacityBox,
-            l["DataCapacityLimitHint"]);
+        ExternalToolsTitle.Text = l["ExternalTools"];
+        SevenZipTitle.Text = l["SevenZip"];
+        SevenZipBrowseButtonText.Text = l["Browse"];
+        SevenZipRestoreDefaultButtonText.Text = l["RestoreDefault"];
+        SevenZipPathBox.SetValue(AutomationProperties.NameProperty, l["SevenZip"]);
+        ToolTipService.SetToolTip(SevenZipPathBox, l["SevenZipPathHint"]);
         ResetAllTitle.Text = l["ResetAllTitle"];
         ResetAllButtonText.Text = l["ResetAllButton"];
         WelcomeTitle.Text = l["Welcome"];

@@ -50,14 +50,14 @@ public sealed record UserPreferences(
 /// (agent-settings.json). Only the Agent writes them. SavedAtUtc is a
 /// content-generation label: consumers compare it by inequality, never by
 /// ordering, so a system clock step can never hide a real change.
-/// DataCapacityLimitBytes bounds compression-related data retention; the
-/// monitoring and test features will consume it.
+/// SevenZipExecutablePath is an optional user-selected absolute executable
+/// path. A null value means the portable package's bundled component.
 /// </summary>
 public sealed record AgentPreferences(
     bool ContinuousMonitoringEnabled = false,
     double MonitoringSampleRateHz = 5,
     bool StartAgentAtLogin = false,
-    long DataCapacityLimitBytes = 1024L * 1024 * 1024,
+    string? SevenZipExecutablePath = null,
     DateTimeOffset SavedAtUtc = default,
     int FormatVersion = 1)
 {

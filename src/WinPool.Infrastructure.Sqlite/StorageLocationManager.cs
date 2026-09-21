@@ -102,6 +102,7 @@ public sealed class AtomicStorageLocationPointerCommitter : IStorageLocationPoin
 public sealed class StorageLocationManager : IStorageLocationManager
 {
     public const string DatabaseFileName = "winpool.db";
+    public const string MonitoringDatabaseFileName = "monitoring.db";
     public const string PointerFileName = "storage-location.json";
     public const string RuntimeDirectoryName = "Runtime";
 
@@ -361,6 +362,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                         stagingRoot,
                         cancellationToken);
                 }
+                await VerifyMonitoringDatabaseAsync(stagingRoot, cancellationToken);
 
                 await using var writeLease = await writeCoordinator.QuiesceAndFlushAsync(
                     correlationId,
@@ -407,6 +409,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                         stagingRoot,
                         cancellationToken);
                 }
+                await VerifyMonitoringDatabaseAsync(plan.SourceRoot, cancellationToken);
 
                 currentTargetSnapshot = await SnapshotSourceAsync(
                     plan.TargetRoot,
@@ -437,6 +440,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                         plan.TargetRoot,
                         cancellationToken);
                 }
+                await VerifyMonitoringDatabaseAsync(plan.TargetRoot, cancellationToken);
 
                 targetSnapshot = await SnapshotSourceAsync(
                     plan.TargetRoot,
@@ -734,6 +738,40 @@ public sealed class StorageLocationManager : IStorageLocationManager
         }
     }
 
+    private static async Task VerifyMonitoringDatabaseAsync(
+        string root,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(root, MonitoringDatabaseFileName);
+        foreach (var sidecar in new[]
+                 {
+                     path + "-wal",
+                     path + "-shm",
+                     path + "-journal"
+                 })
+        {
+            if (File.Exists(sidecar))
+            {
+                // Migration snapshots intentionally exclude SQLite sidecars.
+                // That is safe for monitoring.db only after the Agent has
+                // confirmed TRUNCATE checkpoint + connection closure. Refuse
+                // the switch rather than silently omit committed WAL frames.
+                throw new IOException(
+                    "The monitoring database has SQLite sidecars and was not confirmed self-contained before data-root migration.");
+            }
+        }
+
+        if (!IsSqliteDatabase(path))
+        {
+            return;
+        }
+
+        // Monitoring data has its own strict, no-migration format contract.
+        // The verifier is read-only for an existing file, so a root switch
+        // cannot silently initialize or repair it.
+        await new MonitoringSqliteStore(path).InitializeAsync(cancellationToken);
+    }
+
     private static void EnsureSameManifest(
         SourceSnapshot source,
         SourceSnapshot candidate,
@@ -883,14 +921,31 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
     private static void DrainSourceDatabaseHandles(string sourceRoot)
     {
-        var databasePath = Path.Combine(sourceRoot, DatabaseFileName);
-        if (!IsSqliteDatabase(databasePath))
+        foreach (var databasePath in new[]
+                 {
+                     Path.Combine(sourceRoot, DatabaseFileName),
+                     Path.Combine(sourceRoot, MonitoringDatabaseFileName)
+                 })
         {
-            return;
-        }
+            if (!IsSqliteDatabase(databasePath))
+            {
+                continue;
+            }
 
-        WinPoolSqliteStore.DrainConnectionPool(databasePath);
-        VerifyExclusiveRead(databasePath);
+            if (string.Equals(
+                    Path.GetFileName(databasePath),
+                    DatabaseFileName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                WinPoolSqliteStore.DrainConnectionPool(databasePath);
+            }
+            else
+            {
+                new MonitoringSqliteStore(databasePath).DrainConnectionPool();
+            }
+
+            VerifyExclusiveRead(databasePath);
+        }
     }
 
     private static void VerifyExclusiveRead(string databasePath)
@@ -922,10 +977,14 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     PointerFileName + ".tmp-",
                     StringComparison.OrdinalIgnoreCase));
         return isPointer
-            || string.Equals(name, DatabaseFileName + "-wal", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, DatabaseFileName + "-shm", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, DatabaseFileName + "-journal", StringComparison.OrdinalIgnoreCase);
+            || IsDatabaseSidecar(name, DatabaseFileName)
+            || IsDatabaseSidecar(name, MonitoringDatabaseFileName);
     }
+
+    private static bool IsDatabaseSidecar(string name, string databaseFileName) =>
+        string.Equals(name, databaseFileName + "-wal", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, databaseFileName + "-shm", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, databaseFileName + "-journal", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsRuntimeFile(string file, string root)
     {

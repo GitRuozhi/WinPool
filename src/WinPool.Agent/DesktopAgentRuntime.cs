@@ -398,11 +398,20 @@ internal sealed class DesktopAgentRuntime :
     {
         cancellationToken.ThrowIfCancellationRequested();
         var current = await agentPreferences.LoadAsync(cancellationToken);
+        if (request.Field == AgentPreferenceField.SevenZipExecutablePath
+            && !string.IsNullOrWhiteSpace(request.TextValue)
+            && (!Path.IsPathFullyQualified(request.TextValue)
+                || !File.Exists(request.TextValue)))
+        {
+            return Reject(request.CorrelationId, "agent.preference.7zip_path_invalid");
+        }
+
         var updated = AgentPreferenceRequests.Apply(
             current,
             request.Field,
             request.BooleanValue,
-            request.NumberValue);
+            request.NumberValue,
+            request.TextValue);
         if (updated is null)
         {
             return Reject(request.CorrelationId, "agent.preference.value_invalid");

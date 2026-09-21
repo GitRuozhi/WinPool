@@ -29,6 +29,17 @@ public sealed class SamplingDiagnosticsTracker
         lastFailureCode = null;
     }
 
+    /// <summary>
+    /// Clears a transport failure after a successful Agent response without
+    /// claiming a monitor sample was observed. A stopped Agent snapshot is a
+    /// communication success, not a database or sampler success.
+    /// </summary>
+    public void RecordCommunicationSuccess()
+    {
+        consecutiveFailures = 0;
+        lastFailureCode = null;
+    }
+
     public void RecordFailure(string? code)
     {
         consecutiveFailures = Math.Min(int.MaxValue, consecutiveFailures + 1);

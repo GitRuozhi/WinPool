@@ -694,6 +694,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await SendAgentPreferenceAsync(
             AgentPreferenceField.ContinuousMonitoringEnabled,
             enabled,
+            null,
             null);
     }
 
@@ -707,7 +708,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await SendAgentPreferenceAsync(
             AgentPreferenceField.MonitoringSampleRateHz,
             null,
-            rateHz);
+            rateHz,
+            null);
     }
 
     public async Task SetStartAgentAtLoginAsync(bool enabled)
@@ -715,20 +717,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await SendAgentPreferenceAsync(
             AgentPreferenceField.StartAgentAtLogin,
             enabled,
+            null,
             null);
     }
 
-    public async Task SetDataCapacityLimitMibAsync(double mib)
+    public async Task SetSevenZipExecutablePathAsync(string? executablePath)
     {
-        if (!double.IsFinite(mib) || mib is < 1 or > 1_048_576)
-        {
-            throw new ArgumentOutOfRangeException(nameof(mib));
-        }
-
         await SendAgentPreferenceAsync(
-            AgentPreferenceField.DataCapacityLimitMiB,
+            AgentPreferenceField.SevenZipExecutablePath,
             null,
-            mib);
+            null,
+            executablePath);
     }
 
     /// <summary>
@@ -792,7 +791,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             await SetContinuousMonitoringAsync(false);
             await SetMonitoringSampleRateAsync(5);
-            await SetDataCapacityLimitMibAsync(1024);
+            await SetSevenZipExecutablePathAsync(null);
             await SetStartAgentAtLoginAsync(false);
         }
         catch (Exception exception) when (
@@ -809,7 +808,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private async Task SendAgentPreferenceAsync(
         AgentPreferenceField field,
         bool? booleanValue,
-        double? numberValue)
+        double? numberValue,
+        string? textValue)
     {
         if (_agentConnection is null)
         {
@@ -822,7 +822,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 field,
                 booleanValue,
                 numberValue,
-                CorrelationId.New()),
+                CorrelationId.New(),
+                textValue),
             CancellationToken.None);
         if (!result.IsSuccess
             || result.Value is not AgentPreferenceSavedResponse saved)

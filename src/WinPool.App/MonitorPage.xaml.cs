@@ -56,6 +56,11 @@ public sealed partial class MonitorRowViewModel : ObservableObject
     public string? InstanceName { get; set; }
 }
 
+public sealed record MonitorIssueRow(
+    string Key,
+    string Text,
+    string DismissAutomationName);
+
 public sealed partial class MonitorPage : Page
 {
     private static readonly Color[] SeriesPalette =
@@ -82,6 +87,8 @@ public sealed partial class MonitorPage : Page
 
     private readonly ObservableCollection<MonitorRowViewModel> _rows = [];
     private readonly ObservableCollection<string> _storageEventRows = [];
+    private readonly ObservableCollection<MonitorIssueRow> _monitorIssueRows = [];
+    private readonly HashSet<string> _dismissedMonitorIssueKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByInstance = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, MonitorRowViewModel> _rowsByDiskNumber = new();
     private DateTimeOffset _storageEventCutoff = DateTimeOffset.UtcNow;
@@ -91,11 +98,13 @@ public sealed partial class MonitorPage : Page
     private bool _ready;
     private bool _updatingContinuousMonitoring;
     private bool _applyingSampleRate;
+    private string? _lastSessionOccurrenceId;
 
     public MonitorPage()
     {
         InitializeComponent();
         DiskRows.ItemsSource = _rows;
+        MonitorIssueRows.ItemsSource = _monitorIssueRows;
         Unloaded += MonitorPage_Unloaded;
     }
 
@@ -281,6 +290,7 @@ public sealed partial class MonitorPage : Page
         SamplingRateLabel.Text = l["SamplingRate"];
         ((TextBlock)((StackPanel)AutoColorsButton.Content).Children[1]).Text = l["AutoColor"];
         ((TextBlock)((StackPanel)ExportButton.Content).Children[1]).Text = l["ExportData"];
+        ToolTipService.SetToolTip(ExportButton, l["ExportCurrentActiveDatabaseHint"]);
         ToolTipService.SetToolTip(RateOptions, l["RefreshRate"]);
         EventsButtonText.Text = l["MonitoringEvents"];
     }
@@ -568,10 +578,15 @@ public sealed partial class MonitorPage : Page
         return row;
     }
 
-    private void Poll()
+    private async void Poll()
     {
         try
         {
+            if (Monitoring.UsesAgent)
+            {
+                await Monitoring.RefreshRemoteStateAsync();
+            }
+
             PollCore();
         }
         catch (Exception ex)
@@ -660,31 +675,169 @@ public sealed partial class MonitorPage : Page
     {
         var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         var diagnostics = Monitoring.GetDiagnostics();
-        var runningState = Monitoring.IsRunning
-            ? (zh ? "运行中" : "running")
-            : (zh ? "未运行" : "stopped");
-        if (!Monitoring.IsRunning && !string.IsNullOrWhiteSpace(Monitoring.LastError))
+        var runtime = Monitoring.GetRuntimeDiagnostics();
+        if (!string.IsNullOrWhiteSpace(runtime.SessionOccurrenceId)
+            && !string.Equals(
+                runtime.SessionOccurrenceId,
+                _lastSessionOccurrenceId,
+                StringComparison.Ordinal))
         {
-            MonitorStatusText.Text = zh
-                ? $"监控状态：{runningState}；原因：{Monitoring.LastError}"
-                : $"Monitoring: {runningState}; reason: {Monitoring.LastError}";
+            // A session identity, rather than a transient IsRunning edge, is
+            // the occurrence boundary. Reconnects can omit an intermediate
+            // false state, while a new Agent session must reveal real errors.
+            _dismissedMonitorIssueKeys.Clear();
+            _lastSessionOccurrenceId = runtime.SessionOccurrenceId;
         }
-        else
-        {
-        var queue = diagnostics.SubscriberCapacity > 0
-            ? $"{diagnostics.SubscriberBufferedSamples}/{diagnostics.SubscriberCapacity}"
-            : "0/0";
-        var dropDetails = zh
-            ? $"窗口 {diagnostics.WindowDroppedSamples}、持久化 {diagnostics.PersistenceDroppedSamples}、订阅 {diagnostics.SubscriberDroppedSamples}、拒绝源 {diagnostics.RejectedSourceSamples}；订阅队列 {queue}（{diagnostics.ActiveSubscribers} 个）"
-            : $"window {diagnostics.WindowDroppedSamples}, persistence {diagnostics.PersistenceDroppedSamples}, subscriber {diagnostics.SubscriberDroppedSamples}, rejected source {diagnostics.RejectedSourceSamples}; subscriber queue {queue} ({diagnostics.ActiveSubscribers})";
-        MonitorStatusText.Text = diagnostics.ConsecutiveFailures > 0
+        MonitorStatusText.Text = Monitoring.UsesAgent && !Monitoring.IsRemoteStateKnown
+            ? zh ? "监控状态未知" : "Monitoring state unknown"
+            : Monitoring.IsRunning
             ? zh
-                ? $"采样异常：连续失败 {diagnostics.ConsecutiveFailures} 次；代码 {diagnostics.LastFailureCode ?? "unknown"}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
-                : $"Sampling warning: {diagnostics.ConsecutiveFailures} consecutive failures; code {diagnostics.LastFailureCode ?? "unknown"}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})"
-            : zh
-                ? $"监控状态：{runningState}；采样正常；最近成功 {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}；窗口样本 {diagnostics.WindowSampleCount}；Agent 丢样 {diagnostics.AgentDroppedSamples}（{dropDetails}）"
-                : $"Monitoring: {runningState}; sampling healthy; last success {FormatTimestamp(diagnostics.LastSuccessfulSampleUtc)}; {diagnostics.WindowSampleCount} window samples; {diagnostics.AgentDroppedSamples} Agent drops ({dropDetails})";
+                ? $"运行时长：{FormatRuntimeDuration(runtime.SessionElapsedMilliseconds)}"
+                : $"Duration: {FormatRuntimeDuration(runtime.SessionElapsedMilliseconds)}"
+            : zh ? "已停止" : "Stopped";
+
+        var dismissAutomationName = zh ? "关闭此提示" : "Dismiss this issue";
+        var issues = new List<MonitorIssueRow>();
+        if (runtime.PersistencePaused)
+        {
+            issues.Add(new(
+                $"persistence-paused:{runtime.PersistenceFailureOccurrenceId ?? runtime.SessionOccurrenceId ?? "current"}",
+                zh
+                    ? $"⛔ 记录已暂停：{runtime.PersistenceFailure ?? "正在等待安全恢复"}"
+                    : $"⛔ Recording paused: {runtime.PersistenceFailure ?? "waiting for safe recovery"}",
+                dismissAutomationName));
         }
+
+        // Only an actual writer/rotation failure can contribute here.  A
+        // normal 250 ms batch is pending persistence, not a known loss.
+        var knownUnpersisted = Math.Max(0, runtime.ConfirmedLostSamples);
+        var knownLoss = SaturatingAdd(
+            knownUnpersisted,
+            Math.Max(0, diagnostics.PersistenceDroppedSamples));
+        if (knownLoss > 0)
+        {
+            issues.Add(new(
+                $"known-loss:{runtime.SessionOccurrenceId ?? "terminal"}",
+                zh
+                    ? $"⚠ 记录不完整：{knownLoss} 条样本未保存"
+                    : $"⚠ Incomplete recording: {knownLoss} samples were not saved",
+                dismissAutomationName));
+        }
+
+        if (runtime.PersistenceDelayed && !runtime.PersistencePaused)
+        {
+            var samplingConfirmed = Monitoring.IsRunning
+                && Monitoring.IsRemoteStateKnown
+                && string.IsNullOrWhiteSpace(runtime.SamplingFailure);
+            issues.Add(new(
+                $"persistence-delay:{runtime.SessionOccurrenceId ?? "current"}",
+                samplingConfirmed
+                    ? zh
+                        ? $"⚠ 写入延迟：采样继续，{runtime.PendingPersistenceSamples} 条样本暂存内存"
+                        : $"⚠ Write delayed: sampling continues; {runtime.PendingPersistenceSamples} samples are buffered in memory"
+                    : zh
+                        ? $"⚠ 写入延迟：{runtime.PendingPersistenceSamples} 条样本待写入"
+                        : $"⚠ Write delayed: {runtime.PendingPersistenceSamples} samples are pending persistence",
+                dismissAutomationName));
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtime.PersistenceFailure) && !runtime.PersistencePaused)
+        {
+            issues.Add(new(
+                $"persistence-failure:{runtime.PersistenceFailureOccurrenceId ?? runtime.SessionOccurrenceId ?? "current"}",
+                zh
+                    ? $"⚠ 记录失败：{runtime.PersistenceFailure}"
+                    : $"⚠ Recording failure: {runtime.PersistenceFailure}",
+                dismissAutomationName));
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtime.ArchiveFailure))
+        {
+            issues.Add(new(
+                $"archive:{runtime.ArchiveFailureOccurrenceId ?? "current"}",
+                runtime.ArchiveRawDatabaseRetained
+                    ? zh
+                        ? $"⚠ 归档失败：原始数据库已保留。{runtime.ArchiveFailure}"
+                        : $"⚠ Archive failed: the raw database was retained. {runtime.ArchiveFailure}"
+                    : zh
+                        ? $"⚠ 归档校验失败：请保留现有归档并修复。{runtime.ArchiveFailure}"
+                        : $"⚠ Archive verification failed: retain the existing archive and repair it. {runtime.ArchiveFailure}",
+                dismissAutomationName));
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtime.SamplingFailure))
+        {
+            issues.Add(new(
+                $"sampling:{runtime.SessionOccurrenceId ?? "current"}",
+                zh
+                    ? $"⚠ 采样已停止：{runtime.SamplingFailure}"
+                    : $"⚠ Sampling stopped: {runtime.SamplingFailure}",
+                dismissAutomationName));
+        }
+
+        if (runtime.HasRecoveredInterruptedSession)
+        {
+            issues.Add(new(
+                $"interrupted-session:{runtime.RecoveredInterruptedSessionOccurrenceId ?? "current"}",
+                zh
+                    ? "⚠ 上次监控异常结束：可能有数量未知的未保存样本"
+                    : "⚠ Previous monitoring ended unexpectedly: an unknown number of samples may not have been saved",
+                dismissAutomationName));
+        }
+
+        // SubscriberDroppedSamples is a session total. Only a currently deep
+        // subscriber queue means the live graph is still behind; when it
+        // drains this temporary presentation issue disappears.
+        if (diagnostics.ActiveSubscribers > 0
+            && diagnostics.SubscriberCapacity > 0
+            && (long)diagnostics.SubscriberBufferedSamples * 4
+                >= (long)diagnostics.SubscriberCapacity * 3)
+        {
+            issues.Add(new(
+                $"display-delay:{runtime.SessionOccurrenceId ?? "current"}",
+                zh
+                    ? "⚠ 实时显示延迟：部分实时图表样本未显示"
+                    : "⚠ Live display delayed: some chart samples were not displayed",
+                dismissAutomationName));
+        }
+
+        if (diagnostics.ConsecutiveFailures > 0)
+        {
+            var failureCode = diagnostics.LastFailureCode ?? "unknown";
+            issues.Add(new(
+                $"communication:{failureCode}",
+                zh
+                    ? $"⚠ 通信或采样异常：{failureCode}"
+                    : $"⚠ Communication or sampling issue: {failureCode}",
+                dismissAutomationName));
+        }
+        else if (!string.IsNullOrWhiteSpace(Monitoring.LastError)
+                 && !string.Equals(
+                     Monitoring.LastError,
+                     runtime.PersistenceFailure,
+                     StringComparison.Ordinal)
+                 && !string.Equals(
+                     Monitoring.LastError,
+                     runtime.ArchiveFailure,
+                     StringComparison.Ordinal)
+                 && !string.Equals(
+                     Monitoring.LastError,
+                     runtime.SamplingFailure,
+                     StringComparison.Ordinal))
+        {
+            issues.Add(new(
+                $"control:{Monitoring.IsRunning}:{Monitoring.LastError}",
+                Monitoring.IsRunning
+                    ? zh
+                        ? $"⚠ 监控控制异常：{Monitoring.LastError}"
+                        : $"⚠ Monitoring control issue: {Monitoring.LastError}"
+                    : zh
+                        ? $"⚠ 监控停止原因：{Monitoring.LastError}"
+                        : $"⚠ Monitoring stopped: {Monitoring.LastError}",
+                dismissAutomationName));
+        }
+
+        SetMonitorIssues(issues);
 
         var displayRows = Monitoring.GetRecentStorageHealthEvents()
             .OrderByDescending(item => item.OccurredAtUtc)
@@ -704,8 +857,50 @@ public sealed partial class MonitorPage : Page
         }
     }
 
-    private static string FormatTimestamp(DateTimeOffset? timestamp) =>
-        timestamp?.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+    private void SetMonitorIssues(IReadOnlyList<MonitorIssueRow> issues)
+    {
+        _dismissedMonitorIssueKeys.IntersectWith(issues.Select(issue => issue.Key));
+        var visibleIssues = issues
+            .Where(issue => !_dismissedMonitorIssueKeys.Contains(issue.Key))
+            .ToArray();
+        if (_monitorIssueRows.SequenceEqual(visibleIssues))
+        {
+            return;
+        }
+
+        _monitorIssueRows.Clear();
+        foreach (var issue in visibleIssues)
+        {
+            _monitorIssueRows.Add(issue);
+        }
+    }
+
+    private void DismissMonitorIssue_Click(
+        object sender,
+        Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string key })
+        {
+            return;
+        }
+
+        _dismissedMonitorIssueKeys.Add(key);
+        var dismissed = _monitorIssueRows
+            .FirstOrDefault(issue => string.Equals(issue.Key, key, StringComparison.Ordinal));
+        if (dismissed is not null)
+        {
+            _monitorIssueRows.Remove(dismissed);
+        }
+    }
+
+    private static long SaturatingAdd(long first, long second) =>
+        first > long.MaxValue - second ? long.MaxValue : first + second;
+
+    private static string FormatRuntimeDuration(long milliseconds)
+    {
+        var elapsed = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
+        return $"{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+    }
 
     private void PublishNewStorageHealthEvent()
     {

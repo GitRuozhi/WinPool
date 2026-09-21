@@ -1,7 +1,9 @@
 using Microsoft.Data.Sqlite;
+using System.Runtime.CompilerServices;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
+using WinPool.Monitoring;
 
 namespace WinPool.Persistence.Tests;
 
@@ -273,6 +275,45 @@ public sealed class StorageLocationManagerTests
         Assert.True(result.IsSuccess);
         Assert.True(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
         Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db-wal")));
+        Assert.Equal(["quiesce", "resume"], coordinator.Events);
+    }
+
+    [Fact]
+    public async Task MonitoringSidecarRejectsMigrationRatherThanSilentlyOmittingIt()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard(StorageLocationManager.DatabaseFileName, "database");
+        var monitoring = new MonitoringSqliteStore(Path.Combine(
+            locations.StandardRoot,
+            StorageLocationManager.MonitoringDatabaseFileName));
+        await monitoring.InitializeAsync();
+        await monitoring.CheckpointAndCloseAsync();
+        var sidecarPath = Path.Combine(
+            locations.StandardRoot,
+            StorageLocationManager.MonitoringDatabaseFileName + "-wal");
+        await File.WriteAllTextAsync(sidecarPath, "uncheckpointed-monitoring-evidence");
+
+        var coordinator = new RecordingCoordinator();
+        var manager = locations.CreateManager(coordinator);
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.True(File.Exists(sidecarPath));
+        Assert.True(File.Exists(Path.Combine(
+            locations.StandardRoot,
+            StorageLocationManager.MonitoringDatabaseFileName)));
+        Assert.False(File.Exists(Path.Combine(
+            locations.PortableRoot,
+            StorageLocationManager.MonitoringDatabaseFileName)));
         Assert.Equal(["quiesce", "resume"], coordinator.Events);
     }
 
@@ -693,6 +734,206 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
+    public async Task ProductionRoundTripMovesBothDatabasesAndArchiveLifecycleWithoutLeavingOldRootReferences()
+    {
+        using var locations = TemporaryLocations.Create();
+        var sevenZipPath = FindBundledSevenZipPath();
+        await CreateCoreDatabaseAsync(locations.StandardRoot);
+
+        var activeSession = await CreateMonitoringDatabaseAsync(
+            Path.Combine(locations.StandardRoot, StorageLocationManager.MonitoringDatabaseFileName),
+            MonitoringSessionState.Running,
+            droppedSamples: 0);
+        var completedRawPath = Path.Combine(
+            locations.StandardRoot,
+            MonitoringArchiveCoordinator.ArchiveDirectoryName,
+            MonitoringArchiveCoordinator.SealedDirectoryName,
+            "completed-before-migration.db");
+        var completedSession = await CreateMonitoringDatabaseAsync(
+            completedRawPath,
+            MonitoringSessionState.Stopped,
+            droppedSamples: 0);
+        var completedGenerationId = Guid.NewGuid().ToString("N");
+        MonitoringArchiveRecord released;
+        await using (var sourceArchive = new MonitoringArchiveCoordinator(
+                         locations.StandardRoot,
+                         locations.StandardRoot,
+                         () => sevenZipPath))
+        {
+            await sourceArchive.InitializeAsync();
+            await sourceArchive.RegisterSealedDatabaseAsync(
+                completedRawPath,
+                completedSession,
+                completedGenerationId);
+            await sourceArchive.WaitForIdleAsync(TimeSpan.FromSeconds(30));
+            released = Assert.Single(sourceArchive.Snapshot());
+            Assert.Equal(MonitoringArchiveStage.SourceReleased, released.Stage);
+            Assert.False(File.Exists(completedRawPath));
+        }
+
+        var pendingRawPath = Path.Combine(
+            locations.StandardRoot,
+            MonitoringArchiveCoordinator.ArchiveDirectoryName,
+            MonitoringArchiveCoordinator.SealedDirectoryName,
+            "pending-before-migration.db");
+        var pendingSession = await CreateMonitoringDatabaseAsync(
+            pendingRawPath,
+            MonitoringSessionState.Running,
+            droppedSamples: 0);
+        var pendingGenerationId = Guid.NewGuid().ToString("N");
+        await using (var sourceArchive = new MonitoringArchiveCoordinator(
+                         locations.StandardRoot,
+                         locations.StandardRoot,
+                         () => sevenZipPath))
+        {
+            await sourceArchive.InitializeAsync();
+            await sourceArchive.CreatePendingSealAsync(
+                pendingRawPath,
+                pendingSession,
+                pendingGenerationId);
+        }
+
+        var sourceCoreAudit = await new SqliteMigrationAuditor().CaptureAsync(
+            Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName));
+        var pendingRawHash = await HashFileAsync(pendingRawPath);
+        var releasedPackageHash = await HashFileAsync(released.ArchivePath);
+        var coordinator = new RecordingCoordinator();
+        var manager = locations.CreateManager(coordinator);
+
+        var toPortable = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Portable,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+        var portableResult = await manager.ApplySwitchAsync(
+            toPortable,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.True(portableResult.IsSuccess);
+        Assert.Equal(StorageLocationMode.Portable, portableResult.Value!.Mode);
+        Assert.Equal(
+            ["quiesce", "resume"],
+            coordinator.Events);
+        Assert.Equal(
+            ReadManagedPayload(locations.StandardRoot),
+            ReadManagedPayload(locations.PortableRoot));
+        Assert.Equal(
+            pendingRawHash,
+            await HashFileAsync(Path.Combine(
+                locations.PortableRoot,
+                MonitoringArchiveCoordinator.ArchiveDirectoryName,
+                MonitoringArchiveCoordinator.SealedDirectoryName,
+                Path.GetFileName(pendingRawPath))));
+        var portableCoreAudit = await new SqliteMigrationAuditor().CaptureAsync(
+            Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName));
+        Assert.True(sourceCoreAudit.HasSameLogicalIdentity(portableCoreAudit));
+
+        var failingRunner = new RecordingFailingArchiveRunner();
+        var targetArchive = new MonitoringArchiveCoordinator(
+            locations.PortableRoot,
+            locations.PortableRoot,
+            () => sevenZipPath,
+            new SevenZipArchiveAdapter(failingRunner),
+            TimeSpan.FromMilliseconds(25));
+        await using (var targetFactory = new RotatingMonitorSessionPersistenceFactory(
+                         locations.PortableRoot,
+                         "migration-target-agent",
+                         targetArchive))
+        {
+            await targetFactory.InitializeAsync();
+            var recoveredPendingRawHash = await HashFileAsync(targetArchive.Snapshot()
+                .Single(record => record.GenerationId == pendingGenerationId)
+                .RawDatabasePath);
+            await WaitUntilAsync(
+                () => targetArchive.Snapshot().Any(record =>
+                    record.GenerationId == pendingGenerationId
+                    && !string.IsNullOrWhiteSpace(record.LastError)),
+                TimeSpan.FromSeconds(10));
+
+            var recoveredSession = await new MonitorSessionRepository(
+                targetFactory.GetCurrentDatabase()).GetAsync(activeSession);
+            Assert.NotNull(recoveredSession);
+            Assert.Equal(MonitoringSessionState.Interrupted, recoveredSession.State);
+            // Recovery records the existing minimum interruption-evidence
+            // sentinel. It is not an exact, UI-facing confirmed-loss count.
+            Assert.Equal(1, recoveredSession.DroppedSamples);
+            Assert.NotNull(recoveredSession.EndedAtUtc);
+
+            var monitorCoordinator = new MonitoringSessionCoordinator(
+                new NeverProducingMonitorSource(),
+                targetFactory);
+            var background = monitorCoordinator.CurrentDiagnostics;
+            Assert.True(background.HasRecoveredInterruptedSession);
+            Assert.StartsWith(
+                "interrupted:",
+                background.RecoveredInterruptedSessionOccurrenceId,
+                StringComparison.Ordinal);
+            Assert.Equal(0, background.ConfirmedLostSamples);
+            Assert.Equal(0, background.DroppedSamples);
+            Assert.True(background.FailedArchives > 0);
+            Assert.True(background.ArchiveRawDatabaseRetained);
+
+            var migratedRecords = targetArchive.Snapshot();
+            var migratedReleased = migratedRecords.Single(record =>
+                record.GenerationId == completedGenerationId);
+            var migratedPending = migratedRecords.Single(record =>
+                record.GenerationId == pendingGenerationId);
+            Assert.Equal(MonitoringArchiveStage.SourceReleased, migratedReleased.Stage);
+            Assert.True(File.Exists(migratedReleased.ArchivePath));
+            Assert.Equal(releasedPackageHash, await HashFileAsync(migratedReleased.ArchivePath));
+            Assert.True(File.Exists(migratedPending.RawDatabasePath));
+            Assert.Equal(recoveredPendingRawHash, await HashFileAsync(migratedPending.RawDatabasePath));
+            Assert.StartsWith(
+                locations.PortableRoot,
+                migratedReleased.ArchivePath,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.StartsWith(
+                locations.PortableRoot,
+                migratedPending.RawDatabasePath,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(locations.StandardRoot, migratedReleased.ArchivePath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(locations.StandardRoot, migratedPending.RawDatabasePath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                failingRunner.Invocations,
+                invocation => invocation.Arguments.Contains(migratedReleased.ArchivePath));
+
+            var ledgerText = await File.ReadAllTextAsync(Path.Combine(
+                locations.PortableRoot,
+                MonitoringArchiveCoordinator.ArchiveDirectoryName,
+                MonitoringArchiveCoordinator.LedgerFileName));
+            Assert.DoesNotContain(locations.StandardRoot, ledgerText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(locations.PortableRoot, ledgerText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var portablePayloadAfterRestart = ReadManagedPayload(locations.PortableRoot);
+        var toStandard = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(
+                StorageLocationMode.Standard,
+                CorrelationId.New(),
+                CancellationToken.None)).Value);
+        var standardResult = await manager.ApplySwitchAsync(
+            toStandard,
+            CorrelationId.New(),
+            CancellationToken.None);
+
+        Assert.True(standardResult.IsSuccess);
+        Assert.Equal(StorageLocationMode.Standard, standardResult.Value!.Mode);
+        Assert.Equal(portablePayloadAfterRestart, ReadManagedPayload(locations.StandardRoot));
+        Assert.Equal(portablePayloadAfterRestart, ReadManagedPayload(locations.PortableRoot));
+        Assert.Equal(
+            1,
+            await CountMonitoringSamplesAsync(Path.Combine(
+                locations.StandardRoot,
+                StorageLocationManager.MonitoringDatabaseFileName)));
+        Assert.Equal(
+            1,
+            await CountMonitoringSamplesAsync(Path.Combine(
+                locations.PortableRoot,
+                StorageLocationManager.MonitoringDatabaseFileName)));
+    }
+
+    [Fact]
     public async Task MigrationTemporaryRootsCanBeCleanedImmediately()
     {
         using var locations = TemporaryLocations.Create();
@@ -800,6 +1041,125 @@ public sealed class StorageLocationManagerTests
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task CreateCoreDatabaseAsync(string root)
+    {
+        Directory.CreateDirectory(root);
+        var store = new WinPoolSqliteStore(Path.Combine(
+            root,
+            StorageLocationManager.DatabaseFileName));
+        await store.InitializeAsync();
+        await using var connection = await store.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<SessionId> CreateMonitoringDatabaseAsync(
+        string databasePath,
+        MonitoringSessionState state,
+        long droppedSamples)
+    {
+        var store = new MonitoringSqliteStore(databasePath);
+        await store.InitializeAsync();
+        var sessionId = SessionId.New();
+        var systemId = SystemId.New();
+        var sampledAt = DateTimeOffset.UtcNow;
+        var sample = new MonitorSample(
+            sessionId,
+            new StorageObjectId(systemId, StorageObjectKind.PhysicalDisk, "migration-disk"),
+            sampledAt,
+            [new MonitorMetricValue(MonitorMetricKind.ActiveTimePercent, 42)]);
+        await using (var lease = AgentWriteOwnerLease.Acquire(
+                         store,
+                         "storage-location-migration-seed-" + Guid.NewGuid().ToString("N")))
+        {
+            await new MonitorSessionRepository(store, lease).CreateAsync(
+                new PersistedMonitorSession(
+                    sessionId,
+                    sampledAt,
+                    state == MonitoringSessionState.Running
+                        ? null
+                        : sampledAt.AddSeconds(1),
+                    "Stopwatch+UTC",
+                    state,
+                    droppedSamples));
+            await new MonitorSampleRepository(store, lease).WriteBatchAsync([sample]);
+        }
+
+        await store.CheckpointAndCloseAsync();
+        return sessionId;
+    }
+
+    private static async Task<long> CountMonitoringSamplesAsync(string databasePath)
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString();
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM monitor_samples;";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<string> HashFileAsync(string path)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (predicate())
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+        }
+
+        throw new TimeoutException("The expected archive state was not observed.");
+    }
+
+    private static string FindBundledSevenZipPath()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "WinPool.slnx")))
+            {
+                var path = Path.Combine(
+                    current.FullName,
+                    "assets",
+                    "ThirdParty",
+                    "7zip",
+                    "26.03",
+                    "x64",
+                    "7za.exe");
+                Assert.True(File.Exists(path), $"Missing bundled 7-Zip asset: {path}");
+                return path;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the WinPool repository root.");
+    }
+
     private static string[] ReadManagedPayload(string root) =>
         Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Where(path =>
@@ -823,6 +1183,18 @@ public sealed class StorageLocationManagerTests
                        && !string.Equals(
                            relative,
                            StorageLocationManager.DatabaseFileName + "-journal",
+                           StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           relative,
+                           StorageLocationManager.MonitoringDatabaseFileName + "-wal",
+                           StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           relative,
+                           StorageLocationManager.MonitoringDatabaseFileName + "-shm",
+                           StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           relative,
+                           StorageLocationManager.MonitoringDatabaseFileName + "-journal",
                            StringComparison.OrdinalIgnoreCase);
             })
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -855,6 +1227,67 @@ public sealed class StorageLocationManagerTests
         private sealed class NoopLease : IAsyncDisposable
         {
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class NeverProducingMonitorSource : IMonitorSource
+    {
+        public async IAsyncEnumerable<MonitorSample> SampleAsync(
+            MonitorRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            _ = request;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            yield break;
+        }
+    }
+
+    private sealed class RecordingFailingArchiveRunner : IControlledProcessRunner
+    {
+        private readonly object gate = new();
+        private readonly List<ControlledProcessInvocation> invocations = [];
+
+        public IReadOnlyList<ControlledProcessInvocation> Invocations
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return invocations.ToArray();
+                }
+            }
+        }
+
+        public Task<ControlledProcessResult> RunAsync(
+            ControlledProcessInvocation invocation,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Record(invocation);
+            return Task.FromResult(new ControlledProcessResult(
+                7,
+                string.Empty,
+                "intentional migration archive failure"));
+        }
+
+        public Task<ControlledProcessBinaryResult> RunBinaryOutputAsync(
+            ControlledProcessInvocation invocation,
+            Func<Stream, CancellationToken, Task> consumeStandardOutputAsync,
+            CancellationToken cancellationToken)
+        {
+            _ = consumeStandardOutputAsync;
+            cancellationToken.ThrowIfCancellationRequested();
+            Record(invocation);
+            return Task.FromException<ControlledProcessBinaryResult>(new InvalidOperationException(
+                "A released archive must not be re-extracted during migration recovery."));
+        }
+
+        private void Record(ControlledProcessInvocation invocation)
+        {
+            lock (gate)
+            {
+                invocations.Add(invocation);
+            }
         }
     }
 

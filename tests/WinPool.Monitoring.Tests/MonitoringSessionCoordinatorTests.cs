@@ -124,6 +124,161 @@ public sealed class MonitoringSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task PersistenceAndArchiveFactsFlowIntoLiveAndTerminalDiagnostics()
+    {
+        var fixture = new Fixture();
+        var persistence = new RecordingPersistence
+        {
+            PersistenceDiagnostics = new MonitorPersistenceDiagnostics(
+                ConfirmedLostSamples: 7,
+                PendingSamples: 3,
+                OldestPendingMilliseconds: 2_001,
+                IsDelayed: true,
+                IsPaused: true,
+                RotationInProgress: true,
+                RotationBufferedSamples: 11,
+                Failure: "checkpoint busy",
+                PendingArchives: 2,
+                FailedArchives: 1,
+                ArchiveFailure: "7-Zip test failed",
+                ArchiveRawDatabaseRetained: true)
+        };
+        var coordinator = new MonitoringSessionCoordinator(
+            new ControlledSource(),
+            new FixedPersistenceFactory(persistence));
+
+        Assert.True((await coordinator.StartAsync(fixture.Request, CancellationToken.None)).IsSuccess);
+        var first = coordinator.CurrentDiagnostics;
+        await Task.Delay(TimeSpan.FromMilliseconds(15));
+        var later = coordinator.CurrentDiagnostics;
+
+        Assert.True(later.SessionElapsedMilliseconds >= first.SessionElapsedMilliseconds);
+        Assert.Equal(7, later.ConfirmedLostSamples);
+        Assert.Equal(3, later.PendingPersistenceSamples);
+        Assert.Equal(2_001, later.OldestPendingPersistenceMilliseconds);
+        Assert.True(later.PersistenceDelayed);
+        Assert.True(later.PersistencePaused);
+        Assert.True(later.RotationInProgress);
+        Assert.Equal(11, later.RotationBufferedSamples);
+        Assert.Equal("checkpoint busy", later.PersistenceFailure);
+        Assert.Equal(2, later.PendingArchives);
+        Assert.Equal(1, later.FailedArchives);
+        Assert.Equal("7-Zip test failed", later.ArchiveFailure);
+        Assert.True(later.ArchiveRawDatabaseRetained);
+
+        await coordinator.StopAsync(fixture.Request.SessionId, CancellationToken.None);
+        var terminal = coordinator.CurrentDiagnostics;
+        Assert.True(terminal.SessionElapsedMilliseconds >= later.SessionElapsedMilliseconds);
+        Assert.Equal("checkpoint busy", terminal.PersistenceFailure);
+        Assert.Equal("7-Zip test failed", terminal.ArchiveFailure);
+        Assert.True(terminal.ArchiveRawDatabaseRetained);
+    }
+
+    [Fact]
+    public async Task PendingPersistenceOnlyShowsDelayAfterThresholdAndClearsAfterProgress()
+    {
+        var fixture = new Fixture();
+        var persistence = new RecordingPersistence
+        {
+            PersistenceDiagnostics = new MonitorPersistenceDiagnostics(
+                PendingSamples: 4,
+                OldestPendingMilliseconds: 250,
+                IsDelayed: false)
+        };
+        var coordinator = new MonitoringSessionCoordinator(
+            new ControlledSource(),
+            new FixedPersistenceFactory(persistence));
+
+        Assert.True((await coordinator.StartAsync(fixture.Request, CancellationToken.None)).IsSuccess);
+        var healthyBatch = coordinator.CurrentDiagnostics;
+        Assert.Equal(4, healthyBatch.PendingPersistenceSamples);
+        Assert.Equal(0, healthyBatch.ConfirmedLostSamples);
+        Assert.False(healthyBatch.PersistenceDelayed);
+
+        persistence.PersistenceDiagnostics = new MonitorPersistenceDiagnostics(
+            PendingSamples: 4,
+            OldestPendingMilliseconds: 2_000,
+            IsDelayed: true);
+        var delayed = coordinator.CurrentDiagnostics;
+        Assert.True(delayed.PersistenceDelayed);
+        Assert.Equal(0, delayed.ConfirmedLostSamples);
+
+        persistence.PersistenceDiagnostics = new MonitorPersistenceDiagnostics();
+        var recovered = coordinator.CurrentDiagnostics;
+        Assert.False(recovered.PersistenceDelayed);
+        Assert.Equal(0, recovered.PendingPersistenceSamples);
+
+        await coordinator.StopAsync(fixture.Request.SessionId, CancellationToken.None);
+        var stopped = coordinator.CurrentDiagnostics;
+        Assert.Equal(0, stopped.ConfirmedLostSamples);
+        Assert.False(stopped.PersistenceDelayed);
+    }
+
+    [Fact]
+    public async Task SessionDurationUsesMonotonicClockBeyondTwentyFourHoursAndKeepsItsOccurrence()
+    {
+        var fixture = new Fixture();
+        var clock = new ManualMonotonicTimeProvider(
+            new DateTimeOffset(2026, 9, 21, 8, 0, 0, TimeSpan.Zero));
+        var coordinator = new MonitoringSessionCoordinator(
+            new ControlledSource(),
+            new FixedPersistenceFactory(new RecordingPersistence()),
+            timeProvider: clock);
+
+        var started = await coordinator.StartAsync(fixture.Request, CancellationToken.None);
+        Assert.True(started.IsSuccess);
+        var occurrence = coordinator.CurrentDiagnostics.SessionOccurrenceId;
+        var elapsed = TimeSpan.FromHours(25) + TimeSpan.FromMinutes(17) + TimeSpan.FromSeconds(3);
+        clock.Advance(elapsed);
+
+        var afterTwentyFourHours = coordinator.CurrentDiagnostics;
+        Assert.Equal((long)elapsed.TotalMilliseconds, afterTwentyFourHours.SessionElapsedMilliseconds);
+        Assert.Equal(occurrence, afterTwentyFourHours.SessionOccurrenceId);
+
+        // A wall-clock correction must not reset the monotonic display duration.
+        clock.SetUtcNow(clock.GetUtcNow().AddHours(-9));
+        var afterClockCorrection = coordinator.CurrentDiagnostics;
+        Assert.Equal(afterTwentyFourHours.SessionElapsedMilliseconds, afterClockCorrection.SessionElapsedMilliseconds);
+        Assert.Equal(occurrence, afterClockCorrection.SessionOccurrenceId);
+
+        var stopped = await coordinator.StopAsync(fixture.Request.SessionId, CancellationToken.None);
+        Assert.True(stopped.IsSuccess);
+        var terminal = coordinator.CurrentDiagnostics;
+        Assert.Equal((long)elapsed.TotalMilliseconds, terminal.SessionElapsedMilliseconds);
+        Assert.Equal(occurrence, terminal.SessionOccurrenceId);
+    }
+
+    [Fact]
+    public void BackgroundArchiveAndInterruptedSessionFactsRemainVisibleWithoutLiveSession()
+    {
+        var persistence = new RecordingPersistence();
+        var factory = new BackgroundDiagnosticsFactory(persistence)
+        {
+            BackgroundDiagnostics = new MonitorPersistenceDiagnostics(
+                PendingArchives: 1,
+                FailedArchives: 1,
+                ArchiveFailure: "archive retry pending",
+                ArchiveRawDatabaseRetained: true,
+                ArchiveFailureOccurrenceId: "generation-a:1",
+                HasRecoveredInterruptedSession: true,
+                RecoveredInterruptedSessionOccurrenceId: "interrupted:a")
+        };
+        var coordinator = new MonitoringSessionCoordinator(new ControlledSource(), factory);
+
+        var diagnostics = coordinator.CurrentDiagnostics;
+        Assert.Equal(1, diagnostics.PendingArchives);
+        Assert.Equal("archive retry pending", diagnostics.ArchiveFailure);
+        Assert.Equal("generation-a:1", diagnostics.ArchiveFailureOccurrenceId);
+        Assert.True(diagnostics.HasRecoveredInterruptedSession);
+
+        factory.BackgroundDiagnostics = new MonitorPersistenceDiagnostics();
+        var recovered = coordinator.CurrentDiagnostics;
+        Assert.Equal(0, recovered.FailedArchives);
+        Assert.Null(recovered.ArchiveFailure);
+        Assert.False(recovered.HasRecoveredInterruptedSession);
+    }
+
+    [Fact]
     public async Task StartAndDisposeFailuresReturnFailedWithoutRetainingSession()
     {
         var fixture = new Fixture();
@@ -245,11 +400,11 @@ public sealed class MonitoringSessionCoordinatorTests
             await coordinator.StopAsync(fixture.Request.SessionId, CancellationToken.None);
         }
 
-        Assert.Equal(
-            (sampleCount - latestCapacity)
-            + sampleCount
-            + ((sampleCount - 1 - subscriberCapacity) * subscriberCount),
-            persistence.DroppedSamples);
+        // A rolling presentation window and slow subscriber queues evict
+        // observations deliberately.  They are not database loss.  Only a
+        // rejected persistence enqueue is recorded in the durable session
+        // loss count.
+        Assert.Equal(sampleCount, persistence.DroppedSamples);
         Assert.Equal(MonitoringSessionState.Stopped, persistence.FinalState);
     }
 
@@ -277,7 +432,7 @@ public sealed class MonitoringSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task ForeignTargetSampleIsRejectedAndReportedAsDropped()
+    public async Task ForeignTargetSampleIsRejectedWithoutReportingDatabaseLoss()
     {
         var fixture = new Fixture();
         var persistence = new RecordingPersistence();
@@ -300,7 +455,8 @@ public sealed class MonitoringSessionCoordinatorTests
         await coordinator.StopAsync(fixture.Request.SessionId, CancellationToken.None);
 
         Assert.Empty(persistence.Samples);
-        Assert.True(persistence.DroppedSamples >= 1);
+        Assert.Equal(0, persistence.DroppedSamples);
+        Assert.Equal(1, coordinator.CurrentDiagnostics.RejectedSourceSamples);
     }
 
     [Fact]
@@ -421,13 +577,72 @@ public sealed class MonitoringSessionCoordinatorTests
         }
     }
 
+    private sealed class ManualMonotonicTimeProvider : TimeProvider
+    {
+        private readonly object gate = new();
+        private DateTimeOffset utcNow;
+        private long timestamp;
+
+        public ManualMonotonicTimeProvider(DateTimeOffset initialUtcNow)
+        {
+            utcNow = initialUtcNow;
+        }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (gate)
+            {
+                return utcNow;
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            lock (gate)
+            {
+                return timestamp;
+            }
+        }
+
+        public void Advance(TimeSpan elapsed)
+        {
+            lock (gate)
+            {
+                timestamp = checked(timestamp + elapsed.Ticks);
+                utcNow = utcNow.Add(elapsed);
+            }
+        }
+
+        public void SetUtcNow(DateTimeOffset value)
+        {
+            lock (gate)
+            {
+                utcNow = value;
+            }
+        }
+    }
+
     private sealed class FixedPersistenceFactory(RecordingPersistence persistence)
         : IMonitorSessionPersistenceFactory
     {
         public IMonitorSessionPersistence Create(SessionId sessionId) => persistence;
     }
 
-    private sealed class RecordingPersistence : IMonitorSessionPersistence
+    private sealed class BackgroundDiagnosticsFactory(RecordingPersistence persistence)
+        : IMonitorSessionPersistenceFactory, IMonitoringPersistenceBackgroundDiagnostics
+    {
+        public MonitorPersistenceDiagnostics BackgroundDiagnostics { get; set; } = new();
+
+        public IMonitorSessionPersistence Create(SessionId sessionId) => persistence;
+
+        public MonitorPersistenceDiagnostics GetBackgroundDiagnostics() => BackgroundDiagnostics;
+    }
+
+    private sealed class RecordingPersistence :
+        IMonitorSessionPersistence,
+        IMonitorSessionPersistenceDiagnostics
     {
         public bool AcceptSamples { get; set; } = true;
         public bool ThrowOnStart { get; set; }
@@ -437,6 +652,9 @@ public sealed class MonitoringSessionCoordinatorTests
         public List<MonitorSample> Samples { get; } = [];
         public long DroppedSamples { get; private set; }
         public MonitoringSessionState? FinalState { get; private set; }
+        public MonitorPersistenceDiagnostics PersistenceDiagnostics { get; set; } = new();
+
+        public MonitorPersistenceDiagnostics GetDiagnostics() => PersistenceDiagnostics;
 
         public Task StartAsync(
             MonitoringSession session,

@@ -1,0 +1,11 @@
+WinPool bundles the x64 standalone console program 7za.exe from 7-Zip Extra
+26.03 (2026-09-03), obtained from:
+https://github.com/ip7z/7zip/releases/download/26.03/7z2603-extra.7z
+
+Downloaded package SHA-256:
+191894E6ACB3647FFB69CE630479FF318523B2E2B9890AA7F05C1127C2E59B8F
+
+7-Zip Extra is licensed as described in the accompanying License.txt. The
+primary license is GNU LGPL v2.1 or later; 7za.exe also includes the BSD
+3-clause and BSD 2-clause notices reproduced in License.txt. Source and
+license information are available at https://www.7-zip.org/.

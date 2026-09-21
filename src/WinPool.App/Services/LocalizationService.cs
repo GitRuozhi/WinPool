@@ -233,10 +233,16 @@ public sealed class LocalizationService : ObservableObject
             ["InitializeDisk"] = ("初始化磁盘", "Disk initialization"),
             ["CreateMsrOnInitialize"] = ("初始化磁盘时创建微软保留分区", "Create a Microsoft Reserved Partition when initializing disks"),
             ["PartitionGapThreshold"] = ("分区缝隙隐藏阈值", "Partition gap hiding threshold"),
-            ["DataCapacityLimit"] = ("数据容量限制", "Data capacity limit"),
-            ["DataCapacityLimitHint"] = (
-                "与数据压缩相关；将在监控与测试功能中完整生效。",
-                "Related to data compression; takes full effect with the monitoring and test features."),
+            ["ExternalTools"] = ("外部工具", "External tools"),
+            ["SevenZip"] = ("7Z", "7Z"),
+            ["Browse"] = ("浏览", "Browse"),
+            ["RestoreDefault"] = ("恢复默认", "Restore default"),
+            ["SevenZipPathHint"] = (
+                "默认使用便携目录中的 7Z 组件；自定义路径必须是存在的绝对 .exe 文件。",
+                "Uses the portable 7Z component by default; a custom path must be an existing absolute .exe file."),
+            ["SevenZipPathInvalid"] = (
+                "7Z 路径必须是存在的绝对 .exe 文件。自定义路径失效时不会自动改用随附组件。",
+                "The 7Z path must be an existing absolute .exe file. An invalid custom path does not fall back to the bundled component."),
             ["ResetAllTitle"] = ("恢复默认", "Reset to defaults"),
             ["ResetAllButton"] = ("全部恢复默认", "Reset all to defaults"),
             ["ResetAllConfirmTitle"] = ("确认恢复默认", "Confirm reset to defaults"),
@@ -282,6 +288,7 @@ public sealed class LocalizationService : ObservableObject
             ["StartMonitoring"] = ("开始监控", "Start monitoring"),
             ["StopMonitoring"] = ("停止监控", "Stop monitoring"),
             ["ExportData"] = ("导出数据", "Export data"),
+            ["ExportCurrentActiveDatabaseHint"] = ("仅导出当前活动监控数据库；已归档的历史记录不会包含在此导出中。", "Exports only the current active monitoring database; archived history is not included."),
             ["Activity"] = ("活动", "Activity"),
             ["ReadSpeed"] = ("读取速度", "Read speed"),
             ["WriteSpeed"] = ("写入速度", "Write speed"),

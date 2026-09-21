@@ -6,7 +6,10 @@ namespace WinPool.Ipc;
 
 public static class IpcProtocol
 {
-    public const int CurrentVersion = 10;
+    // Monitoring snapshot diagnostics and preferences gained wire-visible
+    // fields in the archive-rotation update. Keep the handshake strict so an
+    // older App never misreads the expanded state as a healthy default.
+    public const int CurrentVersion = 11;
     public const int MaximumFrameBytes = 4 * 1024 * 1024;
     public static readonly TimeSpan MaximumHandshakeAge = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan HandshakeReadTimeout = TimeSpan.FromSeconds(5);

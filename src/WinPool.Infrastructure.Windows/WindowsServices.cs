@@ -373,10 +373,9 @@ public sealed class LocalAgentPreferencesService : IAgentPreferencesStore
         {
             FormatVersion = CurrentFormatVersion,
             MonitoringSampleRateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20),
-            DataCapacityLimitBytes = Math.Clamp(
-                preferences.DataCapacityLimitBytes,
-                1024L * 1024,
-                1024L * 1024 * 1024 * 1024)
+            SevenZipExecutablePath = string.IsNullOrWhiteSpace(preferences.SevenZipExecutablePath)
+                ? null
+                : preferences.SevenZipExecutablePath
         };
 }
 

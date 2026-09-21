@@ -11,14 +11,33 @@ public sealed record MonitorCsvExportResult(
     string Sha256,
     long RowCount);
 
-public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
+public sealed class MonitorCsvExporter
 {
+    private readonly ISqliteDatabaseStore? store;
+    private readonly IMonitoringDatabaseAccess? databaseAccess;
+
+    public MonitorCsvExporter(ISqliteDatabaseStore store)
+    {
+        this.store = store ?? throw new ArgumentNullException(nameof(store));
+    }
+
+    public MonitorCsvExporter(IMonitoringDatabaseAccess databaseAccess)
+    {
+        this.databaseAccess = databaseAccess
+            ?? throw new ArgumentNullException(nameof(databaseAccess));
+    }
+
     public async Task<MonitorCsvExportResult> ExportAsync(
         SessionId sessionId,
         string destinationPath,
         bool overwrite,
         CancellationToken cancellationToken = default)
     {
+        await using var readLease = databaseAccess is null
+            ? NoopAsyncDisposable.Instance
+            : await databaseAccess.AcquireReadLeaseAsync(cancellationToken);
+        var database = databaseAccess?.GetCurrentDatabase() ?? store
+            ?? throw new InvalidOperationException("No monitoring database is configured for CSV export.");
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         var destination = Path.GetFullPath(destinationPath);
         if (!string.Equals(
@@ -33,7 +52,7 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
 
         if (string.Equals(
                 destination,
-                store.DatabasePath,
+                database.DatabasePath,
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("不能用监控导出覆盖 WinPool 数据库。");
@@ -63,7 +82,7 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
             await using (var writer = new StreamWriter(
                              output,
                              new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)))
-            await using (var connection = await store.OpenConnectionAsync(cancellationToken))
+            await using (var connection = await database.OpenConnectionAsync(cancellationToken))
             await using (var command = connection.CreateCommand())
             {
                 command.CommandText = """
@@ -168,5 +187,12 @@ public sealed class MonitorCsvExporter(WinPoolSqliteStore store)
             exception is IOException or UnauthorizedAccessException)
         {
         }
+    }
+
+    private sealed class NoopAsyncDisposable : IAsyncDisposable
+    {
+        public static NoopAsyncDisposable Instance { get; } = new();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

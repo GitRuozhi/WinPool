@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using WinPool.Application;
 using WinPool.Domain;
@@ -50,15 +51,26 @@ public sealed class MonitoringService : IDisposable
     private readonly SamplingDiagnosticsTracker _diagnostics = new();
     private MonitorRuntimeDiagnostics _agentDiagnostics = new(0, 0);
     private int _restartGeneration;
+    private readonly Stopwatch _localSessionElapsed = new();
 
     public MonitoringService(IAgentConnection? agentConnection = null)
     {
         _agentConnection = agentConnection;
+        // A local sampler owns its initial state. An Agent-backed page has
+        // no such fact until its first snapshot succeeds, so it must not
+        // render an unconnected/new Agent as a confirmed stopped monitor.
+        IsRemoteStateKnown = agentConnection is null;
     }
 
     public bool UsesAgent => _agentConnection is not null;
 
     public bool IsRunning { get; private set; }
+
+    /// <summary>
+    /// False only for Agent-backed monitoring after a transport/snapshot
+    /// failure.  The page must not render that unknown state as "Stopped".
+    /// </summary>
+    public bool IsRemoteStateKnown { get; private set; }
 
     public string? LastError { get; private set; }
 
@@ -85,6 +97,7 @@ public sealed class MonitoringService : IDisposable
 
         if (_agentConnection is not null)
         {
+            IsRemoteStateKnown = false;
             LastError = "agent.monitor-starting";
             using var startupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             startupTimeout.CancelAfter(TimeSpan.FromSeconds(12));
@@ -95,6 +108,7 @@ public sealed class MonitoringService : IDisposable
                     ?? connection.Messages.FirstOrDefault()?.Code
                     ?? "agent.connect-failed";
                 IsRunning = false;
+                IsRemoteStateKnown = false;
                 return false;
             }
 
@@ -112,6 +126,7 @@ public sealed class MonitoringService : IDisposable
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 IsRunning = false;
+                IsRemoteStateKnown = false;
                 LastError = "agent.monitor-start-timeout";
                 _loopCts.Cancel();
                 ready.TrySetResult(false);
@@ -122,6 +137,7 @@ public sealed class MonitoringService : IDisposable
         _sampler ??= new DiskPerformanceSampler();
         LastError = null;
         StartSessionFile();
+        _localSessionElapsed.Restart();
         IsRunning = true;
         _loopCts = new CancellationTokenSource();
         var token = _loopCts.Token;
@@ -136,6 +152,15 @@ public sealed class MonitoringService : IDisposable
     public async Task SetRateAsync(double rateHz)
     {
         rateHz = Math.Clamp(rateHz, 0.2, 20);
+        if (Math.Abs(SampleRateHz - rateHz) < 0.000_001)
+        {
+            // MonitorPage reapplies the persisted rate when it is recreated.
+            // Re-entering the same page must not end the Agent-owned session
+            // just to start an equivalent one, because that resets its
+            // monotonic runtime duration and creates an artificial boundary.
+            return;
+        }
+
         SampleRateHz = rateHz;
         if (_agentConnection is not null && IsRunning)
         {
@@ -150,20 +175,93 @@ public sealed class MonitoringService : IDisposable
             return;
         }
 
-        IsRunning = false;
         _loopCts?.Cancel();
         if (_agentConnection is not null)
         {
             if (_remoteSessionId is { } sessionId)
             {
-                await _agentConnection.SendAsync(
-                    new StopAgentMonitoringRequest(
-                        sessionId,
-                        CorrelationId.New()),
-                    CancellationToken.None);
+                try
+                {
+                    var stopped = await _agentConnection.SendAsync(
+                        new StopAgentMonitoringRequest(
+                            sessionId,
+                            CorrelationId.New()),
+                        CancellationToken.None);
+                    var terminalSession = (stopped.Value as MonitoringSessionResponse)?.Session;
+                    if (terminalSession is null
+                        || terminalSession.State is MonitoringSessionState.Starting
+                            or MonitoringSessionState.Running
+                            or MonitoringSessionState.Stopping)
+                    {
+                        LastError = stopped.Messages.FirstOrDefault()?.DiagnosticText
+                            ?? stopped.Messages.FirstOrDefault()?.Code
+                            ?? "agent.monitor-stop-unconfirmed";
+                        // A transport/control result without a terminal
+                        // session state does not prove that the Agent stopped
+                        // its writer. Keep the running state until a later
+                        // snapshot provides that proof.
+                        IsRunning = true;
+                        return;
+                    }
+
+                    // A failed recording session is nevertheless terminal.
+                    // Refresh once after the stop response so the Agent's
+                    // durable persistence/archive diagnostic, rather than a
+                    // generic successful control result, reaches the UI.
+                    if (terminalSession.State is MonitoringSessionState.Failed
+                        or MonitoringSessionState.Interrupted)
+                    {
+                        try
+                        {
+                            await RefreshRemoteSnapshotAsync(CancellationToken.None);
+                        }
+                        catch (Exception exception) when (
+                            exception is IOException
+                                or InvalidDataException
+                                or TimeoutException
+                                or InvalidOperationException)
+                        {
+                            // The stop response itself proved a terminal
+                            // state. Retain the best available terminal error
+                            // below rather than changing it back to running.
+                            _ = exception;
+                        }
+                    }
+
+                    var terminalFailure = terminalSession.State is MonitoringSessionState.Failed
+                        or MonitoringSessionState.Interrupted;
+                    if (terminalFailure || !stopped.IsSuccess)
+                    {
+                        var runtime = GetRuntimeDiagnostics();
+                        LastError = runtime.PersistenceFailure
+                            ?? runtime.SamplingFailure
+                            ?? stopped.Messages.FirstOrDefault()?.DiagnosticText
+                            ?? stopped.Messages.FirstOrDefault()?.Code
+                            ?? $"agent.monitor-terminal-{terminalSession.State}";
+                    }
+                    else
+                    {
+                        LastError = null;
+                    }
+                }
+                catch (Exception exception) when (
+                    exception is IOException
+                        or InvalidOperationException
+                        or UnauthorizedAccessException
+                        or TimeoutException)
+                {
+                    LastError = $"agent.monitor-stop-{exception.GetType().Name}";
+                    IsRunning = true;
+                    throw;
+                }
+            }
+            else
+            {
+                LastError = null;
             }
 
             _remoteSessionId = null;
+            IsRunning = false;
             lock (_sync)
             {
                 _windows.Clear();
@@ -171,6 +269,9 @@ public sealed class MonitoringService : IDisposable
             }
             return;
         }
+
+        IsRunning = false;
+        _localSessionElapsed.Stop();
 
         try
         {
@@ -233,15 +334,32 @@ public sealed class MonitoringService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Agent-originated persistence facts are distinct from the transient
+    /// display-window counters. Consumers use these only for real errors, not
+    /// normal archive or queue progress.
+    /// </summary>
+    public MonitorRuntimeDiagnostics GetRuntimeDiagnostics()
+    {
+        if (_agentConnection is null)
+        {
+            return new MonitorRuntimeDiagnostics(
+                DroppedSamples: 0,
+                BufferedSamples: 0,
+                SessionElapsedMilliseconds: Math.Max(0, _localSessionElapsed.ElapsedMilliseconds));
+        }
+
+        lock (_sync)
+        {
+            return _agentDiagnostics;
+        }
+    }
+
     public async Task FlushAsync()
     {
         if (_agentConnection is not null)
         {
-            if (_remoteSessionId is not null)
-            {
-                await RefreshRemoteSnapshotAsync(CancellationToken.None);
-            }
-
+            await RefreshRemoteStateAsync(CancellationToken.None);
             return;
         }
 
@@ -321,6 +439,35 @@ public sealed class MonitoringService : IDisposable
     {
         _loopCts?.Cancel();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Refreshes Agent-owned diagnostics even when no monitoring session is
+    /// live, so a background archive retry can update a stopped Monitor page.
+    /// Transport failure is a state-of-knowledge change, not proof that the
+    /// Agent stopped monitoring.
+    /// </summary>
+    public async Task RefreshRemoteStateAsync(CancellationToken cancellationToken = default)
+    {
+        if (_agentConnection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await RefreshRemoteSnapshotAsync(cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidDataException
+                or TimeoutException
+                or InvalidOperationException
+                or UnauthorizedAccessException)
+        {
+            IsRemoteStateKnown = false;
+            RecordSamplingFailure($"agent.{exception.GetType().Name}");
+        }
     }
 
     private async Task StartRemoteAsync(
@@ -433,6 +580,7 @@ public sealed class MonitoringService : IDisposable
                 or UnauthorizedAccessException)
         {
             IsRunning = false;
+            IsRemoteStateKnown = false;
             LastError = $"agent.monitor-start-{ex.GetType().Name}";
             ready.TrySetResult(false);
         }
@@ -504,6 +652,7 @@ public sealed class MonitoringService : IDisposable
                     or TimeoutException
                     or InvalidOperationException)
             {
+                IsRemoteStateKnown = false;
                 RecordSamplingFailure($"agent.{exception.GetType().Name}");
             }
         }
@@ -515,16 +664,27 @@ public sealed class MonitoringService : IDisposable
             new GetAgentSnapshotRequest(CorrelationId.New()),
             cancellationToken);
         if (!response.IsSuccess
-            || response.Value is not AgentSnapshotResponse snapshot
-            || snapshot.Snapshot.ActiveMonitoringSession is not { } session)
+            || response.Value is not AgentSnapshotResponse snapshot)
         {
+            IsRemoteStateKnown = false;
             RecordSamplingFailure(
                 response.Messages.FirstOrDefault()?.Code
                 ?? "agent.snapshot-unavailable");
             return;
         }
 
-        _remoteSessionId = session.SessionId;
+        // A control/event handshake can complete while the Agent is still
+        // recovering its own state. Its recovery snapshot intentionally has
+        // no active monitoring session, but that absence is not proof that
+        // monitoring stopped. Only a ready Agent owns a definitive stopped
+        // state for this page.
+        if (snapshot.Snapshot.ShutdownStatus.State != AgentLifecycleState.Running)
+        {
+            IsRemoteStateKnown = false;
+            return;
+        }
+
+        var latestSamples = snapshot.Snapshot.LatestMonitorSamples ?? Array.Empty<MonitorSample>();
         var cutoff = DateTimeOffset.UtcNow - WindowLength;
         lock (_sync)
         {
@@ -532,7 +692,28 @@ public sealed class MonitoringService : IDisposable
                 snapshot.Snapshot.RecentStorageHealthEvents?.ToArray() ?? [];
             _agentDiagnostics =
                 snapshot.Snapshot.MonitorDiagnostics ?? new MonitorRuntimeDiagnostics(0, 0);
-            foreach (var sample in snapshot.Snapshot.LatestMonitorSamples ?? [])
+        }
+
+        IsRemoteStateKnown = true;
+
+        if (snapshot.Snapshot.ActiveMonitoringSession is not { } session)
+        {
+            _remoteSessionId = null;
+            IsRunning = false;
+            lock (_sync)
+            {
+                // A stopped/no-session response confirms the connection has
+                // recovered, but it must not manufacture a successful sample
+                // timestamp or imply that persistence was healthy.
+                RecordCommunicationSuccessLocked();
+            }
+            return;
+        }
+
+        _remoteSessionId = session.SessionId;
+        lock (_sync)
+        {
+            foreach (var sample in latestSamples)
             {
                 var instance = sample.TargetId.ProviderKey.StartsWith(
                         "pdh-storage-spaces:",
@@ -571,11 +752,14 @@ public sealed class MonitoringService : IDisposable
                 points.RemoveAll(point => point.Timestamp < cutoff);
             }
 
-            RecordSamplingSuccessLocked(
-                snapshot.Snapshot.LatestMonitorSamples?
-                    .Select(sample => (DateTimeOffset?)sample.SampledAtUtc)
-                    .Max()
-                ?? DateTimeOffset.UtcNow);
+            if (latestSamples.Count > 0)
+            {
+                RecordSamplingSuccessLocked(latestSamples.Max(sample => sample.SampledAtUtc));
+            }
+            else
+            {
+                RecordCommunicationSuccessLocked();
+            }
         }
     }
 
@@ -593,6 +777,11 @@ public sealed class MonitoringService : IDisposable
     private void RecordSamplingSuccessLocked(DateTimeOffset sampledAtUtc)
     {
         _diagnostics.RecordSuccess(sampledAtUtc);
+    }
+
+    private void RecordCommunicationSuccessLocked()
+    {
+        _diagnostics.RecordCommunicationSuccess();
     }
 
     private async Task RunLoopCoreAsync(CancellationToken token)

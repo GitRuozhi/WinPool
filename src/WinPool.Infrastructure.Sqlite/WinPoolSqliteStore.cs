@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 
 namespace WinPool.Infrastructure.Sqlite;
 
-public sealed class WinPoolSqliteStore
+public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
 {
     // V0.48 starts from a deliberately clean schema 15 data root. Do not add
     // migrations from earlier schemas: they contain retired product domains

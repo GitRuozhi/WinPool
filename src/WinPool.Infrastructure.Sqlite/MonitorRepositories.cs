@@ -48,17 +48,17 @@ public sealed record MonitorSamplePage(
 
 public sealed class MonitorSessionRepository
 {
-    private readonly WinPoolSqliteStore store;
+    private readonly ISqliteDatabaseStore store;
     private readonly AgentWriteOwnerLease? writeOwner;
 
-    public MonitorSessionRepository(WinPoolSqliteStore store)
+    public MonitorSessionRepository(ISqliteDatabaseStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         this.store = store;
     }
 
     public MonitorSessionRepository(
-        WinPoolSqliteStore store,
+        ISqliteDatabaseStore store,
         AgentWriteOwnerLease writeOwner)
         : this(store)
     {
@@ -251,17 +251,17 @@ public sealed class MonitorSessionRepository
 
 public sealed class MonitorDeviceRepository
 {
-    private readonly WinPoolSqliteStore store;
+    private readonly ISqliteDatabaseStore store;
     private readonly AgentWriteOwnerLease? writeOwner;
 
-    public MonitorDeviceRepository(WinPoolSqliteStore store)
+    public MonitorDeviceRepository(ISqliteDatabaseStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         this.store = store;
     }
 
     public MonitorDeviceRepository(
-        WinPoolSqliteStore store,
+        ISqliteDatabaseStore store,
         AgentWriteOwnerLease writeOwner)
         : this(store)
     {
@@ -344,17 +344,17 @@ public sealed class MonitorSampleRepository
 {
     public const int MaximumPageSize = 10_000;
 
-    private readonly WinPoolSqliteStore store;
+    private readonly ISqliteDatabaseStore store;
     private readonly AgentWriteOwnerLease? writeOwner;
 
-    public MonitorSampleRepository(WinPoolSqliteStore store)
+    public MonitorSampleRepository(ISqliteDatabaseStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         this.store = store;
     }
 
     public MonitorSampleRepository(
-        WinPoolSqliteStore store,
+        ISqliteDatabaseStore store,
         AgentWriteOwnerLease writeOwner)
         : this(store)
     {

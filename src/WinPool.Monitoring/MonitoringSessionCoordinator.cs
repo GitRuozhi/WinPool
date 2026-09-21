@@ -31,6 +31,26 @@ public interface IMonitorSessionPersistenceFactory
     IMonitorSessionPersistence Create(SessionId sessionId);
 }
 
+/// <summary>
+/// Optional facts from a concrete persistence implementation. The monitoring
+/// coordinator stays usable with the null and test persistences while the
+/// Agent can forward real rotation/archive failures through its snapshot IPC.
+/// </summary>
+public interface IMonitorSessionPersistenceDiagnostics
+{
+    MonitorPersistenceDiagnostics GetDiagnostics();
+}
+
+/// <summary>
+/// Facts owned by a persistence factory rather than a live session, such as a
+/// background archive retry or an interrupted session discovered at Agent
+/// startup.  They must remain visible after the session itself has stopped.
+/// </summary>
+public interface IMonitoringPersistenceBackgroundDiagnostics
+{
+    MonitorPersistenceDiagnostics GetBackgroundDiagnostics();
+}
+
 public sealed class NullMonitorSessionPersistenceFactory
     : IMonitorSessionPersistenceFactory
 {
@@ -76,6 +96,7 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
     private readonly ConcurrentDictionary<SessionId, ActiveSession> sessions = new();
     private readonly int latestWindowCapacity;
     private readonly int subscriberCapacity;
+    private MonitorRuntimeDiagnostics lastDiagnostics = new(0, 0);
 
     public MonitoringSessionCoordinator(
         IMonitorSource source,
@@ -123,9 +144,28 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             var active = sessions.Values.FirstOrDefault(
                 value => value.Snapshot().State is
                     MonitoringSessionState.Starting or MonitoringSessionState.Running);
-            return active is null
-                ? new(0, 0)
-                : active.Diagnostics();
+            if (active is null)
+            {
+                var terminal = Volatile.Read(ref lastDiagnostics);
+                var background = (persistenceFactory as IMonitoringPersistenceBackgroundDiagnostics)
+                    ?.GetBackgroundDiagnostics();
+                return background is null
+                    ? terminal
+                    : terminal with
+                    {
+                        PendingArchives = background.PendingArchives,
+                        FailedArchives = background.FailedArchives,
+                        ArchiveFailure = background.ArchiveFailure,
+                        ArchiveRawDatabaseRetained = background.ArchiveRawDatabaseRetained,
+                        ArchiveFailureOccurrenceId = background.ArchiveFailureOccurrenceId,
+                        HasRecoveredInterruptedSession = background.HasRecoveredInterruptedSession,
+                        RecoveredInterruptedSessionOccurrenceId = background.RecoveredInterruptedSessionOccurrenceId
+                    };
+            }
+
+            var diagnostics = active.Diagnostics();
+            Volatile.Write(ref lastDiagnostics, diagnostics);
+            return diagnostics;
         }
     }
 
@@ -165,7 +205,10 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             initial,
             persistence,
             latestWindowCapacity,
-            subscriberCapacity);
+            subscriberCapacity,
+            timeProvider.GetTimestamp(),
+            timeProvider);
+        Volatile.Write(ref lastDiagnostics, active.Diagnostics());
         if (!sessions.TryAdd(request.SessionId, active))
         {
             await persistence.DisposeAsync();
@@ -195,7 +238,9 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
         }
         catch (Exception exception) when (IsPersistenceFailure(exception))
         {
+            active.SetPersistenceFailure(exception);
             active.SetState(MonitoringSessionState.Failed, timeProvider.GetUtcNow());
+            Volatile.Write(ref lastDiagnostics, active.Diagnostics());
             sessions.TryRemove(request.SessionId, out _);
             await DisposePersistenceAsync(persistence);
             return ApplicationResult<MonitoringSession>.FromStatus(
@@ -266,6 +311,8 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
         }
         catch (Exception exception) when (IsPersistenceFailure(exception))
         {
+            active.SetPersistenceFailure(exception);
+            Volatile.Write(ref lastDiagnostics, active.Diagnostics());
             return ApplicationResult<MonitoringSession>.FromStatus(
                 ApplicationStatus.Failed,
                 correlationId,
@@ -333,11 +380,16 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
                 or System.ComponentModel.Win32Exception)
         {
             finalState = MonitoringSessionState.Failed;
+            active.SetSamplingFailure(exception);
         }
         finally
         {
             var endedAt = timeProvider.GetUtcNow();
-            var dropped = active.TotalDroppedSamples;
+            // The rolling display window and subscriber queues intentionally
+            // evict old samples. They never imply that a sample failed to reach
+            // the database, so only a rejected persistence enqueue is stored as
+            // a durable session loss count.
+            var dropped = active.PersistenceDroppedSamples;
             try
             {
                 if (dropped > 0)
@@ -355,6 +407,7 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             catch (Exception exception) when (IsPersistenceFailure(exception))
             {
                 finalState = MonitoringSessionState.Failed;
+                active.SetPersistenceFailure(exception);
             }
 
             try
@@ -364,9 +417,11 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             catch (Exception exception) when (IsPersistenceFailure(exception))
             {
                 finalState = MonitoringSessionState.Failed;
+                active.SetPersistenceFailure(exception);
             }
 
             active.SetState(finalState, endedAt);
+            Volatile.Write(ref lastDiagnostics, active.Diagnostics());
             active.CompleteSubscribers();
             sessions.TryRemove(active.Request.SessionId, out _);
         }
@@ -445,17 +500,25 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
         private long persistenceDrops;
         private long subscriberDrops;
         private long rejectedSourceSamples;
+        private readonly long startedTimestamp;
+        private readonly TimeProvider timeProvider;
+        private string? persistenceFailure;
+        private string? samplingFailure;
 
         public ActiveSession(
             MonitoringSession session,
             IMonitorSessionPersistence persistence,
             int latestWindowCapacity,
-            int subscriberCapacity)
+            int subscriberCapacity,
+            long startedTimestamp,
+            TimeProvider timeProvider)
         {
             this.session = session;
             Persistence = persistence;
             Latest = new LatestMonitorWindow(latestWindowCapacity);
             this.subscriberCapacity = subscriberCapacity;
+            this.startedTimestamp = startedTimestamp;
+            this.timeProvider = timeProvider;
             Targets = session.Request.Targets
                 .Select(target => target.ObjectId)
                 .ToHashSet();
@@ -474,10 +537,19 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             + Interlocked.Read(ref subscriberDrops)
             + Interlocked.Read(ref rejectedSourceSamples);
 
+        public long PersistenceDroppedSamples =>
+            Interlocked.Read(ref persistenceDrops);
+
         public MonitorRuntimeDiagnostics Diagnostics()
         {
             lock (gate)
             {
+                var persistence = (Persistence as IMonitorSessionPersistenceDiagnostics)
+                    ?.GetDiagnostics()
+                    ?? new MonitorPersistenceDiagnostics();
+                var elapsed = timeProvider.GetElapsedTime(
+                    startedTimestamp,
+                    timeProvider.GetTimestamp());
                 return new(
                     TotalDroppedSamples,
                     Latest.Snapshot().Count,
@@ -487,7 +559,27 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
                     Interlocked.Read(ref rejectedSourceSamples),
                     subscribers.Count,
                     subscribers.Sum(subscriber => subscriber.Reader.Count),
-                    checked(subscribers.Count * subscriberCapacity));
+                    checked(subscribers.Count * subscriberCapacity),
+                    SessionElapsedMilliseconds: Math.Max(0, (long)elapsed.TotalMilliseconds),
+                    ConfirmedLostSamples: persistence.ConfirmedLostSamples,
+                    PendingPersistenceSamples: persistence.PendingSamples,
+                    OldestPendingPersistenceMilliseconds: persistence.OldestPendingMilliseconds,
+                    PersistenceDelayed: persistence.IsDelayed,
+                    PersistencePaused: persistence.IsPaused,
+                    RotationInProgress: persistence.RotationInProgress,
+                    RotationBufferedSamples: persistence.RotationBufferedSamples,
+                    PersistenceFailure: persistence.Failure ?? persistenceFailure,
+                    PendingArchives: persistence.PendingArchives,
+                    FailedArchives: persistence.FailedArchives,
+                    ArchiveFailure: persistence.ArchiveFailure,
+                    SamplingFailure: samplingFailure,
+                    ArchiveRawDatabaseRetained: persistence.ArchiveRawDatabaseRetained,
+                    SessionOccurrenceId: session.SessionId.Value.ToString("N"),
+                    PersistenceFailureOccurrenceId: persistence.FailureOccurrenceId
+                        ?? (persistence.Failure is null ? null : session.SessionId.Value.ToString("N")),
+                    ArchiveFailureOccurrenceId: persistence.ArchiveFailureOccurrenceId,
+                    HasRecoveredInterruptedSession: persistence.HasRecoveredInterruptedSession,
+                    RecoveredInterruptedSessionOccurrenceId: persistence.RecoveredInterruptedSessionOccurrenceId);
             }
         }
 
@@ -579,6 +671,24 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
 
         public void IncrementRejectedSourceSamples() =>
             Interlocked.Increment(ref rejectedSourceSamples);
+
+        public void SetPersistenceFailure(Exception exception)
+        {
+            ArgumentNullException.ThrowIfNull(exception);
+            lock (gate)
+            {
+                persistenceFailure = exception.Message;
+            }
+        }
+
+        public void SetSamplingFailure(Exception exception)
+        {
+            ArgumentNullException.ThrowIfNull(exception);
+            lock (gate)
+            {
+                samplingFailure = exception.Message;
+            }
+        }
 
         public bool Accepts(MonitorSample sample) =>
             sample.SessionId == Request.SessionId

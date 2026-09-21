@@ -167,7 +167,7 @@ public enum AgentPreferenceField
     ContinuousMonitoringEnabled,
     MonitoringSampleRateHz,
     StartAgentAtLogin,
-    DataCapacityLimitMiB
+    SevenZipExecutablePath
 }
 
 /// <summary>
@@ -178,7 +178,8 @@ public sealed record SetAgentPreferenceRequest(
     AgentPreferenceField Field,
     bool? BooleanValue,
     double? NumberValue,
-    CorrelationId CorrelationId)
+    CorrelationId CorrelationId,
+    string? TextValue = null)
     : AgentRequest(CorrelationId);
 
 public static class AgentPreferenceRequests
@@ -191,7 +192,8 @@ public static class AgentPreferenceRequests
         AgentPreferences preferences,
         AgentPreferenceField field,
         bool? booleanValue,
-        double? numberValue) =>
+        double? numberValue,
+        string? textValue = null) =>
         field switch
         {
             AgentPreferenceField.ContinuousMonitoringEnabled when booleanValue.HasValue =>
@@ -203,14 +205,16 @@ public static class AgentPreferenceRequests
                      && double.IsFinite(numberValue.Value)
                      && numberValue.Value is >= 0.2 and <= 20 =>
                 preferences with { MonitoringSampleRateHz = numberValue.Value },
-            AgentPreferenceField.DataCapacityLimitMiB
-                when numberValue.HasValue
-                     && double.IsFinite(numberValue.Value)
-                     && numberValue.Value is >= 1 and <= 1_048_576 =>
+            AgentPreferenceField.SevenZipExecutablePath
+                when !booleanValue.HasValue
+                     && !numberValue.HasValue
+                     && (string.IsNullOrWhiteSpace(textValue)
+                         || Path.IsPathFullyQualified(textValue)) =>
                 preferences with
                 {
-                    DataCapacityLimitBytes = (long)Math.Round(
-                        numberValue.Value * 1024d * 1024d)
+                    SevenZipExecutablePath = string.IsNullOrWhiteSpace(textValue)
+                        ? null
+                        : Path.GetFullPath(textValue)
                 },
             _ => null
         };

@@ -1192,13 +1192,13 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IpcProtocolCurrentVersionIsTen()
+    public void IpcProtocolCurrentVersionIsEleven()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
 
-        Assert.Contains("public const int CurrentVersion = 10;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 11;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
     }
 

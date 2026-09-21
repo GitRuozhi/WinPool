@@ -84,6 +84,9 @@ internal static class Program
                 Environment.ProcessId,
                 startedAtUtc);
             var endpointPath = PublishEndpoint(endpoint, dataRoot);
+            using var endpointPublication = new PublishedEndpointLease(
+                endpointPath,
+                endpoint);
             using var pipeCancellation = new CancellationTokenSource();
             var server = new CurrentUserAgentControlServer(
                 pipeName,
@@ -124,34 +127,43 @@ internal static class Program
                 TaskScheduler.Default);
 
             var store = new WinPoolSqliteStore(Path.Combine(dataRoot, "winpool.db"));
-            store.InitializeAsync().GetAwaiter().GetResult();
+            AgentStartupTaskRunner.Complete(() => store.InitializeAsync());
             using var writeOwner = AgentWriteOwnerLease.Acquire(
                 store,
                 $"agent-{agentSessionId:N}");
             var agentSessions = new AgentSessionRepository(store, writeOwner);
-            agentSessions.RecoverOpenSessionsAsync(startedAtUtc)
-                .GetAwaiter()
-                .GetResult();
-            agentSessions.StartAsync(
+            AgentStartupTaskRunner.Complete(
+                () => agentSessions.RecoverOpenSessionsAsync(startedAtUtc));
+            AgentStartupTaskRunner.Complete(
+                () => agentSessions.StartAsync(
                     instanceId,
                     Environment.ProcessId,
-                    startedAtUtc)
-                .GetAwaiter()
-                .GetResult();
+                    startedAtUtc));
+            var monitoringArchives = new MonitoringArchiveCoordinator(
+                dataRoot,
+                AppContext.BaseDirectory,
+                () => agentPreferencesStore.LoadAsync(CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult()
+                    .SevenZipExecutablePath);
+            var monitoringPersistence = new RotatingMonitorSessionPersistenceFactory(
+                dataRoot,
+                $"agent-monitoring-{agentSessionId:N}",
+                monitoringArchives);
+            AgentStartupTaskRunner.Complete(
+                () => monitoringPersistence.InitializeAsync());
             var monitoring = new MonitoringSessionCoordinator(
                 new PdhDiskMonitorSource(),
-                new SqliteMonitorSessionPersistenceFactory(store, writeOwner));
+                monitoringPersistence);
             workerProcesses = new WorkerProcessRepository(store, writeOwner);
             var storageHealthEvents = new StorageHealthEventRepository(store, writeOwner);
-            var initialStorageHealthEvents = storageHealthEvents
-                .ListRecentAsync(200, CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
+            var initialStorageHealthEvents = AgentStartupTaskRunner.Complete(
+                () => storageHealthEvents.ListRecentAsync(200, CancellationToken.None));
             var runtime = new DesktopAgentRuntime(
                 context,
                 instanceId,
                 monitoring,
-                new MonitorCsvExporter(store),
+                new MonitorCsvExporter(monitoringPersistence),
                 processRegistry,
                 new WorkspaceSessionStateRepository(store, writeOwner),
                 new SimulationDocumentRepository(store, writeOwner),
@@ -206,6 +218,62 @@ internal static class Program
                 recoveryTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
                     .GetAwaiter()
                     .GetResult();
+                var monitoringStopped = false;
+                try
+                {
+                    // No shutdown timeout is used here. A normal Agent exit
+                    // must either wait for the monitoring writer to complete
+                    // its final batch or retain a visible failure; it may not
+                    // release the factory lease underneath a live writer.
+                    runtime.StopMonitoringAsync(CancellationToken.None)
+                        .GetAwaiter()
+                        .GetResult();
+                    monitoringStopped = true;
+                }
+                catch (Exception exception) when (
+                    exception is IOException
+                        or InvalidOperationException
+                        or TimeoutException
+                        or Microsoft.Data.Sqlite.SqliteException)
+                {
+                    lifecycle.MarkFailed("agent.monitoring.stop_failed");
+                    DiagnosticLog.AppendFailure(
+                        dataRoot,
+                        "agent-monitoring.jsonl",
+                        "agent.monitoring.stop_failed",
+                        exception);
+                }
+                if (monitoringStopped)
+                {
+                    try
+                    {
+                        monitoringPersistence.DisposeAsync().AsTask()
+                            .GetAwaiter()
+                            .GetResult();
+                    }
+                    catch (Exception exception) when (
+                        exception is IOException
+                            or InvalidOperationException
+                            or TimeoutException
+                            or Microsoft.Data.Sqlite.SqliteException)
+                    {
+                        lifecycle.MarkFailed("agent.monitoring.dispose_failed");
+                        DiagnosticLog.AppendFailure(
+                            dataRoot,
+                            "agent-monitoring.jsonl",
+                            "agent.monitoring.dispose_failed",
+                            exception);
+                    }
+                }
+                else
+                {
+                    DiagnosticLog.AppendFailure(
+                        dataRoot,
+                        "agent-monitoring.jsonl",
+                        "agent.monitoring.dispose_skipped",
+                        new InvalidOperationException(
+                            "Monitoring persistence disposal was skipped because its writer did not stop."));
+                }
                 runtime.StopInventoryAsync(CancellationToken.None).GetAwaiter().GetResult();
                 pipeCancellation.Cancel();
                 serverTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
@@ -226,7 +294,6 @@ internal static class Program
                 {
                     // The next Agent start retains this row as unclean evidence.
                 }
-                TryRemoveEndpoint(endpointPath);
             }
         }
         catch (Exception exception)
@@ -247,6 +314,27 @@ internal static class Program
         Path.TrimEndingDirectorySeparator(
             Path.GetFullPath(AppContext.BaseDirectory));
 
+    /// <summary>
+    /// Runs non-UI startup work before the tray message loop begins. The tray
+    /// context can already have a Windows Forms synchronization context at
+    /// this point, so blocking that thread directly on an async database or
+    /// archive operation can deadlock its continuation permanently.
+    /// </summary>
+    internal static class AgentStartupTaskRunner
+    {
+        internal static void Complete(Func<Task> operation)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+            Task.Run(operation).GetAwaiter().GetResult();
+        }
+
+        internal static T Complete<T>(Func<Task<T>> operation)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+            return Task.Run(operation).GetAwaiter().GetResult();
+        }
+    }
+
     private static string PublishEndpoint(AgentEndpointRecord endpoint, string dataRoot)
     {
         var path = DataRootLayout.AgentEndpointPath(dataRoot);
@@ -257,11 +345,27 @@ internal static class Program
         return path;
     }
 
-    private static void TryRemoveEndpoint(string path)
+    internal static bool IsCurrentEndpoint(
+        AgentEndpointRecord candidate,
+        AgentEndpointRecord expected) =>
+        candidate.AgentSessionId == expected.AgentSessionId
+        && candidate.Nonce == expected.Nonce
+        && candidate.ProcessId == expected.ProcessId;
+
+    private static void TryRemoveEndpoint(
+        string path,
+        AgentEndpointRecord expectedEndpoint)
     {
         try
         {
-            if (File.Exists(path))
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            var published = JsonSerializer.Deserialize<AgentEndpointRecord>(
+                File.ReadAllText(path));
+            if (published is not null && IsCurrentEndpoint(published, expectedEndpoint))
             {
                 File.Delete(path);
             }
@@ -272,5 +376,15 @@ internal static class Program
         catch (UnauthorizedAccessException)
         {
         }
+        catch (JsonException)
+        {
+        }
+    }
+
+    internal sealed class PublishedEndpointLease(
+        string path,
+        AgentEndpointRecord endpoint) : IDisposable
+    {
+        public void Dispose() => TryRemoveEndpoint(path, endpoint);
     }
 }

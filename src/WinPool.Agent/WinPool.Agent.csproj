@@ -21,5 +21,14 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\WinPool.App\Assets\CAppIcon.ico" Link="Assets\CAppIcon.ico" />
+    <Content Include="..\..\assets\ThirdParty\7zip\26.03\x64\7za.exe"
+             Link="Tools\7zip\7za.exe"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\ThirdParty\7zip\26.03\License.txt"
+             Link="Tools\7zip\License.txt"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\ThirdParty\7zip\26.03\NOTICE.txt"
+             Link="Tools\7zip\NOTICE.txt"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -235,52 +235,57 @@ public sealed class AgentPreferenceRequestsTests
     }
 
     [Fact]
-    public void BackgroundPreferencesDefaultTo1024MiBDataCapacity()
+    public void BackgroundPreferencesDefaultToBundledSevenZip()
     {
         var preferences = new AgentPreferences();
 
-        Assert.Equal(1024L * 1024 * 1024, preferences.DataCapacityLimitBytes);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(1024)]
-    [InlineData(1_048_576)]
-    public void DataCapacityAcceptsMiBValuesAndConvertsToBytes(double mib)
-    {
-        var updated = AgentPreferenceRequests.Apply(
-            new AgentPreferences(),
-            AgentPreferenceField.DataCapacityLimitMiB,
-            booleanValue: null,
-            numberValue: mib);
-
-        Assert.NotNull(updated);
-        Assert.Equal(
-            (long)Math.Round(mib * 1024d * 1024d),
-            updated!.DataCapacityLimitBytes);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(0.9)]
-    [InlineData(-1)]
-    [InlineData(1_048_577)]
-    public void DataCapacityRejectsValuesOutsideItsRange(double mib)
-    {
-        Assert.Null(AgentPreferenceRequests.Apply(
-            new AgentPreferences(),
-            AgentPreferenceField.DataCapacityLimitMiB,
-            booleanValue: null,
-            numberValue: mib));
+        Assert.Null(preferences.SevenZipExecutablePath);
     }
 
     [Fact]
-    public void DataCapacityRejectsNonFiniteValues()
+    public void SevenZipPathAcceptsNullOrAbsolutePathWithoutChangingOtherPreferences()
+    {
+        var absolute = Path.Combine(Path.GetTempPath(), "WinPool", "7za.exe");
+        var custom = AgentPreferenceRequests.Apply(
+            new AgentPreferences(),
+            AgentPreferenceField.SevenZipExecutablePath,
+            booleanValue: null,
+            numberValue: null,
+            textValue: absolute);
+        var bundled = AgentPreferenceRequests.Apply(
+            new AgentPreferences(ContinuousMonitoringEnabled: true),
+            AgentPreferenceField.SevenZipExecutablePath,
+            booleanValue: null,
+            numberValue: null,
+            textValue: null);
+
+        Assert.NotNull(custom);
+        Assert.Equal(Path.GetFullPath(absolute), custom!.SevenZipExecutablePath);
+        Assert.NotNull(bundled);
+        Assert.Null(bundled!.SevenZipExecutablePath);
+        Assert.True(bundled.ContinuousMonitoringEnabled);
+    }
+
+    [Fact]
+    public void SevenZipPathRejectsRelativePathsAndValuesInOtherSlots()
     {
         Assert.Null(AgentPreferenceRequests.Apply(
             new AgentPreferences(),
-            AgentPreferenceField.DataCapacityLimitMiB,
+            AgentPreferenceField.SevenZipExecutablePath,
             booleanValue: null,
-            numberValue: double.NaN));
+            numberValue: null,
+            textValue: "7za.exe"));
+        Assert.Null(AgentPreferenceRequests.Apply(
+            new AgentPreferences(),
+            AgentPreferenceField.SevenZipExecutablePath,
+            booleanValue: true,
+            numberValue: null,
+            textValue: Path.Combine(Path.GetTempPath(), "7za.exe")));
+        Assert.Null(AgentPreferenceRequests.Apply(
+            new AgentPreferences(),
+            AgentPreferenceField.SevenZipExecutablePath,
+            booleanValue: null,
+            numberValue: 1,
+            textValue: Path.Combine(Path.GetTempPath(), "7za.exe")));
     }
 }

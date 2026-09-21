@@ -41,7 +41,7 @@ public sealed class AgentWriteOwnerLease : IDisposable, IAsyncDisposable
     }
 
     public static AgentWriteOwnerLease Acquire(
-        WinPoolSqliteStore store,
+        ISqliteDatabaseStore store,
         string ownerId)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -65,7 +65,7 @@ public sealed class AgentWriteOwnerLease : IDisposable, IAsyncDisposable
         return lease;
     }
 
-    public void AssertOwnership(WinPoolSqliteStore store)
+    public void AssertOwnership(ISqliteDatabaseStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
         var requestedPath = Normalize(store.DatabasePath);
