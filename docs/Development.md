@@ -80,7 +80,9 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 
-模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。未编辑及重置后的 GiB 显示保留原始字节基线，避免两位显示舍入变成隐式修改。上述范围不是 Windows `Get-PartitionSupportedSize` 实测，也不允许真实写入；当前验收状态见活动 Plan。
+模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。扩缩入口由分区页的“扩展分区／压缩分区”按钮打开同窗口串行对话框，输入整数 MiB，对话框只接受落在能力范围内的目标并在确认前逐次校验；页面容量框对已有分区只显示四舍五入后的当前容量，不作为目标输入，因此两位显示舍入不会再被当成隐式修改，也不会让按钮永久灰置。上述范围不是 Windows `Get-PartitionSupportedSize` 实测，也不允许真实写入；当前验收状态见活动 Plan。
+
+模拟分区删除资格只由所选分区自身的 Boot／System 标记决定，页面、管理页投影和服务端共用 `StorageEditRules.CanDeleteSimulatedPartition`：同盘的系统身份、分区类型（含 EFI、MSR、恢复）和所属系统盘都不再单独禁止删除，但仍不得删除标记为 Boot 或 System 的分区。格式化保持更窄的范围，只允许普通 Primary／BasicData 且非 Boot／System，不随删除资格一起放宽。
 
 内置模拟与导入模拟均可删除。`BuiltInSimulationCatalogPolicy` 只在首次成功初始化或显式恢复默认时补齐样例；`UserPreferences.BuiltInSimulationCatalogSeeded` 在持久化成功后设置，正常重载不重建已删除样例。目录可以没有模拟系统，此时使用本机选择。单项导入、转换及删除先完成仓储操作再更新内存目录；批量恢复默认逐项同步成功结果，避免失败重试使用旧修订。
 

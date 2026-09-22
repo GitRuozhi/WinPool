@@ -26,6 +26,14 @@ public static class StorageEditRules
     public const string WindowsShrinkBasicVolume =
         "https://learn.microsoft.com/en-us/windows-server/storage/disk-management/shrink-a-basic-volume";
 
+    /// <summary>
+    /// Determines whether a simulated partition is eligible for deletion based
+    /// only on the selected partition's boot and system flags. Callers retain
+    /// their own simulation-mode and online-disk gates.
+    /// </summary>
+    public static bool CanDeleteSimulatedPartition(PartitionInfo? partition) =>
+        partition is { IsBoot: false, IsSystem: false };
+
     public static StorageRuleDecision Evaluate(
         StorageSnapshot snapshot,
         SimulationEditRequest request)
@@ -367,7 +375,7 @@ public static class StorageEditRules
             return Deny("storage.rule.delete-partition.missing", "The selected partition was not found.");
         }
 
-        if (partition.IsBoot || partition.IsSystem)
+        if (!CanDeleteSimulatedPartition(partition))
         {
             return Deny(
                 "storage.rule.delete-partition.system",

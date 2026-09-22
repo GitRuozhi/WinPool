@@ -101,13 +101,16 @@ public sealed class ManageCommandProjector
                 // boot/system partition itself; do not turn its other controls
                 // into a blanket system-disk lockout.
                 var editable = isSimulation && primary && osDisk is { IsOffline: false };
-                var destructive = editable && partition is { IsBoot: false, IsSystem: false };
+                var formatEligible = editable && partition is { IsBoot: false, IsSystem: false };
+                var deleteEligible = isSimulation
+                    && osDisk is { IsOffline: false }
+                    && StorageEditRules.CanDeleteSimulatedPartition(partition);
                 Add(commands, ManageCommandKind.OpenExplorer, primary && localConsistent);
                 Add(commands, ManageCommandKind.ChangeDriveLetter, editable);
                 Add(commands, ManageCommandKind.RenamePartition, editable);
-                Add(commands, ManageCommandKind.FormatPartition, destructive);
+                Add(commands, ManageCommandKind.FormatPartition, formatEligible);
                 Add(commands, ManageCommandKind.EditPartition, editable);
-                Add(commands, ManageCommandKind.DeletePartition, destructive);
+                Add(commands, ManageCommandKind.DeletePartition, deleteEligible);
                 Add(commands, ManageCommandKind.OptimizeDrive, primary && localConsistent);
                 Add(
                     commands,

@@ -30,9 +30,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
     private bool _filling;
     private bool _renameInProgress;
-    private string? _resizeTargetBaselinePartitionId;
-    private long? _resizeTargetBaselineBytes;
-    private bool _resizeTargetEdited;
 
     public DiskPartitionPage()
     {
@@ -95,15 +92,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(NewPartitionButton,
             Text("在 GPT 模拟磁盘的未分配空间创建分区。", "Create a partition in unallocated space on a simulated GPT disk."));
         ContextHelp.Set(DeletePartitionButton,
-            Text("删除选中的普通模拟分区；受保护分区不可删除。", "Delete the selected normal simulated partition; protected partitions cannot be deleted."));
+            Text("删除选中的非系统、非启动模拟分区。", "Delete the selected simulated partition when it is neither a system nor a boot partition."));
         ContextHelp.Set(ExtendButton,
             Text(
-                "将 NTFS、ReFS 或 RAW／未格式化的普通模拟数据分区调整到更大的 1 MiB 对齐目标容量；只验证建模几何，不是 Windows 支持容量实测。",
-                "Resize an NTFS, ReFS, or RAW/unformatted normal simulated data partition to a larger 1 MiB-aligned target capacity; this validates modeled geometry, not a Windows supported-size result."));
+                "选择“扩展分区”后，输入更大的目标总容量（MiB 整数，按 1 MiB 对齐）；只验证建模几何，不是 Windows 支持容量实测。",
+                "Select Extend partition, then enter a larger total target capacity as a whole number of MiB (1 MiB-aligned); this validates modeled geometry, not a Windows supported-size result."));
         ContextHelp.Set(ShrinkButton,
             Text(
-                "将 NTFS 或 RAW／未格式化的普通模拟数据分区调整到更小的 1 MiB 对齐目标容量；目标是总容量而非增量，只验证建模几何。",
-                "Resize an NTFS or RAW/unformatted normal simulated data partition to a smaller 1 MiB-aligned target capacity; the target is total capacity, not an increment, and only modeled geometry is validated."));
+                "选择“压缩分区”后，输入更小的目标总容量（MiB 整数，按 1 MiB 对齐）；目标是总容量而非增量，只验证建模几何。",
+                "Select Shrink partition, then enter a smaller total target capacity as a whole number of MiB (1 MiB-aligned); the target is a total size, not an increment, and only modeled geometry is validated."));
         ContextHelp.Set(OpenExplorerButton,
             Text("仅打开有本机盘符的现有本机卷。", "Open only an existing local volume with a local drive letter."));
         ContextHelp.Set(PartitionTypeBox,
@@ -114,8 +111,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(SizeBox,
             Text(
-                "创建时输入新分区大小；选中可扩缩分区时输入 1 MiB 对齐的目标总容量（GiB），不是增量。",
-                "Enter a new partition size while creating; for a resizable partition, enter a 1 MiB-aligned total target capacity in GiB, not an increment."));
+                "创建时输入新分区大小；选中已有分区时这里只显示四舍五入后的容量。扩展或压缩请使用相应按钮输入精确的 MiB 整数目标。",
+                "Enter a new partition size while creating; for an existing partition, this only shows its rounded capacity. Use Extend or Shrink to enter an exact whole-MiB target."));
         ContextHelp.Set(FileSystemBox,
             Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
         ContextHelp.Set(ClusterBox,
@@ -324,7 +321,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 ?? (partition is null ? string.Empty : partition.FileSystemLabel);
             if (gap)
             {
-                ClearResizeTargetBaseline();
                 SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
                 var gb = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
                 SizeBox.Minimum = 0;
@@ -337,16 +333,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else if (partition is not null)
             {
-                SizeLabel.Text = Text("目标容量（GiB）", "Target size (GiB)");
-                var resize = PreferredResizeCapability(partition);
-                SizeBox.Minimum = resize.MinimumTargetSizeBytes is long minimum
-                    ? minimum / (double)BytesPerGiB
-                    : 0;
-                SizeBox.Maximum = resize.MaximumTargetSizeBytes is long maximum
-                    ? maximum / (double)BytesPerGiB
-                    : 1_000_000;
-                SizeBox.Value = Math.Round(partition.Size / 1024d / 1024d / 1024d, 2);
-                SetResizeTargetBaseline(partition);
+                SizeLabel.Text = Text("当前容量（GiB）", "Current size (GiB)");
+                var displayedSize = Math.Round(partition.Size / (double)BytesPerGiB, 2);
+                SizeBox.Minimum = 0;
+                SizeBox.Maximum = Math.Max(1_000_000, displayedSize);
+                SizeBox.Value = displayedSize;
                 SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
                 SelectCluster(volume?.AllocationUnitSize ?? partition.AllocationUnitSize);
                 QuickFormatSwitch.IsOn = true;
@@ -360,7 +351,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else
             {
-                ClearResizeTargetBaseline();
                 SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
                 SizeBox.Minimum = 0;
                 SizeBox.Maximum = 1_000_000;
@@ -516,13 +506,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _working.OsDisks.FirstOrDefault(item => item.StableId == _selectedDiskId);
 
     /// <summary>
-    /// Only a normal data partition that is neither the boot nor the system
-    /// partition can be deleted or formatted. This deliberately does not
-    /// decide whether its non-destructive properties may be viewed or edited.
+    /// Projects the application deletion policy only. The page keeps its
+    /// separate simulation-mode and online-disk gates around this result.
     /// </summary>
-    private bool IsDestructivePartitionTarget(PartitionInfo? partition) =>
-        partition is { Type: "Primary" or "BasicData", IsBoot: false, IsSystem: false }
-        && partition.Type is not "EfiSystem" and not "MicrosoftReserved" and not "WindowsRecovery";
+    private static bool IsDestructivePartitionTarget(PartitionInfo? partition) =>
+        StorageEditRules.CanDeleteSimulatedPartition(partition);
+
+    /// <summary>
+    /// Formatting remains narrower than deletion: this page formats normal
+    /// data partitions only, while the shared deletion policy is flags-only.
+    /// </summary>
+    private static bool IsFormatPartitionTarget(PartitionInfo? partition) =>
+        partition is { Type: "Primary" or "BasicData", IsBoot: false, IsSystem: false };
 
     private bool IsProtected(PartitionInfo partition) =>
         partition.IsBoot
@@ -547,6 +542,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var isGapSelection = _selectedUnallocatedOffset is not null;
         var isDiskSelection = disk is not null && !isPartitionSelection && !isGapSelection;
         var destructivePartition = IsDestructivePartitionTarget(partition);
+        var formattablePartition = IsFormatPartitionTarget(partition);
         var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
         var hasVolume = volume is not null;
         var alreadyGpt = disk is not null
@@ -573,28 +569,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 _working,
                 partition.StableId,
                 SimulationEditKind.ShrinkPartition);
-        var resizeCapability = PreferredResizeCapability(extendCapability, shrinkCapability);
-        var canEditResizeTarget = propertyEnabled
-            && (extendCapability?.Decision.Verdict == StorageRuleVerdict.Allow
-                || shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
-        long resizeTargetSize = 0;
-        var hasResizeTarget = partition is not null && TryGetResizeTargetSize(partition, out resizeTargetSize);
-        var extendDecision = extendCapability?.Decision.Verdict == StorageRuleVerdict.Allow && hasResizeTarget
-            ? StorageEditRules.Evaluate(
-                _working,
-                new SimulationEditRequest(
-                    SimulationEditKind.ExtendPartition,
-                    partition!.StableId,
-                    SizeBytes: resizeTargetSize))
-            : null;
-        var shrinkDecision = shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow && hasResizeTarget
-            ? StorageEditRules.Evaluate(
-                _working,
-                new SimulationEditRequest(
-                    SimulationEditKind.ShrinkPartition,
-                    partition!.StableId,
-                    SizeBytes: resizeTargetSize))
-            : null;
+        var canExtend = propertyEnabled
+            && extendCapability?.Decision.Verdict == StorageRuleVerdict.Allow;
+        var canShrink = propertyEnabled
+            && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow;
 
         OnlineButton.IsEnabled = simulated && isDiskSelection && disk is { IsOffline: true };
         OfflineButton.IsEnabled = simulated
@@ -607,22 +585,20 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         NewPartitionButton.IsEnabled = simulated && !diskOffline && alreadyGpt && hasGap
             && (isDiskSelection || isGapSelection);
         DeletePartitionButton.IsEnabled = simulated && !diskOffline && destructivePartition;
-        ExtendButton.IsEnabled = canEditResizeTarget
-            && extendDecision?.Verdict == StorageRuleVerdict.Allow;
-        ShrinkButton.IsEnabled = canEditResizeTarget
-            && shrinkDecision?.Verdict == StorageRuleVerdict.Allow;
+        ExtendButton.IsEnabled = canExtend;
+        ShrinkButton.IsEnabled = canShrink;
         OpenExplorerButton.IsEnabled = !simulated
             && isPartitionSelection
             && !diskOffline
             && letter.Length == 1
             && Directory.Exists(explorerPath);
 
-        var canFormatSelection = createMode || destructivePartition;
+        var canFormatSelection = createMode || formattablePartition;
         var kind = SelectedPartitionKind();
         PartitionTypeBox.IsEnabled = propertyEnabled && createMode;
         DriveLetterBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
         VolumeLabelBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
-        SizeBox.IsEnabled = propertyEnabled && (isGapSelection || canEditResizeTarget);
+        SizeBox.IsEnabled = propertyEnabled && isGapSelection;
         FileSystemBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
         ClusterBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
         QuickFormatSwitch.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
@@ -643,10 +619,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FormatButton.IsEnabled = propertyEnabled && canFormatSelection;
         RestoreFieldHelp();
         var contextReason = ResolveContextDisabledReason(simulated, disk, diskOffline);
-        var protectedPartitionReason = DescribeProtectedPartitionReason(partition);
+        var protectedPartitionReason = DescribeFormatPartitionReason(partition);
         var destructiveReason = contextReason
-            ?? protectedPartitionReason
-            ?? Text("请选择普通模拟数据分区。", "Select a normal simulated data partition.");
+            ?? (partition is null
+                ? Text("请选择一个模拟分区。", "Select a simulated partition.")
+                : partition.IsBoot || partition.IsSystem
+                    ? Text("系统或启动分区不能删除。", "A system or boot partition cannot be deleted.")
+                    : Text("当前选择不具备模拟删除条件。", "The current selection cannot be deleted in the simulation."));
         var selectionReason = contextReason;
         var createReason = contextReason
             ?? (!alreadyGpt
@@ -654,13 +633,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : !hasGap
                     ? Text("该模拟磁盘没有可用的未分配空间。", "This simulated disk has no usable unallocated space.")
                     : Text("请选择未分配空间以创建分区。", "Select unallocated space to create a partition."));
-        var resizeEligibilityReason = contextReason
-            ?? (partition is null
-                ? Text("请选择普通模拟数据分区以设置目标容量。", "Select a normal simulated data partition to set a target capacity.")
-                : resizeCapability is null
-                    ? Text("当前选择不具备模拟分区扩缩条件。", "The current selection cannot be resized in the simulation.")
-                    : ResizeCapabilityReason(resizeCapability, extend: null));
-        var resizeTargetReason = partition is null ? null : ResizeTargetInputReason(partition);
         var extendEligibilityReason = contextReason
             ?? (partition is null
                 ? Text("请选择普通模拟数据分区以扩展。", "Select a normal simulated data partition to extend.")
@@ -669,16 +641,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ?? (partition is null
                 ? Text("请选择普通模拟数据分区以压缩。", "Select a normal simulated data partition to shrink.")
                 : ResizeCapabilityReason(shrinkCapability!, extend: false));
-        var extendReason = contextReason
-            ?? (extendCapability?.Decision.Verdict != StorageRuleVerdict.Allow
-                ? extendEligibilityReason
-                : resizeTargetReason
-                    ?? ResizeDecisionReason(extendDecision, extend: true));
-        var shrinkReason = contextReason
-            ?? (shrinkCapability?.Decision.Verdict != StorageRuleVerdict.Allow
-                ? shrinkEligibilityReason
-                : resizeTargetReason
-                    ?? ResizeDecisionReason(shrinkDecision, extend: false));
+        var extendReason = canExtend ? null : extendEligibilityReason;
+        var shrinkReason = canShrink ? null : shrinkEligibilityReason;
 
         SetDisabledReason(OnlineButton,
             !simulated
@@ -754,7 +718,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             selectionReason
             ?? (isGapSelection
                 ? Text("请选择 GPT 模拟磁盘上的未分配空间以设置新分区容量。", "Select unallocated space on a simulated GPT disk to set a new partition capacity.")
-                : resizeEligibilityReason));
+                : partition is not null
+                    ? Text(
+                        "这里仅显示四舍五入后的当前容量。请使用扩展或压缩按钮输入精确的 MiB 整数目标容量。",
+                        "This only shows the rounded current capacity. Use Extend or Shrink to enter an exact whole-MiB target capacity.")
+                    : Text("请选择未分配空间以设置新分区容量。", "Select unallocated space to set a new partition capacity.")));
         var formatReason = contextReason
             ?? (createMode
                 ? kind == PartitionKind.MicrosoftReserved
@@ -781,8 +749,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             SelectedPartition() is null
                 ? Text("以 GiB 输入新分区大小；提交时按现有规则转换为字节。", "Enter the new partition size in GiB; submission converts it to bytes using the existing rules.")
                 : Text(
-                    "输入 1 MiB 对齐的模拟分区目标总容量（GiB），不是增量。扩缩只检查保存的几何、空闲空间和方向支持的模拟文件系统，不是 Windows 支持容量实测。",
-                    "Enter a 1 MiB-aligned total target capacity for the simulated partition in GiB, not an increment. Resize checks persisted geometry, free space, and direction-supported simulated file systems; it is not a Windows supported-size measurement."));
+                    "这里只显示四舍五入后的当前容量。扩展或压缩请点击相应按钮，在对话框中输入精确的 MiB 整数目标总容量；扩缩只检查保存的几何、空闲空间和方向支持的模拟文件系统，不是 Windows 支持容量实测。",
+                    "This only shows the rounded current capacity. Click Extend or Shrink and enter an exact whole-MiB total target in the dialog; resize checks persisted geometry, free space, and direction-supported simulated file systems, not a Windows supported-size result."));
         ContextHelp.Set(FileSystemBox,
             Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
         ContextHelp.Set(ClusterBox,
@@ -793,112 +761,110 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
     }
 
-    private PartitionResizeCapability PreferredResizeCapability(PartitionInfo partition) =>
-        PreferredResizeCapability(
-            StorageEditRules.GetPartitionResizeCapability(
-                _working,
-                partition.StableId,
-                SimulationEditKind.ExtendPartition),
-            StorageEditRules.GetPartitionResizeCapability(
-                _working,
-                partition.StableId,
-                SimulationEditKind.ShrinkPartition))!;
-
-    private static PartitionResizeCapability? PreferredResizeCapability(
-        PartitionResizeCapability? extend,
-        PartitionResizeCapability? shrink) =>
-        extend?.Decision.Verdict == StorageRuleVerdict.Allow
-            ? extend
-            : shrink?.Decision.Verdict == StorageRuleVerdict.Allow
-                ? shrink
-                : extend ?? shrink;
-
-    private void SetResizeTargetBaseline(PartitionInfo partition)
+    private static bool TryGetResizeTargetRange(
+        PartitionInfo partition,
+        PartitionResizeCapability capability,
+        bool extend,
+        out long minimumMib,
+        out long maximumMib,
+        out long suggestedMib)
     {
-        _resizeTargetBaselinePartitionId = partition.StableId;
-        _resizeTargetBaselineBytes = partition.Size;
-        _resizeTargetEdited = false;
+        minimumMib = 0;
+        maximumMib = 0;
+        suggestedMib = 0;
+        if (capability.Decision.Verdict != StorageRuleVerdict.Allow
+            || capability.MinimumTargetSizeBytes is not long minimumBytes
+            || capability.MaximumTargetSizeBytes is not long maximumBytes
+            || minimumBytes <= 0
+            || maximumBytes < minimumBytes)
+        {
+            return false;
+        }
+
+        var alignment = StorageEditRules.PartitionResizeAlignmentBytes;
+        var minimumAllowedMib = minimumBytes / alignment
+            + (minimumBytes % alignment == 0 ? 0 : 1);
+        var maximumAllowedMib = maximumBytes / alignment;
+        if (extend)
+        {
+            minimumMib = Math.Max(minimumAllowedMib, partition.Size / alignment + 1);
+            maximumMib = maximumAllowedMib;
+            suggestedMib = minimumMib;
+        }
+        else
+        {
+            if (partition.Size <= 1)
+            {
+                return false;
+            }
+
+            minimumMib = minimumAllowedMib;
+            maximumMib = Math.Min(maximumAllowedMib, (partition.Size - 1) / alignment);
+            suggestedMib = maximumMib;
+        }
+
+        return minimumMib > 0 && minimumMib <= maximumMib;
     }
 
-    private void ClearResizeTargetBaseline()
-    {
-        _resizeTargetBaselinePartitionId = null;
-        _resizeTargetBaselineBytes = null;
-        _resizeTargetEdited = false;
-    }
+    private static bool TryParseResizeTargetMib(string? value, out long targetMib) =>
+        long.TryParse(
+            value?.Trim(),
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out targetMib)
+        && targetMib > 0;
 
-    private bool IsResizeTargetAtBaseline(PartitionInfo partition) =>
-        !_resizeTargetEdited
-        && _resizeTargetBaselineBytes == partition.Size
-        && string.Equals(
-            _resizeTargetBaselinePartitionId,
-            partition.StableId,
-            StringComparison.OrdinalIgnoreCase);
-
-    private bool TryGetResizeTargetSize(PartitionInfo partition, out long targetSize)
+    private static bool TryConvertMibToBytes(long targetMib, out long targetSize)
     {
         targetSize = 0;
-        if (IsResizeTargetAtBaseline(partition))
-        {
-            targetSize = partition.Size;
-            return true;
-        }
-
-        if (!TryParseResizeTargetSize(SizeBox.Value, out targetSize))
+        var alignment = StorageEditRules.PartitionResizeAlignmentBytes;
+        if (targetMib <= 0 || targetMib > long.MaxValue / alignment)
         {
             return false;
         }
 
-        return targetSize % StorageEditRules.PartitionResizeAlignmentBytes == 0;
+        targetSize = targetMib * alignment;
+        return true;
     }
 
-    private static bool TryParseResizeTargetSize(double gigibytes, out long targetSize)
+    private string? ValidateResizeTarget(
+        PartitionInfo partition,
+        SimulationEditKind action,
+        long minimumMib,
+        long maximumMib,
+        string? input,
+        out long targetSize)
     {
         targetSize = 0;
-        if (double.IsNaN(gigibytes)
-            || double.IsInfinity(gigibytes)
-            || gigibytes <= 0
-            || gigibytes > long.MaxValue / (double)BytesPerGiB)
-        {
-            return false;
-        }
-
-        var bytes = gigibytes * BytesPerGiB;
-        if (bytes > long.MaxValue)
-        {
-            return false;
-        }
-
-        try
-        {
-            targetSize = checked((long)Math.Round(bytes, MidpointRounding.AwayFromZero));
-            return targetSize > 0;
-        }
-        catch (OverflowException)
-        {
-            return false;
-        }
-    }
-
-    private string? ResizeTargetInputReason(PartitionInfo partition)
-    {
-        if (IsResizeTargetAtBaseline(partition))
-        {
-            return null;
-        }
-
-        if (!TryParseResizeTargetSize(SizeBox.Value, out var targetSize))
+        if (!TryParseResizeTargetMib(input, out var targetMib))
         {
             return Text(
-                "请输入有效的正目标容量（GiB）；该数值是总容量，不是增量。",
-                "Enter a valid positive target capacity in GiB; it is a total size, not an increment.");
+                "请输入正整数 MiB；目标是总容量，不是增量。",
+                "Enter a positive whole number of MiB; the target is a total capacity, not an increment.");
         }
 
-        return targetSize % StorageEditRules.PartitionResizeAlignmentBytes != 0
-            ? Text(
-                "目标容量必须按 1 MiB 对齐；可用整数 GiB，或输入 1 MiB 的整数倍。",
-                "The target capacity must be 1 MiB-aligned; use whole GiB or an exact multiple of 1 MiB.")
-            : null;
+        if (targetMib < minimumMib || targetMib > maximumMib)
+        {
+            return Text(
+                $"目标容量必须在 {minimumMib} 到 {maximumMib} MiB 之间。",
+                $"The target capacity must be between {minimumMib} and {maximumMib} MiB.");
+        }
+
+        if (!TryConvertMibToBytes(targetMib, out targetSize))
+        {
+            return Text(
+                "目标容量超出可安全表示的范围。",
+                "The target capacity is outside the safely representable range.");
+        }
+
+        var decision = StorageEditRules.Evaluate(
+            _working,
+            new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize));
+        return decision.Verdict == StorageRuleVerdict.Allow
+            ? null
+            : ResizeDecisionReason(
+                decision,
+                action == SimulationEditKind.ExtendPartition);
     }
 
     private string ResizeCapabilityReason(PartitionResizeCapability capability, bool? extend) =>
@@ -935,7 +901,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "仅 NTFS 或 RAW／未格式化的普通模拟数据分区可以压缩；ReFS 和 exFAT 不支持压缩。",
                 "Only NTFS or RAW/unformatted normal simulated data partitions can be shrunk; ReFS and exFAT cannot be shrunk."),
             "storage.rule.resize.extend-no-aligned-target" => Text(
-                "当前几何没有更大的 1 MiB 对齐目标容量可用。", "No larger 1 MiB-aligned target capacity fits the current geometry."),
+                "分区右侧没有足够的连续未分配空间，无法形成更大的 1 MiB 对齐目标容量。",
+                "There is not enough contiguous unallocated space immediately after the partition for a larger 1 MiB-aligned target capacity."),
             "storage.rule.resize.shrink-no-aligned-target" => Text(
                 "当前已用数据和几何没有更小的 1 MiB 对齐目标容量可用。", "No smaller 1 MiB-aligned target capacity preserves the current data and geometry."),
             "storage.rule.resize.partition-geometry" or "storage.rule.resize.sibling-geometry"
@@ -1012,7 +979,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
             "Local storage is read-only on this page; select or create a simulated system to edit.");
 
-    private string? DescribeProtectedPartitionReason(PartitionInfo? partition)
+    private string? DescribeFormatPartitionReason(PartitionInfo? partition)
     {
         if (partition is null)
         {
@@ -1022,15 +989,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (partition.IsBoot || partition.IsSystem)
         {
             return Text(
-                "系统或启动分区不能删除或格式化；卷标、盘符和符合条件的模拟扩缩仍可编辑。",
-                "A system or boot partition cannot be deleted or formatted; label, drive letter, and eligible simulated resize remain editable.");
+                "系统或启动分区不能格式化；卷标、盘符和符合条件的模拟扩缩仍可编辑。",
+                "A system or boot partition cannot be formatted; label, drive letter, and eligible simulated resize remain editable.");
         }
 
         return partition.Type switch
         {
-            "EfiSystem" => Text("EFI 系统分区不能删除或格式化。", "An EFI system partition cannot be deleted or formatted."),
-            "MicrosoftReserved" => Text("Microsoft 保留分区不能删除或格式化。", "A Microsoft Reserved Partition cannot be deleted or formatted."),
-            "WindowsRecovery" => Text("Windows 恢复分区不能删除或格式化。", "A Windows recovery partition cannot be deleted or formatted."),
+            "EfiSystem" => Text("EFI 系统分区不能在此页格式化。", "An EFI system partition cannot be formatted on this page."),
+            "MicrosoftReserved" => Text("Microsoft 保留分区不能在此页格式化。", "A Microsoft Reserved Partition cannot be formatted on this page."),
+            "WindowsRecovery" => Text("Windows 恢复分区不能在此页格式化。", "A Windows recovery partition cannot be formatted on this page."),
             _ => null
         };
     }
@@ -1110,11 +1077,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         if (!_filling)
         {
-            if (SelectedPartition() is not null)
-            {
-                _resizeTargetEdited = true;
-            }
-
             UpdatePropertyResetState();
             UpdateButtonState();
         }
@@ -1158,11 +1120,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var sizeChanged = gap
             && SizeBox.IsEnabled
             && (double.IsNaN(SizeBox.Value) || Math.Abs(SizeBox.Value - recommendedSize) > 0.005);
-        if (partition is not null && SizeBox.IsEnabled && _resizeTargetEdited)
-        {
-            sizeChanged |= !TryGetResizeTargetSize(partition, out var resizeTarget)
-                || resizeTarget != partition.Size;
-        }
         var fileSystemChanged = parameterEnabled
             && FileSystemBox.IsEnabled
             && !string.Equals(
@@ -1195,20 +1152,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void ResetSize_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedPartition() is { } partition)
-        {
-            _filling = true;
-            try
-            {
-                SizeBox.Value = Math.Round(partition.Size / (double)BytesPerGiB, 2);
-                SetResizeTargetBaseline(partition);
-            }
-            finally
-            {
-                _filling = false;
-            }
-        }
-        else if (_selectedUnallocatedOffset is not null)
+        if (_selectedUnallocatedOffset is not null)
         {
             SizeBox.Value = Math.Round(RecommendedCreateSizeGiB(), 2);
         }
@@ -1528,15 +1472,147 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async void Shrink_Click(object sender, RoutedEventArgs e) => await ResizeAsync(extend: false);
 
+    private async Task<long?> PromptResizeTargetAsync(
+        PartitionInfo partition,
+        PartitionResizeCapability capability,
+        bool extend)
+    {
+        if (!TryGetResizeTargetRange(
+                partition,
+                capability,
+                extend,
+                out var minimumMib,
+                out var maximumMib,
+                out var suggestedMib))
+        {
+            await ShowMessageAsync(
+                extend
+                    ? Text("无法扩展分区", "Cannot extend partition")
+                    : Text("无法压缩分区", "Cannot shrink partition"),
+                extend
+                    ? Text(
+                        "分区右侧没有足够的连续未分配空间，无法形成更大的 1 MiB 对齐目标容量。",
+                        "There is not enough contiguous unallocated space immediately after the partition for a larger 1 MiB-aligned target capacity.")
+                    : Text(
+                        "当前已用数据和几何没有可用的更小 1 MiB 对齐目标容量。",
+                        "The modeled used data and geometry have no smaller 1 MiB-aligned target capacity."));
+            return null;
+        }
+
+        var action = extend ? SimulationEditKind.ExtendPartition : SimulationEditKind.ShrinkPartition;
+        var input = new TextBox
+        {
+            Header = Text("目标容量（MiB，整数）", "Target capacity (MiB, whole number)"),
+            Text = suggestedMib.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            MinWidth = 320
+        };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock
+        {
+            Text = Text(
+                "请输入目标总容量，而不是要增加或减少的容量。只有选择确认后才会写入模拟修改。",
+                "Enter the total target capacity, not the amount to add or remove. The simulation changes only after you confirm."),
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = extend
+                ? Text(
+                    $"可用目标范围：{minimumMib} 到 {maximumMib} MiB。已预填最小可扩展目标 {suggestedMib} MiB。",
+                    $"Available target range: {minimumMib} to {maximumMib} MiB. The smallest expandable target, {suggestedMib} MiB, is prefilled.")
+                : Text(
+                    $"可用目标范围：{minimumMib} 到 {maximumMib} MiB。已预填最接近当前容量的可压缩目标 {suggestedMib} MiB。",
+                    $"Available target range: {minimumMib} to {maximumMib} MiB. The shrink target closest to the current capacity, {suggestedMib} MiB, is prefilled."),
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(input);
+        content.Children.Add(validation);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = extend
+                ? Text("扩展分区", "Extend partition")
+                : Text("压缩分区", "Shrink partition"),
+            Content = content,
+            PrimaryButtonText = extend
+                ? Text("确认扩展", "Confirm extend")
+                : Text("确认压缩", "Confirm shrink"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        long? targetSize = null;
+        void Validate()
+        {
+            var error = ValidateResizeTarget(
+                partition,
+                action,
+                minimumMib,
+                maximumMib,
+                input.Text,
+                out var candidateSize);
+            targetSize = error is null ? candidateSize : null;
+            validation.Text = error ?? string.Empty;
+            dialog.IsPrimaryButtonEnabled = error is null;
+        }
+
+        input.TextChanged += (_, _) => Validate();
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            Validate();
+            args.Cancel = targetSize is null;
+        };
+        Validate();
+        return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary
+            ? targetSize
+            : null;
+    }
+
     private async Task ResizeAsync(bool extend)
     {
         var partition = SelectedPartition();
-        if (partition is null || !TryGetResizeTargetSize(partition, out var targetSize))
+        if (partition is null)
         {
             return;
         }
 
         var action = extend ? SimulationEditKind.ExtendPartition : SimulationEditKind.ShrinkPartition;
+        var capability = StorageEditRules.GetPartitionResizeCapability(
+            _working,
+            partition.StableId,
+            action);
+        if (capability.Decision.Verdict != StorageRuleVerdict.Allow)
+        {
+            await ShowMessageAsync(
+                extend
+                    ? Text("无法扩展分区", "Cannot extend partition")
+                    : Text("无法压缩分区", "Cannot shrink partition"),
+                ResizeCapabilityReason(capability, extend));
+            UpdateButtonState();
+            return;
+        }
+
+        var targetSize = await PromptResizeTargetAsync(partition, capability, extend);
+        if (targetSize is null)
+        {
+            return;
+        }
+
+        var request = new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize);
+        var decision = StorageEditRules.Evaluate(_working, request);
+        if (decision.Verdict != StorageRuleVerdict.Allow)
+        {
+            await ShowMessageAsync(
+                extend
+                    ? Text("扩展分区失败", "Partition extend failed")
+                    : Text("压缩分区失败", "Partition shrink failed"),
+                ResizeDecisionReason(decision, extend));
+            UpdateButtonState();
+            return;
+        }
+
         var successTitle = extend
             ? Text("扩展分区成功", "Partition extended")
             : Text("压缩分区成功", "Partition shrunk");
@@ -1544,7 +1620,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             "已将模拟分区调整为目标容量；如有关联卷，已同步其容量与剩余空间。这是建模结果，不是 Windows 支持容量实测。",
             "The simulated partition was adjusted to the target capacity; when a linked volume exists, its capacity/free space was synchronized. This is a modeled result, not a Windows supported-size measurement.");
         _ = await SubmitAsync(
-            new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize),
+            request,
             successTitle,
             successMessage,
             failTitle: extend

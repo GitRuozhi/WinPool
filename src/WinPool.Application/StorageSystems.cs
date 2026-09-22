@@ -573,7 +573,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         {
             throw new InvalidOperationException("The selected partition was not found.");
         }
-        if (partition.IsBoot || partition.IsSystem)
+        if (!StorageEditRules.CanDeleteSimulatedPartition(partition))
         {
             throw new InvalidOperationException("A simulated boot or system partition cannot be deleted.");
         }

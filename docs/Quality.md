@@ -4,6 +4,8 @@
 
 ## 最近已记录的验证基线
 
+2026-09-22 系统盘删除与模拟扩缩修正：用户回报的“同盘分区全部不能删除”和“扩展／压缩无效”经只读审计确认为实现缺陷。修正后 Application 278/278、Infrastructure 90/90、Architecture 47/47 全通过，TRX 位于 `artifacts/v055-delete-resize-fix-20260922-r1/test-results`，主代理已核对；完整隔离 Release 构建写入 `artifacts/v055-delete-resize-fix-20260922-r1/Release`，0 警告、0 错误，并集合并 288 shared／294 App-only／10 Agent-only／0 collisions。首轮隔离命令漏写路径尾部分隔符导致合并目标落错位置，该轮构建失败未被当作通过；修正后重新构建取得明确成功，误建的两个中间树已按文件处置规则移入项目根 Rubbish。修正后的运行树已替换为用户原先使用的 `artifacts/Release`（592 文件），替换前旧树完整保留在 `Rubbish/20260922_release-before-delete-resize-fix/Program/WinPool/artifacts/Release`。本轮原生扩缩与内置模拟删除仍为 `deferred_by_user`，未做真实存储修改。
+
 2026-09-22 更正：下述反馈修复只是已取得的局部证据，上轮据此归档过早，不能代表用户 15 项全部完成。当前已重开 [Plan](Plan.md)，逐项补查实现遗漏及原生验证缺口；既有通过记录仍保留，未验证项不自动转为完成。
 
 本轮代码补齐后：Application 272/272、Infrastructure 88/88、Architecture 47/47 全通过，TRX 位于 `artifacts/v055-feedback-completion-20260922-r1/test-results`，主代理已核对。最终完整隔离 Release 构建为 `artifacts/v055-feedback-completion-20260922-r2/Release`，exit 0、0 警告、0 错误；r1 构建会话没有最终退出状态，保留 unverified，之后在新 r2 目录构建取得明确结果，未重复测试。原运行目录未覆盖。模拟扩缩的几何、方向文件系统、容量差值、只读门控及持久化偏好回归已覆盖；扩缩容与容量重置的原生操作按用户决定为 `deferred_by_user`，不计为通过。

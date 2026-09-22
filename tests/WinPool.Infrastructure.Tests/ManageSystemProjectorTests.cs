@@ -345,6 +345,44 @@ public sealed class ManageSystemProjectorTests
         Assert.False(commands.Single(command => command.Kind == ManageCommandKind.DeletePartition).IsEnabled);
     }
 
+    [Theory]
+    [InlineData("WindowsRecovery", "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}")]
+    [InlineData("MicrosoftReserved", "{e3c9e316-0b5c-4db8-817d-f92df00215ae}")]
+    public void UnmarkedSpecialPartitionCanBeDeletedButNotFormattedInOnlineSimulation(string type, string gptType)
+    {
+        var source = Document();
+        var partition = source.Snapshot.Partitions[0] with
+        {
+            Type = type,
+            IsBoot = false,
+            IsSystem = false,
+            PartitionTypeId = string.Empty,
+            GptType = gptType,
+            MbrType = string.Empty
+        };
+        var simulation = source.WithCandidate(source.Snapshot with { Partitions = [partition] });
+        var local = simulation with
+        {
+            Id = "local:manage-test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("local:manage-test"),
+            Kind = StorageSystemKind.Local,
+            DisplayName = "Local"
+        };
+        var system = InternalStableIdentity.SystemFromDocumentId(simulation.Id);
+
+        Assert.Equal(type, Assert.Single(simulation.Snapshot.Partitions).Type);
+        var commands = new ManageCommandProjector().Project(
+            simulation,
+            local,
+            Object(system, WinPool.Domain.StorageObjectKind.Partition, partition.StableId),
+            ManageObjectRole.Partition,
+            ManageWorkspaceCategory.Partition)
+            .Commands;
+
+        Assert.True(commands.Single(command => command.Kind == ManageCommandKind.DeletePartition).IsEnabled);
+        Assert.False(commands.Single(command => command.Kind == ManageCommandKind.FormatPartition).IsEnabled);
+    }
+
     [Fact]
     public void SystemDiskCanStillBeRenamedInASimulation()
     {
