@@ -13,7 +13,7 @@ Manage and Hardware first display the last saved local inventory. On startup, th
 - View local storage through read-only discovery and inspect pools, tiers, disks, partitions, and related information.
 - Enable Developer mode in Settings to show Hardware, Test, and Development. Hardware appears before Manage and provides a read-only ten-section report, source details, local refresh, and complete system JSON export.
 - Edit simulated systems on the Storage structure and Disk/partition pages.
-- Monitor supported devices with persistent session duration and separate, single-line problem indicators.
+- Monitor supported devices with persistent session duration; problems use the shared notification cards and current-run message history.
 - Record new monitoring samples in a separate database, rotating at 1 GiB and archiving with the bundled 7-Zip; Settings accepts an optional custom 7Z path.
 - Use English or Simplified Chinese, themes, and keyboard navigation.
 
@@ -22,6 +22,8 @@ Current inventory documents store source facts; older inventory formats are reje
 Monitoring archives are not automatically deleted. The application does not browse historical monitoring data; CSV export covers only records available in the current active monitoring database. Rotation buffers samples in bounded memory while disk writes pause briefly; a crash or exhausted buffer can still leave a reported recording gap.
 
 Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
+
+Normal simulated data partitions can be extended or shrunk to a 1 MiB-aligned total target capacity; system partitions remain protected from deletion and formatting. Extend supports NTFS/ReFS/RAW; shrink supports NTFS/RAW. The restored implementation and automated regression checks have passed; native resize verification remains deferred.
 
 Test remains a roadmap notice. Development shows a copyable diagnostics directory path and the latest 200 messages from the current App run, only in Developer mode. Messages stay in memory and are cleared when the App exits; the application does not read log contents or maintain a complete operation history. Full testing and development workspaces are planned for 2.0.
 

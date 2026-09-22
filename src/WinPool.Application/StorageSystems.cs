@@ -805,43 +805,38 @@ public sealed class SimulationOperationService : ISimulationOperationService
         SimulationEditRequest request,
         bool extend)
     {
-        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
-            ?? throw new InvalidOperationException("The selected partition was not found.");
-        if (partition.IsBoot || partition.IsSystem)
+        var decision = StorageEditRules.TryBuildPartitionResizePlan(
+            snapshot,
+            request,
+            extend,
+            out var plan);
+        if (decision.Verdict != StorageRuleVerdict.Allow || plan is null)
         {
-            throw new InvalidOperationException("A simulated boot or system partition cannot be resized.");
-        }
-        var newSize = request.SizeBytes
-            ?? throw new InvalidOperationException("The requested size is missing.");
-        var used = partition.Size - partition.SizeRemaining;
-        if (newSize < used)
-        {
-            throw new InvalidOperationException("The simulated partition cannot be smaller than its used space.");
-        }
-        if (extend && newSize <= partition.Size)
-        {
-            throw new InvalidOperationException("Extending requires a size larger than the current partition.");
-        }
-        if (!extend && newSize >= partition.Size)
-        {
-            throw new InvalidOperationException("Shrinking requires a size smaller than the current partition.");
-        }
-        if (extend)
-        {
-            var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == partition.OsDiskStableId);
-            if (disk is not null && partition.Offset + newSize > disk.Size)
-            {
-                throw new InvalidOperationException("The simulated disk does not have enough free space to extend.");
-            }
+            throw new InvalidOperationException(decision.Message);
         }
 
         return snapshot with
         {
             Partitions = snapshot.Partitions
-                .Select(x => x.StableId == partition.StableId
-                    ? x with { Size = newSize, SizeRemaining = newSize - used }
-                    : x)
-                .ToArray()
+                .Select(item => item.StableId == plan.Partition.StableId
+                    ? item with
+                    {
+                        Size = plan.TargetPartitionSizeBytes,
+                        SizeRemaining = plan.TargetPartitionSizeRemainingBytes
+                    }
+                    : item)
+                .ToArray(),
+            Volumes = plan.Volume is null
+                ? snapshot.Volumes
+                : snapshot.Volumes
+                    .Select(item => item.StableId == plan.Volume.StableId
+                        ? item with
+                        {
+                            Size = plan.TargetVolumeSizeBytes!.Value,
+                            SizeRemaining = plan.TargetVolumeSizeRemainingBytes!.Value
+                        }
+                        : item)
+                    .ToArray()
         };
     }
 

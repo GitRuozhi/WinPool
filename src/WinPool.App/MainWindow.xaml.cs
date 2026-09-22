@@ -435,6 +435,11 @@ public sealed partial class MainWindow : Window
         ToolTipService.SetToolTip(
             LocalRealOperationsSwitch,
             ViewModel.CanUseRealMode ? ViewModel.Localization["ExecutionMode"] : ViewModel.Localization["AdminRequired"]);
+        ContextHelp.Set(
+            ActiveSystemSelector,
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "切换当前查看或编辑的本机、导入或模拟存储系统。"
+                : "Switch the local, imported, or simulated storage system currently being viewed or edited.");
         LocalRealOperationsSwitch.IsEnabled = true;
         RefreshShellNavigationText();
         UpdateShellNavigationTextVisibility();

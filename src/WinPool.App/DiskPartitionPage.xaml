@@ -200,7 +200,8 @@
                 <Button
                     x:Name="ExtendButton"
                     Grid.Column="6"
-                    Style="{StaticResource PartitionChromeButtonStyle}">
+                    Style="{StaticResource PartitionChromeButtonStyle}"
+                    Click="Extend_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -219,7 +220,8 @@
                 <Button
                     x:Name="ShrinkButton"
                     Grid.Column="7"
-                    Style="{StaticResource PartitionChromeButtonStyle}">
+                    Style="{StaticResource PartitionChromeButtonStyle}"
+                    Click="Shrink_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />

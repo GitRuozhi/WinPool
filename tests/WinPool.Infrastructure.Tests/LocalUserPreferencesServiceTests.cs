@@ -43,6 +43,31 @@ public sealed class LocalUserPreferencesServiceTests
     }
 
     [Fact]
+    public async Task AutoCreationAndCatalogSeedFlagsRoundTripWithoutOverwritingEachOther()
+    {
+        using var location = TemporaryLocation.Create();
+        var firstService = new LocalUserPreferencesService(location.Root);
+        await firstService.SaveAsync(new UserPreferences(
+            AutoCreateVirtualDisk: false,
+            AutoCreatePartition: false,
+            BuiltInSimulationCatalogSeeded: true));
+
+        var secondService = new LocalUserPreferencesService(location.Root);
+        var firstLoad = await secondService.LoadAsync();
+        Assert.False(firstLoad.AutoCreateVirtualDisk);
+        Assert.False(firstLoad.AutoCreatePartition);
+        Assert.True(firstLoad.BuiltInSimulationCatalogSeeded);
+
+        await secondService.SaveAsync(firstLoad with { AutoCreateVirtualDisk = true });
+
+        var thirdService = new LocalUserPreferencesService(location.Root);
+        var secondLoad = await thirdService.LoadAsync();
+        Assert.True(secondLoad.AutoCreateVirtualDisk);
+        Assert.False(secondLoad.AutoCreatePartition);
+        Assert.True(secondLoad.BuiltInSimulationCatalogSeeded);
+    }
+
+    [Fact]
     public async Task SaveReplacesExistingPreferencesWithoutLeavingTemporaryFiles()
     {
         using var location = TemporaryLocation.Create();

@@ -1102,6 +1102,10 @@ public sealed partial class SettingsPage : Page
             l.EffectiveLanguage == LanguagePreference.ZhCn ? "在浏览器中查看更新。" : "View updates in a browser.");
         ContextHelp.Set(FeedbackButton,
             l.EffectiveLanguage == LanguagePreference.ZhCn ? "在浏览器中发送反馈。" : "Send feedback in a browser.");
+        ContextHelp.Set(AboutCommunityButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "在浏览器中打开 WinPool QQ 交流群。"
+                : "Open the WinPool QQ community in a browser.");
         SyncExecutionMode();
     }
 

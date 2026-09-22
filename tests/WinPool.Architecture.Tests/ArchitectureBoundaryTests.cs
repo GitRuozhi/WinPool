@@ -485,8 +485,24 @@ public sealed class ArchitectureBoundaryTests
             "ApplyLocal",
             diskPartitionPage,
             StringComparison.Ordinal);
-        Assert.DoesNotContain(
+        Assert.Contains(
             "SimulationEditKind.ExtendPartition",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SimulationEditKind.ShrinkPartition",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "StorageEditRules.Evaluate",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "new SimulationOperationService",
+            diskPartitionPage,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Resize-Partition -",
             diskPartitionPage,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

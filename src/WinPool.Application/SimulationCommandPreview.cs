@@ -59,7 +59,9 @@ public static class SimulationCommandPreview
                 break;
             case SimulationEditKind.ExtendPartition:
             case SimulationEditKind.ShrinkPartition:
-                lines.Add("# Partition resizing is not implemented in this version; no command is emitted."); break;
+                lines.Add("# Simulated geometry only. Target size is 1 MiB-aligned and not a Windows Get-PartitionSupportedSize result.");
+                lines.Add("Resize-Partition -InputObject $targetPartition -Size " + Number(step.SizeBytes ?? 0));
+                break;
             case SimulationEditKind.OptimizePool:
             case SimulationEditKind.OptimizeDrive:
                 lines.Add("# Simulated no-op. No optimization command or performance improvement is claimed."); break;

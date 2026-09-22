@@ -5,6 +5,9 @@ namespace WinPool.Application.Tests;
 
 public sealed class SimulationOperationTests
 {
+    private const long MiB = 1024L * 1024;
+    private const long GiB = 1024L * MiB;
+
     private static StorageSystemDocument CreateDocument()
     {
         var primordialDisks = new[]
@@ -55,6 +58,70 @@ public sealed class SimulationOperationTests
         Assert.True(result.Succeeded, result.Error);
         Assert.NotEmpty(result.Commands);
         return result.Document;
+    }
+
+    private static StorageSystemDocument CreateFormattedPartitionDocument(string fileSystem = "NTFS") =>
+        Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:5",
+            SizeBytes: 20 * GiB,
+            FileSystem: fileSystem));
+
+    private static StorageSystemDocument CreateSystemDiskWithTwoDataPartitions(
+        out string systemPartitionId,
+        out string ordinaryPartitionId)
+    {
+        var document = CreateFormattedPartitionDocument();
+        var systemPartition = Assert.Single(document.Snapshot.Partitions);
+        var systemVolume = document.Snapshot.VolumeForPartition(systemPartition.StableId)!;
+        systemPartitionId = systemPartition.StableId;
+        ordinaryPartitionId = "sim:partition:ordinary";
+        var ordinaryPartition = new PartitionInfo(
+            ordinaryPartitionId,
+            true,
+            5,
+            2,
+            "BasicData",
+            40 * GiB,
+            10 * GiB,
+            false,
+            false,
+            "D",
+            "Ordinary data",
+            "NTFS",
+            65536,
+            10 * GiB,
+            "Healthy",
+            "OK",
+            "D:\\",
+            "osdisk:5");
+        var ordinaryVolume = new VolumeInfo(
+            "sim:volume:ordinary",
+            true,
+            ordinaryPartitionId,
+            "NTFS",
+            "Ordinary data",
+            10 * GiB,
+            10 * GiB,
+            65536,
+            "Healthy",
+            "OK",
+            ["D:\\"]);
+
+        return document.WithCandidate(document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item.StableId == "osdisk:5"
+                    ? item with { IsBoot = true, IsSystem = true }
+                    : item)
+                .ToArray(),
+            Partitions =
+            [
+                systemPartition with { IsBoot = true, IsSystem = true },
+                ordinaryPartition
+            ],
+            Volumes = [systemVolume, ordinaryVolume]
+        });
     }
 
     [Fact]
@@ -150,6 +217,332 @@ public sealed class SimulationOperationTests
     }
 
     [Fact]
+    public void SystemDiskDataPartitionsCanResizeWhileSystemBasicDataStaysDestructiveProtected()
+    {
+        var document = CreateSystemDiskWithTwoDataPartitions(out var systemPartitionId, out var ordinaryPartitionId);
+        var service = new SimulationOperationService();
+
+        var systemResize = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            systemPartitionId,
+            SizeBytes: 24 * GiB));
+        Assert.True(systemResize.Succeeded, systemResize.Error);
+        var systemShrink = service.Apply(systemResize.Document, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            systemPartitionId,
+            SizeBytes: 16 * GiB));
+        Assert.True(systemShrink.Succeeded, systemShrink.Error);
+        var ordinaryResize = service.Apply(systemShrink.Document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            ordinaryPartitionId,
+            SizeBytes: 12 * GiB));
+        Assert.True(ordinaryResize.Succeeded, ordinaryResize.Error);
+
+        var snapshot = ordinaryResize.Document.Snapshot;
+        var systemPartition = Assert.Single(snapshot.Partitions, item => item.StableId == systemPartitionId);
+        var ordinaryPartition = Assert.Single(snapshot.Partitions, item => item.StableId == ordinaryPartitionId);
+        Assert.True(snapshot.OsDisks.Single(item => item.StableId == "osdisk:5").IsSystem);
+        Assert.True(systemPartition.IsBoot);
+        Assert.True(systemPartition.IsSystem);
+        Assert.Equal(16 * GiB, systemPartition.Size);
+        Assert.Equal(12 * GiB, ordinaryPartition.Size);
+
+        var delete = service.Apply(ordinaryResize.Document, new SimulationEditRequest(
+            SimulationEditKind.DeletePartition,
+            systemPartitionId));
+        var format = service.Apply(ordinaryResize.Document, new SimulationEditRequest(
+            SimulationEditKind.FormatPartition,
+            systemPartitionId,
+            FileSystem: "NTFS"));
+        Assert.False(delete.Succeeded);
+        Assert.False(format.Succeeded);
+        Assert.Same(ordinaryResize.Document, delete.Document);
+        Assert.Same(ordinaryResize.Document, format.Document);
+    }
+
+    [Fact]
+    public void ResizeSynchronizesLinkedPartitionAndVolumeToTheTargetCapacity()
+    {
+        var document = CreateFormattedPartitionDocument();
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        var service = new SimulationOperationService();
+
+        var extended = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 24 * GiB));
+        Assert.True(extended.Succeeded, extended.Error);
+        Assert.Contains(extended.Commands, command => command.Contains(
+            "Resize-Partition -InputObject $targetPartition -Size 25769803776",
+            StringComparison.Ordinal));
+
+        var extendedPartition = Assert.Single(extended.Document.Snapshot.Partitions);
+        var extendedVolume = Assert.Single(extended.Document.Snapshot.Volumes);
+        Assert.Equal(24 * GiB, extendedPartition.Size);
+        Assert.Equal(extendedPartition.Size, extendedVolume.Size);
+        Assert.Equal(extendedPartition.SizeRemaining, extendedVolume.SizeRemaining);
+
+        var shrunk = service.Apply(extended.Document, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            partition.StableId,
+            SizeBytes: 16 * GiB));
+        Assert.True(shrunk.Succeeded, shrunk.Error);
+        var shrunkPartition = Assert.Single(shrunk.Document.Snapshot.Partitions);
+        var shrunkVolume = Assert.Single(shrunk.Document.Snapshot.Volumes);
+        Assert.Equal(16 * GiB, shrunkPartition.Size);
+        Assert.Equal(shrunkPartition.Size, shrunkVolume.Size);
+        Assert.Equal(shrunkPartition.SizeRemaining, shrunkVolume.SizeRemaining);
+    }
+
+    [Fact]
+    public void ResizeRejectsAdjacentPartitionAndDiskBoundariesWithoutMutatingDocument()
+    {
+        var document = CreateSystemDiskWithTwoDataPartitions(out var systemPartitionId, out var ordinaryPartitionId);
+        var service = new SimulationOperationService();
+
+        var adjacentPartition = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            systemPartitionId,
+            SizeBytes: 40 * GiB));
+        var diskBoundary = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            ordinaryPartitionId,
+            SizeBytes: 100 * GiB));
+
+        Assert.False(adjacentPartition.Succeeded);
+        Assert.False(diskBoundary.Succeeded);
+        Assert.Same(document, adjacentPartition.Document);
+        Assert.Same(document, diskBoundary.Document);
+        Assert.Contains("boundary", adjacentPartition.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("boundary", diskBoundary.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResizeFileSystemSupportIsDirectionSpecific()
+    {
+        var service = new SimulationOperationService();
+        var refs = CreateFormattedPartitionDocument("ReFS");
+        var refsPartition = Assert.Single(refs.Snapshot.Partitions);
+        var refsExtend = service.Apply(refs, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            refsPartition.StableId,
+            SizeBytes: 24 * GiB));
+        var refsShrink = service.Apply(refs, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            refsPartition.StableId,
+            SizeBytes: 16 * GiB));
+
+        var exfat = CreateFormattedPartitionDocument("exFAT");
+        var exfatPartition = Assert.Single(exfat.Snapshot.Partitions);
+        var exfatExtend = service.Apply(exfat, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            exfatPartition.StableId,
+            SizeBytes: 24 * GiB));
+        var exfatShrink = service.Apply(exfat, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            exfatPartition.StableId,
+            SizeBytes: 16 * GiB));
+
+        Assert.True(refsExtend.Succeeded, refsExtend.Error);
+        Assert.False(refsShrink.Succeeded);
+        Assert.Same(refs, refsShrink.Document);
+        Assert.False(exfatExtend.Succeeded);
+        Assert.False(exfatShrink.Succeeded);
+        Assert.Same(exfat, exfatExtend.Document);
+        Assert.Same(exfat, exfatShrink.Document);
+
+        var raw = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:5",
+            SizeBytes: 20 * GiB));
+        var rawPartition = Assert.Single(raw.Snapshot.Partitions);
+        var rawExtend = service.Apply(raw, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            rawPartition.StableId,
+            SizeBytes: 24 * GiB));
+        Assert.True(rawExtend.Succeeded, rawExtend.Error);
+        var rawShrink = service.Apply(rawExtend.Document, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            rawPartition.StableId,
+            SizeBytes: 16 * GiB));
+        Assert.True(rawShrink.Succeeded, rawShrink.Error);
+        Assert.Empty(rawShrink.Document.Snapshot.Volumes);
+        var rawPartitionShrunk = Assert.Single(rawShrink.Document.Snapshot.Partitions);
+        Assert.Equal(16 * GiB, rawPartitionShrunk.Size);
+        Assert.Equal(0L, rawPartitionShrunk.SizeRemaining);
+    }
+
+    [Fact]
+    public void ResizeRejectsUnalignedTargetsAndPreservesLegitimatePartitionVolumeDifferences()
+    {
+        var document = CreateFormattedPartitionDocument();
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        var service = new SimulationOperationService();
+        var unaligned = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 24 * GiB + 1));
+
+        var volume = document.Snapshot.VolumeForPartition(partition.StableId)!;
+        var differentVolume = document.WithCandidate(document.Snapshot with
+        {
+            Volumes = [volume with { Size = 19 * GiB, SizeRemaining = 18 * GiB }]
+        });
+        var differentPartition = Assert.Single(differentVolume.Snapshot.Partitions);
+        var differentVolumeBefore = Assert.Single(differentVolume.Snapshot.Volumes);
+        var differentResult = service.Apply(differentVolume, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 24 * GiB));
+
+        Assert.False(unaligned.Succeeded);
+        Assert.Contains("aligned", unaligned.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Same(document, unaligned.Document);
+        Assert.True(differentResult.Succeeded, differentResult.Error);
+        var differentPartitionAfter = Assert.Single(differentResult.Document.Snapshot.Partitions);
+        var differentVolumeAfter = Assert.Single(differentResult.Document.Snapshot.Volumes);
+        Assert.Equal(24 * GiB, differentPartitionAfter.Size);
+        Assert.Equal(23 * GiB, differentVolumeAfter.Size);
+        Assert.Equal(22 * GiB, differentVolumeAfter.SizeRemaining);
+        Assert.Equal(differentVolumeAfter.SizeRemaining, differentPartitionAfter.SizeRemaining);
+        Assert.Equal(
+            differentPartition.Size - differentVolumeBefore.Size,
+            differentPartitionAfter.Size - differentVolumeAfter.Size);
+        Assert.Equal(
+            differentVolumeBefore.Size - differentVolumeBefore.SizeRemaining,
+            differentVolumeAfter.Size - differentVolumeAfter.SizeRemaining);
+
+        var differentShrink = service.Apply(differentResult.Document, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            differentPartition.StableId,
+            SizeBytes: 16 * GiB));
+        Assert.True(differentShrink.Succeeded, differentShrink.Error);
+        var differentPartitionShrunk = Assert.Single(differentShrink.Document.Snapshot.Partitions);
+        var differentVolumeShrunk = Assert.Single(differentShrink.Document.Snapshot.Volumes);
+        Assert.Equal(16 * GiB, differentPartitionShrunk.Size);
+        Assert.Equal(15 * GiB, differentVolumeShrunk.Size);
+        Assert.Equal(14 * GiB, differentVolumeShrunk.SizeRemaining);
+        Assert.Equal(
+            differentPartition.Size - differentVolumeBefore.Size,
+            differentPartitionShrunk.Size - differentVolumeShrunk.Size);
+        Assert.Equal(
+            differentVolumeBefore.Size - differentVolumeBefore.SizeRemaining,
+            differentVolumeShrunk.Size - differentVolumeShrunk.SizeRemaining);
+
+        var independentlyReportedFreeSpace = differentVolume.Snapshot with
+        {
+            Partitions = [differentPartition with { SizeRemaining = 17 * GiB }]
+        };
+        var independentDecision = StorageEditRules.Evaluate(independentlyReportedFreeSpace,
+            new SimulationEditRequest(
+                SimulationEditKind.ExtendPartition,
+                differentPartition.StableId,
+                SizeBytes: 24 * GiB));
+        Assert.Equal(StorageRuleVerdict.Allow, independentDecision.Verdict);
+
+        var oversizedVolume = document.WithCandidate(document.Snapshot with
+        {
+            Volumes = [volume with { Size = 21 * GiB, SizeRemaining = 20 * GiB }]
+        });
+        var oversizedResult = service.Apply(oversizedVolume, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 24 * GiB));
+        Assert.False(oversizedResult.Succeeded);
+        Assert.Same(oversizedVolume, oversizedResult.Document);
+        Assert.Contains("linked volume", oversizedResult.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResizeDeniesUnavailableSourceAndOverflowingGeometryWithoutThrowing()
+    {
+        var document = CreateFormattedPartitionDocument();
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        var unavailable = document.Snapshot with
+        {
+            FieldIssues = [new StorageFieldIssue(partition.StableId, "Offset", FieldReadState.Failed, "test")]
+        };
+        var unavailableDecision = StorageEditRules.Evaluate(unavailable, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 24 * GiB));
+        var overflowing = document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item.StableId == "osdisk:5" ? item with { Size = long.MaxValue } : item)
+                .ToArray(),
+            Partitions = [partition with { Offset = long.MaxValue - MiB, Size = 2 * MiB }]
+        };
+        var overflowDecision = StorageEditRules.Evaluate(overflowing, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 3 * MiB));
+        var volume = document.Snapshot.VolumeForPartition(partition.StableId)!;
+        var overflowingVolume = document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item.StableId == "osdisk:5" ? item with { Size = long.MaxValue } : item)
+                .ToArray(),
+            Volumes = [volume with { Size = long.MaxValue - MiB, SizeRemaining = MiB }]
+        };
+        var volumeOverflowDecision = StorageEditRules.Evaluate(overflowingVolume,
+            new SimulationEditRequest(
+                SimulationEditKind.ExtendPartition,
+                partition.StableId,
+                SizeBytes: 24 * GiB));
+
+        Assert.Equal(StorageRuleVerdict.InsufficientInfo, unavailableDecision.Verdict);
+        Assert.Equal("storage.rule.source-field-unavailable", unavailableDecision.Code);
+        Assert.Equal(StorageRuleVerdict.Deny, overflowDecision.Verdict);
+        Assert.Equal("storage.rule.resize.partition-geometry", overflowDecision.Code);
+        Assert.Equal(StorageRuleVerdict.Deny, volumeOverflowDecision.Verdict);
+        Assert.Equal("storage.rule.resize.volume-geometry", volumeOverflowDecision.Code);
+    }
+
+    [Fact]
+    public void ResizeRejectsMissingOfflineAndNonpositiveRequestsWithoutMutatingDocument()
+    {
+        var document = CreateFormattedPartitionDocument();
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        var service = new SimulationOperationService();
+
+        var missing = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            "sim:partition:missing",
+            SizeBytes: 24 * GiB));
+        var missingTarget = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId));
+        var nonpositiveTarget = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.ShrinkPartition,
+            partition.StableId,
+            SizeBytes: 0));
+        var offline = document.WithCandidate(document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item.StableId == "osdisk:5" ? item with { IsOffline = true } : item)
+                .ToArray()
+        });
+        var offlineRequest = service.Apply(offline, new SimulationEditRequest(
+            SimulationEditKind.ExtendPartition,
+            partition.StableId,
+            SizeBytes: 24 * GiB));
+
+        Assert.False(missing.Succeeded);
+        Assert.False(missingTarget.Succeeded);
+        Assert.False(nonpositiveTarget.Succeeded);
+        Assert.False(offlineRequest.Succeeded);
+        Assert.Same(document, missing.Document);
+        Assert.Same(document, missingTarget.Document);
+        Assert.Same(document, nonpositiveTarget.Document);
+        Assert.Same(offline, offlineRequest.Document);
+        Assert.Contains("not found", missing.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("target", missingTarget.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("target", nonpositiveTarget.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("offline", offlineRequest.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CreatePoolVirtualDiskAndPartitionChainProducesUsableVolume()
     {
         var document = CreateDocument();
@@ -195,25 +588,26 @@ public sealed class SimulationOperationTests
     }
 
     [Fact]
-    public void ShrinkBelowUsedSpaceIsRejected()
+    public void ShrinkBelowModeledUsedSpaceIsRejectedWithoutMutation()
     {
-        var document = CreateDocument();
-        document = Apply(document, new SimulationEditRequest(
-            SimulationEditKind.CreatePartition,
-            "osdisk:5",
-            SizeBytes: 500_000_000,
-            FileSystem: "NTFS"));
+        var document = CreateFormattedPartitionDocument();
         var partition = Assert.Single(document.Snapshot.Partitions);
-        var usedPartition = partition with { SizeRemaining = 100_000_000 };
-        document = document.WithCandidate(document.Snapshot with { Partitions = [usedPartition] });
+        var volume = document.Snapshot.VolumeForPartition(partition.StableId)!;
+        document = document.WithCandidate(document.Snapshot with
+        {
+            Volumes = [volume with { SizeRemaining = 5 * GiB }]
+        });
+        var usedPartition = Assert.Single(document.Snapshot.Partitions);
 
         var result = new SimulationOperationService().Apply(
             document,
             new SimulationEditRequest(
                 SimulationEditKind.ShrinkPartition,
                 usedPartition.StableId,
-                SizeBytes: 50_000_000));
+                SizeBytes: 10 * GiB));
         Assert.False(result.Succeeded);
+        Assert.Same(document, result.Document);
+        Assert.Contains("used data", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

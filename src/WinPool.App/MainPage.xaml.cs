@@ -219,6 +219,9 @@ public sealed partial class MainPage : Page
                         Tag = columns[i].Key
                     };
                     AutomationProperties.SetName(selector, columns[i].Name);
+                    ContextHelp.Set(selector, Text(
+                        "选择此列对象以查看其属性和可用操作。",
+                        "Select this column's object to view its properties and available actions."));
                     selector.Click += ColumnHeader_Click;
                     text.Padding = new Thickness(0);
                     content = selector;

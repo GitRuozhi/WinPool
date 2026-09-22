@@ -80,6 +80,8 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 
+模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。未编辑及重置后的 GiB 显示保留原始字节基线，避免两位显示舍入变成隐式修改。上述范围不是 Windows `Get-PartitionSupportedSize` 实测，也不允许真实写入；当前验收状态见活动 Plan。
+
 内置模拟与导入模拟均可删除。`BuiltInSimulationCatalogPolicy` 只在首次成功初始化或显式恢复默认时补齐样例；`UserPreferences.BuiltInSimulationCatalogSeeded` 在持久化成功后设置，正常重载不重建已删除样例。目录可以没有模拟系统，此时使用本机选择。单项导入、转换及删除先完成仓储操作再更新内存目录；批量恢复默认逐项同步成功结果，避免失败重试使用旧修订。
 
 自动创建虚拟磁盘、分区保存在 App 的 `UserPreferences`，结构页开关保留原位置；选择对象不修改偏好，偏好变更不反向增删已有结构。新建操作读取偏好，相关保存串行取最新偏好以避免快速连切丢失字段。前台文件选择器采用带窗口身份的 `Microsoft.Windows.Storage.Pickers`，不再用提升模式不支持的旧 picker；不因此新增管理员写入存储的权限。
@@ -155,7 +157,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 
 有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。监控数据库轮换与 7z 归档阶段、V0.55 通知初版及人工反馈修复均已归档，当前无活动 Plan；其他未激活 Design 不因此获得执行授权。
+用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。监控轮换与通知初版已归档；人工反馈修复上轮过早收口，当前 [Plan](Plan.md) 重新逐项核查并补齐用户 15 项要求。其他未激活 Design 不因此获得执行授权。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 

@@ -9,6 +9,27 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class SimulationCommandPreviewTests
 {
     [Fact]
+    public void ResizePreviewStatesItsModeledAlignmentBoundaryAndUsesTheTargetCapacity()
+    {
+        var snapshot = StorageSnapshot.Empty("test");
+        var preview = string.Join("\n", SimulationCommandPreview.Build(
+            new SimulationEditRequest(
+                SimulationEditKind.ExtendPartition,
+                "sim:partition:target",
+                SizeBytes: 24L * 1024 * 1024 * 1024),
+            snapshot,
+            snapshot));
+
+        Assert.Contains("Simulated geometry only", preview, StringComparison.Ordinal);
+        Assert.Contains("1 MiB-aligned", preview, StringComparison.Ordinal);
+        Assert.Contains(
+            "Resize-Partition -InputObject $targetPartition -Size 25769803776",
+            preview,
+            StringComparison.Ordinal);
+        Assert.Contains("not a Windows Get-PartitionSupportedSize result", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GeneratedTextParsesAndUsesInstalledStorageParametersWithoutExecutingIt()
     {
         const string name = "O'Brien ’ ‘ ‚ ‛ 中文\n$(throw 'never execute') ; `n";

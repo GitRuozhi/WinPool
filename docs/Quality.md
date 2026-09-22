@@ -4,6 +4,14 @@
 
 ## 最近已记录的验证基线
 
+2026-09-22 更正：下述反馈修复只是已取得的局部证据，上轮据此归档过早，不能代表用户 15 项全部完成。当前已重开 [Plan](Plan.md)，逐项补查实现遗漏及原生验证缺口；既有通过记录仍保留，未验证项不自动转为完成。
+
+本轮代码补齐后：Application 272/272、Infrastructure 88/88、Architecture 47/47 全通过，TRX 位于 `artifacts/v055-feedback-completion-20260922-r1/test-results`，主代理已核对。最终完整隔离 Release 构建为 `artifacts/v055-feedback-completion-20260922-r2/Release`，exit 0、0 警告、0 错误；r1 构建会话没有最终退出状态，保留 unverified，之后在新 r2 目录构建取得明确结果，未重复测试。原运行目录未覆盖。模拟扩缩的几何、方向文件系统、容量差值、只读门控及持久化偏好回归已覆盖；扩缩容与容量重置的原生操作按用户决定为 `deferred_by_user`，不计为通过。
+
+补验已确认：当时用户运行的 `artifacts/Release` 普通实例上，普通成功卡出现后 422 ms 真鼠标点击，同一调用内 UIA 与截图证实移除；动态“删除模拟系统”和静态“格式化”禁用按钮真实悬停均显示具体原因。主代理实际查看前后图和 tooltip popup，证据保存于 `artifacts/v055-feedback-completion-20260922/evidence`。该实例不是已消失的 r4 临时树，不能混写构建身份；本轮四处用途提示新增代码和模拟扩缩容恢复已通过上述统一构建，但不因此冒充原生验证。
+
+管理员补验：同一当前 Release 的提升实例 PID 11748 实际打开模拟导入“打开”和导出“另存为”窗口；主代理查看 `admin-open-picker-open-20260922-120027936.png`、`admin-save-picker-open-20260922-120027936.png`，并核对 cleanup JSON 的两个 `Cancelled=true`。两窗口均已取消，未导入数据或保存文件；此证据只覆盖管理员窗口打开/取消，不代表管理员文件往返。此前辅助脚本的中文编码、导航匹配和误判同进程文件窗口造成数次自动化失败，不记为产品失败或通过。原“单盘池／磁盘分区编辑”已恢复，主代理核对读回 JSON 和 `admin-restored-singlepool-20260922-120224378.png`，App/Agent 保持运行。
+
 2026-09-22 V0.55 人工反馈修复完成实现及有限验证：Application 首轮 265 项中 264 passed、1 failed（新增用例误用 `Single()`，不是产品实现失败）；修正测试夹具后，受影响用例及通知测试 9/9 passed。Infrastructure 86/86 passed。Architecture 首轮 46/47 passed，磁盘改名入口绕过投影的新增代码已修正，失败守卫定点复测 1/1 passed，未放宽原断言。主代理已核对 TRX 与相关代码，不重复执行已通过测试；证据位于本地 `artifacts/v055-feedback-repair-20260922-r1/test-results`，详细范围见[反馈修复归档](Archive/20260922-feedback-repair/README.md)。
 
 最终完整隔离 Release 构建为 `artifacts/v055-feedback-repair-20260922-r4/Release`，exit 0、0 警告/0 错误。首轮发现 WinUI Border 不可继承，已通过项目 WinMD 元数据核验改用可继承的 Grid；第二轮开发页遗漏命名空间引用已修复；r3 未取得最终退出状态，保持 unverified，不能作为最终构建证据。各轮输出原位保留，未替换原运行树。

@@ -346,7 +346,11 @@ public sealed partial class MonitorPage : Page
                 Padding = new Thickness(0),
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(color)
             };
-            ToolTipService.SetToolTip(swatch, hex);
+            ContextHelp.Set(
+                swatch,
+                _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                    ? $"选择此颜色（{hex}）作为监控曲线颜色。"
+                    : $"Choose this color ({hex}) for the monitored chart series.");
             swatch.Click += (_, _) =>
             {
                 input.Text = hex;

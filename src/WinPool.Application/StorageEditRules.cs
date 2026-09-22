@@ -4,6 +4,13 @@ namespace WinPool.Application;
 
 public static class StorageEditRules
 {
+    /// <summary>
+    /// The simulated partition editor uses the same 1 MiB boundary convention
+    /// as its first-partition placement. It is a stable modeling granularity,
+    /// not a claim about a Windows disk's physical-sector requirement.
+    /// </summary>
+    public const long PartitionResizeAlignmentBytes = 1024L * 1024;
+
     public const string WindowsPhysicalDiskUsage =
         "https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-physicaldisk";
     public const string WindowsPartition =
@@ -12,6 +19,12 @@ public static class StorageEditRules
         "https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-volume";
     public const string WindowsTierSupportedSize =
         "https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-storagetier-getsupportedsize";
+    public const string WindowsPartitionResize =
+        "https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-partition-resize";
+    public const string WindowsExtendBasicVolume =
+        "https://learn.microsoft.com/en-us/windows-server/storage/disk-management/extend-a-basic-volume";
+    public const string WindowsShrinkBasicVolume =
+        "https://learn.microsoft.com/en-us/windows-server/storage/disk-management/shrink-a-basic-volume";
 
     public static StorageRuleDecision Evaluate(
         StorageSnapshot snapshot,
@@ -19,14 +32,11 @@ public static class StorageEditRules
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Kind is not (SimulationEditKind.Rename or SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
-            && HasUnsupportedRelatedValue(snapshot, request))
-            return Deny("storage.rule.source-value-out-of-range",
-                "A related source value exceeds the supported editing range. Inspect its original value in source details.");
-        var unavailable = RequiredSourceIssue(snapshot, request);
-        if (unavailable is not null)
-            return new(StorageRuleVerdict.InsufficientInfo, "storage.rule.source-field-unavailable",
-                $"{unavailable.FieldName} is unavailable or conflicting ({unavailable.State}, {unavailable.Reason}); this operation requires reliable source information.", unavailable.ObjectId);
+        var sourceDecision = SourceSafetyDecision(snapshot, request);
+        if (sourceDecision is not null)
+        {
+            return sourceDecision;
+        }
         return request.Kind switch
         {
             SimulationEditKind.Rename => Allow("storage.rule.rename"),
@@ -37,8 +47,8 @@ public static class StorageEditRules
             SimulationEditKind.InitializeDisk => EvaluateInitialize(snapshot, request),
             SimulationEditKind.ConvertDisk => EvaluateConvert(snapshot, request),
             SimulationEditKind.CreatePartition => EvaluateCreatePartition(snapshot, request),
-            SimulationEditKind.ExtendPartition => UnsupportedResize("extend"),
-            SimulationEditKind.ShrinkPartition => UnsupportedResize("shrink"),
+            SimulationEditKind.ExtendPartition => TryBuildPartitionResizePlan(snapshot, request, extend: true, out _),
+            SimulationEditKind.ShrinkPartition => TryBuildPartitionResizePlan(snapshot, request, extend: false, out _),
             SimulationEditKind.CreateStoragePool => EvaluateCreatePool(snapshot, request),
             SimulationEditKind.CreateTieredPool => EvaluateCreateTieredPool(snapshot, request),
             SimulationEditKind.CreateVirtualDisk => EvaluateCreateVirtualDisk(snapshot, request),
@@ -55,6 +65,83 @@ public static class StorageEditRules
         };
     }
 
+    /// <summary>
+    /// Reports whether the selected simulated partition has enough reliable,
+    /// modeled geometry to accept a target capacity. This does not claim a
+    /// Windows Get-PartitionSupportedSize result.
+    /// </summary>
+    public static PartitionResizeCapability GetPartitionResizeCapability(
+        StorageSnapshot snapshot,
+        string targetProviderKey,
+        SimulationEditKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(targetProviderKey);
+        if (kind is not (SimulationEditKind.ExtendPartition or SimulationEditKind.ShrinkPartition))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "A partition resize operation is required.");
+        }
+
+        var request = new SimulationEditRequest(kind, targetProviderKey);
+        var sourceDecision = SourceSafetyDecision(snapshot, request);
+        if (sourceDecision is not null)
+        {
+            return new(sourceDecision, null, null, null);
+        }
+
+        var capability = GetPartitionResizeCapabilityCore(snapshot, targetProviderKey, out var context);
+        if (capability.Decision.Verdict != StorageRuleVerdict.Allow || context is null)
+        {
+            return capability;
+        }
+
+        var extend = kind == SimulationEditKind.ExtendPartition;
+        var fileSystemDecision = EvaluateResizeFileSystem(context, extend);
+        if (fileSystemDecision.Verdict != StorageRuleVerdict.Allow)
+        {
+            return capability with { Decision = fileSystemDecision };
+        }
+
+        if (!HasAlignedResizeTarget(context, extend))
+        {
+            return capability with
+            {
+                Decision = Deny(
+                    extend
+                        ? "storage.rule.resize.extend-no-aligned-target"
+                        : "storage.rule.resize.shrink-no-aligned-target",
+                    extend
+                        ? "No larger 1 MiB-aligned target capacity fits the modeled partition geometry."
+                        : "No smaller 1 MiB-aligned target capacity preserves the modeled data and geometry.",
+                    context.Partition.StableId)
+            };
+        }
+
+        return capability;
+    }
+
+    private static StorageRuleDecision? SourceSafetyDecision(
+        StorageSnapshot snapshot,
+        SimulationEditRequest request)
+    {
+        if (request.Kind is not (SimulationEditKind.Rename or SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
+            && HasUnsupportedRelatedValue(snapshot, request))
+        {
+            return Deny(
+                "storage.rule.source-value-out-of-range",
+                "A related source value exceeds the supported editing range. Inspect its original value in source details.");
+        }
+
+        var unavailable = RequiredSourceIssue(snapshot, request);
+        return unavailable is null
+            ? null
+            : new StorageRuleDecision(
+                StorageRuleVerdict.InsufficientInfo,
+                "storage.rule.source-field-unavailable",
+                $"{unavailable.FieldName} is unavailable or conflicting ({unavailable.State}, {unavailable.Reason}); this operation requires reliable source information.",
+                unavailable.ObjectId);
+    }
+
     private static StorageFieldIssue? RequiredSourceIssue(StorageSnapshot snapshot, SimulationEditRequest request)
     {
         if (snapshot.FieldIssues.Count == 0 || request.Kind is SimulationEditKind.Rename
@@ -66,7 +153,8 @@ public static class StorageEditRules
         var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == (partition?.OsDiskStableId ?? target));
         var partitionAction = request.Kind is SimulationEditKind.FormatPartition or SimulationEditKind.DeletePartition
             or SimulationEditKind.ChangeDriveLetter or SimulationEditKind.CreatePartition or SimulationEditKind.InitializeDisk
-            or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline;
+            or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline or SimulationEditKind.ExtendPartition
+            or SimulationEditKind.ShrinkPartition;
         if (partitionAction)
         {
             Need(disk?.StableId, "IsOffline");
@@ -81,6 +169,19 @@ public static class StorageEditRules
             {
                 Need(disk?.StableId, "Size", "PartitionStyle");
                 foreach (var item in snapshot.Partitions.Where(x => x.OsDiskStableId == disk?.StableId)) Need(item.StableId, "Size", "Offset");
+            }
+            if (request.Kind is SimulationEditKind.ExtendPartition or SimulationEditKind.ShrinkPartition)
+            {
+                Need(target, "Type", "Size", "Offset", "SizeRemaining", "FileSystem");
+                Need(disk?.StableId, "Size");
+                foreach (var volume in snapshot.Volumes.Where(item => item.PartitionStableId == target))
+                {
+                    Need(volume.StableId, "Size", "SizeRemaining", "FileSystem");
+                }
+                foreach (var item in snapshot.Partitions.Where(item => item.OsDiskStableId == disk?.StableId))
+                {
+                    Need(item.StableId, "Size", "Offset");
+                }
             }
         }
         else
@@ -141,8 +242,8 @@ public static class StorageEditRules
         (SimulationEditKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
         (SimulationEditKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
         (SimulationEditKind.CreatePartition, "supported: four fixed GPT partition kinds"),
-        (SimulationEditKind.ExtendPartition, "not_supported: no Windows supported-size evidence"),
-        (SimulationEditKind.ShrinkPartition, "not_supported: no Windows supported-size evidence"),
+        (SimulationEditKind.ExtendPartition, "supported: simulated Primary/BasicData, 1 MiB-aligned target capacity, modeled geometry and NTFS/ReFS/RAW direction rules; not a Windows supported-size result"),
+        (SimulationEditKind.ShrinkPartition, "supported: simulated Primary/BasicData, 1 MiB-aligned target capacity, modeled geometry and NTFS/RAW direction rules; not a Windows supported-size result"),
         (SimulationEditKind.CreateStoragePool, "supported: primordial data members"),
         (SimulationEditKind.CreateTieredPool, "supported: Simple/Mirror×2/Parity with legal disk counts"),
         (SimulationEditKind.CreateVirtualDisk, "supported: at most one new VD per pool; Fixed estimate"),
@@ -412,12 +513,400 @@ public static class StorageEditRules
         return Allow("storage.rule.create-partition", WindowsPartition);
     }
 
-    private static StorageRuleDecision UnsupportedResize(string action) =>
-        new(
-            StorageRuleVerdict.InsufficientInfo,
-            $"storage.rule.{action}.unsupported",
-            $"Partition {action} is not offered without a Windows supported-size or file-system limit for this configuration.",
-            Source: WindowsVolume);
+    internal static StorageRuleDecision TryBuildPartitionResizePlan(
+        StorageSnapshot snapshot,
+        SimulationEditRequest request,
+        bool extend,
+        out PartitionResizePlan? plan)
+    {
+        plan = null;
+        var sourceDecision = SourceSafetyDecision(snapshot, request);
+        if (sourceDecision is not null)
+        {
+            return sourceDecision;
+        }
+
+        var capability = GetPartitionResizeCapabilityCore(snapshot, request.TargetProviderKey, out var context);
+        if (capability.Decision.Verdict != StorageRuleVerdict.Allow || context is null)
+        {
+            return capability.Decision;
+        }
+
+        var fileSystemDecision = EvaluateResizeFileSystem(context, extend);
+        if (fileSystemDecision.Verdict != StorageRuleVerdict.Allow)
+        {
+            return fileSystemDecision;
+        }
+
+        if (request.SizeBytes is not long targetSize || targetSize <= 0)
+        {
+            return Deny(
+                "storage.rule.resize.target-size",
+                "A positive target partition capacity is required. The value is a total target size, not an increment.",
+                context.Partition.StableId);
+        }
+
+        if (targetSize % PartitionResizeAlignmentBytes != 0)
+        {
+            return Deny(
+                "storage.rule.resize.target-alignment",
+                "The target partition capacity must be aligned to 1 MiB in the simulation.",
+                context.Partition.StableId);
+        }
+
+        if (extend && targetSize <= context.Partition.Size)
+        {
+            return Deny(
+                "storage.rule.resize.extend-target",
+                "Extending requires a target capacity larger than the current partition size.",
+                context.Partition.StableId);
+        }
+
+        if (!extend && targetSize >= context.Partition.Size)
+        {
+            return Deny(
+                "storage.rule.resize.shrink-target",
+                "Shrinking requires a target capacity smaller than the current partition size.",
+                context.Partition.StableId);
+        }
+
+        if (targetSize < context.MinimumTargetSizeBytes)
+        {
+            return Deny(
+                "storage.rule.resize.used-space",
+                "The target capacity is smaller than the modeled used data or file-system reserve.",
+                context.Partition.StableId);
+        }
+
+        if (targetSize > context.MaximumTargetSizeBytes)
+        {
+            return Deny(
+                "storage.rule.resize.geometry-boundary",
+                "The target capacity would exceed the modeled disk boundary or overlap the next partition.",
+                context.Partition.StableId);
+        }
+
+        try
+        {
+            var change = checked(targetSize - context.Partition.Size);
+            // Partition free space is projected from the linked volume. An
+            // unformatted partition has no filesystem free-space fact, so its
+            // synthetic zero must not be treated as occupied data.
+            var targetPartitionRemaining = context.Volume is null
+                ? 0
+                : checked(context.Volume.SizeRemaining + change);
+
+            long? targetVolumeSize = null;
+            long? targetVolumeRemaining = null;
+            if (context.Volume is { } volume)
+            {
+                targetVolumeSize = checked(volume.Size + change);
+                targetVolumeRemaining = checked(volume.SizeRemaining + change);
+                if (targetVolumeSize <= 0
+                    || targetVolumeRemaining < 0
+                    || targetVolumeRemaining > targetVolumeSize)
+                {
+                    return Deny(
+                        "storage.rule.resize.volume-free-space",
+                        "The target capacity cannot preserve the modeled volume used and free space.",
+                        context.Partition.StableId);
+                }
+            }
+
+            plan = new(
+                context.Partition,
+                context.Volume,
+                targetSize,
+                targetPartitionRemaining,
+                targetVolumeSize,
+                targetVolumeRemaining);
+            return capability.Decision;
+        }
+        catch (OverflowException)
+        {
+            return Deny(
+                "storage.rule.resize.numeric-overflow",
+                "The target capacity cannot be represented safely by the simulated partition geometry.",
+                context.Partition.StableId);
+        }
+    }
+
+    private static PartitionResizeCapability GetPartitionResizeCapabilityCore(
+        StorageSnapshot snapshot,
+        string targetProviderKey,
+        out PartitionResizeContext? context)
+    {
+        context = null;
+        var partition = snapshot.Partitions.FirstOrDefault(item =>
+            item.StableId.Equals(targetProviderKey, StringComparison.OrdinalIgnoreCase));
+        if (partition is null)
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.missing-partition",
+                "The selected partition was not found."));
+        }
+
+        if (IsReservedPartitionType(partition.Type))
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.reserved-partition",
+                "EFI, Microsoft Reserved, and recovery partitions are outside the simulated resize range.",
+                partition.StableId));
+        }
+
+        if (!IsResizablePartitionType(partition.Type))
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.partition-type",
+                "Only Primary or BasicData partitions can be resized in the simulation.",
+                partition.StableId));
+        }
+
+        var disk = snapshot.OsDisks.FirstOrDefault(item =>
+            item.StableId.Equals(partition.OsDiskStableId, StringComparison.OrdinalIgnoreCase));
+        if (disk is null)
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.missing-disk",
+                "The selected partition has no modeled OS disk, so its resize boundary is unknown.",
+                partition.StableId));
+        }
+
+        if (disk.IsOffline)
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.offline",
+                "An offline simulated disk cannot resize a partition.",
+                partition.StableId));
+        }
+
+        var linkedVolumes = snapshot.Volumes
+            .Where(item => item.PartitionStableId is not null
+                && item.PartitionStableId.Equals(partition.StableId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (linkedVolumes.Length > 1)
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.ambiguous-volume",
+                "More than one volume is linked to the selected partition, so its file-system capacity is ambiguous.",
+                partition.StableId));
+        }
+
+        var volume = linkedVolumes.SingleOrDefault();
+        var fileSystem = (volume?.FileSystem ?? partition.FileSystem ?? string.Empty).Trim();
+
+        if (disk.Size <= 0
+            || !TryRangeEnd(partition.Offset, partition.Size, out var partitionEnd)
+            || partitionEnd > disk.Size
+            || (volume is null && !HasValidRemaining(partition.Size, partition.SizeRemaining)))
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.partition-geometry",
+                "The selected partition or disk has invalid modeled capacity, offset, or free-space data.",
+                partition.StableId));
+        }
+
+        if (volume is not null
+            && (volume.Size <= 0
+                || volume.Size > partition.Size
+                || !HasValidRemaining(volume.Size, volume.SizeRemaining)))
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.volume-geometry",
+                "The linked volume has invalid modeled capacity or free-space data.",
+                partition.StableId));
+        }
+
+        var maximumEnd = disk.Size;
+        foreach (var sibling in snapshot.Partitions.Where(item =>
+                     item.OsDiskStableId is not null
+                     && item.OsDiskStableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase)
+                     && !item.StableId.Equals(partition.StableId, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!TryRangeEnd(sibling.Offset, sibling.Size, out var siblingEnd) || siblingEnd > disk.Size)
+            {
+                return ResizeCapability(Deny(
+                    "storage.rule.resize.sibling-geometry",
+                    "A neighboring partition has invalid modeled capacity or offset, so resize bounds are unknown.",
+                    partition.StableId));
+            }
+
+            if (RangesOverlap(partition.Offset, partitionEnd, sibling.Offset, siblingEnd))
+            {
+                return ResizeCapability(Deny(
+                    "storage.rule.resize.overlapping-layout",
+                    "The existing modeled partition layout overlaps, so resize is not applied.",
+                    partition.StableId));
+            }
+
+            if (sibling.Offset > partition.Offset)
+            {
+                maximumEnd = Math.Min(maximumEnd, sibling.Offset);
+            }
+        }
+
+        long minimum;
+        long maximum;
+        try
+        {
+            // Filesystem capacity may legitimately be smaller than its
+            // containing partition. Both are moved by the same delta, retaining
+            // that difference and modeled used bytes instead of rejecting
+            // imported source facts merely because the two capacities are not
+            // equal.
+            var volumeMinimum = volume is null
+                ? 1
+                : Math.Max(
+                    checked(partition.Size - volume.SizeRemaining),
+                    checked(partition.Size - volume.Size + 1));
+            minimum = Math.Max(1, volumeMinimum);
+            maximum = checked(maximumEnd - partition.Offset);
+        }
+        catch (OverflowException)
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.numeric-overflow",
+                "The simulated partition geometry cannot be calculated safely.",
+                partition.StableId));
+        }
+
+        if (minimum > partition.Size || maximum < partition.Size || maximum < minimum)
+        {
+            return ResizeCapability(Deny(
+                "storage.rule.resize.geometry-range",
+                "The modeled partition has no safe target capacity range.",
+                partition.StableId));
+        }
+
+        context = new(partition, disk, volume, fileSystem, minimum, maximum);
+        return new(Allow("storage.rule.resize.simulated-geometry", WindowsPartitionResize), partition.Size, minimum, maximum);
+    }
+
+    private static PartitionResizeCapability ResizeCapability(StorageRuleDecision decision) =>
+        new(decision, null, null, null);
+
+    private static bool IsResizablePartitionType(string? value) =>
+        string.Equals(value, "Primary", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "BasicData", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsReservedPartitionType(string? value) =>
+        string.Equals(value, "EfiSystem", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "MicrosoftReserved", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "WindowsRecovery", StringComparison.OrdinalIgnoreCase);
+
+    private static StorageRuleDecision EvaluateResizeFileSystem(
+        PartitionResizeContext context,
+        bool extend)
+    {
+        var rawOrUnformatted = IsRawOrUnformattedFileSystem(context.FileSystem);
+        var ntfs = context.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase);
+        var refs = context.FileSystem.Equals("REFS", StringComparison.OrdinalIgnoreCase);
+        var supported = extend
+            ? rawOrUnformatted || ntfs || refs
+            : rawOrUnformatted || ntfs;
+        if (supported)
+        {
+            var source = rawOrUnformatted
+                ? WindowsPartitionResize
+                : extend
+                    ? WindowsExtendBasicVolume
+                    : WindowsShrinkBasicVolume;
+            return Allow(
+                extend
+                    ? "storage.rule.resize.extend-filesystem"
+                    : "storage.rule.resize.shrink-filesystem",
+                source);
+        }
+
+        return Deny(
+            extend
+                ? "storage.rule.resize.extend-filesystem"
+                : "storage.rule.resize.shrink-filesystem",
+            extend
+                ? "Only NTFS, ReFS, or RAW/unformatted normal data partitions can be extended in the simulation."
+                : "Only NTFS or RAW/unformatted normal data partitions can be shrunk in the simulation.",
+            context.Partition.StableId);
+    }
+
+    private static bool IsRawOrUnformattedFileSystem(string value) =>
+        string.IsNullOrWhiteSpace(value)
+        || value.Equals("RAW", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasAlignedResizeTarget(PartitionResizeContext context, bool extend)
+    {
+        if (extend)
+        {
+            if (context.Partition.Size == long.MaxValue
+                || !TryAlignUp(context.Partition.Size + 1, out var minimumLargerTarget))
+            {
+                return false;
+            }
+
+            return minimumLargerTarget <= context.MaximumTargetSizeBytes;
+        }
+
+        if (context.Partition.Size <= 1)
+        {
+            return false;
+        }
+
+        var maximumSmallerTarget = AlignDown(context.Partition.Size - 1);
+        return maximumSmallerTarget > 0 && maximumSmallerTarget >= context.MinimumTargetSizeBytes;
+    }
+
+    private static bool TryAlignUp(long value, out long aligned)
+    {
+        aligned = 0;
+        if (value < 0)
+        {
+            return false;
+        }
+
+        var remainder = value % PartitionResizeAlignmentBytes;
+        if (remainder == 0)
+        {
+            aligned = value;
+            return true;
+        }
+
+        try
+        {
+            aligned = checked(value + PartitionResizeAlignmentBytes - remainder);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+    }
+
+    private static long AlignDown(long value) =>
+        value - value % PartitionResizeAlignmentBytes;
+
+    private static bool HasValidRemaining(long size, long remaining) =>
+        size > 0 && remaining >= 0 && remaining <= size;
+
+    private static bool TryRangeEnd(long offset, long size, out long end)
+    {
+        end = 0;
+        if (offset < 0 || size <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            end = checked(offset + size);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+    }
+
+    private static bool RangesOverlap(long firstStart, long firstEnd, long secondStart, long secondEnd) =>
+        firstStart < secondEnd && secondStart < firstEnd;
 
     private static StorageRuleDecision EvaluateCreatePool(
         StorageSnapshot snapshot,
@@ -1074,3 +1563,30 @@ public static class StorageEditRules
     private static StorageRuleDecision Deny(string code, string message, string? objectId = null) =>
         new(StorageRuleVerdict.Deny, code, message, objectId);
 }
+
+/// <summary>
+/// A modeled target-capacity range for a simulated partition. The range is
+/// derived from the persisted geometry and volume accounting only; it is not a
+/// Windows supported-size probe.
+/// </summary>
+public sealed record PartitionResizeCapability(
+    StorageRuleDecision Decision,
+    long? CurrentSizeBytes,
+    long? MinimumTargetSizeBytes,
+    long? MaximumTargetSizeBytes);
+
+internal sealed record PartitionResizeContext(
+    PartitionInfo Partition,
+    OsDiskInfo Disk,
+    VolumeInfo? Volume,
+    string FileSystem,
+    long MinimumTargetSizeBytes,
+    long MaximumTargetSizeBytes);
+
+internal sealed record PartitionResizePlan(
+    PartitionInfo Partition,
+    VolumeInfo? Volume,
+    long TargetPartitionSizeBytes,
+    long TargetPartitionSizeRemainingBytes,
+    long? TargetVolumeSizeBytes,
+    long? TargetVolumeSizeRemainingBytes);
