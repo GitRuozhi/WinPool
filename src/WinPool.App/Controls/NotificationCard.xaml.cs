@@ -2,22 +2,20 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using WinPool.Application;
+using Windows.System;
 
 namespace WinPool_App.Controls;
 
 /// <summary>
-/// Small, UI-only projection of one active application notification. The
-/// window owns dismissal and lifetime policy; this control only reports user
-/// interaction so short-notification timers can be paused safely.
+/// A compact notification surface. Completed messages leave automatically;
+/// tapping a normal card dismisses it, while an error asks the window to show
+/// its readable message without exposing diagnostic metadata outside the
+/// Developer page.
 /// </summary>
 public sealed partial class NotificationCard : UserControl
 {
     private const int MaximumCardMessageLength = 280;
-    private bool _hasKeyboardFocus;
-    private bool _isPointerInside;
-    private bool? _lastPauseState;
 
     public static readonly DependencyProperty NotificationProperty = DependencyProperty.Register(
         nameof(Notification),
@@ -34,9 +32,7 @@ public sealed partial class NotificationCard : UserControl
     public NotificationCard()
     {
         InitializeComponent();
-        Loaded += NotificationCard_Loaded;
-        Unloaded += NotificationCard_Unloaded;
-        UpdateLocalizedText();
+        UpdateNotification();
     }
 
     public GlobalNotification? Notification
@@ -51,29 +47,12 @@ public sealed partial class NotificationCard : UserControl
         set => SetValue(IsChineseProperty, value);
     }
 
-    public event EventHandler<NotificationCardEventArgs>? DismissRequested;
-
-    public event EventHandler<NotificationCardEventArgs>? DetailsRequested;
-
-    public event EventHandler<NotificationCardPauseRequestedEventArgs>? PauseRequested;
+    public event EventHandler<NotificationCardEventArgs>? Invoked;
 
     private static void OnNotificationChanged(
         DependencyObject dependencyObject,
-        DependencyPropertyChangedEventArgs args)
-    {
-        var control = (NotificationCard)dependencyObject;
-        if (args.OldValue is GlobalNotification oldNotification)
-        {
-            var keepsSameNotification = args.NewValue is GlobalNotification replacementNotification
-                && oldNotification.Id.Equals(replacementNotification.Id, StringComparison.Ordinal);
-            if (!keepsSameNotification)
-            {
-                control.ReleasePause(oldNotification);
-            }
-        }
-        control._lastPauseState = null;
-        control.UpdateNotification();
-    }
+        DependencyPropertyChangedEventArgs args) =>
+        ((NotificationCard)dependencyObject).UpdateNotification();
 
     private static void OnDisplayLanguageChanged(
         DependencyObject dependencyObject,
@@ -89,155 +68,70 @@ public sealed partial class NotificationCard : UserControl
 
         NotificationInfoBar.Severity = NotificationSeverityConverter.ToInfoBarSeverity(notification.Severity);
         NotificationInfoBar.Title = notification.Title;
-        NotificationInfoBar.Message = Shorten(notification.Message);
-        OccurrenceText.Text = notification.OccurrenceCount > 1
-            ? $"×{notification.OccurrenceCount:N0}"
-            : string.Empty;
-        OccurrenceText.Visibility = notification.OccurrenceCount > 1
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        NotificationInfoBar.Message = DisplayMessage(notification);
+        var action = notification.Severity == GlobalNotificationSeverity.Error
+            ? Text("单击查看此错误消息；完整详情在开发页。", "Click to view this error message; full details are on the Developer page.")
+            : Text("单击关闭此消息。", "Click to dismiss this message.");
+        ToolTipService.SetToolTip(this, action);
         AutomationProperties.SetName(
             this,
-            string.IsNullOrWhiteSpace(notification.Message)
+            string.IsNullOrWhiteSpace(NotificationInfoBar.Message)
                 ? notification.Title
-                : $"{notification.Title}: {Shorten(notification.Message)}");
-        UpdateLocalizedText();
-        UpdatePauseState();
+                : $"{notification.Title}: {NotificationInfoBar.Message}");
+        AutomationProperties.SetHelpText(this, action);
     }
 
-    private void NotificationCard_PointerEntered(object sender, PointerRoutedEventArgs e)
+    private void NotificationCard_Tapped(object sender, TappedRoutedEventArgs e) => Invoke();
+
+    private void NotificationCard_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        _isPointerInside = true;
-        UpdatePauseState();
-    }
-
-    private void NotificationCard_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        _isPointerInside = false;
-        UpdatePauseState();
-    }
-
-    private void NotificationCard_GotFocus(object sender, RoutedEventArgs e)
-    {
-        _hasKeyboardFocus = true;
-        UpdatePauseState();
-    }
-
-    private void NotificationCard_LostFocus(object sender, RoutedEventArgs e) =>
-        DispatcherQueue.TryEnqueue(() =>
+        if (e.Key is VirtualKey.Enter or VirtualKey.Space)
         {
-            _hasKeyboardFocus = HasFocusedDescendant();
-            UpdatePauseState();
-        });
-
-    private void NotificationCard_Loaded(object sender, RoutedEventArgs e) => UpdatePauseState();
-
-    private void NotificationCard_Unloaded(object sender, RoutedEventArgs e)
-    {
-        _isPointerInside = false;
-        _hasKeyboardFocus = false;
-        if (Notification is { } notification)
-        {
-            ReleasePause(notification);
+            e.Handled = true;
+            Invoke();
         }
     }
 
-    private void DetailsButton_Click(object sender, RoutedEventArgs e)
+    private void Invoke()
     {
         if (Notification is { } notification)
         {
-            DetailsRequested?.Invoke(this, new NotificationCardEventArgs(notification));
+            Invoked?.Invoke(this, new NotificationCardEventArgs(notification));
         }
     }
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    private string DisplayMessage(GlobalNotification notification)
     {
-        if (Notification is { } notification)
+        if (notification.Severity != GlobalNotificationSeverity.Error)
         {
-            DismissRequested?.Invoke(this, new NotificationCardEventArgs(notification));
+            return Shorten(notification.Message, MaximumCardMessageLength);
         }
+
+        // Keep the required route to details visible even when an error body is
+        // long. The original, untruncated message is available on click and in
+        // the Developer page history.
+        var prompt = Text("进入开发页查看详情", "Open Developer features for details");
+        var messageLength = Math.Max(0, MaximumCardMessageLength - prompt.Length - 1);
+        return string.IsNullOrWhiteSpace(notification.Message)
+            ? prompt
+            : $"{Shorten(notification.Message, messageLength)}\n{prompt}";
     }
 
-    private void UpdateLocalizedText()
+    private static string Shorten(string? text, int maximum)
     {
-        DetailsButtonText.Text = IsChinese ? "详情" : "Details";
-        CloseButtonText.Text = IsChinese ? "关闭" : "Close";
-        ToolTipService.SetToolTip(
-            DetailsButton,
-            IsChinese ? "查看及复制完整详情" : "View and copy full details");
-        ToolTipService.SetToolTip(
-            CloseButton,
-            IsChinese ? "关闭通知" : "Dismiss notification");
-        AutomationProperties.SetName(DetailsButton, IsChinese ? "通知详情" : "Notification details");
-        AutomationProperties.SetName(CloseButton, IsChinese ? "关闭通知" : "Dismiss notification");
-    }
-
-    private void UpdatePauseState()
-    {
-        var isPaused = _isPointerInside || _hasKeyboardFocus;
-        if (_lastPauseState == isPaused)
-        {
-            return;
-        }
-
-        _lastPauseState = isPaused;
-        if (Notification is { AutoDismiss: true } notification)
-        {
-            PauseRequested?.Invoke(this, new NotificationCardPauseRequestedEventArgs(notification, isPaused));
-        }
-    }
-
-    private void ReleasePause(GlobalNotification notification)
-    {
-        if (notification.AutoDismiss)
-        {
-            PauseRequested?.Invoke(this, new NotificationCardPauseRequestedEventArgs(notification, false));
-        }
-
-        _lastPauseState = false;
-    }
-
-    private bool HasFocusedDescendant()
-    {
-        if (XamlRoot is null)
-        {
-            return false;
-        }
-
-        for (var current = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
-             current is not null;
-             current = VisualTreeHelper.GetParent(current))
-        {
-            if (ReferenceEquals(current, this))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string Shorten(string text)
-    {
-        if (text.Length <= MaximumCardMessageLength)
+        text ??= string.Empty;
+        if (text.Length <= maximum)
         {
             return text;
         }
 
-        return text[..(MaximumCardMessageLength - 1)] + "…";
+        return maximum <= 1 ? "…" : text[..(maximum - 1)] + "…";
     }
+
+    private string Text(string chinese, string english) => IsChinese ? chinese : english;
 }
 
 public sealed class NotificationCardEventArgs(GlobalNotification notification) : EventArgs
 {
     public GlobalNotification Notification { get; } = notification;
-}
-
-public sealed class NotificationCardPauseRequestedEventArgs(
-    GlobalNotification notification,
-    bool isPaused) : EventArgs
-{
-    public GlobalNotification Notification { get; } = notification;
-
-    public bool IsPaused { get; } = isPaused;
 }

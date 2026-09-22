@@ -27,12 +27,6 @@ public sealed partial class HardwarePage : Page
         IsTextSelectionEnabled = true,
         Visibility = Visibility.Collapsed
     };
-    private readonly TextBlock actionHint = new()
-    {
-        TextWrapping = TextWrapping.Wrap,
-        Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray),
-        Visibility = Visibility.Collapsed
-    };
     private readonly Button refresh = new();
     private readonly Button export = new();
     private readonly StackPanel report = new() { Spacing = 20, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -64,8 +58,8 @@ public sealed partial class HardwarePage : Page
             HorizontalAlignment = HorizontalAlignment.Left,
             Spacing = 8
         };
-        actions.Children.Add(refresh);
-        actions.Children.Add(export);
+        actions.Children.Add(ContextHelp.Wrap(refresh));
+        actions.Children.Add(ContextHelp.Wrap(export));
         var content = new StackPanel
         {
             Margin = new Thickness(12),
@@ -73,7 +67,6 @@ public sealed partial class HardwarePage : Page
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         content.Children.Add(actions);
-        content.Children.Add(actionHint);
         content.Children.Add(status);
         content.Children.Add(report);
         pageScroll.Content = content;
@@ -121,7 +114,7 @@ public sealed partial class HardwarePage : Page
         SetButtonContent(export, "\uEDE1", viewModel.Localization["HardwareExport"]);
         refresh.IsEnabled = capture is not null || viewModel.SelectedSystem.IsLocal && !viewModel.IsScanning;
         export.IsEnabled = capture is null;
-        var refreshHint = capture is not null
+        var refreshDisabledReason = capture is not null
             ? Text("正在刷新；可选择“取消”。", "Refreshing; select Cancel to stop.")
             : !viewModel.SelectedSystem.IsLocal
                 ? Text("硬件事实来自本机只读采集；模拟系统不能刷新硬件。",
@@ -130,15 +123,15 @@ public sealed partial class HardwarePage : Page
                     ? Text("正在扫描本机存储；扫描完成后可刷新硬件。",
                         "Local storage is being scanned; refresh becomes available when the scan completes.")
                     : string.Empty;
-        actionHint.Text = refreshHint;
-        actionHint.Visibility = string.IsNullOrWhiteSpace(refreshHint)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
         ContextHelp.Set(refresh, capture is not null
             ? Text("取消当前只读硬件刷新。", "Cancel the current read-only hardware refresh.")
             : Text("只读刷新本机硬件信息。", "Refresh local hardware information without changing storage."));
         ContextHelp.Set(export, capture is null
             ? Text("导出当前本机或模拟系统的硬件报告。", "Export the hardware report for the current local or simulated system.")
+            : Text("正在刷新时不能导出报告。", "Export is unavailable while a refresh is running."));
+        ContextHelp.SetDisabledReason(refresh, refresh.IsEnabled ? null : refreshDisabledReason);
+        ContextHelp.SetDisabledReason(export, export.IsEnabled
+            ? null
             : Text("正在刷新时不能导出报告。", "Export is unavailable while a refresh is running."));
         SetStatus(null);
         report.Children.Clear();
@@ -424,6 +417,8 @@ public sealed partial class HardwarePage : Page
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
         export.IsEnabled = false;
+        ContextHelp.SetDisabledReason(export,
+            Text("正在导出硬件报告；完成后可以再次导出。", "The hardware report is exporting; export is available again when it finishes."));
         SetStatus(null);
         try
         {
@@ -448,7 +443,14 @@ public sealed partial class HardwarePage : Page
                 exception,
                 "hardware.export.exception");
         }
-        finally { if (active) export.IsEnabled = true; }
+        finally
+        {
+            if (active)
+            {
+                export.IsEnabled = true;
+                ContextHelp.SetDisabledReason(export, null);
+            }
+        }
     }
 
     private string Text(string zh, string en) =>
@@ -469,7 +471,6 @@ public sealed partial class HardwarePage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = code,
-                AutoDismiss = false,
                 Code = code,
                 SystemId = viewModel.SelectedSystem.Id,
                 Target = target,

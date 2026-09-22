@@ -116,20 +116,31 @@ internal sealed class AgentInventorySynchronizer : IDisposable
         ClearAutomaticProgressWithUnknownOutcome();
         LogFailure(code, exception);
         var isConnectionFault = IsConnectionFault(code);
+        var isNewFailure = true;
         if (isConnectionFault)
         {
+            isNewFailure = !connectionFaultActive;
             connectionFaultActive = true;
         }
-        if (code.Equals(ReloadFaultKey, StringComparison.Ordinal))
+        else if (code.Equals(ReloadFaultKey, StringComparison.Ordinal))
         {
+            isNewFailure = !reloadFaultActive;
             reloadFaultActive = true;
         }
+
+        // The observer can retry once a second. Keep logging the retry, but
+        // only create a card/history event when the state first changes; a
+        // real transport or reload recovery resets the gate below.
+        if (!isNewFailure)
+        {
+            return;
+        }
+
         viewModel.NotificationService.PublishWarning(
             viewModel.Localization.IsChinese ? "本机数据刷新未完成，保留上次数据" : "Local inventory refresh incomplete; previous data retained",
             code,
             "inventory",
             isConnectionFault ? ConnectionFaultKey : code,
-            autoDismiss: false,
             options: new GlobalNotificationOptions
             {
                 Code = code,
@@ -176,7 +187,6 @@ internal sealed class AgentInventorySynchronizer : IDisposable
                 string.Empty,
                 "inventory",
                 AutomaticInventoryNotification.InterruptedKey(purpose),
-                autoDismiss: false,
                 options: new GlobalNotificationOptions
                 {
                     Code = "inventory.automatic.outcome_unknown",

@@ -175,8 +175,7 @@ public class EditorPageBase : Page
             source,
             code,
             $"{exception.GetType().Name}: {exception.Message}",
-            showNotification,
-            autoDismiss: false);
+            showNotification);
     }
 
     protected void PublishOperationResult(
@@ -207,7 +206,6 @@ public class EditorPageBase : Page
             first?.Code is { Length: > 0 } value ? value : $"{source}.{status}",
             detail,
             showNotification,
-            autoDismiss: false,
             occurrenceKey: outcomeUnknown ? $"{source}:outcome-unknown:{correlationId.Value}" : null);
     }
 
@@ -219,7 +217,6 @@ public class EditorPageBase : Page
         string code,
         string? detail = null,
         bool showNotification = true,
-        bool? autoDismiss = null,
         string? occurrenceKey = null)
     {
         ViewModel.NotificationService.Publish(
@@ -230,7 +227,6 @@ public class EditorPageBase : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = occurrenceKey,
-                AutoDismiss = autoDismiss,
                 ShowNotification = showNotification,
                 RecordInHistory = true,
                 Code = code,

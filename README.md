@@ -25,6 +25,8 @@ Simulation output is not proof that Windows can execute a configuration. See the
 
 Test remains a roadmap notice. Development shows a copyable diagnostics directory path and the latest 200 messages from the current App run, only in Developer mode. Messages stay in memory and are cleared when the App exits; the application does not read log contents or maintain a complete operation history. Full testing and development workspaces are planned for 2.0.
 
+Transient messages use simple bottom-right cards without merging separate repeated events. Click a normal message to dismiss it or an error to open its message dialog. Both expire automatically, with errors staying longer. Detailed records are available on Development.
+
 ## Requirements and running
 
 Minimum supported: **Windows 10 22H2 x64**. Primary platforms: Windows 11 24H2 and 25H2 x64. Available storage features depend on the Windows edition and storage provider.

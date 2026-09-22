@@ -568,9 +568,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
 
     private static StorageSnapshot DeletePartition(StorageSnapshot snapshot, SimulationEditRequest request)
     {
-        if (snapshot.Partitions.All(x => x.StableId != request.TargetProviderKey))
+        var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetProviderKey);
+        if (partition is null)
         {
             throw new InvalidOperationException("The selected partition was not found.");
+        }
+        if (partition.IsBoot || partition.IsSystem)
+        {
+            throw new InvalidOperationException("A simulated boot or system partition cannot be deleted.");
         }
 
         var result = snapshot with

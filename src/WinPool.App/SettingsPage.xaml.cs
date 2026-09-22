@@ -128,7 +128,8 @@ public sealed partial class SettingsPage : Page
         DataLocationOptions.SelectedIndex = (int)currentMode;
         _updatingDataLocation = false;
         DataLocationOptions.IsEnabled = false;
-        SetSettingsAvailability(
+        ContextHelp.SetDisabledReason(
+            DataLocationOptions,
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
                 ? "正在等待迁移确认；数据位置暂不可更改。"
                 : "Waiting for migration confirmation; the data location cannot be changed yet.");
@@ -150,7 +151,7 @@ public sealed partial class SettingsPage : Page
         finally
         {
             DataLocationOptions.IsEnabled = true;
-            SetSettingsAvailability(null);
+            ContextHelp.SetDisabledReason(DataLocationOptions, null);
         }
     }
 
@@ -265,7 +266,6 @@ public sealed partial class SettingsPage : Page
                 new GlobalNotificationOptions
                 {
                     OccurrenceKey = "settings.datalocation.restart",
-                    AutoDismiss = false,
                     Code = "settings.datalocation.restart",
                     SystemId = SettingsSystemId,
                     Target = SettingsTarget(zh),
@@ -313,7 +313,6 @@ public sealed partial class SettingsPage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = "settings.datalocation.failure",
-                AutoDismiss = false,
                 Code = "settings.datalocation.failure",
                 SystemId = SettingsSystemId,
                 Target = SettingsTarget(zh),
@@ -334,7 +333,6 @@ public sealed partial class SettingsPage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = $"settings.preference.{exception.GetType().Name}",
-                AutoDismiss = false,
                 Code = "settings.preference.failure",
                 SystemId = SettingsSystemId,
                 Target = SettingsTarget(zh),
@@ -354,7 +352,6 @@ public sealed partial class SettingsPage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = "settings.open-path.failure",
-                AutoDismiss = false,
                 Code = "settings.open-path.failure",
                 SystemId = SettingsSystemId,
                 Target = SettingsTarget(zh),
@@ -672,7 +669,8 @@ public sealed partial class SettingsPage : Page
 
         _savingSevenZipOptions = true;
         SevenZipOptions.IsEnabled = false;
-        SetSettingsAvailability(
+        ContextHelp.SetDisabledReason(
+            SevenZipOptions,
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
                 ? "正在保存 7-Zip 路径；选择暂不可更改。"
                 : "Saving the 7-Zip path; the selection cannot be changed yet.");
@@ -704,7 +702,7 @@ public sealed partial class SettingsPage : Page
         {
             _savingSevenZipOptions = false;
             SevenZipOptions.IsEnabled = true;
-            SetSettingsAvailability(null);
+            ContextHelp.SetDisabledReason(SevenZipOptions, null);
             SyncSevenZipOptions();
         }
     }
@@ -1165,7 +1163,6 @@ public sealed partial class SettingsPage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = code,
-                AutoDismiss = false,
                 Code = code,
                 SystemId = SettingsSystemId,
                 Target = SettingsTarget(zh),
@@ -1181,11 +1178,4 @@ public sealed partial class SettingsPage : Page
         .First(system => system.IsLocal)
         .Id;
 
-    private void SetSettingsAvailability(string? message)
-    {
-        SettingsAvailabilityText.Text = message ?? string.Empty;
-        SettingsAvailabilityText.Visibility = string.IsNullOrWhiteSpace(message)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-    }
 }

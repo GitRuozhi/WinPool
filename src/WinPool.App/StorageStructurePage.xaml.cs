@@ -27,6 +27,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
     private bool _filling;
     private bool _formDirty;
+    private bool _updatingAutoVdisk;
+    private bool _updatingAutoPartition;
 
     private Stack<EditorDraftState> _undoStack => EditingSession.UndoStack;
     private Stack<EditorDraftState> _redoStack => EditingSession.RedoStack;
@@ -253,14 +255,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HookNameField(_poolNameBox);
         HookNameField(_virtualDiskNameBox);
         HookNameField(_volumeNameBox);
-        _autoVdiskSwitch.Toggled += (_, _) => CommitAutoCreateToggle(virtualDisk: true);
-        _autoPartitionSwitch.Toggled += (_, _) => CommitAutoCreateToggle(virtualDisk: false);
+        _autoVdiskSwitch.Toggled += AutoVdiskSwitch_Toggled;
+        _autoPartitionSwitch.Toggled += AutoPartitionSwitch_Toggled;
 
         ContextHelp.Set(_poolNameBox, Text("输入名称后按 Enter 保存；离开焦点不会提交。", "Enter a name and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(_virtualDiskNameBox, Text("输入名称后按 Enter 保存；离开焦点不会提交。", "Enter a name and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(_volumeNameBox, Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
-        ContextHelp.Set(_autoVdiskSwitch, Text("控制新建池是否自动创建虚拟磁盘。", "Choose whether a new pool automatically creates a virtual disk."));
-        ContextHelp.Set(_autoPartitionSwitch, Text("控制新建虚拟磁盘是否自动创建分区。", "Choose whether a new virtual disk automatically creates a partition."));
+        ContextHelp.Set(_autoVdiskSwitch, Text(
+            "软件设置：新建模拟存储池时是否自动创建虚拟磁盘；不会改动已有对象。",
+            "Software setting: whether a new simulated storage pool automatically creates a virtual disk; existing objects are unchanged."));
+        ContextHelp.Set(_autoPartitionSwitch, Text(
+            "软件设置：新建模拟虚拟磁盘时是否自动创建分区；不会改动已有对象。",
+            "Software setting: whether a new simulated virtual disk automatically creates a partition; existing objects are unchanged."));
         ContextHelp.Set(_partitionStyleBox, Text("选择模拟分区表样式。", "Choose the simulated partition-table style."));
         ContextHelp.Set(_fileSystemBox, Text("选择模拟卷文件系统；ReFS 没有等同于 64 KiB NTFS 的长期证据。", "Choose the simulated volume file system; ReFS has no long-run evidence equivalent to 64 KiB NTFS."));
         ContextHelp.Set(_clusterBox, Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是 Windows 容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a Windows capacity guarantee."));
@@ -297,6 +303,86 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Grid.SetColumn(_multiVdiskWarning, 0);
         Grid.SetColumnSpan(_multiVdiskWarning, 3);
         PoolFormGrid.Children.Add(_multiVdiskWarning);
+    }
+
+    private void RefreshAutoCreateSwitches()
+    {
+        _updatingAutoVdisk = true;
+        _autoVdiskSwitch.IsOn = ViewModel.CurrentPreferences.AutoCreateVirtualDisk;
+        _updatingAutoVdisk = false;
+        _updatingAutoPartition = true;
+        _autoPartitionSwitch.IsOn = ViewModel.CurrentPreferences.AutoCreatePartition;
+        _updatingAutoPartition = false;
+        UpdateAutomaticCreationChrome();
+    }
+
+    private void UpdateAutomaticCreationChrome()
+    {
+        var createsPartition = ViewModel.CurrentPreferences.AutoCreatePartition;
+        CreateVdiskButtonLabel.Text = createsPartition
+            ? Text("创建虚拟磁盘和分区", "Create virtual disk and partition")
+            : Text("创建虚拟磁盘", "Create virtual disk");
+        ContextHelp.Set(
+            CreateVdiskButton,
+            createsPartition
+                ? Text("为符合条件的模拟池创建虚拟磁盘和分区。", "Create a virtual disk and partition for an eligible simulated pool.")
+                : Text("为符合条件的模拟池创建虚拟磁盘；自动创建分区已关闭。", "Create a virtual disk for an eligible simulated pool; auto-create partition is off."));
+    }
+
+    private async void AutoVdiskSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_updatingAutoVdisk)
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.SetAutoCreateVirtualDiskAsync(_autoVdiskSwitch.IsOn);
+            // This is deliberately a preference-only update. It refreshes
+            // control availability but never inserts or removes existing drafts.
+            UpdateButtonState();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            RefreshAutoCreateSwitches();
+            PublishOperationException(
+                Text("设置未保存", "Setting was not saved"),
+                "storage-structure-editor",
+                exception,
+                "structure.auto-vdisk.preference.failure");
+        }
+    }
+
+    private async void AutoPartitionSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_updatingAutoPartition)
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.SetAutoCreatePartitionAsync(_autoPartitionSwitch.IsOn);
+            // Do not interpret changing a software preference as a request to
+            // alter an existing virtual disk or its partition.
+            UpdateButtonState();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            RefreshAutoCreateSwitches();
+            PublishOperationException(
+                Text("设置未保存", "Setting was not saved"),
+                "storage-structure-editor",
+                exception,
+                "structure.auto-partition.preference.failure");
+        }
     }
 
     private void HookNameField(TextBox box)
@@ -610,9 +696,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var sizePanel = new Grid { ColumnSpacing = 6 };
         sizePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sizePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(group.MaximumButton, 1);
-        sizePanel.Children.Add(group.SizeBox);
-        sizePanel.Children.Add(group.MaximumButton);
+        var hostedSizeBox = ContextHelp.Wrap(group.SizeBox);
+        var hostedMaximumButton = ContextHelp.Wrap(group.MaximumButton);
+        Grid.SetColumn(hostedMaximumButton, 1);
+        sizePanel.Children.Add(hostedSizeBox);
+        sizePanel.Children.Add(hostedMaximumButton);
         row = AddTierRow(row, group, "TierSize", sizePanel, () => ResetTierField(group, "Size"));
         row = AddTierRow(row, group, "TierProvisioning", group.ProvisioningBox, null);
         row = AddTierRow(row, group, "TierResiliency", group.ResiliencyBox, () => ResetTierField(group, "Resiliency"));
@@ -780,12 +868,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         Grid.SetRow(labelPanel, row);
         Grid.SetColumn(labelPanel, 0);
-        Grid.SetRow(value, row);
-        Grid.SetColumn(value, 2);
+        // A disabled WinUI control cannot reliably receive pointer input, so
+        // host actual input controls instead of putting their explanation in
+        // a separate gray text line. Composite panels retain their own layout
+        // and host their child inputs individually (see AddTierGroup).
+        var hostedValue = value is Control ? ContextHelp.Wrap(value) : value;
+        Grid.SetRow(hostedValue, row);
+        Grid.SetColumn(hostedValue, 2);
         PoolFormGrid.Children.Add(labelPanel);
-        PoolFormGrid.Children.Add(value);
+        PoolFormGrid.Children.Add(hostedValue);
         visibilityGroup?.Add(labelPanel);
-        visibilityGroup?.Add(value);
+        visibilityGroup?.Add(hostedValue);
         if (reset is null)
         {
             return row + 1;
@@ -1188,7 +1281,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
 
             if (EditWorkspace.IsDraftPool(poolId)
-                && _autoVdiskSwitch.IsOn
+                && ViewModel.CurrentPreferences.AutoCreateVirtualDisk
                 && next.VirtualDisks.All(item => !string.Equals(
                     item.PoolStableId,
                     poolId,
@@ -1203,6 +1296,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         : _virtualDiskNameBox.Text.Trim(),
                     "Simple",
                     65536);
+                _poolIntents[poolId] = _poolIntents.TryGetValue(poolId, out var existingIntent)
+                    ? existingIntent with
+                    {
+                        AutoCreateVirtualDisk = ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
+                        AutoCreatePartition = ViewModel.CurrentPreferences.AutoCreatePartition
+                    }
+                    : CreateAutomaticIntent(draftPool.FriendlyName);
             }
 
             if (!ReferenceEquals(next, _working))
@@ -1270,8 +1370,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _filling = true;
         try
         {
+            // These switches are persistent software preferences. Refreshing
+            // the selected pool must never derive or overwrite their values.
+            RefreshAutoCreateSwitches();
             var pool = SelectedPool();
-            var isCreateContext = pool is null || EditWorkspace.IsDraftPool(pool.StableId);
             var multi = pool is not null && EditWorkspace.HasMultipleVirtualDisks(_working, pool.StableId);
             _multiVdiskWarning.Visibility = multi ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1307,8 +1409,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _poolNameBox.Text = pool.FriendlyName;
             var vdisk = _working.VirtualDisks.FirstOrDefault(item =>
                 string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase));
-            _autoVdiskSwitch.IsOn = isCreateContext;
-            _autoPartitionSwitch.IsOn = vdisk is null;
             _virtualDiskNameBox.Text = vdisk?.FriendlyName ?? pool.FriendlyName;
             var partition = PrimaryPartition(pool.StableId);
             _volumeNameBox.Text = partition is not null
@@ -1350,8 +1450,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
             if (_poolIntents.TryGetValue(pool.StableId, out var intent))
             {
-                _autoVdiskSwitch.IsOn = intent.AutoCreateVirtualDisk;
-                _autoPartitionSwitch.IsOn = intent.AutoCreatePartition;
                 if (_fileSystemBox.Items.Contains(intent.FileSystem))
                 {
                     _fileSystemBox.SelectedItem = intent.FileSystem;
@@ -1378,7 +1476,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _poolNameBox.Text = nextName;
         _virtualDiskNameBox.Text = nextName;
         _volumeNameBox.Text = nextName;
-        _autoPartitionSwitch.IsOn = true;
         foreach (var group in TierGroups())
         {
             SetResiliency(group.ResiliencyBox, "Mirror");
@@ -1758,6 +1855,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return $"{prefix}:{suffix}";
     }
 
+    /// <summary>
+    /// Records the global automatic-creation policy at the moment a draft is
+    /// created. Its switches stay in this editor for continuity, but their
+    /// values are app preferences rather than per-pool state.
+    /// </summary>
+    private PoolEditIntent CreateAutomaticIntent(string volumeName) => new(
+        ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
+        ViewModel.CurrentPreferences.AutoCreatePartition,
+        "NTFS",
+        64L * 1024,
+        volumeName);
+
     private void CaptureSelectedIntent()
     {
         if (_filling || string.IsNullOrWhiteSpace(_selectedPoolId))
@@ -1767,8 +1876,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var savedPartition = CommittedPrimaryPartition(_selectedPoolId);
         _poolIntents[_selectedPoolId] = new PoolEditIntent(
-            _autoVdiskSwitch.IsOn,
-            _autoPartitionSwitch.IsOn,
+            ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
+            ViewModel.CurrentPreferences.AutoCreatePartition,
             _fileSystemBox.SelectedItem as string ?? "NTFS",
             ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
             savedPartition is null ? _volumeNameBox.Text.Trim() : savedPartition.FileSystemLabel);
@@ -1788,8 +1897,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (!string.IsNullOrWhiteSpace(_selectedPoolId))
         {
             intents[_selectedPoolId] = new PoolEditIntent(
-                _autoVdiskSwitch.IsOn,
-                _autoPartitionSwitch.IsOn,
+                ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
+                ViewModel.CurrentPreferences.AutoCreatePartition,
                 _fileSystemBox.SelectedItem as string ?? "NTFS",
                 ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
                 _volumeNameBox.Text.Trim());
@@ -1819,8 +1928,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var createVdisk = steps.FirstOrDefault(item =>
             item.Kind == SimulationEditKind.CreateVirtualDisk
             && item.TargetProviderKey.Equals(appliedPoolId, StringComparison.OrdinalIgnoreCase));
-        if ((!draftPool || intent.AutoCreateVirtualDisk)
-            && intent.AutoCreatePartition
+        if (intent.AutoCreatePartition
             && createVdisk?.AllocatedOsDiskId is not null
             && !steps.Any(item => item.Kind == SimulationEditKind.CreatePartition
                 && item.TargetProviderKey.Equals(createVdisk.AllocatedOsDiskId, StringComparison.OrdinalIgnoreCase)))
@@ -1890,13 +1998,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }
         });
         var copy = new Button { Content = Text("复制命令预览", "Copy command preview"), IsEnabled = item.CommandPreview.Count > 0 };
+        ContextHelp.Set(copy, Text("复制此步骤的 PowerShell 命令预览；不会执行命令。", "Copy this step's PowerShell command preview; it does not run the command."));
+        SetDisabledReason(
+            copy,
+            Text("此步骤未通过预检查，没有可复制的命令。", "This step did not pass precheck, so no command is available to copy."));
         copy.Click += (_, _) =>
         {
             var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
             package.SetText(text);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
         };
-        panel.Children.Add(copy);
+        panel.Children.Add(ContextHelp.Wrap(copy));
         return panel;
     }
 
@@ -2001,25 +2113,90 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false }
             && !poolOffline
             && poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)) <= 1;
-        var availability = ResolveStructureAvailabilityText(
+        var structureReason = ResolveStructureDisabledReason(
             simulated,
             pool,
             poolOffline,
             poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)));
-        StructureAvailabilityText.Text = availability ?? string.Empty;
-        StructureAvailabilityText.Visibility = string.IsNullOrWhiteSpace(availability)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
         RestoreStructureActionHelp();
-        if (!ApplyAllButton.IsEnabled) ContextHelp.Set(ApplyAllButton, availability ?? Text("需要可应用的无阻塞模拟计划。", "A non-blocked simulated plan is required."));
-        if (!SavePoolPropertiesButton.IsEnabled) ContextHelp.Set(SavePoolPropertiesButton, availability ?? Text("需要可保存的模拟池属性修改。", "A saveable simulated pool property change is required."));
         ShowHotSpareSwitch.IsEnabled = simulated;
         ShowRetiredSwitch.IsEnabled = simulated;
+        SetDisabledReason(
+            UndoButton,
+            Text("没有可撤销的未应用修改。", "There is no unapplied change to undo."));
+        SetDisabledReason(
+            RedoButton,
+            Text("没有可恢复的撤销修改。", "There is no undone change to redo."));
+        SetDisabledReason(
+            DiscardAllButton,
+            Text("没有可放弃的未应用修改。", "There is no unapplied change to discard."));
+        SetDisabledReason(
+            ApplyAllButton,
+            !simulated
+                ? structureReason
+                : !hasUnapplied
+                    ? Text("没有待应用的模拟修改。", "There is no simulated change to apply.")
+                    : !string.IsNullOrWhiteSpace(_planBuildError)
+                        ? _planBuildError
+                        : planBlocked
+                            ? Text("待处理操作包含被规则阻止的步骤；请在待处理操作中查看原因。", "A pending operation is blocked by rules; see Pending actions for the reason.")
+                            : HasInvalidSizeInput()
+                                ? Text("容量必须是有效的非负 GiB 数值。", "Capacity must be a valid non-negative GiB value.")
+                                : _outcomeUnknown
+                                    ? structureReason
+                                    : Text("需要可应用的无阻塞模拟计划。", "A non-blocked simulated plan is required."));
+        SetDisabledReason(
+            CreatePoolButton,
+            !simulated
+                ? structureReason
+                : Text("当前已有一个模拟池草稿；请先保存、应用或放弃它。", "A simulated pool draft already exists; save, apply, or discard it first."));
+        SetDisabledReason(
+            DissolveButton,
+            structureReason ?? Text("请选择可解散的普通模拟存储池。", "Select a normal simulated storage pool to dissolve."));
+        SetDisabledReason(
+            SavePoolPropertiesButton,
+            structureReason ?? Text("没有可保存的模拟池属性修改。", "There is no simulated pool property change to save."));
+        var diskRoleReason = structureReason
+            ?? (selectedDisk is null
+                ? Text("请选择该池中的一块数据磁盘。", "Select a data disk in this pool.")
+                : selectedDisk.IsBoot || selectedDisk.IsSystem
+                    ? Text("启动盘或系统盘不能在池中切换为特殊角色。", "A boot or system disk cannot be assigned a special role in a pool.")
+                    : IsPhysicalDiskOffline(selectedDisk.StableId)
+                        ? Text("该磁盘已脱机；请先在磁盘分区页联机。", "This disk is offline; bring it online in the disk partition page first.")
+                        : !string.Equals(selectedDisk.PoolStableId, pool?.StableId, StringComparison.OrdinalIgnoreCase)
+                            ? Text("请选择当前池中的成员磁盘。", "Select a member disk in the current pool.")
+                            : null);
+        SetDisabledReason(
+            RetireButton,
+            diskRoleReason ?? Text("该磁盘已经标为已退役。", "This disk is already marked as retired."));
+        SetDisabledReason(
+            HotSpareButton,
+            diskRoleReason ?? Text("该磁盘已经标为热备。", "This disk is already marked as a hot spare."));
+        SetDisabledReason(
+            CreateVdiskButton,
+            structureReason
+                ?? (realVdisk is not null
+                    ? Text("该池已有虚拟磁盘；此页每个池只支持创建一个。", "This pool already has a virtual disk; this page supports one per pool.")
+                    : Text("该池需要至少一块数据磁盘后才能创建虚拟磁盘。", "This pool needs at least one data disk before a virtual disk can be created.")));
+        SetDisabledReason(
+            DeleteVdiskButton,
+            structureReason
+                ?? (deleteTarget is null
+                    ? Text("该池没有可删除的虚拟磁盘。", "This pool has no virtual disk to delete.")
+                    : virtualDiskOffline
+                        ? Text("该虚拟磁盘已脱机；请先在磁盘分区页联机。", "This virtual disk is offline; bring it online in the disk partition page first.")
+                        : Text("当前虚拟磁盘不能删除。", "The current virtual disk cannot be deleted.")));
+        SetDisabledReason(
+            ShowHotSpareSwitch,
+            Text("本机存储在此页只读；请选择或创建模拟系统后使用图层开关。", "Local storage is read-only on this page; select or create a simulated system to use layer switches."));
+        SetDisabledReason(
+            ShowRetiredSwitch,
+            Text("本机存储在此页只读；请选择或创建模拟系统后使用图层开关。", "Local storage is read-only on this page; select or create a simulated system to use layer switches."));
         UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
         UpdateFieldResets();
     }
 
-    private string? ResolveStructureAvailabilityText(
+    private string? ResolveStructureDisabledReason(
         bool simulated,
         StoragePoolInfo? pool,
         bool poolOffline,
@@ -2076,6 +2253,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前池属性草稿到待处理模拟修改。", "Save the current pool property draft into pending simulated changes."));
     }
 
+    private static void SetDisabledReason(FrameworkElement element, string? reason) =>
+        ContextHelp.SetDisabledReason(
+            element,
+            element is Control { IsEnabled: false } ? reason : null);
+
     private void UpdateFormStates(
         bool formEnabled,
         StoragePoolInfo? pool,
@@ -2115,6 +2297,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 : Text("按 Enter 保存名称。", "Press Enter to save the name."));
         _poolNameBox.IsEnabled = formEnabled;
         _virtualDiskNameBox.IsEnabled = formEnabled;
+        var formDisabledReason = ResolveStructureDisabledReason(
+            ViewModel.IsUsingSimulatedInventory,
+            pool,
+            pool is not null && StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]),
+            pool is null
+                ? 0
+                : _working.VirtualDisks.Count(item => item.PoolStableId == pool.StableId
+                    && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))
+            ?? Text("请选择可编辑的模拟存储池。", "Select an editable simulated storage pool.");
+        SetDisabledReason(_poolNameBox, formDisabledReason);
         var volumePartition = pool is not null && vdisk is not null
             ? PrimaryPartition(pool.StableId)
             : null;
@@ -2131,21 +2323,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 : Text("按 Enter 保存卷标。", "Press Enter to save the volume label."));
         _volumeNameBox.IsEnabled = formEnabled
             && (vdisk is null || volumePartition is not null);
-        // Auto-create virtual disk only matters while a draft pool is being
-        // put together; committed pools create through the upper-right
-        // button and never auto-create.
-        _autoVdiskSwitch.IsEnabled = formEnabled && isDraft;
-        // Auto-create partition applies whenever a virtual disk can still be
-        // created here: a draft with auto-vdisk on, or an empty committed
-        // pool before its first virtual disk.
-        var creationContext = formEnabled && !hasVdisk;
-        _autoPartitionSwitch.IsEnabled = creationContext
-            && (!isDraft || _autoVdiskSwitch.IsOn);
-
+        SetDisabledReason(_virtualDiskNameBox, formDisabledReason);
+        SetDisabledReason(
+            _volumeNameBox,
+            formEnabled && vdisk is not null && volumePartition is null
+                ? Text("该虚拟磁盘尚未创建分区；请先在磁盘与分区页完成初始化。", "This virtual disk has no partition yet; initialize it in Disk and partitions first.")
+                : formDisabledReason);
         if (pool is null)
         {
             foreach (var group in TierGroups())
             {
+                RestoreTierHelp(group);
                 group.SizeBox.IsEnabled = false;
                 group.MaximumButton.IsEnabled = false;
                 group.ProvisioningBox.IsEnabled = false;
@@ -2154,10 +2342,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 group.CopiesBox.IsEnabled = false;
                 group.FailuresBox.IsEnabled = false;
                 group.ColumnsBox.IsEnabled = false;
+                SetTierDisabledReasons(group, formDisabledReason, supportedInterleave: true);
             }
             _partitionStyleBox.IsEnabled = false;
             _fileSystemBox.IsEnabled = false;
             _clusterBox.IsEnabled = false;
+            SetDisabledReason(_partitionStyleBox, formDisabledReason);
+            SetDisabledReason(_fileSystemBox, formDisabledReason);
+            SetDisabledReason(_clusterBox, formDisabledReason);
             return;
         }
 
@@ -2216,7 +2408,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 SetNum(group.ColumnsBox, null);
             }
             UpdateMaximumSizeText(group);
-            var disabledReason = ResolveStructureAvailabilityText(
+            var disabledReason = ResolveStructureDisabledReason(
                 ViewModel.IsUsingSimulatedInventory,
                 pool,
                 StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]),
@@ -2227,26 +2419,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         "The pool holds stored data, so structure-changing fields are locked.")
                     : Text("此层字段受当前层和复原类型限制。",
                         "This tier field is limited by the current tier and resiliency type."));
-            if (!group.SizeBox.IsEnabled) ContextHelp.Set(group.SizeBox, disabledReason);
-            if (!group.MaximumButton.IsEnabled) ContextHelp.Set(group.MaximumButton, disabledReason);
-            if (!group.ResiliencyBox.IsEnabled) ContextHelp.Set(group.ResiliencyBox, disabledReason);
-            if (!group.InterleaveBox.IsEnabled) ContextHelp.Set(
-                group.InterleaveBox,
-                supportedInterleave
-                    ? disabledReason
-                    : Text("当前 Interleave 值超出编辑范围，已按原值保留。",
-                        "The current interleave is outside the editable range and is preserved."));
-            if (!group.CopiesBox.IsEnabled) ContextHelp.Set(group.CopiesBox, disabledReason);
-            if (!group.FailuresBox.IsEnabled) ContextHelp.Set(group.FailuresBox, disabledReason);
-            if (!group.ColumnsBox.IsEnabled) ContextHelp.Set(group.ColumnsBox, disabledReason);
+            SetTierDisabledReasons(group, disabledReason, supportedInterleave);
         }
 
         // Disk and partition group.
         var partition = PrimaryPartition(pool.StableId);
         var userPartitions = UserPartitions(pool.StableId);
         var canEditPartition = !hasVdisk
-            && _autoPartitionSwitch.IsOn
-            && _autoPartitionSwitch.IsEnabled
+            && ViewModel.CurrentPreferences.AutoCreatePartition
             && !holdsData;
         var partitionHasData = hasVdisk && EditWorkspace.DiskHoldsStoredData(
             _working,
@@ -2260,17 +2440,52 @@ public sealed partial class StorageStructurePage : EditorPageBase
             : canEditPartition;
         _fileSystemBox.IsEnabled = formEnabled && fsEditable;
         _clusterBox.IsEnabled = formEnabled && fsEditable;
+        var partitionReason = formDisabledReason;
+        if (formEnabled && !hasVdisk && !ViewModel.CurrentPreferences.AutoCreatePartition)
+        {
+            partitionReason = Text(
+                "“自动创建分区”已在设置中关闭；创建虚拟磁盘时不会预建分区。",
+                "Auto-create partition is off in Settings, so creating a virtual disk will not pre-create a partition.");
+        }
+        else if (formEnabled && hasVdisk && partitionHasData)
+        {
+            partitionReason = Text("该分区含有数据；格式相关属性已锁定。", "This partition contains data, so format-related properties are locked.");
+        }
+        SetDisabledReason(_partitionStyleBox, partitionReason);
+        SetDisabledReason(_fileSystemBox, partitionReason);
+        SetDisabledReason(_clusterBox, partitionReason);
     }
 
     private void RestoreTierHelp(TierFields group)
     {
         ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
         ContextHelp.Set(group.MaximumButton, Text("使用当前规划的对齐上限；不保证实际 Windows 可用容量。", "Use the current planned aligned upper bound; it does not guarantee usable Windows capacity."));
+        ContextHelp.Set(group.ProvisioningBox, Text("当前模拟仅支持固定预配。", "The current simulation supports fixed provisioning only."));
         ContextHelp.Set(group.ResiliencyBox, Text("选择现有模拟规则支持的复原类型。", "Choose a resiliency type supported by the existing simulation rules."));
         ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
         ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
         ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
         ContextHelp.Set(group.ColumnsBox, Text("奇偶校验层列数；按 Enter 规范化。", "Column count for a parity tier; press Enter to normalize."));
+        ContextHelp.Set(group.DiskCountBox, Text("显示当前层的成员磁盘数量，只读。", "Shows the number of member disks in this tier; read-only."));
+    }
+
+    private void SetTierDisabledReasons(
+        TierFields group,
+        string? disabledReason,
+        bool supportedInterleave)
+    {
+        SetDisabledReason(group.SizeBox, disabledReason);
+        SetDisabledReason(group.MaximumButton, disabledReason);
+        SetDisabledReason(group.ProvisioningBox, disabledReason);
+        SetDisabledReason(group.ResiliencyBox, disabledReason);
+        SetDisabledReason(
+            group.InterleaveBox,
+            supportedInterleave
+                ? disabledReason
+                : Text("当前 Interleave 值超出编辑范围，已按原值保留。", "The current interleave is outside the editable range and is preserved."));
+        SetDisabledReason(group.CopiesBox, disabledReason);
+        SetDisabledReason(group.FailuresBox, disabledReason);
+        SetDisabledReason(group.ColumnsBox, disabledReason);
     }
 
     private void ShowHotSpareSwitch_Toggled(object sender, RoutedEventArgs e)
@@ -2343,10 +2558,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             var next = CreateDraftPoolStep(_working);
             var draftId = next.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
-            if (_autoVdiskSwitch.IsOn
+            var draftName = next.StoragePools.First(item => item.StableId == draftId).FriendlyName;
+            _poolIntents[draftId] = CreateAutomaticIntent(draftName);
+            if (ViewModel.CurrentPreferences.AutoCreateVirtualDisk
                 && next.StoragePools.First(item => item.StableId == draftId).MemberPhysicalDiskIds.Count > 0)
             {
-                var draftName = next.StoragePools.First(item => item.StableId == draftId).FriendlyName;
                 next = EditWorkspace.InsertDraftVirtualDisk(
                     next,
                     draftId,
@@ -3567,70 +3783,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 }
 
                 break;
-        }
-    }
-
-    private void CommitAutoCreateToggle(bool virtualDisk)
-    {
-        var pool = SelectedPool();
-        if (_filling || pool is null || pool.IsPrimordial || !ViewModel.IsUsingSimulatedInventory)
-        {
-            return;
-        }
-
-        var poolId = pool.StableId;
-        var priorIntents = new Dictionary<string, PoolEditIntent>(_poolIntents, StringComparer.OrdinalIgnoreCase)
-        {
-            [poolId] = new PoolEditIntent(
-                virtualDisk ? !_autoVdiskSwitch.IsOn : _autoVdiskSwitch.IsOn,
-                virtualDisk ? _autoPartitionSwitch.IsOn : !_autoPartitionSwitch.IsOn,
-                _fileSystemBox.SelectedItem as string ?? "NTFS",
-                ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
-                CommittedPrimaryPartition(poolId)?.FileSystemLabel ?? _volumeNameBox.Text.Trim())
-        };
-        var prior = new EditorDraftState(
-            _working,
-            priorIntents,
-            new HashSet<string>(_maximumSizeFields, StringComparer.OrdinalIgnoreCase));
-        CaptureSelectedIntent();
-        var next = _working;
-        var placeholder = _working.VirtualDisks.FirstOrDefault(item =>
-            string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
-            && EditWorkspace.IsDraftVirtualDisk(item.StableId));
-        try
-        {
-            if (virtualDisk
-                && EditWorkspace.IsDraftPool(poolId)
-                && _autoVdiskSwitch.IsOn
-                && placeholder is null)
-            {
-                next = EditWorkspace.InsertDraftVirtualDisk(
-                    _working,
-                    poolId,
-                    string.IsNullOrWhiteSpace(_virtualDiskNameBox.Text)
-                        ? pool.FriendlyName
-                        : _virtualDiskNameBox.Text.Trim(),
-                    "Simple",
-                    65536);
-            }
-            else if (virtualDisk && !_autoVdiskSwitch.IsOn && placeholder is not null)
-            {
-                next = EditWorkspace.DeleteVirtualDiskFromWorking(_working, placeholder.StableId);
-            }
-
-            _undoStack.Push(prior);
-            _redoStack.Clear();
-            _working = next;
-            _formDirty = false;
-            RefreshAll();
-        }
-        catch (InvalidOperationException exception)
-        {
-            PublishOperationException(
-                ViewModel.Localization["OperationFailed"],
-                "storage-structure-editor",
-                exception,
-                "structure.edit.exception");
         }
     }
 

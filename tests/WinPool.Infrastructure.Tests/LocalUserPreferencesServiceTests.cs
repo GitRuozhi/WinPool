@@ -19,7 +19,7 @@ public sealed class LocalUserPreferencesServiceTests
     }
 
     [Fact]
-    public async Task ExistingFormatWithoutDeveloperModeLoadsWithItDisabled()
+    public async Task ExistingFormatWithoutNewFlagsUsesSafeCatalogSeedDefaults()
     {
         using var location = TemporaryLocation.Create();
         var service = new LocalUserPreferencesService(location.Root);
@@ -37,6 +37,9 @@ public sealed class LocalUserPreferencesServiceTests
         var loaded = await service.LoadAsync();
 
         Assert.False(loaded.DeveloperMode);
+        Assert.True(loaded.AutoCreateVirtualDisk);
+        Assert.True(loaded.AutoCreatePartition);
+        Assert.False(loaded.BuiltInSimulationCatalogSeeded);
     }
 
     [Fact]

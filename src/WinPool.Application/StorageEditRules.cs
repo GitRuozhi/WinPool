@@ -70,7 +70,9 @@ public static class StorageEditRules
         if (partitionAction)
         {
             Need(disk?.StableId, "IsOffline");
-            if (request.Kind == SimulationEditKind.FormatPartition) Need(target, "IsBoot", "IsSystem", "Type");
+            if (request.Kind is SimulationEditKind.FormatPartition or SimulationEditKind.DeletePartition)
+                Need(target, "IsBoot", "IsSystem");
+            if (request.Kind == SimulationEditKind.FormatPartition) Need(target, "Type");
             if (request.Kind is SimulationEditKind.InitializeDisk or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline)
                 Need(disk?.StableId, "IsBoot", "IsSystem", "PartitionStyle");
             if (request.Kind == SimulationEditKind.SetDiskOffline && request.Offline == true)
@@ -134,7 +136,7 @@ public static class StorageEditRules
         (SimulationEditKind.Rename, "supported: object friendly name / volume label"),
         (SimulationEditKind.ChangeDriveLetter, "supported: unused letter, volume present"),
         (SimulationEditKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
-        (SimulationEditKind.DeletePartition, "supported: any existing partition"),
+        (SimulationEditKind.DeletePartition, "supported: existing non-boot/system partition"),
         (SimulationEditKind.SetDiskOffline, "supported: persisted simulation disk state"),
         (SimulationEditKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
         (SimulationEditKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
@@ -262,6 +264,13 @@ public static class StorageEditRules
         if (partition is null)
         {
             return Deny("storage.rule.delete-partition.missing", "The selected partition was not found.");
+        }
+
+        if (partition.IsBoot || partition.IsSystem)
+        {
+            return Deny(
+                "storage.rule.delete-partition.system",
+                "The boot or system partition cannot be deleted.");
         }
 
         return Allow("storage.rule.delete-partition", WindowsPartition);

@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
+using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 
@@ -26,6 +27,8 @@ public sealed partial class TopologyNodeControl : UserControl
     public TopologyNodeControl()
     {
         InitializeComponent();
+        ContextHelp.Set(ExpandButton, "展开或折叠此结构节点。 / Expand or collapse this structure node.");
+        ContextHelp.SetDisabledReason(ExpandButton, "当前节点没有可展开的子项。 / This node has no child items to expand.");
         Loaded += (_, _) => UpdateSelectionVisual();
         ActualThemeChanged += (_, _) => UpdateSelectionVisual();
         DragStarting += TopologyNodeControl_DragStarting;

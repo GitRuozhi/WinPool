@@ -19,6 +19,8 @@ public sealed record ApplicationNotification(
     string UserDetailText,
     string Source,
     string OccurrenceKey,
+    // Completed messages expire. A false value is reserved for a live progress
+    // lifecycle, which is removed explicitly when that operation ends.
     bool AutoDismiss = true,
     bool RecordInHistory = true,
     bool IsProgress = false,
@@ -87,8 +89,7 @@ public static class WorkspaceNotificationFactory
             "ScanFailed",
             string.Empty,
             "inventory",
-            occurrenceKey,
-            autoDismiss: false);
+            occurrenceKey);
 
     public static ApplicationNotification ExportCompleted(string occurrenceKey) =>
         Create(
@@ -118,8 +119,7 @@ public static class WorkspaceNotificationFactory
             "OperationFailed",
             string.Empty,
             "workspace-operation",
-            occurrenceKey,
-            autoDismiss: false);
+            occurrenceKey);
 
     private static ApplicationNotification Create(
         string code,

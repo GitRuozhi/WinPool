@@ -311,6 +311,98 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
+    public void SystemPartitionKeepsNonDestructiveSimulationCommandsEnabled()
+    {
+        var source = Document();
+        var systemPartition = source.Snapshot.Partitions[0] with { IsBoot = true, IsSystem = true };
+        var systemDisk = source.Snapshot.OsDisks[0] with { IsBoot = true, IsSystem = true };
+        var simulation = source.WithCandidate(source.Snapshot with
+        {
+            Partitions = [systemPartition],
+            OsDisks = [systemDisk]
+        });
+        var local = simulation with
+        {
+            Id = "local:manage-test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("local:manage-test"),
+            Kind = StorageSystemKind.Local,
+            DisplayName = "Local"
+        };
+        var system = InternalStableIdentity.SystemFromDocumentId(simulation.Id);
+
+        var commands = new ManageCommandProjector().Project(
+            simulation,
+            local,
+            Object(system, WinPool.Domain.StorageObjectKind.Partition, systemPartition.StableId),
+            ManageObjectRole.Partition,
+            ManageWorkspaceCategory.Partition)
+            .Commands;
+
+        Assert.True(commands.Single(command => command.Kind == ManageCommandKind.ChangeDriveLetter).IsEnabled);
+        Assert.True(commands.Single(command => command.Kind == ManageCommandKind.RenamePartition).IsEnabled);
+        Assert.True(commands.Single(command => command.Kind == ManageCommandKind.EditPartition).IsEnabled);
+        Assert.False(commands.Single(command => command.Kind == ManageCommandKind.FormatPartition).IsEnabled);
+        Assert.False(commands.Single(command => command.Kind == ManageCommandKind.DeletePartition).IsEnabled);
+    }
+
+    [Fact]
+    public void SystemDiskCanStillBeRenamedInASimulation()
+    {
+        var source = Document();
+        var systemDisk = source.Snapshot.OsDisks[0] with { IsBoot = true, IsSystem = true };
+        var simulation = source.WithCandidate(source.Snapshot with { OsDisks = [systemDisk] });
+        var local = simulation with
+        {
+            Id = "local:manage-test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("local:manage-test"),
+            Kind = StorageSystemKind.Local,
+            DisplayName = "Local"
+        };
+        var system = InternalStableIdentity.SystemFromDocumentId(simulation.Id);
+
+        var commands = new ManageCommandProjector().Project(
+            simulation,
+            local,
+            Object(system, WinPool.Domain.StorageObjectKind.OsDisk, systemDisk.StableId),
+            ManageObjectRole.OsDisk,
+            ManageWorkspaceCategory.Disk)
+            .Commands;
+
+        Assert.True(commands.Single(command => command.Kind == ManageCommandKind.RenameDisk).IsEnabled);
+        Assert.False(commands.Single(command => command.Kind == ManageCommandKind.InitializeDisk).IsEnabled);
+        Assert.False(commands.Single(command => command.Kind == ManageCommandKind.ConvertDiskStyle).IsEnabled);
+    }
+
+    [Fact]
+    public void BuiltInSimulationCanBeDeletedLikeAnyOtherSimulation()
+    {
+        var source = Document();
+        var builtIn = source with
+        {
+            Id = "simulation:builtin:standard",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("simulation:builtin:standard")
+        };
+        var local = source with
+        {
+            Id = "local:manage-test",
+            SystemId = InternalStableIdentity.SystemFromDocumentId("local:manage-test"),
+            Kind = StorageSystemKind.Local,
+            DisplayName = "Local"
+        };
+        var system = InternalStableIdentity.SystemFromDocumentId(builtIn.Id);
+
+        var commands = new ManageCommandProjector().Project(
+            builtIn,
+            local,
+            Object(system, WinPool.Domain.StorageObjectKind.System, builtIn.Id),
+            ManageObjectRole.System,
+            ManageWorkspaceCategory.System)
+            .Commands;
+
+        Assert.True(commands.Single(command => command.Kind == ManageCommandKind.DeleteSimulation).IsEnabled);
+    }
+
+    [Fact]
     public void PartitionWorkspaceUsesTheUnionIdentityAndKeepsVolumeSourceResolvable()
     {
         var source = Document();

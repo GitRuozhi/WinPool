@@ -21,6 +21,7 @@ public sealed class AutomaticInventoryNotificationTests
         Assert.False(started.RecordInHistory);
         Assert.True(success.AutoDismiss);
         Assert.Equal(ApplicationNotificationSeverity.Error, failure.Severity);
+        Assert.True(failure.AutoDismiss);
         Assert.Equal(AutomaticInventoryNotification.ProgressKey(purpose), started.OccurrenceKey);
         Assert.Equal(AutomaticInventoryNotification.CompletedKey(purpose), success.OccurrenceKey);
         Assert.Equal(AutomaticInventoryNotification.FailedKey(purpose), failure.OccurrenceKey);

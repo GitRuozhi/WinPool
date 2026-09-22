@@ -76,12 +76,8 @@
             BorderThickness="1"
             CornerRadius="4">
             <StackPanel Spacing="6">
-                <TextBlock
-                    x:Name="PartitionAvailabilityText"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextWrapping="Wrap"
-                    Visibility="Collapsed" />
                 <controls:FixedWrapPanel ItemWidth="176" ItemHeight="44" Spacing="6">
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="OnlineButton"
                     Style="{StaticResource PartitionChromeButtonStyle}"
@@ -99,6 +95,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="OfflineButton"
                     Grid.Column="1"
@@ -117,6 +115,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="InitializeButton"
                     Grid.Column="2"
@@ -135,6 +135,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="ConvertGptButton"
                     Grid.Column="3"
@@ -153,6 +155,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="NewPartitionButton"
                     Grid.Column="4"
@@ -171,6 +175,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="DeletePartitionButton"
                     Grid.Column="5"
@@ -189,6 +195,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="ExtendButton"
                     Grid.Column="6"
@@ -206,6 +214,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="ShrinkButton"
                     Grid.Column="7"
@@ -223,6 +233,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="OpenExplorerButton"
                     Grid.Column="8"
@@ -241,6 +253,7 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
                 </controls:FixedWrapPanel>
             </StackPanel>
         </Border>
@@ -319,31 +332,31 @@
                                 x:Name="PartitionTypeLabel"
                                 Grid.Row="4"
                                 VerticalAlignment="Center" />
-                            <ComboBox
-                                x:Name="PartitionTypeBox"
-                                Grid.Row="4"
-                                Grid.Column="2"
-                                HorizontalAlignment="Stretch"
-                                SelectionChanged="PartitionTypeBox_SelectionChanged" />
+                            <controls:ContextHelpHost Grid.Row="4" Grid.Column="2">
+                                <ComboBox
+                                    x:Name="PartitionTypeBox"
+                                    HorizontalAlignment="Stretch"
+                                    SelectionChanged="PartitionTypeBox_SelectionChanged" />
+                            </controls:ContextHelpHost>
                             <TextBlock
                                 x:Name="DriveLetterLabel"
                                 Grid.Row="5"
                                 VerticalAlignment="Center" />
-                            <ComboBox
-                                x:Name="DriveLetterBox"
-                                Grid.Row="5"
-                                Grid.Column="2"
-                                HorizontalAlignment="Stretch"
-                                SelectionChanged="DriveLetterBox_SelectionChanged" />
+                            <controls:ContextHelpHost Grid.Row="5" Grid.Column="2">
+                                <ComboBox
+                                    x:Name="DriveLetterBox"
+                                    HorizontalAlignment="Stretch"
+                                    SelectionChanged="DriveLetterBox_SelectionChanged" />
+                            </controls:ContextHelpHost>
                             <TextBlock
                                 x:Name="VolumeLabelCaption"
                                 Grid.Row="6"
                                 VerticalAlignment="Center" />
-                            <TextBox
-                                x:Name="VolumeLabelBox"
-                                Grid.Row="6"
-                                Grid.Column="2"
-                                KeyDown="VolumeLabelBox_KeyDown" />
+                            <controls:ContextHelpHost Grid.Row="6" Grid.Column="2">
+                                <TextBox
+                                    x:Name="VolumeLabelBox"
+                                    KeyDown="VolumeLabelBox_KeyDown" />
+                            </controls:ContextHelpHost>
                             <StackPanel
                                 Grid.Row="7"
                                 Orientation="Horizontal"
@@ -368,16 +381,16 @@
                                 Visibility="Collapsed">
                                 <FontIcon Glyph="&#xE777;" FontSize="12" />
                             </Button>
-                            <NumberBox
-                                x:Name="SizeBox"
-                                Grid.Row="7"
-                                Grid.Column="2"
-                                Minimum="0"
-                                SmallChange="1"
-                                LargeChange="10"
-                                SpinButtonPlacementMode="Hidden"
-                                ValidationMode="InvalidInputOverwritten"
-                                ValueChanged="SizeBox_ValueChanged" />
+                            <controls:ContextHelpHost Grid.Row="7" Grid.Column="2">
+                                <NumberBox
+                                    x:Name="SizeBox"
+                                    Minimum="0"
+                                    SmallChange="1"
+                                    LargeChange="10"
+                                    SpinButtonPlacementMode="Hidden"
+                                    ValidationMode="InvalidInputOverwritten"
+                                    ValueChanged="SizeBox_ValueChanged" />
+                            </controls:ContextHelpHost>
                             <StackPanel
                                 Grid.Row="8"
                                 Orientation="Horizontal"
@@ -402,12 +415,12 @@
                                 Visibility="Collapsed">
                                 <FontIcon Glyph="&#xE777;" FontSize="12" />
                             </Button>
-                            <ComboBox
-                                x:Name="FileSystemBox"
-                                Grid.Row="8"
-                                Grid.Column="2"
-                                HorizontalAlignment="Stretch"
-                                SelectionChanged="FileSystemBox_SelectionChanged" />
+                            <controls:ContextHelpHost Grid.Row="8" Grid.Column="2">
+                                <ComboBox
+                                    x:Name="FileSystemBox"
+                                    HorizontalAlignment="Stretch"
+                                    SelectionChanged="FileSystemBox_SelectionChanged" />
+                            </controls:ContextHelpHost>
                             <StackPanel
                                 Grid.Row="9"
                                 Orientation="Horizontal"
@@ -432,12 +445,12 @@
                                 Visibility="Collapsed">
                                 <FontIcon Glyph="&#xE777;" FontSize="12" />
                             </Button>
-                            <ComboBox
-                                x:Name="ClusterBox"
-                                Grid.Row="9"
-                                Grid.Column="2"
-                                HorizontalAlignment="Stretch"
-                                SelectionChanged="ClusterBox_SelectionChanged" />
+                            <controls:ContextHelpHost Grid.Row="9" Grid.Column="2">
+                                <ComboBox
+                                    x:Name="ClusterBox"
+                                    HorizontalAlignment="Stretch"
+                                    SelectionChanged="ClusterBox_SelectionChanged" />
+                            </controls:ContextHelpHost>
                             <StackPanel
                                 Grid.Row="10"
                                 Orientation="Horizontal"
@@ -462,20 +475,20 @@
                                 Visibility="Collapsed">
                                 <FontIcon Glyph="&#xE777;" FontSize="12" />
                             </Button>
-                            <ToggleSwitch
-                                x:Name="QuickFormatSwitch"
-                                Grid.Row="10"
-                                Grid.Column="2"
-                                MinWidth="0"
-                                Margin="0"
-                                OffContent=""
-                                OnContent=""
-                                Toggled="QuickFormatSwitch_Toggled" />
+                            <controls:ContextHelpHost Grid.Row="10" Grid.Column="2">
+                                <ToggleSwitch
+                                    x:Name="QuickFormatSwitch"
+                                    MinWidth="0"
+                                    Margin="0"
+                                    OffContent=""
+                                    OnContent=""
+                                    Toggled="QuickFormatSwitch_Toggled" />
+                            </controls:ContextHelpHost>
                         </Grid>
                     </Border>
+                    <controls:ContextHelpHost Margin="0,8,0,0">
                     <Button
                         x:Name="FormatButton"
-                        Margin="0,8,0,0"
                         HorizontalAlignment="Stretch"
                         Click="Format_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -483,6 +496,7 @@
                             <TextBlock x:Name="FormatButtonLabel" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    </controls:ContextHelpHost>
                 </StackPanel>
             </ScrollViewer>
     </Grid>

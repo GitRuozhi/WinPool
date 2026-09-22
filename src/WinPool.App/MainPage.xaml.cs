@@ -429,6 +429,7 @@ public sealed partial class MainPage : Page
         string Glyph,
         bool Enabled,
         Func<Task> Action,
+        string Purpose,
         string? DisabledReason = null);
 
     private sealed record TableCellContext(string GroupKey, string Value);
@@ -462,16 +463,26 @@ public sealed partial class MainPage : Page
         var selected = ViewModel.SelectedWorkspaceItem;
         if (selected?.IsAction == true)
         {
-            return [new CommandSpec(Text("导入", "Import"), "\uE8B5", true, ImportAsync)];
+            return [new CommandSpec(
+                Text("导入", "Import"),
+                "\uE8B5",
+                true,
+                ImportAsync,
+                Text("从 WinPool JSON 文件导入一个可编辑的模拟系统。", "Import a WinPool JSON file as an editable simulated system."))];
         }
 
         var surface = ViewModel.GetSelectedCommandSurface();
-        var commands = surface is null ? new List<CommandSpec>() : surface.Commands.Select(BuildCommandSpec).ToList();
+        var commands = surface is null
+            ? new List<CommandSpec>()
+            : surface.Commands.Select(command => BuildCommandSpec(command, surface)).ToList();
         return commands;
     }
 
-    private CommandSpec BuildCommandSpec(ManageCommandView command) =>
-        command.Kind switch
+    private CommandSpec BuildCommandSpec(
+        ManageCommandView command,
+        ManageCommandSurfaceView surface)
+    {
+        var spec = command.Kind switch
         {
             ManageCommandKind.RefreshLocal =>
                 Spec("刷新本机信息", "Refresh local info", "\uE72C", command, RescanAsync),
@@ -498,7 +509,7 @@ public sealed partial class MainPage : Page
             ManageCommandKind.EditTier =>
                 Spec("编辑存储层", "Edit tier", "\uE90F", command, NavigateStructureAsync),
             ManageCommandKind.RenameDisk =>
-                Spec("重命名磁盘", "Rename disk", "\uE8AC", command, NavigateStructureAsync),
+                Spec("重命名磁盘", "Rename disk", "\uE8AC", command, RenameDiskAsync),
             ManageCommandKind.InitializeDisk =>
                 Spec("初始化磁盘", "Initialize disk", "\uE9CE", command, NavigatePartitionAsync),
             ManageCommandKind.CreatePartition =>
@@ -527,6 +538,10 @@ public sealed partial class MainPage : Page
                 Spec("优化驱动器", "Optimize drive", "\uE945", command, OptimizeDrivesAsync),
             _ => throw new ArgumentOutOfRangeException(nameof(command))
         };
+        return command.IsEnabled
+            ? spec
+            : spec with { DisabledReason = ManageDisabledReason(command.Kind, surface) };
+    }
 
     private CommandSpec Spec(
         string zh,
@@ -539,25 +554,497 @@ public sealed partial class MainPage : Page
             glyph,
             command.IsEnabled,
             action,
-            command.IsEnabled ? null : ManageDisabledReason());
+            CommandPurpose(command.Kind));
 
-    private string ManageDisabledReason()
+    private string CommandPurpose(ManageCommandKind kind) => kind switch
     {
+        ManageCommandKind.RefreshLocal => Text(
+            "重新扫描本机存储并刷新只读信息。",
+            "Rescan this computer's storage and refresh its read-only information."),
+        ManageCommandKind.ConvertLocalToSimulation => Text(
+            "将当前本机清单复制为一个可编辑的模拟系统；不会修改真实磁盘。",
+            "Copy the current local inventory into an editable simulation without changing real disks."),
+        ManageCommandKind.ImportSimulation => Text(
+            "从 WinPool JSON 文件导入一个可编辑的模拟系统。",
+            "Import a WinPool JSON file as an editable simulated system."),
+        ManageCommandKind.ExportSimulation => Text(
+            "将当前系统保存为 WinPool JSON 文件；不会修改系统。",
+            "Save the current system as a WinPool JSON file without changing it."),
+        ManageCommandKind.DeleteSimulation => Text(
+            "删除当前模拟系统及其保存的数据；不会影响真实磁盘。",
+            "Delete the current simulation and its saved data without affecting real disks."),
+        ManageCommandKind.RenamePool => Text(
+            "打开存储结构页以修改所选模拟存储池的名称。",
+            "Open Storage structure to change the selected simulated storage pool name."),
+        ManageCommandKind.CreatePool => Text(
+            "打开存储结构页以在模拟系统中创建存储池。",
+            "Open Storage structure to create a storage pool in the simulation."),
+        ManageCommandKind.EditPool => Text(
+            "打开存储结构页以编辑所选模拟存储池。",
+            "Open Storage structure to edit the selected simulated storage pool."),
+        ManageCommandKind.OptimizePoolUsage => Text(
+            "打开存储结构页以查看模拟存储池的使用率操作。",
+            "Open Storage structure for simulated storage-pool usage actions."),
+        ManageCommandKind.RenameTier => Text(
+            "打开存储结构页以修改所选模拟存储层的名称。",
+            "Open Storage structure to change the selected simulated storage tier name."),
+        ManageCommandKind.CreateTier => Text(
+            "打开存储结构页以在模拟系统中创建存储层。",
+            "Open Storage structure to create a storage tier in the simulation."),
+        ManageCommandKind.EditTier => Text(
+            "打开存储结构页以编辑所选模拟存储层。",
+            "Open Storage structure to edit the selected simulated storage tier."),
+        ManageCommandKind.RenameDisk => Text(
+            "输入新名称以修改所选模拟磁盘；不会修改真实磁盘。",
+            "Enter a new name for the selected simulated disk without changing real disks."),
+        ManageCommandKind.InitializeDisk => Text(
+            "打开磁盘与分区页以初始化所选模拟磁盘。",
+            "Open Disk and partitions to initialize the selected simulated disk."),
+        ManageCommandKind.CreatePartition => Text(
+            "打开磁盘与分区页以在所选模拟磁盘上创建分区。",
+            "Open Disk and partitions to create a partition on the selected simulated disk."),
+        ManageCommandKind.ConvertDiskStyle => Text(
+            "打开磁盘与分区页以将所选模拟磁盘转换为 GPT。",
+            "Open Disk and partitions to convert the selected simulated disk to GPT."),
+        ManageCommandKind.OnlineDisk => Text(
+            "打开磁盘与分区页以使所选模拟磁盘联机。",
+            "Open Disk and partitions to bring the selected simulated disk online."),
+        ManageCommandKind.OfflineDisk => Text(
+            "打开磁盘与分区页以使所选模拟磁盘脱机。",
+            "Open Disk and partitions to take the selected simulated disk offline."),
+        ManageCommandKind.ShowSystemProperties => Text(
+            "打开 Windows 的系统属性对话框；不会修改存储。",
+            "Open the Windows system-properties dialog without changing storage."),
+        ManageCommandKind.OpenExplorer => Text(
+            "在文件资源管理器中打开所选本机分区。",
+            "Open the selected local partition in File Explorer."),
+        ManageCommandKind.ChangeDriveLetter => Text(
+            "打开磁盘与分区页以修改所选模拟分区的盘符和路径。",
+            "Open Disk and partitions to change the selected simulated partition's drive letter and paths."),
+        ManageCommandKind.RenamePartition => Text(
+            "打开磁盘与分区页以修改所选模拟分区的卷标。",
+            "Open Disk and partitions to change the selected simulated partition's volume label."),
+        ManageCommandKind.FormatPartition => Text(
+            "打开磁盘与分区页以格式化所选模拟分区。",
+            "Open Disk and partitions to format the selected simulated partition."),
+        ManageCommandKind.EditPartition => Text(
+            "打开磁盘与分区页以编辑所选模拟分区。",
+            "Open Disk and partitions to edit the selected simulated partition."),
+        ManageCommandKind.DeletePartition => Text(
+            "打开磁盘与分区页以删除所选模拟分区。",
+            "Open Disk and partitions to delete the selected simulated partition."),
+        ManageCommandKind.OptimizeDrive => Text(
+            "打开 Windows 的驱动器优化工具；不会模拟性能结果。",
+            "Open Windows Optimize Drives; it does not claim a simulated performance result."),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
+
+    private string ManageDisabledReason(
+        ManageCommandKind kind,
+        ManageCommandSurfaceView surface)
+    {
+        var target = ViewModel.SelectedWorkspaceItem?.Projection;
+        if (target is null)
+        {
+            return Text(
+                "当前没有可用于此操作的管理对象。",
+                "There is no selected management object for this operation.");
+        }
+
+        // These system-level commands have a useful explanation before the
+        // general local-read-only guard. They are disabled because the active
+        // document has a different kind, not because a selected disk failed a
+        // storage precondition.
+        switch (kind)
+        {
+            case ManageCommandKind.RefreshLocal:
+                return Text(
+                    "只有本机系统可以重新扫描；模拟系统没有可扫描的本机存储。",
+                    "Only the local system can be rescanned; a simulation has no local storage to scan.");
+            case ManageCommandKind.ConvertLocalToSimulation:
+                return Text(
+                    "当前已是模拟系统，无需再次转换。",
+                    "The current system is already a simulation and does not need conversion.");
+            case ManageCommandKind.DeleteSimulation when ViewModel.IsLocalSystem:
+                return Text(
+                    "本机存储不能删除；只能删除模拟系统。",
+                    "The local system cannot be deleted; only a simulation can be deleted.");
+        }
+
+        if (kind is ManageCommandKind.OpenExplorer or ManageCommandKind.OptimizeDrive)
+        {
+            if (!ViewModel.IsLocalSystem)
+            {
+                return Text(
+                    "此功能只打开或优化本机卷；模拟系统没有可交给 Windows 的本机路径。",
+                    "This action only opens or optimizes a local volume; simulations have no local Windows path.");
+            }
+
+            return LocalPartitionTargetReason(kind, target);
+        }
+
+        if (kind == ManageCommandKind.ShowSystemProperties)
+        {
+            return !ViewModel.IsLocalSystem
+                ? Text(
+                    "Windows 系统属性对话框只可用于本机对象；模拟系统没有本机 Windows 目标。",
+                    "The Windows properties dialog is only available for a local object; simulations have no local Windows target.")
+                : LocalWindowsTargetReason(target);
+        }
+
         if (ViewModel.IsLocalSystem)
         {
-            return Text("本机存储为只读；请转换或选择模拟系统后编辑。",
-                "Local storage is read-only; convert it or select a simulated system to edit.");
+            return LocalReadOnlyReason(kind);
         }
 
-        if (ViewModel.SelectedWorkspaceItem?.Projection?.IsStableIdentity == false)
+        if (IsSyntheticOrUnstableTarget(target))
         {
-            return Text("此对象没有可编辑的 Windows 来源。",
-                "This object has no editable Windows source.");
+            return Text(
+                "此对象是派生汇总项，或没有稳定的 Windows 来源；不能直接执行该操作。",
+                "This is a derived item or it lacks a stable Windows source, so the operation cannot be applied directly.");
         }
 
-        return Text("当前选择不满足此操作的前置条件。",
-            "The current selection does not meet this operation's prerequisites.");
+        return kind switch
+        {
+            ManageCommandKind.RenamePool => PoolOperationReason(target, "重命名", "renamed"),
+            ManageCommandKind.CreatePool => PoolOperationReason(target, "创建新池", "used to create a new pool"),
+            ManageCommandKind.EditPool => PoolOperationReason(target, "编辑", "edited"),
+            ManageCommandKind.OptimizePoolUsage => PoolOperationReason(target, "优化", "optimized"),
+            ManageCommandKind.RenameTier or ManageCommandKind.CreateTier or ManageCommandKind.EditTier => Text(
+                "所选存储层没有可编辑的模拟存储来源。",
+                "The selected storage tier has no editable simulated-storage source."),
+            ManageCommandKind.RenameDisk => DiskRenameReason(target),
+            ManageCommandKind.InitializeDisk => DiskInitializeReason(target, surface),
+            ManageCommandKind.CreatePartition => DiskCreatePartitionReason(target, surface),
+            ManageCommandKind.ConvertDiskStyle => DiskConvertReason(target, surface),
+            ManageCommandKind.OnlineDisk => Text(
+                "只有已识别为脱机状态的模拟 Windows 磁盘可以联机。",
+                "Only a simulated Windows disk identified as offline can be brought online."),
+            ManageCommandKind.OfflineDisk => DiskOfflineReason(target, surface),
+            ManageCommandKind.ShowSystemProperties => LocalWindowsTargetReason(target),
+            ManageCommandKind.ChangeDriveLetter => PartitionEditReason(target, "修改盘符和路径", "change drive letters or paths"),
+            ManageCommandKind.RenamePartition => PartitionEditReason(target, "修改卷标", "change its volume label"),
+            ManageCommandKind.EditPartition => PartitionEditReason(target, "编辑", "be edited"),
+            ManageCommandKind.FormatPartition => PartitionDestructiveReason(target, surface, "格式化", "formatted"),
+            ManageCommandKind.DeletePartition => PartitionDestructiveReason(target, surface, "删除", "deleted"),
+            ManageCommandKind.DeleteSimulation => Text(
+                "只有当前模拟系统可删除。",
+                "Only the currently selected simulation can be deleted."),
+            _ => Text(
+                "当前选择没有满足此操作的可编辑来源；请查看对象详情或选择可编辑的模拟对象。",
+                "The selected object has no editable source that meets this operation's prerequisites. Inspect its details or select an editable simulation.")
+        };
     }
+
+    private string LocalReadOnlyReason(ManageCommandKind kind) => kind switch
+    {
+        ManageCommandKind.FormatPartition => Text(
+            "本机存储为只读；WinPool 不会格式化真实分区。",
+            "Local storage is read-only; WinPool will not format a real partition."),
+        ManageCommandKind.DeletePartition => Text(
+            "本机存储为只读；WinPool 不会删除真实分区。",
+            "Local storage is read-only; WinPool will not delete a real partition."),
+        ManageCommandKind.InitializeDisk => Text(
+            "本机存储为只读；WinPool 不会初始化真实磁盘。",
+            "Local storage is read-only; WinPool will not initialize a real disk."),
+        ManageCommandKind.ConvertDiskStyle => Text(
+            "本机存储为只读；WinPool 不会转换真实磁盘的分区样式。",
+            "Local storage is read-only; WinPool will not convert a real disk's partition style."),
+        ManageCommandKind.OnlineDisk or ManageCommandKind.OfflineDisk => Text(
+            "本机存储为只读；WinPool 不会改变真实磁盘的联机状态。",
+            "Local storage is read-only; WinPool will not change a real disk's online state."),
+        ManageCommandKind.CreatePartition => Text(
+            "本机存储为只读；WinPool 不会在真实磁盘上创建分区。",
+            "Local storage is read-only; WinPool will not create a partition on a real disk."),
+        _ => Text(
+            "本机存储为只读；请转换或选择模拟系统后编辑。",
+            "Local storage is read-only; convert it or select a simulated system to edit.")
+    };
+
+    private string LocalPartitionTargetReason(
+        ManageCommandKind kind,
+        ManageObjectListItemView target)
+    {
+        if (!IsPrimaryDataPartition(target))
+        {
+            return kind == ManageCommandKind.OpenExplorer
+                ? Text(
+                    "只有普通主分区或基本数据分区有可打开的本机卷路径。",
+                    "Only a primary or basic-data partition has a local volume path that can be opened.")
+                : Text(
+                    "只有普通主分区或基本数据分区可以交给 Windows 优化工具。",
+                    "Only a primary or basic-data partition can be sent to Windows Optimize Drives.");
+        }
+
+        return Text(
+            "当前选择没有可用的本机 Windows 分区目标。",
+            "The current selection has no usable local Windows partition target.");
+    }
+
+    private string LocalWindowsTargetReason(ManageObjectListItemView target)
+    {
+        if (target.Category is ManageWorkspaceCategory.Partition or ManageWorkspaceCategory.Volume
+            && !IsPrimaryDataPartition(target))
+        {
+            return Text(
+                "只有普通主分区或基本数据分区可以打开 Windows 属性对话框。",
+                "Only a primary or basic-data partition can open the Windows properties dialog.");
+        }
+
+        return Text(
+            "当前选择没有可用的本机 Windows 对话框目标。",
+            "The current selection has no usable local Windows dialog target.");
+    }
+
+    private string PoolOperationReason(
+        ManageObjectListItemView target,
+        string zhOperation,
+        string enOperation)
+    {
+        if (MetadataIsTrue(target, "isPrimordial"))
+        {
+            return Text(
+                $"原始存储池不能{zhOperation}。",
+                $"The primordial storage pool cannot be {enOperation}.");
+        }
+
+        return Text(
+            "未解析到可编辑的普通模拟存储池。",
+            "No editable non-primordial simulated storage pool was resolved.");
+    }
+
+    private string DiskRenameReason(ManageObjectListItemView target)
+    {
+        if (!IsDirectDiskRole(target.Role))
+        {
+            return Text(
+                "只有直接的物理磁盘、虚拟磁盘或 Windows 磁盘可以重命名。",
+                "Only a direct physical disk, virtual disk, or Windows disk can be renamed.");
+        }
+
+        return Text(
+            "所选模拟磁盘没有可编辑的稳定 Windows 来源。",
+            "The selected simulated disk has no editable stable Windows source.");
+    }
+
+    private string DiskInitializeReason(
+        ManageObjectListItemView target,
+        ManageCommandSurfaceView surface)
+    {
+        if (!IsDirectDiskRole(target.Role))
+        {
+            return DiskSourceReason();
+        }
+        if (HasCommand(surface, ManageCommandKind.OnlineDisk))
+        {
+            return Text(
+                "该模拟磁盘当前脱机；请先联机后再初始化。",
+                "This simulated disk is offline; bring it online before initializing it.");
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.ConvertDiskStyle))
+        {
+            return Text(
+                "只有 RAW 模拟磁盘可以初始化；所选 MBR 磁盘可先转换为 GPT。",
+                "Only a RAW simulated disk can be initialized; the selected MBR disk can be converted to GPT instead.");
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.CreatePartition))
+        {
+            return Text(
+                "只有 RAW 模拟磁盘可以初始化；所选磁盘已经是 GPT。",
+                "Only a RAW simulated disk can be initialized; the selected disk is already GPT.");
+        }
+        if (IsProtectedOrUnresolvedDisk(surface))
+        {
+            return Text(
+                "该磁盘受启动/系统保护，或没有 Windows 磁盘视图；不能初始化。",
+                "This disk is boot/system-protected or has no Windows disk view, so it cannot be initialized.");
+        }
+
+        return Text(
+            "初始化需要一个联机的 RAW 模拟 Windows 磁盘。",
+            "Initialization requires an online RAW simulated Windows disk.");
+    }
+
+    private string DiskCreatePartitionReason(
+        ManageObjectListItemView target,
+        ManageCommandSurfaceView surface)
+    {
+        if (!IsDirectDiskRole(target.Role))
+        {
+            return DiskSourceReason();
+        }
+        if (HasCommand(surface, ManageCommandKind.OnlineDisk))
+        {
+            return Text(
+                "该模拟磁盘当前脱机；请先联机后再创建分区。",
+                "This simulated disk is offline; bring it online before creating a partition.");
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.InitializeDisk))
+        {
+            return Text(
+                "该模拟磁盘还是 RAW；请先初始化为 GPT 后再创建分区。",
+                "This simulated disk is still RAW; initialize it as GPT before creating a partition.");
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.ConvertDiskStyle))
+        {
+            return Text(
+                "该模拟磁盘是 MBR；请先转换为 GPT 后再创建分区。",
+                "This simulated disk is MBR; convert it to GPT before creating a partition.");
+        }
+        if (IsProtectedOrUnresolvedDisk(surface))
+        {
+            return Text(
+                "该磁盘受启动/系统保护，或没有 Windows 磁盘视图；不能创建分区。",
+                "This disk is boot/system-protected or has no Windows disk view, so a partition cannot be created.");
+        }
+
+        return Text(
+            "创建分区需要一个联机的 GPT 模拟 Windows 磁盘。",
+            "Creating a partition requires an online GPT simulated Windows disk.");
+    }
+
+    private string DiskConvertReason(
+        ManageObjectListItemView target,
+        ManageCommandSurfaceView surface)
+    {
+        if (!IsDirectDiskRole(target.Role))
+        {
+            return DiskSourceReason();
+        }
+        if (HasCommand(surface, ManageCommandKind.OnlineDisk))
+        {
+            return Text(
+                "该模拟磁盘当前脱机；请先联机后再转换分区样式。",
+                "This simulated disk is offline; bring it online before converting its partition style.");
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.InitializeDisk))
+        {
+            return Text(
+                "只有 MBR 模拟磁盘可以转换为 GPT；所选磁盘仍是 RAW。",
+                "Only an MBR simulated disk can be converted to GPT; the selected disk is still RAW.");
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.CreatePartition))
+        {
+            return Text(
+                "只有 MBR 模拟磁盘需要转换；所选磁盘已经是 GPT。",
+                "Only an MBR simulated disk needs conversion; the selected disk is already GPT.");
+        }
+        if (IsProtectedOrUnresolvedDisk(surface))
+        {
+            return Text(
+                "该磁盘受启动/系统保护，或没有 Windows 磁盘视图；不能转换分区样式。",
+                "This disk is boot/system-protected or has no Windows disk view, so its partition style cannot be converted.");
+        }
+
+        return Text(
+            "转换为 GPT 需要一个联机的非系统 MBR 模拟 Windows 磁盘。",
+            "Converting to GPT requires an online, non-system MBR simulated Windows disk.");
+    }
+
+    private string DiskOfflineReason(
+        ManageObjectListItemView target,
+        ManageCommandSurfaceView surface)
+    {
+        if (!IsDirectDiskRole(target.Role))
+        {
+            return DiskSourceReason();
+        }
+        if (IsCommandEnabled(surface, ManageCommandKind.CreatePartition))
+        {
+            return Text(
+                "该启动或系统磁盘不能脱机。",
+                "This boot or system disk cannot be taken offline.");
+        }
+        if (IsProtectedOrUnresolvedDisk(surface))
+        {
+            return Text(
+                "该磁盘受启动/系统保护，或没有 Windows 磁盘视图；不能脱机。",
+                "This disk is boot/system-protected or has no Windows disk view, so it cannot be taken offline.");
+        }
+
+        return Text(
+            "只有联机的模拟 Windows 磁盘可以脱机。",
+            "Only an online simulated Windows disk can be taken offline.");
+    }
+
+    private string PartitionEditReason(
+        ManageObjectListItemView target,
+        string zhOperation,
+        string enOperation)
+    {
+        if (!IsPrimaryDataPartition(target))
+        {
+            return Text(
+                $"只有普通主分区或基本数据分区可以{zhOperation}。",
+                $"Only a primary or basic-data partition can {enOperation}.");
+        }
+
+        return Text(
+            "所选分区所在的模拟磁盘已脱机，或该分区没有可编辑的 Windows 来源。",
+            "The selected partition's simulated disk is offline or the partition has no editable Windows source.");
+    }
+
+    private string PartitionDestructiveReason(
+        ManageObjectListItemView target,
+        ManageCommandSurfaceView surface,
+        string zhOperation,
+        string enOperation)
+    {
+        if (IsPartitionEditEnabled(surface))
+        {
+            return Text(
+                $"所选分区是启动或系统分区，不能{zhOperation}。",
+                $"The selected partition is a boot or system partition and cannot be {enOperation}.");
+        }
+        if (!IsPrimaryDataPartition(target))
+        {
+            return Text(
+                $"只有普通主分区或基本数据分区可以{zhOperation}。",
+                $"Only a primary or basic-data partition can be {enOperation}.");
+        }
+
+        return Text(
+            "所选分区所在的模拟磁盘已脱机，或该分区没有可编辑的 Windows 来源。",
+            "The selected partition's simulated disk is offline or the partition has no editable Windows source.");
+    }
+
+    private string DiskSourceReason() => Text(
+        "所选对象没有可操作的物理、虚拟或 Windows 磁盘来源。",
+        "The selected object has no operable physical, virtual, or Windows disk source.");
+
+    private static bool IsSyntheticOrUnstableTarget(ManageObjectListItemView target) =>
+        !target.IsStableIdentity
+        || target.Role is ManageObjectRole.SyntheticStoragePool or ManageObjectRole.SyntheticStorageTier
+        || target.Metadata.TryGetValue("hasOriginalSource", out var originalSource)
+           && string.Equals(originalSource, "False", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDirectDiskRole(ManageObjectRole role) =>
+        role is ManageObjectRole.PhysicalDisk or ManageObjectRole.VirtualDisk or ManageObjectRole.OsDisk;
+
+    private static bool IsPrimaryDataPartition(ManageObjectListItemView target) =>
+        target.Metadata.TryGetValue("partitionType", out var type)
+        && type is "Primary" or "BasicData";
+
+    private static bool MetadataIsTrue(ManageObjectListItemView target, string key) =>
+        target.Metadata.TryGetValue(key, out var value)
+        && bool.TryParse(value, out var result)
+        && result;
+
+    private static bool HasCommand(ManageCommandSurfaceView surface, ManageCommandKind kind) =>
+        surface.Commands.Any(command => command.Kind == kind);
+
+    private static bool IsCommandEnabled(ManageCommandSurfaceView surface, ManageCommandKind kind) =>
+        surface.Commands.Any(command => command.Kind == kind && command.IsEnabled);
+
+    private static bool IsProtectedOrUnresolvedDisk(ManageCommandSurfaceView surface) =>
+        HasCommand(surface, ManageCommandKind.OfflineDisk)
+        && !IsCommandEnabled(surface, ManageCommandKind.OfflineDisk)
+        && IsCommandEnabled(surface, ManageCommandKind.RenameDisk);
+
+    private static bool IsPartitionEditEnabled(ManageCommandSurfaceView surface) =>
+        IsCommandEnabled(surface, ManageCommandKind.ChangeDriveLetter)
+        || IsCommandEnabled(surface, ManageCommandKind.RenamePartition)
+        || IsCommandEnabled(surface, ManageCommandKind.EditPartition);
 
 
     private async Task DeleteSimulationAsync()
@@ -603,11 +1090,6 @@ public sealed partial class MainPage : Page
         }
         CommandButtonsPanel.Children.Clear();
         var specs = BuildCommandSpecs();
-        var firstDisabled = specs.FirstOrDefault(spec => !spec.Enabled);
-        CommandAvailabilityText.Text = firstDisabled?.DisabledReason ?? string.Empty;
-        CommandAvailabilityText.Visibility = firstDisabled is null
-            ? Visibility.Collapsed
-            : Visibility.Visible;
         foreach (var spec in specs)
         {
             AddCommand(spec);
@@ -650,13 +1132,14 @@ public sealed partial class MainPage : Page
     }
 
     private void AddCommand(CommandSpec spec) =>
-        AddCommand(spec.Text, spec.Glyph, spec.Enabled, spec.Action, spec.DisabledReason);
+        AddCommand(spec.Text, spec.Glyph, spec.Enabled, spec.Action, spec.Purpose, spec.DisabledReason);
 
     private void AddCommand(
         string text,
         string glyph,
         bool enabled,
         Func<Task> action,
+        string purpose,
         string? disabledReason)
     {
         var button = new Button
@@ -675,10 +1158,16 @@ public sealed partial class MainPage : Page
             IsEnabled = enabled
         };
         button.SetValue(AutomationProperties.NameProperty, text);
-        ContextHelp.Set(button, disabledReason ?? Text(
-            "执行此管理操作。", "Run this management operation."));
+        ContextHelp.Set(button, purpose);
+        if (!enabled && !string.IsNullOrWhiteSpace(disabledReason))
+        {
+            ContextHelp.SetDisabledReason(button, disabledReason);
+        }
         button.Click += async (_, _) => await RunCommandAsync(action);
-        CommandButtonsPanel.Children.Add(button);
+        // Disabled WinUI controls do not reliably receive pointer input. Keep
+        // their explanatory help on the transparent host rather than adding a
+        // permanent grey status sentence beside unrelated commands.
+        CommandButtonsPanel.Children.Add(enabled ? button : ContextHelp.Wrap(button));
     }
 
     private async Task RunCommandAsync(Func<Task> action)
@@ -697,7 +1186,6 @@ public sealed partial class MainPage : Page
                 new GlobalNotificationOptions
                 {
                     OccurrenceKey = $"workspace-operation:{exception.GetType().Name}",
-                    AutoDismiss = false,
                     Code = "workspace.operation.exception",
                     SystemId = ViewModel.SelectedSystem.Id,
                     Target = OperationTarget(),
@@ -746,6 +1234,61 @@ public sealed partial class MainPage : Page
             : selected?.Id.ProviderKey;
         ((MainWindow)App.Window).ShowDiskPartition(target);
         return Task.CompletedTask;
+    }
+
+    private async Task RenameDiskAsync()
+    {
+        var selected = ViewModel.SelectedWorkspaceItem?.Projection;
+        if (selected is null || string.IsNullOrWhiteSpace(selected.Id.ProviderKey))
+        {
+            NotifyTargetMissing();
+            return;
+        }
+
+        // The selected Application projection already carries the visible name;
+        // do not reach back into the domain snapshot from this UI adapter.
+        var targetId = selected.Id.ProviderKey;
+        var currentName = selected.DisplayName;
+        var input = new TextBox
+        {
+            Text = currentName,
+            Header = Text("新名称", "New name"),
+            MinWidth = 320
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = ((FrameworkElement)App.Window.Content).RequestedTheme,
+            Title = Text("重命名磁盘", "Rename disk"),
+            Content = input,
+            PrimaryButtonText = Text("确定", "OK"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+        if (await DialogCoordinator.ShowAsync(dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        var name = input.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name) || string.Equals(name, currentName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var result = await ViewModel.ApplySimulationOperationAsync(
+            new SimulationEditRequest(SimulationEditKind.Rename, targetId, Name: name));
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException(
+                result.Messages.FirstOrDefault()?.UserTextKey
+                ?? Text("模拟磁盘名称未保存。", "The simulated disk name was not saved."));
+        }
+
+        PublishWorkspaceInfo(
+            Text("模拟磁盘已重命名", "Simulated disk renamed"),
+            Text("已保存所选模拟磁盘的新名称。", "The selected simulated disk name was saved."),
+            "workspace.rename-disk.completed");
     }
 
     private async Task ConvertLocalAsync()
@@ -861,11 +1404,10 @@ public sealed partial class MainPage : Page
                     Text("无法打开属性", "Could not open properties"),
                     $"{OperationTarget()}{Environment.NewLine}{Text("Windows 未能打开所选分区的属性。请确认该分区仍可用后重试。", "Windows could not open properties for the selected partition. Confirm that it is still available, then try again.")}",
                     "workspace-operation",
-                    new GlobalNotificationOptions
-                    {
-                        OccurrenceKey = "workspace.properties.native-launch",
-                        AutoDismiss = false,
-                        Code = "workspace.properties.native-launch",
+                new GlobalNotificationOptions
+                {
+                    OccurrenceKey = "workspace.properties.native-launch",
+                    Code = "workspace.properties.native-launch",
                         SystemId = ViewModel.SelectedSystem.Id,
                         Target = OperationTarget(),
                         Detail = target.PartitionPath

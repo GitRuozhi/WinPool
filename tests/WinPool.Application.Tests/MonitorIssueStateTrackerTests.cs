@@ -55,6 +55,23 @@ public sealed class MonitorIssueStateTrackerTests
     }
 
     [Fact]
+    public void ReappearedIssueReportsOnlyAfterAnAuthoritativeRecovery()
+    {
+        using var tracker = new MonitorIssueStateTracker();
+        var issue = new MonitorIssueState("communication:agent-timeout", "Communication timed out");
+
+        tracker.Update([issue], stateIsAuthoritative: true);
+        tracker.Update([issue], stateIsAuthoritative: true);
+        var recovered = tracker.Update([], stateIsAuthoritative: true);
+        var reappeared = tracker.Update([issue], stateIsAuthoritative: true);
+
+        Assert.Single(recovered.Transitions);
+        var appearance = Assert.Single(reappeared.Transitions);
+        Assert.Equal(MonitorIssueTransitionKind.Appeared, appearance.Kind);
+        Assert.Equal(issue.Key, appearance.Issue.Key);
+    }
+
+    [Fact]
     public void PermanentGapSurvivesAuthoritativeSessionChangeWithoutRecovery()
     {
         using var tracker = new MonitorIssueStateTracker();

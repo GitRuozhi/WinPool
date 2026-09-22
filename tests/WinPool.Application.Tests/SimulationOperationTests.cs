@@ -89,6 +89,67 @@ public sealed class SimulationOperationTests
     }
 
     [Fact]
+    public void SystemPartitionCannotBeDeletedOrFormattedButItsLabelCanBeChanged()
+    {
+        var document = Apply(CreateDocument(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:5",
+            SizeBytes: 500_000_000,
+            FileSystem: "NTFS"));
+        var partition = Assert.Single(document.Snapshot.Partitions);
+        document = document.WithCandidate(document.Snapshot with
+        {
+            Partitions = [partition with { IsBoot = true, IsSystem = true }]
+        });
+        var service = new SimulationOperationService();
+
+        var delete = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.DeletePartition,
+            partition.StableId));
+        var format = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.FormatPartition,
+            partition.StableId,
+            FileSystem: "NTFS"));
+        var rename = service.Apply(document, new SimulationEditRequest(
+            SimulationEditKind.Rename,
+            partition.StableId,
+            Name: "System volume"));
+
+        Assert.False(delete.Succeeded);
+        Assert.Contains("cannot be deleted", delete.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.False(format.Succeeded);
+        Assert.Contains("cannot be formatted", format.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.True(rename.Succeeded, rename.Error);
+        Assert.Equal(
+            "System volume",
+            rename.Document.Snapshot.VolumeForPartition(partition.StableId)!.FileSystemLabel);
+    }
+
+    [Fact]
+    public void SystemDiskCanBeRenamedWithoutPermittingDestructiveChanges()
+    {
+        var document = CreateDocument();
+        var systemDisk = document.Snapshot.OsDisks.Single(item => item.StableId == "osdisk:5")
+            with { IsBoot = true, IsSystem = true };
+        document = document.WithCandidate(document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item.StableId == systemDisk.StableId ? systemDisk : item)
+                .ToArray()
+        });
+
+        var rename = new SimulationOperationService().Apply(document, new SimulationEditRequest(
+            SimulationEditKind.Rename,
+            systemDisk.StableId,
+            Name: "Renamed system disk"));
+
+        Assert.True(rename.Succeeded, rename.Error);
+        Assert.Equal(
+            "Renamed system disk",
+            rename.Document.Snapshot.OsDisks.Single(item => item.StableId == systemDisk.StableId).FriendlyName);
+    }
+
+    [Fact]
     public void CreatePoolVirtualDiskAndPartitionChainProducesUsableVolume()
     {
         var document = CreateDocument();

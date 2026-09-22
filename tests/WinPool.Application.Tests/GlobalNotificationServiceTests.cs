@@ -5,7 +5,7 @@ namespace WinPool.Application.Tests;
 public sealed class GlobalNotificationServiceTests
 {
     [Fact]
-    public void HistoryKeepsOnlyTheMostRecentTwoHundredEntries()
+    public void HistoryKeepsOnlyTheMostRecentTwoHundredIndependentEntries()
     {
         var service = new GlobalNotificationService();
 
@@ -18,19 +18,21 @@ public sealed class GlobalNotificationServiceTests
                 "test",
                 new GlobalNotificationOptions
                 {
-                    OccurrenceKey = $"history:{index}",
+                    OccurrenceKey = "history:shared",
                     ShowNotification = false
                 });
         }
 
         Assert.Equal(200, service.History.Count);
-        Assert.Equal("history:1", service.History[0].DeduplicationKey);
-        Assert.Equal("history:200", service.History[^1].DeduplicationKey);
+        Assert.Equal("1", service.History[0].Message);
+        Assert.Equal("200", service.History[^1].Message);
+        Assert.All(service.History, notification =>
+            Assert.Equal("history:shared", notification.DeduplicationKey));
         Assert.Empty(service.Notifications);
     }
 
     [Fact]
-    public void LongTextAndKeysAreBoundedWithoutMergingDifferentSemanticKeys()
+    public void LongTextAndKeysAreBoundedWithoutCollapsingSeparateEvents()
     {
         var service = new GlobalNotificationService();
         var longTitle = new string('t', 320);
@@ -61,12 +63,6 @@ public sealed class GlobalNotificationServiceTests
         });
         Assert.NotEqual(service.Notifications[0].DeduplicationKey, service.Notifications[1].DeduplicationKey);
 
-        service.DismissByKey(common + "-first");
-        Assert.Single(service.Notifications);
-        service.ResolveByKey(common + "-second");
-        Assert.Empty(service.Notifications);
-        Assert.True(service.History.Single(notification => notification.IsResolved).IsResolved);
-
         var defaultKeyService = new GlobalNotificationService();
         defaultKeyService.PublishInfo("Title", new string('x', 2_100) + "-first", "source");
         defaultKeyService.PublishInfo("Title", new string('x', 2_100) + "-second", "source");
@@ -74,25 +70,21 @@ public sealed class GlobalNotificationServiceTests
     }
 
     [Fact]
-    public void RepeatedSemanticKeyUpdatesOneActiveAndOneHistoryRecord()
+    public void RepeatedCompletedOccurrenceKeyCreatesSeparateCardsAndHistoryEntries()
     {
         var clock = new TestTimeProvider(DateTimeOffset.UnixEpoch);
         var service = new GlobalNotificationService(clock);
 
         service.PublishWarning("First title", "First body", "inventory", "same");
-        var initialId = service.Notifications.Single().Id;
         clock.Advance(TimeSpan.FromMinutes(1));
-        service.PublishWarning("Updated title", "Updated body", "inventory", "same");
+        service.PublishWarning("Second title", "Second body", "inventory", "same");
 
-        var active = Assert.Single(service.Notifications);
-        var history = Assert.Single(service.History);
-        Assert.Equal(initialId, active.Id);
-        Assert.Equal("Updated title", active.Title);
-        Assert.Equal("Updated body", active.Message);
-        Assert.Equal(2, active.OccurrenceCount);
-        Assert.Equal(clock.GetUtcNow(), active.LastOccurredAt);
-        Assert.Equal(2, history.OccurrenceCount);
-        Assert.Equal(clock.GetUtcNow(), history.LastOccurredAt);
+        Assert.Equal(2, service.Notifications.Count);
+        Assert.Equal(2, service.History.Count);
+        Assert.Equal("Second title", service.Notifications[0].Title);
+        Assert.Equal("First title", service.Notifications[1].Title);
+        Assert.NotEqual(service.Notifications[0].Id, service.Notifications[1].Id);
+        Assert.Equal(["First body", "Second body"], service.History.Select(notification => notification.Message));
     }
 
     [Fact]
@@ -108,9 +100,10 @@ public sealed class GlobalNotificationServiceTests
         Assert.False(service.History.Single().IsResolved);
 
         service.PublishError("Failure again", "New details", "inventory", "fault");
+        service.PublishError("Failure once more", "Newest details", "inventory", "fault");
         service.ResolveByKey("fault");
         Assert.Empty(service.Notifications);
-        Assert.True(service.History.Single().IsResolved);
+        Assert.All(service.History, notification => Assert.True(notification.IsResolved));
 
         service.PublishError("Still active", "Details", "inventory", "active");
         service.ClearHistory();
@@ -121,91 +114,82 @@ public sealed class GlobalNotificationServiceTests
     }
 
     [Fact]
-    public void ProgressIsExplicitlyExcludedFromHistoryAndErrorsAreStickyByDefault()
+    public void ProgressUpdatesByLifecycleKeyButNeverEntersHistory()
     {
         var service = new GlobalNotificationService();
         service.Publish(
             GlobalNotificationSeverity.Info,
             "Scanning",
-            string.Empty,
+            "One",
             "inventory",
             new GlobalNotificationOptions
             {
                 OccurrenceKey = "progress",
-                IsProgress = true,
-                RecordInHistory = false,
-                AutoDismiss = false
+                IsProgress = true
             });
-        service.PublishError("Failure", "Details", "inventory", "fault");
+        var id = service.Notifications.Single().Id;
+        service.Publish(
+            GlobalNotificationSeverity.Info,
+            "Scanning",
+            "Two",
+            "inventory",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = "progress",
+                IsProgress = true
+            });
+        service.PublishError(
+            "Failure",
+            "Details",
+            "inventory",
+            "fault",
+            autoDismiss: false);
 
         Assert.Single(service.History);
         Assert.Equal("fault", service.History.Single().DeduplicationKey);
-        Assert.True(service.Notifications.Single(notification => notification.DeduplicationKey == "progress").IsProgress);
-        Assert.False(service.Notifications.Single(notification => notification.DeduplicationKey == "fault").AutoDismiss);
-        service.PublishWarning(
-            "Sticky warning",
-            "Details",
-            "inventory",
-            "sticky-warning",
-            options: new GlobalNotificationOptions { AutoDismiss = false });
-        Assert.False(service.Notifications.Single(notification => notification.DeduplicationKey == "sticky-warning").AutoDismiss);
+        var progress = Assert.Single(service.Notifications, notification => notification.IsProgress);
+        Assert.Equal(id, progress.Id);
+        Assert.Equal("Two", progress.Message);
+        Assert.False(progress.AutoDismiss);
+        Assert.True(service.Notifications.Single(notification => notification.DeduplicationKey == "fault").AutoDismiss);
     }
 
     [Fact]
-    public void ShortNotificationsExpireAndPauseWithoutResettingOnDuplicate()
+    public void NormalCardsExpireAfterEightSecondsAndErrorsAfterTwentySeconds()
     {
         var clock = new TestTimeProvider(DateTimeOffset.UnixEpoch);
-        var service = new GlobalNotificationService(
-            clock,
-            autoDismissDuration: TimeSpan.FromSeconds(10));
-        service.PublishInfo("Short", "One", "test", "short");
-        var id = service.Notifications.Single().Id;
+        var service = new GlobalNotificationService(clock);
+        service.PublishInfo("Info", "Short", "test", "info");
+        service.PublishWarning("Warning", "Short", "test", "warning", autoDismiss: false);
+        service.PublishError("Error", "Longer", "test", "error", autoDismiss: false);
 
-        clock.Advance(TimeSpan.FromSeconds(4));
-        service.PublishInfo("Short", "Repeated", "test", "short");
-        clock.Advance(TimeSpan.FromSeconds(2));
-        service.SetPaused(id, true);
-        clock.Advance(TimeSpan.FromMinutes(1));
+        clock.Advance(TimeSpan.FromSeconds(8));
         service.DismissExpired();
-        Assert.Single(service.Notifications);
+        var remaining = Assert.Single(service.Notifications);
+        Assert.Equal("error", remaining.DeduplicationKey);
 
-        service.SetPaused(id, false);
-        clock.Advance(TimeSpan.FromSeconds(3));
-        service.DismissExpired();
-        Assert.Single(service.Notifications);
-        clock.Advance(TimeSpan.FromSeconds(1));
+        clock.Advance(TimeSpan.FromSeconds(12));
         service.DismissExpired();
         Assert.Empty(service.Notifications);
     }
 
     [Fact]
-    public void BoundedActiveQueueKeepsStickyWarningsAndSummarizesCompressedImportantNotifications()
+    public void ActiveCardsAreBoundedWithoutOverflowSummaryAndRetainHistory()
     {
-        var displayQueue = new GlobalNotificationService();
-        for (var index = 0; index < 4; index++)
-        {
-            displayQueue.PublishError("Failure", index.ToString(), "test", $"display:{index}");
-        }
-        Assert.True(displayQueue.HasNotificationOverflow);
-        Assert.Equal(1, displayQueue.OverflowedNotificationCount);
-
         var service = new GlobalNotificationService(activeCapacity: 3);
-        service.PublishWarning("Warning 1", "Details", "test", "warning:1", autoDismiss: false);
-        service.PublishWarning("Warning 2", "Details", "test", "warning:2", autoDismiss: false);
-        service.PublishWarning("Warning 3", "Details", "test", "warning:3", autoDismiss: false);
-        service.PublishError("New error", "Details", "test", "error:4");
+        service.PublishInfo("One", "1", "test", "one");
+        service.PublishInfo("Two", "2", "test", "two");
+        service.PublishInfo("Three", "3", "test", "three");
+        service.PublishError("Four", "4", "test", "four");
 
         Assert.Equal(3, service.Notifications.Count);
-        var summary = Assert.Single(service.Notifications.Where(notification => notification.IsOverflowSummary));
-        Assert.Equal("notification.active-overflow", summary.Code);
-        Assert.False(summary.AutoDismiss);
-        Assert.True(summary.OccurrenceCount >= 2);
-        Assert.Contains(service.Notifications, notification => notification.DeduplicationKey == "error:4");
+        Assert.Equal(["four", "three", "two"], service.Notifications.Select(notification => notification.DeduplicationKey));
         Assert.Equal(4, service.History.Count);
+        Assert.DoesNotContain(service.Notifications, notification => notification.DeduplicationKey == "one");
     }
 
     [Fact]
-    public void CodeSystemTargetAndDetailFlowIntoTheRetainedMessage()
+    public void CodeSystemTargetAndDetailFlowIntoEveryRetainedMessage()
     {
         var service = new GlobalNotificationService();
         service.Publish(

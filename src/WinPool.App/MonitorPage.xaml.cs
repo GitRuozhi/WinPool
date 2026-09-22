@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 using Windows.UI;
 using WinPool_App.Controls;
 using WinPool.App.Services;
@@ -56,11 +56,6 @@ public sealed partial class MonitorRowViewModel : ObservableObject
     public string? InstanceName { get; set; }
 }
 
-public sealed record MonitorIssueRow(
-    string Key,
-    string Text,
-    string DismissAutomationName);
-
 public sealed partial class MonitorPage : Page
 {
     private static readonly Color[] SeriesPalette =
@@ -87,10 +82,6 @@ public sealed partial class MonitorPage : Page
 
     private readonly ObservableCollection<MonitorRowViewModel> _rows = [];
     private readonly ObservableCollection<string> _storageEventRows = [];
-    private readonly ObservableCollection<MonitorIssueRow> _monitorIssueRows = [];
-    private readonly HashSet<string> _dismissedMonitorIssueKeys = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, MonitorIssueRow> _lastAuthoritativeMonitorIssues =
-        new(StringComparer.Ordinal);
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByInstance = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, MonitorRowViewModel> _rowsByDiskNumber = new();
     private DateTimeOffset _storageEventCutoff = DateTimeOffset.UtcNow;
@@ -100,14 +91,11 @@ public sealed partial class MonitorPage : Page
     private bool _ready;
     private bool _updatingContinuousMonitoring;
     private bool _applyingSampleRate;
-    private string? _lastSessionOccurrenceId;
-    private string? _lastAuthoritativeMonitorSessionOccurrenceId;
 
     public MonitorPage()
     {
         InitializeComponent();
         DiskRows.ItemsSource = _rows;
-        MonitorIssueRows.ItemsSource = _monitorIssueRows;
         Unloaded += MonitorPage_Unloaded;
     }
 
@@ -304,6 +292,18 @@ public sealed partial class MonitorPage : Page
     private void ColorSwatch_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         Guard("ColorSwatch", () => ColorSwatchCore(sender));
+    }
+
+    private void ColorSwatch_Loaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (sender is Button button)
+        {
+            ContextHelp.Set(
+                button,
+                _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                    ? "选择此监控项目的曲线颜色。"
+                    : "Choose the chart color for this monitored item.");
+        }
     }
 
     private void ColorSwatchCore(object sender)
@@ -682,18 +682,6 @@ public sealed partial class MonitorPage : Page
         var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         var diagnostics = Monitoring.GetDiagnostics();
         var runtime = Monitoring.GetRuntimeDiagnostics();
-        if (!string.IsNullOrWhiteSpace(runtime.SessionOccurrenceId)
-            && !string.Equals(
-                runtime.SessionOccurrenceId,
-                _lastSessionOccurrenceId,
-                StringComparison.Ordinal))
-        {
-            // Keep the existing presentation rule: a confirmed new session
-            // reveals its current facts even if an earlier page row was
-            // dismissed. This does not resolve the prior notification.
-            _dismissedMonitorIssueKeys.Clear();
-            _lastSessionOccurrenceId = runtime.SessionOccurrenceId;
-        }
         MonitorStatusText.Text = Monitoring.UsesAgent && !Monitoring.IsRemoteStateKnown
             ? zh ? "监控状态未知" : "Monitoring state unknown"
             : Monitoring.IsRunning
@@ -702,16 +690,14 @@ public sealed partial class MonitorPage : Page
                 : $"Duration: {FormatRuntimeDuration(runtime.SessionElapsedMilliseconds)}"
             : zh ? "已停止" : "Stopped";
 
-        var dismissAutomationName = zh ? "关闭此提示" : "Dismiss this issue";
-        var issues = new List<MonitorIssueRow>();
+        var issues = new List<MonitorIssueState>();
         if (runtime.PersistencePaused)
         {
             issues.Add(new(
                 $"persistence-paused:{runtime.PersistenceFailureOccurrenceId ?? runtime.SessionOccurrenceId ?? "current"}",
                 zh
                     ? $"⛔ 记录已暂停：{runtime.PersistenceFailure ?? "正在等待安全恢复"}"
-                    : $"⛔ Recording paused: {runtime.PersistenceFailure ?? "waiting for safe recovery"}",
-                dismissAutomationName));
+                    : $"⛔ Recording paused: {runtime.PersistenceFailure ?? "waiting for safe recovery"}"));
         }
 
         // Only an actual writer/rotation failure can contribute here.  A
@@ -726,8 +712,7 @@ public sealed partial class MonitorPage : Page
                 $"known-loss:{runtime.SessionOccurrenceId ?? "terminal"}",
                 zh
                     ? $"⚠ 记录不完整：{knownLoss} 条样本未保存"
-                    : $"⚠ Incomplete recording: {knownLoss} samples were not saved",
-                dismissAutomationName));
+                    : $"⚠ Incomplete recording: {knownLoss} samples were not saved"));
         }
 
         if (runtime.PersistenceDelayed && !runtime.PersistencePaused)
@@ -743,8 +728,7 @@ public sealed partial class MonitorPage : Page
                         : $"⚠ Write delayed: sampling continues; {runtime.PendingPersistenceSamples} samples are buffered in memory"
                     : zh
                         ? $"⚠ 写入延迟：{runtime.PendingPersistenceSamples} 条样本待写入"
-                        : $"⚠ Write delayed: {runtime.PendingPersistenceSamples} samples are pending persistence",
-                dismissAutomationName));
+                        : $"⚠ Write delayed: {runtime.PendingPersistenceSamples} samples are pending persistence"));
         }
 
         if (!string.IsNullOrWhiteSpace(runtime.PersistenceFailure) && !runtime.PersistencePaused)
@@ -753,8 +737,7 @@ public sealed partial class MonitorPage : Page
                 $"persistence-failure:{runtime.PersistenceFailureOccurrenceId ?? runtime.SessionOccurrenceId ?? "current"}",
                 zh
                     ? $"⚠ 记录失败：{runtime.PersistenceFailure}"
-                    : $"⚠ Recording failure: {runtime.PersistenceFailure}",
-                dismissAutomationName));
+                    : $"⚠ Recording failure: {runtime.PersistenceFailure}"));
         }
 
         if (!string.IsNullOrWhiteSpace(runtime.ArchiveFailure))
@@ -767,8 +750,7 @@ public sealed partial class MonitorPage : Page
                         : $"⚠ Archive failed: the raw database was retained. {runtime.ArchiveFailure}"
                     : zh
                         ? $"⚠ 归档校验失败：请保留现有归档并修复。{runtime.ArchiveFailure}"
-                        : $"⚠ Archive verification failed: retain the existing archive and repair it. {runtime.ArchiveFailure}",
-                dismissAutomationName));
+                        : $"⚠ Archive verification failed: retain the existing archive and repair it. {runtime.ArchiveFailure}"));
         }
 
         if (!string.IsNullOrWhiteSpace(runtime.SamplingFailure))
@@ -777,8 +759,7 @@ public sealed partial class MonitorPage : Page
                 $"sampling:{runtime.SessionOccurrenceId ?? "current"}",
                 zh
                     ? $"⚠ 采样已停止：{runtime.SamplingFailure}"
-                    : $"⚠ Sampling stopped: {runtime.SamplingFailure}",
-                dismissAutomationName));
+                    : $"⚠ Sampling stopped: {runtime.SamplingFailure}"));
         }
 
         if (runtime.HasRecoveredInterruptedSession)
@@ -787,8 +768,7 @@ public sealed partial class MonitorPage : Page
                 $"interrupted-session:{runtime.RecoveredInterruptedSessionOccurrenceId ?? "current"}",
                 zh
                     ? "⚠ 上次监控异常结束：可能有数量未知的未保存样本"
-                    : "⚠ Previous monitoring ended unexpectedly: an unknown number of samples may not have been saved",
-                dismissAutomationName));
+                    : "⚠ Previous monitoring ended unexpectedly: an unknown number of samples may not have been saved"));
         }
 
         // SubscriberDroppedSamples is a session total. Only a currently deep
@@ -803,8 +783,7 @@ public sealed partial class MonitorPage : Page
                 $"display-delay:{runtime.SessionOccurrenceId ?? "current"}",
                 zh
                     ? "⚠ 实时显示延迟：部分实时图表样本未显示"
-                    : "⚠ Live display delayed: some chart samples were not displayed",
-                dismissAutomationName));
+                    : "⚠ Live display delayed: some chart samples were not displayed"));
         }
 
         if (diagnostics.ConsecutiveFailures > 0)
@@ -814,8 +793,7 @@ public sealed partial class MonitorPage : Page
                 $"communication:{failureCode}",
                 zh
                     ? $"⚠ 通信或采样异常：{failureCode}"
-                    : $"⚠ Communication or sampling issue: {failureCode}",
-                dismissAutomationName));
+                    : $"⚠ Communication or sampling issue: {failureCode}"));
         }
         else if (!string.IsNullOrWhiteSpace(Monitoring.LastError)
                  && !string.Equals(
@@ -839,8 +817,7 @@ public sealed partial class MonitorPage : Page
                         : $"⚠ Monitoring control issue: {Monitoring.LastError}"
                     : zh
                         ? $"⚠ 监控停止原因：{Monitoring.LastError}"
-                        : $"⚠ Monitoring stopped: {Monitoring.LastError}",
-                dismissAutomationName));
+                        : $"⚠ Monitoring stopped: {Monitoring.LastError}"));
         }
 
         // A missing Agent snapshot is not evidence that an earlier issue
@@ -848,44 +825,13 @@ public sealed partial class MonitorPage : Page
         // page recreation and notification dismissal.
         var stateIsAuthoritative = !Monitoring.UsesAgent || Monitoring.IsRemoteStateKnown;
         var snapshot = Monitoring.UpdateIssueStates(
-            issues.Select(issue => new MonitorIssueState(
-                issue.Key,
-                issue.Text,
-                issue.Key.StartsWith("known-loss:", StringComparison.Ordinal)
-                    || issue.Key.StartsWith("interrupted-session:", StringComparison.Ordinal))),
+            issues.Select(issue => issue with
+            {
+                IsPermanentGap = issue.Key.StartsWith("known-loss:", StringComparison.Ordinal)
+                    || issue.Key.StartsWith("interrupted-session:", StringComparison.Ordinal)
+            }),
             stateIsAuthoritative);
         PublishMonitorIssueTransitions(snapshot, zh);
-        IReadOnlyList<MonitorIssueRow> pageIssues = issues;
-        if (stateIsAuthoritative)
-        {
-            _lastAuthoritativeMonitorIssues.Clear();
-            foreach (var issue in issues)
-            {
-                _lastAuthoritativeMonitorIssues[issue.Key] = issue;
-            }
-
-            _lastAuthoritativeMonitorSessionOccurrenceId = runtime.SessionOccurrenceId;
-        }
-        else if (_lastAuthoritativeMonitorIssues.Count > 0
-                 && (string.IsNullOrWhiteSpace(runtime.SessionOccurrenceId)
-                     || string.Equals(
-                         runtime.SessionOccurrenceId,
-                         _lastAuthoritativeMonitorSessionOccurrenceId,
-                         StringComparison.Ordinal)))
-        {
-            // A transport failure can omit diagnostics for the same session;
-            // retain the last known rows beside the current communication row
-            // until an authoritative snapshot proves their recovery.
-            pageIssues = _lastAuthoritativeMonitorIssues.Values
-                .Concat(issues)
-                .GroupBy(issue => issue.Key, StringComparer.Ordinal)
-                .Select(group => group.Last())
-                .ToArray();
-        }
-        // The page shows current facts only. The service keeps prior permanent
-        // gaps and unknown-state issues for notification correctness, but does
-        // not inject an old session's gap into a later session's page rows.
-        SetMonitorIssues(pageIssues);
 
         var displayRows = Monitoring.GetRecentStorageHealthEvents()
             .OrderByDescending(item => item.OccurredAtUtc)
@@ -902,24 +848,6 @@ public sealed partial class MonitorPage : Page
         foreach (var row in displayRows)
         {
             _storageEventRows.Add(row);
-        }
-    }
-
-    private void SetMonitorIssues(IReadOnlyList<MonitorIssueRow> issues)
-    {
-        _dismissedMonitorIssueKeys.IntersectWith(issues.Select(issue => issue.Key));
-        var visibleIssues = issues
-            .Where(issue => !_dismissedMonitorIssueKeys.Contains(issue.Key))
-            .ToArray();
-        if (_monitorIssueRows.SequenceEqual(visibleIssues))
-        {
-            return;
-        }
-
-        _monitorIssueRows.Clear();
-        foreach (var issue in visibleIssues)
-        {
-            _monitorIssueRows.Add(issue);
         }
     }
 
@@ -941,7 +869,6 @@ public sealed partial class MonitorPage : Page
                     new GlobalNotificationOptions
                     {
                         OccurrenceKey = occurrenceKey,
-                        AutoDismiss = issue.IsPermanentGap ? false : null,
                         Code = "monitor.issue",
                         SystemId = MonitorSystemId,
                         Target = MonitorTarget(zh),
@@ -981,24 +908,6 @@ public sealed partial class MonitorPage : Page
             : $"Local monitoring target: {local.DisplayName}";
     }
 
-    private void DismissMonitorIssue_Click(
-        object sender,
-        Microsoft.UI.Xaml.RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: string key })
-        {
-            return;
-        }
-
-        _dismissedMonitorIssueKeys.Add(key);
-        var dismissed = _monitorIssueRows
-            .FirstOrDefault(issue => string.Equals(issue.Key, key, StringComparison.Ordinal));
-        if (dismissed is not null)
-        {
-            _monitorIssueRows.Remove(dismissed);
-        }
-    }
-
     private static long SaturatingAdd(long first, long second) =>
         first > long.MaxValue - second ? long.MaxValue : first + second;
 
@@ -1035,7 +944,6 @@ public sealed partial class MonitorPage : Page
                 new GlobalNotificationOptions
                 {
                     OccurrenceKey = $"storage-event:{newest.Channel}:{newest.RecordId}:{newest.EventId}",
-                    AutoDismiss = false,
                     Code = $"storage-event.{newest.EventId}",
                     SystemId = MonitorSystemId,
                     Target = MonitorTarget(zh),
@@ -1249,12 +1157,16 @@ public sealed partial class MonitorPage : Page
             return;
         }
 
-        var picker = new FileSavePicker
+        if (ExportButton.XamlRoot is null)
+        {
+            return;
+        }
+
+        var picker = new FileSavePicker(ExportButton.XamlRoot.ContentIslandEnvironment.AppWindowId)
         {
             SuggestedFileName = $"WinPool-Monitor-{DateTime.Now:yyyyMMdd-HHmmss}"
         };
         picker.FileTypeChoices.Add("CSV", [".csv"]);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
         var file = await picker.PickSaveFileAsync();
         if (file is null)
         {
@@ -1290,7 +1202,6 @@ public sealed partial class MonitorPage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = code,
-                AutoDismiss = false,
                 Code = code,
                 SystemId = MonitorSystemId,
                 Target = MonitorTarget(zh),
@@ -1327,7 +1238,6 @@ public sealed partial class MonitorPage : Page
             new GlobalNotificationOptions
             {
                 OccurrenceKey = code,
-                AutoDismiss = false,
                 Code = code,
                 SystemId = MonitorSystemId,
                 Target = MonitorTarget(zh),

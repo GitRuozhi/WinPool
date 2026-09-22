@@ -46,8 +46,7 @@ public sealed class ManageCommandProjector
                 Add(
                     commands,
                     ManageCommandKind.DeleteSimulation,
-                    isSimulation
-                    && !activeDocument.Id.StartsWith("simulation:builtin", StringComparison.Ordinal));
+                    isSimulation);
                 break;
             case ManageWorkspaceCategory.Pool:
             {
@@ -65,9 +64,13 @@ public sealed class ManageCommandProjector
             case ManageWorkspaceCategory.Disk:
             {
                 var osDisk = ResolveOsDisk(activeDocument.Snapshot, objectId.ProviderKey, role);
+                var renameableDisk = role is ManageObjectRole.PhysicalDisk
+                    or ManageObjectRole.VirtualDisk
+                    or ManageObjectRole.OsDisk;
                 var canTakeOffline = osDisk is { IsOffline: true }
                     || osDisk is { IsBoot: false, IsSystem: false };
                 var online = osDisk is { IsOffline: false };
+                Add(commands, ManageCommandKind.RenameDisk, isSimulation && renameableDisk);
                 Add(commands, ManageCommandKind.InitializeDisk,
                     isSimulation && online && osDisk is { IsBoot: false, IsSystem: false }
                     && osDisk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase));
@@ -93,14 +96,18 @@ public sealed class ManageCommandProjector
                 var osDisk = partition is null ? null : activeDocument.Snapshot.OsDisks.FirstOrDefault(
                     item => item.StableId == partition.OsDiskStableId);
                 var primary = partition?.Type is "Primary" or "BasicData";
-                var editable = isSimulation && primary && osDisk is { IsOffline: false }
-                    && partition is { IsBoot: false, IsSystem: false };
+                // A data partition can remain editable even when it lives on
+                // the system disk. Only destructive operations must reject the
+                // boot/system partition itself; do not turn its other controls
+                // into a blanket system-disk lockout.
+                var editable = isSimulation && primary && osDisk is { IsOffline: false };
+                var destructive = editable && partition is { IsBoot: false, IsSystem: false };
                 Add(commands, ManageCommandKind.OpenExplorer, primary && localConsistent);
                 Add(commands, ManageCommandKind.ChangeDriveLetter, editable);
                 Add(commands, ManageCommandKind.RenamePartition, editable);
-                Add(commands, ManageCommandKind.FormatPartition, editable);
+                Add(commands, ManageCommandKind.FormatPartition, destructive);
                 Add(commands, ManageCommandKind.EditPartition, editable);
-                Add(commands, ManageCommandKind.DeletePartition, editable);
+                Add(commands, ManageCommandKind.DeletePartition, destructive);
                 Add(commands, ManageCommandKind.OptimizeDrive, primary && localConsistent);
                 Add(
                     commands,

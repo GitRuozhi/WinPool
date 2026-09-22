@@ -6,24 +6,25 @@ namespace WinPool.Application;
 
 /// <summary>
 /// Owns the small, process-local notification state used by the desktop shell.
-/// It retains only strings and value types: callers log an exception separately
-/// rather than handing the exception or a UI element to this service.
+/// Every completed event gets its own retained history entry. Occurrence keys
+/// only identify an in-progress lifecycle or a condition that has recovered;
+/// they never merge separate user-visible events.
 /// </summary>
 public sealed class GlobalNotificationService : IGlobalNotificationService
 {
     public const int DefaultHistoryCapacity = 200;
-    public const int DefaultActiveCapacity = 200;
-    public const int VisibleNotificationCapacity = 3;
+    public const int DefaultActiveCapacity = 3;
+    public const int VisibleNotificationCapacity = DefaultActiveCapacity;
 
-    private const string ActiveOverflowKey = "notification:active-overflow";
-    private const string ActiveOverflowCode = "notification.active-overflow";
     private static readonly TimeSpan DefaultAutoDismissDuration = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan DefaultErrorAutoDismissDuration = TimeSpan.FromSeconds(20);
 
     private readonly ObservableCollection<GlobalNotification> _notifications = [];
     private readonly ObservableCollection<GlobalNotification> _history = [];
-    private readonly Dictionary<string, LifetimeState> lifetimes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> lifetimes = new(StringComparer.Ordinal);
     private readonly TimeProvider timeProvider;
     private readonly TimeSpan autoDismissDuration;
+    private readonly TimeSpan errorAutoDismissDuration;
     private readonly int historyCapacity;
     private readonly int activeCapacity;
 
@@ -31,46 +32,48 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         TimeProvider? timeProvider = null,
         int historyCapacity = DefaultHistoryCapacity,
         int activeCapacity = DefaultActiveCapacity,
-        TimeSpan? autoDismissDuration = null)
+        TimeSpan? autoDismissDuration = null,
+        TimeSpan? errorAutoDismissDuration = null)
     {
         if (historyCapacity < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(historyCapacity));
         }
 
-        // The overflow summary needs one slot while a newly arriving important
-        // notification takes another.
-        if (activeCapacity < 2)
+        if (activeCapacity < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(activeCapacity));
         }
 
-        var duration = autoDismissDuration ?? DefaultAutoDismissDuration;
-        if (duration <= TimeSpan.Zero)
+        var normalDuration = autoDismissDuration ?? DefaultAutoDismissDuration;
+        if (normalDuration <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(autoDismissDuration));
+        }
+
+        var errorDuration = errorAutoDismissDuration ?? DefaultErrorAutoDismissDuration;
+        if (errorDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(errorAutoDismissDuration));
         }
 
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.historyCapacity = historyCapacity;
         this.activeCapacity = activeCapacity;
-        this.autoDismissDuration = duration;
+        this.autoDismissDuration = normalDuration;
+        this.errorAutoDismissDuration = errorDuration;
         Notifications = new ReadOnlyObservableCollection<GlobalNotification>(_notifications);
         History = new ReadOnlyObservableCollection<GlobalNotification>(_history);
     }
 
     /// <summary>
-    /// Active notifications. The collection is bounded independently from
-    /// History; the shell renders its first three items and can show the rest
-    /// in a local overflow view without relying on developer mode.
+    /// The three cards currently shown in the shell. When another message
+    /// arrives, the oldest card yields while the complete session history keeps
+    /// the event for the Developer page.
     /// </summary>
     public ReadOnlyObservableCollection<GlobalNotification> Notifications { get; }
 
     public ReadOnlyObservableCollection<GlobalNotification> History { get; }
-
-    public int OverflowedNotificationCount => Math.Max(0, _notifications.Count - VisibleNotificationCapacity);
-
-    public bool HasNotificationOverflow => OverflowedNotificationCount > 0;
 
     public void Publish(
         GlobalNotificationSeverity severity,
@@ -105,18 +108,20 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         var normalizedSystemId = Bound(options.SystemId, 256);
         var normalizedTarget = Bound(options.Target, 512);
         var requestedKey = BoundKey(options.OccurrenceKey, 512);
-        var deduplicationKey = string.IsNullOrWhiteSpace(requestedKey)
+        var occurrenceKey = string.IsNullOrWhiteSpace(requestedKey)
             ? CreateDefaultKey(severity, normalizedSource, options.Code, title, message, options.Detail)
             : requestedKey;
-        if (string.IsNullOrWhiteSpace(deduplicationKey))
+        if (string.IsNullOrWhiteSpace(occurrenceKey))
         {
             return;
         }
 
         var isProgress = options.IsProgress;
-        var autoDismiss = isProgress
-            ? false
-            : options.AutoDismiss ?? severity != GlobalNotificationSeverity.Error;
+        // User-facing completed events must always leave the card stack on a
+        // timer. A progress card is the one lifecycle exception: it stays only
+        // until its caller reports completion, failure, cancellation, or an
+        // unknown outcome using DismissByKey/ResolveByKey.
+        var autoDismiss = !isProgress;
         var now = timeProvider.GetUtcNow();
         var notification = new GlobalNotification(
             Guid.NewGuid().ToString("N"),
@@ -125,26 +130,31 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
             normalizedMessage,
             normalizedSource,
             now,
-            deduplicationKey,
+            occurrenceKey,
             autoDismiss,
             normalizedCode,
             normalizedSystemId,
             normalizedTarget,
             normalizedDetail,
-            OccurrenceCount: 1,
-            LastOccurredAt: now,
             IsProgress: isProgress);
 
-        // Progress is explicitly excluded even when a caller accidentally
-        // leaves RecordInHistory at its default value.
+        // Progress is excluded even if a caller accidentally leaves the
+        // default RecordInHistory value in place.
         if (options.RecordInHistory && !isProgress)
         {
-            UpdateHistory(notification);
+            AddHistory(notification);
         }
 
         if (options.ShowNotification)
         {
-            UpdateActive(notification);
+            if (isProgress)
+            {
+                UpdateProgress(notification);
+            }
+            else
+            {
+                AddTransient(notification);
+            }
         }
     }
 
@@ -181,7 +191,7 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         string message,
         string source,
         string? occurrenceKey = null,
-        bool autoDismiss = false,
+        bool autoDismiss = true,
         GlobalNotificationOptions? options = null) =>
         Publish(
             GlobalNotificationSeverity.Error,
@@ -228,7 +238,8 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         for (var index = 0; index < _history.Count; index++)
         {
             var history = _history[index];
-            if (history.DeduplicationKey.Equals(normalizedKey, StringComparison.Ordinal))
+            if (history.DeduplicationKey.Equals(normalizedKey, StringComparison.Ordinal)
+                && !history.IsResolved)
             {
                 _history[index] = history with { IsResolved = true };
             }
@@ -242,276 +253,83 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         var now = timeProvider.GetUtcNow();
         foreach (var entry in lifetimes.ToArray())
         {
-            var state = entry.Value;
-            if (state.IsPaused || now < state.ExpiresAt)
+            if (now >= entry.Value)
             {
-                continue;
+                Dismiss(entry.Key);
             }
-
-            Dismiss(entry.Key);
         }
     }
 
-    public void SetPaused(string id, bool isPaused)
+    private void AddHistory(GlobalNotification notification)
     {
-        if (string.IsNullOrWhiteSpace(id) || !lifetimes.TryGetValue(id, out var state))
-        {
-            return;
-        }
-
-        var now = timeProvider.GetUtcNow();
-        if (isPaused == state.IsPaused)
-        {
-            return;
-        }
-
-        if (isPaused)
-        {
-            state.PausedRemaining = now >= state.ExpiresAt
-                ? TimeSpan.Zero
-                : state.ExpiresAt - now;
-            state.IsPaused = true;
-            return;
-        }
-
-        state.ExpiresAt = now + state.PausedRemaining;
-        state.IsPaused = false;
-    }
-
-    private void UpdateHistory(GlobalNotification notification)
-    {
-        var index = FindHistoryIndexByKey(notification.DeduplicationKey);
-        if (index < 0)
-        {
-            _history.Add(notification);
-        }
-        else
-        {
-            var previous = _history[index];
-            var updated = MergeRepeated(previous, notification) with
-            {
-                Id = previous.Id,
-                CreatedAt = previous.CreatedAt,
-                IsResolved = false
-            };
-            _history.RemoveAt(index);
-            _history.Add(updated);
-        }
-
+        _history.Add(notification);
         while (_history.Count > historyCapacity)
         {
             _history.RemoveAt(0);
         }
     }
 
-    private void UpdateActive(GlobalNotification notification)
+    private void UpdateProgress(GlobalNotification notification)
     {
-        var existingIndex = FindActiveIndexByKey(notification.DeduplicationKey);
+        var existingIndex = FindProgressIndexByKey(notification.DeduplicationKey);
         if (existingIndex >= 0)
         {
             var previous = _notifications[existingIndex];
-            var updated = MergeRepeated(previous, notification) with
+            _notifications[existingIndex] = notification with
             {
                 Id = previous.Id,
-                CreatedAt = previous.CreatedAt,
-                IsResolved = false
+                CreatedAt = previous.CreatedAt
             };
-            _notifications[existingIndex] = updated;
-            if (!updated.AutoDismiss)
-            {
-                lifetimes.Remove(updated.Id);
-            }
-            else if (!lifetimes.ContainsKey(updated.Id))
-            {
-                // A short notification only gets a fresh deadline on its first
-                // active appearance. Repeated updates deliberately keep its old
-                // deadline so a noisy warning cannot occupy a card forever.
-                lifetimes[updated.Id] = new LifetimeState(timeProvider.GetUtcNow() + autoDismissDuration);
-            }
             return;
         }
 
-        if (_notifications.Count < activeCapacity)
-        {
-            AddActive(notification);
-            return;
-        }
-
-        AddAtCapacity(notification);
+        AddActive(notification);
     }
 
-    private void AddAtCapacity(GlobalNotification notification)
-    {
-        var summaryIndex = FindActiveIndexByKey(ActiveOverflowKey);
-        var nonImportantCandidate = FindEvictionCandidate(summaryIndex, onlyNonImportant: true);
-
-        if (!IsImportant(notification))
-        {
-            // A short, non-important card may yield to a newer one. It is
-            // already in bounded History; it never displaces a sticky warning
-            // or any error.
-            if (nonImportantCandidate >= 0)
-            {
-                ReplaceActiveAt(nonImportantCandidate, notification);
-            }
-            return;
-        }
-
-        if (nonImportantCandidate >= 0)
-        {
-            ReplaceActiveAt(nonImportantCandidate, notification);
-            return;
-        }
-
-        if (summaryIndex >= 0)
-        {
-            var importantCandidate = FindEvictionCandidate(summaryIndex, onlyNonImportant: false);
-            if (importantCandidate >= 0)
-            {
-                ReplaceActiveAt(importantCandidate, notification);
-                UpdateOverflowSummary(summaryIndex, additionalCompressedCount: 1);
-            }
-            return;
-        }
-
-        // The active set is entirely important conditions. Reserve one slot for a
-        // sticky summary and one for the incoming condition rather than silently
-        // dropping either condition. The summary truthfully says that details
-        // were compressed once the bounded active set filled.
-        var firstImportant = FindEvictionCandidate(excludedIndex: -1, onlyNonImportant: false);
-        var secondImportant = FindEvictionCandidate(excludedIndex: firstImportant, onlyNonImportant: false);
-        if (firstImportant < 0 || secondImportant < 0)
-        {
-            return;
-        }
-
-        ReplaceActiveAt(firstImportant, CreateOverflowSummary(compressedCount: 2));
-        ReplaceActiveAt(secondImportant, notification);
-    }
+    private void AddTransient(GlobalNotification notification) => AddActive(notification);
 
     private void AddActive(GlobalNotification notification)
     {
-        _notifications.Add(notification);
-        AddLifetime(notification);
+        if (_notifications.Count >= activeCapacity)
+        {
+            RemoveActiveAt(FindOldestEvictionIndex());
+        }
+
+        // New cards appear first in the lower-right stack, so a burst of
+        // independent messages never hides the newest event behind old cards.
+        _notifications.Insert(0, notification);
+        if (notification.AutoDismiss)
+        {
+            lifetimes[notification.Id] = timeProvider.GetUtcNow() + DurationFor(notification);
+        }
     }
 
-    private void ReplaceActiveAt(int index, GlobalNotification replacement)
+    private int FindOldestEvictionIndex()
     {
-        var previous = _notifications[index];
-        lifetimes.Remove(previous.Id);
-        _notifications[index] = replacement;
-        AddLifetime(replacement);
+        // Preserve a visible in-progress lifecycle when a transient card can
+        // yield instead. If all cards are progress cards, the oldest one gives
+        // way rather than introducing an invisible active queue.
+        for (var index = _notifications.Count - 1; index >= 0; index--)
+        {
+            if (!_notifications[index].IsProgress)
+            {
+                return index;
+            }
+        }
+
+        return _notifications.Count - 1;
     }
+
+    private TimeSpan DurationFor(GlobalNotification notification) =>
+        notification.Severity == GlobalNotificationSeverity.Error
+            ? errorAutoDismissDuration
+            : autoDismissDuration;
 
     private void RemoveActiveAt(int index)
     {
         lifetimes.Remove(_notifications[index].Id);
         _notifications.RemoveAt(index);
     }
-
-    private void AddLifetime(GlobalNotification notification)
-    {
-        if (notification.AutoDismiss)
-        {
-            lifetimes[notification.Id] = new LifetimeState(timeProvider.GetUtcNow() + autoDismissDuration);
-        }
-    }
-
-    private int FindEvictionCandidate(int excludedIndex, bool onlyNonImportant)
-    {
-        var bestIndex = -1;
-        for (var index = 0; index < _notifications.Count; index++)
-        {
-            if (index == excludedIndex || _notifications[index].IsOverflowSummary)
-            {
-                continue;
-            }
-
-            var candidate = _notifications[index];
-            if (onlyNonImportant && IsImportant(candidate))
-            {
-                continue;
-            }
-
-            if (bestIndex < 0 || IsBetterEvictionCandidate(candidate, _notifications[bestIndex]))
-            {
-                bestIndex = index;
-            }
-        }
-
-        return bestIndex;
-    }
-
-    private static bool IsBetterEvictionCandidate(GlobalNotification candidate, GlobalNotification current)
-    {
-        if (IsImportant(candidate) != IsImportant(current))
-        {
-            return !IsImportant(candidate);
-        }
-
-        return candidate.Severity < current.Severity
-            || (candidate.Severity == current.Severity && candidate.AutoDismiss && !current.AutoDismiss)
-            || (candidate.Severity == current.Severity
-                && candidate.AutoDismiss == current.AutoDismiss
-                && candidate.CreatedAt < current.CreatedAt);
-    }
-
-    private void UpdateOverflowSummary(int index, int additionalCompressedCount)
-    {
-        var existing = _notifications[index];
-        var now = timeProvider.GetUtcNow();
-        var count = SaturatingAdd(existing.OccurrenceCount, additionalCompressedCount);
-        _notifications[index] = existing with
-        {
-            OccurrenceCount = count,
-            LastOccurredAt = now,
-            Detail = OverflowDetail(count)
-        };
-    }
-
-    private GlobalNotification CreateOverflowSummary(int compressedCount)
-    {
-        var now = timeProvider.GetUtcNow();
-        return new GlobalNotification(
-            Guid.NewGuid().ToString("N"),
-            GlobalNotificationSeverity.Error,
-            "Additional important notifications",
-            "Some active notifications were condensed because the active queue reached its limit.",
-            "notification",
-            now,
-            ActiveOverflowKey,
-            AutoDismiss: false,
-            Code: ActiveOverflowCode,
-            Detail: OverflowDetail(compressedCount),
-            OccurrenceCount: compressedCount,
-            LastOccurredAt: now,
-            IsOverflowSummary: true);
-    }
-
-    private static string OverflowDetail(int compressedCount) =>
-        $"{compressedCount} important notification(s) were condensed. Current active messages and retained session history may contain more detail.";
-
-    private static GlobalNotification MergeRepeated(GlobalNotification previous, GlobalNotification next) =>
-        next with
-        {
-            Severity = (GlobalNotificationSeverity)Math.Max((int)previous.Severity, (int)next.Severity),
-            AutoDismiss = previous.AutoDismiss && next.AutoDismiss,
-            OccurrenceCount = SaturatingAdd(previous.OccurrenceCount, 1),
-            IsResolved = false
-        };
-
-    private static int SaturatingAdd(int value, int increment) =>
-        value >= int.MaxValue - increment ? int.MaxValue : value + increment;
-
-    private static GlobalNotificationOptions WithCompatibilityOptions(
-        GlobalNotificationOptions? options,
-        string? occurrenceKey,
-        bool autoDismiss) =>
-        (options ?? new GlobalNotificationOptions()) with
-        {
-            OccurrenceKey = occurrenceKey ?? options?.OccurrenceKey,
-            AutoDismiss = options?.AutoDismiss ?? autoDismiss
-        };
 
     private int FindActiveIndexById(string id)
     {
@@ -526,11 +344,13 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         return -1;
     }
 
-    private int FindActiveIndexByKey(string key)
+    private int FindProgressIndexByKey(string key)
     {
         for (var index = 0; index < _notifications.Count; index++)
         {
-            if (_notifications[index].DeduplicationKey.Equals(key, StringComparison.Ordinal))
+            var notification = _notifications[index];
+            if (notification.IsProgress
+                && notification.DeduplicationKey.Equals(key, StringComparison.Ordinal))
             {
                 return index;
             }
@@ -539,18 +359,15 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
         return -1;
     }
 
-    private int FindHistoryIndexByKey(string key)
-    {
-        for (var index = 0; index < _history.Count; index++)
+    private static GlobalNotificationOptions WithCompatibilityOptions(
+        GlobalNotificationOptions? options,
+        string? occurrenceKey,
+        bool autoDismiss) =>
+        (options ?? new GlobalNotificationOptions()) with
         {
-            if (_history[index].DeduplicationKey.Equals(key, StringComparison.Ordinal))
-            {
-                return index;
-            }
-        }
-
-        return -1;
-    }
+            OccurrenceKey = occurrenceKey ?? options?.OccurrenceKey,
+            AutoDismiss = options?.AutoDismiss ?? autoDismiss
+        };
 
     private static string Bound(string? value, int maximum)
     {
@@ -601,17 +418,4 @@ public sealed class GlobalNotificationService : IGlobalNotificationService
     private static string Normalize(string? value) => string.IsNullOrEmpty(value)
         ? string.Empty
         : value.Replace("\0", string.Empty, StringComparison.Ordinal).Trim();
-
-    private static bool IsImportant(GlobalNotification notification) =>
-        !notification.IsProgress
-        && (notification.Severity == GlobalNotificationSeverity.Error || !notification.AutoDismiss);
-
-    private sealed class LifetimeState(DateTimeOffset expiresAt)
-    {
-        public DateTimeOffset ExpiresAt { get; set; } = expiresAt;
-
-        public TimeSpan PausedRemaining { get; set; }
-
-        public bool IsPaused { get; set; }
-    }
 }

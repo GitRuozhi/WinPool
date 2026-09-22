@@ -88,16 +88,12 @@
             BorderThickness="1"
             CornerRadius="4">
             <StackPanel Spacing="6">
-                <TextBlock
-                    x:Name="StructureAvailabilityText"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextWrapping="Wrap"
-                    Visibility="Collapsed" />
                 <controls:FixedWrapPanel
                     ItemWidth="176"
                     ItemHeight="44"
                     ItemsPerColumn="2"
                     Spacing="6">
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="UndoButton"
                     Style="{StaticResource StructureChromeButtonStyle}"
@@ -115,6 +111,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="RedoButton"
                     Grid.Row="1"
@@ -133,6 +131,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="DiscardAllButton"
                     Grid.Column="1"
@@ -151,6 +151,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="ApplyAllButton"
                     Grid.Row="1"
@@ -170,6 +172,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="CreatePoolButton"
                     Grid.Column="2"
@@ -188,6 +192,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="DissolveButton"
                     Grid.Row="1"
@@ -207,6 +213,7 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
                 <Grid
                     Grid.Column="5"
                     MinHeight="36"
@@ -220,15 +227,16 @@
                         x:Name="ShowHotSpareLabel"
                         VerticalAlignment="Center"
                         TextWrapping="Wrap" />
-                    <ToggleSwitch
-                        x:Name="ShowHotSpareSwitch"
-                        Grid.Column="1"
-                        MinWidth="0"
-                        Margin="0"
-                        VerticalAlignment="Center"
-                        OffContent=""
-                        OnContent=""
-                        Toggled="ShowHotSpareSwitch_Toggled" />
+                    <controls:ContextHelpHost Grid.Column="1">
+                        <ToggleSwitch
+                            x:Name="ShowHotSpareSwitch"
+                            MinWidth="0"
+                            Margin="0"
+                            VerticalAlignment="Center"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="ShowHotSpareSwitch_Toggled" />
+                    </controls:ContextHelpHost>
                 </Grid>
                 <Grid
                     Grid.Row="1"
@@ -244,16 +252,18 @@
                         x:Name="ShowRetiredLabel"
                         VerticalAlignment="Center"
                         TextWrapping="Wrap" />
-                    <ToggleSwitch
-                        x:Name="ShowRetiredSwitch"
-                        Grid.Column="1"
-                        MinWidth="0"
-                        Margin="0"
-                        VerticalAlignment="Center"
-                        OffContent=""
-                        OnContent=""
-                        Toggled="ShowRetiredSwitch_Toggled" />
+                    <controls:ContextHelpHost Grid.Column="1">
+                        <ToggleSwitch
+                            x:Name="ShowRetiredSwitch"
+                            MinWidth="0"
+                            Margin="0"
+                            VerticalAlignment="Center"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="ShowRetiredSwitch_Toggled" />
+                    </controls:ContextHelpHost>
                 </Grid>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="RetireButton"
                     Grid.Column="4"
@@ -272,6 +282,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="HotSpareButton"
                     Grid.Row="1"
@@ -291,6 +303,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="CreateVdiskButton"
                     Grid.Column="3"
@@ -309,6 +323,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
                     x:Name="DeleteVdiskButton"
                     Grid.Row="1"
@@ -328,6 +344,7 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
+                </controls:ContextHelpHost>
                 </controls:FixedWrapPanel>
             </StackPanel>
         </Border>
@@ -360,10 +377,9 @@
                     </Grid>
                 </Border>
             </ScrollViewer>
+            <controls:ContextHelpHost Grid.Row="1" Margin="0,8,0,0">
             <Button
                 x:Name="SavePoolPropertiesButton"
-                Grid.Row="1"
-                Margin="0,8,0,0"
                 HorizontalAlignment="Stretch"
                 Click="SavePoolProperties_Click">
                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -371,6 +387,7 @@
                     <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
+            </controls:ContextHelpHost>
         </Grid>
     </Grid>
 </editors:EditorPageBase>

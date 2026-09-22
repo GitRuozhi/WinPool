@@ -13,15 +13,13 @@
                     FontSize="28"
                     FontWeight="SemiBold"
                     Text="磁盘测试 / Disk tests" />
-                <InfoBar
-                    IsClosable="False"
-                    IsOpen="True"
-                    Message="完整测试工作区不属于 WinPool 1.x，计划作为 WinPool 2.0 功能推出。&#x0a;The complete Test workspace is outside WinPool 1.x and is planned for WinPool 2.0."
-                    Severity="Informational"
-                    Title="WinPool 2.0" />
+                <TextBlock
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="WinPool 2.0" />
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="WinPool 1.x 聚焦存储管理、监控、稳定性和尽快完成正式发布。&#x0a;WinPool 1.x focuses on storage management, monitoring, reliability, and reaching a formal release quickly."
+                    Text="完整测试工作区不属于 WinPool 1.x，计划作为 WinPool 2.0 功能推出。&#x0a;The complete Test workspace is outside WinPool 1.x and is planned for WinPool 2.0.&#x0a;&#x0a;WinPool 1.x 聚焦存储管理、监控、稳定性和尽快完成正式发布。&#x0a;WinPool 1.x focuses on storage management, monitoring, reliability, and reaching a formal release quickly."
                     TextWrapping="Wrap" />
             </StackPanel>
         </Grid>

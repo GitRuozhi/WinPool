@@ -33,6 +33,15 @@ public sealed partial class WelcomeWindow : Window
         WelcomeTitleText.Text = localization["WelcomeTitle"];
         SetMessageText(WelcomeMessageText, localization["WelcomeMessage"]);
         ConfirmButton.Content = localization["WelcomeConfirm"];
+        ContextHelp.Set(CloseButton, localization.IsChinese
+            ? "关闭欢迎窗口。"
+            : "Close the welcome window.");
+        ContextHelp.Set(CycleButton, localization.IsChinese
+            ? "切换欢迎角色图像。"
+            : "Show another welcome mascot.");
+        ContextHelp.Set(ConfirmButton, localization.IsChinese
+            ? "关闭欢迎窗口并进入 WinPool。"
+            : "Close the welcome window and continue to WinPool.");
         ApplyMascot((mascotSelector ?? new WelcomeMascotSelector()).SelectAssetKey());
 
         AppWindow.SetIcon("Assets/CAppIcon.ico");

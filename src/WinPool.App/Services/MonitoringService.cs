@@ -364,8 +364,8 @@ public sealed class MonitoringService : IDisposable
     /// service. When state is unknown (for example, an Agent transport
     /// failure), absent facts are retained and therefore cannot emit a false
     /// recovery. Known loss and interrupted-session gaps never emit an
-    /// automatic recovery while tracked; their recorded notifications remain
-    /// active even if bounded transition bookkeeping later retires an old key.
+    /// automatic recovery while tracked; their recorded history remains even
+    /// if bounded transition bookkeeping later retires an old key.
     /// </summary>
     public MonitorIssueStateSnapshot UpdateIssueStates(
         IEnumerable<MonitorIssueState> observedIssues,

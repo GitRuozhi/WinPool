@@ -3,6 +3,7 @@
     x:Class="WinPool_App.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:WinPool_App.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
@@ -92,7 +93,6 @@
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
@@ -230,14 +230,16 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <ComboBox
-                            x:Name="DataLocationOptions"
-                            MinWidth="220"
-                            MinHeight="32"
-                            FontSize="14"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            SelectionChanged="DataLocationOptions_SelectionChanged" />
+                        <controls:ContextHelpHost>
+                            <ComboBox
+                                x:Name="DataLocationOptions"
+                                MinWidth="220"
+                                MinHeight="32"
+                                FontSize="14"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                SelectionChanged="DataLocationOptions_SelectionChanged" />
+                        </controls:ContextHelpHost>
                         <Button
                             x:Name="OpenDataLocationButton"
                             Grid.Column="1"
@@ -282,13 +284,6 @@
                                 Text="全部恢复默认" />
                         </StackPanel>
                     </Button>
-                    <TextBlock
-                        x:Name="SettingsAvailabilityText"
-                        Grid.Row="8"
-                        Grid.Column="1"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        TextWrapping="Wrap"
-                        Visibility="Collapsed" />
                 </Grid>
             </Border>
 
@@ -310,15 +305,17 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <ComboBox
-                            x:Name="SevenZipOptions"
-                            MinWidth="220"
-                            MinHeight="32"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            DropDownOpened="SevenZipOptions_DropDownOpened"
-                            DropDownClosed="SevenZipOptions_DropDownClosed"
-                            SelectionChanged="SevenZipOptions_SelectionChanged" />
+                        <controls:ContextHelpHost>
+                            <ComboBox
+                                x:Name="SevenZipOptions"
+                                MinWidth="220"
+                                MinHeight="32"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                DropDownOpened="SevenZipOptions_DropDownOpened"
+                                DropDownClosed="SevenZipOptions_DropDownClosed"
+                                SelectionChanged="SevenZipOptions_SelectionChanged" />
+                        </controls:ContextHelpHost>
                         <Button
                             x:Name="OpenSevenZipLocationButton"
                             Grid.Column="1"

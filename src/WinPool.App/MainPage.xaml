@@ -158,11 +158,6 @@
                     HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Auto">
                     <StackPanel MinWidth="180" Spacing="8">
-                        <TextBlock
-                            x:Name="CommandAvailabilityText"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            TextWrapping="Wrap"
-                            Visibility="Collapsed" />
                         <StackPanel x:Name="CommandButtonsPanel" Spacing="8" />
                     </StackPanel>
                 </ScrollViewer>

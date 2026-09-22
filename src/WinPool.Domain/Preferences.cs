@@ -43,6 +43,9 @@ public sealed record UserPreferences(
     long PartitionIgnoreSizeBytes = 8L * 1024 * 1024,
     string LastActivePage = "Manage",
     bool DeveloperMode = false,
+    bool AutoCreateVirtualDisk = true,
+    bool AutoCreatePartition = true,
+    bool BuiltInSimulationCatalogSeeded = false,
     int FormatVersion = 1);
 
 /// <summary>

@@ -490,7 +490,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private OsDiskInfo? SelectedDisk() =>
         _working.OsDisks.FirstOrDefault(item => item.StableId == _selectedDiskId);
 
-    private bool IsUserPartition(PartitionInfo? partition) =>
+    /// <summary>
+    /// Only a normal data partition that is neither the boot nor the system
+    /// partition can be deleted or formatted. This deliberately does not
+    /// decide whether its non-destructive properties may be viewed or edited.
+    /// </summary>
+    private bool IsDestructivePartitionTarget(PartitionInfo? partition) =>
         partition is { Type: "Primary" or "BasicData", IsBoot: false, IsSystem: false }
         && partition.Type is not "EfiSystem" and not "MicrosoftReserved" and not "WindowsRecovery";
 
@@ -516,7 +521,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var isPartitionSelection = partition is not null;
         var isGapSelection = _selectedUnallocatedOffset is not null;
         var isDiskSelection = disk is not null && !isPartitionSelection && !isGapSelection;
-        var userPartition = IsUserPartition(partition);
+        var destructivePartition = IsDestructivePartitionTarget(partition);
         var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
         var hasVolume = volume is not null;
         var alreadyGpt = disk is not null
@@ -541,7 +546,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && disk is { IsBoot: false, IsSystem: false } && mbr;
         NewPartitionButton.IsEnabled = simulated && !diskOffline && alreadyGpt && hasGap
             && (isDiskSelection || isGapSelection);
-        DeletePartitionButton.IsEnabled = simulated && !diskOffline && userPartition;
+        DeletePartitionButton.IsEnabled = simulated && !diskOffline && destructivePartition;
         ExtendButton.IsEnabled = false;
         ShrinkButton.IsEnabled = false;
         OpenExplorerButton.IsEnabled = !simulated
@@ -551,14 +556,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && Directory.Exists(explorerPath);
 
         var propertyEnabled = simulated && !diskOffline && (isPartitionSelection || isGapSelection);
+        var canFormatSelection = createMode || destructivePartition;
         var kind = SelectedPartitionKind();
         PartitionTypeBox.IsEnabled = propertyEnabled && createMode;
         DriveLetterBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
         VolumeLabelBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
         SizeBox.IsEnabled = propertyEnabled && isGapSelection;
-        FileSystemBox.IsEnabled = propertyEnabled && kind != PartitionKind.MicrosoftReserved;
-        ClusterBox.IsEnabled = propertyEnabled && kind != PartitionKind.MicrosoftReserved;
-        QuickFormatSwitch.IsEnabled = propertyEnabled && kind != PartitionKind.MicrosoftReserved;
+        FileSystemBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
+        ClusterBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
+        QuickFormatSwitch.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
         if (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery)
         {
             DriveLetterBox.IsEnabled = false;
@@ -573,35 +579,107 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : Text("新建分区并格式化", "Create partition and format")
             : ViewModel.Localization["Format"];
         FormatButtonIcon.Glyph = createMode ? "\uE710" : "\uE9CE";
-        FormatButton.IsEnabled = propertyEnabled && (createMode || userPartition);
-        var availability = ResolveAvailabilityText(
-            simulated,
-            disk,
-            partition,
-            isDiskSelection,
-            isGapSelection,
-            diskOffline,
-            alreadyGpt,
-            hasGap,
-            userPartition)
-            ?? Text(
-                "扩展和压缩分区尚未在此版本实现。",
-                "Extend and shrink partition are not implemented in this version.");
-        PartitionAvailabilityText.Text = availability ?? string.Empty;
-        PartitionAvailabilityText.Visibility = string.IsNullOrWhiteSpace(availability)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        FormatButton.IsEnabled = propertyEnabled && canFormatSelection;
         RestoreFieldHelp();
-        var disabledReason = availability ?? Text(
-            "此字段受当前模拟选择和分区类型限制。",
-            "This field is limited by the current simulated selection and partition type.");
-        if (!PartitionTypeBox.IsEnabled) ContextHelp.Set(PartitionTypeBox, disabledReason);
-        if (!DriveLetterBox.IsEnabled) ContextHelp.Set(DriveLetterBox, disabledReason);
-        if (!VolumeLabelBox.IsEnabled) ContextHelp.Set(VolumeLabelBox, disabledReason);
-        if (!SizeBox.IsEnabled) ContextHelp.Set(SizeBox, disabledReason);
-        if (!FileSystemBox.IsEnabled) ContextHelp.Set(FileSystemBox, disabledReason);
-        if (!ClusterBox.IsEnabled) ContextHelp.Set(ClusterBox, disabledReason);
-        if (!QuickFormatSwitch.IsEnabled) ContextHelp.Set(QuickFormatSwitch, disabledReason);
+        var contextReason = ResolveContextDisabledReason(simulated, disk, diskOffline);
+        var protectedPartitionReason = DescribeProtectedPartitionReason(partition);
+        var destructiveReason = contextReason
+            ?? protectedPartitionReason
+            ?? Text("请选择普通模拟数据分区。", "Select a normal simulated data partition.");
+        var selectionReason = contextReason;
+        var createReason = contextReason
+            ?? (!alreadyGpt
+                ? Text("新建分区需要已初始化的 GPT 模拟磁盘。", "Creating a partition requires an initialized simulated GPT disk.")
+                : !hasGap
+                    ? Text("该模拟磁盘没有可用的未分配空间。", "This simulated disk has no usable unallocated space.")
+                    : Text("请选择未分配空间以创建分区。", "Select unallocated space to create a partition."));
+
+        SetDisabledReason(OnlineButton,
+            !simulated
+                ? LocalReadOnlyReason()
+                : disk is null
+                    ? Text("请选择一个模拟磁盘。", "Select a simulated disk.")
+                    : !isDiskSelection
+                        ? Text("请先选择磁盘本身，而不是分区或未分配空间。", "Select the disk itself, not a partition or unallocated space.")
+                        : !disk.IsOffline
+                            ? Text("该模拟磁盘已经联机；无需再次联机。", "This simulated disk is already online.")
+                            : Text("只有脱机的模拟磁盘可以联机。", "Only an offline simulated disk can be brought online."));
+        SetDisabledReason(OfflineButton,
+            !simulated
+                ? LocalReadOnlyReason()
+                : disk is null || !isDiskSelection
+                    ? Text("请选择一个联机的模拟磁盘。", "Select an online simulated disk.")
+                    : disk.IsBoot || disk.IsSystem
+                        ? Text("系统或启动磁盘不能脱机。", "A system or boot disk cannot be taken offline.")
+                        : disk.IsOffline
+                            ? Text("该模拟磁盘已经脱机。", "This simulated disk is already offline.")
+                            : Text("只有联机的模拟磁盘可以脱机。", "Only an online simulated disk can be taken offline."));
+        SetDisabledReason(InitializeButton,
+            !simulated
+                ? LocalReadOnlyReason()
+                : disk is null || !isDiskSelection
+                    ? Text("请选择一个未初始化的模拟磁盘。", "Select an uninitialized simulated disk.")
+                    : disk.IsBoot || disk.IsSystem
+                        ? Text("系统或启动磁盘不能初始化。", "A system or boot disk cannot be initialized.")
+                        : diskOffline
+                            ? Text("请先将模拟磁盘联机。", "Bring the simulated disk online first.")
+                            : raw
+                                ? Text("当前磁盘已满足初始化条件。", "The current disk already meets the initialization conditions.")
+                                : Text("只有 RAW 模拟磁盘可以初始化。", "Only a RAW simulated disk can be initialized."));
+        SetDisabledReason(ConvertGptButton,
+            !simulated
+                ? LocalReadOnlyReason()
+                : disk is null || !isDiskSelection
+                    ? Text("请选择一个 MBR 模拟磁盘。", "Select an MBR simulated disk.")
+                    : disk.IsBoot || disk.IsSystem
+                        ? Text("系统或启动磁盘不能转换分区表。", "A system or boot disk cannot have its partition table converted.")
+                        : diskOffline
+                            ? Text("请先将模拟磁盘联机。", "Bring the simulated disk online first.")
+                            : mbr
+                                ? Text("当前磁盘已满足转换条件。", "The current disk already meets the conversion conditions.")
+                                : Text("只有 MBR 模拟磁盘可以转换为 GPT。", "Only an MBR simulated disk can be converted to GPT."));
+        SetDisabledReason(NewPartitionButton, createReason);
+        SetDisabledReason(DeletePartitionButton, destructiveReason);
+        SetDisabledReason(ExtendButton,
+            Text("扩展分区尚未在此版本实现。", "Extend partition is not implemented in this version."));
+        SetDisabledReason(ShrinkButton,
+            Text("压缩分区尚未在此版本实现。", "Shrink partition is not implemented in this version."));
+        SetDisabledReason(OpenExplorerButton,
+            simulated
+                ? Text("资源管理器只打开本机卷；模拟系统没有本机路径。", "File Explorer opens local volumes only; simulated systems have no local path.")
+                : !isPartitionSelection
+                    ? Text("请选择一个本机分区。", "Select a local partition.")
+                    : diskOffline
+                        ? Text("该磁盘当前脱机。", "The disk is currently offline.")
+                        : letter.Length != 1
+                            ? Text("当前卷没有可打开的盘符。", "The current volume has no drive letter to open.")
+                            : Text("当前本机路径不可用。", "The current local path is unavailable."));
+
+        SetDisabledReason(PartitionTypeBox, createReason);
+        SetDisabledReason(DriveLetterBox,
+            selectionReason
+            ?? (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery
+                ? Text("EFI、MSR 和恢复分区不能分配盘符。", "EFI, MSR, and recovery partitions cannot receive a drive letter.")
+                : Text("当前选择没有可改写盘符的模拟卷。", "The current selection has no simulated volume whose drive letter can be changed.")));
+        SetDisabledReason(VolumeLabelBox,
+            selectionReason
+            ?? (createMode && kind == PartitionKind.MicrosoftReserved
+                ? Text("Microsoft 保留分区没有卷标。", "A Microsoft Reserved Partition has no volume label.")
+                : Text("当前选择没有可改写卷标的模拟卷。", "The current selection has no simulated volume whose label can be changed.")));
+        SetDisabledReason(SizeBox,
+            selectionReason
+            ?? Text("容量只能在创建新分区时设置；扩展和压缩尚未实现。", "Size can be set only while creating a new partition; extend and shrink are not implemented."));
+        var formatReason = contextReason
+            ?? (createMode
+                ? kind == PartitionKind.MicrosoftReserved
+                    ? Text("Microsoft 保留分区不能格式化。", "A Microsoft Reserved Partition cannot be formatted.")
+                    : Text("请选择可创建的未分配空间。", "Select unallocated space that can be used to create a partition.")
+                : protectedPartitionReason
+                    ?? Text("只有普通模拟数据分区可以格式化。", "Only a normal simulated data partition can be formatted."));
+        SetDisabledReason(FileSystemBox, formatReason);
+        SetDisabledReason(ClusterBox, formatReason);
+        SetDisabledReason(QuickFormatSwitch, formatReason);
+        SetDisabledReason(FormatButton, formatReason);
         UpdatePropertyResetState();
     }
 
@@ -625,21 +703,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
     }
 
-    private string? ResolveAvailabilityText(
+    private string? ResolveContextDisabledReason(
         bool simulated,
         OsDiskInfo? disk,
-        PartitionInfo? partition,
-        bool isDiskSelection,
-        bool isGapSelection,
-        bool diskOffline,
-        bool alreadyGpt,
-        bool hasGap,
-        bool userPartition)
+        bool diskOffline)
     {
         if (!simulated)
         {
-            return Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
-                "Local storage is read-only on this page; select or create a simulated system to edit.");
+            return LocalReadOnlyReason();
         }
 
         if (disk is null)
@@ -654,32 +725,39 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "The simulated disk is offline; bring it online before editing partitions.");
         }
 
-        if (partition is not null && IsProtected(partition))
-        {
-            return Text("系统、启动或保留分区受保护，不能在此编辑。",
-                "System, boot, and reserved partitions are protected and cannot be edited here.");
-        }
-
-        if ((isDiskSelection || isGapSelection) && !alreadyGpt)
-        {
-            return Text("新建分区需要已初始化的 GPT 模拟磁盘。",
-                "Creating a partition requires an initialized simulated GPT disk.");
-        }
-
-        if ((isDiskSelection || isGapSelection) && !hasGap)
-        {
-            return Text("该模拟磁盘没有可用的未分配空间。",
-                "This simulated disk has no usable unallocated space.");
-        }
-
-        if (partition is not null && !userPartition)
-        {
-            return Text("当前分区不属于可编辑的普通分区。",
-                "The current partition is not an editable normal partition.");
-        }
-
         return null;
     }
+
+    private string LocalReadOnlyReason() =>
+        Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
+            "Local storage is read-only on this page; select or create a simulated system to edit.");
+
+    private string? DescribeProtectedPartitionReason(PartitionInfo? partition)
+    {
+        if (partition is null)
+        {
+            return null;
+        }
+
+        if (partition.IsBoot || partition.IsSystem)
+        {
+            return Text("系统或启动分区不能删除或格式化；卷标和盘符等非破坏性属性仍可编辑。",
+                "A system or boot partition cannot be deleted or formatted; non-destructive properties such as label and drive letter remain editable.");
+        }
+
+        return partition.Type switch
+        {
+            "EfiSystem" => Text("EFI 系统分区不能删除或格式化。", "An EFI system partition cannot be deleted or formatted."),
+            "MicrosoftReserved" => Text("Microsoft 保留分区不能删除或格式化。", "A Microsoft Reserved Partition cannot be deleted or formatted."),
+            "WindowsRecovery" => Text("Windows 恢复分区不能删除或格式化。", "A Windows recovery partition cannot be deleted or formatted."),
+            _ => null
+        };
+    }
+
+    private static void SetDisabledReason(FrameworkElement control, string? reason) =>
+        ContextHelp.SetDisabledReason(
+            control,
+            control is Control { IsEnabled: false } ? reason : null);
 
     private void FileSystemBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

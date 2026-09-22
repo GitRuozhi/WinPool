@@ -149,10 +149,7 @@ public sealed record GlobalNotification(
     string SystemId = "",
     string Target = "",
     string Detail = "",
-    int OccurrenceCount = 1,
-    DateTimeOffset LastOccurredAt = default,
     bool IsProgress = false,
-    bool IsOverflowSummary = false,
     bool IsResolved = false);
 
 /// <summary>
@@ -163,7 +160,10 @@ public sealed record GlobalNotificationOptions
 {
     public string? OccurrenceKey { get; init; }
 
-    /// <summary>Null selects the severity default (Error is sticky).</summary>
+    /// <summary>
+    /// Retained for source compatibility. Non-progress cards always expire;
+    /// only an in-progress operation remains until its lifecycle ends.
+    /// </summary>
     public bool? AutoDismiss { get; init; }
 
     /// <summary>False records feedback without showing a transient card.</summary>
@@ -172,7 +172,10 @@ public sealed record GlobalNotificationOptions
     /// <summary>False is required for high-frequency progress notifications.</summary>
     public bool RecordInHistory { get; init; } = true;
 
-    /// <summary>Progress is never retained in history and is normally removed by key.</summary>
+    /// <summary>
+    /// Progress is never retained in history and is updated by its occurrence
+    /// key until the operation completes, fails, or is cancelled.
+    /// </summary>
     public bool IsProgress { get; init; }
 
     public string Code { get; init; } = "";
@@ -190,11 +193,6 @@ public interface IGlobalNotificationService
 
     /// <summary>Current-session, in-memory message history, bounded to 200 entries.</summary>
     ReadOnlyObservableCollection<GlobalNotification> History { get; }
-
-    /// <summary>Active notifications not rendered in the first three cards.</summary>
-    int OverflowedNotificationCount { get; }
-
-    bool HasNotificationOverflow { get; }
 
     void Publish(
         GlobalNotificationSeverity severity,
@@ -224,7 +222,7 @@ public interface IGlobalNotificationService
         string message,
         string source,
         string? occurrenceKey = null,
-        bool autoDismiss = false,
+        bool autoDismiss = true,
         GlobalNotificationOptions? options = null);
 
     void Dismiss(string id);
@@ -240,8 +238,6 @@ public interface IGlobalNotificationService
     /// <summary>Removes expired short notifications using the service clock.</summary>
     void DismissExpired();
 
-    /// <summary>Pauses or resumes an individual short-notification lifetime.</summary>
-    void SetPaused(string id, bool isPaused);
 }
 
 public enum ElevationRestartStatus

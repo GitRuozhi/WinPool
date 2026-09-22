@@ -328,20 +328,20 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
-    public void GlobalNotificationsAreIndependentDeduplicatedAndDismissible()
+    public void GlobalNotificationsAreIndependentAndDismissible()
     {
         var service = new WinPool.Application.GlobalNotificationService();
         service.PublishWarning("Warning", "One", "scan", "same");
         service.PublishWarning("Warning", "One", "scan", "same");
         service.PublishError("Error", "Two", "operation", "other");
 
-        Assert.Equal(2, service.Notifications.Count);
-        Assert.Equal(2, service.History.Count);
-        Assert.Equal(2, service.History.Single(notification => notification.DeduplicationKey == "same").OccurrenceCount);
-        var firstId = service.Notifications[0].Id;
+        Assert.Equal(3, service.Notifications.Count);
+        Assert.Equal(3, service.History.Count);
+        Assert.Equal(2, service.History.Count(notification => notification.DeduplicationKey == "same"));
+        var firstId = service.Notifications.First(notification => notification.Message == "One").Id;
         service.Dismiss(firstId);
-        Assert.Single(service.Notifications);
-        Assert.Equal(2, service.History.Count);
+        Assert.Equal(2, service.Notifications.Count);
+        Assert.Equal(3, service.History.Count);
         Assert.Equal("Two", service.Notifications[0].Message);
     }
 
@@ -542,18 +542,17 @@ public sealed class ApplicationBehaviorTests
     }
 
     [Fact]
-    public void InfoNotificationsSupportStickyAndDismissByKey()
+    public void InfoNotificationsAlwaysExpireOutsideProgressAndDismissByKey()
     {
         var service = new WinPool.Application.GlobalNotificationService();
         service.PublishInfo("Scanning", string.Empty, "inventory", "scan", autoDismiss: false);
         service.PublishInfo("Done", "Finished", "inventory", "done");
 
         Assert.Equal(2, service.Notifications.Count);
-        Assert.False(service.Notifications[0].AutoDismiss);
-        Assert.True(service.Notifications[1].AutoDismiss);
+        Assert.All(service.Notifications, notification => Assert.True(notification.AutoDismiss));
         Assert.Equal(
             WinPool.Application.GlobalNotificationSeverity.Info,
-            service.Notifications[0].Severity);
+            service.Notifications.Single(notification => notification.DeduplicationKey == "scan").Severity);
 
         service.DismissByKey("scan");
         Assert.Single(service.Notifications);

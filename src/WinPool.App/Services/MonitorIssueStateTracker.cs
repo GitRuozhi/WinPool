@@ -73,7 +73,7 @@ public sealed class MonitorIssueStateTracker : IDisposable
                     if (_issues.Count >= MaxIssues)
                     {
                         // Do not let old irreversible gaps consume the bounded
-                        // tracker forever. Their notifications remain active;
+                        // tracker forever. Their retained history remains;
                         // this only retires transition bookkeeping so a later
                         // session's actual issue can still be reported.
                         var retired = _issues

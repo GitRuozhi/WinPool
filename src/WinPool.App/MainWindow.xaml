@@ -158,18 +158,6 @@
         <Grid Grid.Row="1">
             <Frame x:Name="RootFrame" />
 
-            <InfoBar
-                x:Name="LocalRealOperationsWarning"
-                Margin="12,6,12,0"
-                HorizontalAlignment="Stretch"
-                VerticalAlignment="Top"
-                Canvas.ZIndex="110"
-                IsClosable="True"
-                IsOpen="False"
-                Severity="Warning"
-                CloseButtonClick="LocalRealOperationsWarning_CloseButtonClick"
-                Title="测试版本" />
-
             <StackPanel
                 x:Name="GlobalNotificationHost"
                 Margin="12,0,12,12"
@@ -178,12 +166,6 @@
                 VerticalAlignment="Bottom"
                 Canvas.ZIndex="100"
                 Spacing="6">
-                <Button
-                    x:Name="NotificationOverflowButton"
-                    HorizontalAlignment="Right"
-                    Click="NotificationOverflowButton_Click"
-                    Visibility="Collapsed"
-                    AutomationProperties.Name="More notifications" />
                 <ItemsControl
                     x:Name="GlobalNotificationStack"
                     ItemsSource="{x:Bind VisibleNotifications, Mode=OneWay}">
@@ -195,11 +177,10 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <controls:NotificationCard
-                                DismissRequested="NotificationCard_DismissRequested"
-                                DetailsRequested="NotificationCard_DetailsRequested"
                                 IsChinese="{Binding IsChinese}"
+                                Invoked="NotificationCard_Invoked"
                                 Notification="{Binding Notification}"
-                                PauseRequested="NotificationCard_PauseRequested" />
+                                />
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

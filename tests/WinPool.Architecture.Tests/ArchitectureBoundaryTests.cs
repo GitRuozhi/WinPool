@@ -1203,6 +1203,10 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("WinPool 1.x", page, StringComparison.Ordinal);
         Assert.Contains("DiagnosticsPathText", view, StringComparison.Ordinal);
         Assert.Contains("MessageList", view, StringComparison.Ordinal);
+        Assert.Contains("RoadmapTitle", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("<InfoBar", view, StringComparison.Ordinal);
+        Assert.Contains("ContextHelpHost", view, StringComparison.Ordinal);
+        Assert.Contains("SetDisabledReason", page, StringComparison.Ordinal);
         Assert.Contains("NotificationService.History", page, StringComparison.Ordinal);
         Assert.Contains("ClearHistory()", page, StringComparison.Ordinal);
         Assert.Contains("RefreshDiagnosticsDirectoryState()", page, StringComparison.Ordinal);
@@ -1215,7 +1219,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void NotificationShellKeepsCardDisplayBoundedAndOverflowIndependentFromHistory()
+    public void NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(
@@ -1224,23 +1228,42 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml"));
         var card = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "Controls", "NotificationCard.xaml.cs"));
+        var notificationService = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.Application", "GlobalNotificationService.cs"));
+        var monitorXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml"));
+        var monitorPage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml.cs"));
+        var testPage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "TestPage.xaml"));
 
         Assert.Contains("MaximumVisibleNotificationCards = 3", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Take(MaximumVisibleNotificationCards)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Skip(MaximumVisibleNotificationCards)", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("NotificationService.History", mainWindow, StringComparison.Ordinal);
         Assert.Contains("DismissExpired()", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("SetPaused", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("IsOverflowSummary", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("notification.active-overflow", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromSeconds(1)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("DialogCoordinator.ShowAsync", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ShowErrorNotificationMessageAsync", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("CreatedAt <= cutoff", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"NotificationOverflowButton\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("NotificationCard", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("_isPointerInside || _hasKeyboardFocus", card, StringComparison.Ordinal);
-        Assert.Contains("ReleasePause", card, StringComparison.Ordinal);
+        Assert.Contains("Invoked=\"NotificationCard_Invoked\"", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotificationOverflowButton", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalRealOperationsWarning", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("NotificationCard_Tapped", card, StringComparison.Ordinal);
+        Assert.Contains("NotificationCard_KeyDown", card, StringComparison.Ordinal);
+        Assert.Contains("进入开发页查看详情", card, StringComparison.Ordinal);
+        Assert.DoesNotContain("DetailsButton", card, StringComparison.Ordinal);
+        Assert.DoesNotContain("CloseButton", card, StringComparison.Ordinal);
         Assert.Contains("IsChinese", card, StringComparison.Ordinal);
         Assert.Contains("AutomationProperties", card, StringComparison.Ordinal);
+        Assert.Contains("DefaultErrorAutoDismissDuration", notificationService, StringComparison.Ordinal);
+        Assert.DoesNotContain("MergeRepeated", notificationService, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActiveOverflow", notificationService, StringComparison.Ordinal);
+        Assert.DoesNotContain("MonitorIssueRows", monitorXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DismissMonitorIssue", monitorPage, StringComparison.Ordinal);
+        Assert.Contains("UpdateIssueStates(", monitorPage, StringComparison.Ordinal);
+        Assert.Contains("PublishMonitorIssueTransitions(", monitorPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("<InfoBar", testPage, StringComparison.Ordinal);
     }
 
     [Fact]

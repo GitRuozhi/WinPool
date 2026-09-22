@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 using WinPool.Application;
 
 namespace WinPool.App.Services;
@@ -19,12 +19,11 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         StorageUnitRef? selectedUnit,
         CancellationToken cancellationToken = default)
     {
-        var picker = new FileSavePicker
+        var picker = new FileSavePicker(ParentWindowId)
         {
             SuggestedFileName = $"WinPool-{Environment.MachineName}-{DateTime.Now:yyyyMMdd-HHmmss}"
         };
         picker.FileTypeChoices.Add("JSON", [".json"]);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinPool_App.App.WindowHandle);
         var file = await picker.PickSaveFileAsync();
         if (file is null)
         {
@@ -55,14 +54,14 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         StorageSystemDocument document,
         CancellationToken cancellationToken = default)
     {
-        var picker = new FileSavePicker
+        var picker = new FileSavePicker(ParentWindowId)
         {
             SuggestedFileName =
-                $"WinPool-{NormalizeFileName(document.DisplayName)}-{DateTime.Now:yyyyMMdd-HHmmss}.winpool"
+                $"WinPool-{NormalizeFileName(document.DisplayName)}-{DateTime.Now:yyyyMMdd-HHmmss}",
+            DefaultFileExtension = ".winpool"
         };
-        picker.FileTypeChoices.Add("WinPool system", [".json"]);
+        picker.FileTypeChoices.Add("WinPool system", [".winpool"]);
         picker.FileTypeChoices.Add("JSON", [".json"]);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinPool_App.App.WindowHandle);
         var file = await picker.PickSaveFileAsync();
         if (file is null)
         {
@@ -87,9 +86,8 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         string csvContent,
         CancellationToken cancellationToken = default)
     {
-        var picker = new FileSavePicker { SuggestedFileName = suggestedName };
+        var picker = new FileSavePicker(ParentWindowId) { SuggestedFileName = suggestedName };
         picker.FileTypeChoices.Add("CSV", [".csv"]);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinPool_App.App.WindowHandle);
         var file = await picker.PickSaveFileAsync();
         if (file is null)
         {
@@ -103,9 +101,9 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
     public async Task<StorageSystemDocument?> ImportAsync(
         CancellationToken cancellationToken = default)
     {
-        var picker = new FileOpenPicker();
+        var picker = new FileOpenPicker(ParentWindowId);
+        picker.FileTypeFilter.Add(".winpool");
         picker.FileTypeFilter.Add(".json");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinPool_App.App.WindowHandle);
         var file = await picker.PickSingleFileAsync();
         if (file is null)
         {
@@ -159,6 +157,8 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
     }
+
+    private static Microsoft.UI.WindowId ParentWindowId => WinPool_App.App.Window.AppWindow.Id;
 
     private sealed record StorageSystemExportEnvelope(
         string Product,
