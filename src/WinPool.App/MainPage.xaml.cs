@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using System.Runtime.InteropServices;
 using WinPool.App.ViewModels;
+using WinPool.App.Services;
 using WinPool.Application;
 using WinPool_App.Controls;
 
@@ -423,7 +424,12 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private sealed record CommandSpec(string Text, string Glyph, bool Enabled, Func<Task> Action);
+    private sealed record CommandSpec(
+        string Text,
+        string Glyph,
+        bool Enabled,
+        Func<Task> Action,
+        string? DisabledReason = null);
 
     private sealed record TableCellContext(string GroupKey, string Value);
 
@@ -528,7 +534,30 @@ public sealed partial class MainPage : Page
         string glyph,
         ManageCommandView command,
         Func<Task> action) =>
-        new(Text(zh, en), glyph, command.IsEnabled, action);
+        new(
+            Text(zh, en),
+            glyph,
+            command.IsEnabled,
+            action,
+            command.IsEnabled ? null : ManageDisabledReason());
+
+    private string ManageDisabledReason()
+    {
+        if (ViewModel.IsLocalSystem)
+        {
+            return Text("本机存储为只读；请转换或选择模拟系统后编辑。",
+                "Local storage is read-only; convert it or select a simulated system to edit.");
+        }
+
+        if (ViewModel.SelectedWorkspaceItem?.Projection?.IsStableIdentity == false)
+        {
+            return Text("此对象没有可编辑的 Windows 来源。",
+                "This object has no editable Windows source.");
+        }
+
+        return Text("当前选择不满足此操作的前置条件。",
+            "The current selection does not meet this operation's prerequisites.");
+    }
 
 
     private async Task DeleteSimulationAsync()
@@ -544,11 +573,26 @@ public sealed partial class MainPage : Page
             CloseButtonText = l["Cancel"],
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogCoordinator.ShowAsync(dialog) != ContentDialogResult.Primary)
         {
             return;
         }
+        var deletedTarget = OperationTarget();
+        var deletedSystemId = ViewModel.SelectedSystem.Id;
         await ViewModel.DeleteSimulationAsync();
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Info,
+            Text("模拟系统已删除", "Simulated system deleted"),
+            $"{deletedTarget}{Environment.NewLine}{Text("已删除所选模拟系统。", "The selected simulated system was deleted.")}",
+            "workspace-operation",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = "workspace.delete-simulation.completed",
+                Code = "workspace.delete-simulation.completed",
+                SystemId = deletedSystemId,
+                Target = deletedTarget,
+                Detail = deletedTarget
+            });
     }
 
     private void BuildCommandButtons()
@@ -558,7 +602,13 @@ public sealed partial class MainPage : Page
             return;
         }
         CommandButtonsPanel.Children.Clear();
-        foreach (var spec in BuildCommandSpecs())
+        var specs = BuildCommandSpecs();
+        var firstDisabled = specs.FirstOrDefault(spec => !spec.Enabled);
+        CommandAvailabilityText.Text = firstDisabled?.DisabledReason ?? string.Empty;
+        CommandAvailabilityText.Visibility = firstDisabled is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        foreach (var spec in specs)
         {
             AddCommand(spec);
         }
@@ -599,9 +649,15 @@ public sealed partial class MainPage : Page
         flyout.ShowAt(element, new FlyoutShowOptions { Position = pointerPosition });
     }
 
-    private void AddCommand(CommandSpec spec) => AddCommand(spec.Text, spec.Glyph, spec.Enabled, spec.Action);
+    private void AddCommand(CommandSpec spec) =>
+        AddCommand(spec.Text, spec.Glyph, spec.Enabled, spec.Action, spec.DisabledReason);
 
-    private void AddCommand(string text, string glyph, bool enabled, Func<Task> action)
+    private void AddCommand(
+        string text,
+        string glyph,
+        bool enabled,
+        Func<Task> action,
+        string? disabledReason)
     {
         var button = new Button
         {
@@ -619,12 +675,8 @@ public sealed partial class MainPage : Page
             IsEnabled = enabled
         };
         button.SetValue(AutomationProperties.NameProperty, text);
-        if (!enabled && ViewModel.IsLocalSystem)
-        {
-            ToolTipService.SetToolTip(
-                button,
-                Text("本机存储当前为只读。", "Local storage is currently read-only."));
-        }
+        ContextHelp.Set(button, disabledReason ?? Text(
+            "执行此管理操作。", "Run this management operation."));
         button.Click += async (_, _) => await RunCommandAsync(action);
         CommandButtonsPanel.Children.Add(button);
     }
@@ -635,10 +687,22 @@ public sealed partial class MainPage : Page
         {
             await action();
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            ViewModel.PresentNotification(WorkspaceNotificationFactory.OperationFailed(
-                $"workspace-operation:{DateTimeOffset.UtcNow.Ticks}"));
+            ViewModel.NotificationService.Publish(
+                GlobalNotificationSeverity.Error,
+                Text("操作失败", "Operation failed"),
+                $"{OperationTarget()}{Environment.NewLine}{Text("操作未完成。请检查当前选择、连接或权限后重试。", "The operation did not complete. Check the current selection, connection, or permissions, then try again.")}",
+                "workspace-operation",
+                new GlobalNotificationOptions
+                {
+                    OccurrenceKey = $"workspace-operation:{exception.GetType().Name}",
+                    AutoDismiss = false,
+                    Code = "workspace.operation.exception",
+                    SystemId = ViewModel.SelectedSystem.Id,
+                    Target = OperationTarget(),
+                    Detail = $"{exception.GetType().Name}: {exception.Message}"
+                });
         }
         BuildCommandButtons();
     }
@@ -649,8 +713,10 @@ public sealed partial class MainPage : Page
     {
         if (await ViewModel.ExportActiveSystemAsync() is not null)
         {
-            ViewModel.PresentNotification(WorkspaceNotificationFactory.ExportCompleted(
-                $"export:{DateTimeOffset.UtcNow.Ticks}"));
+            PublishWorkspaceInfo(
+                Text("导出模拟系统", "Export simulated system"),
+                Text("模拟系统已导出。", "The simulated system was exported."),
+                "workspace.export.completed");
         }
     }
 
@@ -658,8 +724,10 @@ public sealed partial class MainPage : Page
     {
         if (await ViewModel.ImportSystemAsync())
         {
-            ViewModel.PresentNotification(WorkspaceNotificationFactory.ImportCompleted(
-                $"import:{DateTimeOffset.UtcNow.Ticks}"));
+            PublishWorkspaceInfo(
+                Text("导入模拟系统", "Import simulated system"),
+                Text("模拟系统已导入。", "The simulated system was imported."),
+                "workspace.import.completed");
         }
     }
 
@@ -683,19 +751,47 @@ public sealed partial class MainPage : Page
     private async Task ConvertLocalAsync()
     {
         await ViewModel.ConvertLocalToSimulationAsync();
-        ViewModel.NotificationService.PublishInfo(
+        PublishWorkspaceInfo(
             Text("转换本机到模拟", "Convert local to simulation"),
             ViewModel.Localization["ConvertedToSimulation"],
-            "workspace-operation",
-            $"convert-local:{DateTimeOffset.UtcNow.Ticks}");
+            "workspace.convert.completed");
     }
 
     private void NotifyTargetMissing() =>
-        ViewModel.NotificationService.PublishWarning(
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Warning,
             ViewModel.Localization["Warning"],
-            ViewModel.Localization["TargetMissing"],
+            $"{OperationTarget()}{Environment.NewLine}{ViewModel.Localization["TargetMissing"]}",
             "workspace-operation",
-            $"target-missing:{DateTimeOffset.UtcNow.Ticks}");
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = "workspace.target-missing",
+                Code = "workspace.target-missing",
+                SystemId = ViewModel.SelectedSystem.Id,
+                Target = OperationTarget(),
+                Detail = ViewModel.Localization["TargetMissing"]
+            });
+
+    private string OperationTarget() => ViewModel.IsUsingSimulatedInventory
+        ? Text($"模拟目标：{ViewModel.SelectedSystem.DisplayName}",
+            $"Simulated target: {ViewModel.SelectedSystem.DisplayName}")
+        : Text($"本机目标：{ViewModel.SelectedSystem.DisplayName}",
+            $"Local target: {ViewModel.SelectedSystem.DisplayName}");
+
+    private void PublishWorkspaceInfo(string title, string message, string code) =>
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Info,
+            title,
+            $"{OperationTarget()}{Environment.NewLine}{message}",
+            "workspace-operation",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = $"{code}:{ViewModel.SelectedSystem.Id}",
+                Code = code,
+                SystemId = ViewModel.SelectedSystem.Id,
+                Target = OperationTarget(),
+                Detail = message
+            });
 
     private async Task OptimizeDrivesAsync()
     {
@@ -760,11 +856,20 @@ public sealed partial class MainPage : Page
             if (Directory.Exists(target.PartitionPath)
                 && !TryShowNativeProperties(target.PartitionPath))
             {
-                ViewModel.NotificationService.PublishError(
-                    ViewModel.Localization["Error"],
-                    ViewModel.Localization["OperationFailed"],
+                ViewModel.NotificationService.Publish(
+                    GlobalNotificationSeverity.Error,
+                    Text("无法打开属性", "Could not open properties"),
+                    $"{OperationTarget()}{Environment.NewLine}{Text("Windows 未能打开所选分区的属性。请确认该分区仍可用后重试。", "Windows could not open properties for the selected partition. Confirm that it is still available, then try again.")}",
                     "workspace-operation",
-                    $"properties:{DateTimeOffset.UtcNow.Ticks}");
+                    new GlobalNotificationOptions
+                    {
+                        OccurrenceKey = "workspace.properties.native-launch",
+                        AutoDismiss = false,
+                        Code = "workspace.properties.native-launch",
+                        SystemId = ViewModel.SelectedSystem.Id,
+                        Target = OperationTarget(),
+                        Detail = target.PartitionPath
+                    });
             }
             return;
         }
@@ -792,11 +897,19 @@ public sealed partial class MainPage : Page
             {
                 foreach (var message in response.Messages)
                 {
-                    ViewModel.NotificationService.PublishWarning(
-                        ViewModel.Localization["Warning"],
-                        message.DiagnosticText,
+                    ViewModel.NotificationService.Publish(
+                        GlobalNotificationSeverity.Warning,
+                        Text("属性请求提示", "Properties request notice"),
+                        $"{OperationTarget()}{Environment.NewLine}{Text("目标返回了属性请求提示。详细内容可在通知历史中复制。", "The target returned a properties-request notice. Its details can be copied from notification history.")}",
                         "workspace-operation",
-                        $"properties:{message.Code}");
+                        new GlobalNotificationOptions
+                        {
+                            OccurrenceKey = $"workspace.properties:{message.Code}",
+                            Code = message.Code,
+                            SystemId = ViewModel.SelectedSystem.Id,
+                            Target = OperationTarget(),
+                            Detail = message.DiagnosticText
+                        });
                 }
                 return;
             }

@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
+using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Infrastructure.Windows;
 using WinPool_App.Controls;
@@ -24,6 +25,12 @@ public sealed partial class HardwarePage : Page
     {
         TextWrapping = TextWrapping.Wrap,
         IsTextSelectionEnabled = true,
+        Visibility = Visibility.Collapsed
+    };
+    private readonly TextBlock actionHint = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray),
         Visibility = Visibility.Collapsed
     };
     private readonly Button refresh = new();
@@ -66,6 +73,7 @@ public sealed partial class HardwarePage : Page
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         content.Children.Add(actions);
+        content.Children.Add(actionHint);
         content.Children.Add(status);
         content.Children.Add(report);
         pageScroll.Content = content;
@@ -113,6 +121,25 @@ public sealed partial class HardwarePage : Page
         SetButtonContent(export, "\uEDE1", viewModel.Localization["HardwareExport"]);
         refresh.IsEnabled = capture is not null || viewModel.SelectedSystem.IsLocal && !viewModel.IsScanning;
         export.IsEnabled = capture is null;
+        var refreshHint = capture is not null
+            ? Text("正在刷新；可选择“取消”。", "Refreshing; select Cancel to stop.")
+            : !viewModel.SelectedSystem.IsLocal
+                ? Text("硬件事实来自本机只读采集；模拟系统不能刷新硬件。",
+                    "Hardware facts come from a local read-only scan; a simulated system cannot refresh them.")
+                : viewModel.IsScanning
+                    ? Text("正在扫描本机存储；扫描完成后可刷新硬件。",
+                        "Local storage is being scanned; refresh becomes available when the scan completes.")
+                    : string.Empty;
+        actionHint.Text = refreshHint;
+        actionHint.Visibility = string.IsNullOrWhiteSpace(refreshHint)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        ContextHelp.Set(refresh, capture is not null
+            ? Text("取消当前只读硬件刷新。", "Cancel the current read-only hardware refresh.")
+            : Text("只读刷新本机硬件信息。", "Refresh local hardware information without changing storage."));
+        ContextHelp.Set(export, capture is null
+            ? Text("导出当前本机或模拟系统的硬件报告。", "Export the hardware report for the current local or simulated system.")
+            : Text("正在刷新时不能导出报告。", "Export is unavailable while a refresh is running."));
         SetStatus(null);
         report.Children.Clear();
         groupCells.Clear();
@@ -372,8 +399,25 @@ public sealed partial class HardwarePage : Page
         if (capture is not null) { capture.Cancel(); return; }
         if (!viewModel.SelectedSystem.IsLocal) return;
         capture = new CancellationTokenSource(); Rebuild();
-        try { await viewModel.RefreshHardwareAsync(capture.Token); }
+        try
+        {
+            await viewModel.RefreshHardwareAsync(capture.Token);
+            PublishHardwareInfo(
+                Text("硬件信息已刷新", "Hardware information refreshed"),
+                Text("已完成本机只读硬件刷新。", "The local read-only hardware refresh completed."),
+                "hardware.refresh.completed");
+        }
         catch (OperationCanceledException) when (capture.IsCancellationRequested) { }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            PublishHardwareFailure(
+                Text("硬件刷新失败", "Hardware refresh failed"),
+                exception,
+                "hardware.refresh.exception");
+        }
         finally { capture.Dispose(); capture = null; if (active) Rebuild(); }
     }
 
@@ -388,8 +432,70 @@ public sealed partial class HardwarePage : Page
             if (path is not null && active && viewModel.SelectedSystem.Id == targetId)
             {
                 SetStatus(viewModel.Localization["Exported"]);
+                PublishHardwareInfo(
+                    Text("硬件报告已导出", "Hardware report exported"),
+                    viewModel.Localization["Exported"],
+                    "hardware.export.completed");
             }
         }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            PublishHardwareFailure(
+                Text("硬件导出失败", "Hardware export failed"),
+                exception,
+                "hardware.export.exception");
+        }
         finally { if (active) export.IsEnabled = true; }
+    }
+
+    private string Text(string zh, string en) =>
+        viewModel.Localization.IsChinese ? zh : en;
+
+    private void PublishHardwareFailure(string title, Exception exception, string code)
+    {
+        var target = viewModel.SelectedSystem.IsLocal
+            ? Text($"本机目标：{viewModel.SelectedSystem.DisplayName}",
+                $"Local target: {viewModel.SelectedSystem.DisplayName}")
+            : Text($"模拟目标：{viewModel.SelectedSystem.DisplayName}",
+                $"Simulated target: {viewModel.SelectedSystem.DisplayName}");
+        viewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Error,
+            title,
+            $"{target}{Environment.NewLine}{Text("操作未完成。请检查连接、权限或当前选择后重试。", "The operation did not complete. Check the connection, permissions, or current selection, then try again.")}",
+            "hardware",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = code,
+                AutoDismiss = false,
+                Code = code,
+                SystemId = viewModel.SelectedSystem.Id,
+                Target = target,
+                Detail = $"{exception.GetType().Name}: {exception.Message}"
+            });
+    }
+
+    private void PublishHardwareInfo(string title, string message, string code)
+    {
+        var target = viewModel.SelectedSystem.IsLocal
+            ? Text($"本机目标：{viewModel.SelectedSystem.DisplayName}",
+                $"Local target: {viewModel.SelectedSystem.DisplayName}")
+            : Text($"模拟目标：{viewModel.SelectedSystem.DisplayName}",
+                $"Simulated target: {viewModel.SelectedSystem.DisplayName}");
+        viewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Info,
+            title,
+            $"{target}{Environment.NewLine}{message}",
+            "hardware",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = code,
+                Code = code,
+                SystemId = viewModel.SelectedSystem.Id,
+                Target = target,
+                Detail = message
+            });
     }
 }

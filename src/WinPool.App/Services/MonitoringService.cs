@@ -49,6 +49,10 @@ public sealed class MonitoringService : IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<StorageHealthEvent> _recentStorageHealthEvents = [];
     private readonly SamplingDiagnosticsTracker _diagnostics = new();
+    // This is intentionally owned by the session service, rather than a page:
+    // navigation, notification dismissal, and history cleanup cannot turn an
+    // existing monitoring issue into a recovery.
+    private readonly MonitorIssueStateTracker _issueStates = new();
     private MonitorRuntimeDiagnostics _agentDiagnostics = new(0, 0);
     private int _restartGeneration;
     private readonly Stopwatch _localSessionElapsed = new();
@@ -353,6 +357,23 @@ public sealed class MonitoringService : IDisposable
         {
             return _agentDiagnostics;
         }
+    }
+
+    /// <summary>
+    /// Reconciles the current diagnostic facts for the active monitoring
+    /// service. When state is unknown (for example, an Agent transport
+    /// failure), absent facts are retained and therefore cannot emit a false
+    /// recovery. Known loss and interrupted-session gaps never emit an
+    /// automatic recovery while tracked; their recorded notifications remain
+    /// active even if bounded transition bookkeeping later retires an old key.
+    /// </summary>
+    public MonitorIssueStateSnapshot UpdateIssueStates(
+        IEnumerable<MonitorIssueState> observedIssues,
+        bool stateIsAuthoritative)
+    {
+        ArgumentNullException.ThrowIfNull(observedIssues);
+
+        return _issueStates.Update(observedIssues, stateIsAuthoritative);
     }
 
     public async Task FlushAsync()
@@ -893,6 +914,7 @@ public sealed class MonitoringService : IDisposable
 
         _disposed = true;
         _loopCts?.Cancel();
+        _issueStates.Dispose();
         if (_agentConnection is not null)
         {
             return;

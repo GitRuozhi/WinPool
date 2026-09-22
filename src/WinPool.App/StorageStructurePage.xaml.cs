@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
@@ -186,6 +187,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _volumeNameBox.PlaceholderText = ViewModel.Localization["VolumeName"];
         PendingActionsTitle.Text = ViewModel.Localization["PendingActions"];
         PendingActionsEmptyText.Text = ViewModel.Localization["NoPendingActions"];
+        ContextHelp.Set(UndoButton, Text("撤销最近一项未应用的模拟修改。", "Undo the most recent unapplied simulated change."));
+        ContextHelp.Set(RedoButton, Text("恢复最近撤销的模拟修改。", "Redo the most recently undone simulated change."));
+        ContextHelp.Set(DiscardAllButton, Text("放弃所有未应用的模拟修改。", "Discard all unapplied simulated changes."));
+        ContextHelp.Set(ApplyAllButton, Text("确认风险后将待处理结构修改写入模拟系统。", "Write pending structural changes to the simulated system after confirming risks."));
+        ContextHelp.Set(CreatePoolButton, Text("在模拟系统中创建新的存储池草稿。", "Create a new storage-pool draft in the simulated system."));
+        ContextHelp.Set(DissolveButton, Text("解散选中的模拟存储池；请先阅读确认提示。", "Dissolve the selected simulated storage pool; review the confirmation first."));
+        ContextHelp.Set(RetireButton, Text("将选中的模拟池成员标为已退役。", "Mark the selected simulated pool member as retired."));
+        ContextHelp.Set(HotSpareButton, Text("将选中的模拟池成员标为热备。", "Mark the selected simulated pool member as a hot spare."));
+        ContextHelp.Set(CreateVdiskButton, Text("为符合条件的模拟池创建虚拟磁盘和分区。", "Create a virtual disk and partition for an eligible simulated pool."));
+        ContextHelp.Set(DeleteVdiskButton, Text("删除模拟虚拟磁盘及其分区；请先阅读确认提示。", "Delete the simulated virtual disk and partition; review the confirmation first."));
+        ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
+        ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
+        ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前池属性草稿到待处理模拟修改。", "Save the current pool property draft into pending simulated changes."));
     }
 
     private void EnsureForm()
@@ -208,7 +222,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             FillCombo(group.ResiliencyBox, ["Simple", "Mirror", "Parity"], 1);
             FillCombo(group.InterleaveBox, ["16 KiB", "32 KiB", "64 KiB", "128 KiB", "256 KiB"], 2);
             FillCombo(group.ProvisioningBox, ["Fixed"], 0);
-            ToolTipService.SetToolTip(group.MaximumButton, ViewModel.Localization["UseMaximumSize"]);
+            ContextHelp.Set(
+                group.MaximumButton,
+                Text("使用当前规划的对齐上限；该值不保证实际 Windows 可用容量。",
+                    "Use the current planned aligned upper bound; it does not guarantee usable Windows capacity."));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
                 group.MaximumButton,
                 ViewModel.Localization["UseMaximumSize"]);
@@ -238,6 +255,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HookNameField(_volumeNameBox);
         _autoVdiskSwitch.Toggled += (_, _) => CommitAutoCreateToggle(virtualDisk: true);
         _autoPartitionSwitch.Toggled += (_, _) => CommitAutoCreateToggle(virtualDisk: false);
+
+        ContextHelp.Set(_poolNameBox, Text("输入名称后按 Enter 保存；离开焦点不会提交。", "Enter a name and press Enter to save; losing focus does not submit it."));
+        ContextHelp.Set(_virtualDiskNameBox, Text("输入名称后按 Enter 保存；离开焦点不会提交。", "Enter a name and press Enter to save; losing focus does not submit it."));
+        ContextHelp.Set(_volumeNameBox, Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
+        ContextHelp.Set(_autoVdiskSwitch, Text("控制新建池是否自动创建虚拟磁盘。", "Choose whether a new pool automatically creates a virtual disk."));
+        ContextHelp.Set(_autoPartitionSwitch, Text("控制新建虚拟磁盘是否自动创建分区。", "Choose whether a new virtual disk automatically creates a partition."));
+        ContextHelp.Set(_partitionStyleBox, Text("选择模拟分区表样式。", "Choose the simulated partition-table style."));
+        ContextHelp.Set(_fileSystemBox, Text("选择模拟卷文件系统；ReFS 没有等同于 64 KiB NTFS 的长期证据。", "Choose the simulated volume file system; ReFS has no long-run evidence equivalent to 64 KiB NTFS."));
+        ContextHelp.Set(_clusterBox, Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是 Windows 容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a Windows capacity guarantee."));
+        foreach (var group in TierGroups())
+        {
+            ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
+            ContextHelp.Set(group.ResiliencyBox, Text("选择现有模拟规则支持的复原类型。", "Choose a resiliency type supported by the existing simulation rules."));
+            ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
+            ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
+            ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
+            ContextHelp.Set(group.ColumnsBox, Text("奇偶校验层列数；按 Enter 规范化。", "Column count for a parity tier; press Enter to normalize."));
+        }
 
         var row = 0;
         row = AddSectionHeader(row, "PoolPropertiesSection", first: true);
@@ -481,18 +516,28 @@ public sealed partial class StorageStructurePage : EditorPageBase
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
-                await ShowMessageAsync(Text("改名失败", "Rename failed"), exception.Message);
+                PublishOperationException(
+                    Text("改名失败", "Rename failed"),
+                    "storage-structure-editor",
+                    exception,
+                    "structure.rename.exception");
                 return;
             }
 
             if (!result.IsSuccess || result.Value is null)
             {
-                await ShowMessageAsync(
+                PublishOperationResult(
+                    result.Status,
+                    result.Messages,
+                    result.CorrelationId,
                     result.Status == ApplicationStatus.OutcomeUnknown
                         ? Text("提交结果未知", "Commit outcome unknown")
                         : Text("改名失败", "Rename failed"),
-                    result.Messages.FirstOrDefault()?.UserTextKey
-                        ?? Text("名称未保存，可以修正后重试。", "The name was not saved. Correct it and try again."));
+                    "storage-structure-editor");
+                if (result.Status == ApplicationStatus.OutcomeUnknown)
+                {
+                    _outcomeUnknown = true;
+                }
                 return;
             }
 
@@ -628,7 +673,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 FontSize = 12
             }
         };
-        ToolTipService.SetToolTip(button, ViewModel.Localization["ResetRecommended"]);
+        ContextHelp.Set(button, ViewModel.Localization["ResetRecommended"]);
         button.Click += (_, _) =>
         {
             if (_filling)
@@ -1006,7 +1051,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -1039,7 +1088,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
             catch (InvalidOperationException exception)
             {
-                _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+                PublishOperationException(
+                    ViewModel.Localization["OperationFailed"],
+                    "storage-structure-editor",
+                    exception,
+                    "structure.edit.exception");
             }
 
             return;
@@ -1062,7 +1115,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -1155,7 +1212,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -1586,8 +1647,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
         {
+            _ = exception;
             _currentPlan = null;
-            _planBuildError = exception.Message;
+            _planBuildError = Text(
+                "当前草稿无法生成可应用计划；请检查字段值和待处理操作。",
+                "The current draft cannot produce an applicable plan; check field values and pending operations.");
         }
 
         if (_currentPlan is null || _currentPlan.IsEmpty)
@@ -1937,10 +2001,79 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false }
             && !poolOffline
             && poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)) <= 1;
+        var availability = ResolveStructureAvailabilityText(
+            simulated,
+            pool,
+            poolOffline,
+            poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)));
+        StructureAvailabilityText.Text = availability ?? string.Empty;
+        StructureAvailabilityText.Visibility = string.IsNullOrWhiteSpace(availability)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        RestoreStructureActionHelp();
+        if (!ApplyAllButton.IsEnabled) ContextHelp.Set(ApplyAllButton, availability ?? Text("需要可应用的无阻塞模拟计划。", "A non-blocked simulated plan is required."));
+        if (!SavePoolPropertiesButton.IsEnabled) ContextHelp.Set(SavePoolPropertiesButton, availability ?? Text("需要可保存的模拟池属性修改。", "A saveable simulated pool property change is required."));
         ShowHotSpareSwitch.IsEnabled = simulated;
         ShowRetiredSwitch.IsEnabled = simulated;
         UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
         UpdateFieldResets();
+    }
+
+    private string? ResolveStructureAvailabilityText(
+        bool simulated,
+        StoragePoolInfo? pool,
+        bool poolOffline,
+        int realVirtualDiskCount)
+    {
+        if (!simulated)
+        {
+            return Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
+                "Local storage is read-only on this page; select or create a simulated system to edit.");
+        }
+
+        if (_outcomeUnknown)
+        {
+            return Text("上次提交结果未知；请刷新模拟状态后再继续编辑或应用。",
+                "The previous submission outcome is unknown; refresh the simulation state before editing or applying again.");
+        }
+
+        if (pool is null)
+        {
+            return Text("请选择一个非原始模拟存储池以编辑属性。",
+                "Select a non-primordial simulated storage pool to edit properties.");
+        }
+
+        if (pool.IsPrimordial)
+        {
+            return Text("原始池不可在此编辑；请选择或创建普通模拟存储池。",
+                "The primordial pool cannot be edited here; select or create a normal simulated storage pool.");
+        }
+
+        if (poolOffline)
+        {
+            return Text("该池包含脱机磁盘；请先在磁盘分区页联机。",
+                "This pool contains an offline disk; bring it online in the disk partition page first.");
+        }
+
+        if (EditWorkspace.IsDraftPool(pool.StableId))
+        {
+            return Text("当前已有一个模拟池草稿；请先保存、应用或放弃它。",
+                "A simulated pool draft already exists; save, apply, or discard it before creating another one.");
+        }
+
+        if (realVirtualDiskCount > 1)
+        {
+            return Text("该池有多个现有虚拟磁盘；此表单不更改它们的共享属性。",
+                "This pool has multiple existing virtual disks; this form does not change their shared properties.");
+        }
+
+        return null;
+    }
+
+    private void RestoreStructureActionHelp()
+    {
+        ContextHelp.Set(ApplyAllButton, Text("确认风险后将待处理结构修改写入模拟系统。", "Write pending structural changes to the simulated system after confirming risks."));
+        ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前池属性草稿到待处理模拟修改。", "Save the current pool property draft into pending simulated changes."));
     }
 
     private void UpdateFormStates(
@@ -1975,7 +2108,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         bool hasVdisk)
     {
         var isDraft = pool is not null && EditWorkspace.IsDraftPool(pool.StableId);
-        ToolTipService.SetToolTip(
+        ContextHelp.Set(
             _poolNameBox,
             isDraft
                 ? Text("名称将在创建时生效。", "The name takes effect when the object is created.")
@@ -1986,12 +2119,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ? PrimaryPartition(pool.StableId)
             : null;
         var virtualDiskIsDraft = vdisk is null || EditWorkspace.IsDraftVirtualDisk(vdisk.StableId);
-        ToolTipService.SetToolTip(
+        ContextHelp.Set(
             _virtualDiskNameBox,
             virtualDiskIsDraft
                 ? Text("名称将在创建时生效。", "The name takes effect when the object is created.")
                 : Text("按 Enter 保存名称。", "Press Enter to save the name."));
-        ToolTipService.SetToolTip(
+        ContextHelp.Set(
             _volumeNameBox,
             volumePartition is null
                 ? Text("卷标将在创建时生效。", "The volume label takes effect when the volume is created.")
@@ -2031,6 +2164,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var holdsData = EditWorkspace.PoolHoldsStoredData(_working, pool.StableId);
         foreach (var group in TierGroups())
         {
+            RestoreTierHelp(group);
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
             var tierVisible = TierVisible(pool.StableId, group.Media);
             var sizeEditable = formEnabled && tierVisible && tier is not null && !holdsData;
@@ -2057,10 +2191,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var supportedInterleave = tier?.Interleave is null
                 || tier.Interleave is 16384 or 32768 or 65536 or 131072 or 262144;
             group.InterleaveBox.IsEnabled = specEditable && supportedInterleave;
-            ToolTipService.SetToolTip(
+            ContextHelp.Set(
                 group.InterleaveBox,
                 supportedInterleave
-                    ? null
+                    ? Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。",
+                        "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it.")
                     : Text("当前 Interleave 值超出编辑范围，已按原值保留。", "The current interleave is outside the editable range and is preserved."));
             group.DiskCountBox.IsReadOnly = true;
             if (!tierVisible)
@@ -2081,6 +2216,29 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 SetNum(group.ColumnsBox, null);
             }
             UpdateMaximumSizeText(group);
+            var disabledReason = ResolveStructureAvailabilityText(
+                ViewModel.IsUsingSimulatedInventory,
+                pool,
+                StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]),
+                _working.VirtualDisks.Count(item => item.PoolStableId == pool.StableId
+                    && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))
+                ?? (holdsData
+                    ? Text("池含有已存储数据；会改变结构的字段已锁定。",
+                        "The pool holds stored data, so structure-changing fields are locked.")
+                    : Text("此层字段受当前层和复原类型限制。",
+                        "This tier field is limited by the current tier and resiliency type."));
+            if (!group.SizeBox.IsEnabled) ContextHelp.Set(group.SizeBox, disabledReason);
+            if (!group.MaximumButton.IsEnabled) ContextHelp.Set(group.MaximumButton, disabledReason);
+            if (!group.ResiliencyBox.IsEnabled) ContextHelp.Set(group.ResiliencyBox, disabledReason);
+            if (!group.InterleaveBox.IsEnabled) ContextHelp.Set(
+                group.InterleaveBox,
+                supportedInterleave
+                    ? disabledReason
+                    : Text("当前 Interleave 值超出编辑范围，已按原值保留。",
+                        "The current interleave is outside the editable range and is preserved."));
+            if (!group.CopiesBox.IsEnabled) ContextHelp.Set(group.CopiesBox, disabledReason);
+            if (!group.FailuresBox.IsEnabled) ContextHelp.Set(group.FailuresBox, disabledReason);
+            if (!group.ColumnsBox.IsEnabled) ContextHelp.Set(group.ColumnsBox, disabledReason);
         }
 
         // Disk and partition group.
@@ -2102,6 +2260,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
             : canEditPartition;
         _fileSystemBox.IsEnabled = formEnabled && fsEditable;
         _clusterBox.IsEnabled = formEnabled && fsEditable;
+    }
+
+    private void RestoreTierHelp(TierFields group)
+    {
+        ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
+        ContextHelp.Set(group.MaximumButton, Text("使用当前规划的对齐上限；不保证实际 Windows 可用容量。", "Use the current planned aligned upper bound; it does not guarantee usable Windows capacity."));
+        ContextHelp.Set(group.ResiliencyBox, Text("选择现有模拟规则支持的复原类型。", "Choose a resiliency type supported by the existing simulation rules."));
+        ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
+        ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
+        ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
+        ContextHelp.Set(group.ColumnsBox, Text("奇偶校验层列数；按 Enter 规范化。", "Column count for a parity tier; press Enter to normalize."));
     }
 
     private void ShowHotSpareSwitch_Toggled(object sender, RoutedEventArgs e)
@@ -2194,7 +2363,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -2339,7 +2512,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -2381,7 +2558,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -2428,7 +2609,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -2474,7 +2659,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 
@@ -2642,35 +2831,39 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ResetLayerSwitchesForSelection();
         _formDirty = false;
         RefreshAll();
-        ViewModel.NotificationService.PublishInfo(
+        PublishOperationFeedback(
+            GlobalNotificationSeverity.Info,
             Text("修改已应用", "Changes applied"),
             Text("结构修改已写入模拟系统。", "The structural changes were saved to the simulation."),
-            "storage-structure-editor");
+            "storage-structure-editor",
+            "structure.apply.completed");
     }
 
-    private async Task HandleFailedApplyAsync(
+    private Task HandleFailedApplyAsync(
         ApplicationResult<SimulationEditReceipt> applied,
         StorageSnapshot pending)
     {
-        var detail = applied.Messages.FirstOrDefault()?.UserTextKey;
-        if (string.IsNullOrWhiteSpace(detail))
-        {
-            detail = applied.Status.ToString();
-        }
-
         if (applied.Status == ApplicationStatus.OutcomeUnknown)
         {
-            await ShowMessageAsync(
+            PublishOperationResult(
+                applied.Status,
+                applied.Messages,
+                applied.CorrelationId,
                 Text("提交结果未知", "Commit outcome unknown"),
-                detail);
+                "storage-structure-editor");
             _outcomeUnknown = true;
             _working = pending;
             _formDirty = false;
             RefreshAll();
-            return;
+            return Task.CompletedTask;
         }
 
-        await ShowMessageAsync(Text("操作不可用", "Operation unavailable"), detail);
+        PublishOperationResult(
+            applied.Status,
+            applied.Messages,
+            applied.CorrelationId,
+            Text("操作未完成", "Operation did not complete"),
+            "storage-structure-editor");
         if (!ReferenceEquals(pending, _working))
         {
             _working = pending;
@@ -2678,6 +2871,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         RefreshAll();
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -3432,7 +3626,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         catch (InvalidOperationException exception)
         {
-            _ = ShowMessageAsync(ViewModel.Localization["OperationFailed"], exception.Message);
+            PublishOperationException(
+                ViewModel.Localization["OperationFailed"],
+                "storage-structure-editor",
+                exception,
+                "structure.edit.exception");
         }
     }
 

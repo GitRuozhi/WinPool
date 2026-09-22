@@ -19,7 +19,12 @@ public sealed record ApplicationNotification(
     string UserDetailText,
     string Source,
     string OccurrenceKey,
-    bool AutoDismiss = true);
+    bool AutoDismiss = true,
+    bool RecordInHistory = true,
+    bool IsProgress = false,
+    bool ShowNotification = true,
+    string SystemId = "",
+    string Target = "");
 
 public static class ApplicationNotificationValidator
 {
@@ -33,6 +38,8 @@ public static class ApplicationNotificationValidator
             && IsBounded(notification.UserDetailText, 2048, true)
             && IsBounded(notification.Source, 128, false)
             && IsBounded(notification.OccurrenceKey, 512, false)
+            && IsBounded(notification.SystemId, 256, true)
+            && IsBounded(notification.Target, 512, true)
             && (!string.IsNullOrWhiteSpace(notification.TitleTextKey)
                 || !string.IsNullOrWhiteSpace(notification.MessageTextKey)
                 || !string.IsNullOrWhiteSpace(notification.UserDetailText));
@@ -46,7 +53,7 @@ public static class ApplicationNotificationValidator
 
 public static class WorkspaceNotificationFactory
 {
-    public static ApplicationNotification ScanStarted() =>
+    public static ApplicationNotification ScanStarted(string occurrenceKey = "inventory:scanning") =>
         Create(
             "workspace.scan.started",
             ApplicationNotificationSeverity.Information,
@@ -54,12 +61,15 @@ public static class WorkspaceNotificationFactory
             string.Empty,
             string.Empty,
             "inventory",
-            "inventory:scanning",
-            autoDismiss: false);
+            occurrenceKey,
+            autoDismiss: false,
+            recordInHistory: false,
+            isProgress: true);
 
     public static ApplicationNotification ScanCompleted(
         string safeLastScanText,
-        DateTimeOffset scannedAt) =>
+        DateTimeOffset scannedAt,
+        string? occurrenceKey = null) =>
         Create(
             "workspace.scan.completed",
             ApplicationNotificationSeverity.Information,
@@ -67,7 +77,7 @@ public static class WorkspaceNotificationFactory
             string.Empty,
             safeLastScanText,
             "inventory",
-            $"inventory:scan-complete:{scannedAt.UtcTicks}");
+            occurrenceKey ?? $"inventory:scan-complete:{scannedAt.UtcTicks}");
 
     public static ApplicationNotification ScanFailed(string occurrenceKey) =>
         Create(
@@ -77,7 +87,8 @@ public static class WorkspaceNotificationFactory
             "ScanFailed",
             string.Empty,
             "inventory",
-            occurrenceKey);
+            occurrenceKey,
+            autoDismiss: false);
 
     public static ApplicationNotification ExportCompleted(string occurrenceKey) =>
         Create(
@@ -107,7 +118,8 @@ public static class WorkspaceNotificationFactory
             "OperationFailed",
             string.Empty,
             "workspace-operation",
-            occurrenceKey);
+            occurrenceKey,
+            autoDismiss: false);
 
     private static ApplicationNotification Create(
         string code,
@@ -117,7 +129,12 @@ public static class WorkspaceNotificationFactory
         string userDetailText,
         string source,
         string occurrenceKey,
-        bool autoDismiss = true)
+        bool autoDismiss = true,
+        bool recordInHistory = true,
+        bool isProgress = false,
+        bool showNotification = true,
+        string systemId = "",
+        string target = "")
     {
         var notification = new ApplicationNotification(
             code,
@@ -127,7 +144,12 @@ public static class WorkspaceNotificationFactory
             userDetailText,
             source,
             occurrenceKey,
-            autoDismiss);
+            autoDismiss,
+            recordInHistory,
+            isProgress,
+            showNotification,
+            systemId,
+            target);
         if (!ApplicationNotificationValidator.IsValid(notification))
         {
             throw new ArgumentException("The application notification is invalid.");

@@ -336,9 +336,12 @@ public sealed class ApplicationBehaviorTests
         service.PublishError("Error", "Two", "operation", "other");
 
         Assert.Equal(2, service.Notifications.Count);
+        Assert.Equal(2, service.History.Count);
+        Assert.Equal(2, service.History.Single(notification => notification.DeduplicationKey == "same").OccurrenceCount);
         var firstId = service.Notifications[0].Id;
         service.Dismiss(firstId);
         Assert.Single(service.Notifications);
+        Assert.Equal(2, service.History.Count);
         Assert.Equal("Two", service.Notifications[0].Message);
     }
 

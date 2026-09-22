@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:controls="using:WinPool_App.Controls"
     xmlns:local="using:WinPool_App"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Title="WinPool"
@@ -169,38 +170,40 @@
                 CloseButtonClick="LocalRealOperationsWarning_CloseButtonClick"
                 Title="测试版本" />
 
-            <ItemsControl
-                x:Name="GlobalNotificationStack"
+            <StackPanel
+                x:Name="GlobalNotificationHost"
                 Margin="12,0,12,12"
+                MaxWidth="400"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
                 Canvas.ZIndex="100"
-                ItemsSource="{x:Bind NotificationService.Notifications, Mode=OneWay}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Width="380" Spacing="6" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Border
-                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="4">
-                            <InfoBar
-                                Background="Transparent"
-                                BorderThickness="0"
-                                IsClosable="True"
-                                IsOpen="True"
-                                CloseButtonClick="GlobalNotification_CloseButtonClick"
-                                Message="{Binding Message}"
-                                Severity="{Binding Severity, Converter={StaticResource NotificationSeverityConverter}}"
-                                Title="{Binding Title}" />
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                Spacing="6">
+                <Button
+                    x:Name="NotificationOverflowButton"
+                    HorizontalAlignment="Right"
+                    Click="NotificationOverflowButton_Click"
+                    Visibility="Collapsed"
+                    AutomationProperties.Name="More notifications" />
+                <ItemsControl
+                    x:Name="GlobalNotificationStack"
+                    ItemsSource="{x:Bind VisibleNotifications, Mode=OneWay}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="6" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <controls:NotificationCard
+                                DismissRequested="NotificationCard_DismissRequested"
+                                DetailsRequested="NotificationCard_DetailsRequested"
+                                IsChinese="{Binding IsChinese}"
+                                Notification="{Binding Notification}"
+                                PauseRequested="NotificationCard_PauseRequested" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

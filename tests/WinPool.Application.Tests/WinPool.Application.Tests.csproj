@@ -23,4 +23,11 @@
     <ProjectReference Include="..\..\src\WinPool.Domain\WinPool.Domain.csproj" />
   </ItemGroup>
 
+  <!-- UI-free monitor transition logic is source-linked so its session
+       semantics stay directly testable without loading WinUI. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\WinPool.App\Services\MonitorIssueStateTracker.cs"
+             Link="Services\MonitorIssueStateTracker.cs" />
+  </ItemGroup>
+
 </Project>

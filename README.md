@@ -4,7 +4,7 @@
 
 WinPool is a Windows desktop application for viewing storage topology, monitoring devices, and editing simulated storage systems.
 
-The current implementation is **V0.54**. Real storage-structure changes are not enabled.
+The current implementation is **V0.55**. Real storage-structure changes are not enabled.
 
 Manage and Hardware first display the last saved local inventory. On startup, the Agent collects storage first, then full hardware, and reports each result to the App. Both automatic collection and manual refresh show in-window progress, success or failure notifications; failed collection preserves the previous data. Loading history is not reported as a successful collection. Internal formats are document 3 / core SQLite 17 / monitoring SQLite 1 / IPC 11.
 
@@ -23,7 +23,7 @@ Monitoring archives are not automatically deleted. The application does not brow
 
 Simulation output is not proof that Windows can execute a configuration. See the [current limitations and changes](docs/CHANGELOG.md).
 
-The Test and Development pages remain roadmap notices throughout 1.x and are visible only in Developer mode. Their full workspaces are planned for 2.0.
+Test remains a roadmap notice. Development shows a copyable diagnostics directory path and the latest 200 messages from the current App run, only in Developer mode. Messages stay in memory and are cleared when the App exits; the application does not read log contents or maintain a complete operation history. Full testing and development workspaces are planned for 2.0.
 
 ## Requirements and running
 

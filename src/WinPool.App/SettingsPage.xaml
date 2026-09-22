@@ -100,6 +100,7 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
                         <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="220" />
@@ -281,6 +282,13 @@
                                 Text="全部恢复默认" />
                         </StackPanel>
                     </Button>
+                    <TextBlock
+                        x:Name="SettingsAvailabilityText"
+                        Grid.Row="8"
+                        Grid.Column="1"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
                 </Grid>
             </Border>
 

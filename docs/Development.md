@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前阶段结果见 [V0.52 归档](Archive/V0.52/README.md)和[硬件报告执行归档](Archive/20260915-hardware-report/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.54。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前阶段结果见 [V0.52 归档](Archive/V0.52/README.md)和[硬件报告执行归档](Archive/20260915-hardware-report/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.55。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
@@ -80,6 +80,12 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 
+## 通知与上下文帮助
+
+V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presenter 负责本地化，App 负责布局和交互。活动通知与会话 History 分别有界，清空历史不删除活动错误；界面最多展示三张即时卡片，其余通过普通用户可访问的合并入口查看。消息只保存有界文本与标识，不持有控件、异常对象或完整采集文档，不写数据库或新日志文件。进度显式不进入历史，异常恢复须由真实业务状态触发，关闭只改变呈现。
+
+开发页消费现有消息服务并显示 DataRootLayout.DiagnosticsDirectory 的当前实际路径，不解析日志。消息缓存不依赖开发页生命周期或 DeveloperMode；退出 App 自然清空，不补采后台历史。现有 CommandLog 不接入此页，不复制成第二套历史。原生 ToolTip 与显式详情分别承担短说明和可复制长信息；同窗口 ContentDialog 使用小型串行协调，不增加通用任务平台。具体实现和验证状态以本阶段记录为准。
+
 ## 数据与生命周期
 
 标准数据根是 `%LocalAppData%/WinPool`，便携模式使用程序旁可写 `Data`；`storage-location.json` 是定位活动根的启动指针。切换前验证目标，现有租约、单实例和生命周期机制继续保留。
@@ -102,7 +108,7 @@ CSV 仅导出当前活动监控库中的可用记录，不跨归档补齐会话�
 
 `ControlledProcessRunner` 与 `SevenZipArchiveAdapter` 是现有 SQLite 基础设施内的两个小型职责，不恢复旧工具管理项目。7z 默认相对运行目录解析为 `Tools/7zip/7za.exe`，随附资源来自 `assets/ThirdParty/7zip/26.03`，许可证和来源说明一并打包。自定义覆盖只检查绝对路径和文件存在，失败不回退，不执行能力或版本预检；压缩及校验固定使用本次任务开始时取得的路径。产品不提供工具安装、更新或搜索。
 
-V0.54 当前实施代码为核心 SQLite schema 17、监控 SQLite schema 1、IPC 11、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
+V0.55 当前实施代码为核心 SQLite schema 17、监控 SQLite schema 1、IPC 11、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
 
 V0.53 在 `UserPreferences` 中保存默认关闭的 `DeveloperMode`，旧格式缺少字段时按关闭处理，不升级偏好格式。主窗口从偏好重建可用导航；Hardware、Test、Development 同受该门控制，隐藏状态下启动目标、快捷键和记忆页面均回到 Manage。开发者导航顺序以 Hardware 在 Manage 之前开始。
 
@@ -145,7 +151,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 
 有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。监控数据库轮换与 7z 归档阶段已完成并归档，当前没有活动 Plan；未激活 Design 不因此获得执行授权。
+用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。监控数据库轮换与 7z 归档阶段、V0.55 通知与轻量事件记录阶段均已收口并归档，当前无活动 Plan；其他未激活 Design 不因此获得执行授权。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 

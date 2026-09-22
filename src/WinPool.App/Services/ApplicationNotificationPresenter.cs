@@ -20,34 +20,32 @@ public sealed class ApplicationNotificationPresenter(
 
         var title = Localize(notification.TitleTextKey);
         var message = Join(Localize(notification.MessageTextKey), notification.UserDetailText);
-        switch (notification.Severity)
-        {
-            case ApplicationNotificationSeverity.Information:
-                notifications.PublishInfo(
-                    title,
-                    message,
-                    notification.Source,
-                    notification.OccurrenceKey,
-                    notification.AutoDismiss);
-                break;
-            case ApplicationNotificationSeverity.Warning:
-                notifications.PublishWarning(
-                    title,
-                    message,
-                    notification.Source,
-                    notification.OccurrenceKey);
-                break;
-            case ApplicationNotificationSeverity.Error:
-                notifications.PublishError(
-                    title,
-                    message,
-                    notification.Source,
-                    notification.OccurrenceKey);
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(notification));
-        }
+        notifications.Publish(
+            ToGlobalSeverity(notification.Severity),
+            title,
+            message,
+            notification.Source,
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = notification.OccurrenceKey,
+                AutoDismiss = notification.AutoDismiss,
+                RecordInHistory = notification.RecordInHistory,
+                IsProgress = notification.IsProgress,
+                ShowNotification = notification.ShowNotification,
+                Code = notification.Code,
+                SystemId = notification.SystemId,
+                Target = notification.Target,
+                Detail = notification.UserDetailText
+            });
     }
+
+    private static GlobalNotificationSeverity ToGlobalSeverity(ApplicationNotificationSeverity severity) => severity switch
+    {
+        ApplicationNotificationSeverity.Information => GlobalNotificationSeverity.Info,
+        ApplicationNotificationSeverity.Warning => GlobalNotificationSeverity.Warning,
+        ApplicationNotificationSeverity.Error => GlobalNotificationSeverity.Error,
+        _ => throw new ArgumentOutOfRangeException(nameof(severity))
+    };
 
     private string Localize(string key) => string.IsNullOrWhiteSpace(key)
         ? string.Empty

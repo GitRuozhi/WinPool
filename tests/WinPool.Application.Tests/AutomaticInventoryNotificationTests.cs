@@ -17,9 +17,14 @@ public sealed class AutomaticInventoryNotificationTests
         Assert.Equal(WorkspaceNotificationFactory.ScanCompleted("", now).TitleTextKey, success.TitleTextKey);
         Assert.Equal("ScanFailed", failure.TitleTextKey);
         Assert.False(started.AutoDismiss);
+        Assert.True(started.IsProgress);
+        Assert.False(started.RecordInHistory);
         Assert.True(success.AutoDismiss);
         Assert.Equal(ApplicationNotificationSeverity.Error, failure.Severity);
         Assert.Equal(AutomaticInventoryNotification.ProgressKey(purpose), started.OccurrenceKey);
+        Assert.Equal(AutomaticInventoryNotification.CompletedKey(purpose), success.OccurrenceKey);
+        Assert.Equal(AutomaticInventoryNotification.FailedKey(purpose), failure.OccurrenceKey);
+        Assert.Equal("test.failure", failure.Code);
         Assert.NotEqual(WorkspaceNotificationFactory.ScanStarted().OccurrenceKey, started.OccurrenceKey);
         foreach (var notification in new[] { started, success, failure })
         {
@@ -39,7 +44,10 @@ public sealed class AutomaticInventoryNotificationTests
         Assert.Null(AutomaticInventoryNotification.FromEvent(new AgentInventoryStartedEvent(purpose, now)));
         Assert.Null(AutomaticInventoryNotification.FromEvent(new AgentInventoryUpdatedEvent(purpose, null!, now)));
         Assert.Null(AutomaticInventoryNotification.FromEvent(new AgentInventoryFailedEvent(purpose, "test.failure", now)));
+        Assert.Null(AutomaticInventoryNotification.FromEvent(new AgentStateReseedEvent(null!, "test.reseed", now)));
         Assert.NotEqual(AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Storage),
             AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Hardware));
+        Assert.NotEqual(AutomaticInventoryNotification.ProgressKey(purpose),
+            AutomaticInventoryNotification.InterruptedKey(purpose));
     }
 }

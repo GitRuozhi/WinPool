@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Windows.ApplicationModel.DataTransfer;
+using WinPool.App.Services;
 
 namespace WinPool_App.Controls;
 
@@ -56,7 +57,7 @@ public static class PropertyTableContextMenu
         XamlRoot xamlRoot,
         PropertyTableContextMenuRequest request)
     {
-        await new ContentDialog
+        var dialog = new ContentDialog
         {
             XamlRoot = xamlRoot,
             Title = $"{request.GroupTitle} — {request.RawFieldsText}",
@@ -72,6 +73,7 @@ public static class PropertyTableContextMenu
                     IsTextSelectionEnabled = true
                 }
             }
-        }.ShowAsync();
+        };
+        await DialogCoordinator.ShowAsync(dialog, xamlRoot);
     }
 }

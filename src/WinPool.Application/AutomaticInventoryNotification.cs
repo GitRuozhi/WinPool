@@ -5,6 +5,14 @@ public static class AutomaticInventoryNotification
 {
     public static string ProgressKey(CollectionPurpose purpose) => $"inventory:automatic:{purpose}:scanning";
 
+    public static string CompletedKey(CollectionPurpose purpose) => $"inventory:automatic:{purpose}:completed";
+
+    public static string FailedKey(CollectionPurpose purpose) => $"inventory:automatic:{purpose}:failed";
+
+    /// <summary>Capture ended with an event gap, so its result remains unknown.</summary>
+    public static string InterruptedKey(CollectionPurpose purpose) =>
+        $"inventory:automatic:{purpose}:outcome-unknown";
+
     public static ApplicationNotification? FromEvent(AgentEvent report)
     {
         var purpose = report switch
@@ -17,16 +25,18 @@ public static class AutomaticInventoryNotification
         if (purpose is null) return null; // Manual refresh is notified by its request/response path, including transport failure.
         var notification = report switch
         {
-            AgentInventoryStartedEvent => WorkspaceNotificationFactory.ScanStarted(),
-            AgentInventoryUpdatedEvent => WorkspaceNotificationFactory.ScanCompleted(string.Empty, report.OccurredAtUtc),
-            _ => WorkspaceNotificationFactory.ScanFailed($"inventory:automatic:{purpose}:failed:{report.OccurredAtUtc.UtcTicks}")
+            AgentInventoryStartedEvent => WorkspaceNotificationFactory.ScanStarted(ProgressKey(purpose.Value)),
+            AgentInventoryUpdatedEvent => WorkspaceNotificationFactory.ScanCompleted(
+                string.Empty,
+                report.OccurredAtUtc,
+                CompletedKey(purpose.Value)),
+            _ => WorkspaceNotificationFactory.ScanFailed(FailedKey(purpose.Value))
         };
         return notification with
         {
             MessageTextKey = purpose == CollectionPurpose.Hardware ? "InventoryAutomaticHardware" : "InventoryAutomaticStorage",
             TitleTextKey = report is AgentInventoryFailedEvent ? "ScanFailed" : notification.TitleTextKey,
-            OccurrenceKey = report is AgentInventoryStartedEvent ? ProgressKey(purpose.Value)
-                : $"inventory:automatic:{purpose}:{notification.Code}:{report.OccurredAtUtc.UtcTicks}"
+            Code = report is AgentInventoryFailedEvent failure ? failure.Code : notification.Code
         };
     }
 }

@@ -87,11 +87,17 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <controls:FixedWrapPanel
-                ItemWidth="176"
-                ItemHeight="44"
-                ItemsPerColumn="2"
-                Spacing="6">
+            <StackPanel Spacing="6">
+                <TextBlock
+                    x:Name="StructureAvailabilityText"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed" />
+                <controls:FixedWrapPanel
+                    ItemWidth="176"
+                    ItemHeight="44"
+                    ItemsPerColumn="2"
+                    Spacing="6">
                 <Button
                     x:Name="UndoButton"
                     Style="{StaticResource StructureChromeButtonStyle}"
@@ -322,7 +328,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
-            </controls:FixedWrapPanel>
+                </controls:FixedWrapPanel>
+            </StackPanel>
         </Border>
         <Grid
             Grid.Column="1"

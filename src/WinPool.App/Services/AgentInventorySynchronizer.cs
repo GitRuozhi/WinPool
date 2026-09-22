@@ -8,10 +8,17 @@ namespace WinPool.App.Services;
 
 internal sealed class AgentInventorySynchronizer : IDisposable
 {
+    private const string ConnectionFaultKey = "inventory.events.disconnected";
+    private const string ConnectionRecoveredKey = "inventory.events.reconnected";
+    private const string ReloadFaultKey = "inventory.report.reload_failed";
+    private const string ReloadRecoveredKey = "inventory.report.reload_recovered";
+
     private readonly CancellationTokenSource cancellation = new();
     private readonly LocalInventoryObserver? observer;
     private readonly DispatcherQueue dispatcher;
     private readonly WorkspaceViewModel viewModel;
+    private bool connectionFaultActive;
+    private bool reloadFaultActive;
 
     public AgentInventorySynchronizer(WorkspaceViewModel viewModel, IAgentConnection? connection, DispatcherQueue dispatcher)
     {
@@ -54,7 +61,11 @@ internal sealed class AgentInventorySynchronizer : IDisposable
         {
             try
             {
-                if (!cancellation.IsCancellationRequested) viewModel.ApplyLocalInventory(document);
+                if (!cancellation.IsCancellationRequested)
+                {
+                    viewModel.ApplyLocalInventory(document);
+                    ReportReloadRecoveredAfterApplyCore();
+                }
                 completion.TrySetResult();
             }
             catch (Exception exception) { completion.TrySetException(exception); }
@@ -68,12 +79,17 @@ internal sealed class AgentInventorySynchronizer : IDisposable
         if (report is AgentInventoryFailedEvent failedReport) LogFailure($"{failedReport.Code}.{failedReport.Purpose}", null);
         if (report is AgentStateReseedEvent)
         {
-            if (viewModel.NotificationService.Notifications.Any(n =>
-                n.DeduplicationKey == AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Storage)
-                || n.DeduplicationKey == AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Hardware)))
-                ReportFailureCore("inventory.events.reconnected", null);
+            // A reseed proves that the event transport is reachable, but its
+            // following cache reload is not a new capture and must never be
+            // presented as inventory success.
+            ClearAutomaticProgressWithUnknownOutcome();
+            ReportTransportRecoveredCore();
             return;
         }
+
+        // Any lifecycle event is also a real transport recovery. It deliberately
+        // says nothing about the capture result; success remains tied to Updated.
+        ReportTransportRecoveredCore();
         var notification = AutomaticInventoryNotification.FromEvent(report);
         if (notification is null) return;
         var purpose = report switch
@@ -84,6 +100,11 @@ internal sealed class AgentInventorySynchronizer : IDisposable
             _ => throw new InvalidOperationException("Unexpected inventory event.")
         };
         viewModel.NotificationService.DismissByKey(AutomaticInventoryNotification.ProgressKey(purpose));
+        if (report is AgentInventoryUpdatedEvent)
+        {
+            viewModel.NotificationService.ResolveByKey(AutomaticInventoryNotification.FailedKey(purpose));
+            viewModel.NotificationService.ResolveByKey(AutomaticInventoryNotification.InterruptedKey(purpose));
+        }
         new ApplicationNotificationPresenter(viewModel.NotificationService, viewModel.Localization).Present(notification);
     });
 
@@ -92,13 +113,111 @@ internal sealed class AgentInventorySynchronizer : IDisposable
     private void ReportFailureCore(string code, Exception? exception)
     {
         if (cancellation.IsCancellationRequested) return;
-        viewModel.NotificationService.DismissByKey(AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Storage));
-        viewModel.NotificationService.DismissByKey(AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Hardware));
+        ClearAutomaticProgressWithUnknownOutcome();
         LogFailure(code, exception);
+        var isConnectionFault = IsConnectionFault(code);
+        if (isConnectionFault)
+        {
+            connectionFaultActive = true;
+        }
+        if (code.Equals(ReloadFaultKey, StringComparison.Ordinal))
+        {
+            reloadFaultActive = true;
+        }
         viewModel.NotificationService.PublishWarning(
             viewModel.Localization.IsChinese ? "本机数据刷新未完成，保留上次数据" : "Local inventory refresh incomplete; previous data retained",
-            code, "inventory", code);
+            code,
+            "inventory",
+            isConnectionFault ? ConnectionFaultKey : code,
+            autoDismiss: false,
+            options: new GlobalNotificationOptions
+            {
+                Code = code,
+                Detail = code
+            });
     }
+
+    private void ReportTransportRecoveredCore()
+    {
+        if (!connectionFaultActive)
+        {
+            return;
+        }
+
+        connectionFaultActive = false;
+        viewModel.NotificationService.ResolveByKey(ConnectionFaultKey);
+        viewModel.NotificationService.PublishInfo(
+            viewModel.Localization.IsChinese
+                ? "与本机 Agent 的连接已恢复；未将缓存重读视为新的采集成功"
+                : "Connection to the local Agent was restored; cached data was not treated as a new collection success",
+            string.Empty,
+            "inventory",
+            ConnectionRecoveredKey,
+            autoDismiss: true,
+            options: new GlobalNotificationOptions { Code = ConnectionRecoveredKey });
+    }
+
+    private void ClearAutomaticProgressWithUnknownOutcome()
+    {
+        foreach (var purpose in new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware })
+        {
+            var progressKey = AutomaticInventoryNotification.ProgressKey(purpose);
+            if (!viewModel.NotificationService.Notifications.Any(notification =>
+                    notification.DeduplicationKey.Equals(progressKey, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            viewModel.NotificationService.DismissByKey(progressKey);
+            viewModel.NotificationService.PublishWarning(
+                viewModel.Localization.IsChinese
+                    ? $"自动{PurposeText(purpose, true)}采集的结果未知，已保留上一次数据"
+                    : $"Automatic {PurposeText(purpose, false)} collection has an unknown outcome; previous data was retained",
+                string.Empty,
+                "inventory",
+                AutomaticInventoryNotification.InterruptedKey(purpose),
+                autoDismiss: false,
+                options: new GlobalNotificationOptions
+                {
+                    Code = "inventory.automatic.outcome_unknown",
+                    Detail = progressKey
+                });
+        }
+    }
+
+    private static bool IsConnectionFault(string code) =>
+        code.Equals(ConnectionFaultKey, StringComparison.Ordinal);
+
+    private void ReportReloadRecoveredAfterApplyCore()
+    {
+        if (!reloadFaultActive)
+        {
+            return;
+        }
+
+        reloadFaultActive = false;
+        viewModel.NotificationService.ResolveByKey(ReloadFaultKey);
+        viewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Info,
+            viewModel.Localization.IsChinese ? "本机数据重读已恢复" : "Local inventory reload recovered",
+            viewModel.Localization.IsChinese
+                ? "已成功应用一份本机数据；这不是新的采集成功通知。"
+                : "A local inventory document was applied; this is not a new collection-success notification.",
+            "inventory",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = ReloadRecoveredKey,
+                ShowNotification = false,
+                RecordInHistory = true,
+                Code = ReloadRecoveredKey
+            });
+    }
+
+    private static string PurposeText(CollectionPurpose purpose, bool chinese) => purpose switch
+    {
+        CollectionPurpose.Hardware => chinese ? "硬件" : "hardware",
+        _ => chinese ? "存储" : "storage"
+    };
 
     private static void LogFailure(string code, Exception? exception)
     {

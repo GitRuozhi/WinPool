@@ -75,7 +75,13 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <controls:FixedWrapPanel ItemWidth="176" ItemHeight="44" Spacing="6">
+            <StackPanel Spacing="6">
+                <TextBlock
+                    x:Name="PartitionAvailabilityText"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed" />
+                <controls:FixedWrapPanel ItemWidth="176" ItemHeight="44" Spacing="6">
                 <Button
                     x:Name="OnlineButton"
                     Style="{StaticResource PartitionChromeButtonStyle}"
@@ -235,7 +241,8 @@
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
-            </controls:FixedWrapPanel>
+                </controls:FixedWrapPanel>
+            </StackPanel>
         </Border>
         <ScrollViewer
             Grid.Column="1"

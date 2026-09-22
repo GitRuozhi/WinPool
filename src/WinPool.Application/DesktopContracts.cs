@@ -144,26 +144,104 @@ public sealed record GlobalNotification(
     string Source,
     DateTimeOffset CreatedAt,
     string DeduplicationKey,
-    bool AutoDismiss = true);
+    bool AutoDismiss = true,
+    string Code = "",
+    string SystemId = "",
+    string Target = "",
+    string Detail = "",
+    int OccurrenceCount = 1,
+    DateTimeOffset LastOccurredAt = default,
+    bool IsProgress = false,
+    bool IsOverflowSummary = false,
+    bool IsResolved = false);
+
+/// <summary>
+/// UI-neutral notification delivery options. All text is normalized and bounded
+/// by <see cref="IGlobalNotificationService"/> before it is retained.
+/// </summary>
+public sealed record GlobalNotificationOptions
+{
+    public string? OccurrenceKey { get; init; }
+
+    /// <summary>Null selects the severity default (Error is sticky).</summary>
+    public bool? AutoDismiss { get; init; }
+
+    /// <summary>False records feedback without showing a transient card.</summary>
+    public bool ShowNotification { get; init; } = true;
+
+    /// <summary>False is required for high-frequency progress notifications.</summary>
+    public bool RecordInHistory { get; init; } = true;
+
+    /// <summary>Progress is never retained in history and is normally removed by key.</summary>
+    public bool IsProgress { get; init; }
+
+    public string Code { get; init; } = "";
+
+    public string SystemId { get; init; } = "";
+
+    public string Target { get; init; } = "";
+
+    public string Detail { get; init; } = "";
+}
 
 public interface IGlobalNotificationService
 {
     ReadOnlyObservableCollection<GlobalNotification> Notifications { get; }
+
+    /// <summary>Current-session, in-memory message history, bounded to 200 entries.</summary>
+    ReadOnlyObservableCollection<GlobalNotification> History { get; }
+
+    /// <summary>Active notifications not rendered in the first three cards.</summary>
+    int OverflowedNotificationCount { get; }
+
+    bool HasNotificationOverflow { get; }
+
+    void Publish(
+        GlobalNotificationSeverity severity,
+        string title,
+        string message,
+        string source,
+        GlobalNotificationOptions? options = null);
 
     void PublishInfo(
         string title,
         string message,
         string source,
         string? occurrenceKey = null,
-        bool autoDismiss = true);
+        bool autoDismiss = true,
+        GlobalNotificationOptions? options = null);
 
-    void PublishWarning(string title, string message, string source, string? occurrenceKey = null);
+    void PublishWarning(
+        string title,
+        string message,
+        string source,
+        string? occurrenceKey = null,
+        bool autoDismiss = true,
+        GlobalNotificationOptions? options = null);
 
-    void PublishError(string title, string message, string source, string? occurrenceKey = null);
+    void PublishError(
+        string title,
+        string message,
+        string source,
+        string? occurrenceKey = null,
+        bool autoDismiss = false,
+        GlobalNotificationOptions? options = null);
 
     void Dismiss(string id);
 
     void DismissByKey(string deduplicationKey);
+
+    /// <summary>Removes an active condition only after the caller has observed a real recovery.</summary>
+    void ResolveByKey(string deduplicationKey);
+
+    /// <summary>Removes only the session history. Active notifications remain available.</summary>
+    void ClearHistory();
+
+    /// <summary>Removes expired short notifications using the service clock.</summary>
+    void DismissExpired();
+
+    /// <summary>Pauses or resumes an individual short-notification lifetime.</summary>
+    void SetPaused(string id, bool isPaused);
 }
 
 public enum ElevationRestartStatus

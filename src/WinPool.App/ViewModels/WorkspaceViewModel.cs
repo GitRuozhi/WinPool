@@ -39,7 +39,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private ManageObjectTarget? _selectedTopologyTarget;
     private readonly HashSet<string> _shownFindings = new(StringComparer.Ordinal);
     public const string AddStorageSystemKey = "action:add-storage-system";
-    private const string ScanningNotificationKey = "inventory:scanning";
     private const string WorkspacePrepareNotificationKey = "startup:workspace-prepare";
 
     public WorkspaceViewModel(
@@ -112,6 +111,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public IStorageSystemImportExportService ImportExportService { get; }
 
     public IGlobalNotificationService NotificationService => _notificationService;
+
+    /// <summary>Display-only diagnostics location; reading or creating it is not required.</summary>
+    public string DiagnosticsDirectoryPath => DataRootLayout.DiagnosticsDirectory(StorageDataLocations.CurrentRoot);
+
+    public bool DiagnosticsDirectoryExists => Directory.Exists(DiagnosticsDirectoryPath);
+
+    public void RefreshDiagnosticsDirectoryState()
+    {
+        OnPropertyChanged(nameof(DiagnosticsDirectoryPath));
+        OnPropertyChanged(nameof(DiagnosticsDirectoryExists));
+    }
 
     public void PresentNotification(WinPool.Application.ApplicationNotification notification) =>
         new ApplicationNotificationPresenter(_notificationService, Localization).Present(notification);
@@ -403,12 +413,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private void ReplacePersistentInfo(string title, string occurrenceKey)
     {
         _notificationService.DismissByKey(occurrenceKey);
-        _notificationService.PublishInfo(
+        _notificationService.Publish(
+            GlobalNotificationSeverity.Info,
             title,
             string.Empty,
             "startup",
-            occurrenceKey,
-            autoDismiss: false);
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = occurrenceKey,
+                AutoDismiss = false,
+                RecordInHistory = false,
+                IsProgress = true
+            });
     }
 
     public async Task InitializeAsync()
@@ -1121,8 +1137,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         IsScanning = true;
         ScanError = string.Empty;
         StatusMessage = Localization["Scanning"];
-        _notificationService.DismissByKey(ScanningNotificationKey);
-        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted());
+        var progressKey = ManualProgressKey(purpose);
+        _notificationService.DismissByKey(progressKey);
+        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted(progressKey));
         try
         {
             var localDocument = purpose == CollectionPurpose.Hardware
@@ -1143,10 +1160,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             }
             ApplyLocalInventory(localDocument);
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
-            _notificationService.DismissByKey(ScanningNotificationKey);
+            _notificationService.DismissByKey(progressKey);
+            _notificationService.ResolveByKey(ManualFailedKey(purpose));
             PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanCompleted(
                 StatusMessage,
-                snapshot.ScannedAt));
+                snapshot.ScannedAt,
+                ManualCompletedKey(purpose)));
             foreach (var warning in snapshot.Warnings)
             {
                 _notificationService.PublishWarning(
@@ -1159,13 +1178,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             BuildDetails();
             RebuildComparisonColumns();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _notificationService.DismissByKey(progressKey);
+            StatusMessage = string.Empty;
+        }
         catch (Exception ex)
         {
             ScanError = $"{Localization["ScanFailed"]} {ex.Message}";
             StatusMessage = ScanError;
-            _notificationService.DismissByKey(ScanningNotificationKey);
+            _notificationService.DismissByKey(progressKey);
             PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanFailed(
-                $"inventory-error:{DateTimeOffset.UtcNow.Ticks}"));
+                ManualFailedKey(purpose)));
         }
         finally
         {
@@ -1173,6 +1197,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             _scanGate.Release();
         }
     }
+
+    private static string ManualProgressKey(CollectionPurpose purpose) => $"inventory:manual:{purpose}:scanning";
+
+    private static string ManualCompletedKey(CollectionPurpose purpose) => $"inventory:manual:{purpose}:completed";
+
+    private static string ManualFailedKey(CollectionPurpose purpose) => $"inventory:manual:{purpose}:failed";
 
     public void SelectTopologyUnit(StorageUnitRef unit) =>
         SelectTopologyUnit(unit, ActiveSnapshot);

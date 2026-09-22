@@ -128,6 +128,10 @@ public sealed partial class SettingsPage : Page
         DataLocationOptions.SelectedIndex = (int)currentMode;
         _updatingDataLocation = false;
         DataLocationOptions.IsEnabled = false;
+        SetSettingsAvailability(
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "正在等待迁移确认；数据位置暂不可更改。"
+                : "Waiting for migration confirmation; the data location cannot be changed yet.");
         try
         {
             await SwitchDataLocationAsync(requestedMode);
@@ -146,6 +150,7 @@ public sealed partial class SettingsPage : Page
         finally
         {
             DataLocationOptions.IsEnabled = true;
+            SetSettingsAvailability(null);
         }
     }
 
@@ -164,7 +169,7 @@ public sealed partial class SettingsPage : Page
             CloseButtonText = zh ? "取消" : "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await warning.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogCoordinator.ShowAsync(warning) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -227,7 +232,7 @@ public sealed partial class SettingsPage : Page
             CloseButtonText = zh ? "取消" : "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogCoordinator.ShowAsync(confirmation) != ContentDialogResult.Primary)
         {
             agentExclusion.Release();
             await RestartAgentAfterAbortedSwitchAsync();
@@ -250,13 +255,22 @@ public sealed partial class SettingsPage : Page
         if (!DataLocationSwitchRuntime.StartReplacementApplication())
         {
             await RestartAgentAfterAbortedSwitchAsync();
-            ViewModel.NotificationService.PublishError(
+            ViewModel.NotificationService.Publish(
+                GlobalNotificationSeverity.Error,
                 zh ? "重启 WinPool 失败" : "WinPool restart failed",
                 zh
                     ? "数据位置已经安全提交，Agent 已按新位置恢复。请手动重启 WinPool，使主界面读取新位置。"
                     : "The data location was committed safely and the Agent resumed on it. Restart WinPool manually so the UI reads the new location.",
                 "settings",
-                $"datalocation-restart:{DateTimeOffset.UtcNow.Ticks}");
+                new GlobalNotificationOptions
+                {
+                    OccurrenceKey = "settings.datalocation.restart",
+                    AutoDismiss = false,
+                    Code = "settings.datalocation.restart",
+                    SystemId = SettingsSystemId,
+                    Target = SettingsTarget(zh),
+                    Detail = "replacement-application-start-failed"
+                });
             return;
         }
 
@@ -289,33 +303,65 @@ public sealed partial class SettingsPage : Page
 
     private void PublishDataLocationFailure(bool zh, string detail)
     {
-        ViewModel.NotificationService.PublishError(
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Error,
             zh ? "数据位置切换失败" : "Data location switch failed",
             zh
-                ? $"未提交新的数据位置；请重试。诊断：{detail}"
-                : $"The new data location was not committed; retry the operation. Diagnostic: {detail}",
+                ? "未提交新的数据位置；请检查 Agent 与权限后重试。"
+                : "The new data location was not committed. Check the Agent and permissions, then try again.",
             "settings",
-            $"datalocation:{DateTimeOffset.UtcNow.Ticks}");
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = "settings.datalocation.failure",
+                AutoDismiss = false,
+                Code = "settings.datalocation.failure",
+                SystemId = SettingsSystemId,
+                Target = SettingsTarget(zh),
+                Detail = detail
+            });
     }
 
     private void PublishPreferenceFailure(Exception exception)
     {
         var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        ViewModel.NotificationService.PublishError(
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Error,
             zh ? "设置保存失败" : "Settings save failed",
-            exception.Message,
+            zh
+                ? "设置未保存。请检查权限或数据位置后重试。"
+                : "The setting was not saved. Check permissions or the data location, then try again.",
             "settings",
-            $"preference:{DateTimeOffset.UtcNow.Ticks}");
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = $"settings.preference.{exception.GetType().Name}",
+                AutoDismiss = false,
+                Code = "settings.preference.failure",
+                SystemId = SettingsSystemId,
+                Target = SettingsTarget(zh),
+                Detail = $"{exception.GetType().Name}: {exception.Message}"
+            });
     }
 
-    private void PublishPathOpenFailure(string path)
+    private void PublishPathOpenFailure(string path, Exception? exception = null)
     {
         var l = ViewModel.Localization;
-        ViewModel.NotificationService.PublishError(
+        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Error,
             l["OpenPathFailed"],
             string.Format(l["OpenPathFailedDescription"], path),
             "settings",
-            $"open-path:{DateTimeOffset.UtcNow.Ticks}");
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = "settings.open-path.failure",
+                AutoDismiss = false,
+                Code = "settings.open-path.failure",
+                SystemId = SettingsSystemId,
+                Target = SettingsTarget(zh),
+                Detail = exception is null
+                    ? path
+                    : $"{exception.GetType().Name}: {exception.Message}{Environment.NewLine}{path}"
+            });
     }
 
     private void OpenExistingDirectory(string directoryPath)
@@ -340,7 +386,7 @@ public sealed partial class SettingsPage : Page
                 or System.ComponentModel.Win32Exception
                 or UnauthorizedAccessException)
         {
-            PublishPathOpenFailure(directoryPath);
+            PublishPathOpenFailure(directoryPath, exception);
         }
     }
 
@@ -493,6 +539,7 @@ public sealed partial class SettingsPage : Page
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
+            e.Handled = true;
             CommitPartitionGapAsync();
         }
     }
@@ -625,6 +672,10 @@ public sealed partial class SettingsPage : Page
 
         _savingSevenZipOptions = true;
         SevenZipOptions.IsEnabled = false;
+        SetSettingsAvailability(
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "正在保存 7-Zip 路径；选择暂不可更改。"
+                : "Saving the 7-Zip path; the selection cannot be changed yet.");
         try
         {
             var normalized = candidate?.Trim();
@@ -653,6 +704,7 @@ public sealed partial class SettingsPage : Page
         {
             _savingSevenZipOptions = false;
             SevenZipOptions.IsEnabled = true;
+            SetSettingsAvailability(null);
             SyncSevenZipOptions();
         }
     }
@@ -670,11 +722,16 @@ public sealed partial class SettingsPage : Page
         SetSevenZipOptionSelection(
             string.IsNullOrWhiteSpace(ViewModel.CurrentAgentPreferences.SevenZipExecutablePath) ? 0 : 1);
         var effectivePath = EffectiveSevenZipPath();
-        ToolTipService.SetToolTip(
+        ContextHelp.Set(
             SevenZipOptions,
             $"{ViewModel.Localization["SevenZipPathHint"]}\n{effectivePath}");
         SevenZipOptions.SetValue(AutomationProperties.NameProperty, ViewModel.Localization["SevenZip"]);
         SevenZipPath.Text = effectivePath;
+        ContextHelp.Set(OpenSevenZipLocationButton,
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "打开当前 7-Zip 可执行文件所在文件夹。"
+                : "Open the folder that contains the current 7-Zip executable.");
+        ContextHelp.Set(SevenZipPath, effectivePath);
     }
 
     private void SetSevenZipOptionSelection(int index)
@@ -759,7 +816,7 @@ public sealed partial class SettingsPage : Page
             CloseButtonText = l["Cancel"],
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogCoordinator.ShowAsync(dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -777,7 +834,7 @@ public sealed partial class SettingsPage : Page
                     or UnauthorizedAccessException
                     or InvalidOperationException)
             {
-                await ShowMessageDialogAsync(exception.Message);
+                PublishPreferenceFailure(exception);
                 return;
             }
 
@@ -790,13 +847,23 @@ public sealed partial class SettingsPage : Page
 
             UpdateText();
             RefreshPreferenceControls();
-            ViewModel.NotificationService.PublishInfo(
+            var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+            var resetMessage = backgroundResetFailed
+                ? l["ResetAllBackgroundFailed"]
+                : l["ResetAllDone"];
+            ViewModel.NotificationService.Publish(
+                GlobalNotificationSeverity.Info,
                 l["ResetAllTitle"],
-                backgroundResetFailed
-                    ? l["ResetAllBackgroundFailed"]
-                    : l["ResetAllDone"],
+                $"{SettingsTarget(zh)}{Environment.NewLine}{resetMessage}",
                 "settings",
-                "settings-reset-all");
+                new GlobalNotificationOptions
+                {
+                    OccurrenceKey = "settings.reset-all",
+                    Code = "settings.reset-all",
+                    SystemId = SettingsSystemId,
+                    Target = SettingsTarget(zh),
+                    Detail = resetMessage
+                });
         }
         finally
         {
@@ -835,7 +902,7 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private async void CommunityButton_Click(object sender, RoutedEventArgs e)
+    private void CommunityButton_Click(object sender, RoutedEventArgs e)
     {
         const string groupUrl =
             "https://qm.qq.com/cgi-bin/qm/qr?k=iw0LxnFaHE8JdUr5z937pFuagFxOtFOo&jump_from=webapi&authKey=JvkcK/IIaFg5e1ymzhP41yxcAiTVURjvhrNtDziZZSGj3ZD2byZhqX2lj48L9jkT";
@@ -846,10 +913,12 @@ public sealed partial class SettingsPage : Page
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
             or InvalidOperationException)
         {
-            await ShowMessageDialogAsync(
+            PublishExternalLinkFailure(
                 ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
-                    ? $"无法打开 QQ 群链接。群号：732019606\n{exception.Message}"
-                    : $"Could not open the QQ group link. Group: 732019606\n{exception.Message}");
+                    ? "无法打开 QQ 群链接。群号：732019606"
+                    : "Could not open the QQ group link. Group: 732019606",
+                exception,
+                "settings.community-link.failure");
         }
     }
 
@@ -875,7 +944,7 @@ public sealed partial class SettingsPage : Page
             _updatingStartup = true;
             StartupAgentSwitch.IsOn = ViewModel.CurrentAgentPreferences.StartAgentAtLogin;
             _updatingStartup = false;
-            await ShowMessageDialogAsync(exception.Message);
+            PublishPreferenceFailure(exception);
         }
     }
 
@@ -932,9 +1001,11 @@ public sealed partial class SettingsPage : Page
         _updatingMode = true;
         SettingsExecutionModeSwitch.IsEnabled = true;
         SettingsExecutionModeSwitch.IsOn = ViewModel.IsRealMode;
-        ToolTipService.SetToolTip(
+        ContextHelp.Set(
             SettingsExecutionModeSwitch,
-            ViewModel.CanUseRealMode ? ViewModel.Localization["ExecutionMode"] : ViewModel.Localization["AdminRequired"]);
+            ViewModel.CanUseRealMode
+                ? ViewModel.Localization["ExecutionMode"]
+                : ViewModel.Localization["AdminRequired"]);
         SettingsExecutionModeSwitch.SetValue(
             AutomationProperties.NameProperty,
             ViewModel.Localization["LocalRealOperations"]);
@@ -951,10 +1022,45 @@ public sealed partial class SettingsPage : Page
         DeveloperModeSwitch.SetValue(
             AutomationProperties.NameProperty,
             l["DeveloperMode"]);
-        ToolTipService.SetToolTip(DeveloperModeSwitch, l["DeveloperModeDescription"]);
+        ContextHelp.Set(ThemeOptions,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "选择系统、浅色或深色主题。"
+                : "Choose the system, light, or dark theme.");
+        ContextHelp.Set(AccentOptions,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "选择应用强调色。"
+                : "Choose the app accent color.");
+        ContextHelp.Set(LanguageOptions,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "立即切换界面语言。"
+                : "Switch the interface language immediately.");
+        ContextHelp.Set(DeveloperModeSwitch, l["DeveloperModeDescription"]);
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
         PartitionGapTitle.Text = l["PartitionGapThreshold"];
+        ContextHelp.Set(WelcomeButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "打开欢迎内容。"
+                : "Open the welcome content.");
+        ContextHelp.Set(StartupAgentSwitch,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "控制登录时是否启动 WinPool Agent。"
+                : "Control whether the WinPool Agent starts at sign-in.");
+        ContextHelp.Set(MsrSwitch,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "仅影响模拟磁盘初始化时是否创建 Microsoft 保留分区。"
+                : "Only affects whether simulated disk initialization creates a Microsoft Reserved partition.");
+        ContextHelp.Set(PartitionGapBox,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "以 MiB 输入隐藏小分区缝隙的阈值；按 Enter 保存。"
+                : "Enter the threshold in MiB for hiding small partition gaps; press Enter to save.");
+        ContextHelp.Set(DataLocationOptions,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "迁移 WinPool 数据位置；会停止 Agent 和后台监控，并在校验后重启。"
+                : "Migrate the WinPool data location; it stops the Agent and background monitoring, then restarts after verification.");
+        ContextHelp.Set(OpenDataLocationButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn ? "打开当前 WinPool 数据位置。" : "Open the current WinPool data location.");
+        ContextHelp.Set(DataLocationPath, StorageDataLocations.CurrentRoot);
         SevenZipTitle.Text = l["SevenZip"];
         OpenSevenZipLocationButtonText.Text = l["OpenPath"];
         OpenSevenZipLocationButton.SetValue(AutomationProperties.NameProperty, l["OpenPath"]);
@@ -962,6 +1068,10 @@ public sealed partial class SettingsPage : Page
         SyncSevenZipOptions();
         ResetAllTitle.Text = l["ResetAllTitle"];
         ResetAllButtonText.Text = l["ResetAllButton"];
+        ContextHelp.Set(ResetAllButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn
+                ? "恢复 WinPool 设置默认值；请先阅读确认内容。"
+                : "Restore WinPool settings to defaults; review the confirmation first.");
         WelcomeTitle.Text = l["Welcome"];
         WelcomeButtonText.Text = l["OpenWelcome"];
         StartupAgentTitle.Text = l["Startup"];
@@ -988,6 +1098,12 @@ public sealed partial class SettingsPage : Page
         WebsiteButtonText.Text = l["VisitWebsite"];
         UpdateButtonText.Text = l["ViewUpdates"];
         FeedbackButtonText.Text = l["SendFeedback"];
+        ContextHelp.Set(WebsiteButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn ? "在浏览器中打开官网。" : "Open the website in a browser.");
+        ContextHelp.Set(UpdateButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn ? "在浏览器中查看更新。" : "View updates in a browser.");
+        ContextHelp.Set(FeedbackButton,
+            l.EffectiveLanguage == LanguagePreference.ZhCn ? "在浏览器中发送反馈。" : "Send feedback in a browser.");
         SyncExecutionMode();
     }
 
@@ -1002,7 +1118,7 @@ public sealed partial class SettingsPage : Page
             Content = content,
             CloseButtonText = zh ? "关闭" : "Close"
         };
-        await dialog.ShowAsync();
+        await DialogCoordinator.ShowAsync(dialog);
     }
 
     private async void WebsiteLink_Click(object sender, RoutedEventArgs e) =>
@@ -1027,10 +1143,49 @@ public sealed partial class SettingsPage : Page
         {
         }
 
-        ViewModel.NotificationService.PublishError(
-            ViewModel.Localization["Error"],
+        PublishExternalLinkFailure(
             ViewModel.Localization["OpenUpdateFailed"],
-            "updates",
-            $"updates:{DateTimeOffset.UtcNow.Ticks}");
+            null,
+            "settings.open-uri.failure",
+            uri.ToString());
+    }
+
+    private void PublishExternalLinkFailure(
+        string message,
+        Exception? exception,
+        string code,
+        string? detail = null)
+    {
+        var zh = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        ViewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Error,
+            ViewModel.Localization["Error"],
+            $"{SettingsTarget(zh)}{Environment.NewLine}{message}",
+            "settings",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = code,
+                AutoDismiss = false,
+                Code = code,
+                SystemId = SettingsSystemId,
+                Target = SettingsTarget(zh),
+                Detail = exception is null
+                    ? detail ?? string.Empty
+                    : $"{exception.GetType().Name}: {exception.Message}"
+            });
+    }
+
+    private string SettingsTarget(bool zh) => zh ? "本机 WinPool 设置" : "Local WinPool settings";
+
+    private string SettingsSystemId => ViewModel.SystemCatalog.Systems
+        .First(system => system.IsLocal)
+        .Id;
+
+    private void SetSettingsAvailability(string? message)
+    {
+        SettingsAvailabilityText.Text = message ?? string.Empty;
+        SettingsAvailabilityText.Visibility = string.IsNullOrWhiteSpace(message)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 }

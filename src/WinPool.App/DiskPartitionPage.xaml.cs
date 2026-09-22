@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.ViewModels;
+using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
 using SimulationEditKind = WinPool.Application.SimulationEditKind;
@@ -79,9 +80,44 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
         FormatButtonLabel.Text = ViewModel.Localization["Format"];
+        ContextHelp.Set(OnlineButton,
+            Text("仅将模拟磁盘联机。", "Bring a simulated disk online only."));
+        ContextHelp.Set(OfflineButton,
+            Text("仅将非系统模拟磁盘脱机。", "Take a non-system simulated disk offline only."));
+        ContextHelp.Set(InitializeButton,
+            Text("初始化空白模拟磁盘；不修改本机磁盘。", "Initialize a blank simulated disk; no local disk is changed."));
+        ContextHelp.Set(ConvertGptButton,
+            Text("将符合条件的模拟 MBR 磁盘转换为 GPT。", "Convert an eligible simulated MBR disk to GPT."));
+        ContextHelp.Set(NewPartitionButton,
+            Text("在 GPT 模拟磁盘的未分配空间创建分区。", "Create a partition in unallocated space on a simulated GPT disk."));
+        ContextHelp.Set(DeletePartitionButton,
+            Text("删除选中的普通模拟分区；受保护分区不可删除。", "Delete the selected normal simulated partition; protected partitions cannot be deleted."));
+        ContextHelp.Set(ExtendButton,
+            Text("扩展分区尚未在此版本实现。", "Extend partition is not implemented in this version."));
+        ContextHelp.Set(ShrinkButton,
+            Text("压缩分区尚未在此版本实现。", "Shrink partition is not implemented in this version."));
+        ContextHelp.Set(OpenExplorerButton,
+            Text("仅打开有本机盘符的现有本机卷。", "Open only an existing local volume with a local drive letter."));
+        ContextHelp.Set(PartitionTypeBox,
+            Text("仅在 GPT 模拟未分配空间中选择固定分区类型。", "Choose a fixed partition type only in simulated GPT unallocated space."));
+        ContextHelp.Set(DriveLetterBox,
+            Text("选择模拟卷盘符；保留分区不能分配盘符。", "Choose a simulated volume drive letter; reserved partitions cannot receive one."));
+        ContextHelp.Set(VolumeLabelBox,
+            Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
+        ContextHelp.Set(SizeBox,
+            Text("以 GiB 输入新分区大小；提交时按现有规则转换为字节。", "Enter the new partition size in GiB; submission converts it to bytes using the existing rules."));
+        ContextHelp.Set(FileSystemBox,
+            Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
+        ContextHelp.Set(ClusterBox,
+            Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。",
+                "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
+        ContextHelp.Set(QuickFormatSwitch,
+            Text("控制模拟格式化是否为快速格式化。", "Choose whether simulated formatting is quick."));
+        ContextHelp.Set(FormatButton,
+            Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
         foreach (var button in PropertyResetButtons())
         {
-            ToolTipService.SetToolTip(button, ViewModel.Localization["ResetRecommended"]);
+            ContextHelp.Set(button, ViewModel.Localization["ResetRecommended"]);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
                 button,
                 ViewModel.Localization["ResetRecommended"]);
@@ -538,7 +574,111 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             : ViewModel.Localization["Format"];
         FormatButtonIcon.Glyph = createMode ? "\uE710" : "\uE9CE";
         FormatButton.IsEnabled = propertyEnabled && (createMode || userPartition);
+        var availability = ResolveAvailabilityText(
+            simulated,
+            disk,
+            partition,
+            isDiskSelection,
+            isGapSelection,
+            diskOffline,
+            alreadyGpt,
+            hasGap,
+            userPartition)
+            ?? Text(
+                "扩展和压缩分区尚未在此版本实现。",
+                "Extend and shrink partition are not implemented in this version.");
+        PartitionAvailabilityText.Text = availability ?? string.Empty;
+        PartitionAvailabilityText.Visibility = string.IsNullOrWhiteSpace(availability)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        RestoreFieldHelp();
+        var disabledReason = availability ?? Text(
+            "此字段受当前模拟选择和分区类型限制。",
+            "This field is limited by the current simulated selection and partition type.");
+        if (!PartitionTypeBox.IsEnabled) ContextHelp.Set(PartitionTypeBox, disabledReason);
+        if (!DriveLetterBox.IsEnabled) ContextHelp.Set(DriveLetterBox, disabledReason);
+        if (!VolumeLabelBox.IsEnabled) ContextHelp.Set(VolumeLabelBox, disabledReason);
+        if (!SizeBox.IsEnabled) ContextHelp.Set(SizeBox, disabledReason);
+        if (!FileSystemBox.IsEnabled) ContextHelp.Set(FileSystemBox, disabledReason);
+        if (!ClusterBox.IsEnabled) ContextHelp.Set(ClusterBox, disabledReason);
+        if (!QuickFormatSwitch.IsEnabled) ContextHelp.Set(QuickFormatSwitch, disabledReason);
         UpdatePropertyResetState();
+    }
+
+    private void RestoreFieldHelp()
+    {
+        ContextHelp.Set(PartitionTypeBox,
+            Text("仅在 GPT 模拟未分配空间中选择固定分区类型。", "Choose a fixed partition type only in simulated GPT unallocated space."));
+        ContextHelp.Set(DriveLetterBox,
+            Text("选择模拟卷盘符；保留分区不能分配盘符。", "Choose a simulated volume drive letter; reserved partitions cannot receive one."));
+        ContextHelp.Set(VolumeLabelBox,
+            Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
+        ContextHelp.Set(SizeBox,
+            Text("以 GiB 输入新分区大小；提交时按现有规则转换为字节。", "Enter the new partition size in GiB; submission converts it to bytes using the existing rules."));
+        ContextHelp.Set(FileSystemBox,
+            Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
+        ContextHelp.Set(ClusterBox,
+            Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
+        ContextHelp.Set(QuickFormatSwitch,
+            Text("控制模拟格式化是否为快速格式化。", "Choose whether simulated formatting is quick."));
+        ContextHelp.Set(FormatButton,
+            Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
+    }
+
+    private string? ResolveAvailabilityText(
+        bool simulated,
+        OsDiskInfo? disk,
+        PartitionInfo? partition,
+        bool isDiskSelection,
+        bool isGapSelection,
+        bool diskOffline,
+        bool alreadyGpt,
+        bool hasGap,
+        bool userPartition)
+    {
+        if (!simulated)
+        {
+            return Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
+                "Local storage is read-only on this page; select or create a simulated system to edit.");
+        }
+
+        if (disk is null)
+        {
+            return Text("请选择一个模拟磁盘、分区或未分配空间。",
+                "Select a simulated disk, partition, or unallocated space.");
+        }
+
+        if (diskOffline)
+        {
+            return Text("模拟磁盘已脱机；请先联机后编辑分区。",
+                "The simulated disk is offline; bring it online before editing partitions.");
+        }
+
+        if (partition is not null && IsProtected(partition))
+        {
+            return Text("系统、启动或保留分区受保护，不能在此编辑。",
+                "System, boot, and reserved partitions are protected and cannot be edited here.");
+        }
+
+        if ((isDiskSelection || isGapSelection) && !alreadyGpt)
+        {
+            return Text("新建分区需要已初始化的 GPT 模拟磁盘。",
+                "Creating a partition requires an initialized simulated GPT disk.");
+        }
+
+        if ((isDiskSelection || isGapSelection) && !hasGap)
+        {
+            return Text("该模拟磁盘没有可用的未分配空间。",
+                "This simulated disk has no usable unallocated space.");
+        }
+
+        if (partition is not null && !userPartition)
+        {
+            return Text("当前分区不属于可编辑的普通分区。",
+                "The current partition is not an editable normal partition.");
+        }
+
+        return null;
     }
 
     private void FileSystemBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1114,12 +1254,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     }
 
     private void PublishRefsNotice() =>
-        ViewModel.NotificationService.PublishWarning(
+        PublishOperationFeedback(
+            GlobalNotificationSeverity.Warning,
             Text("ReFS 提示", "ReFS notice"),
             Text(
                 "ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。操作将继续。",
                 "ReFS has no long-run evidence equivalent to 64 KiB NTFS. The operation will continue."),
-            "disk-partition-editor");
+            "disk-partition-editor",
+            "partition.refs-evidence",
+            showNotification: true);
 
     private async Task<bool> SubmitAsync(
         SimulationEditRequest request,
@@ -1138,18 +1281,24 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 or InvalidOperationException
                 or ArgumentException)
         {
-            await ShowMessageAsync(failTitle ?? Text("操作失败", "Operation failed"), exception.Message);
+            PublishOperationException(
+                failTitle ?? Text("操作失败", "Operation failed"),
+                "disk-partition-editor",
+                exception,
+                "partition.submit.exception",
+                showNotification: true);
             return false;
         }
 
         if (result.Status == WinPool.Application.ApplicationStatus.OutcomeUnknown)
         {
-            await ShowMessageAsync(
+            PublishOperationResult(
+                result.Status,
+                result.Messages,
+                result.CorrelationId,
                 Text("提交结果未知", "Commit outcome unknown"),
-                result.Messages.FirstOrDefault()?.UserTextKey
-                    ?? Text(
-                        "请求已发送，但结果未知。请重新加载后再决定是否重试。",
-                        "The request was sent and the outcome is unknown. Reload before retrying."));
+                "disk-partition-editor",
+                showNotification: true);
             _working = ViewModel.EffectiveActiveSnapshot;
             RefreshAll();
             return false;
@@ -1157,18 +1306,23 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         if (!result.IsSuccess || result.Value is null)
         {
-            await ShowMessageAsync(
+            PublishOperationResult(
+                result.Status,
+                result.Messages,
+                result.CorrelationId,
                 failTitle ?? Text("操作失败", "Operation failed"),
-                result.Messages.FirstOrDefault()?.UserTextKey
-                    ?? Text("模拟操作未完成。", "The simulation operation did not complete."));
+                "disk-partition-editor",
+                showNotification: true);
             return false;
         }
 
         _working = ViewModel.EffectiveActiveSnapshot;
-        ViewModel.NotificationService.PublishInfo(
+        PublishOperationFeedback(
+            GlobalNotificationSeverity.Info,
             successTitle,
             successMessage,
-            "disk-partition-editor");
+            "disk-partition-editor",
+            "partition.submit.completed");
         RefreshAll();
         return true;
     }

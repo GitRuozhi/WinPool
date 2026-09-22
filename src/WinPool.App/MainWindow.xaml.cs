@@ -17,6 +17,7 @@ using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
+using WinPool_App.Controls;
 using IAgentConnection = WinPool.Application.IAgentConnection;
 
 // To learn more about WinUI, the WinUI project structure,
@@ -31,6 +32,7 @@ namespace WinPool_App;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private const int MaximumVisibleNotificationCards = 3;
     private bool _initialized;
     private bool _updatingMode;
     private bool _updatingNavigation;
@@ -51,6 +53,7 @@ public sealed partial class MainWindow : Window
     private readonly AgentPreferencesSynchronizer _agentPreferencesSynchronizer;
     private readonly AgentInventorySynchronizer _agentInventorySynchronizer;
     private readonly DispatcherTimer _notificationDismissTimer;
+    private readonly INotifyPropertyChanged? _notificationServicePropertyChanged;
     private InputNonClientPointerSource? _nonClientPointerSource;
     private WelcomeWindow? _welcomeWindow;
 
@@ -58,15 +61,61 @@ public sealed partial class MainWindow : Window
 
     public IGlobalNotificationService NotificationService { get; }
 
+    /// <summary>
+    /// The shell deliberately projects only three activity cards. The complete
+    /// active collection remains owned by the notification service and is
+    /// available through the non-developer overflow entry.
+    /// </summary>
+    public ObservableCollection<NotificationDisplayItem> VisibleNotifications { get; } = [];
+
     public ObservableCollection<ShellNavigationItem> ShellNavigationItems { get; } = [];
 
     public ShellNavigationItem? SelectedShellItem { get; set; }
+
+    /// <summary>
+    /// Keeps the same data-template instance alive when an active notification
+    /// is updated in place. Replacing every list item would make a hovered or
+    /// focused card unload and briefly resume its timer.
+    /// </summary>
+    public sealed class NotificationDisplayItem : INotifyPropertyChanged
+    {
+        private GlobalNotification _notification;
+        private bool _isChinese;
+
+        public NotificationDisplayItem(GlobalNotification notification, bool isChinese)
+        {
+            _notification = notification;
+            _isChinese = isChinese;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public GlobalNotification Notification => _notification;
+
+        public bool IsChinese => _isChinese;
+
+        public void Update(GlobalNotification notification, bool isChinese)
+        {
+            if (!Equals(_notification, notification))
+            {
+                _notification = notification;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Notification)));
+            }
+
+            if (_isChinese != isChinese)
+            {
+                _isChinese = isChinese;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChinese)));
+            }
+        }
+    }
 
     public MainWindow(
         ApplicationStartupOptions startupOptions,
         IAgentConnection? agentConnection = null)
     {
         NotificationService = new GlobalNotificationService();
+        _notificationServicePropertyChanged = NotificationService as INotifyPropertyChanged;
         _elevationRestartService = new WindowsElevationRestartService();
         _workspaceStateService = agentConnection is null
             ? new EphemeralWorkspaceStateService()
@@ -101,9 +150,11 @@ public sealed partial class MainWindow : Window
 
         ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
             .CollectionChanged += Notifications_CollectionChanged;
+        _notificationServicePropertyChanged?.PropertyChanged += NotificationService_PropertyChanged;
         _notificationDismissTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _notificationDismissTimer.Tick += NotificationDismissTimer_Tick;
         _notificationDismissTimer.Start();
+        RefreshNotificationSurface();
 
         ExtendsContentIntoTitleBar = true;
         AppWindow.SetIcon("Assets/CAppIcon.ico");
@@ -236,6 +287,11 @@ public sealed partial class MainWindow : Window
         App.StopActivationChannel();
         _agentPreferencesSynchronizer.Dispose();
         _agentInventorySynchronizer.Dispose();
+        ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
+            .CollectionChanged -= Notifications_CollectionChanged;
+        _notificationServicePropertyChanged?.PropertyChanged -= NotificationService_PropertyChanged;
+        _notificationDismissTimer.Stop();
+        NotificationService.ClearHistory();
 
         if (_closingForElevationHandoff)
         {
@@ -395,6 +451,7 @@ public sealed partial class MainWindow : Window
         UpdateShellNavigationTextVisibility();
         UpdateActiveSystemName();
         SyncModeSwitch();
+        RefreshNotificationSurface();
     }
 
     private void UpdateActiveSystemName()
@@ -538,7 +595,7 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = localization["Cancel"],
                 DefaultButton = ContentDialogButton.Primary
             };
-            var result = await dialog.ShowAsync();
+            var result = await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot);
             if (result != ContentDialogResult.Primary)
             {
                 return false;
@@ -1213,39 +1270,418 @@ public sealed partial class MainWindow : Window
             Math.Max(1, (int)Math.Round(bounds.Height * scale)));
     }
 
-    private void GlobalNotification_CloseButtonClick(InfoBar sender, object args)
-    {
-        if (sender.DataContext is GlobalNotification notification)
-        {
-            NotificationService.Dismiss(notification.Id);
-        }
-    }
-
     private void Notifications_CollectionChanged(
         object? sender,
         System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
+        RefreshNotificationSurface();
         if (NotificationService.Notifications.Any(x => x.AutoDismiss))
         {
             _notificationDismissTimer.Start();
         }
     }
 
+    private void NotificationService_PropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        DispatcherQueue.TryEnqueue(RefreshNotificationSurface);
+
     private void NotificationDismissTimer_Tick(object? sender, object e)
     {
-        var cutoff = DateTimeOffset.Now - TimeSpan.FromSeconds(4);
-        var expired = NotificationService.Notifications
-            .Where(x => x.AutoDismiss && x.CreatedAt <= cutoff)
-            .Select(x => x.Id)
-            .ToList();
-        foreach (var id in expired)
-        {
-            NotificationService.Dismiss(id);
-        }
+        // The service owns duration, pause accounting and recovery semantics.
+        // The shell must not infer expiry from CreatedAt because a hovered or
+        // focused card deliberately pauses its lifetime.
+        NotificationService.DismissExpired();
+        RefreshNotificationSurface();
         if (!NotificationService.Notifications.Any(x => x.AutoDismiss))
         {
             _notificationDismissTimer.Stop();
         }
+    }
+
+    private void RefreshNotificationSurface()
+    {
+        var visible = NotificationService.Notifications
+            .Take(MaximumVisibleNotificationCards)
+            .Select(FormatNotificationForDisplay)
+            .ToArray();
+        var isChinese = ViewModel.Localization.IsChinese;
+        for (var desiredIndex = 0; desiredIndex < visible.Length; desiredIndex++)
+        {
+            var currentIndex = -1;
+            for (var index = desiredIndex; index < VisibleNotifications.Count; index++)
+            {
+                if (VisibleNotifications[index].Notification.Id.Equals(
+                        visible[desiredIndex].Id,
+                        StringComparison.Ordinal))
+                {
+                    currentIndex = index;
+                    break;
+                }
+            }
+
+            if (currentIndex < 0)
+            {
+                VisibleNotifications.Insert(
+                    desiredIndex,
+                    new NotificationDisplayItem(visible[desiredIndex], isChinese));
+                continue;
+            }
+
+            if (currentIndex != desiredIndex)
+            {
+                VisibleNotifications.Move(currentIndex, desiredIndex);
+            }
+
+            VisibleNotifications[desiredIndex].Update(visible[desiredIndex], isChinese);
+        }
+        while (VisibleNotifications.Count > visible.Length)
+        {
+            VisibleNotifications.RemoveAt(VisibleNotifications.Count - 1);
+        }
+
+        var overflowCount = NotificationService.OverflowedNotificationCount;
+        var hasOverflow = NotificationService.HasNotificationOverflow && overflowCount > 0;
+        NotificationOverflowButton.Visibility = hasOverflow ? Visibility.Visible : Visibility.Collapsed;
+        if (!hasOverflow)
+        {
+            return;
+        }
+
+        var zh = ViewModel.Localization.IsChinese;
+        var text = zh
+            ? $"还有 {overflowCount:N0} 条活动通知"
+            : $"{overflowCount:N0} more active notification(s)";
+        NotificationOverflowButton.Content = text;
+        AutomationProperties.SetName(NotificationOverflowButton, text);
+        ToolTipService.SetToolTip(
+            NotificationOverflowButton,
+            zh
+                ? "查看或关闭未显示在主窗口的活动通知"
+                : "View or dismiss active notifications not shown in the main window");
+    }
+
+    private GlobalNotification FormatNotificationForDisplay(GlobalNotification notification)
+    {
+        if (!notification.IsOverflowSummary
+            && !string.Equals(notification.Code, "notification.active-overflow", StringComparison.Ordinal))
+        {
+            return notification;
+        }
+
+        var zh = ViewModel.Localization.IsChinese;
+        var compressed = Math.Max(1, notification.OccurrenceCount);
+        var active = Math.Max(0, NotificationService.Notifications.Count - 1);
+        var detail = zh
+            ? $"较早的活动通知已有 {compressed:N0} 条被压缩为摘要。当前仍有 {active:N0} 条活动通知可查看。"
+            : $"{compressed:N0} earlier active notification(s) were compressed into this summary. {active:N0} active notification(s) remain available to view.";
+        return notification with
+        {
+            Title = zh ? "活动通知已压缩" : "Active notifications compressed",
+            Message = detail,
+            // The core fallback detail is English and may itself be a summary.
+            // Present one localized, idempotent statement instead of appending
+            // it repeatedly when a card or dialog is refreshed.
+            Detail = detail
+        };
+    }
+
+    private void NotificationCard_PauseRequested(
+        object? sender,
+        NotificationCardPauseRequestedEventArgs e) =>
+        NotificationService.SetPaused(e.Notification.Id, e.IsPaused);
+
+    private void NotificationCard_DismissRequested(
+        object? sender,
+        NotificationCardEventArgs e) =>
+        NotificationService.Dismiss(e.Notification.Id);
+
+    private async void NotificationCard_DetailsRequested(
+        object? sender,
+        NotificationCardEventArgs e) =>
+        await ShowNotificationDetailsAsync(e.Notification);
+
+    private async void NotificationOverflowButton_Click(object sender, RoutedEventArgs e) =>
+        await ShowNotificationOverflowAsync();
+
+    private async Task ShowNotificationDetailsAsync(GlobalNotification notification)
+    {
+        if (RootGrid.XamlRoot is null)
+        {
+            return;
+        }
+
+        var zh = ViewModel.Localization.IsChinese;
+        var detail = FormatNotificationDetails(notification);
+        var detailsTextBox = new TextBox
+        {
+            AcceptsReturn = true,
+            Height = 260,
+            IsReadOnly = true,
+            IsSpellCheckEnabled = false,
+            Text = detail,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var copyButton = new Button
+        {
+            Content = zh ? "复制详情" : "Copy details",
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        copyButton.Click += (_, _) => CopyToClipboard(detail);
+        ToolTipService.SetToolTip(
+            copyButton,
+            zh ? "将完整通知详情复制到剪贴板" : "Copy the full notification detail to the clipboard");
+
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(detailsTextBox);
+        content.Children.Add(copyButton);
+        var dialog = new ContentDialog
+        {
+            Title = zh ? "通知详情" : "Notification details",
+            Content = content,
+            CloseButtonText = zh ? "关闭" : "Close",
+            DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = RootGrid.RequestedTheme
+        };
+        await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot);
+    }
+
+    private async Task ShowNotificationOverflowAsync()
+    {
+        if (RootGrid.XamlRoot is null)
+        {
+            return;
+        }
+
+        // This is intentionally the active collection, never History. Users
+        // must be able to inspect and dismiss unresolved important errors even
+        // when developer mode is hidden or the session history was cleared.
+        var overflow = NotificationService.Notifications
+            .Skip(MaximumVisibleNotificationCards)
+            .ToArray();
+        if (overflow.Length == 0)
+        {
+            RefreshNotificationSurface();
+            return;
+        }
+
+        var zh = ViewModel.Localization.IsChinese;
+        var notificationList = new ListView
+        {
+            MaxHeight = 220,
+            SelectionMode = ListViewSelectionMode.Single
+        };
+        foreach (var notification in overflow)
+        {
+            notificationList.Items.Add(new ListViewItem
+            {
+                Content = FormatNotificationListItem(notification),
+                Tag = notification
+            });
+        }
+
+        var detailsTextBox = new TextBox
+        {
+            AcceptsReturn = true,
+            Height = 190,
+            IsReadOnly = true,
+            IsSpellCheckEnabled = false,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var copyButton = new Button
+        {
+            Content = zh ? "复制详情" : "Copy details",
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        var dismissButton = new Button
+        {
+            Content = zh ? "关闭所选通知" : "Dismiss selected notification",
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        var commandRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        commandRow.Children.Add(copyButton);
+        commandRow.Children.Add(dismissButton);
+
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(notificationList);
+        content.Children.Add(detailsTextBox);
+        content.Children.Add(commandRow);
+        var dialog = new ContentDialog
+        {
+            Title = zh ? "更多活动通知" : "More active notifications",
+            Content = content,
+            CloseButtonText = zh ? "关闭" : "Close",
+            DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = RootGrid.RequestedTheme
+        };
+
+        void UpdateSelection()
+        {
+            if (notificationList.SelectedItem is not ListViewItem { Tag: GlobalNotification notification })
+            {
+                detailsTextBox.Text = string.Empty;
+                copyButton.IsEnabled = false;
+                dismissButton.IsEnabled = false;
+                return;
+            }
+
+            detailsTextBox.Text = FormatNotificationDetails(notification);
+            copyButton.IsEnabled = true;
+            dismissButton.IsEnabled = true;
+        }
+
+        void RefreshOverflowList()
+        {
+            var selectedId = (notificationList.SelectedItem as ListViewItem)?.Tag is GlobalNotification selected
+                ? selected.Id
+                : null;
+            var currentOverflow = NotificationService.Notifications
+                .Skip(MaximumVisibleNotificationCards)
+                .ToArray();
+            notificationList.Items.Clear();
+            foreach (var current in currentOverflow)
+            {
+                notificationList.Items.Add(new ListViewItem
+                {
+                    Content = FormatNotificationListItem(current),
+                    Tag = current
+                });
+            }
+
+            if (notificationList.Items.Count == 0)
+            {
+                detailsTextBox.Text = string.Empty;
+                copyButton.IsEnabled = false;
+                dismissButton.IsEnabled = false;
+                if (dialog.IsLoaded)
+                {
+                    dialog.Hide();
+                }
+                return;
+            }
+
+            notificationList.SelectedItem = notificationList.Items
+                .OfType<ListViewItem>()
+                .FirstOrDefault(item => item.Tag is GlobalNotification notification
+                    && notification.Id.Equals(selectedId, StringComparison.Ordinal))
+                ?? notificationList.Items[0];
+            UpdateSelection();
+        }
+
+        var overflowDialogActive = true;
+        System.Collections.Specialized.NotifyCollectionChangedEventHandler activeNotificationsChanged =
+            (_, _) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (overflowDialogActive)
+                {
+                    RefreshOverflowList();
+                }
+            });
+        notificationList.SelectionChanged += (_, _) => UpdateSelection();
+        ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications).CollectionChanged +=
+            activeNotificationsChanged;
+        copyButton.Click += (_, _) => CopyToClipboard(detailsTextBox.Text);
+        dismissButton.Click += (_, _) =>
+        {
+            if (notificationList.SelectedItem is not ListViewItem { Tag: GlobalNotification notification })
+            {
+                return;
+            }
+
+            NotificationService.Dismiss(notification.Id);
+            // The collection-change handler rebuilds from active IDs. It
+            // cannot leave a resolved item in this modal snapshot.
+            RefreshOverflowList();
+        };
+        notificationList.SelectedIndex = 0;
+        UpdateSelection();
+        try
+        {
+            await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot);
+        }
+        finally
+        {
+            overflowDialogActive = false;
+            ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications).CollectionChanged -=
+                activeNotificationsChanged;
+            RefreshNotificationSurface();
+        }
+    }
+
+    private string FormatNotificationListItem(GlobalNotification notification)
+    {
+        var display = FormatNotificationForDisplay(notification);
+        var occurrence = display.OccurrenceCount > 1 ? $" ×{display.OccurrenceCount:N0}" : string.Empty;
+        var message = string.IsNullOrWhiteSpace(display.Message) ? string.Empty : $" — {display.Message}";
+        return $"{display.Title}{occurrence}{message}";
+    }
+
+    private string FormatNotificationDetails(GlobalNotification notification)
+    {
+        var display = FormatNotificationForDisplay(notification);
+        var zh = ViewModel.Localization.IsChinese;
+        var lines = new List<string>
+        {
+            display.Title,
+            string.Empty
+        };
+        if (!string.IsNullOrWhiteSpace(display.Message))
+        {
+            lines.Add(display.Message);
+        }
+        if (!string.IsNullOrWhiteSpace(display.Detail)
+            && !display.Detail.Equals(display.Message, StringComparison.Ordinal))
+        {
+            lines.Add(string.Empty);
+            lines.Add(display.Detail);
+        }
+
+        AddDetailLine(lines, zh ? "来源" : "Source", display.Source);
+        AddDetailLine(lines, zh ? "级别" : "Severity", FormatSeverity(display.Severity, zh));
+        AddDetailLine(lines, zh ? "代码" : "Code", display.Code);
+        AddDetailLine(lines, zh ? "相关对象" : "Related object", display.Target);
+        AddDetailLine(lines, zh ? "系统标识" : "System ID", display.SystemId);
+        if (display.CreatedAt != default)
+        {
+            AddDetailLine(
+                lines,
+                zh ? "首次发生" : "First occurred",
+                display.CreatedAt.LocalDateTime.ToString("g"));
+        }
+        AddDetailLine(
+            lines,
+            zh ? "重复次数" : "Occurrences",
+            display.OccurrenceCount.ToString("N0"));
+        if (display.LastOccurredAt != default)
+        {
+            AddDetailLine(
+                lines,
+                zh ? "最近发生" : "Last occurred",
+                display.LastOccurredAt.LocalDateTime.ToString("g"));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static void AddDetailLine(ICollection<string> lines, string label, string value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            lines.Add($"{label}: {value}");
+        }
+    }
+
+    private static string FormatSeverity(GlobalNotificationSeverity severity, bool chinese) =>
+        severity switch
+        {
+            GlobalNotificationSeverity.Error => chinese ? "错误" : "Error",
+            GlobalNotificationSeverity.Warning => chinese ? "警告" : "Warning",
+            _ => chinese ? "信息" : "Information"
+        };
+
+    private static void CopyToClipboard(string text)
+    {
+        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        package.SetText(text);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
     }
 
     private void LocalRealOperationsWarning_CloseButtonClick(InfoBar sender, object args)
