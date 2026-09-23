@@ -13,7 +13,7 @@ Startup first displays the last page and system from an integrity-checked, read-
 - View local storage through read-only discovery and inspect pools, tiers, disks, partitions, and related information.
 - Enable Developer mode in Settings to show Hardware, Test, and Development. Hardware appears before Manage and provides a read-only ten-section report, source details, local refresh, and complete system JSON export.
 - Edit simulated systems on the Storage structure and Disk/partition pages.
-- Create simulated GPT partitions on a 1 MiB grid. The creation field uses whole MiB, defaults to the largest aligned capacity, and offers MAX; the right panel has separate New and Format actions.
+- Create simulated GPT partitions on a 1 MiB grid. The creation field uses whole MiB, defaults to the largest aligned capacity, and offers MAX; one action button switches between Create partition and Format partition according to the selection.
 - Export storage systems as JSON. On the Disk/partition page, Quick format and Full format are mutually exclusive simulation modes; neither writes to a real disk.
 - Monitor supported devices with persistent session duration; problems use the shared notification cards and current-run message history.
 - Record new monitoring samples in a separate database, rotating at 1 GiB and archiving with the bundled 7-Zip; Settings accepts an optional custom 7Z path.
@@ -27,7 +27,7 @@ Simulation output is not proof that Windows can execute a configuration. See the
 
 Normal simulated data partitions can be extended or shrunk to a 1 MiB-aligned total target capacity; system partitions remain protected from deletion and formatting. Extend supports NTFS/ReFS/RAW; shrink supports NTFS/RAW. The restored implementation and automated regression checks have passed; native resize verification remains deferred.
 
-Test remains a roadmap notice. Development shows single-line entries for the latest 200 messages from the current App run; double-click an entry to open copyable details, then click outside to dismiss. Messages stay in memory and are cleared when the App exits; the application does not read log contents or maintain a complete operation history. The other areas are reserved for future work, including an AI entry. Full testing and development workspaces are planned for 2.0.
+Test remains a roadmap notice. Development shows a Message List with single-line entries for the latest 200 messages from the current App run; double-click an entry to open centered, copyable details, then click outside to dismiss. Messages stay in memory and are cleared when the App exits; the application does not read fault log contents or maintain a complete operation history. The three areas can be resized by dragging their dividers. Full testing and development workspaces are planned for 2.0.
 
 Transient messages use fixed-width, content-height bottom-right cards without merging separate repeated events. Cards move right as they disappear. Click a normal message to dismiss it or an error to open its message dialog. Both expire automatically, with errors staying longer. Detailed records are available on Development.
 

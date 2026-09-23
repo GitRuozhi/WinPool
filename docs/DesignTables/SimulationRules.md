@@ -28,7 +28,7 @@
 | 删除分区 | 所选分区本身不是 Boot／System | 所选分区有 Boot 或 System 标记时拒绝；同盘其它分区的系统身份和所选 EFI／MSR／Recovery 类型本身不额外阻止删除 | 页面、管理页与提交都使用 `CanDeleteSimulatedPartition` |
 | 扩展／压缩 | 在线盘的 Primary／BasicData 分区，几何与卷信息可靠；目标**总容量**为正整数 MiB | EFI／MSR／Recovery、重叠或越盘、多个关联卷、无可靠容量、目标方向错误、目标低于已用数据或超出下一分区边界时拒绝 | 扩展允许 NTFS／ReFS／RAW；压缩允许 NTFS／RAW。能力来自模拟几何，不等于 Windows 实际支持容量 |
 
-分区起点和终点在界面以 `xxMiB (xx自适应单位)` 显示；括号外固定 MiB。容量第一行是整数 MiB 输入，第二行是自动单位的只读换算。“终点”是独占边界：起点 1 MiB、长度 16 MiB 的 MSR 终点为 17 MiB。1 MiB 网格是 WinPool 当前模拟创建规则；已有导入结构不会为了匹配网格而改写。Windows 的 `create partition primary` 和 `New-Partition` 提供 size、offset／alignment 参数，不能据此宣称所有 Windows 磁盘都有相同默认对齐行为：[diskpart 文档](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/create-partition-primary)、[New-Partition 文档](https://learn.microsoft.com/en-us/powershell/module/storage/new-partition?view=windowsserver2025-ps)。
+分区页仍按设置中的“隐藏小分区缝隙”阈值过滤拓扑节点；这是显示规则，不能放宽模拟提交时的几何检查。右侧底部只有一个随当前选择切换“新建分区／格式化分区”的按钮。右侧字段固定称“起点”“终点”“容量”：起终点以带千位分隔符的 `xxMiB (xx自适应单位)` 显示，数值列右对齐；容量第一行是整数 MiB 输入、固定 MiB 后缀和 MAX，第二行是自动单位的只读换算。“终点”是独占边界：起点 1 MiB、长度 16 MiB 的 MSR 终点为 17 MiB。1 MiB 网格是 WinPool 当前模拟创建规则；已有导入结构不会为了匹配网格而改写。Windows 的 `create partition primary` 和 `New-Partition` 提供 size、offset／alignment 参数，不能据此宣称所有 Windows 磁盘都有相同默认对齐行为：[diskpart 文档](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/create-partition-primary)、[New-Partition 文档](https://learn.microsoft.com/en-us/powershell/module/storage/new-partition?view=windowsserver2025-ps)。
 
 ## 池、层和物理盘
 

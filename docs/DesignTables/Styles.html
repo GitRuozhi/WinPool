@@ -24,7 +24,7 @@
   <table>
     <thead><tr><th>类别</th><th>当前值／资源</th><th>可视检查</th><th>使用位置与规则</th></tr></thead>
     <tbody>
-      <tr><td>界面字体</td><td>WinUI 默认字体；文档建议 Segoe UI Variable</td><td>中文由系统回退字体呈现</td><td>普通文字不单独覆盖字族；日志时间列使用 Consolas，字号 12 DIP</td></tr>
+      <tr><td>界面字体</td><td>WinUI 默认字体；文档建议 Segoe UI Variable</td><td>中文由系统回退字体呈现</td><td>普通文字不单独覆盖字族；消息时间列使用 Consolas，字号 12 DIP</td></tr>
       <tr><td>图标字体</td><td><code>FontIcon</code>／<code>SymbolThemeFontFamily</code></td><td><span style="font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:22px"></span>　<span style="font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:22px"></span></td><td>按钮图标通常 14 DIP；分区恢复按钮 12 DIP，见按钮表</td></tr>
       <tr><td>默认强调色</td><td><code>WinPoolAccentColor #0078D4</code></td><td><span class="swatch" style="background:#0078D4"></span>蓝色</td><td>App.xaml；设置可改变当前强调色，不能只凭本行判断运行时颜色</td></tr>
       <tr><td>强调悬停遮罩</td><td><code>WinPoolAccentHoverColor #330078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.2)"></span>20% 蓝</td><td>强调元素指针悬停</td></tr>
@@ -34,16 +34,16 @@
       <tr><td>强调按钮前景</td><td><code>#FFFFFF</code></td><td><span class="swatch" style="background:#FFFFFF"></span>白色</td><td>默认强调按钮文字；与运行时强调色的对比度需实机检查</td></tr>
       <tr><td>系统控件强调别名</td><td><code>AccentFillColor*Brush</code>、<code>AccentTextFillColor*Brush</code>、<code>FocusStrokeColorOuterBrush</code></td><td>跟随 WinPool 强调色</td><td>选中、焦点、开关开启状态由 App.xaml 别名统一</td></tr>
       <tr><td>卡片背景</td><td><code>CardBackgroundFillColorDefaultBrush</code></td><td>亮／暗／高对比度随主题</td><td>分区、结构、开发页各区域背景</td></tr>
-      <tr><td>卡片边框</td><td><code>CardStrokeColorDefaultBrush</code>，1 DIP</td><td>主题描边</td><td>主工作区边框、消息卡外框</td></tr>
-      <tr><td>卡片圆角</td><td>4 DIP</td><td>统一小圆角</td><td>分区、结构、开发三区域及消息卡</td></tr>
-      <tr><td>次要文字</td><td><code>TextFillColorSecondaryBrush</code></td><td>主题次要文字</td><td>日志时间、级别、来源和 AI 开发中提示；不用固定灰色</td></tr>
+      <tr><td>卡片边框</td><td><code>CardStrokeColorDefaultBrush</code>，1 DIP</td><td>主题描边</td><td>主工作区边框；通知使用 InfoBar 自身的单层背景与描边</td></tr>
+      <tr><td>卡片圆角</td><td>4 DIP</td><td>统一小圆角</td><td>分区、结构、开发三区域；通知圆角遵循 InfoBar 主题模板</td></tr>
+      <tr><td>次要文字</td><td><code>TextFillColorSecondaryBrush</code></td><td>主题次要文字</td><td>消息时间、级别、来源和 AI 开发中提示；不用固定灰色</td></tr>
       <tr><td>启动恢复过渡</td><td>工作区未读到可用预显时，中央 32 DIP <code>ProgressRing</code> 与状态文字</td><td>有效缓存载入后直接显示上次系统的页面内容</td><td>预显期间页面不可交互，标题栏系统名可见但选择器禁用；Agent 核对完成后放开交互。缓存不可用时保留过渡提示，避免先显示默认系统</td></tr>
-      <tr><td>开发页布局</td><td>外边距 24 DIP；区域间距 16 DIP；上方 2*、下方 *</td><td>左上日志／右上空白／下方空白</td><td>宽度小于 760 DIP 时右上隐藏，日志横跨上方；无页面大标题</td></tr>
-      <tr><td>日志条目</td><td>单行，最小高 28 DIP；内边距 8×4 DIP；字号 12 DIP</td><td>时间／级别／来源／摘要</td><td>超宽内容省略号；双击显示可复制详情浮层，外部点击关闭</td></tr>
-      <tr><td>详情浮层</td><td>原生 Flyout；只读 TextBox，宽 300–560 DIP，高 180–320 DIP</td><td>无标题及按钮</td><td>文本可选择并用 Ctrl+C 复制；外部点击或 Esc 关闭</td></tr>
-      <tr><td>右下消息卡</td><td>宽 384 DIP；内容高 72–200 DIP；卡间距 6 DIP</td><td>高度按实际内容变化</td><td>右下停靠；最多三张，窗口高度不足时减少张数</td></tr>
-      <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；日志寿命独立</td></tr>
-      <tr><td>分区数值</td><td>输入整数 MiB；起止位置显示 <code>xxMiB (自适应单位)</code></td><td>起止位置固定 MiB，括号内自动换 GiB/TiB</td><td>创建容量第一行可编辑且右侧常显 MiB、图标式 MAX，第二行仅展示自适应单位；起点和长度使用 1 MiB 网格</td></tr>
+      <tr><td>开发页布局</td><td>外边距 24 DIP；横向和纵向分隔条各 8 DIP；上方 2*、下方 *</td><td>左上消息列表／右上空白／下方空白</td><td>分隔条可拖拽；宽度小于 760 DIP 时右上隐藏，消息列表横跨上方；不显示列表标题、说明和页面大标题</td></tr>
+      <tr><td>消息列表条目</td><td>单行，行最小高 40 DIP；内边距 8×5 DIP；字号 12 DIP</td><td>时间／级别／来源／摘要</td><td>超宽内容省略号；悬停使用主题底色，选中使用强调底色与 3 DIP 左侧标记；双击显示详情</td></tr>
+      <tr><td>消息详情</td><td>半透明黑色遮罩 <code>#80000000</code>；中央只读 TextBox，宽随页面缩到 160–640 DIP，高 96–380 DIP</td><td>无标题及按钮；短文本收缩高度，长文本显示竖向滚动</td><td>文本可选择并用 Ctrl+C 复制；点击文本框外关闭</td></tr>
+      <tr><td>右下消息卡</td><td>宽 384 DIP；内容高 72–200 DIP；卡间距 6 DIP</td><td>高度按实际内容变化；单层 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；无额外 Border 包裹</td></tr>
+      <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；消息历史寿命独立</td></tr>
+      <tr><td>分区数值</td><td>“起点”“终点”“容量”固定标签；起终点显示 <code>1,024MiB (自适应单位)</code></td><td>起终点数值右对齐，MiB 整数有千位分隔符，括号内自动换 GiB/TiB</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行仅展示自适应单位；操作按钮随选择切换新建／格式化</td></tr>
       <tr><td>拓扑剩余空间描边</td><td>Light <code>#60000000</code>；Dark <code>#40FFFFFF</code>（XAML AARRGGBB）；高对比度 <code>SystemColorWindowTextColor</code></td><td><span class="swatch" style="background:rgba(0,0,0,.376)"></span><span class="swatch" style="background:rgba(255,255,255,.251)"></span></td><td><code>WinPoolTopologyRestStrokeBrush</code>；保持高对比度系统资源</td></tr>
     </tbody>
   </table>

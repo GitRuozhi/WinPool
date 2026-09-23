@@ -28,11 +28,12 @@
 | `TableOuterScrollViewer` | 滚动属性表区域的纵向内容 | 外层只负责纵向滚动，内表格另有水平滚动 | `MainPage.xaml` |
 | `TableScrollViewer` | 水平滚动比较表各对象列 | 分列表格宽于可视区域时可滚动 | `MainPage.xaml` |
 | `ComparisonTableGrid` 单元格 | 点击选择对应对象/属性组；悬停高亮；右键可复制当前值、复制组数据或查看原始字段 | 复制菜单只在当前选中列对象的属性组打开 | `MainPage.xaml`、`MainPage.xaml.cs`、`PropertyTableContextMenu.cs` |
-| `CommandButtonsPanel` 动态命令按钮 | 显示当前对象可执行或被禁用的 Manage 命令 | 每个命令有用途帮助；禁用命令提供原因。启用条件由对象类别、模拟/本机身份、对象角色及磁盘/分区规则决定；同一命令也出现在节点右键菜单 | `MainPage.xaml`、`MainPage.xaml.cs`、`ManageCommandProjector.cs` |
+| `CommandButtonsPanel` 下区按钮 | 按当前对象类型显示精简操作；拓扑节点右键菜单保持原有完整命令集 | 池、层和分区编辑入口常亮；磁盘编辑需有可定位的目标页。目标页限制真实/模拟编辑；Windows 专用操作仍按对象条件禁用并说明原因 | `MainPage.xaml`、`MainPage.xaml.cs`、`ManageCommandProjector.cs` |
 | System 管理命令 | 本机刷新、转换为模拟、导入、导出、删除模拟系统 | 刷新/转换只对本机系统启用；删除只对模拟系统启用；导入/导出由投影器持续提供 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
-| Pool/Tier 管理命令 | 重命名、创建或编辑池；编辑所选层 | 池重命名/编辑要求普通模拟池；创建池要求非合成模拟池对象；层编辑要求非合成模拟层。当前投影器不生成层重命名或创建命令 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
-| Disk 管理命令 | 重命名、初始化、创建分区、MBR 转 GPT、联机/脱机、系统属性 | 编辑操作仅在模拟系统；初始化要求非系统/启动 RAW 磁盘，转换要求非系统/启动 MBR 磁盘；联机/脱机取决于当前状态及系统/启动保护；系统属性仅本机可用 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
-| Partition/Volume 管理命令 | 打开资源管理器、修改盘符/卷标、格式化、编辑、删除、优化驱动器、系统属性 | 盘符/卷标/编辑要求在线模拟主分区或基本数据分区；格式化再要求非启动/系统分区；删除按模拟删除规则判定；资源管理器、优化驱动器和系统属性要求可解析的本机主分区/卷 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
+| Pool/Tier 下区按钮 | 池仅“编辑存储池”，层仅“编辑存储层” | 两个按钮始终可点击并定位到结构编辑页；当前系统的只读/可编辑边界由目标页执行 | `MainPage.xaml.cs` |
+| Disk 下区按钮 | 仅“编辑磁盘”“系统属性对话框” | 对应 OS 磁盘在分区编辑页拓扑中可见时定位到分区页；入池物理盘等在该页隐藏的对象若有可解析存储池，定位到结构页；两者都没有时禁用并说明原因。系统属性按当前对象与本机条件决定可用性 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
+| Partition/Volume 下区按钮 | 仅“打开资源管理器”“编辑分区”“优化驱动器”“系统属性对话框” | 编辑分区始终可点击并定位到分区编辑页；其它 Windows 专用按钮按本机对象及系统条件决定可用性 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
+| 拓扑节点右键菜单 | 保留投影器提供的创建、重命名、初始化、格式化、删除等上下文命令 | 与精简的下区按钮不同；原有模拟/本机身份和对象角色禁用规则继续适用 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
 | Manage 分类未投影命令 | `MainPage` 保留层重命名、创建及池优化命令映射 | 当前 `ManageCommandProjector` 未返回这些命令，因此当前界面不生成对应按钮；不要把已有映射误当作可见功能 | `MainPage.xaml.cs`、`ManageCommandProjector.cs` |
 | 属性表上下文菜单 | 复制当前单元格值、复制属性组、查看原始字段 | 仅在已选列属性组的右键菜单中出现；原始字段对话框提供只读可选文本和关闭按钮 | `PropertyTableContextMenu.cs` |
 
@@ -74,7 +75,7 @@
 
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
-| 磁盘与分区拓扑 `TopologyControl` | 选择磁盘、分区或未分配空间；展开节点浏览结构 | 所有正值未分配间隙均显示，包括对齐后不足 1 MiB 的间隙；该选择会使创建按钮显示禁用原因 | `DiskPartitionPage.xaml(.cs)`、`TopologyNodeControl.xaml(.cs)` |
+| 磁盘与分区拓扑 `TopologyControl` | 选择磁盘、分区或可见的未分配空间；展开节点浏览结构 | 未分配间隙小于设置的隐藏阈值时不投影到页面；可见但对齐后不足 1 MiB 的间隙会使操作按钮显示禁用原因 | `DiskPartitionPage.xaml(.cs)`、`TopologyNodeControl.xaml(.cs)` |
 | `TopologyScrollViewer` | 滚动浏览磁盘与分区拓扑 | 承载左侧结构树；节点选择更新右侧表单和操作状态 | `DiskPartitionPage.xaml` |
 | `PartitionFormGrid` | 显示磁盘/分区身份字段和右侧编辑表单 | 当前选择决定哪些字段和按钮启用；表单放在纵向可滚动区域 | `DiskPartitionPage.xaml(.cs)` |
 | `OnlineButton` | 联机选中的模拟磁盘 | 仅选中模拟磁盘本身且磁盘当前脱机时启用；帮助说明只作用于模拟磁盘 | `DiskPartitionPage.xaml(.cs)` |
@@ -91,7 +92,7 @@
 | `ResetSizeButton` | 将新建容量恢复为当前分区类型的推荐值 | 容量偏离推荐值时显示；帮助指出恢复推荐 MiB 容量 | `DiskPartitionPage.xaml(.cs)` |
 | `SizeBox` 与固定 `MiB` 后缀 | 输入新分区 MiB 容量；已有分区时显示当前 MiB 数值 | 创建时仅接受正 MiB 整数并受所选空隙的 1 MiB 对齐上限限制；已有分区时只读，扩展/压缩使用单独对话框 | `DiskPartitionPage.xaml`、`DiskPartitionPage.xaml.cs` |
 | `SizeAdaptiveValue` | 显示 `SizeBox` 当前容量对应的自适应容量单位 | 只读第二行；无有效整数或尚无可计算容量时显示说明或破折号 | `DiskPartitionPage.xaml(.cs)` |
-| `MaximumSizeButton` | 将创建容量填为当前空隙所能容纳的最大对齐值（MAX） | 只有模拟 GPT 未分配间隙几何可创建时启用；对齐后余量不足 1 MiB 的间隙仍可选择，但该按钮和创建按钮会显示不足原因；无图标 | `DiskPartitionPage.xaml(.cs)` |
+| `MaximumSizeButton` | 将创建容量填为当前空隙所能容纳的最大对齐值（MAX） | 只有模拟 GPT 可见间隙的几何可创建时启用；对齐后余量不足 1 MiB 时给出原因；使用 U+E74E 图标 | `DiskPartitionPage.xaml(.cs)` |
 | `ResetFileSystemButton` | 恢复该分区类型推荐的文件系统 | 文件系统值偏离推荐项时显示 | `DiskPartitionPage.xaml(.cs)` |
 | `FileSystemBox` | 选择模拟格式化文件系统 | 仅可格式化的普通模拟数据分区或新建分区可用；受 MSR、启动/系统分区保护 | `DiskPartitionPage.xaml(.cs)` |
 | `ResetClusterButton` | 恢复推荐的分配单元大小 | 分配单元值偏离推荐项时显示 | `DiskPartitionPage.xaml(.cs)` |
@@ -99,8 +100,7 @@
 | `ResetQuickFormatButton` | 恢复快速格式化选项的推荐值 | 快速格式化开关偏离推荐状态时显示 | `DiskPartitionPage.xaml(.cs)` |
 | `QuickFormatSwitch` | 选择模拟快速格式化选项 | 仅格式化选项可用时启用；悬停帮助说明模拟行为 | `DiskPartitionPage.xaml(.cs)` |
 | `FullFormatSwitch` | 选择模拟完整格式化选项 | 仅格式化选项可用时启用；悬停帮助明确不会扫描真实介质 | `DiskPartitionPage.xaml(.cs)` |
-| `CreatePartitionButton` | 在当前选中的模拟 GPT 未分配间隙创建分区 | 要求有效对齐几何和容量正整数不超过上限；容不下 1 MiB 对齐分区的正数间隙仍显示但禁用，并说明具体原因 | `DiskPartitionPage.xaml(.cs)` |
-| `FormatButton` | 格式化选中的现有模拟分区 | 仅现有可格式化的普通模拟数据分区启用；创建分区另用 `CreatePartitionButton`；提交前按流程显示风险确认 | `DiskPartitionPage.xaml(.cs)` |
+| `PartitionActionButton` | 右侧底部唯一操作按钮；选未分配间隙时新建分区，选现有分区时格式化分区 | 文字、图标、自动化名称、用途帮助和禁用原因随选择切换；新建要求有效对齐几何及整数 MiB 容量，格式化要求可格式化的普通模拟数据分区；提交前按流程确认 | `DiskPartitionPage.xaml(.cs)` |
 | 扩展／压缩目标对话框输入框 | 输入目标总容量的 MiB 整数 | 扩展目标需大于当前大小；压缩目标需较小且满足建模几何、空闲空间与文件系统条件；不通过时主操作被阻止 | `DiskPartitionPage.xaml.cs` |
 
 ## 监控页
@@ -149,8 +149,9 @@
 
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
-| 本次运行日志 `MessageList` | 显示本进程通知历史；双击具体日志行打开详情浮层 | 不允许列表选择；没有条目时显示空状态 | `DevelopmentPage.xaml(.cs)` |
-| 消息详情 `detailTextBox` | 在日志条目浮层中查看完整消息并用键盘复制 | 动态创建、只读且可选文本；单击浮层外或按 Esc 由原生 Flyout 关闭 | `DevelopmentPage.xaml.cs` |
+| 消息列表 `MessageList` | 显示本进程通知历史的单行条目；双击条目打开详情 | 悬停有底色、选中有强调色底色和左侧标记；空列表显示提示；与 `Diagnostics` 故障日志分离 | `DevelopmentPage.xaml(.cs)` |
+| 开发页横向／纵向分隔条 `TopAreaColumnSplitter`／`TopBottomAreaSplitter` | 拖拽调整左上和右上宽度、上下高度 | 窄窗隐藏右上区域和横向分隔条；上下分隔条仍可拖拽 | `DevelopmentPage.xaml(.cs)` |
+| 消息详情 `MessageDetailOverlay`／`MessageDetailText` | 在页面中央查看完整消息并用键盘复制 | 背景变暗；单个只读、可选文本框按内容调整高度，长文本可滚动；点击文本框外关闭 | `DevelopmentPage.xaml(.cs)` |
 | 测试页 | 说明完整测试工作区属于 WinPool 2.0 规划 | 当前为静态说明页，没有交互控件 | `TestPage.xaml` |
 
 ## 临时对话框与弹层

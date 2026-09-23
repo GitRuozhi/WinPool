@@ -2,9 +2,19 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
-## 2026-09-23 最新 21 项要求：本轮结果
+## 2026-09-23 最新 13 项界面反馈：验证结果
 
-本轮以 `1d94d2e` 加当前源码为基线。Release 自动回归：Application 291/291、Infrastructure 93/93、Architecture 47/47；Persistence 130 passed、3 个既有大型监控测量按门控 skipped，均 0 failed。新增启动只读读取器的子代理定点 Debug 回归 7/7 passed。TRX 位于 `artifacts/verification-20260923-final-r1/test-results`。Architecture 首轮 46/47：旧断言要求先呈现默认系统，已改为检查预显顺序，R2 47/47；Infrastructure 首轮 90/93：三个格式化测试夹具用非整数 MiB 创建分区，与新规则冲突，改为有效的 500 MiB 后 R2 93/93。首轮失败 TRX 均保留。新增分区几何回归还覆盖大小写不同的磁盘关联与删除中间分区后编号唯一。隔离 App/Agent Release 构建见同一验证目录的 `release-build.log`，exit 0、0 警告、0 错误，运行树在 `artifacts/verification-20260923-final-r1/Release`，合并 288 shared／294 App-only／10 Agent-only／0 collisions；未替换 `artifacts/Release`。
+基线为 `5424902` 加本轮修改。最终 Architecture 47/47 passed、0 failed、0 skipped；`WinPool.slnx` 隔离 Release 构建 exit 0、0 warnings、0 errors，App/Agent 合并为 288 shared／294 App-only／10 Agent-only／0 collisions。TRX、实际构建命令与日志位于 `artifacts/verification-20260923-final-integration-5c02b9a7/`；合并产物位于其 `Release/`，共 592 文件。保护目录 `artifacts/Release` 的 App EXE 哈希和时间在构建前后相同。自动测试不代替原生界面检查。
+
+原生 App 与 Agent 从该隔离 Release 目录运行，使用现有标准数据根，不执行模拟创建、格式化或真实存储写入。开发页横向、纵向分隔条均实际拖动，消息区 UIA 边界由 746×525 变为 860×461；两条消息以单行列出，列表及区域自动化名称均为“消息列表”，页面没有可见标题。悬停第一条后点击，UIA 读到 `IsSelected=True`；双击后唯一只读 `MessageDetailText` 边界为 640×171，中心与内容区中心一致，点击框外后控件消失。实际 Ctrl+C、长文本滚动和悬停/选中颜色视觉未核对。
+
+分区边界模拟系统选择可见间隙时，UIA 读到“起点” `593,937MiB (580.02 GiB)`、“终点” `1,907,348MiB (1.82 TiB)`、默认容量 1313411 MiB，第二行 `1.25 TiB`；第一行输入、MiB、MAX 和第二行换算值的边界分行清楚。该系统只出现一段大未分配空间；恢复的小间隙阈值源码核对通过。选间隙时唯一 `PartitionActionButton` 为“新建分区”，选已有 C: 时切为“格式化分区”。管理页下区 UIA 见池仅 1 个编辑按钮、磁盘仅编辑及系统属性 2 个、分区指定 4 个；本机磁盘编辑实际进入分区页。层分类在本次样例中无条目，按钮未原生核对；入池物理盘路由按分区拓扑可见投影修正，未另造样例进行原生触发。
+
+自动本机只读刷新期间，UIA 见一张宽 384 的通知 Group，只有一个 `NotificationInfoBar` 子控件；XAML 已移除外层 Border。截图工具的窗口捕获返回全黑 4 KB PNG，屏幕区域捕获包含其它应用而非 WinPool 窗口，均保存在同一验证目录 `evidence/`，不能作为卡片单层外观、暗色遮罩或选中颜色的视觉证据。通知右退场、不同文本高度和减少动态效果本轮仍 `unverified`。测试后恢复原系统 `[模拟] 其它与网络` 和硬件页，并退出隔离 App/Agent；未清理数据。
+
+## 2026-09-23 上一轮 21 项要求：历史验证结果
+
+以下以 `1d94d2e` 加上一轮源码为基线的回归、构建和原生验收，只适用于上一轮 21 项要求，不覆盖本轮改动。Release 自动回归：Application 291/291、Infrastructure 93/93、Architecture 47/47；Persistence 130 passed、3 个既有大型监控测量按门控 skipped，均 0 failed。新增启动只读读取器的子代理定点 Debug 回归 7/7 passed。TRX 位于 `artifacts/verification-20260923-final-r1/test-results`。Architecture 首轮 46/47：旧断言要求先呈现默认系统，已改为检查预显顺序，R2 47/47；Infrastructure 首轮 90/93：三个格式化测试夹具用非整数 MiB 创建分区，与新规则冲突，改为有效的 500 MiB 后 R2 93/93。首轮失败 TRX 均保留。新增分区几何回归还覆盖大小写不同的磁盘关联与删除中间分区后编号唯一。隔离 App/Agent Release 构建见同一验证目录的 `release-build.log`，exit 0、0 警告、0 错误，运行树在 `artifacts/verification-20260923-final-r1/Release`，合并 288 shared／294 App-only／10 Agent-only／0 collisions；未替换 `artifacts/Release`。
 
 有限原生核对在上述隔离 Release 运行树和现有标准数据根进行，没有清理数据。关闭 Agent 后冷启动：计时脚本约 663 ms 找到主窗口、约 1883 ms 读到 `[模拟] 分区边界`，当时标题栏选择器可见但禁用，说明 Agent 完成前已呈现上次系统；随后选择器启用。该计时包含 WinApp CLI 调用开销，不能作为准确绘制时延或逐帧“零闪烁”证明。重新启动后 UIA 与 `evidence/restart-partition-simulation.png` 核对上次分区页和模拟系统。测试结束将原选择恢复为本机系统／开发页，下一次启动再核对读回；App 和隔离 Agent 均已退出。
 
