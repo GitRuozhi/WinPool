@@ -185,6 +185,7 @@ public sealed partial class MainWindow : Window
         RefreshNotificationSurface();
 
         ExtendsContentIntoTitleBar = true;
+        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/CAppIcon.ico");
         var windowScale = AppWindowPlacement.GetWindowScale(this);
         if (AppWindow.Presenter is OverlappedPresenter presenter)
@@ -714,7 +715,7 @@ public sealed partial class MainWindow : Window
         {
             _updatingSystemSelector = false;
         }
-        DispatcherQueue.TryEnqueue(UpdateTitleBarPassthroughRegions);
+        QueueTitleBarPassthroughRegionUpdate();
     }
 
     private void ActiveSystemSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1268,7 +1269,7 @@ public sealed partial class MainWindow : Window
     {
         UpdateShellNavigationTextVisibility();
         UpdateCaptionInset();
-        UpdateTitleBarPassthroughRegions();
+        QueueTitleBarPassthroughRegionUpdate();
         RefreshNotificationSurface();
     }
 
@@ -1431,7 +1432,7 @@ public sealed partial class MainWindow : Window
         }
         ShellNavigationList.InvalidateMeasure();
         ShellNavigationList.ItemsPanelRoot?.InvalidateMeasure();
-        UpdateTitleBarPassthroughRegions();
+        QueueTitleBarPassthroughRegionUpdate();
     }
 
     private void UpdateShellNavigationAccent()
@@ -1461,10 +1462,19 @@ public sealed partial class MainWindow : Window
     }
 
     private void CustomTitleBar_Loaded(object sender, RoutedEventArgs e) =>
-        UpdateTitleBarPassthroughRegions();
+        QueueTitleBarPassthroughRegionUpdate();
 
     private void CustomTitleBar_SizeChanged(object sender, SizeChangedEventArgs e) =>
-        UpdateTitleBarPassthroughRegions();
+        QueueTitleBarPassthroughRegionUpdate();
+
+    private void TitleBarInteractiveElement_Loaded(object sender, RoutedEventArgs e) =>
+        QueueTitleBarPassthroughRegionUpdate();
+
+    private void TitleBarInteractiveElement_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        QueueTitleBarPassthroughRegionUpdate();
+
+    private void QueueTitleBarPassthroughRegionUpdate() =>
+        DispatcherQueue.TryEnqueue(UpdateTitleBarPassthroughRegions);
 
     private void UpdateTitleBarPassthroughRegions()
     {
@@ -1479,7 +1489,10 @@ public sealed partial class MainWindow : Window
         try
         {
             var elements = new List<FrameworkElement> { ShellNavigationList, ModeControls };
-            if (ActiveSystemSelector.Visibility == Visibility.Visible) elements.Add(ActiveSystemSelector);
+            if (ActiveSystemSelector.Visibility == Visibility.Visible)
+            {
+                elements.Add(ActiveSystemSelectorHost);
+            }
             regions = elements.Select(element => GetPhysicalRect(element, scale)).ToArray();
         }
         catch (Exception exception) when (

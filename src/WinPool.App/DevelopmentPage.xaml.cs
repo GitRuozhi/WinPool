@@ -24,7 +24,7 @@ public sealed partial class DevelopmentPage : Page
         string CreatedAt,
         string Severity,
         string Source,
-        string Summary,
+        string Title,
         GlobalNotification Notification);
 
     public DevelopmentPage()
@@ -78,6 +78,10 @@ public sealed partial class DevelopmentPage : Page
     private void UpdateText()
     {
         EmptyMessageListText.Text = Text("本次运行没有消息。", "No messages in this run.");
+        MessageTimeHeader.Text = Text("时间", "Time");
+        MessageSeverityHeader.Text = Text("级别", "Level");
+        MessageSourceHeader.Text = Text("来源", "Source");
+        MessageTitleHeader.Text = Text("信息标题", "Message title");
         AiEntryHint.Text = Text("人工智能入口，功能正在开发中。", "AI entry — feature in development.");
         AutomationProperties.SetName(MessageListArea, Text("消息列表", "Message list"));
         AutomationProperties.SetName(MessageList, Text("消息列表", "Message list"));
@@ -122,9 +126,7 @@ public sealed partial class DevelopmentPage : Page
                 message.CreatedAt.LocalDateTime.ToString("HH:mm:ss"),
                 FormatSeverity(message.Severity),
                 message.Source,
-                SingleLine(string.IsNullOrWhiteSpace(message.Message)
-                    ? message.Title
-                    : $"{message.Title} — {message.Message}"),
+                SingleLine(message.Title),
                 message))
             .ToArray();
         if (!_messages.SequenceEqual(messages))

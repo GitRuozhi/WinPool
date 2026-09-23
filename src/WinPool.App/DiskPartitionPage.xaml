@@ -7,14 +7,20 @@
     xmlns:editors="using:WinPool_App">
 
     <editors:EditorPageBase.Resources>
-        <Style x:Key="PartitionChromeButtonStyle" TargetType="Button">
+        <Style
+            x:Key="PartitionChromeButtonStyle"
+            BasedOn="{StaticResource WinPoolButtonBaseStyle}"
+            TargetType="Button">
             <Setter Property="MinHeight" Value="36" />
             <Setter Property="Padding" Value="6,5" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
-        <Style x:Key="PropertyResetButtonStyle" TargetType="Button">
+        <Style
+            x:Key="PropertyResetButtonStyle"
+            BasedOn="{StaticResource WinPoolButtonBaseStyle}"
+            TargetType="Button">
             <Setter Property="Width" Value="24" />
             <Setter Property="Height" Value="26" />
             <Setter Property="Padding" Value="4" />
@@ -22,10 +28,12 @@
         </Style>
     </editors:EditorPageBase.Resources>
 
-    <Grid>
+    <Grid
+        x:Name="PageRootGrid"
+        SizeChanged="PageRootGrid_SizeChanged">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="320" />
+            <ColumnDefinition x:Name="PartitionPropertiesColumn" Width="320" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -245,8 +253,9 @@
             Margin="8,0,0,0"
             VerticalAlignment="Stretch"
             VerticalScrollBarVisibility="Auto"
-            HorizontalScrollBarVisibility="Disabled">
-                <StackPanel>
+            HorizontalScrollBarVisibility="Auto"
+            HorizontalScrollMode="Enabled">
+                <StackPanel MinWidth="412">
                     <Border
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -298,21 +307,106 @@
                                 Grid.Row="2"
                                 VerticalAlignment="Center" />
                             <TextBlock
-                                x:Name="StartOffsetValue"
-                                Grid.Row="2"
-                                Grid.Column="2"
-                                TextAlignment="Right"
-                                VerticalAlignment="Center" />
-                            <TextBlock
                                 x:Name="EndOffsetLabel"
                                 Grid.Row="3"
                                 VerticalAlignment="Center" />
-                            <TextBlock
-                                x:Name="EndOffsetValue"
-                                Grid.Row="3"
+                            <Grid
+                                Grid.Row="2"
+                                Grid.RowSpan="2"
                                 Grid.Column="2"
-                                TextAlignment="Right"
-                                VerticalAlignment="Center" />
+                                VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock
+                                    x:Name="StartOffsetValue"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    TextAlignment="Right"
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="StartOffsetMibPrefixValue"
+                                    Grid.Row="0"
+                                    Grid.Column="2"
+                                    Text="MiB ("
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="StartOffsetAdaptiveValue"
+                                    Grid.Row="0"
+                                    Grid.Column="3"
+                                    TextAlignment="Right"
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="StartOffsetUnitValue"
+                                    Grid.Row="0"
+                                    Grid.Column="4"
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="StartOffsetUnavailableValue"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    Grid.ColumnSpan="4"
+                                    Text="—"
+                                    TextAlignment="Right"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="EndOffsetValue"
+                                    Grid.Row="1"
+                                    Grid.Column="1"
+                                    TextAlignment="Right"
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="EndOffsetMibPrefixValue"
+                                    Grid.Row="1"
+                                    Grid.Column="2"
+                                    Text="MiB ("
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="EndOffsetAdaptiveValue"
+                                    Grid.Row="1"
+                                    Grid.Column="3"
+                                    TextAlignment="Right"
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="EndOffsetUnitValue"
+                                    Grid.Row="1"
+                                    Grid.Column="4"
+                                    TextWrapping="NoWrap"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="EndOffsetUnavailableValue"
+                                    Grid.Row="1"
+                                    Grid.Column="1"
+                                    Grid.ColumnSpan="4"
+                                    Text="—"
+                                    TextAlignment="Right"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center" />
+                            </Grid>
                             <TextBlock
                                 x:Name="PartitionTypeLabel"
                                 Grid.Row="4"
@@ -391,8 +485,6 @@
                                         x:Name="SizeAdaptiveValue"
                                         Grid.Row="1"
                                         Grid.ColumnSpan="2"
-                                        FontSize="12"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         VerticalAlignment="Center" />
                                     <controls:ContextHelpHost Grid.Column="2" Grid.Row="0">
                                         <Button

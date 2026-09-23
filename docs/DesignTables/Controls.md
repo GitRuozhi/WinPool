@@ -4,6 +4,8 @@
 
 ## 窗口与导航
 
+界面顶部标题栏行高 48 DIP，系统首选高度为 Tall。图标与 WinPool 标题区、交互控件之间的空白属于可拖拽区域；导航列表、活动系统选择器、真实编辑控件及系统窗口按钮接收各自输入，因此整条 48 DIP 不能任意位置拖动。交互区加载或尺寸变化后刷新 Passthrough 命中矩形，实际剩余可拖宽度随窗口和语言变化。
+
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
 | 标题栏导航列表 `ShellNavigationList` | 在硬件、管理、结构、分区、测试、监控、开发、设置页面间导航；选择项提供页面本地化名称和图标 | 硬件、测试、开发仅开发者模式可见；Agent 工作区恢复期间禁用，完成后启用 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
@@ -149,9 +151,9 @@
 
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
-| 消息列表 `MessageList` | 显示本进程通知历史的单行条目；双击条目打开详情 | 悬停有底色、选中有强调色底色和左侧标记；空列表显示提示；与 `Diagnostics` 故障日志分离 | `DevelopmentPage.xaml(.cs)` |
+| 消息列表 `MessageList` | 显示本进程通知历史；表头和每条消息依次为时间、级别、来源、信息标题，标题列只取通知标题；双击条目打开详情 | 单行紧凑排列且文字垂直居中；悬停有底色、选中有强调色底色和左侧标记；空列表显示提示；与 `Diagnostics` 故障日志分离 | `DevelopmentPage.xaml(.cs)` |
 | 开发页横向／纵向分隔条 `TopAreaColumnSplitter`／`TopBottomAreaSplitter` | 拖拽调整左上和右上宽度、上下高度 | 窄窗隐藏右上区域和横向分隔条；上下分隔条仍可拖拽 | `DevelopmentPage.xaml(.cs)` |
-| 消息详情 `MessageDetailOverlay`／`MessageDetailText` | 在页面中央查看完整消息并用键盘复制 | 背景变暗；单个只读、可选文本框按内容调整高度，长文本可滚动；点击文本框外关闭 | `DevelopmentPage.xaml(.cs)` |
+| 消息详情 `MessageDetailOverlay`／`MessageDetailText` | 在页面中央查看完整消息并用键盘复制 | 背景变暗；单个只读、可选文本框使用不透明主题背景并按内容调整高度，长文本可滚动；点击文本框外关闭 | `DevelopmentPage.xaml(.cs)` |
 | 测试页 | 说明完整测试工作区属于 WinPool 2.0 规划 | 当前为静态说明页，没有交互控件 | `TestPage.xaml` |
 
 ## 临时对话框与弹层

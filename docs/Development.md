@@ -78,6 +78,8 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 `HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 复用现有系统切换入口；下拉选择先暂存，待 `DropDownClosed` 后再切换工作区和重建列表，避免在 WinUI 弹出层仍打开时使控件集合失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式为核心 SQLite 17 / 监控 SQLite 1 / IPC 11 / StorageSystemDocument 3 / 来源事实 1。
 
+`MainWindow` 的自绘标题栏行高 48 DIP，先启用 `ExtendsContentIntoTitleBar`，再设置 `AppWindow.TitleBar.PreferredHeightOption=Tall`。导航列表、真实编辑控件和可见的系统选择器容器是 Passthrough 交互区，剩余标题行由系统处理拖动；这些交互区加载或尺寸变化后排队重算物理像素矩形，避免语言和窗口布局变化后命中区域仍是旧坐标。Button 使用 App 级 4 DIP 圆角基线；强调样式及结构／分区页显式按钮样式继承它，尺寸与图标仍由各控件决定。
+
 内置模拟继续以 `StorageSnapshot` 作为编辑模型，但持久化前由 `WinPoolSimulationFacts` 生成 Windows 形态的来源事实。来源仍明确标记为 `FactOrigin.Simulation`，命名空间、类名、字段名、CIM 数字枚举、数组类型和 bytes 单位分别对齐 `Win32_ComputerSystem`、`Win32_OperatingSystem`、`Registry.CurrentVersion`、`MSFT_*`、`Win32_LogicalDisk`、`Win32_DiskDrive` 与磁盘角色补充来源。Partition、Volume 和 LogicalDisk 按真实来源拆分并用关系组合；模拟模型无法提供的 Windows 属性不伪造。系统版本号与 DisplayVersion 分开，系统卷使用 4096 bytes 分配单元，存储空间数据卷继续使用当前测试布局的 65536 bytes。
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
@@ -85,6 +87,8 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。当前编辑资格与几何边界见[模拟规则表](DesignTables/SimulationRules.md)；旧叙述稿已[归档](Archive/20260923-design-details/README.md)。
 
 模拟新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。分区页与结构页自动创建读取该几何，草稿规划先按同一粒度整理容量，规则校验及模拟提交再以共享几何核对，不能由界面独自夹紧超界容量。空盘勾选 MSR 时创建于 1–17 MiB；已有导入结构保持原始偏移及容量，不自动重排。
+
+分区页右侧属性栏随页面宽度在 320–420 DIP 间变化：根网格宽度减去 400 DIP 后限定在该区间，720 DIP 及以下保持旧版 320 DIP，820 DIP 及以上使用 420 DIP。右侧内容最小宽度 412 DIP，窄窗允许在属性区内横向滚动，不为扩栏挤掉原先的拓扑空间。起点与终点共用两行 Grid，MiB 数字和括号内自适应数字各在独立的 Auto 列中右对齐；无法计算偏移时隐藏数值及单位，只显示横线。容量输入下方的只读自动单位值使用普通正文文字样式。
 
 模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。扩缩入口由分区页的“扩展分区／压缩分区”按钮打开同窗口串行对话框，输入整数 MiB，对话框只接受落在能力范围内的目标并在确认前逐次校验；页面容量框对已有分区只显示四舍五入后的当前容量，不作为目标输入，因此两位显示舍入不会再被当成隐式修改，也不会让按钮永久灰置。上述范围不是 Windows `Get-PartitionSupportedSize` 实测，也不允许真实写入；当前验收状态见活动 Plan。
 
@@ -102,7 +106,7 @@ V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presente
 
 开发页“消息列表”只消费现有消息服务，不显示 Diagnostics 路径或读取故障日志文件。消息缓存不依赖开发页生命周期或 DeveloperMode；退出 App 自然清空，不补采后台历史。开发者模式关闭仍隐藏开发页，错误卡固定提示到开发页消息列表查看详情，不另加开启模式判断。现有 CommandLog 不接入此页，不复制成第二套历史。原生 ToolTip 与开发页详情分别承担短说明和可复制长信息；禁用控件仍应支持鼠标悬停帮助。其它需要确认的同窗口 ContentDialog 继续使用小型串行协调，不增加通用任务平台。
 
-开发页左上消息列表直接投影 History 的单行摘要，不读取 Diagnostics 文件；列表条目双击后在页面中央显示背景变暗的详情层，只含只读可选文本框，用户可选择并复制正文，点外关闭。三个子区域可拖拽调整；右上和下方保留空区域，下方只给小号 AI 入口开发中提示；窄窗时消息列表横跨上方。此页不显示标题、说明、路径和操作按钮；“消息列表”仅用于控件自动化名称及文档称呼。
+开发页左上消息列表直接投影 History 的时间、级别、来源和 Title，不读取 Diagnostics 文件；第四列不拼接 Message 正文。表头与单行条目共享列宽，消息行紧凑排列并垂直居中。条目双击后在页面中央显示背景变暗的详情层，只含使用不透明主题背景的只读可选文本框，用户可选择并复制正文，点外关闭。三个子区域可拖拽调整；右上和下方保留空区域，下方只给小号 AI 入口开发中提示；窄窗时消息列表横跨上方。此页不显示区域标题、说明、路径和操作按钮；“消息列表”仅用于控件自动化名称及文档称呼。
 
 ## 数据与生命周期
 

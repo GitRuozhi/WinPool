@@ -529,11 +529,21 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
         var diskPartitionXaml = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml"));
+        var diskPartitionPage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml.cs"));
         Assert.Contains("TopologyControl", structureXaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"320\"", structureXaml, StringComparison.Ordinal);
         Assert.Contains("PoolFormGrid", structureXaml, StringComparison.Ordinal);
         Assert.Contains("TopologyControl", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"320\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("PageRootGrid_SizeChanged", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Auto\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollMode=\"Enabled\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("StackPanel MinWidth=\"412\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Math.Min(420d, Math.Max(320d, e.NewSize.Width - 400d))",
+            diskPartitionPage,
+            StringComparison.Ordinal);
         Assert.Contains("PartitionActionButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Equal(
             1,
@@ -1275,7 +1285,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("MessageList", view, StringComparison.Ordinal);
         Assert.Contains("SelectionMode=\"Single\"", view, StringComparison.Ordinal);
         Assert.Contains("DoubleTapped=\"MessageList_DoubleTapped\"", view, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding Summary}\"", view, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding Title}\"", view, StringComparison.Ordinal);
         Assert.Contains("TextWrapping=\"NoWrap\"", view, StringComparison.Ordinal);
         Assert.Contains("MessageRowVisual_PointerEntered", view, StringComparison.Ordinal);
         Assert.Contains("MessageRowSelectedFill", view, StringComparison.Ordinal);

@@ -58,7 +58,9 @@
                 SelectionChanged="ShellNavigationList_SelectionChanged"
                 SelectionMode="Single"
                 ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                ScrollViewer.HorizontalScrollMode="Disabled">
+                ScrollViewer.HorizontalScrollMode="Disabled"
+                Loaded="TitleBarInteractiveElement_Loaded"
+                SizeChanged="TitleBarInteractiveElement_SizeChanged">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="MinWidth" Value="0" />
@@ -111,6 +113,8 @@
                 VerticalAlignment="Center"
                 Background="Transparent"
                 BorderThickness="1"
+                Loaded="TitleBarInteractiveElement_Loaded"
+                SizeChanged="TitleBarInteractiveElement_SizeChanged"
                 CornerRadius="4"
                 PointerEntered="ActiveSystemSelectorHost_PointerEntered"
                 PointerExited="ActiveSystemSelectorHost_PointerExited">
@@ -124,6 +128,8 @@
                     AutomationProperties.Name="Storage system"
                     DropDownClosed="ActiveSystemSelector_DropDownClosed"
                     SelectionChanged="ActiveSystemSelector_SelectionChanged"
+                    Loaded="TitleBarInteractiveElement_Loaded"
+                    SizeChanged="TitleBarInteractiveElement_SizeChanged"
                     Visibility="Collapsed">
                     <ComboBox.ItemContainerStyle>
                         <Style TargetType="ComboBoxItem">
@@ -138,7 +144,9 @@
                 Grid.Column="3"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
-                Spacing="8">
+                Spacing="8"
+                Loaded="TitleBarInteractiveElement_Loaded"
+                SizeChanged="TitleBarInteractiveElement_SizeChanged">
                 <TextBlock
                     x:Name="LocalRealOperationsLabel"
                     VerticalAlignment="Center"

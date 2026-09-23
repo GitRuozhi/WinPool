@@ -2,13 +2,21 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
+## 2026-09-23 七项界面反馈：验证结果
+
+最终隔离构建位于 `artifacts/verification-ui-feedback-20260923-responsive-8238ee77/`，App/Agent Release 编译 exit 0、0 警告、0 错误，运行树合并 288 shared／294 App-only／10 Agent-only／0 collisions；直接相关的 Architecture 两项 2/2 passed、0 failed、0 skipped，TRX、命令和日志保留在该目录。已有 `artifacts/Release` 未作为构建目标。第一次隔离构建在 `artifacts/verification-ui-feedback-20260923-a2225ec1/` 通过编译和开发页定点测试，但原生检查发现分区属性栏 320 DIP 时长 MiB 数字使右侧单位被裁，原始画面在该目录的 `evidence/partition-before-width-fix.png`，UIA 读到两个单位均 offscreen。第二次隔离构建 `artifacts/verification-ui-feedback-20260923-final-1b28b26b/` 改为 420 DIP 后，同一对象的完整单位可见；随后独立审查发现固定 420 DIP 会挤占最小窗口的拓扑视口，因此最终改为随窗口宽度在 320–420 DIP 之间调整，并为窄窗右栏增加横向滚动。前两次结果均未冒充最终通过。
+
+原生界面：开发页四列表头依次为时间、级别、来源、信息标题，标题列实际显示“采集成功”，没有拼接正文；消息列表行 UIA 为 28 DIP，文字纵向位于中间。双击详情后，唯一只读 TextBox 位于页面中央，实色主题背景与暗色遮罩可从 `evidence/development-detail.png` 区分；截图中框内左右空白采样同为 RGB(28,28,28)，框外为 RGB(21,21,21)，未出现底层左右区域透出。分区页复验本机 C: 时，起终点的 MiB 数字分别处于同一列，括号内数字另处一列；`952,664.54199219MiB (930.34 GiB)` 的两个单位都在宽窗 420 DIP 栏内，截图 `evidence/partition-aligned-complete.png`。选择模拟空隙后，起点 `593,937MiB (580.02 GiB)`、终点 `1,907,348MiB (1.82 TiB)` 分列，第一行容量 `1313411` MiB、第二行 `1.25 TiB` 用普通字号显示，截图 `evidence/partition-gap-capacity.png`。窗口缩至 900 DIP 时右栏仍为 420 DIP，两个单位可见，见 `evidence/partition-900.png`；缩至最小 480 DIP 时右栏为 320 DIP、左侧拓扑视口约 142 DIP，与旧布局相同，横向滚到右端后两个单位可见，见 `evidence/partition-480.png`、`evidence/partition-480-scrolled-end.png`。本轮仅选择对象，未提交创建或格式化。
+
+UIA 读到系统自绘标题栏和界面标题行均高 48 DIP。左侧标题区域从 (1080,294) 到 (1140,294)、以及从 (1080,310) 到 (1140,310) 的两次真实鼠标拖动，各使 1440×900 窗口水平移动 60 像素；每次都拖回初始 (1000,270)。导航、可见的系统选择器容器、真实编辑控件和系统窗口按钮是 Passthrough／系统按钮区域，不能作为拖动区。App 全局与结构／分区页显式 Button 样式都设置 4 DIP 圆角，管理和分区页截图已看；未逐一遍历所有页面、主题与 DPI。实际屏幕取证使用 `winapp ui screenshot --capture-screen --focus`，本次返回可辨认画面。测试后恢复原来的本机系统和管理页，并退出经路径核实的隔离 App/Agent；没有修改真实存储。
+
 ## 2026-09-23 通知卡透明余高修正
 
 基线为 `40d8a9b` 加本轮修改。移除 `NotificationCard.xaml` 外层 `MinHeight=72`，让 384 DIP 宽的卡片高度跟随单层 InfoBar 内容；200 DIP 最大高度、堆叠间距和向右离场规则未修改。更新旧的架构断言后，`NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails` 定点测试 1/1 passed；隔离 App/Agent Release 构建 exit 0、0 warnings、0 errors，合并 288 shared／294 App-only／10 Agent-only／0 collisions。有效命令、日志、TRX 和运行树位于 `artifacts/verification-notification-card-height-20260923-r2/`；既有 `artifacts/Release` 的 592 个文件哈希及时间戳未变。首次 r1 命令因工作目录错误在编译前退出，记录已保留；r2 编译的项目库和测试中间输出仍使用共享 `artifacts/build/<项目>/Release`，没有将其当作完全隔离。
 
-当前用户运行的 `artifacts/Release` App/Agent 是旧版本，未为了本次小幅布局修正中断。因此新卡片的原生视觉高度与离场后占位未验证；本轮通过范围为源码、定点架构测试和隔离编译。此前 UIA 读到的短卡 InfoBar 高度约 53，但当时外层仍有 72 DIP 下限，不能作为修复后的原生证据。
+当时用户运行的 `artifacts/Release` App/Agent 是旧版本，未为了该次小幅布局修正中断。因此新卡片的原生视觉高度与离场后占位未验证；该轮通过范围为源码、定点架构测试和隔离编译。此前 UIA 读到的短卡 InfoBar 高度约 53，但当时外层仍有 72 DIP 下限，不能作为修复后的原生证据。
 
-## 2026-09-23 最新 13 项界面反馈：验证结果
+## 2026-09-23 上一轮 13 项界面反馈：验证结果
 
 基线为 `5424902` 加本轮修改。最终 Architecture 47/47 passed、0 failed、0 skipped；`WinPool.slnx` 隔离 Release 构建 exit 0、0 warnings、0 errors，App/Agent 合并为 288 shared／294 App-only／10 Agent-only／0 collisions。TRX、实际构建命令与日志位于 `artifacts/verification-20260923-final-integration-5c02b9a7/`；合并产物位于其 `Release/`，共 592 文件。保护目录 `artifacts/Release` 的 App EXE 哈希和时间在构建前后相同。自动测试不代替原生界面检查。
 

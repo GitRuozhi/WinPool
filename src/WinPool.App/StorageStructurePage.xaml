@@ -7,7 +7,10 @@
     xmlns:editors="using:WinPool_App">
 
     <editors:EditorPageBase.Resources>
-        <Style x:Key="StructureChromeButtonStyle" TargetType="Button">
+        <Style
+            x:Key="StructureChromeButtonStyle"
+            TargetType="Button"
+            BasedOn="{StaticResource WinPoolButtonBaseStyle}">
             <Setter Property="MinHeight" Value="36" />
             <Setter Property="Padding" Value="6,5" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />

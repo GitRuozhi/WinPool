@@ -40,6 +40,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SetFormatMode(quickFormat: true);
     }
 
+    private void PageRootGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var propertyColumnWidth = Math.Min(420d, Math.Max(320d, e.NewSize.Width - 400d));
+        if (PartitionPropertiesColumn.Width.Value != propertyColumnWidth)
+        {
+            PartitionPropertiesColumn.Width = new GridLength(propertyColumnWidth);
+        }
+    }
+
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
@@ -322,37 +331,30 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     : "—";
             var start = partition?.Offset ?? (gap ? _selectedUnallocatedOffset : null);
             var length = partition?.Size ?? (gap ? _selectedUnallocatedSize : null);
+            long? startOffsetBytes = null;
+            long? endOffsetBytes = null;
             if (start is long startBytes && length is long sizeBytes)
             {
                 if (geometry is { CanCreate: true, StartOffsetBytes: long createStart, MaximumEndOffsetExclusiveBytes: long usableEnd })
                 {
-                    StartOffsetValue.Text = FormatOffset(createStart);
-                    EndOffsetValue.Text = FormatOffset(usableEnd);
+                    startOffsetBytes = createStart;
+                    endOffsetBytes = usableEnd;
                 }
                 else
                 {
                     if (TryGetExclusiveRangeEnd(startBytes, sizeBytes, out var endBytes))
                     {
-                        StartOffsetValue.Text = FormatOffset(startBytes);
-                        EndOffsetValue.Text = FormatOffset(endBytes);
-                    }
-                    else
-                    {
-                        StartOffsetValue.Text = "—";
-                        EndOffsetValue.Text = "—";
+                        startOffsetBytes = startBytes;
+                        endOffsetBytes = endBytes;
                     }
                 }
             }
             else if (disk is not null && !gap && partition is null)
             {
-                StartOffsetValue.Text = FormatOffset(0);
-                EndOffsetValue.Text = FormatOffset(disk.Size);
+                startOffsetBytes = 0;
+                endOffsetBytes = disk.Size;
             }
-            else
-            {
-                StartOffsetValue.Text = "—";
-                EndOffsetValue.Text = "—";
-            }
+            SetOffsetValues(startOffsetBytes, endOffsetBytes);
 
             FillFileSystemChoices(partition);
             FillDriveLetters(partition, volume, autoAssign: gap);
@@ -1362,15 +1364,58 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             : Text("请输入 MiB 正整数", "Enter a whole number of MiB");
     }
 
-    private string FormatOffset(long bytes)
+    private void SetOffsetValues(long? startBytes, long? endBytes)
     {
+        SetOffsetValue(
+            startBytes,
+            StartOffsetValue,
+            StartOffsetMibPrefixValue,
+            StartOffsetAdaptiveValue,
+            StartOffsetUnitValue,
+            StartOffsetUnavailableValue);
+        SetOffsetValue(
+            endBytes,
+            EndOffsetValue,
+            EndOffsetMibPrefixValue,
+            EndOffsetAdaptiveValue,
+            EndOffsetUnitValue,
+            EndOffsetUnavailableValue);
+    }
+
+    private void SetOffsetValue(
+        long? bytes,
+        TextBlock mibValue,
+        TextBlock mibPrefix,
+        TextBlock adaptiveValue,
+        TextBlock adaptiveUnit,
+        TextBlock unavailableValue)
+    {
+        var hasValue = bytes is long;
+        mibValue.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
+        mibPrefix.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
+        adaptiveValue.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
+        adaptiveUnit.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
+        unavailableValue.Visibility = hasValue ? Visibility.Collapsed : Visibility.Visible;
+        if (bytes is not long value)
+        {
+            return;
+        }
+
         var cultureName = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
             ? "zh-CN"
             : "en-US";
-        var mibText = ((decimal)bytes / BytesPerMiB).ToString(
+        mibValue.Text = ((decimal)value / BytesPerMiB).ToString(
             "#,0.########",
             System.Globalization.CultureInfo.GetCultureInfo(cultureName));
-        return $"{mibText}MiB ({TopologyProjector.FormatBytes(bytes)})";
+
+        var adaptiveText = TopologyProjector.FormatBytes(value);
+        var unitSeparator = adaptiveText.LastIndexOf(' ');
+        adaptiveValue.Text = unitSeparator > 0
+            ? adaptiveText[..unitSeparator]
+            : adaptiveText;
+        adaptiveUnit.Text = unitSeparator > 0
+            ? $" {adaptiveText[(unitSeparator + 1)..]})"
+            : ")";
     }
 
     private static bool TryGetExclusiveRangeEnd(long startBytes, long sizeBytes, out long endBytes)

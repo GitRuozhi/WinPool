@@ -53,7 +53,15 @@
             <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="{StaticResource WinPoolAccentColor}" />
             <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="{StaticResource WinPoolAccentColor}" />
 
-            <Style x:Key="WinPoolAccentButtonStyle" TargetType="Button">
+            <Style x:Key="WinPoolButtonBaseStyle" TargetType="Button">
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+            <Style TargetType="Button" BasedOn="{StaticResource WinPoolButtonBaseStyle}" />
+
+            <Style
+                x:Key="WinPoolAccentButtonStyle"
+                TargetType="Button"
+                BasedOn="{StaticResource WinPoolButtonBaseStyle}">
                 <Setter Property="Background" Value="{StaticResource WinPoolAccentBrush}" />
                 <Setter Property="BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
                 <Setter Property="Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
