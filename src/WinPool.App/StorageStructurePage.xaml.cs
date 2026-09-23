@@ -1933,15 +1933,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !steps.Any(item => item.Kind == SimulationEditKind.CreatePartition
                 && item.TargetProviderKey.Equals(createVdisk.AllocatedOsDiskId, StringComparison.OrdinalIgnoreCase)))
         {
+            var defaultPartitionSize = createVdisk.SizeBytes is long virtualDiskSize
+                ? EditWorkspace.GetPartitionCreateGeometry(0, virtualDiskSize).DefaultSizeBytes
+                : null;
             steps.Add(new SimulationEditRequest(
                 SimulationEditKind.CreatePartition,
                 createVdisk.AllocatedOsDiskId,
                 Name: intent.VolumeName,
                 FileSystem: intent.FileSystem,
                 AllocationUnitSize: intent.AllocationUnitSize,
-                SizeBytes: createVdisk.SizeBytes is long virtualDiskSize
-                    ? Math.Max(0, virtualDiskSize - (1024L * 1024))
-                    : null,
+                SizeBytes: defaultPartitionSize,
                 AllocatedPartitionId: StableIntentObjectId("sim:partition", poolId),
                 AllocatedVolumeId: StableIntentObjectId("sim:volume", poolId),
                 PartitionKind: PartitionKind.BasicData));

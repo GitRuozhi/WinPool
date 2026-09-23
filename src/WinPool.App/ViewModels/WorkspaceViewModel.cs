@@ -35,6 +35,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _categorySelections = [];
     private bool _updatingComparisonSelection;
     private bool _suppressRelatedSelection;
+    private bool _startupPreviewApplied;
     private StorageUnitRef? _contextUnit;
     private ManageSelectionKey? _selectedSelection;
     private ManageObjectTarget? _selectedTopologyTarget;
@@ -437,17 +438,103 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
         var persisted = (await _systemRepository.LoadSimulationsAsync()).ToList();
         var merged = await MergeBuiltInSimulationsAsync(persisted);
+        var previousSystem = SelectedSystem;
         var selectedId = SelectedSystem.Id;
         SystemCatalog.ReplaceSimulations(merged);
         SelectedSystem = SystemCatalog.Find(selectedId)
             ?? SystemCatalog.Find(cachedLocal?.Id ?? string.Empty)
             ?? SystemCatalog.Systems.FirstOrDefault(system => system.IsLocal)
             ?? SystemCatalog.Systems.First(x => !x.IsLocal);
+        if (!ReferenceEquals(previousSystem, SelectedSystem))
+        {
+            _contextUnit = null;
+            OnPropertyChanged(nameof(SelectedSystem));
+            OnPropertyChanged(nameof(ActiveDocument));
+            OnPropertyChanged(nameof(ActiveSnapshot));
+            OnPropertyChanged(nameof(Snapshot));
+            OnPropertyChanged(nameof(IsLocalSystem));
+            OnPropertyChanged(nameof(IsSelectedSystemLocalConsistent));
+            OnPropertyChanged(nameof(IsUsingSimulatedInventory));
+            OnPropertyChanged(nameof(CanDeleteSelectedSimulation));
+            OnPropertyChanged(nameof(CanOpenSelectedPartition));
+            if (!StringComparer.OrdinalIgnoreCase.Equals(previousSystem.Id, SelectedSystem.Id))
+            {
+                RaiseWorkspaceSelectionChanged();
+            }
+        }
         // Publish the cached local snapshot immediately. Restore only adjusts
         // which system/object is selected; it must not be what makes the
         // last inventory visible.
         RefreshLocalizedContent();
         await RestoreWorkspaceUiStateAsync();
+    }
+
+    /// <summary>
+    /// Applies an integrity-checked read-only startup preview while the Agent
+    /// catalog is loading. Persistence remains disarmed until Agent restore
+    /// verifies the state and active document.
+    /// </summary>
+    internal bool ApplyWorkspaceStartupPreview(
+        WorkspaceSessionState state,
+        StorageSystemDocument activeDocument)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(activeDocument);
+        if (_workspaceStateLoadAttempted
+            || _startupPreviewApplied
+            || !WorkspaceSessionStateValidator.IsValid(state)
+            || string.IsNullOrWhiteSpace(state.ActiveDocumentId)
+            || !StringComparer.OrdinalIgnoreCase.Equals(state.ActiveDocumentId, activeDocument.Id))
+        {
+            return false;
+        }
+
+        try
+        {
+            activeDocument.ValidateCurrentFormat();
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+
+        if (activeDocument.IsLocal)
+        {
+            SystemCatalog.TryReplaceLocalReport(activeDocument);
+        }
+        else
+        {
+            var simulations = SystemCatalog.Systems
+                .Where(system => !system.IsLocal
+                    && !StringComparer.OrdinalIgnoreCase.Equals(system.Id, activeDocument.Id))
+                .Append(activeDocument)
+                .ToArray();
+            SystemCatalog.ReplaceSimulations(simulations);
+        }
+
+        if (SystemCatalog.Find(state.ActiveDocumentId) is null)
+        {
+            return false;
+        }
+
+        RestoredUiState = new WorkspaceUiState(
+            state.ActivePage.ToString(),
+            state.ActiveDocumentId,
+            state.ActiveCategory,
+            state.RememberedProviderKeys.ToDictionary(pair => pair.Key, pair => pair.Value),
+            state.HighlightedTopologyProviderKey);
+        _restoreInProgress = true;
+        try
+        {
+            ApplyRestoredUiState();
+            _persistAllowed = false;
+            _startupPreviewApplied = true;
+            return true;
+        }
+        finally
+        {
+            _restoreInProgress = false;
+        }
     }
 
     private async Task<StorageSystemDocument?> TryLoadCachedLocalAsync()
@@ -496,6 +583,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         try
         {
             await EnsureWorkspaceUiStateLoadedAsync();
+            if (_startupPreviewApplied)
+            {
+                var restoredSystem = string.IsNullOrWhiteSpace(RestoredUiState?.ActiveSystemId)
+                    ? null
+                    : SystemCatalog.Find(RestoredUiState.ActiveSystemId);
+                if (restoredSystem is null
+                    && SystemCatalog.Systems.FirstOrDefault(system => system.IsLocal) is { } local)
+                {
+                    SwitchSystem(local.Id);
+                }
+                _startupPreviewApplied = false;
+            }
             ApplyRestoredUiState();
         }
         finally

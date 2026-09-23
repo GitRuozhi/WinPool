@@ -4,13 +4,11 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Width="384"
-    Height="128"
+    MinHeight="72"
+    MaxHeight="200"
     IsTabStop="True"
     KeyDown="NotificationCard_KeyDown"
     Tapped="NotificationCard_Tapped">
-    <UserControl.Clip>
-        <RectangleGeometry Rect="0,0,384,128" />
-    </UserControl.Clip>
     <UserControl.RenderTransform>
         <TranslateTransform x:Name="NotificationCardTranslation" />
     </UserControl.RenderTransform>

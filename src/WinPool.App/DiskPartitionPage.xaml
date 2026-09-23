@@ -158,28 +158,8 @@
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
                 <Button
-                    x:Name="NewPartitionButton"
-                    Grid.Column="4"
-                    Style="{StaticResource PartitionChromeButtonStyle}"
-                    Click="NewPartition_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="NewPartitionButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
                     x:Name="DeletePartitionButton"
-                    Grid.Column="5"
+                    Grid.Column="4"
                     Style="{StaticResource PartitionChromeButtonStyle}"
                     Click="DeletePartition_Click">
                     <Grid ColumnSpacing="6">
@@ -199,7 +179,7 @@
                 <controls:ContextHelpHost>
                 <Button
                     x:Name="ExtendButton"
-                    Grid.Column="6"
+                    Grid.Column="5"
                     Style="{StaticResource PartitionChromeButtonStyle}"
                     Click="Extend_Click">
                     <Grid ColumnSpacing="6">
@@ -219,7 +199,7 @@
                 <controls:ContextHelpHost>
                 <Button
                     x:Name="ShrinkButton"
-                    Grid.Column="7"
+                    Grid.Column="6"
                     Style="{StaticResource PartitionChromeButtonStyle}"
                     Click="Shrink_Click">
                     <Grid ColumnSpacing="6">
@@ -239,7 +219,7 @@
                 <controls:ContextHelpHost>
                 <Button
                     x:Name="OpenExplorerButton"
-                    Grid.Column="8"
+                    Grid.Column="7"
                     Style="{StaticResource PartitionChromeButtonStyle}"
                     Click="OpenExplorer_Click">
                     <Grid ColumnSpacing="6">
@@ -385,14 +365,41 @@
                                 <FontIcon Glyph="&#xE777;" FontSize="12" />
                             </Button>
                             <controls:ContextHelpHost Grid.Row="7" Grid.Column="2">
-                                <NumberBox
-                                    x:Name="SizeBox"
-                                    Minimum="0"
-                                    SmallChange="1"
-                                    LargeChange="10"
-                                    SpinButtonPlacementMode="Hidden"
-                                    ValidationMode="InvalidInputOverwritten"
-                                    ValueChanged="SizeBox_ValueChanged" />
+                                <Grid ColumnSpacing="6" RowSpacing="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBox
+                                        x:Name="SizeBox"
+                                        Grid.Column="0"
+                                        TextChanged="SizeBox_TextChanged" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Text="MiB"
+                                        Margin="0,0,2,0"
+                                        VerticalAlignment="Center" />
+                                    <TextBlock
+                                        x:Name="SizeAdaptiveValue"
+                                        Grid.Row="1"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        VerticalAlignment="Center" />
+                                    <controls:ContextHelpHost Grid.Column="2" Grid.RowSpan="2">
+                                        <Button
+                                            x:Name="MaximumSizeButton"
+                                            MinWidth="32"
+                                            VerticalAlignment="Stretch"
+                                            Click="MaximumSize_Click">
+                                            <FontIcon Glyph="&#xE74E;" FontSize="14" />
+                                        </Button>
+                                    </controls:ContextHelpHost>
+                                </Grid>
                             </controls:ContextHelpHost>
                             <StackPanel
                                 Grid.Row="8"
@@ -504,17 +511,34 @@
                             </controls:ContextHelpHost>
                         </Grid>
                     </Border>
-                    <controls:ContextHelpHost Margin="0,8,0,0">
-                    <Button
-                        x:Name="FormatButton"
-                        HorizontalAlignment="Stretch"
-                        Click="Format_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="FormatButtonIcon" Glyph="&#xE9CE;" FontSize="14" />
-                            <TextBlock x:Name="FormatButtonLabel" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    </controls:ContextHelpHost>
+                    <Grid Margin="0,8,0,0" ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <controls:ContextHelpHost>
+                            <Button
+                                x:Name="CreatePartitionButton"
+                                HorizontalAlignment="Stretch"
+                                Click="CreatePartition_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE710;" FontSize="14" />
+                                    <TextBlock x:Name="CreatePartitionButtonLabel" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                        </controls:ContextHelpHost>
+                        <controls:ContextHelpHost Grid.Column="1">
+                            <Button
+                                x:Name="FormatButton"
+                                HorizontalAlignment="Stretch"
+                                Click="Format_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE9CE;" FontSize="14" />
+                                    <TextBlock x:Name="FormatButtonLabel" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                        </controls:ContextHelpHost>
+                    </Grid>
                 </StackPanel>
             </ScrollViewer>
     </Grid>

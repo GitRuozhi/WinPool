@@ -4,6 +4,175 @@ namespace WinPool.Application.Tests;
 
 public sealed class V049PartitionSemanticsTests
 {
+    private const long MiB = 1024L * 1024;
+
+    [Fact]
+    public void PartitionCreateGeometryAlignsStartAndFloorsCapacityToWholeMebibytes()
+    {
+        var geometry = EditWorkspace.GetPartitionCreateGeometry(
+            gapOffsetBytes: 5 * MiB + MiB / 2,
+            gapSizeBytes: 3 * MiB);
+
+        Assert.True(geometry.CanCreate);
+        Assert.Equal(6 * MiB, geometry.StartOffsetBytes);
+        Assert.Equal(2 * MiB, geometry.MaximumSizeBytes);
+        Assert.Equal(2 * MiB, geometry.DefaultSizeBytes);
+        Assert.Equal(8 * MiB, geometry.MaximumEndOffsetExclusiveBytes);
+    }
+
+    [Fact]
+    public void DiskHeadGapReservesFirstMebibyteAndRejectsSmallerAlignedCapacity()
+    {
+        var tooSmall = EditWorkspace.GetPartitionCreateGeometry(0, MiB);
+        Assert.False(tooSmall.CanCreate);
+        Assert.Contains("less than 1 MiB", tooSmall.UnavailableReason, StringComparison.Ordinal);
+
+        var oneMebibyte = EditWorkspace.GetPartitionCreateGeometry(0, 2 * MiB);
+        Assert.True(oneMebibyte.CanCreate);
+        Assert.Equal(MiB, oneMebibyte.StartOffsetBytes);
+        Assert.Equal(MiB, oneMebibyte.MaximumSizeBytes);
+    }
+
+    [Fact]
+    public void CreatePartitionPreservesImportedOffsetAndAlignsOnlyNewPartition()
+    {
+        var document = Apply(InitializedDisk(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: MiB));
+        var imported = Assert.Single(document.Snapshot.Partitions);
+        var importedOffset = imported.Offset + 512;
+        document = document.WithCandidate(document.Snapshot with
+        {
+            Partitions = [imported with { Offset = importedOffset }]
+        });
+
+        var nextGapOffset = importedOffset + imported.Size;
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: MiB,
+            OffsetBytes: nextGapOffset));
+
+        var partitions = document.Snapshot.Partitions.OrderBy(item => item.Offset).ToArray();
+        Assert.Equal(importedOffset, partitions[0].Offset);
+        Assert.Equal(3 * MiB, partitions[1].Offset);
+        Assert.Equal(MiB, partitions[1].Size);
+    }
+
+    [Fact]
+    public void CreatePartitionRejectsGapWithoutOneAlignedMebibyteWithReason()
+    {
+        var document = InitializedDisk();
+        document = document.WithCandidate(document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item with { Size = MiB + MiB / 2 })
+                .ToArray()
+        });
+
+        var result = new SimulationOperationService().Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0"));
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("less than 1 MiB", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreatePartitionDoesNotOverlapAnExistingPartitionWhenDiskIdCasingDiffers()
+    {
+        var snapshot = Apply(InitializedDisk(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: MiB)).Snapshot;
+        var existing = Assert.Single(snapshot.Partitions);
+        snapshot = snapshot with
+        {
+            Partitions = [existing with { OsDiskStableId = "OSDISK:SSD0" }]
+        };
+
+        var geometry = EditWorkspace.GetPartitionCreateGeometry(
+            snapshot, "osdisk:ssd0", existing.Offset);
+        var decision = StorageEditRules.Evaluate(snapshot, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: MiB,
+            OffsetBytes: existing.Offset));
+
+        Assert.False(geometry.CanCreate);
+        Assert.Equal(StorageRuleVerdict.Deny, decision.Verdict);
+    }
+
+    [Fact]
+    public void CreatePartitionReusesAnAvailableNumberAfterDeletingAMiddlePartition()
+    {
+        var document = InitializedDisk();
+        for (var index = 0; index < 3; index++)
+        {
+            document = Apply(document, new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
+                "osdisk:ssd0",
+                SizeBytes: MiB));
+        }
+
+        var middle = document.Snapshot.Partitions.Single(item => item.PartitionNumber == 2);
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.DeletePartition, middle.StableId));
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: MiB,
+            OffsetBytes: middle.Offset));
+
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            document.Snapshot.Partitions.Select(item => item.PartitionNumber).OrderBy(number => number));
+    }
+
+    [Fact]
+    public void CreatePartitionRulesRequireWholeMebibyteLengthWithinAlignedMaximum()
+    {
+        var snapshot = InitializedDisk().Snapshot;
+        var maximumSize = EditWorkspace.GetPartitionCreateGeometry(snapshot, "osdisk:ssd0")
+            .MaximumSizeBytes!.Value;
+
+        var unaligned = StorageEditRules.Evaluate(snapshot, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: MiB + 1));
+        var oversized = StorageEditRules.Evaluate(snapshot, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:ssd0",
+            SizeBytes: maximumSize + MiB));
+
+        Assert.Equal(StorageRuleVerdict.Deny, unaligned.Verdict);
+        Assert.Equal("storage.rule.create-partition.size-alignment", unaligned.Code);
+        Assert.Equal(StorageRuleVerdict.Deny, oversized.Verdict);
+        Assert.Equal("storage.rule.create-partition.size-boundary", oversized.Code);
+    }
+
+    [Fact]
+    public void InitializeDiskRejectsMsrWhenDiskCannotContainItsFixedGeometry()
+    {
+        var document = EmptyRawDisk();
+        document = document.WithCandidate(document.Snapshot with
+        {
+            OsDisks = document.Snapshot.OsDisks
+                .Select(item => item with { Size = 17 * MiB - 1 })
+                .ToArray()
+        });
+
+        var decision = StorageEditRules.Evaluate(document.Snapshot, new SimulationEditRequest(
+            SimulationEditKind.InitializeDisk,
+            "osdisk:ssd0",
+            PartitionStyle: "GPT",
+            CreateMsr: true));
+
+        Assert.Equal(StorageRuleVerdict.Deny, decision.Verdict);
+        Assert.Equal("storage.rule.initialize.msr-capacity", decision.Code);
+    }
+
     [Theory]
     [InlineData("NTFS")]
     [InlineData("ReFS")]
@@ -14,7 +183,7 @@ public sealed class V049PartitionSemanticsTests
         document = Apply(document, new SimulationEditRequest(
             SimulationEditKind.CreatePartition,
             "osdisk:ssd0",
-            SizeBytes: 1_000_000_000));
+            SizeBytes: 953 * MiB));
         var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
         Assert.DoesNotContain(document.Snapshot.Volumes, item => item.PartitionStableId == partition.StableId);
 
@@ -42,7 +211,7 @@ public sealed class V049PartitionSemanticsTests
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
                 AllocationUnitSize: 65536,
-                SizeBytes: 1_000_000_000,
+                SizeBytes: 953 * MiB,
                 QuickFormat: quickFormat));
 
         Assert.True(result.Succeeded, result.Error);
@@ -100,7 +269,7 @@ public sealed class V049PartitionSemanticsTests
                 SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: fileSystem,
-                SizeBytes: 100_000_000,
+                SizeBytes: 95 * MiB,
                 PartitionKind: kind));
 
         var partition = Assert.Single(document.Snapshot.Partitions);
@@ -119,7 +288,7 @@ public sealed class V049PartitionSemanticsTests
                 SimulationEditKind.CreatePartition,
                 "osdisk:ssd0",
                 FileSystem: "NTFS",
-                SizeBytes: 100_000_000));
+                SizeBytes: 95 * MiB));
         document = document.WithCandidate(document.Snapshot with
             {
                 OsDisks = document.Snapshot.OsDisks

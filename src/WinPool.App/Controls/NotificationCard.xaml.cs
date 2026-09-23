@@ -164,14 +164,14 @@ public sealed partial class NotificationCard : UserControl
     {
         if (notification.Severity != GlobalNotificationSeverity.Error)
         {
-            return Shorten(notification.Message, IsChinese ? 44 : 80);
+            return Shorten(notification.Message, IsChinese ? 100 : 180);
         }
 
         // Keep the required route to details visible even when an error body is
         // long. The original, untruncated message is available on click and in
         // the Developer page history.
         var prompt = Text("进入开发页查看详情", "Open Developer features for details");
-        var maximumErrorTextLength = IsChinese ? 58 : 108;
+        var maximumErrorTextLength = IsChinese ? 110 : 190;
         var messageLength = Math.Max(0, maximumErrorTextLength - prompt.Length - 1);
         return string.IsNullOrWhiteSpace(notification.Message)
             ? prompt

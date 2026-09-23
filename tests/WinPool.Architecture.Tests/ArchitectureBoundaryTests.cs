@@ -933,7 +933,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void MainWindowPaintsShellBeforeWaitingForAgent()
+    public void MainWindowPreviewsSavedWorkspaceBeforeAgentRestore()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
@@ -952,13 +952,17 @@ public sealed class ArchitectureBoundaryTests
             StringComparison.Ordinal);
         Assert.True(loadedStart >= 0 && loadedEnd > loadedStart);
         var loaded = source[loadedStart..loadedEnd];
+        var hide = loaded.IndexOf("RootFrame.Visibility = Visibility.Collapsed", StringComparison.Ordinal);
+        var preferences = loaded.IndexOf("await ViewModel.InitializePreferencesAsync()", StringComparison.Ordinal);
         var navigate = loaded.IndexOf("NavigateStartupPage()", StringComparison.Ordinal);
-        var wait = loaded.IndexOf(
-            "await App.InitialAgentConnectionTask",
-            StringComparison.Ordinal);
-        Assert.True(navigate >= 0 && wait > navigate);
-        var history = loaded.IndexOf("await _agentInventorySynchronizer.LoadHistoryAsync()", StringComparison.Ordinal);
-        Assert.True(history > navigate && history < wait);
+        var preview = loaded.IndexOf("LoadStartupWorkspacePreviewAsync(", StringComparison.Ordinal);
+        var wait = loaded.IndexOf("await agentConnectionTask", StringComparison.Ordinal);
+        Assert.True(hide >= 0 && hide < preferences);
+        Assert.True(navigate > preferences && preview > navigate && wait > preview);
+        var history = loaded.IndexOf("_ = _agentInventorySynchronizer.LoadHistoryAsync()", StringComparison.Ordinal);
+        Assert.True(history > navigate && history < preview);
+        Assert.Contains("ViewModel.ApplyWorkspaceStartupPreview", loaded, StringComparison.Ordinal);
+        Assert.Contains("RootFrame.IsHitTestVisible = false", loaded, StringComparison.Ordinal);
         Assert.DoesNotContain("ProgressRing", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
         // Cards moved into their own reusable control; retain the shell's
@@ -1208,7 +1212,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DevelopmentPageRemainsGatedAndUsesOnlyInMemoryHistoryAndDiagnosticsPath()
+    public void DevelopmentPageRemainsGatedAndShowsOnlyMinimalInMemoryLogs()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
@@ -1243,22 +1247,24 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("private static bool IsDeveloperPage(ShellPageKind page)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("!IsDeveloperPage(page) || ViewModel.CurrentPreferences.DeveloperMode", mainWindow, StringComparison.Ordinal);
         Assert.Contains("if (!IsShellPageAvailable(page))", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("DiagnosticsPathText", view, StringComparison.Ordinal);
         Assert.Contains("MessageList", view, StringComparison.Ordinal);
         Assert.Contains("DoubleTapped=\"MessageList_DoubleTapped\"", view, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding Summary}\"", view, StringComparison.Ordinal);
         Assert.Contains("FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)", page, StringComparison.Ordinal);
-        Assert.Contains("ShowMessageDetailsAsync(item.Notification)", page, StringComparison.Ordinal);
-        Assert.Contains("DialogCoordinator.ShowAsync(dialog, DevelopmentLayout.XamlRoot)", page, StringComparison.Ordinal);
-        Assert.Contains("CopyToClipboard(details)", page, StringComparison.Ordinal);
+        Assert.Contains("ShowMessageDetails(row, item.Notification)", page, StringComparison.Ordinal);
+        Assert.Contains("new Flyout", page, StringComparison.Ordinal);
+        Assert.Contains("Content = detailTextBox", page, StringComparison.Ordinal);
+        Assert.Contains("IsReadOnly = true", page, StringComparison.Ordinal);
+        Assert.Contains("flyout.ShowAt(row)", page, StringComparison.Ordinal);
         Assert.Contains("人工智能入口，功能正在开发中。", page, StringComparison.Ordinal);
         Assert.Contains("AI entry — feature in development.", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<InfoBar", view, StringComparison.Ordinal);
-        Assert.Contains("ContextHelpHost", view, StringComparison.Ordinal);
-        Assert.Contains("SetDisabledReason", page, StringComparison.Ordinal);
         Assert.Contains("NotificationService.History", page, StringComparison.Ordinal);
-        Assert.Contains("DiagnosticsDirectoryPath", page, StringComparison.Ordinal);
-        Assert.Contains("ClearHistory()", page, StringComparison.Ordinal);
-        Assert.Contains("RefreshDiagnosticsDirectoryState()", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("DiagnosticsPathText", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("DiagnosticsDirectoryPath", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearHistory()", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopyAllMessagesButton", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Button", view, StringComparison.Ordinal);
         Assert.DoesNotContain("Directory.CreateDirectory", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Directory.EnumerateFiles", page, StringComparison.Ordinal);
         Assert.DoesNotContain("File.Read", page, StringComparison.Ordinal);
@@ -1298,10 +1304,12 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("if (_notifications.Count >= activeCapacity)", notificationService, StringComparison.Ordinal);
         Assert.Contains(".Take(GetMaximumVisibleNotificationCards())", mainWindow, StringComparison.Ordinal);
         Assert.Contains("RootGrid.ActualHeight", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("NotificationCardHeightDip = 128", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("MaximumNotificationCardHeightDip = 200", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Math.Clamp(count, 1, MaximumVisibleNotificationCards)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Width=\"384\"", cardXaml, StringComparison.Ordinal);
-        Assert.Contains("Height=\"128\"", cardXaml, StringComparison.Ordinal);
+        Assert.Contains("MinHeight=\"72\"", cardXaml, StringComparison.Ordinal);
+        Assert.Contains("MaxHeight=\"200\"", cardXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Height=\"128\"", cardXaml, StringComparison.Ordinal);
         Assert.Contains("To=\"420\"", cardXaml, StringComparison.Ordinal);
         Assert.Contains("Duration=\"0:0:0.24\"", cardXaml, StringComparison.Ordinal);
         Assert.Contains("ExitAnimationCompleted=\"NotificationCard_ExitAnimationCompleted\"", windowXaml, StringComparison.Ordinal);

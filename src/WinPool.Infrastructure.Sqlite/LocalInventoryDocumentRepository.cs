@@ -30,9 +30,11 @@ public sealed class LocalInventoryDocumentRepository
 
     internal static async Task<PersistedLocalInventoryDocument?> ReadAsync(
         Microsoft.Data.Sqlite.SqliteConnection connection,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Microsoft.Data.Sqlite.SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT snapshot_id, document_id, document_schema_version,
                    display_name, sanitized_json, sha256, captured_at_utc_ms

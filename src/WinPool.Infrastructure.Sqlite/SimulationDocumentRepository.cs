@@ -498,7 +498,7 @@ public sealed class SimulationDocumentRepository
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
-    private static SimulationDocumentPayload Read(SqliteDataReader reader)
+    internal static SimulationDocumentPayload Read(SqliteDataReader reader)
     {
         var document = new SimulationDocumentPayload(
             reader.GetString(0),

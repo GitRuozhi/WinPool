@@ -12,6 +12,7 @@ public static class EditWorkspace
     public const string RetiredLayerPrefix = "edit:retired-layer:";
     public const string HotSpareLayerPrefix = "edit:hotspare-layer:";
     public const long DefaultUnallocatedIgnoreBytes = 8L * 1024 * 1024;
+    public const long PartitionCreateAlignmentBytes = StorageEditRules.PartitionResizeAlignmentBytes;
 
     public static bool IsPlus(string? id) =>
         string.Equals(id, PlusStableId, StringComparison.OrdinalIgnoreCase);
@@ -774,21 +775,199 @@ public sealed record StructureProblem(
             tolerated);
     }
 
+    /// <summary>
+    /// Calculates the usable geometry for one unallocated region when creating a partition.
+    /// Offsets and sizes are bytes. New partition starts and lengths use a 1 MiB grid; the first
+    /// disk MiB is reserved when the region begins at byte zero.
+    /// </summary>
+    public static PartitionCreateGeometry GetPartitionCreateGeometry(long gapOffsetBytes, long gapSizeBytes)
+    {
+        if (gapOffsetBytes < 0 || gapSizeBytes <= 0)
+        {
+            return PartitionCreateGeometry.Unavailable(
+                gapOffsetBytes,
+                null,
+                "The selected unallocated region has no usable space.");
+        }
+
+        long gapEndOffsetExclusiveBytes;
+        try
+        {
+            gapEndOffsetExclusiveBytes = checked(gapOffsetBytes + gapSizeBytes);
+        }
+        catch (OverflowException)
+        {
+            return PartitionCreateGeometry.Unavailable(
+                gapOffsetBytes,
+                null,
+                "The selected unallocated region exceeds the supported byte range.");
+        }
+
+        var firstAllowedOffset = gapOffsetBytes == 0
+            ? PartitionCreateAlignmentBytes
+            : gapOffsetBytes;
+        if (!TryAlignPartitionOffset(firstAllowedOffset, out var startOffsetBytes)
+            || startOffsetBytes >= gapEndOffsetExclusiveBytes)
+        {
+            return PartitionCreateGeometry.Unavailable(
+                gapOffsetBytes,
+                gapEndOffsetExclusiveBytes,
+                "This unallocated region has less than 1 MiB remaining after aligning its start.");
+        }
+
+        var availableAfterAlignment = gapEndOffsetExclusiveBytes - startOffsetBytes;
+        var maximumSizeBytes = availableAfterAlignment
+            - availableAfterAlignment % PartitionCreateAlignmentBytes;
+        if (maximumSizeBytes <= 0)
+        {
+            return PartitionCreateGeometry.Unavailable(
+                gapOffsetBytes,
+                gapEndOffsetExclusiveBytes,
+                "This unallocated region has less than 1 MiB remaining after aligning its start.");
+        }
+
+        var maximumEndOffsetExclusiveBytes = checked(startOffsetBytes + maximumSizeBytes);
+        return new PartitionCreateGeometry(
+            gapOffsetBytes,
+            gapEndOffsetExclusiveBytes,
+            startOffsetBytes,
+            maximumSizeBytes,
+            maximumSizeBytes,
+            maximumEndOffsetExclusiveBytes,
+            true,
+            null);
+    }
+
+    /// <summary>
+    /// Gets geometry for a disk's largest creatable gap, or for a selected byte offset inside
+    /// an existing gap. The selected offset is rounded up to the next 1 MiB boundary.
+    /// </summary>
+    public static PartitionCreateGeometry GetPartitionCreateGeometry(
+        StorageSnapshot snapshot,
+        string osDiskStableId,
+        long? gapOffsetBytes = null)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var disk = snapshot.OsDisks.FirstOrDefault(item =>
+            StringComparer.OrdinalIgnoreCase.Equals(item.StableId, osDiskStableId));
+        if (disk is null)
+        {
+            return PartitionCreateGeometry.Unavailable(
+                gapOffsetBytes ?? 0,
+                null,
+                "The selected OS disk was not found.");
+        }
+
+        var gaps = UnallocatedGaps(
+            disk,
+            snapshot.Partitions.Where(item => StringComparer.OrdinalIgnoreCase.Equals(
+                item.OsDiskStableId, disk.StableId)).ToArray());
+        if (gapOffsetBytes is { } selectedOffset)
+        {
+            foreach (var gap in gaps)
+            {
+                long gapEnd;
+                try
+                {
+                    gapEnd = checked(gap.Offset + gap.Size);
+                }
+                catch (OverflowException)
+                {
+                    continue;
+                }
+
+                if (selectedOffset >= gap.Offset && selectedOffset < gapEnd)
+                {
+                    return GetPartitionCreateGeometry(selectedOffset, gapEnd - selectedOffset);
+                }
+            }
+
+            return PartitionCreateGeometry.Unavailable(
+                selectedOffset,
+                null,
+                "The selected unallocated region is no longer available. Refresh the partition layout and select a gap again.");
+        }
+
+        var geometries = gaps
+            .Select(gap => GetPartitionCreateGeometry(gap.Offset, gap.Size))
+            .Where(geometry => geometry.CanCreate)
+            .OrderByDescending(geometry => geometry.MaximumSizeBytes)
+            .ToArray();
+        if (geometries.Length > 0)
+        {
+            return geometries[0];
+        }
+
+        var largestGap = gaps.OrderByDescending(gap => gap.Size).FirstOrDefault();
+        return largestGap.Size > 0
+            ? GetPartitionCreateGeometry(largestGap.Offset, largestGap.Size)
+            : PartitionCreateGeometry.Unavailable(
+                0,
+                null,
+                "No unallocated region can hold a 1 MiB-aligned partition.");
+    }
+
+    private static bool TryAlignPartitionOffset(long value, out long aligned)
+    {
+        aligned = 0;
+        var remainder = value % PartitionCreateAlignmentBytes;
+        if (remainder == 0)
+        {
+            aligned = value;
+            return true;
+        }
+
+        try
+        {
+            aligned = checked(value + PartitionCreateAlignmentBytes - remainder);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+    }
+
     public static IReadOnlyList<(long Offset, long Size)> UnallocatedGaps(
         OsDiskInfo disk,
         IReadOnlyList<PartitionInfo> partitions)
     {
+        if (disk.Size <= 0)
+        {
+            return [];
+        }
+
         var ordered = partitions.OrderBy(item => item.Offset).ToArray();
         var gaps = new List<(long Offset, long Size)>();
         long cursor = 0;
         foreach (var partition in ordered)
         {
+            if (partition.Offset < 0 || partition.Size <= 0)
+            {
+                return [];
+            }
+
+            long partitionEnd;
+            try
+            {
+                partitionEnd = checked(partition.Offset + partition.Size);
+            }
+            catch (OverflowException)
+            {
+                return [];
+            }
+
+            if (partitionEnd > disk.Size)
+            {
+                return [];
+            }
+
             if (partition.Offset > cursor)
             {
                 gaps.Add((cursor, partition.Offset - cursor));
             }
 
-            cursor = Math.Max(cursor, partition.Offset + partition.Size);
+            cursor = Math.Max(cursor, partitionEnd);
         }
 
         if (disk.Size > cursor)
@@ -805,7 +984,8 @@ public sealed record StructureProblem(
         long minUnallocatedBytes)
     {
         var partitions = snapshot.Partitions
-            .Where(item => item.OsDiskStableId == disk.StableId)
+            .Where(item => StringComparer.OrdinalIgnoreCase.Equals(
+                item.OsDiskStableId, disk.StableId))
             .OrderBy(item => item.Offset)
             .ToArray();
         var capacityWeights = new List<double>();

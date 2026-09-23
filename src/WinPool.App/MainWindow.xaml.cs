@@ -16,6 +16,7 @@ using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
 using WinPool_App.Controls;
 using IAgentConnection = WinPool.Application.IAgentConnection;
@@ -33,15 +34,23 @@ namespace WinPool_App;
 public sealed partial class MainWindow : Window
 {
     private const int MaximumVisibleNotificationCards = 3;
-    private const double NotificationCardHeightDip = 128;
+    private const double MaximumNotificationCardHeightDip = 200;
     private const double NotificationStackSpacingDip = 6;
     private bool _initialized;
+    private bool _workspaceInitializationComplete;
+    private bool _startupPreviewDisplayed;
+    private Grid? _workspaceStartupOverlay;
+    private Grid? _workspaceStartupOverlayHost;
+    private TextBlock? _workspaceStartupMessage;
     private bool _updatingMode;
     private bool _updatingNavigation;
     private bool _updatingSystemSelector;
+    private bool _suppressWorkspaceStatePersistence;
     private bool _systemSelectorRefreshPending;
     private string? _pendingSystemSelectionId;
     private SystemId? _editorSystemId;
+    private long _editorDocumentRevision;
+    private DateTimeOffset _editorDocumentUpdatedAt;
     private bool _requestingElevation;
     private bool _closingForElevationHandoff;
     private bool _showingNotificationMessage;
@@ -219,6 +228,15 @@ public sealed partial class MainWindow : Window
         }
 
         _initialized = true;
+        // Hide system-dependent content before the first asynchronous load.
+        // The selector stays hidden until a validated preview is available.
+        RootFrame.Visibility = Visibility.Collapsed;
+        RootFrame.IsHitTestVisible = false;
+        ActiveSystemSelector.Visibility = Visibility.Collapsed;
+        ActiveSystemSelector.IsEnabled = false;
+        ShellNavigationList.IsEnabled = false;
+        ViewModel.BeginWorkspacePrepare();
+        ShowWorkspaceStartupOverlay(ViewModel.StatusMessage);
         try
         {
             await ViewModel.InitializePreferencesAsync();
@@ -237,13 +255,54 @@ public sealed partial class MainWindow : Window
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
         NavigateStartupPage();
         ViewModel.BeginWorkspacePrepare();
+        UpdateWorkspaceStartupMessage(ViewModel.StatusMessage);
+        var workspaceRestored = false;
         try
         {
-            await _agentInventorySynchronizer.LoadHistoryAsync();
-            // History is already visible; only Agent-owned workspace restore waits for IPC.
-            await App.InitialAgentConnectionTask;
+            _ = _agentInventorySynchronizer.LoadHistoryAsync();
+            using var startupPreviewCancellation = new CancellationTokenSource();
+            var startupPreviewTask = LoadStartupWorkspacePreviewAsync(startupPreviewCancellation.Token);
+            var agentConnectionTask = App.InitialAgentConnectionTask;
+            var firstStartupTask = await Task.WhenAny(startupPreviewTask, agentConnectionTask);
+            if (firstStartupTask == agentConnectionTask && !startupPreviewTask.IsCompleted)
+            {
+                // The handshake can finish before catalog loading starts. Give
+                // the local readonly preview a short chance before the slower
+                // Agent restore is allowed to become the first visible page.
+                await Task.WhenAny(startupPreviewTask, Task.Delay(TimeSpan.FromMilliseconds(200)));
+            }
+            var previewDisplayed = false;
+            if (startupPreviewTask.IsCompleted)
+            {
+                var preview = await startupPreviewTask;
+                if (preview is not null
+                    && ViewModel.ApplyWorkspaceStartupPreview(preview.State, preview.Document))
+                {
+                    if (SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
+                    {
+                        // Editor pages capture a snapshot at navigation time.
+                        SelectShellPage(SelectedShellItem.Page);
+                    }
+
+                    RootFrame.Visibility = Visibility.Visible;
+                    RootFrame.IsHitTestVisible = false;
+                    HideWorkspaceStartupOverlay();
+                    _startupPreviewDisplayed = true;
+                    UpdateActiveSystemName();
+                    previewDisplayed = true;
+                }
+            }
+
+            if (!previewDisplayed)
+            {
+                startupPreviewCancellation.Cancel();
+            }
+
+            await agentConnectionTask;
             ViewModel.NotifyWorkspaceLoading();
+            UpdateWorkspaceStartupMessage(ViewModel.StatusMessage);
             await ViewModel.InitializeAsync();
+            workspaceRestored = true;
         }
         catch (Exception exception)
         {
@@ -263,10 +322,30 @@ public sealed partial class MainWindow : Window
             // navigation. When the workspace finished loading after a startup
             // navigation, re-create the visible editor so the page does not
             // stay on the pre-init snapshot.
-            if (SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
+            if ((SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
+                && (!_startupPreviewDisplayed || EditorDocumentChanged()))
             {
-                SelectShellPage(SelectedShellItem.Page);
+                _suppressWorkspaceStatePersistence = true;
+                try
+                {
+                    SelectShellPage(SelectedShellItem.Page);
+                }
+                finally
+                {
+                    _suppressWorkspaceStatePersistence = false;
+                }
             }
+
+            _workspaceInitializationComplete = workspaceRestored;
+            if (workspaceRestored)
+            {
+                _startupPreviewDisplayed = false;
+            }
+            HideWorkspaceStartupOverlay();
+            RootFrame.Visibility = Visibility.Visible;
+            RootFrame.IsHitTestVisible = workspaceRestored || !_startupPreviewDisplayed;
+            ShellNavigationList.IsEnabled = true;
+            UpdateActiveSystemName();
         }
         if (_enteredRealModeAfterElevation && ViewModel.IsRealMode && ViewModel.CanUseRealMode)
         {
@@ -284,6 +363,60 @@ public sealed partial class MainWindow : Window
         UpdateCaptionButtonColors();
     }
 
+    private Task<StartupWorkspacePreview?> LoadStartupWorkspacePreviewAsync(
+        CancellationToken cancellationToken) =>
+        Task.Run(async () =>
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            if (ViewModel.AgentConnection is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var databasePath = Path.Combine(StorageDataLocations.CurrentRoot, "winpool.db");
+                var persisted = await new ReadOnlyWorkspaceStartupReader(databasePath)
+                    .LoadAsync(cancellationToken);
+                if (persisted is null)
+                {
+                    return null;
+                }
+
+                var document = persisted.SimulationDocument is not null
+                    ? SimulationDocumentCodec.Decode(persisted.SimulationDocument)
+                    : persisted.LocalInventoryDocument is not null
+                        ? LocalInventoryDocumentCodec.TryDecodeCached(persisted.LocalInventoryDocument)
+                        : null;
+                if (document is null
+                    || !StringComparer.OrdinalIgnoreCase.Equals(
+                        document.Id,
+                        persisted.State.ActiveDocumentId))
+                {
+                    return null;
+                }
+
+                return new StartupWorkspacePreview(persisted.State, document);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+            catch (Exception)
+            {
+                // An unavailable, unsupported, or damaged preview falls back
+                // to the existing Agent catalog restore path.
+                return null;
+            }
+        }, CancellationToken.None);
+
+    private sealed record StartupWorkspacePreview(
+        WorkspaceSessionState State,
+        StorageSystemDocument Document);
+
     private void NavigateStartupPage()
     {
         if (_startupTarget is not (ApplicationStartupTarget.None or ApplicationStartupTarget.Welcome))
@@ -300,6 +433,67 @@ public sealed partial class MainWindow : Window
         }
 
         SelectShellPage(ShellPageKind.Manage);
+    }
+
+    private void ShowWorkspaceStartupOverlay(string message)
+    {
+        if (RootFrame.Parent is not Grid host)
+        {
+            return;
+        }
+
+        var panel = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = 12
+        };
+        panel.Children.Add(new ProgressRing
+        {
+            Width = 32,
+            Height = 32,
+            IsActive = true
+        });
+
+        _workspaceStartupMessage = new TextBlock
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Text = message
+        };
+        panel.Children.Add(_workspaceStartupMessage);
+
+        _workspaceStartupOverlay = new Grid
+        {
+            Background = CustomTitleBar.Background
+        };
+        _workspaceStartupOverlay.Children.Add(panel);
+        _workspaceStartupOverlayHost = host;
+        var notificationIndex = host.Children.IndexOf(GlobalNotificationHost);
+        host.Children.Insert(
+            notificationIndex < 0 ? host.Children.Count : notificationIndex,
+            _workspaceStartupOverlay);
+    }
+
+    private void UpdateWorkspaceStartupMessage(string message)
+    {
+        if (_workspaceStartupMessage is not null)
+        {
+            _workspaceStartupMessage.Text = message;
+        }
+    }
+
+    private void HideWorkspaceStartupOverlay()
+    {
+        if (_workspaceStartupOverlay is not null)
+        {
+            _workspaceStartupOverlayHost?.Children.Remove(_workspaceStartupOverlay);
+        }
+
+        _workspaceStartupOverlay = null;
+        _workspaceStartupOverlayHost = null;
+        _workspaceStartupMessage = null;
     }
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
@@ -508,7 +702,11 @@ public sealed partial class MainWindow : Window
                 if (candidate.Id.Equals(system?.Id, StringComparison.OrdinalIgnoreCase)) selected = item;
             }
             ActiveSystemSelector.SelectedItem = selected;
-            ActiveSystemSelector.Visibility = system is null ? Visibility.Collapsed : Visibility.Visible;
+            ActiveSystemSelector.Visibility = (!_workspaceInitializationComplete && !_startupPreviewDisplayed)
+                || system is null
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            ActiveSystemSelector.IsEnabled = _workspaceInitializationComplete;
             AutomationProperties.SetName(ActiveSystemSelector,
                 ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "存储系统" : "Storage system");
         }
@@ -1031,6 +1229,8 @@ public sealed partial class MainWindow : Window
                     new EditorNavigationParameter(ViewModel, editorTargetStableId)))
                 {
                     _editorSystemId = ViewModel.SelectedSystem.SystemId;
+                    _editorDocumentRevision = ViewModel.SelectedSystem.Revision;
+                    _editorDocumentUpdatedAt = ViewModel.SelectedSystem.UpdatedAt;
                 }
                 break;
             case ShellPageKind.DiskPartition:
@@ -1039,6 +1239,8 @@ public sealed partial class MainWindow : Window
                     new EditorNavigationParameter(ViewModel, editorTargetStableId)))
                 {
                     _editorSystemId = ViewModel.SelectedSystem.SystemId;
+                    _editorDocumentRevision = ViewModel.SelectedSystem.Revision;
+                    _editorDocumentUpdatedAt = ViewModel.SelectedSystem.UpdatedAt;
                 }
                 break;
             case ShellPageKind.Test:
@@ -1115,6 +1317,11 @@ public sealed partial class MainWindow : Window
         SelectShellPage(SelectedShellItem.Page);
     }
 
+    private bool EditorDocumentChanged() =>
+        _editorSystemId != ViewModel.SelectedSystem.SystemId
+        || _editorDocumentRevision != ViewModel.SelectedSystem.Revision
+        || _editorDocumentUpdatedAt != ViewModel.SelectedSystem.UpdatedAt;
+
     private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e) =>
         PersistWorkspaceState();
 
@@ -1138,7 +1345,7 @@ public sealed partial class MainWindow : Window
 
     private void PersistWorkspaceState()
     {
-        if (!ViewModel.CanPersistWorkspaceUiState)
+        if (_suppressWorkspaceStatePersistence || !ViewModel.CanPersistWorkspaceUiState)
         {
             return;
         }
@@ -1399,7 +1606,7 @@ public sealed partial class MainWindow : Window
                 - GlobalNotificationHost.Margin.Bottom);
         var count = (int)Math.Floor(
             (availableHeight + NotificationStackSpacingDip)
-            / (NotificationCardHeightDip + NotificationStackSpacingDip));
+            / (MaximumNotificationCardHeightDip + NotificationStackSpacingDip));
         return Math.Clamp(count, 1, MaximumVisibleNotificationCards);
     }
 

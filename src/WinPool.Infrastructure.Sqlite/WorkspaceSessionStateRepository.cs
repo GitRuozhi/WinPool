@@ -32,14 +32,24 @@ public sealed class WorkspaceSessionStateRepository
         CancellationToken cancellationToken)
     {
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        return await ReadAsync(connection, transaction: null, cancellationToken);
+    }
+
+    internal static async Task<WorkspaceSessionState?> ReadAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT json FROM workspace_state WHERE singleton=1;";
         var json = await command.ExecuteScalarAsync(cancellationToken) as string;
-        if (json is null)
-        {
-            return null;
-        }
+        return Deserialize(json);
+    }
 
+    internal static WorkspaceSessionState? Deserialize(string? json)
+    {
+        if (json is null) return null;
         try
         {
             var state = JsonSerializer.Deserialize<WorkspaceSessionState>(json, JsonOptions);

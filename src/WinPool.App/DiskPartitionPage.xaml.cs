@@ -21,7 +21,7 @@ namespace WinPool_App;
 public sealed partial class DiskPartitionPage : EditorPageBase
 {
     private const string NoneLetterValue = "";
-    private const long BytesPerGiB = 1024L * 1024 * 1024;
+    private const long BytesPerMiB = 1024L * 1024;
 
     private string? _selectedDiskId;
     private string? _selectedPartitionId;
@@ -68,7 +68,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         OfflineButtonLabel.Text = Text("脱机", "Offline");
         InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
         ConvertGptButtonLabel.Text = Text("转换为 GPT", "Convert to GPT");
-        NewPartitionButtonLabel.Text = ViewModel.Localization["NewPartition"];
         DeletePartitionButtonLabel.Text = Text("删除分区", "Delete partition");
         ExtendButtonLabel.Text = Text("扩展分区", "Extend partition");
         ShrinkButtonLabel.Text = Text("压缩分区", "Shrink partition");
@@ -80,14 +79,20 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         PartitionTypeLabel.Text = Text("分区类型", "Partition type");
         DriveLetterLabel.Text = Text("盘符", "Drive letter");
         VolumeLabelCaption.Text = Text("卷标", "Volume label");
-        SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
+        SizeLabel.Text = Text("容量（MiB）", "Size (MiB)");
         FileSystemLabel.Text = Text("文件系统", "File system");
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
         FullFormatLabel.Text = Text("完整格式化", "Full format");
         AutomationProperties.SetName(QuickFormatSwitch, QuickFormatLabel.Text);
         AutomationProperties.SetName(FullFormatSwitch, FullFormatLabel.Text);
+        CreatePartitionButtonLabel.Text = Text("新建", "New");
         FormatButtonLabel.Text = ViewModel.Localization["Format"];
+        AutomationProperties.SetName(CreatePartitionButton, Text("新建分区", "Create partition"));
+        AutomationProperties.SetName(FormatButton, ViewModel.Localization["Format"]);
+        AutomationProperties.SetName(MaximumSizeButton, Text("使用最大容量", "Use maximum capacity"));
+        AutomationProperties.SetName(SizeBox, Text("分区容量（MiB）", "Partition capacity (MiB)"));
+        AutomationProperties.SetName(SizeAdaptiveValue, Text("自适应容量单位", "Adaptive capacity unit"));
         ContextHelp.Set(OnlineButton,
             Text("仅将模拟磁盘联机。", "Bring a simulated disk online only."));
         ContextHelp.Set(OfflineButton,
@@ -96,8 +101,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("初始化空白模拟磁盘；不修改本机磁盘。", "Initialize a blank simulated disk; no local disk is changed."));
         ContextHelp.Set(ConvertGptButton,
             Text("将符合条件的模拟 MBR 磁盘转换为 GPT。", "Convert an eligible simulated MBR disk to GPT."));
-        ContextHelp.Set(NewPartitionButton,
-            Text("在 GPT 模拟磁盘的未分配空间创建分区。", "Create a partition in unallocated space on a simulated GPT disk."));
+        ContextHelp.Set(CreatePartitionButton,
+            Text("在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。",
+                "Create a partition in the selected simulated GPT gap; capacity uses 1 MiB alignment."));
         ContextHelp.Set(DeletePartitionButton,
             Text("删除选中的非系统、非启动模拟分区。", "Delete the selected simulated partition when it is neither a system nor a boot partition."));
         ContextHelp.Set(ExtendButton,
@@ -118,8 +124,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(SizeBox,
             Text(
-                "创建时输入新分区大小；选中已有分区时这里只显示四舍五入后的容量。扩展或压缩请使用相应按钮输入精确的 MiB 整数目标。",
-                "Enter a new partition size while creating; for an existing partition, this only shows its rounded capacity. Use Extend or Shrink to enter an exact whole-MiB target."));
+                "创建时输入 MiB 正整数；第二行显示同一容量的自适应单位。最大值按选中空隙的 1 MiB 对齐范围计算。",
+                "Enter a whole number of MiB while creating; the second line shows the same capacity in an adaptive unit. The maximum uses the selected gap's 1 MiB-aligned range."));
+        ContextHelp.Set(MaximumSizeButton,
+            Text("将容量填为选中空隙中的最大 1 MiB 对齐容量。", "Fill the largest 1 MiB-aligned capacity available in the selected gap."));
         ContextHelp.Set(FileSystemBox,
             Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
         ContextHelp.Set(ClusterBox,
@@ -134,7 +142,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
                 "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
         ContextHelp.Set(FormatButton,
-            Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
+            Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
         foreach (var button in PropertyResetButtons())
         {
             ContextHelp.Set(button, ViewModel.Localization["ResetRecommended"]);
@@ -142,6 +150,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 button,
                 ViewModel.Localization["ResetRecommended"]);
         }
+        ContextHelp.Set(ResetSizeButton,
+            Text("恢复此分区类型的建议 MiB 容量。", "Restore the recommended MiB capacity for this partition type."));
+        AutomationProperties.SetName(
+            ResetSizeButton,
+            Text("恢复建议容量", "Restore recommended capacity"));
         FillFileSystemBox();
         FillClusterBox();
         FillPartitionTypeBox();
@@ -282,7 +295,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void RefreshTopology()
     {
-        var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, UnallocatedIgnoreBytes);
+        // Keep every real gap selectable here so a sub-1-MiB region can show its creation block reason.
+        var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, minUnallocatedBytes: 0);
         var rootViewModel = new TopologyNodeViewModel(
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId),
             ViewModel,
@@ -301,6 +315,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             var partition = SelectedPartition();
             var disk = SelectedDisk();
             var gap = _selectedUnallocatedOffset is not null;
+            var geometry = gap && _selectedUnallocatedOffset is long gapOffset && _selectedUnallocatedSize is long gapSize
+                ? EditWorkspace.GetPartitionCreateGeometry(gapOffset, gapSize)
+                : null;
             var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
             DiskLocationValue.Text = disk is null
                 ? string.Empty
@@ -310,17 +327,39 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : gap
                     ? Text("未分配", "Unallocated")
                     : "—";
+            StartOffsetLabel.Text = gap
+                ? Text("可创建起点", "Create start")
+                : Text("起始位置", "Start");
+            EndOffsetLabel.Text = gap
+                ? Text("可用终点", "Usable end")
+                : Text("结束位置", "End");
             var start = partition?.Offset ?? (gap ? _selectedUnallocatedOffset : null);
             var length = partition?.Size ?? (gap ? _selectedUnallocatedSize : null);
             if (start is long startBytes && length is long sizeBytes)
             {
-                StartOffsetValue.Text = TopologyProjector.FormatBytes(startBytes);
-                EndOffsetValue.Text = TopologyProjector.FormatBytes(startBytes + sizeBytes);
+                if (geometry is { CanCreate: true, StartOffsetBytes: long createStart, MaximumEndOffsetExclusiveBytes: long usableEnd })
+                {
+                    StartOffsetValue.Text = FormatOffset(createStart);
+                    EndOffsetValue.Text = FormatOffset(usableEnd);
+                }
+                else
+                {
+                    if (TryGetExclusiveRangeEnd(startBytes, sizeBytes, out var endBytes))
+                    {
+                        StartOffsetValue.Text = FormatOffset(startBytes);
+                        EndOffsetValue.Text = FormatOffset(endBytes);
+                    }
+                    else
+                    {
+                        StartOffsetValue.Text = "—";
+                        EndOffsetValue.Text = "—";
+                    }
+                }
             }
             else if (disk is not null && !gap && partition is null)
             {
-                StartOffsetValue.Text = TopologyProjector.FormatBytes(0);
-                EndOffsetValue.Text = TopologyProjector.FormatBytes(disk.Size);
+                StartOffsetValue.Text = FormatOffset(0);
+                EndOffsetValue.Text = FormatOffset(disk.Size);
             }
             else
             {
@@ -334,11 +373,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 ?? (partition is null ? string.Empty : partition.FileSystemLabel);
             if (gap)
             {
-                SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
-                var gb = Math.Round((_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d, 2);
-                SizeBox.Minimum = 0;
-                SizeBox.Value = gb;
-                SizeBox.Maximum = gb;
+                SizeLabel.Text = Text("容量（MiB）", "Size (MiB)");
+                SetSizeMib(geometry?.DefaultSizeBytes is long defaultSize
+                    ? defaultSize / BytesPerMiB
+                    : null);
+                if (geometry is { CanCreate: true })
+                {
+                    UpdateSizeAdaptiveValue();
+                }
+                else
+                {
+                    SizeAdaptiveValue.Text = "—";
+                }
                 FileSystemBox.SelectedIndex = 0;
                 ClusterBox.SelectedIndex = 4;
                 SetFormatMode(quickFormat: true);
@@ -346,11 +392,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else if (partition is not null)
             {
-                SizeLabel.Text = Text("当前容量（GiB）", "Current size (GiB)");
-                var displayedSize = Math.Round(partition.Size / (double)BytesPerGiB, 2);
-                SizeBox.Minimum = 0;
-                SizeBox.Maximum = Math.Max(1_000_000, displayedSize);
-                SizeBox.Value = displayedSize;
+                SizeLabel.Text = Text("当前容量（MiB）", "Current size (MiB)");
+                SizeBox.Text = (partition.Size / (double)BytesPerMiB).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+                SizeAdaptiveValue.Text = TopologyProjector.FormatBytes(partition.Size);
                 SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
                 SelectCluster(volume?.AllocationUnitSize ?? partition.AllocationUnitSize);
                 SetFormatMode(quickFormat: true);
@@ -364,10 +408,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else
             {
-                SizeLabel.Text = Text("容量（GiB）", "Size (GiB)");
-                SizeBox.Minimum = 0;
-                SizeBox.Maximum = 1_000_000;
-                SizeBox.Value = 0;
+                SizeLabel.Text = Text("容量（MiB）", "Size (MiB)");
+                SizeBox.Text = string.Empty;
+                SizeAdaptiveValue.Text = "—";
                 FileSystemBox.SelectedIndex = 0;
                 ClusterBox.SelectedIndex = 4;
                 SetFormatMode(quickFormat: true);
@@ -562,14 +605,34 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase);
         var raw = disk?.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase) == true;
         var mbr = disk?.PartitionStyle.Equals("MBR", StringComparison.OrdinalIgnoreCase) == true;
-        var hasGap = disk is not null && EditWorkspace.UnallocatedGaps(
-            disk,
-            _working.Partitions.Where(item => item.OsDiskStableId == disk.StableId).ToArray()).Any(item => item.Size > 0);
         var letter = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
         var explorerPath = letter.Length == 1 ? $"{letter}:\\" : string.Empty;
         var diskOffline = disk?.IsOffline == true;
         var createMode = isGapSelection && alreadyGpt;
         var propertyEnabled = simulated && !diskOffline && (isPartitionSelection || isGapSelection);
+        var createGeometry = _selectedUnallocatedOffset is long gapOffset && _selectedUnallocatedSize is long gapSize
+            ? EditWorkspace.GetPartitionCreateGeometry(gapOffset, gapSize)
+            : null;
+        var hasIntegerSize = TryGetSizeBytes(out var requestedSizeBytes);
+        var maximumCreateSizeBytes = createGeometry?.MaximumSizeBytes;
+        var sizeFitsSelectedGap = hasIntegerSize
+            && createGeometry is { CanCreate: true }
+            && maximumCreateSizeBytes is long maximumSizeBytes
+            && requestedSizeBytes <= maximumSizeBytes;
+        var contextReason = ResolveContextDisabledReason(simulated, disk, diskOffline);
+        var createReason = contextReason
+            ?? (!alreadyGpt
+                ? Text("新建分区需要已初始化的 GPT 模拟磁盘。", "Creating a partition requires an initialized simulated GPT disk.")
+                : !isGapSelection
+                    ? Text("请选择 GPT 模拟磁盘上的未分配空间。", "Select unallocated space on a simulated GPT disk.")
+                    : createGeometry is { CanCreate: false }
+                        ? GeometryUnavailableReason(createGeometry)
+                        : !hasIntegerSize
+                            ? Text("请输入大于零的 MiB 正整数。", "Enter a positive whole number of MiB.")
+                            : maximumCreateSizeBytes is long maximum && requestedSizeBytes > maximum
+                                ? Text($"容量不能超过对齐后的上限 {maximum / BytesPerMiB} MiB。", $"Capacity cannot exceed the aligned maximum of {maximum / BytesPerMiB} MiB.")
+                                : null);
+        var canCreatePartition = propertyEnabled && createMode && sizeFitsSelectedGap;
         var extendCapability = partition is null
             ? null
             : StorageEditRules.GetPartitionResizeCapability(
@@ -595,8 +658,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && disk is { IsBoot: false, IsSystem: false } && raw;
         ConvertGptButton.IsEnabled = simulated && isDiskSelection && !diskOffline
             && disk is { IsBoot: false, IsSystem: false } && mbr;
-        NewPartitionButton.IsEnabled = simulated && !diskOffline && alreadyGpt && hasGap
-            && (isDiskSelection || isGapSelection);
         DeletePartitionButton.IsEnabled = simulated && !diskOffline && destructivePartition;
         ExtendButton.IsEnabled = canExtend;
         ShrinkButton.IsEnabled = canShrink;
@@ -611,7 +672,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         PartitionTypeBox.IsEnabled = propertyEnabled && createMode;
         DriveLetterBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
         VolumeLabelBox.IsEnabled = propertyEnabled && (hasVolume || createMode);
-        SizeBox.IsEnabled = propertyEnabled && isGapSelection;
+        SizeBox.IsEnabled = propertyEnabled && createMode && createGeometry is { CanCreate: true };
+        MaximumSizeButton.IsEnabled = propertyEnabled && createMode && createGeometry is { CanCreate: true, MaximumSizeBytes: not null };
         FileSystemBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
         ClusterBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
         var formatOptionsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
@@ -625,15 +687,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         {
             VolumeLabelBox.IsEnabled = false;
         }
-        FormatButtonLabel.Text = createMode
-            ? kind == PartitionKind.MicrosoftReserved
-                ? Text("新建分区", "Create partition")
-                : Text("新建分区并格式化", "Create partition and format")
-            : ViewModel.Localization["Format"];
-        FormatButtonIcon.Glyph = createMode ? "\uE710" : "\uE9CE";
-        FormatButton.IsEnabled = propertyEnabled && canFormatSelection;
+        CreatePartitionButton.IsEnabled = canCreatePartition;
+        FormatButton.IsEnabled = propertyEnabled && isPartitionSelection && formattablePartition;
         RestoreFieldHelp();
-        var contextReason = ResolveContextDisabledReason(simulated, disk, diskOffline);
         var protectedPartitionReason = DescribeFormatPartitionReason(partition);
         var destructiveReason = contextReason
             ?? (partition is null
@@ -642,12 +698,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     ? Text("系统或启动分区不能删除。", "A system or boot partition cannot be deleted.")
                     : Text("当前选择不具备模拟删除条件。", "The current selection cannot be deleted in the simulation."));
         var selectionReason = contextReason;
-        var createReason = contextReason
-            ?? (!alreadyGpt
-                ? Text("新建分区需要已初始化的 GPT 模拟磁盘。", "Creating a partition requires an initialized simulated GPT disk.")
-                : !hasGap
-                    ? Text("该模拟磁盘没有可用的未分配空间。", "This simulated disk has no usable unallocated space.")
-                    : Text("请选择未分配空间以创建分区。", "Select unallocated space to create a partition."));
         var extendEligibilityReason = contextReason
             ?? (partition is null
                 ? Text("请选择普通模拟数据分区以扩展。", "Select a normal simulated data partition to extend.")
@@ -703,7 +753,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                             : mbr
                                 ? Text("当前磁盘已满足转换条件。", "The current disk already meets the conversion conditions.")
                                 : Text("只有 MBR 模拟磁盘可以转换为 GPT。", "Only an MBR simulated disk can be converted to GPT."));
-        SetDisabledReason(NewPartitionButton, createReason);
+        SetDisabledReason(CreatePartitionButton, createReason);
         SetDisabledReason(DeletePartitionButton, destructiveReason);
         SetDisabledReason(ExtendButton, extendReason);
         SetDisabledReason(ShrinkButton, shrinkReason);
@@ -732,23 +782,34 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SetDisabledReason(SizeBox,
             selectionReason
             ?? (isGapSelection
-                ? Text("请选择 GPT 模拟磁盘上的未分配空间以设置新分区容量。", "Select unallocated space on a simulated GPT disk to set a new partition capacity.")
+                ? createMode
+                    ? createGeometry is { CanCreate: false }
+                        ? GeometryUnavailableReason(createGeometry)
+                        : Text("请使用 MiB 正整数设置新分区容量。", "Enter the new partition capacity as a whole number of MiB.")
+                    : createReason
                 : partition is not null
                     ? Text(
                         "这里仅显示四舍五入后的当前容量。请使用扩展或压缩按钮输入精确的 MiB 整数目标容量。",
                         "This only shows the rounded current capacity. Use Extend or Shrink to enter an exact whole-MiB target capacity.")
                     : Text("请选择未分配空间以设置新分区容量。", "Select unallocated space to set a new partition capacity.")));
-        var formatReason = contextReason
+        SetDisabledReason(MaximumSizeButton, createReason);
+        var formatOptionsReason = contextReason
             ?? (createMode
                 ? kind == PartitionKind.MicrosoftReserved
                     ? Text("Microsoft 保留分区不能格式化。", "A Microsoft Reserved Partition cannot be formatted.")
-                    : Text("请选择可创建的未分配空间。", "Select unallocated space that can be used to create a partition.")
+                    : null
                 : protectedPartitionReason
-                    ?? Text("只有普通模拟数据分区可以格式化。", "Only a normal simulated data partition can be formatted."));
-        SetDisabledReason(FileSystemBox, formatReason);
-        SetDisabledReason(ClusterBox, formatReason);
-        SetDisabledReason(QuickFormatSwitch, formatReason);
-        SetDisabledReason(FullFormatSwitch, formatReason);
+                    ?? (partition is null
+                        ? Text("请选择可格式化的普通模拟数据分区。", "Select a formatable simulated data partition.")
+                        : null));
+        var formatReason = contextReason
+            ?? (partition is null
+                ? Text("请选择现有的普通模拟数据分区以格式化。", "Select an existing simulated data partition to format.")
+                : protectedPartitionReason);
+        SetDisabledReason(FileSystemBox, formatOptionsReason);
+        SetDisabledReason(ClusterBox, formatOptionsReason);
+        SetDisabledReason(QuickFormatSwitch, formatOptionsReason);
+        SetDisabledReason(FullFormatSwitch, formatOptionsReason);
         SetDisabledReason(FormatButton, formatReason);
         UpdatePropertyResetState();
     }
@@ -763,10 +824,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(SizeBox,
             SelectedPartition() is null
-                ? Text("以 GiB 输入新分区大小；提交时按现有规则转换为字节。", "Enter the new partition size in GiB; submission converts it to bytes using the existing rules.")
+                ? Text("以 MiB 正整数输入新分区大小；下一行显示自适应单位。", "Enter the new partition size as a whole number of MiB; the next line shows an adaptive unit.")
                 : Text(
                     "这里只显示四舍五入后的当前容量。扩展或压缩请点击相应按钮，在对话框中输入精确的 MiB 整数目标总容量；扩缩只检查保存的几何、空闲空间和方向支持的模拟文件系统，不是 Windows 支持容量实测。",
                     "This only shows the rounded current capacity. Click Extend or Shrink and enter an exact whole-MiB total target in the dialog; resize checks persisted geometry, free space, and direction-supported simulated file systems, not a Windows supported-size result."));
+        ContextHelp.Set(MaximumSizeButton,
+            Text("将容量填为选中空隙中的最大 1 MiB 对齐容量。", "Fill the largest 1 MiB-aligned capacity available in the selected gap."));
         ContextHelp.Set(FileSystemBox,
             Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
         ContextHelp.Set(ClusterBox,
@@ -780,7 +843,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
                 "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
         ContextHelp.Set(FormatButton,
-            Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
+            Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
     }
 
     private static bool TryGetResizeTargetRange(
@@ -1049,37 +1112,41 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _filling = true;
         try
         {
-            var gapGiB = (_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d;
-            switch (SelectedPartitionKind())
+            var recommendedSizeMib = RecommendedCreateSizeMib();
+            if (recommendedSizeMib is long defaultMib)
             {
-                case PartitionKind.EfiSystem:
-                    FillFileSystemBoxFor("FAT32");
-                    ClusterBox.SelectedIndex = 0;
-                    SizeBox.Value = Math.Min(gapGiB, 300d / 1024d);
-                    DriveLetterBox.SelectedIndex = 0;
-                    break;
-                case PartitionKind.MicrosoftReserved:
-                    FillFileSystemBoxFor(string.Empty);
-                    SizeBox.Value = Math.Min(gapGiB, 16d / 1024d);
-                    DriveLetterBox.SelectedIndex = 0;
-                    VolumeLabelBox.Text = string.Empty;
-                    SetFormatMode(quickFormat: true);
-                    break;
-                case PartitionKind.WindowsRecovery:
-                    FillFileSystemBoxFor("NTFS");
-                    ClusterBox.SelectedIndex = 0;
-                    SizeBox.Value = Math.Min(gapGiB, 990d / 1024d);
-                    DriveLetterBox.SelectedIndex = 0;
-                    SetFormatMode(quickFormat: true);
-                    break;
-                default:
-                    FillFileSystemBox();
-                    ClusterBox.SelectedIndex = 4;
-                    SizeBox.Value = gapGiB;
-                    FillDriveLetters(null, null, autoAssign: true);
-                    SetFormatMode(quickFormat: true);
-                    break;
+                switch (SelectedPartitionKind())
+                {
+                    case PartitionKind.EfiSystem:
+                        FillFileSystemBoxFor("FAT32");
+                        ClusterBox.SelectedIndex = 0;
+                        SetSizeMib(defaultMib);
+                        DriveLetterBox.SelectedIndex = 0;
+                        break;
+                    case PartitionKind.MicrosoftReserved:
+                        FillFileSystemBoxFor(string.Empty);
+                        SetSizeMib(defaultMib);
+                        DriveLetterBox.SelectedIndex = 0;
+                        VolumeLabelBox.Text = string.Empty;
+                        SetFormatMode(quickFormat: true);
+                        break;
+                    case PartitionKind.WindowsRecovery:
+                        FillFileSystemBoxFor("NTFS");
+                        ClusterBox.SelectedIndex = 0;
+                        SetSizeMib(defaultMib);
+                        DriveLetterBox.SelectedIndex = 0;
+                        SetFormatMode(quickFormat: true);
+                        break;
+                    default:
+                        FillFileSystemBox();
+                        ClusterBox.SelectedIndex = 4;
+                        SetSizeMib(defaultMib);
+                        FillDriveLetters(null, null, autoAssign: true);
+                        SetFormatMode(quickFormat: true);
+                        break;
+                }
             }
+            UpdateSizeAdaptiveValue();
         }
         finally
         {
@@ -1095,10 +1162,22 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FileSystemBox.SelectedIndex = 0;
     }
 
-    private void SizeBox_ValueChanged(object sender, NumberBoxValueChangedEventArgs e)
+    private void SizeBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_filling)
         {
+            UpdateSizeAdaptiveValue();
+            UpdatePropertyResetState();
+            UpdateButtonState();
+        }
+    }
+
+    private void MaximumSize_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedCreateGeometry()?.MaximumSizeBytes is long maximumBytes)
+        {
+            SetSizeMib(maximumBytes / BytesPerMiB);
+            UpdateSizeAdaptiveValue();
             UpdatePropertyResetState();
             UpdateButtonState();
         }
@@ -1160,7 +1239,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
         var gap = _selectedUnallocatedOffset is not null;
         var parameterEnabled = ViewModel.IsUsingSimulatedInventory && (partition is not null || gap);
-        var recommendedSize = Math.Round(RecommendedCreateSizeGiB(), 2);
+        var recommendedSizeMib = RecommendedCreateSizeMib();
         var baselineFileSystem = volume?.FileSystem ?? partition?.FileSystem;
         if (string.IsNullOrWhiteSpace(baselineFileSystem))
         {
@@ -1175,7 +1254,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var baselineCluster = volume?.AllocationUnitSize ?? partition?.AllocationUnitSize;
         var sizeChanged = gap
             && SizeBox.IsEnabled
-            && (double.IsNaN(SizeBox.Value) || Math.Abs(SizeBox.Value - recommendedSize) > 0.005);
+            && (!TryGetSizeMib(out var currentSizeMib)
+                || recommendedSizeMib is not long recommendedMib
+                || currentSizeMib != recommendedMib);
         var fileSystemChanged = parameterEnabled
             && FileSystemBox.IsEnabled
             && !string.Equals(
@@ -1210,7 +1291,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         if (_selectedUnallocatedOffset is not null)
         {
-            SizeBox.Value = Math.Round(RecommendedCreateSizeGiB(), 2);
+            SetSizeMib(RecommendedCreateSizeMib());
+            UpdateSizeAdaptiveValue();
         }
 
         UpdateButtonState();
@@ -1241,17 +1323,82 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         UpdatePropertyResetState();
     }
 
-    private double RecommendedCreateSizeGiB()
+    private long? RecommendedCreateSizeMib()
     {
-        var gapGiB = (_selectedUnallocatedSize ?? 0) / 1024d / 1024d / 1024d;
-        return SelectedPartitionKind() switch
-        {
-            PartitionKind.EfiSystem => Math.Min(gapGiB, 300d / 1024d),
-            PartitionKind.MicrosoftReserved => Math.Min(gapGiB, 16d / 1024d),
-            PartitionKind.WindowsRecovery => Math.Min(gapGiB, 990d / 1024d),
-            _ => gapGiB
-        };
+        var maximumMib = SelectedCreateGeometry()?.DefaultSizeBytes is long defaultBytes
+            ? defaultBytes / BytesPerMiB
+            : 0;
+        return maximumMib > 0 ? maximumMib : null;
     }
+
+    private PartitionCreateGeometry? SelectedCreateGeometry() =>
+        _selectedUnallocatedOffset is long offset && _selectedUnallocatedSize is long size
+            ? EditWorkspace.GetPartitionCreateGeometry(offset, size)
+            : null;
+
+    private void SetSizeMib(long? sizeMib) =>
+        SizeBox.Text = sizeMib?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private bool TryGetSizeMib(out long sizeMib) =>
+        long.TryParse(
+            SizeBox.Text,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out sizeMib)
+        && sizeMib > 0
+        && sizeMib <= long.MaxValue / BytesPerMiB;
+
+    private bool TryGetSizeBytes(out long sizeBytes)
+    {
+        sizeBytes = 0;
+        if (!TryGetSizeMib(out var sizeMib))
+        {
+            return false;
+        }
+
+        sizeBytes = sizeMib * BytesPerMiB;
+        return true;
+    }
+
+    private void UpdateSizeAdaptiveValue()
+    {
+        SizeAdaptiveValue.Text = TryGetSizeBytes(out var sizeBytes)
+            ? TopologyProjector.FormatBytes(sizeBytes)
+            : Text("请输入 MiB 正整数", "Enter a whole number of MiB");
+    }
+
+    private static string FormatOffset(long bytes)
+    {
+        var mibText = ((decimal)bytes / BytesPerMiB).ToString(
+            "0.########",
+            System.Globalization.CultureInfo.InvariantCulture);
+        return $"{mibText}MiB ({TopologyProjector.FormatBytes(bytes)})";
+    }
+
+    private static bool TryGetExclusiveRangeEnd(long startBytes, long sizeBytes, out long endBytes)
+    {
+        endBytes = 0;
+        if (startBytes < 0 || sizeBytes <= 0 || startBytes > long.MaxValue - sizeBytes)
+        {
+            return false;
+        }
+
+        endBytes = startBytes + sizeBytes;
+        return true;
+    }
+
+    private string GeometryUnavailableReason(PartitionCreateGeometry geometry) => geometry.UnavailableReason switch
+    {
+        "The selected unallocated region has no usable space." =>
+            Text("所选未分配区域没有可用空间。", "The selected unallocated region has no usable space."),
+        "The selected unallocated region exceeds the supported byte range." =>
+            Text("所选未分配区域超出支持的容量范围。", "The selected unallocated region exceeds the supported byte range."),
+        "This unallocated region has less than 1 MiB remaining after aligning its start." =>
+            Text("起点按 1 MiB 对齐后，剩余空间不足 1 MiB。", "Less than 1 MiB remains after aligning the start."),
+        "No unallocated region can hold a 1 MiB-aligned partition." =>
+            Text("没有可容纳 1 MiB 对齐分区的未分配区域。", "No unallocated region can hold a 1 MiB-aligned partition."),
+        _ => geometry.UnavailableReason ?? Text("该未分配区域不可创建分区。", "A partition cannot be created in this unallocated region.")
+    };
 
     private async void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -1418,32 +1565,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("磁盘已转换为 GPT。", "The disk was converted to GPT."));
     }
 
-    private void NewPartition_Click(object sender, RoutedEventArgs e)
-    {
-        var disk = SelectedDisk();
-        if (disk is null)
-        {
-            return;
-        }
-
-        var largest = EditWorkspace.UnallocatedGaps(
-                disk,
-                _working.Partitions.Where(item => item.OsDiskStableId == disk.StableId).ToArray())
-            .Where(item => item.Size > 0)
-            .OrderByDescending(item => item.Size)
-            .ThenBy(item => item.Offset)
-            .FirstOrDefault();
-        if (largest.Size <= 0)
-        {
-            return;
-        }
-
-        _selectedPartitionId = null;
-        _selectedUnallocatedOffset = largest.Offset;
-        _selectedUnallocatedSize = largest.Size;
-        RefreshAll();
-    }
-
     private bool DiskHoldsStoredData(OsDiskInfo disk) =>
         _working.Partitions.Any(item =>
             item.OsDiskStableId == disk.StableId
@@ -1466,7 +1587,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        if (_selectedUnallocatedOffset is null)
+        var geometry = SelectedCreateGeometry();
+        if (geometry is not { CanCreate: true, StartOffsetBytes: long createOffset, MaximumSizeBytes: long maximumSize }
+            || _selectedUnallocatedOffset is null)
+        {
+            return;
+        }
+
+        if (!TryGetSizeBytes(out var createSizeBytes) || createSizeBytes > maximumSize)
         {
             return;
         }
@@ -1480,12 +1608,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             PublishRefsNotice();
         }
 
-        long? bytes = null;
-        if (!double.IsNaN(SizeBox.Value) && SizeBox.Value > 0)
-        {
-            bytes = (long)(SizeBox.Value * 1024d * 1024d * 1024d);
-        }
-
         var letter = DriveLetterBox.SelectedItem as string;
         if (letter == Text("无", "None"))
         {
@@ -1493,7 +1615,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         var diskId = _selectedDiskId;
-        var offset = _selectedUnallocatedOffset;
+        var offset = createOffset;
         var quickFormat = QuickFormatSwitch.IsOn;
         if (!await SubmitAsync(
                 new SimulationEditRequest(
@@ -1503,7 +1625,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     DriveLetter: letter,
                     FileSystem: fileSystem,
                     AllocationUnitSize: SelectedClusterBytes(),
-                    SizeBytes: bytes ?? _selectedUnallocatedSize,
+                    SizeBytes: createSizeBytes,
                     OffsetBytes: offset,
                     PartitionKind: partitionKind,
                     QuickFormat: string.IsNullOrWhiteSpace(fileSystem) ? null : quickFormat),
@@ -1751,14 +1873,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         });
     }
 
+    private async void CreatePartition_Click(object sender, RoutedEventArgs e) => await CreatePartitionAsync();
+
     private async void Format_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedUnallocatedOffset is not null)
-        {
-            await CreatePartitionAsync();
-            return;
-        }
-
         var partition = SelectedPartition();
         if (partition is null || IsProtected(partition))
         {

@@ -49,7 +49,7 @@ public static class SimulationCommandPreview
             case SimulationEditKind.ConvertDisk:
                 lines.Add("Clear-Disk -InputObject $targetDisk -RemoveData -Confirm:$false");
                 lines.Add("Initialize-Disk -InputObject $targetDisk -PartitionStyle " + Quote(step.PartitionStyle?.Trim().ToUpperInvariant()));
-                if (step.CreateMsr == true) lines.Add("New-Partition -InputObject $targetDisk -Size 16777216 -GptType " + Quote(PartitionTypeId(PartitionKind.MicrosoftReserved)));
+                if (step.CreateMsr == true) lines.Add("New-Partition -InputObject $targetDisk -Offset 1048576 -Size 16777216 -GptType " + Quote(PartitionTypeId(PartitionKind.MicrosoftReserved)));
                 break;
             case SimulationEditKind.SetDiskOffline:
                 lines.Add("Set-Disk -InputObject $targetDisk -IsOffline $" + (step.Offline == true ? "true" : "false")); break;

@@ -131,7 +131,7 @@ public sealed class SimulationOperationTests
         document = Apply(document, new SimulationEditRequest(
             SimulationEditKind.CreatePartition,
             "osdisk:5",
-            SizeBytes: 500_000_000));
+            SizeBytes: 476 * MiB));
         Assert.Single(document.Snapshot.Partitions);
 
         document = document.WithCandidate(document.Snapshot with
@@ -143,16 +143,30 @@ public sealed class SimulationOperationTests
                     .ToArray()
             });
 
-        document = Apply(document, new SimulationEditRequest(
+        var initialize = new SimulationOperationService().Apply(document, new SimulationEditRequest(
             SimulationEditKind.InitializeDisk,
             "osdisk:5",
             PartitionStyle: "GPT",
             CreateMsr: true));
+        Assert.True(initialize.Succeeded, initialize.Error);
+        Assert.Contains(initialize.Commands, command =>
+            command.Contains("-Offset 1048576 -Size 16777216", StringComparison.Ordinal));
+        document = initialize.Document;
 
         var partition = Assert.Single(document.Snapshot.Partitions);
         Assert.Equal("MicrosoftReserved", partition.Type);
+        Assert.Equal(1024L * 1024, partition.Offset);
         Assert.Equal(16 * 1024 * 1024, partition.Size);
+        Assert.Equal(17L * 1024 * 1024, partition.Offset + partition.Size);
         Assert.Equal("GPT", document.Snapshot.OsDisks.Single(x => x.StableId == "osdisk:5").PartitionStyle);
+
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.CreatePartition,
+            "osdisk:5",
+            SizeBytes: 1024L * 1024,
+            OffsetBytes: 17L * 1024 * 1024));
+        var data = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
+        Assert.Equal(17L * 1024 * 1024, data.Offset);
     }
 
     [Fact]
@@ -161,7 +175,7 @@ public sealed class SimulationOperationTests
         var document = Apply(CreateDocument(), new SimulationEditRequest(
             SimulationEditKind.CreatePartition,
             "osdisk:5",
-            SizeBytes: 500_000_000,
+            SizeBytes: 476 * MiB,
             FileSystem: "NTFS"));
         var partition = Assert.Single(document.Snapshot.Partitions);
         document = document.WithCandidate(document.Snapshot with

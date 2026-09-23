@@ -664,7 +664,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 disk.Number,
                 1,
                 "MicrosoftReserved",
-                17408,
+                1024L * 1024,
                 16 * 1024 * 1024,
                 false,
                 false,
@@ -706,35 +706,41 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
 
         var existing = snapshot.Partitions
-            .Where(x => x.OsDiskStableId == disk.StableId)
+            .Where(x => StringComparer.OrdinalIgnoreCase.Equals(x.OsDiskStableId, disk.StableId))
             .OrderBy(x => x.Offset)
             .ToList();
-        var gaps = EditWorkspace.UnallocatedGaps(disk, existing);
-        long offset;
-        long free;
-        if (request.OffsetBytes is >= 0)
+        var usedPartitionNumbers = existing.Select(x => x.PartitionNumber).ToHashSet();
+        var nextPartitionNumber = Enumerable.Range(1, existing.Count + 1)
+            .First(number => !usedPartitionNumbers.Contains(number));
+        if (request.OffsetBytes is < 0)
         {
-            var gap = gaps.FirstOrDefault(item => item.Offset == request.OffsetBytes.Value);
-            if (gap.Size <= 0)
-            {
-                throw new InvalidOperationException("The selected unallocated region was not found.");
-            }
-
-            offset = gap.Offset;
-            free = gap.Size;
-        }
-        else
-        {
-            offset = existing.Count == 0
-                ? 1024L * 1024
-                : existing.Max(x => x.Offset + x.Size);
-            free = disk.Size - offset;
+            throw new InvalidOperationException("The selected unallocated region was not found.");
         }
 
-        var size = request.SizeBytes is null or <= 0 ? free : Math.Min(request.SizeBytes.Value, free);
-        if (size <= 0)
+        var geometry = EditWorkspace.GetPartitionCreateGeometry(
+            snapshot,
+            disk.StableId,
+            request.OffsetBytes);
+        if (!geometry.CanCreate
+            || geometry.StartOffsetBytes is not long offset
+            || geometry.MaximumSizeBytes is not long maximumSize)
         {
-            throw new InvalidOperationException("The simulated disk has no free space for a new partition.");
+            throw new InvalidOperationException(
+                geometry.UnavailableReason ?? "The simulated disk has no free space for a new partition.");
+        }
+
+        var size = request.SizeBytes is null or <= 0
+            ? geometry.DefaultSizeBytes ?? maximumSize
+            : request.SizeBytes.Value;
+        if (size % EditWorkspace.PartitionCreateAlignmentBytes != 0)
+        {
+            throw new InvalidOperationException("A new partition length must be a whole number of MiB in the simulation.");
+        }
+
+        if (size > maximumSize)
+        {
+            throw new InvalidOperationException(
+                "The requested partition length exceeds the aligned capacity available in the selected unallocated region.");
         }
 
         var kind = request.PartitionKind ?? PartitionKind.BasicData;
@@ -762,7 +768,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             partitionId,
             true,
             disk.Number,
-            existing.Count + 1,
+            nextPartitionNumber,
             partitionType,
             offset,
             size,

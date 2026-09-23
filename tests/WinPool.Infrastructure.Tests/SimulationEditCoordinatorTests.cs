@@ -426,7 +426,7 @@ public sealed class SimulationEditCoordinatorTests
                 "osdisk:5",
                 FileSystem: "NTFS",
                 AllocationUnitSize: 4096,
-                SizeBytes: 500_000_000));
+                SizeBytes: 500L * 1024 * 1024));
         Assert.True(created.Succeeded, created.Error);
         return created.Document;
     }

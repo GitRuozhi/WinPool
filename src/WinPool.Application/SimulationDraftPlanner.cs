@@ -211,7 +211,7 @@ public static class SimulationDraftPlanner
                     DriveLetter: working.DriveLetterOf(partition),
                     FileSystem: volume?.FileSystem ?? partition.FileSystem,
                     AllocationUnitSize: volume?.AllocationUnitSize ?? partition.AllocationUnitSize,
-                    SizeBytes: partition.Size,
+                    SizeBytes: AlignPartitionSizeForCreate(partition.Size),
                     OffsetBytes: partition.Offset,
                     AllocatedPartitionId: partitionId,
                     AllocatedVolumeId: volumeId,
@@ -711,8 +711,10 @@ public static class SimulationDraftPlanner
                 DriveLetter: working.DriveLetterOf(partition),
                 FileSystem: working.FileSystemOf(partition),
                 AllocationUnitSize: working.AllocationUnitOf(partition),
-                SizeBytes: partition.Size,
-                OffsetBytes: partition.Offset,
+                SizeBytes: AlignPartitionSizeForCreate(partition.Size),
+                OffsetBytes: committed.OsDisks.Any(item => item.StableId == partition.OsDiskStableId)
+                    ? partition.Offset
+                    : null,
                 AllocatedPartitionId: partition.StableId.StartsWith("edit:", StringComparison.Ordinal)
                     ? StableAllocatedId("sim:partition", partition.StableId)
                     : partition.StableId,
@@ -792,6 +794,14 @@ public static class SimulationDraftPlanner
     {
         var suffix = draftId[(draftId.LastIndexOf(':') + 1)..];
         return $"{prefix}:{suffix}";
+    }
+
+    private static long AlignPartitionSizeForCreate(long sizeBytes)
+    {
+        var alignment = EditWorkspace.PartitionCreateAlignmentBytes;
+        return sizeBytes >= alignment
+            ? sizeBytes - sizeBytes % alignment
+            : sizeBytes;
     }
 
 }

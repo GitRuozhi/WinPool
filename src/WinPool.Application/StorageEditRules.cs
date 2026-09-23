@@ -249,7 +249,7 @@ public static class StorageEditRules
         (SimulationEditKind.SetDiskOffline, "supported: persisted simulation disk state"),
         (SimulationEditKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
         (SimulationEditKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
-        (SimulationEditKind.CreatePartition, "supported: four fixed GPT partition kinds"),
+        (SimulationEditKind.CreatePartition, "supported: four fixed GPT partition kinds; new starts and lengths use the simulated 1 MiB grid"),
         (SimulationEditKind.ExtendPartition, "supported: simulated Primary/BasicData, 1 MiB-aligned target capacity, modeled geometry and NTFS/ReFS/RAW direction rules; not a Windows supported-size result"),
         (SimulationEditKind.ShrinkPartition, "supported: simulated Primary/BasicData, 1 MiB-aligned target capacity, modeled geometry and NTFS/RAW direction rules; not a Windows supported-size result"),
         (SimulationEditKind.CreateStoragePool, "supported: primordial data members"),
@@ -438,6 +438,14 @@ public static class StorageEditRules
             return Deny("storage.rule.initialize.raw-only", "Only a RAW disk can be initialized.");
         }
 
+        if (request.CreateMsr == true && disk.Size < 17L * 1024 * 1024)
+        {
+            return Deny(
+                "storage.rule.initialize.msr-capacity",
+                "The disk is too small for the simulated 16 MiB MSR at the 1 MiB offset.",
+                disk.StableId);
+        }
+
         return Allow("storage.rule.initialize", WindowsPartition);
     }
 
@@ -497,6 +505,11 @@ public static class StorageEditRules
             return Deny("storage.rule.create-partition.size", "Partition size cannot be negative.");
         }
 
+        if (request.OffsetBytes is < 0)
+        {
+            return Deny("storage.rule.create-partition.offset", "The selected unallocated region was not found.");
+        }
+
         var kind = request.PartitionKind ?? PartitionKind.BasicData;
         var fileSystem = request.FileSystem?.Trim().ToUpperInvariant() ?? string.Empty;
         if (kind == PartitionKind.MicrosoftReserved && fileSystem.Length > 0)
@@ -516,6 +529,38 @@ public static class StorageEditRules
             return Deny(
                 "storage.rule.create-partition.filesystem",
                 "A formatted basic data partition must use NTFS, ReFS, or exFAT.");
+        }
+
+        var geometry = EditWorkspace.GetPartitionCreateGeometry(
+            snapshot,
+            disk.StableId,
+            request.OffsetBytes);
+        if (!geometry.CanCreate
+            || geometry.MaximumSizeBytes is not long maximumSize)
+        {
+            return Deny(
+                "storage.rule.create-partition.no-aligned-space",
+                geometry.UnavailableReason ?? "No unallocated region can hold a 1 MiB-aligned partition.",
+                disk.StableId);
+        }
+
+        if (request.SizeBytes is long requestedSize && requestedSize > 0)
+        {
+            if (requestedSize % EditWorkspace.PartitionCreateAlignmentBytes != 0)
+            {
+                return Deny(
+                    "storage.rule.create-partition.size-alignment",
+                    "A new partition length must be a whole number of MiB in the simulation.",
+                    disk.StableId);
+            }
+
+            if (requestedSize > maximumSize)
+            {
+                return Deny(
+                    "storage.rule.create-partition.size-boundary",
+                    "The requested partition length exceeds the aligned capacity available in the selected unallocated region.",
+                    disk.StableId);
+            }
         }
 
         return Allow("storage.rule.create-partition", WindowsPartition);
