@@ -534,7 +534,14 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("PoolFormGrid", structureXaml, StringComparison.Ordinal);
         Assert.Contains("TopologyControl", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"320\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("FormatButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("PartitionActionButton", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Equal(
+            1,
+            diskPartitionXaml.Split(
+                new[] { "x:Name=\"PartitionActionButton\"" },
+                StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("x:Name=\"CreatePartitionButton\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"FormatButton\"", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("PartitionChromeBorder", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("DiskLocationValue", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("StartOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
@@ -965,10 +972,14 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("RootFrame.IsHitTestVisible = false", loaded, StringComparison.Ordinal);
         Assert.DoesNotContain("ProgressRing", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
-        // Cards moved into their own reusable control; retain the shell's
-        // opaque notification surface rather than requiring its resource to
-        // remain duplicated in MainWindow.xaml.
-        Assert.Contains("SolidBackgroundFillColorBaseBrush", notificationCardXaml, StringComparison.Ordinal);
+        // Cards moved into their own reusable control. Keep the presentation
+        // to one InfoBar surface without restoring a decorative wrapper.
+        Assert.Contains("<InfoBar", notificationCardXaml, StringComparison.Ordinal);
+        Assert.Equal(
+            1,
+            notificationCardXaml.Split(new[] { "<InfoBar" }, StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("<Border", notificationCardXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Background=\"Transparent\"", notificationCardXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GlobalNotificationStack\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("BeginWorkspacePrepare()", loaded, StringComparison.Ordinal);
         Assert.Contains("CompleteWorkspacePrepare()", loaded, StringComparison.Ordinal);
@@ -1212,7 +1223,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DevelopmentPageRemainsGatedAndShowsOnlyMinimalInMemoryLogs()
+    public void DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
@@ -1223,24 +1234,38 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
         var layout = XDocument.Load(viewPath).Root?.Element(presentation + "Grid")
             ?? throw new InvalidOperationException("The Development page must define its root layout grid.");
         var areas = layout.Elements(presentation + "Border").ToArray();
         Assert.Equal(3, areas.Length);
         Assert.Equal(
-            new[] { "LogArea", "RightTopEmptyArea", "LowerEmptyArea" },
+            new[] { "MessageListArea", "RightTopEmptyArea", "LowerEmptyArea" },
             areas.Select(area => (string?)area.Attribute(xaml + "Name")).ToArray());
+        var rowDefinitions = layout.Element(presentation + "Grid.RowDefinitions")
+            ?? throw new InvalidOperationException("The Development page must define three rows.");
+        var columnDefinitions = layout.Element(presentation + "Grid.ColumnDefinitions")
+            ?? throw new InvalidOperationException("The Development page must define three columns.");
+        Assert.Equal(3, rowDefinitions.Elements(presentation + "RowDefinition").Count());
+        Assert.Equal(3, columnDefinitions.Elements(presentation + "ColumnDefinition").Count());
         Assert.Equal("0", (string?)areas[0].Attribute("Grid.Row"));
         Assert.Equal("0", (string?)areas[0].Attribute("Grid.Column"));
         Assert.Equal("0", (string?)areas[1].Attribute("Grid.Row"));
-        Assert.Equal("1", (string?)areas[1].Attribute("Grid.Column"));
-        Assert.Equal("1", (string?)areas[2].Attribute("Grid.Row"));
-        Assert.Equal("2", (string?)areas[2].Attribute("Grid.ColumnSpan"));
+        Assert.Equal("2", (string?)areas[1].Attribute("Grid.Column"));
+        Assert.Equal("2", (string?)areas[2].Attribute("Grid.Row"));
+        Assert.Equal("3", (string?)areas[2].Attribute("Grid.ColumnSpan"));
         Assert.Empty(areas[1].Elements());
         var lowerAreaContent = areas[2].Elements().ToArray();
         Assert.Single(lowerAreaContent);
         Assert.Equal("TextBlock", lowerAreaContent[0].Name.LocalName);
         Assert.Equal("AiEntryHint", (string?)lowerAreaContent[0].Attribute(xaml + "Name"));
+        var splitters = layout.Elements(toolkit + "GridSplitter").ToArray();
+        Assert.Equal(2, splitters.Length);
+        Assert.Equal(
+            new[] { "TopAreaColumnSplitter", "TopBottomAreaSplitter" },
+            splitters.Select(splitter => (string?)splitter.Attribute(xaml + "Name")).ToArray());
+        Assert.Contains(splitters, splitter => (string?)splitter.Attribute("ResizeDirection") == "Columns");
+        Assert.Contains(splitters, splitter => (string?)splitter.Attribute("ResizeDirection") == "Rows");
 
         Assert.Contains("if (ViewModel.CurrentPreferences.DeveloperMode)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ShellPageKind.Development", mainWindow, StringComparison.Ordinal);
@@ -1248,14 +1273,41 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("!IsDeveloperPage(page) || ViewModel.CurrentPreferences.DeveloperMode", mainWindow, StringComparison.Ordinal);
         Assert.Contains("if (!IsShellPageAvailable(page))", mainWindow, StringComparison.Ordinal);
         Assert.Contains("MessageList", view, StringComparison.Ordinal);
+        Assert.Contains("SelectionMode=\"Single\"", view, StringComparison.Ordinal);
         Assert.Contains("DoubleTapped=\"MessageList_DoubleTapped\"", view, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding Summary}\"", view, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping=\"NoWrap\"", view, StringComparison.Ordinal);
+        Assert.Contains("MessageRowVisual_PointerEntered", view, StringComparison.Ordinal);
+        Assert.Contains("MessageRowSelectedFill", view, StringComparison.Ordinal);
+        Assert.Contains("MessageRowSelectionIndicator", view, StringComparison.Ordinal);
+        Assert.Contains("MessageList_SelectionChanged", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("MessageListHeader", view, StringComparison.Ordinal);
+        Assert.Contains("EmptyMessageListText.Text = Text(\"本次运行没有消息。\", \"No messages in this run.\")", page, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetName(MessageList, Text(\"消息列表\", \"Message list\"))", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("日志", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("本次运行没有日志", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("LogArea", page, StringComparison.Ordinal);
         Assert.Contains("FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)", page, StringComparison.Ordinal);
-        Assert.Contains("ShowMessageDetails(row, item.Notification)", page, StringComparison.Ordinal);
-        Assert.Contains("new Flyout", page, StringComparison.Ordinal);
-        Assert.Contains("Content = detailTextBox", page, StringComparison.Ordinal);
-        Assert.Contains("IsReadOnly = true", page, StringComparison.Ordinal);
-        Assert.Contains("flyout.ShowAt(row)", page, StringComparison.Ordinal);
+        Assert.Contains("row?.Content is not SessionMessageItem item", page, StringComparison.Ordinal);
+        Assert.Contains("ShowMessageDetails(item.Notification)", page, StringComparison.Ordinal);
+        var detailOverlay = layout.Elements(presentation + "Grid")
+            .Single(element => (string?)element.Attribute(xaml + "Name") == "MessageDetailOverlay");
+        Assert.Equal("3", (string?)detailOverlay.Attribute("Grid.RowSpan"));
+        Assert.Equal("3", (string?)detailOverlay.Attribute("Grid.ColumnSpan"));
+        Assert.Equal("#80000000", (string?)detailOverlay.Attribute("Background"));
+        Assert.Equal("Collapsed", (string?)detailOverlay.Attribute("Visibility"));
+        var detailContent = detailOverlay.Elements().ToArray();
+        Assert.Single(detailContent);
+        Assert.Equal("TextBox", detailContent[0].Name.LocalName);
+        Assert.Equal("True", (string?)detailContent[0].Attribute("IsReadOnly"));
+        Assert.Equal("Wrap", (string?)detailContent[0].Attribute("TextWrapping"));
+        Assert.Equal("Auto", (string?)detailContent[0].Attribute("ScrollViewer.VerticalScrollBarVisibility"));
+        Assert.Contains("MessageDetailOverlay_Tapped", page, StringComparison.Ordinal);
+        Assert.Contains("CloseMessageDetails()", page, StringComparison.Ordinal);
+        Assert.Contains("FindAncestor<TextBox>(e.OriginalSource as DependencyObject)", page, StringComparison.Ordinal);
+        Assert.Contains("textMeasure.Measure(new Size(contentWidth, double.PositiveInfinity))", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Flyout", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("flyout.ShowAt", page, StringComparison.Ordinal);
         Assert.Contains("人工智能入口，功能正在开发中。", page, StringComparison.Ordinal);
         Assert.Contains("AI entry — feature in development.", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<InfoBar", view, StringComparison.Ordinal);
@@ -1321,8 +1373,8 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("ShowErrorNotificationMessageAsync", mainWindow, StringComparison.Ordinal);
         Assert.Contains("await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("NotificationService.History", developmentPage, StringComparison.Ordinal);
-        Assert.Contains("进入开发页查看详情", card, StringComparison.Ordinal);
-        Assert.Contains("Open Developer features for details", card, StringComparison.Ordinal);
+        Assert.Contains("进入开发页消息列表查看详情", card, StringComparison.Ordinal);
+        Assert.Contains("Open the Developer message list for details", card, StringComparison.Ordinal);
         Assert.Contains("notification.Message", card, StringComparison.Ordinal);
         Assert.DoesNotContain("CreatedAt <= cutoff", mainWindow, StringComparison.Ordinal);
         Assert.Contains("NotificationCard", windowXaml, StringComparison.Ordinal);
@@ -1331,7 +1383,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("LocalRealOperationsWarning", windowXaml, StringComparison.Ordinal);
         Assert.Contains("NotificationCard_Tapped", card, StringComparison.Ordinal);
         Assert.Contains("NotificationCard_KeyDown", card, StringComparison.Ordinal);
-        Assert.Contains("进入开发页查看详情", card, StringComparison.Ordinal);
+        Assert.Contains("进入开发页消息列表查看详情", card, StringComparison.Ordinal);
         Assert.DoesNotContain("DetailsButton", card, StringComparison.Ordinal);
         Assert.DoesNotContain("CloseButton", card, StringComparison.Ordinal);
         Assert.Contains("IsChinese", card, StringComparison.Ordinal);

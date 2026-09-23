@@ -301,6 +301,7 @@
                                 x:Name="StartOffsetValue"
                                 Grid.Row="2"
                                 Grid.Column="2"
+                                TextAlignment="Right"
                                 VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="EndOffsetLabel"
@@ -310,6 +311,7 @@
                                 x:Name="EndOffsetValue"
                                 Grid.Row="3"
                                 Grid.Column="2"
+                                TextAlignment="Right"
                                 VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="PartitionTypeLabel"
@@ -344,7 +346,7 @@
                                 Grid.Row="7"
                                 Orientation="Horizontal"
                                 Spacing="5"
-                                VerticalAlignment="Center">
+                                VerticalAlignment="Top">
                                 <TextBlock x:Name="SizeLabel" VerticalAlignment="Center" />
                                 <Border
                                     x:Name="SizeChangedIndicator"
@@ -361,6 +363,7 @@
                                 Grid.Column="1"
                                 Style="{StaticResource PropertyResetButtonStyle}"
                                 Click="ResetSize_Click"
+                                VerticalAlignment="Top"
                                 Visibility="Collapsed">
                                 <FontIcon Glyph="&#xE777;" FontSize="12" />
                             </Button>
@@ -387,14 +390,15 @@
                                     <TextBlock
                                         x:Name="SizeAdaptiveValue"
                                         Grid.Row="1"
+                                        Grid.ColumnSpan="2"
                                         FontSize="12"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         VerticalAlignment="Center" />
-                                    <controls:ContextHelpHost Grid.Column="2" Grid.RowSpan="2">
+                                    <controls:ContextHelpHost Grid.Column="2" Grid.Row="0">
                                         <Button
                                             x:Name="MaximumSizeButton"
                                             MinWidth="32"
-                                            VerticalAlignment="Stretch"
+                                            VerticalAlignment="Center"
                                             Click="MaximumSize_Click">
                                             <FontIcon Glyph="&#xE74E;" FontSize="14" />
                                         </Button>
@@ -511,34 +515,17 @@
                             </controls:ContextHelpHost>
                         </Grid>
                     </Border>
-                    <Grid Margin="0,8,0,0" ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <controls:ContextHelpHost>
-                            <Button
-                                x:Name="CreatePartitionButton"
-                                HorizontalAlignment="Stretch"
-                                Click="CreatePartition_Click">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon Glyph="&#xE710;" FontSize="14" />
-                                    <TextBlock x:Name="CreatePartitionButtonLabel" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Button>
-                        </controls:ContextHelpHost>
-                        <controls:ContextHelpHost Grid.Column="1">
-                            <Button
-                                x:Name="FormatButton"
-                                HorizontalAlignment="Stretch"
-                                Click="Format_Click">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon Glyph="&#xE9CE;" FontSize="14" />
-                                    <TextBlock x:Name="FormatButtonLabel" VerticalAlignment="Center" />
-                                </StackPanel>
-                            </Button>
-                        </controls:ContextHelpHost>
-                    </Grid>
+                    <controls:ContextHelpHost Margin="0,8,0,0">
+                        <Button
+                            x:Name="PartitionActionButton"
+                            HorizontalAlignment="Stretch"
+                            Click="PartitionActionButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon x:Name="PartitionActionButtonIcon" Glyph="&#xE710;" FontSize="14" />
+                                <TextBlock x:Name="PartitionActionButtonLabel" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </controls:ContextHelpHost>
                 </StackPanel>
             </ScrollViewer>
     </Grid>

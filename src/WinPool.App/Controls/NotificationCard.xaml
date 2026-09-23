@@ -21,17 +21,8 @@
                 Duration="0:0:0.24" />
         </Storyboard>
     </UserControl.Resources>
-    <Border
-        Padding="0"
-        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-        BorderThickness="1"
-        CornerRadius="4">
-        <InfoBar
-            x:Name="NotificationInfoBar"
-            Background="Transparent"
-            BorderThickness="0"
-            IsClosable="False"
-            IsOpen="True" />
-    </Border>
+    <InfoBar
+        x:Name="NotificationInfoBar"
+        IsClosable="False"
+        IsOpen="True" />
 </UserControl>

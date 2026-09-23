@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.Foundation;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 
@@ -16,7 +17,7 @@ public sealed partial class DevelopmentPage : Page
 {
     private readonly ObservableCollection<SessionMessageItem> _messages = [];
     private bool _subscribed;
-    private Flyout? _detailFlyout;
+    private GlobalNotification? _displayedMessage;
 
     private sealed record SessionMessageItem(
         string Id,
@@ -55,8 +56,7 @@ public sealed partial class DevelopmentPage : Page
             _subscribed = false;
         }
 
-        _detailFlyout?.Hide();
-        _detailFlyout = null;
+        CloseMessageDetails();
 
         // History intentionally remains in the process-local notification
         // service while the page is hidden. It is never backed by a file or DB.
@@ -77,16 +77,40 @@ public sealed partial class DevelopmentPage : Page
 
     private void UpdateText()
     {
-        NoMessagesText.Text = Text("本次运行没有日志。", "No log entries in this run.");
+        EmptyMessageListText.Text = Text("本次运行没有消息。", "No messages in this run.");
         AiEntryHint.Text = Text("人工智能入口，功能正在开发中。", "AI entry — feature in development.");
-        AutomationProperties.SetName(MessageList, Text("本次运行日志", "Current-session logs"));
+        AutomationProperties.SetName(MessageListArea, Text("消息列表", "Message list"));
+        AutomationProperties.SetName(MessageList, Text("消息列表", "Message list"));
+        AutomationProperties.SetName(EmptyMessageListText, Text("空消息列表", "Empty message list"));
+        AutomationProperties.SetName(
+            TopAreaColumnSplitter,
+            Text("调整消息列表和右侧区域宽度", "Resize the message list and right area"));
+        AutomationProperties.SetName(
+            TopBottomAreaSplitter,
+            Text("调整上方与下方区域高度", "Resize the upper and lower areas"));
+
+        if (_displayedMessage is { } message && MessageDetailOverlay.Visibility == Visibility.Visible)
+        {
+            MessageDetailText.Text = FormatMessageDetails(message);
+            UpdateMessageDetailSize();
+        }
     }
 
     private void DevelopmentLayout_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var isNarrow = e.NewSize.Width < 760;
         RightTopEmptyArea.Visibility = isNarrow ? Visibility.Collapsed : Visibility.Visible;
-        Grid.SetColumnSpan(LogArea, isNarrow ? 2 : 1);
+        TopAreaColumnSplitter.Visibility = isNarrow ? Visibility.Collapsed : Visibility.Visible;
+        MessageListColumn.MinWidth = isNarrow ? 0 : 280;
+        TopColumnSplitterColumn.Width = new GridLength(isNarrow ? 0 : 8);
+        RightAreaColumn.MinWidth = isNarrow ? 0 : 240;
+        RightAreaColumn.Width = isNarrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        Grid.SetColumnSpan(MessageListArea, isNarrow ? 3 : 1);
+
+        if (MessageDetailOverlay.Visibility == Visibility.Visible)
+        {
+            UpdateMessageDetailSize();
+        }
     }
 
     private void RefreshMessages()
@@ -112,7 +136,8 @@ public sealed partial class DevelopmentPage : Page
             }
         }
 
-        NoMessagesText.Visibility = _messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyMessageListText.Visibility = _messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateMessageRowSelectionVisuals();
     }
 
     private void MessageList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -124,7 +149,7 @@ public sealed partial class DevelopmentPage : Page
         }
 
         e.Handled = true;
-        ShowMessageDetails(row, item.Notification);
+        ShowMessageDetails(item.Notification);
     }
 
     private static T? FindAncestor<T>(DependencyObject? element)
@@ -141,34 +166,128 @@ public sealed partial class DevelopmentPage : Page
         return null;
     }
 
-    private void ShowMessageDetails(ListViewItem row, GlobalNotification message)
+    private void ShowMessageDetails(GlobalNotification message)
     {
-        _detailFlyout?.Hide();
-        var detailTextBox = new TextBox
+        _displayedMessage = message;
+        MessageDetailText.Text = FormatMessageDetails(message);
+        AutomationProperties.SetName(MessageDetailText, Text("消息详情文本", "Message details text"));
+        UpdateMessageDetailSize();
+        MessageDetailOverlay.Visibility = Visibility.Visible;
+        MessageDetailText.Focus(FocusState.Programmatic);
+    }
+
+    private void UpdateMessageDetailSize()
+    {
+        var width = Math.Clamp(DevelopmentLayout.ActualWidth - 48, 160, 640);
+        var maxHeight = Math.Clamp(DevelopmentLayout.ActualHeight - 48, 96, 380);
+        var textMeasure = new TextBlock
         {
-            AcceptsReturn = true,
-            Height = Math.Clamp(DevelopmentLayout.ActualHeight - 80, 180, 320),
-            Width = Math.Clamp(DevelopmentLayout.ActualWidth - 80, 300, 560),
-            IsReadOnly = true,
-            IsSpellCheckEnabled = false,
-            Text = FormatMessageDetails(message),
+            FontFamily = MessageDetailText.FontFamily,
+            FontSize = MessageDetailText.FontSize,
+            Text = MessageDetailText.Text,
             TextWrapping = TextWrapping.Wrap
         };
-        AutomationProperties.SetName(detailTextBox, Text("消息详情", "Message details"));
-        var flyout = new Flyout
+        var contentWidth = Math.Max(96, width - 32);
+        textMeasure.Measure(new Size(contentWidth, double.PositiveInfinity));
+
+        MessageDetailText.Width = width;
+        MessageDetailText.Height = Math.Min(
+            maxHeight,
+            Math.Max(96, Math.Ceiling(textMeasure.DesiredSize.Height + 40)));
+    }
+
+    private void MessageDetailOverlay_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (FindAncestor<TextBox>(e.OriginalSource as DependencyObject) is not null)
         {
-            Content = detailTextBox,
-            XamlRoot = DevelopmentLayout.XamlRoot
-        };
-        flyout.Closed += (_, _) =>
+            return;
+        }
+
+        CloseMessageDetails();
+        e.Handled = true;
+    }
+
+    private void CloseMessageDetails()
+    {
+        MessageDetailOverlay.Visibility = Visibility.Collapsed;
+        _displayedMessage = null;
+        MessageList.Focus(FocusState.Programmatic);
+    }
+
+    private void MessageList_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateMessageRowSelectionVisuals();
+
+    private void MessageRowVisual_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid row)
         {
-            if (ReferenceEquals(_detailFlyout, flyout))
+            return;
+        }
+
+        var isSelected = FindAncestor<ListViewItem>(row)?.IsSelected == true;
+        if (FindNamedElement<Border>(row, "MessageRowHoverFill") is { } hoverFill)
+        {
+            hoverFill.Opacity = isSelected ? 0 : 1;
+        }
+    }
+
+    private void MessageRowVisual_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid row && FindNamedElement<Border>(row, "MessageRowHoverFill") is { } hoverFill)
+        {
+            hoverFill.Opacity = 0;
+        }
+    }
+
+    private void UpdateMessageRowSelectionVisuals()
+    {
+        foreach (var item in MessageList.Items)
+        {
+            if (MessageList.ContainerFromItem(item) is not ListViewItem container)
             {
-                _detailFlyout = null;
+                continue;
             }
-        };
-        _detailFlyout = flyout;
-        flyout.ShowAt(row);
+
+            var isSelected = ReferenceEquals(container.Content, MessageList.SelectedItem);
+            if (FindNamedElement<Border>(container, "MessageRowSelectedFill") is { } selectedFill)
+            {
+                selectedFill.Opacity = isSelected ? 1 : 0;
+            }
+
+            if (FindNamedElement<Border>(container, "MessageRowSelectionIndicator") is { } indicator)
+            {
+                indicator.Opacity = isSelected ? 1 : 0;
+            }
+
+            if (isSelected
+                && FindNamedElement<Border>(container, "MessageRowHoverFill") is { } hoverFill)
+            {
+                hoverFill.Opacity = 0;
+            }
+        }
+    }
+
+    private static T? FindNamedElement<T>(DependencyObject? element, string name)
+        where T : FrameworkElement
+    {
+        if (element is T match && match.Name == name)
+        {
+            return match;
+        }
+
+        if (element is not null)
+        {
+            var childCount = VisualTreeHelper.GetChildrenCount(element);
+            for (var index = 0; index < childCount; index++)
+            {
+                if (FindNamedElement<T>(VisualTreeHelper.GetChild(element, index), name) is { } childMatch)
+                {
+                    return childMatch;
+                }
+            }
+        }
+
+        return null;
     }
 
     private string FormatMessageDetails(GlobalNotification message)

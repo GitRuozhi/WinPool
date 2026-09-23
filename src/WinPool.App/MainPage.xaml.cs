@@ -481,6 +481,144 @@ public sealed partial class MainPage : Page
         return commands;
     }
 
+    private List<CommandSpec> BuildActionPanelSpecs()
+    {
+        var selected = ViewModel.SelectedWorkspaceItem;
+        if (selected?.IsAction == true)
+        {
+            return BuildCommandSpecs();
+        }
+
+        var surface = ViewModel.GetSelectedCommandSurface();
+        if (surface is null)
+        {
+            return [];
+        }
+
+        return ViewModel.SelectedCategory switch
+        {
+            ManageWorkspaceCategory.Pool =>
+            [
+                AlwaysEnabledNavigationSpec(
+                    ManageCommandKind.EditPool,
+                    surface,
+                    "编辑存储池",
+                    "Edit pool",
+                    NavigateStructureAsync,
+                    Text(
+                        "打开存储结构页并定位所选存储池；目标页会根据当前系统模式限制可执行的编辑操作。",
+                        "Open Storage structure at the selected pool; the target page applies editing limits for the current system mode."))
+            ],
+            ManageWorkspaceCategory.Tier =>
+            [
+                AlwaysEnabledNavigationSpec(
+                    ManageCommandKind.EditTier,
+                    surface,
+                    "编辑存储层",
+                    "Edit tier",
+                    NavigateStructureAsync,
+                    Text(
+                        "打开存储结构页并定位所选存储层所属的存储池，显示该池的存储层参数；目标页会根据当前系统模式限制可执行的编辑操作。",
+                        "Open Storage structure at the selected tier's pool and show its tier settings; the target page applies editing limits for the current system mode."))
+            ],
+            ManageWorkspaceCategory.Disk =>
+            [
+                BuildDiskEditorSpec(surface),
+                SurfaceCommandSpec(ManageCommandKind.ShowSystemProperties, surface)
+            ],
+            ManageWorkspaceCategory.Partition or ManageWorkspaceCategory.Volume =>
+            [
+                SurfaceCommandSpec(ManageCommandKind.OpenExplorer, surface),
+                AlwaysEnabledNavigationSpec(
+                    ManageCommandKind.EditPartition,
+                    surface,
+                    "编辑分区",
+                    "Edit partition",
+                    NavigatePartitionAsync,
+                    Text(
+                        "打开磁盘与分区页并定位所选分区；目标页会根据当前系统模式限制可执行的编辑操作。",
+                        "Open Disk and partitions at the selected partition; the target page applies editing limits for the current system mode.")),
+                SurfaceCommandSpec(ManageCommandKind.OptimizeDrive, surface),
+                SurfaceCommandSpec(ManageCommandKind.ShowSystemProperties, surface)
+            ],
+            _ => BuildCommandSpecs()
+        };
+    }
+
+    private CommandSpec BuildDiskEditorSpec(ManageCommandSurfaceView surface)
+    {
+        var stableId = ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey;
+        var snapshot = ViewModel.EffectiveActiveSnapshot;
+        var visiblePartitionDiskIds = EditWorkspace.ProjectPartitionWorkspace(snapshot)
+            .Select(node => node.Unit.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var hasPartitionView = snapshot.OsDisks.Any(disk =>
+            visiblePartitionDiskIds.Contains(disk.StableId)
+            && (StringComparer.OrdinalIgnoreCase.Equals(disk.StableId, stableId)
+                || StringComparer.OrdinalIgnoreCase.Equals(disk.PhysicalDiskStableId, stableId)
+                || StringComparer.OrdinalIgnoreCase.Equals(disk.VirtualDiskStableId, stableId)));
+        var hasStructureView = snapshot.PhysicalDisks.Any(disk =>
+                StringComparer.OrdinalIgnoreCase.Equals(disk.StableId, stableId)
+                && snapshot.StoragePools.Any(pool =>
+                    StringComparer.OrdinalIgnoreCase.Equals(pool.StableId, disk.PoolStableId)))
+            || snapshot.VirtualDisks.Any(disk =>
+                StringComparer.OrdinalIgnoreCase.Equals(disk.StableId, stableId)
+                && snapshot.StoragePools.Any(pool =>
+                    StringComparer.OrdinalIgnoreCase.Equals(pool.StableId, disk.PoolStableId)));
+        var purpose = hasPartitionView
+            ? Text(
+                "打开磁盘与分区页并定位所选磁盘；目标页会根据当前系统模式限制可执行的编辑操作。",
+                "Open Disk and partitions at the selected disk; the target page applies editing limits for the current system mode.")
+            : Text(
+                "打开存储结构页并定位所选磁盘的存储池；目标页会根据当前系统模式限制可执行的编辑操作。",
+                "Open Storage structure at the selected disk's pool; the target page applies editing limits for the current system mode.");
+        var spec = AlwaysEnabledNavigationSpec(
+            ManageCommandKind.RenameDisk,
+            surface,
+            "编辑磁盘",
+            "Edit disk",
+            hasPartitionView ? NavigatePartitionAsync : NavigateStructureAsync,
+            purpose) with { Glyph = "\uE90F" };
+        return hasPartitionView || hasStructureView
+            ? spec
+            : spec with
+            {
+                Enabled = false,
+                DisabledReason = Text(
+                    "当前磁盘没有可定位的分区或存储结构编辑视图。",
+                    "This disk has no partition or storage-structure editor target.")
+            };
+    }
+
+    private CommandSpec AlwaysEnabledNavigationSpec(
+        ManageCommandKind kind,
+        ManageCommandSurfaceView surface,
+        string zh,
+        string en,
+        Func<Task> action,
+        string purpose)
+    {
+        var command = surface.Commands.FirstOrDefault(candidate => candidate.Kind == kind)
+            ?? new ManageCommandView(kind, true);
+        return BuildCommandSpec(command, surface) with
+        {
+            Text = Text(zh, en),
+            Enabled = true,
+            Action = action,
+            Purpose = purpose,
+            DisabledReason = null
+        };
+    }
+
+    private CommandSpec SurfaceCommandSpec(
+        ManageCommandKind kind,
+        ManageCommandSurfaceView surface)
+    {
+        var command = surface.Commands.FirstOrDefault(candidate => candidate.Kind == kind)
+            ?? new ManageCommandView(kind, false);
+        return BuildCommandSpec(command, surface);
+    }
+
     private CommandSpec BuildCommandSpec(
         ManageCommandView command,
         ManageCommandSurfaceView surface)
@@ -1092,7 +1230,7 @@ public sealed partial class MainPage : Page
             return;
         }
         CommandButtonsPanel.Children.Clear();
-        var specs = BuildCommandSpecs();
+        var specs = BuildActionPanelSpecs();
         foreach (var spec in specs)
         {
             AddCommand(spec);

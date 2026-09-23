@@ -74,24 +74,23 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         OpenExplorerButtonLabel.Text = Text("打开资源管理器", "Open in File Explorer");
         DiskLocationLabel.Text = Text("所在磁盘", "Disk");
         PartitionNumberLabel.Text = Text("分区编号", "Partition number");
-        StartOffsetLabel.Text = Text("起始位置", "Start");
-        EndOffsetLabel.Text = Text("结束位置", "End");
+        StartOffsetLabel.Text = Text("起点", "Start");
+        EndOffsetLabel.Text = Text("终点", "End");
         PartitionTypeLabel.Text = Text("分区类型", "Partition type");
         DriveLetterLabel.Text = Text("盘符", "Drive letter");
         VolumeLabelCaption.Text = Text("卷标", "Volume label");
-        SizeLabel.Text = Text("容量（MiB）", "Size (MiB)");
+        SizeLabel.Text = Text("容量", "Capacity");
         FileSystemLabel.Text = Text("文件系统", "File system");
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
         FullFormatLabel.Text = Text("完整格式化", "Full format");
         AutomationProperties.SetName(QuickFormatSwitch, QuickFormatLabel.Text);
         AutomationProperties.SetName(FullFormatSwitch, FullFormatLabel.Text);
-        CreatePartitionButtonLabel.Text = Text("新建", "New");
-        FormatButtonLabel.Text = ViewModel.Localization["Format"];
-        AutomationProperties.SetName(CreatePartitionButton, Text("新建分区", "Create partition"));
-        AutomationProperties.SetName(FormatButton, ViewModel.Localization["Format"]);
+        PartitionActionButtonLabel.Text = Text("新建分区", "Create partition");
+        PartitionActionButtonIcon.Glyph = "\uE710";
+        AutomationProperties.SetName(PartitionActionButton, Text("新建分区", "Create partition"));
         AutomationProperties.SetName(MaximumSizeButton, Text("使用最大容量", "Use maximum capacity"));
-        AutomationProperties.SetName(SizeBox, Text("分区容量（MiB）", "Partition capacity (MiB)"));
+        AutomationProperties.SetName(SizeBox, Text("容量", "Capacity"));
         AutomationProperties.SetName(SizeAdaptiveValue, Text("自适应容量单位", "Adaptive capacity unit"));
         ContextHelp.Set(OnlineButton,
             Text("仅将模拟磁盘联机。", "Bring a simulated disk online only."));
@@ -101,9 +100,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("初始化空白模拟磁盘；不修改本机磁盘。", "Initialize a blank simulated disk; no local disk is changed."));
         ContextHelp.Set(ConvertGptButton,
             Text("将符合条件的模拟 MBR 磁盘转换为 GPT。", "Convert an eligible simulated MBR disk to GPT."));
-        ContextHelp.Set(CreatePartitionButton,
-            Text("在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。",
-                "Create a partition in the selected simulated GPT gap; capacity uses 1 MiB alignment."));
         ContextHelp.Set(DeletePartitionButton,
             Text("删除选中的非系统、非启动模拟分区。", "Delete the selected simulated partition when it is neither a system nor a boot partition."));
         ContextHelp.Set(ExtendButton,
@@ -141,8 +137,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text(
                 "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
                 "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
-        ContextHelp.Set(FormatButton,
-            Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
         foreach (var button in PropertyResetButtons())
         {
             ContextHelp.Set(button, ViewModel.Localization["ResetRecommended"]);
@@ -295,8 +289,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void RefreshTopology()
     {
-        // Keep every real gap selectable here so a sub-1-MiB region can show its creation block reason.
-        var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, minUnallocatedBytes: 0);
+        var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, UnallocatedIgnoreBytes);
         var rootViewModel = new TopologyNodeViewModel(
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId),
             ViewModel,
@@ -327,12 +320,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : gap
                     ? Text("未分配", "Unallocated")
                     : "—";
-            StartOffsetLabel.Text = gap
-                ? Text("可创建起点", "Create start")
-                : Text("起始位置", "Start");
-            EndOffsetLabel.Text = gap
-                ? Text("可用终点", "Usable end")
-                : Text("结束位置", "End");
             var start = partition?.Offset ?? (gap ? _selectedUnallocatedOffset : null);
             var length = partition?.Size ?? (gap ? _selectedUnallocatedSize : null);
             if (start is long startBytes && length is long sizeBytes)
@@ -373,7 +360,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 ?? (partition is null ? string.Empty : partition.FileSystemLabel);
             if (gap)
             {
-                SizeLabel.Text = Text("容量（MiB）", "Size (MiB)");
                 SetSizeMib(geometry?.DefaultSizeBytes is long defaultSize
                     ? defaultSize / BytesPerMiB
                     : null);
@@ -392,7 +378,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else if (partition is not null)
             {
-                SizeLabel.Text = Text("当前容量（MiB）", "Current size (MiB)");
                 SizeBox.Text = (partition.Size / (double)BytesPerMiB).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
                 SizeAdaptiveValue.Text = TopologyProjector.FormatBytes(partition.Size);
                 SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
@@ -408,7 +393,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else
             {
-                SizeLabel.Text = Text("容量（MiB）", "Size (MiB)");
                 SizeBox.Text = string.Empty;
                 SizeAdaptiveValue.Text = "—";
                 FileSystemBox.SelectedIndex = 0;
@@ -687,8 +671,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         {
             VolumeLabelBox.IsEnabled = false;
         }
-        CreatePartitionButton.IsEnabled = canCreatePartition;
-        FormatButton.IsEnabled = propertyEnabled && isPartitionSelection && formattablePartition;
         RestoreFieldHelp();
         var protectedPartitionReason = DescribeFormatPartitionReason(partition);
         var destructiveReason = contextReason
@@ -753,7 +735,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                             : mbr
                                 ? Text("当前磁盘已满足转换条件。", "The current disk already meets the conversion conditions.")
                                 : Text("只有 MBR 模拟磁盘可以转换为 GPT。", "Only an MBR simulated disk can be converted to GPT."));
-        SetDisabledReason(CreatePartitionButton, createReason);
         SetDisabledReason(DeletePartitionButton, destructiveReason);
         SetDisabledReason(ExtendButton, extendReason);
         SetDisabledReason(ShrinkButton, shrinkReason);
@@ -806,11 +787,27 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ?? (partition is null
                 ? Text("请选择现有的普通模拟数据分区以格式化。", "Select an existing simulated data partition to format.")
                 : protectedPartitionReason);
+        var createActionSelected = partition is null;
+        PartitionActionButtonLabel.Text = createActionSelected
+            ? Text("新建分区", "Create partition")
+            : Text("格式化分区", "Format partition");
+        PartitionActionButtonIcon.Glyph = createActionSelected ? "\uE710" : "\uE9CE";
+        AutomationProperties.SetName(
+            PartitionActionButton,
+            createActionSelected ? Text("新建分区", "Create partition") : Text("格式化分区", "Format partition"));
+        PartitionActionButton.IsEnabled = createActionSelected
+            ? canCreatePartition
+            : propertyEnabled && isPartitionSelection && formattablePartition;
+        ContextHelp.Set(
+            PartitionActionButton,
+            createActionSelected
+                ? Text("在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。", "Create a partition in the selected simulated GPT gap; capacity uses 1 MiB alignment.")
+                : Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
+        SetDisabledReason(PartitionActionButton, createActionSelected ? createReason : formatReason);
         SetDisabledReason(FileSystemBox, formatOptionsReason);
         SetDisabledReason(ClusterBox, formatOptionsReason);
         SetDisabledReason(QuickFormatSwitch, formatOptionsReason);
         SetDisabledReason(FullFormatSwitch, formatOptionsReason);
-        SetDisabledReason(FormatButton, formatReason);
         UpdatePropertyResetState();
     }
 
@@ -842,8 +839,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text(
                 "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
                 "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
-        ContextHelp.Set(FormatButton,
-            Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
     }
 
     private static bool TryGetResizeTargetRange(
@@ -1367,11 +1362,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             : Text("请输入 MiB 正整数", "Enter a whole number of MiB");
     }
 
-    private static string FormatOffset(long bytes)
+    private string FormatOffset(long bytes)
     {
+        var cultureName = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+            ? "zh-CN"
+            : "en-US";
         var mibText = ((decimal)bytes / BytesPerMiB).ToString(
-            "0.########",
-            System.Globalization.CultureInfo.InvariantCulture);
+            "#,0.########",
+            System.Globalization.CultureInfo.GetCultureInfo(cultureName));
         return $"{mibText}MiB ({TopologyProjector.FormatBytes(bytes)})";
     }
 
@@ -1873,9 +1871,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         });
     }
 
-    private async void CreatePartition_Click(object sender, RoutedEventArgs e) => await CreatePartitionAsync();
+    private async void PartitionActionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedPartition() is null)
+        {
+            await CreatePartitionAsync();
+            return;
+        }
 
-    private async void Format_Click(object sender, RoutedEventArgs e)
+        await FormatPartitionAsync();
+    }
+
+    private async Task FormatPartitionAsync()
     {
         var partition = SelectedPartition();
         if (partition is null || IsProtected(partition))

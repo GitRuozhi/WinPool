@@ -130,7 +130,7 @@ public sealed partial class NotificationCard : UserControl
             IsChinese ? MaximumChineseCardTitleLength : MaximumEnglishCardTitleLength);
         NotificationInfoBar.Message = DisplayMessage(notification);
         var action = notification.Severity == GlobalNotificationSeverity.Error
-            ? Text("单击查看此错误消息；完整详情在开发页。", "Click to view this error message; full details are on the Developer page.")
+            ? Text("单击查看此错误消息；完整详情在开发页消息列表。", "Click to view this error message; full details are in the Developer message list.")
             : Text("单击关闭此消息。", "Click to dismiss this message.");
         ToolTipService.SetToolTip(this, action);
         AutomationProperties.SetName(
@@ -170,7 +170,7 @@ public sealed partial class NotificationCard : UserControl
         // Keep the required route to details visible even when an error body is
         // long. The original, untruncated message is available on click and in
         // the Developer page history.
-        var prompt = Text("进入开发页查看详情", "Open Developer features for details");
+        var prompt = Text("进入开发页消息列表查看详情", "Open the Developer message list for details");
         var maximumErrorTextLength = IsChinese ? 110 : 190;
         var messageLength = Math.Max(0, maximumErrorTextLength - prompt.Length - 1);
         return string.IsNullOrWhiteSpace(notification.Message)

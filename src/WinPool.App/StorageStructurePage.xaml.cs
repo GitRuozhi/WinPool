@@ -139,10 +139,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        string? targetStableId = null;
         if (e.Parameter is EditorNavigationParameter parameter)
         {
             ViewModel = parameter.ViewModel;
-            _selectedPoolId = ResolvePoolId(parameter.TargetStableId);
+            targetStableId = parameter.TargetStableId;
         }
         else
         {
@@ -150,6 +151,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         EditingSession.Bind(ViewModel.SelectedSystem, EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot));
+        _selectedPoolId = ResolvePoolId(targetStableId);
         _undoStack.Clear();
         _redoStack.Clear();
         _poolIntents.Clear();
@@ -915,13 +917,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var snapshot = EditingSession.Baseline;
-        if (snapshot.StoragePools.Any(item => item.StableId == stableId))
+        if (snapshot.StoragePools.Any(item => StringComparer.OrdinalIgnoreCase.Equals(item.StableId, stableId)))
         {
             return stableId;
         }
 
-        return snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == stableId)?.PoolStableId
-            ?? snapshot.VirtualDisks.FirstOrDefault(item => item.StableId == stableId)?.PoolStableId;
+        return snapshot.StorageTiers.FirstOrDefault(item =>
+                StringComparer.OrdinalIgnoreCase.Equals(item.StableId, stableId))?.PoolStableId
+            ?? snapshot.PhysicalDisks.FirstOrDefault(item =>
+                StringComparer.OrdinalIgnoreCase.Equals(item.StableId, stableId))?.PoolStableId
+            ?? snapshot.VirtualDisks.FirstOrDefault(item =>
+                StringComparer.OrdinalIgnoreCase.Equals(item.StableId, stableId))?.PoolStableId;
     }
 
     private void RefreshAll()
