@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using WinPool.Domain;
 
 namespace WinPool.Application;
@@ -79,7 +80,10 @@ public sealed record SimulationEditRequest(
     PartitionKind? PartitionKind = null,
     string? DestinationGroupId = null,
     string? DiskUsage = null,
-    string? PartitionStyle = null);
+    string? PartitionStyle = null,
+    // Null leaves unrelated requests unchanged and means the legacy quick-format default for format operations.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? QuickFormat = null);
 
 public sealed record SimulationPlanItem(
     string Id,

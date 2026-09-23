@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
@@ -30,10 +31,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
     private bool _filling;
     private bool _renameInProgress;
+    private bool _formatModeControlsReady;
 
     public DiskPartitionPage()
     {
         InitializeComponent();
+        _formatModeControlsReady = true;
+        SetFormatMode(quickFormat: true);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -80,6 +84,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FileSystemLabel.Text = Text("文件系统", "File system");
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
+        FullFormatLabel.Text = Text("完整格式化", "Full format");
+        AutomationProperties.SetName(QuickFormatSwitch, QuickFormatLabel.Text);
+        AutomationProperties.SetName(FullFormatSwitch, FullFormatLabel.Text);
         FormatButtonLabel.Text = ViewModel.Localization["Format"];
         ContextHelp.Set(OnlineButton,
             Text("仅将模拟磁盘联机。", "Bring a simulated disk online only."));
@@ -119,7 +126,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。",
                 "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
         ContextHelp.Set(QuickFormatSwitch,
-            Text("控制模拟格式化是否为快速格式化。", "Choose whether simulated formatting is quick."));
+            Text(
+                "选择模拟快速格式化；此模式会进入模拟操作计划，不会格式化真实磁盘。",
+                "Choose simulated quick formatting. This mode is recorded in the simulation plan and does not format a real disk."));
+        ContextHelp.Set(FullFormatSwitch,
+            Text(
+                "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
+                "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
         ContextHelp.Set(FormatButton,
             Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
         foreach (var button in PropertyResetButtons())
@@ -328,7 +341,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 SizeBox.Maximum = gb;
                 FileSystemBox.SelectedIndex = 0;
                 ClusterBox.SelectedIndex = 4;
-                QuickFormatSwitch.IsOn = true;
+                SetFormatMode(quickFormat: true);
                 PartitionTypeBox.SelectedIndex = 0;
             }
             else if (partition is not null)
@@ -340,7 +353,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 SizeBox.Value = displayedSize;
                 SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
                 SelectCluster(volume?.AllocationUnitSize ?? partition.AllocationUnitSize);
-                QuickFormatSwitch.IsOn = true;
+                SetFormatMode(quickFormat: true);
                 PartitionTypeBox.SelectedIndex = partition.Type switch
                 {
                     "EfiSystem" => 1,
@@ -357,7 +370,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 SizeBox.Value = 0;
                 FileSystemBox.SelectedIndex = 0;
                 ClusterBox.SelectedIndex = 4;
-                QuickFormatSwitch.IsOn = true;
+                SetFormatMode(quickFormat: true);
                 PartitionTypeBox.SelectedIndex = 0;
             }
         }
@@ -601,7 +614,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SizeBox.IsEnabled = propertyEnabled && isGapSelection;
         FileSystemBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
         ClusterBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
-        QuickFormatSwitch.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
+        var formatOptionsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
+        QuickFormatSwitch.IsEnabled = formatOptionsEnabled;
+        FullFormatSwitch.IsEnabled = formatOptionsEnabled;
         if (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery)
         {
             DriveLetterBox.IsEnabled = false;
@@ -733,6 +748,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SetDisabledReason(FileSystemBox, formatReason);
         SetDisabledReason(ClusterBox, formatReason);
         SetDisabledReason(QuickFormatSwitch, formatReason);
+        SetDisabledReason(FullFormatSwitch, formatReason);
         SetDisabledReason(FormatButton, formatReason);
         UpdatePropertyResetState();
     }
@@ -756,7 +772,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(ClusterBox,
             Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
         ContextHelp.Set(QuickFormatSwitch,
-            Text("控制模拟格式化是否为快速格式化。", "Choose whether simulated formatting is quick."));
+            Text(
+                "选择模拟快速格式化；此模式会进入模拟操作计划，不会格式化真实磁盘。",
+                "Choose simulated quick formatting. This mode is recorded in the simulation plan and does not format a real disk."));
+        ContextHelp.Set(FullFormatSwitch,
+            Text(
+                "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
+                "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
         ContextHelp.Set(FormatButton,
             Text("提交当前模拟分区创建或格式化设置。", "Submit the current simulated partition creation or formatting settings."));
     }
@@ -1041,21 +1063,21 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     SizeBox.Value = Math.Min(gapGiB, 16d / 1024d);
                     DriveLetterBox.SelectedIndex = 0;
                     VolumeLabelBox.Text = string.Empty;
-                    QuickFormatSwitch.IsOn = false;
+                    SetFormatMode(quickFormat: true);
                     break;
                 case PartitionKind.WindowsRecovery:
                     FillFileSystemBoxFor("NTFS");
                     ClusterBox.SelectedIndex = 0;
                     SizeBox.Value = Math.Min(gapGiB, 990d / 1024d);
                     DriveLetterBox.SelectedIndex = 0;
-                    QuickFormatSwitch.IsOn = true;
+                    SetFormatMode(quickFormat: true);
                     break;
                 default:
                     FillFileSystemBox();
                     ClusterBox.SelectedIndex = 4;
                     SizeBox.Value = gapGiB;
                     FillDriveLetters(null, null, autoAssign: true);
-                    QuickFormatSwitch.IsOn = true;
+                    SetFormatMode(quickFormat: true);
                     break;
             }
         }
@@ -1090,11 +1112,45 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
     }
 
-    private void QuickFormatSwitch_Toggled(object sender, RoutedEventArgs e)
+    private void FormatModeSwitch_Toggled(object sender, RoutedEventArgs e)
     {
-        if (!_filling)
+        if (!_formatModeControlsReady || _filling || sender is not ToggleSwitch changedSwitch)
         {
-            UpdatePropertyResetState();
+            return;
+        }
+
+        _filling = true;
+        try
+        {
+            if (changedSwitch == QuickFormatSwitch)
+            {
+                FullFormatSwitch.IsOn = !QuickFormatSwitch.IsOn;
+            }
+            else if (changedSwitch == FullFormatSwitch)
+            {
+                QuickFormatSwitch.IsOn = !FullFormatSwitch.IsOn;
+            }
+        }
+        finally
+        {
+            _filling = false;
+        }
+
+        UpdatePropertyResetState();
+    }
+
+    private void SetFormatMode(bool quickFormat)
+    {
+        var wasFilling = _filling;
+        _filling = true;
+        try
+        {
+            QuickFormatSwitch.IsOn = quickFormat;
+            FullFormatSwitch.IsOn = !quickFormat;
+        }
+        finally
+        {
+            _filling = wasFilling;
         }
     }
 
@@ -1181,7 +1237,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void ResetQuickFormat_Click(object sender, RoutedEventArgs e)
     {
-        QuickFormatSwitch.IsOn = SelectedPartitionKind() != PartitionKind.MicrosoftReserved;
+        SetFormatMode(quickFormat: true);
         UpdatePropertyResetState();
     }
 
@@ -1438,6 +1494,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var diskId = _selectedDiskId;
         var offset = _selectedUnallocatedOffset;
+        var quickFormat = QuickFormatSwitch.IsOn;
         if (!await SubmitAsync(
                 new SimulationEditRequest(
                     SimulationEditKind.CreatePartition,
@@ -1448,11 +1505,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     AllocationUnitSize: SelectedClusterBytes(),
                     SizeBytes: bytes ?? _selectedUnallocatedSize,
                     OffsetBytes: offset,
-                    PartitionKind: partitionKind),
-                Text("新建分区成功", "Partition created"),
+                    PartitionKind: partitionKind,
+                    QuickFormat: string.IsNullOrWhiteSpace(fileSystem) ? null : quickFormat),
+                partitionKind == PartitionKind.MicrosoftReserved
+                    ? Text("新建分区成功", "Partition created")
+                    : quickFormat
+                        ? Text("新建分区并快速格式化成功", "Partition created with quick format")
+                        : Text("新建分区并完整格式化成功", "Partition created with full format"),
                 partitionKind == PartitionKind.MicrosoftReserved
                     ? Text("已在空隙中创建 Microsoft 保留分区。", "A Microsoft Reserved Partition was created in the gap.")
-                    : Text("已在空隙中创建分区并格式化。", "A partition was created in the gap and formatted.")))
+                    : quickFormat
+                        ? Text("已在空隙中创建分区并模拟快速格式化；没有格式化真实磁盘。", "A partition was created and simulated quick formatting was recorded; no real disk was formatted.")
+                        : Text("已在空隙中创建分区并记录完整格式化模式；没有扫描真实介质。", "A partition was created and simulated full-format mode was recorded; no real media was scanned.")))
         {
             return;
         }
@@ -1705,16 +1769,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var holdsData = EditWorkspace.PartitionHoldsStoredData(partition);
         var usesRefs = fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase);
+        var quick = QuickFormatSwitch.IsOn;
         if (holdsData
             && !await ConfirmAsync(
                 ViewModel.Localization["Format"],
-                usesRefs
-                    ? Text(
-                        "格式化将清除该分区上的已用数据。ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。确定继续？",
-                        "Formatting clears used data on this partition. ReFS has no long-run evidence equivalent to 64 KiB NTFS. Continue?")
-                    : Text(
-                        "格式化将清除该分区上的已用数据。确定继续？",
-                        "Formatting clears used data on this partition. Continue?")))
+                FormatConfirmationText(quick, usesRefs)))
         {
             return;
         }
@@ -1724,20 +1783,42 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             PublishRefsNotice();
         }
 
-        var quick = QuickFormatSwitch.IsOn;
         var ok = await SubmitAsync(
             new SimulationEditRequest(
                 SimulationEditKind.FormatPartition,
                 partition.StableId,
                 Name: VolumeLabelBox.Text,
                 FileSystem: fileSystem,
-                AllocationUnitSize: SelectedClusterBytes()),
-            quick ? Text("快速格式化成功", "Quick format succeeded") : Text("格式化成功", "Format succeeded"),
+                AllocationUnitSize: SelectedClusterBytes(),
+                QuickFormat: quick),
+            quick ? Text("快速格式化成功", "Quick format succeeded") : Text("完整格式化成功", "Full format succeeded"),
             quick
-                ? Text("模拟快速格式化已写入文档。", "The simulated quick format was saved.")
-                : Text("模拟格式化已写入文档。", "The simulated format was saved."),
+                ? Text("模拟快速格式化已写入文档；没有格式化真实磁盘。", "The simulated quick format was saved; no real disk was formatted.")
+                : Text("模拟完整格式化模式已写入操作计划；没有扫描真实介质。", "The simulated full-format mode was recorded in the operation plan; no real media was scanned."),
             failTitle: Text("格式化失败", "Format failed"));
         _ = ok;
+    }
+
+    private string FormatConfirmationText(bool quickFormat, bool usesRefs)
+    {
+        var modeWarning = quickFormat
+            ? Text(
+                "模拟快速格式化会清除该分区上的已用数据；不会格式化真实磁盘。",
+                "Simulated quick formatting clears used data on this partition; no real disk will be formatted.")
+            : Text(
+                "模拟完整格式化会清除该分区上的已用数据，并将完整模式写入操作计划；不会扫描真实介质或格式化真实磁盘。",
+                "Simulated full formatting clears used data on this partition and records full mode in the operation plan; it does not scan real media or format a real disk.");
+        if (!usesRefs)
+        {
+            return Text($"{modeWarning} 确定继续？", $"{modeWarning} Continue?");
+        }
+
+        var refsWarning = Text(
+            "ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。",
+            "ReFS has no long-run evidence equivalent to 64 KiB NTFS.");
+        return Text(
+            $"{modeWarning} {refsWarning} 确定继续？",
+            $"{modeWarning} {refsWarning} Continue?");
     }
 
     private void PublishRefsNotice() =>

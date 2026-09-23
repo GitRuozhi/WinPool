@@ -294,6 +294,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <TextBlock
                                 x:Name="DiskLocationLabel"
@@ -482,9 +483,24 @@
                                     x:Name="QuickFormatSwitch"
                                     MinWidth="0"
                                     Margin="0"
+                                    IsOn="True"
                                     OffContent=""
                                     OnContent=""
-                                    Toggled="QuickFormatSwitch_Toggled" />
+                                    Toggled="FormatModeSwitch_Toggled" />
+                            </controls:ContextHelpHost>
+                            <TextBlock
+                                x:Name="FullFormatLabel"
+                                Grid.Row="11"
+                                VerticalAlignment="Center" />
+                            <controls:ContextHelpHost Grid.Row="11" Grid.Column="2">
+                                <ToggleSwitch
+                                    x:Name="FullFormatSwitch"
+                                    MinWidth="0"
+                                    Margin="0"
+                                    IsOn="False"
+                                    OffContent=""
+                                    OnContent=""
+                                    Toggled="FormatModeSwitch_Toggled" />
                             </controls:ContextHelpHost>
                         </Grid>
                     </Border>

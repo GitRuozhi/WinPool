@@ -45,6 +45,85 @@ public sealed class SimulationEditCoordinatorTests
         Assert.Contains("Set-PhysicalDisk -InputObject $targetPhysicalDisk -NewFriendlyName", Assert.Single(result.Value.SimulatedCommands));
     }
 
+    [Theory]
+    [InlineData(true, "True", false)]
+    [InlineData(false, "False", true)]
+    public async Task FormatModeIsBoundIntoTypedPlanAndPreview(
+        bool quickFormat,
+        string expectedParameter,
+        bool expectFullSwitch)
+    {
+        var active = CreateFormattedDocument();
+        var originalFileSystem = Assert.Single(active.Snapshot.Volumes).FileSystem;
+        SimulationEditCommit? committed = null;
+        var coordinator = new SimulationEditCoordinator(
+            () => active,
+            (commit, _) =>
+            {
+                committed = commit;
+                active = commit.Document;
+                return Task.CompletedTask;
+            },
+            new SimulationOperationService());
+
+        var partition = Assert.Single(active.Snapshot.Partitions);
+        var result = await coordinator.ExecuteAsync(
+            new SimulationEditRequest(
+                SimulationEditKind.FormatPartition,
+                partition.StableId,
+                FileSystem: "NTFS",
+                AllocationUnitSize: 65536,
+                QuickFormat: quickFormat),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(committed);
+        Assert.Equal(expectedParameter, committed!.Plan.Parameters["QuickFormat"]);
+        Assert.Equal(
+            expectFullSwitch,
+            string.Join(Environment.NewLine, result.Value!.SimulatedCommands)
+                .Contains(" -Full", StringComparison.Ordinal));
+        Assert.Equal(originalFileSystem, Assert.Single(active.Snapshot.Volumes).FileSystem);
+    }
+
+    [Fact]
+    public async Task LegacyFormatRequestDefaultsToQuickAndOtherActionsOmitFormatMode()
+    {
+        var active = CreateFormattedDocument();
+        SimulationEditCommit? committed = null;
+        var coordinator = new SimulationEditCoordinator(
+            () => active,
+            (commit, _) =>
+            {
+                committed = commit;
+                active = commit.Document;
+                return Task.CompletedTask;
+            },
+            new SimulationOperationService());
+        var partition = Assert.Single(active.Snapshot.Partitions);
+
+        var format = await coordinator.ExecuteAsync(
+            new SimulationEditRequest(
+                SimulationEditKind.FormatPartition,
+                partition.StableId,
+                FileSystem: "NTFS"),
+            CancellationToken.None);
+
+        Assert.True(format.IsSuccess);
+        Assert.Equal("True", committed!.Plan.Parameters["QuickFormat"]);
+        Assert.DoesNotContain(
+            " -Full",
+            string.Join(Environment.NewLine, format.Value!.SimulatedCommands),
+            StringComparison.Ordinal);
+
+        var rename = await coordinator.ExecuteAsync(
+            new SimulationEditRequest(SimulationEditKind.Rename, "physical:p1", Name: "Renamed"),
+            CancellationToken.None);
+
+        Assert.True(rename.IsSuccess);
+        Assert.DoesNotContain("QuickFormat", committed!.Plan.Parameters.Keys);
+    }
+
     [Fact]
     public async Task LocalDocumentIsRejectedBeforeSimulationEditorOrCommit()
     {
@@ -327,6 +406,29 @@ public sealed class SimulationEditCoordinatorTests
         return useDraftPlan
             ? coordinator.ExecutePlanAsync(new SimulationDraftPlan("rename", [request]), CancellationToken.None)
             : coordinator.ExecuteAsync(request, CancellationToken.None);
+    }
+
+    private static StorageSystemDocument CreateFormattedDocument()
+    {
+        var editor = new SimulationOperationService();
+        var initialized = editor.Apply(
+            CreateDocument(StorageSystemKind.Simulation),
+            new SimulationEditRequest(
+                SimulationEditKind.InitializeDisk,
+                "osdisk:5",
+                PartitionStyle: "GPT",
+                CreateMsr: false));
+        Assert.True(initialized.Succeeded, initialized.Error);
+        var created = editor.Apply(
+            initialized.Document,
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
+                "osdisk:5",
+                FileSystem: "NTFS",
+                AllocationUnitSize: 4096,
+                SizeBytes: 500_000_000));
+        Assert.True(created.Succeeded, created.Error);
+        return created.Document;
     }
 
     // Simulate Agent persistence and transport replies; client planning, execution and reconciliation are real.

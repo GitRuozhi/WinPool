@@ -55,7 +55,7 @@ public static class SimulationCommandPreview
                 lines.Add("Set-Disk -InputObject $targetDisk -IsOffline $" + (step.Offline == true ? "true" : "false")); break;
             case SimulationEditKind.CreatePartition:
                 foreach (var partition in after.Partitions.Where(x => !before.Partitions.Any(old => old.StableId == x.StableId)))
-                    AddPartition(lines, partition, after);
+                    AddPartition(lines, partition, after, step.QuickFormat);
                 break;
             case SimulationEditKind.ExtendPartition:
             case SimulationEditKind.ShrinkPartition:
@@ -151,11 +151,16 @@ public static class SimulationCommandPreview
         + (target is null ? "" : " -InputObject " + target)
         + " -FileSystem " + Quote(step.FileSystem ?? (step.PartitionKind == PartitionKind.EfiSystem ? "FAT32" : "NTFS"))
         + " -AllocationUnitSize " + Number(step.AllocationUnitSize ?? 4096)
+        + (step.QuickFormat == false ? " -Full" : "")
         + (step.VolumeName is not null ? " -NewFileSystemLabel " + Quote(step.VolumeName) : "") + " -Confirm:$false";
 
     private static string Size(long? size) => size is > 0 ? "-Size " + Number(size.Value) : "-UseMaximumSize";
 
-    private static void AddPartition(List<string> lines, PartitionInfo partition, StorageSnapshot candidate)
+    private static void AddPartition(
+        List<string> lines,
+        PartitionInfo partition,
+        StorageSnapshot candidate,
+        bool? quickFormat)
     {
         var volume = candidate.Volumes.FirstOrDefault(x => x.PartitionStableId == partition.StableId);
         lines.Add("$newPartition = New-Partition -InputObject $targetDisk -Size " + Number(partition.Size)
@@ -163,7 +168,8 @@ public static class SimulationCommandPreview
             + (string.IsNullOrWhiteSpace(volume?.DriveLetter) ? "" : " -DriveLetter " + Quote(volume.DriveLetter)));
         if (volume is { FileSystem.Length: > 0 })
             lines.Add("$newPartition | " + Format(new(SimulationEditKind.FormatPartition, partition.StableId,
-                FileSystem: volume.FileSystem, AllocationUnitSize: volume.AllocationUnitSize, VolumeName: volume.FileSystemLabel), null));
+                FileSystem: volume.FileSystem, AllocationUnitSize: volume.AllocationUnitSize,
+                VolumeName: volume.FileSystemLabel, QuickFormat: quickFormat), null));
     }
 
     private static void AddVirtualDisk(List<string> lines, VirtualDiskInfo disk, StorageSnapshot candidate)
@@ -191,7 +197,7 @@ public static class SimulationCommandPreview
             lines.Add("$targetDisk = $newVirtualDisk | Get-Disk");
             if (osDisk.PartitionStyle != "RAW") lines.Add("Initialize-Disk -InputObject $targetDisk -PartitionStyle " + Quote(osDisk.PartitionStyle));
             foreach (var partition in candidate.Partitions.Where(x => x.OsDiskStableId == osDisk.StableId).OrderBy(x => x.Offset))
-                AddPartition(lines, partition, candidate);
+                AddPartition(lines, partition, candidate, quickFormat: null);
         }
     }
 

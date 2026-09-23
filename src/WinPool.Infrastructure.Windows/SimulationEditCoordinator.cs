@@ -424,6 +424,12 @@ public sealed class SimulationEditCoordinator(
         Add(values, "DriveLetter", request.DriveLetter);
         Add(values, "FileSystem", request.FileSystem);
         Add(values, "AllocationUnitSize", request.AllocationUnitSize);
+        if (request.Kind == SimulationEditKind.FormatPartition
+            || request.Kind == SimulationEditKind.CreatePartition
+                && !string.IsNullOrWhiteSpace(request.FileSystem))
+        {
+            Add(values, "QuickFormat", (request.QuickFormat ?? true) ? "True" : "False");
+        }
         Add(values, "Offline", request.Offline);
         Add(values, "EstimatedWriteBytes", request.SizeBytes);
         Add(values, "CreateMsr", request.CreateMsr);

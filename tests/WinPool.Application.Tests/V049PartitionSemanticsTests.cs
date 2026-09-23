@@ -28,6 +28,29 @@ public sealed class V049PartitionSemanticsTests
         Assert.Equal(fileSystem.ToUpperInvariant(), formatted.Snapshot.FileSystemOf(partition).ToUpperInvariant());
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void CreatePartitionPreviewCarriesQuickOrFullFormatModeWithoutChangingSimulatedFilesystem(
+        bool quickFormat,
+        bool expectFullSwitch)
+    {
+        var result = new SimulationOperationService().Apply(
+            InitializedDisk(),
+            new SimulationEditRequest(
+                SimulationEditKind.CreatePartition,
+                "osdisk:ssd0",
+                FileSystem: "NTFS",
+                AllocationUnitSize: 65536,
+                SizeBytes: 1_000_000_000,
+                QuickFormat: quickFormat));
+
+        Assert.True(result.Succeeded, result.Error);
+        var preview = string.Join(Environment.NewLine, result.Commands);
+        Assert.Equal(expectFullSwitch, preview.Contains(" -Full", StringComparison.Ordinal));
+        Assert.Equal("NTFS", Assert.Single(result.Document.Snapshot.Volumes).FileSystem);
+    }
+
     [Fact]
     public void CreatePartitionWithFileSystemCreatesVolume()
     {
