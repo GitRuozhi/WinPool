@@ -391,8 +391,7 @@
             AutomationProperties.Name="Resize topology and properties" />
         <Grid
             Grid.Column="2"
-            Grid.RowSpan="3"
-            Margin="8,0,0,0">
+            Grid.RowSpan="3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
