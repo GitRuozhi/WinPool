@@ -48,7 +48,7 @@
         <toolkit:GridSplitter
             Grid.Row="1"
             HorizontalAlignment="Stretch"
-            Background="Transparent"
+            Background="{ThemeResource CardStrokeColorDefaultBrush}"
             ResizeBehavior="PreviousAndNext"
             ResizeDirection="Rows"
             AutomationProperties.Name="Resize monitor areas" />
@@ -62,192 +62,258 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <Grid RowSpacing="4">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <Grid x:Name="TableHeader" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="36" />
-                        <ColumnDefinition Width="64" />
-                        <ColumnDefinition Width="2*" />
-                        <ColumnDefinition Width="1.2*" />
-                        <ColumnDefinition Width="1*" />
-                        <ColumnDefinition Width="0.7*" />
-                        <ColumnDefinition Width="80" MinWidth="72" />
-                        <ColumnDefinition Width="72" MinWidth="56" />
-                        <ColumnDefinition Width="100" MinWidth="88" />
-                        <ColumnDefinition Width="100" MinWidth="88" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="HeaderColor" Grid.Column="1" FontWeight="SemiBold" Text="颜色" />
-                    <TextBlock x:Name="HeaderName" Grid.Column="2" FontWeight="SemiBold" Text="名称" />
-                    <TextBlock x:Name="HeaderPool" Grid.Column="3" FontWeight="SemiBold" Text="池" />
-                    <TextBlock x:Name="HeaderVolumes" Grid.Column="4" FontWeight="SemiBold" Text="卷" />
-                    <TextBlock x:Name="HeaderMedia" Grid.Column="5" FontWeight="SemiBold" Text="介质" />
-                    <TextBlock
-                        x:Name="HeaderCapacity"
-                        Grid.Column="6"
+            <ScrollViewer
+                x:Name="TableScroll"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled"
+                SizeChanged="TableScroll_SizeChanged">
+                <Grid RowSpacing="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid x:Name="TableHeader" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36" />
+                            <ColumnDefinition Width="64" />
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="1.2*" />
+                            <ColumnDefinition Width="1*" />
+                            <ColumnDefinition Width="0.7*" />
+                            <ColumnDefinition Width="80" MinWidth="72" />
+                            <ColumnDefinition Width="72" MinWidth="56" />
+                            <ColumnDefinition Width="100" MinWidth="88" />
+                            <ColumnDefinition Width="100" MinWidth="88" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="HeaderColor" Grid.Column="1" FontWeight="SemiBold" Text="颜色" />
+                        <TextBlock x:Name="HeaderName" Grid.Column="2" FontWeight="SemiBold" Text="名称" />
+                        <TextBlock x:Name="HeaderPool" Grid.Column="3" FontWeight="SemiBold" Text="池" />
+                        <TextBlock x:Name="HeaderVolumes" Grid.Column="4" FontWeight="SemiBold" Text="卷" />
+                        <TextBlock x:Name="HeaderMedia" Grid.Column="5" FontWeight="SemiBold" Text="介质" />
+                        <TextBlock
+                            x:Name="HeaderCapacity"
+                            Grid.Column="6"
+                            HorizontalAlignment="Stretch"
+                            FontWeight="SemiBold"
+                            Text="容量"
+                            TextAlignment="Right" />
+                        <TextBlock
+                            x:Name="HeaderActivity"
+                            Grid.Column="7"
+                            HorizontalAlignment="Stretch"
+                            FontWeight="SemiBold"
+                            Text="活动"
+                            TextAlignment="Right" />
+                        <TextBlock
+                            x:Name="HeaderRead"
+                            Grid.Column="8"
+                            HorizontalAlignment="Stretch"
+                            FontWeight="SemiBold"
+                            Text="读取速度"
+                            TextAlignment="Right" />
+                        <TextBlock
+                            x:Name="HeaderWrite"
+                            Grid.Column="9"
+                            HorizontalAlignment="Stretch"
+                            FontWeight="SemiBold"
+                            Text="写入速度"
+                            TextAlignment="Right" />
+                    </Grid>
+                    <ScrollViewer
+                        x:Name="TableRowsScroll"
+                        Grid.Row="1"
                         HorizontalAlignment="Stretch"
-                        FontWeight="SemiBold"
-                        Text="容量"
-                        TextAlignment="Right" />
-                    <TextBlock
-                        x:Name="HeaderActivity"
-                        Grid.Column="7"
-                        HorizontalAlignment="Stretch"
-                        FontWeight="SemiBold"
-                        Text="活动"
-                        TextAlignment="Right" />
-                    <TextBlock
-                        x:Name="HeaderRead"
-                        Grid.Column="8"
-                        HorizontalAlignment="Stretch"
-                        FontWeight="SemiBold"
-                        Text="读取速度"
-                        TextAlignment="Right" />
-                    <TextBlock
-                        x:Name="HeaderWrite"
-                        Grid.Column="9"
-                        HorizontalAlignment="Stretch"
-                        FontWeight="SemiBold"
-                        Text="写入速度"
-                        TextAlignment="Right" />
+                        VerticalAlignment="Stretch"
+                        HorizontalScrollBarVisibility="Disabled"
+                        HorizontalScrollMode="Disabled"
+                        VerticalScrollBarVisibility="Auto"
+                        VerticalScrollMode="Enabled">
+                        <ItemsControl x:Name="DiskRows" HorizontalAlignment="Stretch">
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid
+                                        Padding="0,4"
+                                        HorizontalAlignment="Stretch"
+                                        ColumnSpacing="8"
+                                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="36" />
+                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="1.2*" />
+                                            <ColumnDefinition Width="1*" />
+                                            <ColumnDefinition Width="0.7*" />
+                                            <ColumnDefinition Width="80" MinWidth="72" />
+                                            <ColumnDefinition Width="72" MinWidth="56" />
+                                            <ColumnDefinition Width="100" MinWidth="88" />
+                                            <ColumnDefinition Width="100" MinWidth="88" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox
+                                            VerticalAlignment="Center"
+                                            IsChecked="{Binding ShowInGraph, Mode=TwoWay}" />
+                                        <Button
+                                            Grid.Column="1"
+                                            Style="{StaticResource WinPoolInlineIconButtonStyle}"
+                                            VerticalAlignment="Center"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Click="ColorSwatch_Click"
+                                            Loaded="ColorSwatch_Loaded">
+                                            <Border
+                                                Width="20"
+                                                Height="12"
+                                                CornerRadius="2"
+                                                Background="{Binding SeriesColorBrush}" />
+                                        </Button>
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding Name}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Grid.Column="3"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding Pool}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Grid.Column="4"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding Volumes}" />
+                                        <TextBlock
+                                            Grid.Column="5"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding Media}" />
+                                        <TextBlock
+                                            Grid.Column="6"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding Capacity}"
+                                            TextAlignment="Right" />
+                                        <TextBlock
+                                            Grid.Column="7"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding ActivityText}"
+                                            TextAlignment="Right" />
+                                        <TextBlock
+                                            Grid.Column="8"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding ReadText}"
+                                            TextAlignment="Right" />
+                                        <TextBlock
+                                            Grid.Column="9"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding WriteText}"
+                                            TextAlignment="Right" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </Grid>
-                <ScrollViewer
-                    x:Name="TableScroll"
-                    Grid.Row="1"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Stretch"
-                    HorizontalScrollBarVisibility="Disabled"
-                    VerticalScrollBarVisibility="Auto"
-                    SizeChanged="TableScroll_SizeChanged">
-                    <ItemsControl x:Name="DiskRows" HorizontalAlignment="Stretch">
-                        <ItemsControl.ItemContainerStyle>
-                            <Style TargetType="ContentPresenter">
-                                <Setter Property="HorizontalAlignment" Value="Stretch" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            </Style>
-                        </ItemsControl.ItemContainerStyle>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid
-                                    Padding="0,4"
-                                    HorizontalAlignment="Stretch"
-                                    ColumnSpacing="8"
-                                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                    BorderThickness="0,0,0,1">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="36" />
-                                        <ColumnDefinition Width="64" />
-                                        <ColumnDefinition Width="2*" />
-                                        <ColumnDefinition Width="1.2*" />
-                                        <ColumnDefinition Width="1*" />
-                                        <ColumnDefinition Width="0.7*" />
-                                        <ColumnDefinition Width="80" MinWidth="72" />
-                                        <ColumnDefinition Width="72" MinWidth="56" />
-                                        <ColumnDefinition Width="100" MinWidth="88" />
-                                        <ColumnDefinition Width="100" MinWidth="88" />
-                                    </Grid.ColumnDefinitions>
-                                    <CheckBox
-                                        VerticalAlignment="Center"
-                                        IsChecked="{Binding ShowInGraph, Mode=TwoWay}" />
-                                    <Button
-                                        Grid.Column="1"
-                                        Padding="2"
-                                        VerticalAlignment="Center"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Click="ColorSwatch_Click"
-                                        Loaded="ColorSwatch_Loaded">
-                                        <Border
-                                            Width="44"
-                                            Height="12"
-                                            CornerRadius="2"
-                                            Background="{Binding SeriesColorBrush}" />
-                                    </Button>
-                                    <TextBlock
-                                        Grid.Column="2"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding Name}"
-                                        TextTrimming="CharacterEllipsis" />
-                                    <TextBlock
-                                        Grid.Column="3"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding Pool}"
-                                        TextTrimming="CharacterEllipsis" />
-                                    <TextBlock
-                                        Grid.Column="4"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding Volumes}" />
-                                    <TextBlock
-                                        Grid.Column="5"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding Media}" />
-                                    <TextBlock
-                                        Grid.Column="6"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding Capacity}"
-                                        TextAlignment="Right" />
-                                    <TextBlock
-                                        Grid.Column="7"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding ActivityText}"
-                                        TextAlignment="Right" />
-                                    <TextBlock
-                                        Grid.Column="8"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding ReadText}"
-                                        TextAlignment="Right" />
-                                    <TextBlock
-                                        Grid.Column="9"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Center"
-                                        Text="{Binding WriteText}"
-                                        TextAlignment="Right" />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Grid>
+            </ScrollViewer>
         </Border>
+
+        <toolkit:GridSplitter
+            Grid.Row="3"
+            HorizontalAlignment="Stretch"
+            Background="{ThemeResource CardStrokeColorDefaultBrush}"
+            ResizeBehavior="PreviousAndNext"
+            ResizeDirection="Rows"
+            AutomationProperties.Name="Resize table and toolbar areas" />
 
         <Border
             x:Name="ButtonsCard"
             Grid.Row="4"
+            SizeChanged="ButtonsCard_SizeChanged"
             Padding="12,8"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <Grid>
-                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
-                    <TextBlock
-                        x:Name="ContinuousMonitoringLabel"
+            <Grid x:Name="ButtonsGrid" ColumnSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid
+                    x:Name="ToolbarControlsPanel"
+                    Grid.Row="0"
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    ColumnSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel
+                        x:Name="ContinuousMonitoringGroup"
+                        Grid.Row="0"
+                        Grid.Column="0"
                         VerticalAlignment="Center"
-                        Text="持续监控" />
-                    <ToggleSwitch
-                        x:Name="ContinuousMonitoringSwitch"
-                        AccessKey="C"
-                        MinWidth="0"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <TextBlock
+                            x:Name="ContinuousMonitoringLabel"
+                            VerticalAlignment="Center"
+                            Text="持续监控" />
+                        <ToggleSwitch
+                            x:Name="ContinuousMonitoringSwitch"
+                            AccessKey="C"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="ContinuousMonitoringSwitch_Toggled" />
+                    </StackPanel>
+                    <StackPanel
+                        x:Name="SamplingRateGroup"
+                        Grid.Row="0"
+                        Grid.Column="1"
                         VerticalAlignment="Center"
-                        OffContent=""
-                        OnContent=""
-                        Toggled="ContinuousMonitoringSwitch_Toggled" />
-                    <TextBlock
-                        x:Name="SamplingRateLabel"
-                        VerticalAlignment="Center"
-                        Text="采样频率" />
-                    <ComboBox
-                        x:Name="RateOptions"
-                        MinWidth="100"
-                        VerticalAlignment="Center"
-                        DropDownClosed="RateOptions_DropDownClosed"
-                        SelectionChanged="RateOptions_SelectionChanged" />
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <TextBlock
+                            x:Name="SamplingRateLabel"
+                            VerticalAlignment="Center"
+                            Text="采样频率" />
+                        <ComboBox
+                            x:Name="RateOptions"
+                            MinWidth="100"
+                            VerticalAlignment="Center"
+                            DropDownClosed="RateOptions_DropDownClosed"
+                            SelectionChanged="RateOptions_SelectionChanged" />
+                    </StackPanel>
+                </Grid>
+                <StackPanel
+                    x:Name="ToolbarActionsPanel"
+                    Grid.Row="0"
+                    Grid.Column="1"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="8">
                     <Button x:Name="AutoColorsButton" Click="AutoColors_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE790;" />
@@ -263,12 +329,6 @@
                                 Text="事件" />
                         </StackPanel>
                     </Button>
-                </StackPanel>
-                <StackPanel
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Center"
-                    Orientation="Horizontal"
-                    Spacing="12">
                     <Button x:Name="ExportButton" Click="ExportButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE74E;" />

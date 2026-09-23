@@ -1060,7 +1060,6 @@ public sealed partial class SettingsPage : Page
             l.EffectiveLanguage == LanguagePreference.ZhCn ? "打开当前 WinPool 数据位置。" : "Open the current WinPool data location.");
         ContextHelp.Set(DataLocationPath, StorageDataLocations.CurrentRoot);
         SevenZipTitle.Text = l["SevenZip"];
-        OpenSevenZipLocationButtonText.Text = l["OpenPath"];
         OpenSevenZipLocationButton.SetValue(AutomationProperties.NameProperty, l["OpenPath"]);
         RefreshSevenZipOptionItems();
         SyncSevenZipOptions();
@@ -1074,7 +1073,6 @@ public sealed partial class SettingsPage : Page
         WelcomeButtonText.Text = l["OpenWelcome"];
         StartupAgentTitle.Text = l["Startup"];
         DataLocationTitle.Text = l["DataLocation"];
-        OpenDataLocationButtonText.Text = l["OpenPath"];
         OpenDataLocationButton.SetValue(AutomationProperties.NameProperty, l["OpenPath"]);
         DataLocationPath.Text = StorageDataLocations.CurrentRoot;
         _updatingDataLocation = true;

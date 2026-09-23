@@ -9,6 +9,20 @@
         Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
         Loaded="RootLayout_Loaded"
         SizeChanged="RootLayout_SizeChanged">
+        <Grid.Resources>
+            <DataTemplate x:Key="CycleButtonContentTemplate">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding}" />
+                </StackPanel>
+            </DataTemplate>
+            <DataTemplate x:Key="ConfirmButtonContentTemplate">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="14" Glyph="&#xE73E;" />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding}" />
+                </StackPanel>
+            </DataTemplate>
+        </Grid.Resources>
         <Image
             x:Name="MascotImage"
             HorizontalAlignment="Left"
@@ -19,10 +33,10 @@
 
         <Button
             x:Name="CloseButton"
+            Style="{StaticResource WinPoolInlineIconButtonStyle}"
             Width="32"
             Height="32"
             Margin="0,10,10,0"
-            Padding="0"
             HorizontalAlignment="Right"
             VerticalAlignment="Top"
             Background="#B3000000"
@@ -58,27 +72,24 @@
 
         <Button
             x:Name="CycleButton"
-            MinHeight="32"
             Margin="28,0,0,28"
-            Padding="16,0"
             HorizontalAlignment="Left"
             VerticalAlignment="Bottom"
             Background="#B3000000"
             Foreground="White"
             BorderThickness="0"
+            ContentTemplate="{StaticResource CycleButtonContentTemplate}"
             Click="CycleButton_Click" />
 
         <Button
             x:Name="ConfirmButton"
-            MinWidth="120"
-            Height="32"
             Margin="0,0,30,28"
-            Padding="16,0"
             HorizontalAlignment="Right"
             VerticalAlignment="Bottom"
             Background="#B3000000"
             Foreground="White"
             BorderThickness="0"
+            ContentTemplate="{StaticResource ConfirmButtonContentTemplate}"
             Click="ConfirmButton_Click" />
 
         <Rectangle

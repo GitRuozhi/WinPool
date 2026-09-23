@@ -533,17 +533,19 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml.cs"));
         Assert.Contains("TopologyControl", structureXaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"320\"", structureXaml, StringComparison.Ordinal);
+        Assert.Contains("toolkit:GridSplitter", structureXaml, StringComparison.Ordinal);
+        Assert.Contains("ResizeDirection=\"Columns\"", structureXaml, StringComparison.Ordinal);
         Assert.Contains("PoolFormGrid", structureXaml, StringComparison.Ordinal);
         Assert.Contains("TopologyControl", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"320\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("PageRootGrid_SizeChanged", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("toolkit:GridSplitter", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.Contains("ResizeDirection=\"Columns\"", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("PageRootGrid_SizeChanged", diskPartitionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("PageRootGrid_SizeChanged", diskPartitionPage, StringComparison.Ordinal);
         Assert.Contains("HorizontalScrollBarVisibility=\"Auto\"", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalScrollMode=\"Enabled\"", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("StackPanel MinWidth=\"412\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains(
-            "Math.Min(420d, Math.Max(320d, e.NewSize.Width - 400d))",
-            diskPartitionPage,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("Math.Min(420d", diskPartitionPage, StringComparison.Ordinal);
         Assert.Contains("PartitionActionButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Equal(
             1,
@@ -1028,7 +1030,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.Equal(2, windowSource.Split("_editorSystemId = ViewModel.SelectedSystem.SystemId;").Length - 1);
         Assert.Contains("ShellPageKind.StorageStructure or ShellPageKind.DiskPartition", windowSource, StringComparison.Ordinal);
         Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
-        Assert.Contains("elements.Add(ActiveSystemSelector)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("elements.Add(ActiveSystemSelectorHost)", windowSource, StringComparison.Ordinal);
     }
 
     [Fact]

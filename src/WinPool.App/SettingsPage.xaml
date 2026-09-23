@@ -41,8 +41,8 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="2*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
                         x:Name="ThemeTitle"
@@ -103,8 +103,8 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="2*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
                         x:Name="WelcomeTitle"
@@ -113,7 +113,6 @@
                     <Button
                         x:Name="WelcomeButton"
                         Grid.Column="1"
-                        MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"
@@ -224,36 +223,41 @@
                     <Grid
                         Grid.Row="6"
                         Grid.Column="1"
-                        ColumnSpacing="12">
+                        ColumnSpacing="12"
+                        RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <controls:ContextHelpHost>
                             <ComboBox
                                 x:Name="DataLocationOptions"
-                                MinWidth="220"
+                                MinWidth="180"
                                 MinHeight="32"
                                 FontSize="14"
-                                HorizontalAlignment="Left"
+                                HorizontalAlignment="Stretch"
                                 VerticalAlignment="Center"
                                 SelectionChanged="DataLocationOptions_SelectionChanged" />
                         </controls:ContextHelpHost>
                         <Button
                             x:Name="OpenDataLocationButton"
+                            Style="{StaticResource WinPoolInlineIconButtonStyle}"
                             Grid.Column="1"
                             MinHeight="32"
+                            VerticalAlignment="Center"
                             Margin="0,0,0,0"
                             Click="OpenDataLocationButton_Click">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon FontSize="14" Glyph="&#xE8B7;" />
-                                <TextBlock x:Name="OpenDataLocationButtonText" Text="打开路径" />
-                            </StackPanel>
+                            <FontIcon FontSize="14" Glyph="&#xE8B7;" />
                         </Button>
                         <TextBlock
                             x:Name="DataLocationPath"
-                            Grid.Column="2"
+                            Grid.Row="1"
+                            Grid.Column="0"
+                            Grid.ColumnSpan="2"
                             VerticalAlignment="Center"
                             FontSize="14"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -269,7 +273,6 @@
                         x:Name="ResetAllButton"
                         Grid.Row="7"
                         Grid.Column="1"
-                        MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"
@@ -290,8 +293,8 @@
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="2*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
                         x:Name="SevenZipTitle"
@@ -299,18 +302,22 @@
                         Text="7Z" />
                     <Grid
                         Grid.Column="1"
-                        ColumnSpacing="12">
+                        ColumnSpacing="12"
+                        RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <controls:ContextHelpHost>
                             <ComboBox
                                 x:Name="SevenZipOptions"
-                                MinWidth="220"
+                                MinWidth="180"
                                 MinHeight="32"
-                                HorizontalAlignment="Left"
+                                HorizontalAlignment="Stretch"
                                 VerticalAlignment="Center"
                                 DropDownOpened="SevenZipOptions_DropDownOpened"
                                 DropDownClosed="SevenZipOptions_DropDownClosed"
@@ -318,17 +325,18 @@
                         </controls:ContextHelpHost>
                         <Button
                             x:Name="OpenSevenZipLocationButton"
+                            Style="{StaticResource WinPoolInlineIconButtonStyle}"
                             Grid.Column="1"
                             MinHeight="32"
+                            VerticalAlignment="Center"
                             Click="OpenSevenZipLocationButton_Click">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon FontSize="14" Glyph="&#xE8B7;" />
-                                <TextBlock x:Name="OpenSevenZipLocationButtonText" Text="打开路径" />
-                            </StackPanel>
+                            <FontIcon FontSize="14" Glyph="&#xE8B7;" />
                         </Button>
                         <TextBlock
                             x:Name="SevenZipPath"
-                            Grid.Column="2"
+                            Grid.Row="1"
+                            Grid.Column="0"
+                            Grid.ColumnSpan="2"
                             VerticalAlignment="Center"
                             FontSize="14"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -350,8 +358,8 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="2*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
                         x:Name="AboutProductNameLabel"
@@ -391,7 +399,6 @@
                         x:Name="WebsiteButton"
                         Grid.Row="3"
                         Grid.Column="1"
-                        MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"
@@ -411,7 +418,6 @@
                         x:Name="UpdateButton"
                         Grid.Row="4"
                         Grid.Column="1"
-                        MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"
@@ -431,7 +437,6 @@
                         x:Name="FeedbackButton"
                         Grid.Row="5"
                         Grid.Column="1"
-                        MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"
@@ -451,7 +456,6 @@
                         x:Name="AboutCommunityButton"
                         Grid.Row="6"
                         Grid.Column="1"
-                        MinWidth="220"
                         MinHeight="32"
                         FontSize="14"
                         HorizontalAlignment="Left"

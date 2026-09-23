@@ -60,6 +60,7 @@ public sealed partial class MainPage : Page
     private const double ColumnGap = PropertyTableVisuals.ColumnGap;
     private const double RowHeight = PropertyTableVisuals.RowHeight;
     private const double MaxValueWidth = PropertyTableVisuals.ValueColumnMaxWidth;
+    private const double NameHeaderContentOverhead = 44; // 14 DIP icon + 6 DIP gap + 24 DIP button padding.
     private readonly Dictionary<string, int> _columnIndexByKey = new(StringComparer.Ordinal);
     private readonly List<Border> _columnCells = [];
     private readonly Dictionary<Border, TableCellContext> _tableCellContexts = [];
@@ -199,7 +200,7 @@ public sealed partial class MainPage : Page
                 var text = new TextBlock
                 {
                     Padding = new Thickness(10, 5, 10, 5),
-                    MaxWidth = MaxValueWidth,
+                    MaxWidth = isNameRow ? MaxValueWidth - NameHeaderContentOverhead : MaxValueWidth,
                     VerticalAlignment = VerticalAlignment.Center,
                     FontWeight = isNameRow ? FontWeights.SemiBold : FontWeights.Normal,
                     Text = value,
@@ -210,12 +211,21 @@ public sealed partial class MainPage : Page
                 {
                     var selector = new Button
                     {
-                        Padding = new Thickness(10, 5, 10, 5),
+                        Style = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"],
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         HorizontalContentAlignment = HorizontalAlignment.Stretch,
                         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                         BorderThickness = new Thickness(0),
-                        Content = text,
+                        Content = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Spacing = 6,
+                            Children =
+                            {
+                                new FontIcon { FontSize = 14, Glyph = "\uE76C" },
+                                text
+                            }
+                        },
                         Tag = columns[i].Key
                     };
                     AutomationProperties.SetName(selector, columns[i].Name);
@@ -395,9 +405,12 @@ public sealed partial class MainPage : Page
             var text = cell.Child switch
             {
                 TextBlock direct => direct,
-                Button { Content: TextBlock nested } => nested,
+                Button { Content: StackPanel nested } => nested.Children.OfType<TextBlock>().FirstOrDefault(),
                 _ => null
             };
+            var icon = cell.Child is Button { Content: StackPanel iconContent }
+                ? iconContent.Children.OfType<FontIcon>().FirstOrDefault()
+                : null;
             if (text is not null)
             {
                 if (isSelected)
@@ -409,6 +422,18 @@ public sealed partial class MainPage : Page
                     text.ClearValue(TextBlock.ForegroundProperty);
                 }
                 text.IsTextSelectionEnabled = false;
+            }
+
+            if (icon is not null)
+            {
+                if (isSelected)
+                {
+                    icon.Foreground = accentForeground;
+                }
+                else
+                {
+                    icon.ClearValue(FontIcon.ForegroundProperty);
+                }
             }
         }
 
@@ -1285,6 +1310,7 @@ public sealed partial class MainPage : Page
     {
         var button = new Button
         {
+            Style = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"],
             Content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,

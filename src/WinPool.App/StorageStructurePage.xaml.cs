@@ -115,9 +115,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             new TextBox { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "GiB" },
             new Button
             {
-                Width = 32,
-                Height = 32,
-                Padding = new Thickness(6),
+                Style = (Style)Application.Current.Resources["WinPoolInlineIconButtonStyle"],
                 Content = new FontIcon { Glyph = "\uE74E", FontSize = 14 }
             },
             CreateNumberField(minimum: 1, maximum: 16),
@@ -216,7 +214,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _formBuilt = true;
         PoolFormGrid.ColumnDefinitions.Clear();
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
@@ -754,9 +752,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         var button = new Button
         {
-            Width = 24,
-            Height = 26,
-            Padding = new Thickness(4),
+            Style = (Style)Application.Current.Resources["WinPoolInlineIconButtonStyle"],
             Content = new FontIcon
             {
                 Glyph = "\uE777",
@@ -837,10 +833,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Func<bool>? changed = null,
         List<FrameworkElement>? visibilityGroup = null)
     {
-        PoolFormGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
+        PoolFormGrid.RowDefinitions.Add(new RowDefinition
+        {
+            Height = GridLength.Auto,
+            MinHeight = 40
+        });
         var label = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
             FontSize = 14,
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             Text = ViewModel.Localization[key]
@@ -863,10 +864,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         labelPanel.Children.Add(label);
         labelPanel.Children.Add(indicator);
         value.VerticalAlignment = VerticalAlignment.Center;
-        if (value is not ToggleSwitch)
-        {
-            value.Height = 32;
-        }
+        value.MinHeight = 32;
 
         Grid.SetRow(labelPanel, row);
         Grid.SetColumn(labelPanel, 0);
@@ -1359,6 +1357,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _working.OsDisks.Any(item =>
             item.PhysicalDiskStableId == physicalDiskId && item.IsOffline);
 
+    private void StructureActionsScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        StructureActionsPanel.Width = Math.Max(StructureActionsPanel.ItemWidth, e.NewSize.Width);
+    }
+
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
@@ -1393,14 +1396,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
                 }
 
-                // Fixed 40px rows keep their height when hidden; zero them so
-                // a hidden tier never leaves a tall blank block in the form.
+                // Collapse hidden tier rows while keeping visible rows at the
+                // shared 40 DIP minimum and allowing wrapped content to grow.
                 foreach (var index in group.RowIndices)
                 {
                     if (index < PoolFormGrid.RowDefinitions.Count)
                     {
-                        PoolFormGrid.RowDefinitions[index].Height =
-                            new GridLength(visible ? 40 : 0);
+                        PoolFormGrid.RowDefinitions[index].MinHeight = visible ? 40 : 0;
                     }
                 }
             }
@@ -2002,9 +2004,35 @@ public sealed partial class StorageStructurePage : EditorPageBase
         panel.Children.Add(new ScrollViewer
         {
             MaxHeight = 320,
-            Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollMode = ScrollMode.Enabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Enabled,
+            Content = new TextBlock { Text = text, TextWrapping = TextWrapping.NoWrap, IsTextSelectionEnabled = true }
         });
-        var copy = new Button { Content = Text("复制命令预览", "Copy command preview"), IsEnabled = item.CommandPreview.Count > 0 };
+        var copy = new Button
+        {
+            Style = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsEnabled = item.CommandPreview.Count > 0,
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children =
+                {
+                    new FontIcon { Glyph = "\uE8C8", FontSize = 14 },
+                    new TextBlock
+                    {
+                        Text = Text("复制命令预览", "Copy command preview"),
+                        TextWrapping = TextWrapping.Wrap,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                }
+            }
+        };
         ContextHelp.Set(copy, Text("复制此步骤的 PowerShell 命令预览；不会执行命令。", "Copy this step's PowerShell command preview; it does not run the command."));
         SetDisabledReason(
             copy,

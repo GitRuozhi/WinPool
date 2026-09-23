@@ -26,7 +26,7 @@
 | `TopologyScrollViewer` 与 `TopologySystemsControl` | 滚动查看拓扑；承载按系统生成的根节点 | 无额外禁用状态；内部节点分别响应选择、展开、拖放及右键 | `MainPage.xaml` |
 | `VerticalCategoryList` | 选择系统、池、层、磁盘、分区属性类别 | 单选；类别按当前系统填充 | `MainPage.xaml`、`WorkspaceViewModel.cs` |
 | Manage 区域 `GridSplitter` | 调整属性表与命令区域的列宽 | 原生可拖动分隔条，自动化名称为“Resize table and command areas” | `MainPage.xaml` |
-| 对比表列标题按钮 | 选择该列代表的对象并显示其属性和可用命令 | 每个比较对象重复生成；有悬停帮助 | `MainPage.xaml.cs` |
+| 对比表列标题按钮 | 选择该列代表的对象并显示其属性和可用命令 | 每个比较对象重复生成；使用普通图标文字尺寸并有悬停帮助 | `MainPage.xaml.cs` |
 | `TableOuterScrollViewer` | 滚动属性表区域的纵向内容 | 外层只负责纵向滚动，内表格另有水平滚动 | `MainPage.xaml` |
 | `TableScrollViewer` | 水平滚动比较表各对象列 | 分列表格宽于可视区域时可滚动 | `MainPage.xaml` |
 | `ComparisonTableGrid` 单元格 | 点击选择对应对象/属性组；悬停高亮；右键可复制当前值、复制组数据或查看原始字段 | 复制菜单只在当前选中列对象的属性组打开 | `MainPage.xaml`、`MainPage.xaml.cs`、`PropertyTableContextMenu.cs` |
@@ -65,6 +65,7 @@
 | `ShowHotSpareSwitch` | 显示或隐藏热备磁盘 | 模拟系统可用；本机存储只读并禁用 | `StorageStructurePage.xaml(.cs)` |
 | `ShowRetiredSwitch` | 显示或隐藏退役磁盘 | 模拟系统可用；本机存储只读并禁用 | `StorageStructurePage.xaml(.cs)` |
 | `PoolFormGrid` 动态属性表单 | 编辑选中池、层、虚拟磁盘和分区属性 | 文本框、组合框、数值框按所选对象生成；要求可编辑模拟池，离线盘、超出支持对象数或未知提交结果会限制编辑 | `StorageStructurePage.xaml(.cs)` |
+| 结构页左右 `GridSplitter` | 调整拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，窄栏属性和左侧操作各自允许横向滚动 | `StorageStructurePage.xaml` |
 | `SavePoolPropertiesButton` | 保存所选池当前属性草稿到待处理修改 | 需模拟系统、普通非草稿池、表单有改动且池在线；禁用时显示原因 | `StorageStructurePage.xaml(.cs)` |
 | SSD/HDD/SCM 层配置输入框 | 设置容量、精简/固定配置、复原能力、数据副本、容错数、磁盘数、列数及交错 | 动态使用 `ComboBox`、`TextBox`、`NumberBox`；数值按各字段边界归一化；无自定义帮助时字段标签说明用途 | `StorageStructurePage.xaml.cs` |
 | `MaximumButton` 层容量最大值按钮 | 将 SSD/HDD/SCM 容量填为当前规划的对齐上限 | 每个容量输入组生成一个；只在容量输入启用时可用；帮助说明该上限不保证 Windows 实际可用容量 | `StorageStructurePage.xaml.cs` |
@@ -79,6 +80,7 @@
 | --- | --- | --- | --- |
 | 磁盘与分区拓扑 `TopologyControl` | 选择磁盘、分区或可见的未分配空间；展开节点浏览结构 | 未分配间隙小于设置的隐藏阈值时不投影到页面；可见但对齐后不足 1 MiB 的间隙会使操作按钮显示禁用原因 | `DiskPartitionPage.xaml(.cs)`、`TopologyNodeControl.xaml(.cs)` |
 | `TopologyScrollViewer` | 滚动浏览磁盘与分区拓扑 | 承载左侧结构树；节点选择更新右侧表单和操作状态 | `DiskPartitionPage.xaml` |
+| 分区页左右 `GridSplitter` | 调整磁盘拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，长 MiB 数值保留栏内横向滚动 | `DiskPartitionPage.xaml` |
 | `PartitionFormGrid` | 显示磁盘/分区身份字段和右侧编辑表单 | 当前选择决定哪些字段和按钮启用；表单放在纵向可滚动区域 | `DiskPartitionPage.xaml(.cs)` |
 | `OnlineButton` | 联机选中的模拟磁盘 | 仅选中模拟磁盘本身且磁盘当前脱机时启用；帮助说明只作用于模拟磁盘 | `DiskPartitionPage.xaml(.cs)` |
 | `OfflineButton` | 脱机选中的模拟磁盘 | 仅选中在线、非启动且非系统模拟磁盘时启用 | `DiskPartitionPage.xaml(.cs)` |
@@ -110,7 +112,7 @@
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
 | `ActivityGraph` | 显示磁盘读写活动曲线和性能刻度 | 图表为可视化显示控件；没有采样值时由监控状态区提供状态说明 | `MonitorPage.xaml`、`DiskActivityGraphControl.xaml(.cs)` |
-| `TableScroll` 与 `DiskRows` | 滚动查看逐磁盘颜色、名称、池、卷、介质、容量、活动及读写速率 | 每个磁盘行动态生成；横向滚动禁用，纵向滚动按行数启用 | `MonitorPage.xaml` |
+| `TableScroll`、`TableRowsScroll` 与 `DiskRows` | 滚动查看逐磁盘颜色、名称、池、卷、介质、容量、活动及读写速率 | 每个磁盘行动态生成；表头和行同处横向滚动区，行列表保留纵向滚动 | `MonitorPage.xaml` |
 | 监控行 `ShowInGraph` 复选框 | 切换对应磁盘曲线是否绘制 | 每个磁盘行一个复选框；按绑定状态切换 | `MonitorPage.xaml` |
 | 监控行颜色色块按钮 | 打开颜色选择器；点色块或输入颜色以修改对应曲线色彩 | 每行重复；颜色弹层色块按调色板动态生成 | `MonitorPage.xaml(.cs)` |
 | 曲线颜色 `input` 文本框 | 手动输入十六进制 `#RRGGBB` 或 RGB 分量 | Enter 或失焦时校验并应用有效颜色；无效输入不更新曲线颜色，颜色弹层关闭 | `MonitorPage.xaml.cs` |
@@ -120,6 +122,7 @@
 | `EventsButton` | 查看已采集的存储健康事件 | 有悬停说明；无动态禁用条件 | `MonitorPage.xaml(.cs)` |
 | `ExportButton` | 导出当前活动数据库的监控数据 | 有导出范围帮助；无动态禁用条件 | `MonitorPage.xaml(.cs)` |
 | 图表／表格 `GridSplitter` | 调整图表与磁盘表格的垂直空间 | 拖动调整布局；自动化名称为“Resize monitor areas” | `MonitorPage.xaml` |
+| 表格／工具栏 `GridSplitter` | 调整磁盘表格与底部工具栏的垂直空间 | 8 DIP 拖动槽；窄窗工具栏可拆行，按钮仍可触达 | `MonitorPage.xaml` |
 
 ## 设置页与欢迎页
 
@@ -135,17 +138,17 @@
 | `MsrSwitch` | 控制模拟磁盘初始化是否创建 Microsoft 保留分区 | 有悬停说明；仅影响模拟初始化 | `SettingsPage.xaml(.cs)` |
 | `PartitionGapBox` | 用 MiB 输入隐藏小分区缝隙的阈值；Enter 保存 | 有悬停说明；最大输入长度 4，只接受数值输入 | `SettingsPage.xaml(.cs)` |
 | `DataLocationOptions` | 迁移标准/便携数据位置 | 迁移期间下拉框禁用并说明正在等待确认；切换需确认，失败时恢复 | `SettingsPage.xaml(.cs)` |
-| `OpenDataLocationButton` | 在资源管理器中打开当前 WinPool 数据目录 | 无动态禁用条件；路径不存在或打开失败时显示错误通知 | `SettingsPage.xaml(.cs)` |
+| `OpenDataLocationButton` | 在资源管理器中打开当前 WinPool 数据目录 | 32×32 DIP 行内单图标按钮，具有自动化名称和悬停帮助；路径不存在或打开失败时显示错误通知 | `SettingsPage.xaml(.cs)` |
 | `ResetAllButton` | 恢复 WinPool 设置默认值 | 有悬停帮助；执行前显示确认对话框 | `SettingsPage.xaml(.cs)` |
 | `SevenZipOptions` | 选择内置或自定义 7-Zip 程序 | 选择/保存及文件选择器处理期间暂时禁用，并说明原因 | `SettingsPage.xaml(.cs)` |
-| `OpenSevenZipLocationButton` | 打开当前 7-Zip 程序所在目录 | 无动态禁用条件；路径不可用时显示错误通知 | `SettingsPage.xaml(.cs)` |
+| `OpenSevenZipLocationButton` | 打开当前 7-Zip 程序所在目录 | 32×32 DIP 行内单图标按钮，具有自动化名称和悬停帮助；路径不可用时显示错误通知 | `SettingsPage.xaml(.cs)` |
 | `WebsiteButton` | 在浏览器打开官网 | 有悬停说明；无动态禁用条件 | `SettingsPage.xaml(.cs)` |
 | `UpdateButton` | 在浏览器查看更新 | 有悬停说明；无动态禁用条件 | `SettingsPage.xaml(.cs)` |
 | `FeedbackButton` | 在浏览器提交反馈 | 有悬停说明；无动态禁用条件 | `SettingsPage.xaml(.cs)` |
 | `AboutCommunityButton` | 在浏览器打开 WinPool QQ 交流群 | 有悬停说明；无动态禁用条件 | `SettingsPage.xaml(.cs)` |
 | `CloseButton` | 关闭欢迎窗口 | 图标按钮，有上下文帮助 | `WelcomeWindow.xaml(.cs)` |
-| `CycleButton` | 显示下一个欢迎内容；按钮文字随内容改变 | 文本按钮，无图标；无动态禁用条件 | `WelcomeWindow.xaml(.cs)` |
-| `ConfirmButton` | 关闭欢迎窗口 | 文本按钮，无图标；无动态禁用条件 | `WelcomeWindow.xaml(.cs)` |
+| `CycleButton` | 显示下一个欢迎内容；按钮文字随内容改变 | 图标文字普通按钮；无动态禁用条件 | `WelcomeWindow.xaml(.cs)` |
+| `ConfirmButton` | 关闭欢迎窗口 | 图标文字普通按钮；无动态禁用条件 | `WelcomeWindow.xaml(.cs)` |
 
 ## 开发页与测试页
 

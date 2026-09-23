@@ -75,10 +75,8 @@
                 <controls:ContextHelpHost Grid.Column="0">
                     <Button
                         x:Name="ExpandButton"
-                        Width="30"
-                        Height="30"
-                        Padding="0"
-                        VerticalAlignment="Top"
+                        Style="{StaticResource WinPoolInlineIconButtonStyle}"
+                        VerticalAlignment="Center"
                         Background="Transparent"
                         BorderThickness="0"
                         Command="{x:Bind ViewModel.ToggleExpandedCommand, Mode=OneWay}"

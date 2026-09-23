@@ -2,6 +2,14 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
+## 2026-09-23 控件角色尺寸与分隔槽：验证结果
+
+标准 Release App 原生启动成功，UIA 读到存储结构编辑页右栏宽 319 DIP（布局取整后约为设计值 320 DIP）、分隔槽宽 8 DIP，拓扑区及操作区滚动容器可见。桌面前台保护多次拒绝拖动；单次工具报告成功后页面和尺寸观测不一致，故**拖拽效果不计为已验证**。480 DIP 窄窗、监控／管理／开发页及分区编辑页本轮未完成原生核对。截图文件生成但画面全黑，不能作为视觉证据；证据目录为 `artifacts/test-results/control-size-final-20260923/evidence/`。测试后恢复原 StorageStructure 页与 1440×900 窗口，只读确认设置未变；App 正常关闭、Agent 随后退出，最终无 WinPool App/Agent 进程，未执行存储操作。
+
+按用户最新要求执行项目标准 `dotnet build WinPool.slnx -c Release --no-restore -m:1`，直接重建 `artifacts/Release`：exit 0、0 warning、0 error，App/Agent 的 `.deps.json`、`.runtimeconfig.json` 与 App `.pri` 五个启动文件均在运行树。Architecture 项目全量单次回归 47/47 passed、0 failed、0 skipped；TRX 位于 `artifacts/test-results/control-size-final-20260923/architecture-control-size-final.trx`。定点编辑页布局检查也曾 1/1 通过；完整回归额外发现标题栏交互容器的旧静态断言，已改为与当前 `ActiveSystemSelectorHost` 实现一致，复跑通过。`git diff --check` exit 0，目标 XAML 均通过静态 XML 解析。
+
+此前两次隔离编译虽然各自 0 错误，其合并运行树均缺上述五个文件，因此不能作为原生运行证据；第一次直接启动在进入界面前崩溃。缺失文件实际被生成到默认 `artifacts/trees/Release`，与覆盖运行树路径的结果分离；失败日志保留在 `artifacts/verification-control-size-20260923-195807-10b39158/`，完整隔离树的定点补齐记录在 `artifacts/verification-control-size-r2-20260923-202038-7c75851b/`。本轮最终以用户指定的标准 Release 重建结果为准，不把隔离尝试算作有效界面验证。
+
 ## 2026-09-23 七项界面反馈：验证结果
 
 最终隔离构建位于 `artifacts/verification-ui-feedback-20260923-responsive-8238ee77/`，App/Agent Release 编译 exit 0、0 警告、0 错误，运行树合并 288 shared／294 App-only／10 Agent-only／0 collisions；直接相关的 Architecture 两项 2/2 passed、0 failed、0 skipped，TRX、命令和日志保留在该目录。已有 `artifacts/Release` 未作为构建目标。第一次隔离构建在 `artifacts/verification-ui-feedback-20260923-a2225ec1/` 通过编译和开发页定点测试，但原生检查发现分区属性栏 320 DIP 时长 MiB 数字使右侧单位被裁，原始画面在该目录的 `evidence/partition-before-width-fix.png`，UIA 读到两个单位均 offscreen。第二次隔离构建 `artifacts/verification-ui-feedback-20260923-final-1b28b26b/` 改为 420 DIP 后，同一对象的完整单位可见；随后独立审查发现固定 420 DIP 会挤占最小窗口的拓扑视口，因此最终改为随窗口宽度在 320–420 DIP 之间调整，并为窄窗右栏增加横向滚动。前两次结果均未冒充最终通过。

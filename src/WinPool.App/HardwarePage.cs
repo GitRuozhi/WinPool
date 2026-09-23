@@ -50,6 +50,9 @@ public sealed partial class HardwarePage : Page
     public HardwarePage()
     {
         InitializeComponent();
+        var buttonStyle = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"];
+        refresh.Style = buttonStyle;
+        export.Style = buttonStyle;
         AutomationProperties.SetAutomationId(refresh, "HardwareRefresh");
         AutomationProperties.SetAutomationId(export, "HardwareExport");
         var actions = new StackPanel

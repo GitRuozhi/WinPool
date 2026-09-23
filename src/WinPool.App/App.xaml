@@ -55,8 +55,24 @@
 
             <Style x:Key="WinPoolButtonBaseStyle" TargetType="Button">
                 <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="Padding" Value="12,4" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
             </Style>
             <Style TargetType="Button" BasedOn="{StaticResource WinPoolButtonBaseStyle}" />
+
+            <Style
+                x:Key="WinPoolInlineIconButtonStyle"
+                TargetType="Button"
+                BasedOn="{StaticResource WinPoolButtonBaseStyle}">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="MinWidth" Value="32" />
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="Padding" Value="4" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
 
             <Style
                 x:Key="WinPoolAccentButtonStyle"

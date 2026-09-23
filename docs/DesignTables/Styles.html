@@ -26,7 +26,10 @@
     <tbody>
       <tr><td>界面字体</td><td>WinUI 默认字体；文档建议 Segoe UI Variable</td><td>中文由系统回退字体呈现</td><td>普通文字不单独覆盖字族；消息时间列使用 Consolas，字号 12 DIP</td></tr>
       <tr><td>图标字体</td><td><code>FontIcon</code>／<code>SymbolThemeFontFamily</code></td><td><span style="font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:22px"></span>　<span style="font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:22px"></span></td><td>按钮图标通常 14 DIP；分区恢复按钮 12 DIP，见按钮表</td></tr>
-      <tr><td>按钮形状</td><td><code>WinPoolButtonBaseStyle</code>：<code>CornerRadius=4</code> DIP；普通 Button 隐式继承，强调按钮及结构／分区页局部按钮样式显式继承</td><td>按钮宽、高、图标和边距可按用途不同，四角统一小圆角</td><td>页面局部按钮样式也须继承统一基线；设置页普通按钮使用全局隐式样式</td></tr>
+      <tr><td>图标文字普通按钮</td><td><code>WinPoolButtonBaseStyle</code>：圆角 4 DIP、最小高 32 DIP、内边距 <code>12,4</code>；普通 Button 隐式继承，强调样式显式继承</td><td>同角色按钮有相同高度下限及文字中线；长文字允许增高</td><td>管理下区、编辑页操作区、硬件、监控、设置和欢迎页使用同一基线；所在区域不产生第三种按钮样式</td></tr>
+      <tr><td>行内单图标按钮</td><td><code>WinPoolInlineIconButtonStyle</code>：32×32 DIP、内边距 4 DIP、圆角 4 DIP</td><td>重置、MAX、展开、关闭及字段旁色块等图形的命中区一致</td><td>只用于单图标或单色块动作；按钮的自动化名称和悬停帮助仍应说明用途</td></tr>
+      <tr><td>表单与表格行</td><td>输入／下拉最小高 32 DIP；两个编辑页属性行 <code>Auto</code> 且最小高 40 DIP；管理／硬件属性表行最小高 32 DIP</td><td>同行控件垂直居中，换行可使整行增高</td><td>编辑操作块的 44 DIP 是布局槽下限，槽随同排最高内容增高，不是第三种按钮高度；窄窗操作区最多高 220 DIP 并可双向滚动</td></tr>
+      <tr><td>区域分隔槽</td><td>8 DIP，可拖动 <code>GridSplitter</code></td><td>拖动后相邻区域宽／高随之变化</td><td>管理、监控、开发和两个编辑页的实际分屏采用同一槽宽；卡片之间的留白不属于分隔槽</td></tr>
       <tr><td>默认强调色</td><td><code>WinPoolAccentColor #0078D4</code></td><td><span class="swatch" style="background:#0078D4"></span>蓝色</td><td>App.xaml；设置可改变当前强调色，不能只凭本行判断运行时颜色</td></tr>
       <tr><td>强调悬停遮罩</td><td><code>WinPoolAccentHoverColor #330078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.2)"></span>20% 蓝</td><td>强调元素指针悬停</td></tr>
       <tr><td>强调按下遮罩</td><td><code>WinPoolAccentPressedColor #4D0078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.3)"></span>30% 蓝</td><td>强调元素按下</td></tr>
@@ -45,7 +48,9 @@
       <tr><td>消息详情</td><td>半透明黑色遮罩 <code>#80000000</code>；中央只读 TextBox，宽随页面缩到 160–640 DIP，高 96–380 DIP；背景为 <code>SolidBackgroundFillColorBaseBrush</code></td><td>不透明主题背景，无标题及按钮；短文本收缩高度，长文本显示竖向滚动</td><td>文本可选择并用 Ctrl+C 复制；点击文本框外关闭</td></tr>
       <tr><td>右下消息卡</td><td>宽 384 DIP；无额外最小高度；内容最大高 200 DIP；卡间距 6 DIP</td><td>高度由 InfoBar 实际内容决定；单层 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；外层 UserControl 不再留下透明空白</td></tr>
       <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；消息历史寿命独立</td></tr>
-      <tr><td>分区数值</td><td>右侧属性栏随窗口为 320–420 DIP；内容最小宽 412 DIP，窄窗有水平滚动；“起点”“终点”“容量”固定标签</td><td>起点和终点共用两行数值网格：MiB 数字与括号内自适应数字分别占列、分别右对齐；MiB 数字有千位分隔符，括号内自动换 GiB/TiB。宽窗可直接读全值，窄窗滚动读尾部单位</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行只读换算值使用与第一行相同的普通文字样式；操作按钮随选择切换新建／格式化</td></tr>
+      <tr><td>编辑页右栏与分区数值</td><td>存储结构／分区右栏均从 320 DIP 开始，最小 240 DIP；左栏最小 120 DIP；分区内容最小宽 412 DIP，栏内横向滚动；“起点”“终点”“容量”固定标签</td><td>两栏可拖动调整；起点和终点共用两行数值网格：MiB 数字与括号内自适应数字分别占列、分别右对齐；MiB 数字有千位分隔符，括号内自动换 GiB/TiB。窄栏可滚动读尾部单位</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行只读换算值使用普通文字样式；操作按钮随选择切换新建／格式化</td></tr>
+      <tr><td>监控表格与工具栏</td><td>表头和数据行置于同一横向滚动区，内容最小宽 720 DIP；工具栏按可用宽度拆成两行</td><td>窄窗横滚时表头与数据列保持同一水平位置，工具按钮不覆盖采样控件</td><td>颜色选择色块使用行内单图标按钮命中尺寸；图表与表格之间仍可拖动</td></tr>
+      <tr><td>设置页字段</td><td>卡片内标签／值列按 <code>1*:2*</code> 分配；路径下拉与 32 DIP 图标按钮同行，路径文字另起一行</td><td>最窄窗口字段仍可触达，标签可随内容换行</td><td>路径图标按钮通过自动化名称和悬停帮助说明“打开路径”；其余设置操作沿用普通按钮样式</td></tr>
       <tr><td>拓扑剩余空间描边</td><td>Light <code>#60000000</code>；Dark <code>#40FFFFFF</code>（XAML AARRGGBB）；高对比度 <code>SystemColorWindowTextColor</code></td><td><span class="swatch" style="background:rgba(0,0,0,.376)"></span><span class="swatch" style="background:rgba(255,255,255,.251)"></span></td><td><code>WinPoolTopologyRestStrokeBrush</code>；保持高对比度系统资源</td></tr>
     </tbody>
   </table>

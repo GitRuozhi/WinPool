@@ -40,15 +40,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SetFormatMode(quickFormat: true);
     }
 
-    private void PageRootGrid_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        var propertyColumnWidth = Math.Min(420d, Math.Max(320d, e.NewSize.Width - 400d));
-        if (PartitionPropertiesColumn.Width.Value != propertyColumnWidth)
-        {
-            PartitionPropertiesColumn.Width = new GridLength(propertyColumnWidth);
-        }
-    }
-
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
@@ -282,6 +273,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         RefreshAll();
+    }
+
+    private void PartitionActionsScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        PartitionActionsPanel.Width = Math.Max(PartitionActionsPanel.ItemWidth, e.NewSize.Width);
     }
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Navigation;
@@ -58,6 +59,8 @@ public sealed partial class MonitorRowViewModel : ObservableObject
 
 public sealed partial class MonitorPage : Page
 {
+    private const double MinimumMonitorTableWidth = 720;
+
     private static readonly Color[] SeriesPalette =
     [
         Color.FromArgb(255, 0x00, 0x78, 0xD4),
@@ -296,8 +299,13 @@ public sealed partial class MonitorPage : Page
 
     private void ColorSwatch_Loaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        if (sender is Button button)
+        if (sender is Button { DataContext: MonitorRowViewModel row } button)
         {
+            AutomationProperties.SetName(
+                button,
+                _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                    ? $"为 {row.Name} 选择曲线颜色"
+                    : $"Choose chart color for {row.Name}");
             ContextHelp.Set(
                 button,
                 _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
@@ -341,11 +349,14 @@ public sealed partial class MonitorPage : Page
             var hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
             var swatch = new Button
             {
-                Width = 28,
-                Height = 28,
-                Padding = new Thickness(0),
+                Style = (Style)Application.Current.Resources["WinPoolInlineIconButtonStyle"],
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(color)
             };
+            AutomationProperties.SetName(
+                swatch,
+                _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
+                    ? $"选择颜色 {hex}"
+                    : $"Choose color {hex}");
             ContextHelp.Set(
                 swatch,
                 _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
@@ -451,6 +462,19 @@ public sealed partial class MonitorPage : Page
 
     private bool _splitApplied;
 
+    private void ButtonsCard_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var isNarrow = e.NewSize.Width < 700;
+        var isVeryNarrow = e.NewSize.Width < 560;
+        Grid.SetRow(ToolbarActionsPanel, isNarrow ? 1 : 0);
+        Grid.SetColumn(ToolbarActionsPanel, isNarrow ? 0 : 1);
+        Grid.SetColumnSpan(ToolbarActionsPanel, isNarrow ? 2 : 1);
+        ToolbarActionsPanel.Margin = isNarrow ? new Thickness(0, 8, 0, 0) : new Thickness(0);
+        Grid.SetRow(SamplingRateGroup, isVeryNarrow ? 1 : 0);
+        Grid.SetColumn(SamplingRateGroup, isVeryNarrow ? 0 : 1);
+        SamplingRateGroup.Margin = isVeryNarrow ? new Thickness(0, 8, 0, 0) : new Thickness(0);
+    }
+
     private void MonitorRoot_Loaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         MonitorRoot.Loaded -= MonitorRoot_Loaded;
@@ -473,7 +497,7 @@ public sealed partial class MonitorPage : Page
                 return;
             }
 
-            var desiredTable = 40 + (_rows.Count * 34) + 28;
+            var desiredTable = 40 + (_rows.Count * 41) + 28;
             var table = Math.Min(desiredTable, available * 0.4);
             table = Math.Clamp(table, 140, available - 160);
             GraphRow.Height = new GridLength(1, GridUnitType.Star);
@@ -484,12 +508,13 @@ public sealed partial class MonitorPage : Page
 
     private void TableScroll_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var width = TableScroll.ActualWidth;
-        if (width <= 0)
+        var viewportWidth = TableScroll.ActualWidth;
+        if (viewportWidth <= 0)
         {
             return;
         }
 
+        var width = Math.Max(viewportWidth, MinimumMonitorTableWidth);
         TableHeader.Width = width;
         DiskRows.Width = width;
     }
