@@ -2,6 +2,14 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
+## 2026-09-23 界面分隔与消息表面：定点验证
+
+关闭已核实位于标准 `artifacts/Release` 的 WinPool App / Agent 后，执行 `dotnet build WinPool.slnx -c Release --no-restore -m:1`，最终结果 0 警告、0 错误，产物直接重建于标准运行目录。未另建隔离运行树。本轮为可逆界面调整，未扩成全套测试。
+
+最终标准 App 原生启动并截图核对：`settings.png` 中标签列收紧、主题下拉不拉满、路径／7Z 下拉与图标按钮紧邻，标题栏系统选择器变窄；`storage-structure.png` 与 `disk-partition.png` 中右栏紧邻单个 8 DIP 分隔槽；`development-detail.png` 中消息列表无表头、详情文本背景不透底；硬件只读刷新时的 `notification.png` 中右下 InfoBar 背景为实色。图片均在 `artifacts/test-results/20260923-ui-feedback-final/`。UIA 读到设置页两个路径下拉宽约 188 DIP、相邻图标按钮各 32 DIP；开发页消息条目仍为 28 DIP。只读刷新没有提交存储编辑。
+
+当前 `TestPage.xaml` 只有静态规划说明，没有子块或分隔槽；用户所说“测试页双倍分隔”无法对应当前源码，已请求位置确认，本轮未擅自改动其他页面。未做主题／DPI／最窄窗口全矩阵，也未把这些项目记为通过。
+
 ## 2026-09-23 控件角色尺寸与分隔槽：验证结果
 
 标准 Release App 原生启动成功，UIA 读到存储结构编辑页右栏宽 319 DIP（布局取整后约为设计值 320 DIP）、分隔槽宽 8 DIP，拓扑区及操作区滚动容器可见。桌面前台保护多次拒绝拖动；单次工具报告成功后页面和尺寸观测不一致，故**拖拽效果不计为已验证**。480 DIP 窄窗、监控／管理／开发页及分区编辑页本轮未完成原生核对。截图文件生成但画面全黑，不能作为视觉证据；证据目录为 `artifacts/test-results/control-size-final-20260923/evidence/`。测试后恢复原 StorageStructure 页与 1440×900 窗口，只读确认设置未变；App 正常关闭、Agent 随后退出，最终无 WinPool App/Agent 进程，未执行存储操作。

@@ -108,7 +108,7 @@
                 Grid.Column="2"
                 Margin="24,0,12,0"
                 MinWidth="180"
-                MaxWidth="420"
+                MaxWidth="280"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 Background="Transparent"
@@ -120,7 +120,7 @@
                 PointerExited="ActiveSystemSelectorHost_PointerExited">
                 <ComboBox
                     x:Name="ActiveSystemSelector"
-                    Width="320"
+                    Width="260"
                     MinWidth="178"
                     Background="Transparent"
                     BorderThickness="0"

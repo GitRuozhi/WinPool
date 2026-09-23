@@ -78,10 +78,6 @@ public sealed partial class DevelopmentPage : Page
     private void UpdateText()
     {
         EmptyMessageListText.Text = Text("本次运行没有消息。", "No messages in this run.");
-        MessageTimeHeader.Text = Text("时间", "Time");
-        MessageSeverityHeader.Text = Text("级别", "Level");
-        MessageSourceHeader.Text = Text("来源", "Source");
-        MessageTitleHeader.Text = Text("信息标题", "Message title");
         AiEntryHint.Text = Text("人工智能入口，功能正在开发中。", "AI entry — feature in development.");
         AutomationProperties.SetName(MessageListArea, Text("消息列表", "Message list"));
         AutomationProperties.SetName(MessageList, Text("消息列表", "Message list"));
@@ -192,8 +188,8 @@ public sealed partial class DevelopmentPage : Page
         var contentWidth = Math.Max(96, width - 32);
         textMeasure.Measure(new Size(contentWidth, double.PositiveInfinity));
 
-        MessageDetailText.Width = width;
-        MessageDetailText.Height = Math.Min(
+        MessageDetailPanel.Width = width;
+        MessageDetailPanel.Height = Math.Min(
             maxHeight,
             Math.Max(96, Math.Ceiling(textMeasure.DesiredSize.Height + 40)));
     }

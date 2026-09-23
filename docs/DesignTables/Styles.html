@@ -29,28 +29,29 @@
       <tr><td>图标文字普通按钮</td><td><code>WinPoolButtonBaseStyle</code>：圆角 4 DIP、最小高 32 DIP、内边距 <code>12,4</code>；普通 Button 隐式继承，强调样式显式继承</td><td>同角色按钮有相同高度下限及文字中线；长文字允许增高</td><td>管理下区、编辑页操作区、硬件、监控、设置和欢迎页使用同一基线；所在区域不产生第三种按钮样式</td></tr>
       <tr><td>行内单图标按钮</td><td><code>WinPoolInlineIconButtonStyle</code>：32×32 DIP、内边距 4 DIP、圆角 4 DIP</td><td>重置、MAX、展开、关闭及字段旁色块等图形的命中区一致</td><td>只用于单图标或单色块动作；按钮的自动化名称和悬停帮助仍应说明用途</td></tr>
       <tr><td>表单与表格行</td><td>输入／下拉最小高 32 DIP；两个编辑页属性行 <code>Auto</code> 且最小高 40 DIP；管理／硬件属性表行最小高 32 DIP</td><td>同行控件垂直居中，换行可使整行增高</td><td>编辑操作块的 44 DIP 是布局槽下限，槽随同排最高内容增高，不是第三种按钮高度；窄窗操作区最多高 220 DIP 并可双向滚动</td></tr>
-      <tr><td>区域分隔槽</td><td>8 DIP，可拖动 <code>GridSplitter</code></td><td>拖动后相邻区域宽／高随之变化</td><td>管理、监控、开发和两个编辑页的实际分屏采用同一槽宽；卡片之间的留白不属于分隔槽</td></tr>
+      <tr><td>区域分隔槽</td><td>8 DIP，可拖动 <code>GridSplitter</code></td><td>拖动后相邻区域宽／高随之变化</td><td>管理、监控、开发和两个编辑页的实际分屏采用同一槽宽；编辑页属性栏紧贴分隔槽，不再叠加左边距</td></tr>
       <tr><td>默认强调色</td><td><code>WinPoolAccentColor #0078D4</code></td><td><span class="swatch" style="background:#0078D4"></span>蓝色</td><td>App.xaml；设置可改变当前强调色，不能只凭本行判断运行时颜色</td></tr>
       <tr><td>强调悬停遮罩</td><td><code>WinPoolAccentHoverColor #330078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.2)"></span>20% 蓝</td><td>强调元素指针悬停</td></tr>
       <tr><td>强调按下遮罩</td><td><code>WinPoolAccentPressedColor #4D0078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.3)"></span>30% 蓝</td><td>强调元素按下</td></tr>
       <tr><td>标题栏选择器悬停</td><td><code>#660078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.4)"></span>40% 蓝</td><td>活动系统选择器的标题栏悬停背景</td></tr>
-      <tr><td>标题栏拖拽</td><td>界面标题栏行高 48 DIP；系统标题栏首选高度 <code>Tall</code></td><td>图标和 WinPool 标题所在左侧区域及控件外空白可拖；导航、系统选择器、真实编辑控件及系统最小化／最大化／关闭按钮占用各自命中区域</td><td>三个交互区加载或尺寸变化后，在布局完成后重新计算 Passthrough 矩形；可拖宽度随窗口和控件宽度变化</td></tr>
+      <tr><td>标题栏拖拽与选择器</td><td>界面标题栏行高 48 DIP；系统标题栏首选高度 <code>Tall</code>；系统选择器宽 260 DIP，下拉项上限 280 DIP</td><td>图标和 WinPool 标题所在左侧区域及控件外空白可拖；导航、系统选择器、真实编辑控件及系统最小化／最大化／关闭按钮占用各自命中区域</td><td>三个交互区加载或尺寸变化后，在布局完成后重新计算 Passthrough 矩形；可拖宽度随窗口和控件宽度变化</td></tr>
       <tr><td>强调描边</td><td><code>#60CDFF</code></td><td><span class="swatch" style="background:#60CDFF"></span>亮蓝</td><td><code>WinPoolAccentButtonStyle</code> 边框</td></tr>
       <tr><td>强调按钮前景</td><td><code>#FFFFFF</code></td><td><span class="swatch" style="background:#FFFFFF"></span>白色</td><td>默认强调按钮文字；与运行时强调色的对比度需实机检查</td></tr>
       <tr><td>系统控件强调别名</td><td><code>AccentFillColor*Brush</code>、<code>AccentTextFillColor*Brush</code>、<code>FocusStrokeColorOuterBrush</code></td><td>跟随 WinPool 强调色</td><td>选中、焦点、开关开启状态由 App.xaml 别名统一</td></tr>
       <tr><td>卡片背景</td><td><code>CardBackgroundFillColorDefaultBrush</code></td><td>亮／暗／高对比度随主题</td><td>分区、结构、开发页各区域背景</td></tr>
+      <tr><td>不透明消息表面</td><td><code>WinPoolOpaqueSurfaceBrush</code>：Light <code>#FFFFFFFF</code>、Dark <code>#FF1C1C1C</code>、高对比度 <code>SystemColorWindowColor</code></td><td>alpha 固定 255；正文后方不会透出页面内容</td><td>右下单层 InfoBar 与开发页详情底板／文本框使用</td></tr>
       <tr><td>卡片边框</td><td><code>CardStrokeColorDefaultBrush</code>，1 DIP</td><td>主题描边</td><td>主工作区边框；通知使用 InfoBar 自身的单层背景与描边</td></tr>
       <tr><td>卡片圆角</td><td>4 DIP</td><td>统一小圆角</td><td>分区、结构、开发三区域；通知圆角遵循 InfoBar 主题模板</td></tr>
       <tr><td>次要文字</td><td><code>TextFillColorSecondaryBrush</code></td><td>主题次要文字</td><td>消息时间、级别、来源和 AI 开发中提示；不用固定灰色</td></tr>
       <tr><td>启动恢复过渡</td><td>工作区未读到可用预显时，中央 32 DIP <code>ProgressRing</code> 与状态文字</td><td>有效缓存载入后直接显示上次系统的页面内容</td><td>预显期间页面不可交互，标题栏系统名可见但选择器禁用；Agent 核对完成后放开交互。缓存不可用时保留过渡提示，避免先显示默认系统</td></tr>
       <tr><td>开发页布局</td><td>外边距 24 DIP；横向和纵向分隔条各 8 DIP；上方 2*、下方 *</td><td>左上消息列表／右上空白／下方空白</td><td>分隔条可拖拽；宽度小于 760 DIP 时右上隐藏，消息列表横跨上方；不显示列表标题、说明和页面大标题</td></tr>
-      <tr><td>消息列表表头及条目</td><td>表头为时间／级别／来源／信息标题；行最小高 28 DIP，容器上下外边距各 1 DIP、内容上下内边距各 2 DIP；文字 12 DIP</td><td>四列共享列宽，消息行文字垂直居中；标题列只显示通知标题</td><td>超宽内容省略号；悬停使用主题底色，选中使用强调底色与 3 DIP 左侧标记；双击显示详情</td></tr>
-      <tr><td>消息详情</td><td>半透明黑色遮罩 <code>#80000000</code>；中央只读 TextBox，宽随页面缩到 160–640 DIP，高 96–380 DIP；背景为 <code>SolidBackgroundFillColorBaseBrush</code></td><td>不透明主题背景，无标题及按钮；短文本收缩高度，长文本显示竖向滚动</td><td>文本可选择并用 Ctrl+C 复制；点击文本框外关闭</td></tr>
-      <tr><td>右下消息卡</td><td>宽 384 DIP；无额外最小高度；内容最大高 200 DIP；卡间距 6 DIP</td><td>高度由 InfoBar 实际内容决定；单层 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；外层 UserControl 不再留下透明空白</td></tr>
+      <tr><td>消息列表条目</td><td>无表头；每行依次显示时间／级别／来源／信息标题；行最小高 28 DIP，容器上下外边距各 1 DIP、内容上下内边距各 2 DIP；文字 12 DIP</td><td>消息行文字垂直居中；标题列只显示通知标题</td><td>超宽内容省略号；悬停使用主题底色，选中使用强调底色与 3 DIP 左侧标记；双击显示详情</td></tr>
+      <tr><td>消息详情</td><td>半透明黑色遮罩 <code>#80000000</code>；中央只读 TextBox，宽随页面缩到 160–640 DIP，高 96–380 DIP；实色底板与文本框使用 <code>WinPoolOpaqueSurfaceBrush</code></td><td>不透明主题背景，无标题及按钮；短文本收缩高度，长文本显示竖向滚动</td><td>文本可选择并用 Ctrl+C 复制；点击文本框外关闭</td></tr>
+      <tr><td>右下消息卡</td><td>宽 384 DIP；无额外最小高度；内容最大高 200 DIP；卡间距 6 DIP；InfoBar 本体使用 <code>WinPoolOpaqueSurfaceBrush</code></td><td>高度由 InfoBar 实际内容决定；单层不透明 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；外层 UserControl 不再留下透明空白</td></tr>
       <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；消息历史寿命独立</td></tr>
       <tr><td>编辑页右栏与分区数值</td><td>存储结构／分区右栏均从 320 DIP 开始，最小 240 DIP；左栏最小 120 DIP；分区内容最小宽 412 DIP，栏内横向滚动；“起点”“终点”“容量”固定标签</td><td>两栏可拖动调整；起点和终点共用两行数值网格：MiB 数字与括号内自适应数字分别占列、分别右对齐；MiB 数字有千位分隔符，括号内自动换 GiB/TiB。窄栏可滚动读尾部单位</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行只读换算值使用普通文字样式；操作按钮随选择切换新建／格式化</td></tr>
       <tr><td>监控表格与工具栏</td><td>表头和数据行置于同一横向滚动区，内容最小宽 720 DIP；工具栏按可用宽度拆成两行</td><td>窄窗横滚时表头与数据列保持同一水平位置，工具按钮不覆盖采样控件</td><td>颜色选择色块使用行内单图标按钮命中尺寸；图表与表格之间仍可拖动</td></tr>
-      <tr><td>设置页字段</td><td>卡片内标签／值列按 <code>1*:2*</code> 分配；路径下拉与 32 DIP 图标按钮同行，路径文字另起一行</td><td>最窄窗口字段仍可触达，标签可随内容换行</td><td>路径图标按钮通过自动化名称和悬停帮助说明“打开路径”；其余设置操作沿用普通按钮样式</td></tr>
+      <tr><td>设置页字段</td><td>卡片内标签列固定 112 DIP；主题、强调色、语言下拉宽 220 DIP，路径和 7Z 下拉宽 180 DIP；路径下拉与 32 DIP 图标按钮紧邻同行，路径文字另起一行</td><td>宽窗口不拉长项名或下拉；最窄窗口字段仍可触达，长标签可换行</td><td>路径图标按钮通过自动化名称和悬停帮助说明“打开路径”；其余设置操作沿用普通按钮样式</td></tr>
       <tr><td>拓扑剩余空间描边</td><td>Light <code>#60000000</code>；Dark <code>#40FFFFFF</code>（XAML AARRGGBB）；高对比度 <code>SystemColorWindowTextColor</code></td><td><span class="swatch" style="background:rgba(0,0,0,.376)"></span><span class="swatch" style="background:rgba(255,255,255,.251)"></span></td><td><code>WinPoolTopologyRestStrokeBrush</code>；保持高对比度系统资源</td></tr>
     </tbody>
   </table>

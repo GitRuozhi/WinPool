@@ -9,10 +9,10 @@
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
 | 标题栏导航列表 `ShellNavigationList` | 在硬件、管理、结构、分区、测试、监控、开发、设置页面间导航；选择项提供页面本地化名称和图标 | 硬件、测试、开发仅开发者模式可见；Agent 工作区恢复期间禁用，完成后启用 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
-| 标题栏活动系统选择器 `ActiveSystemSelector` | 显示当前选中存储系统名称，并切换本机、导入或模拟系统 | 有页面级帮助。启动时偏好读取之前隐藏；若有效的只读缓存预览先完成，则显示系统名但选择器及页面交互仍禁用；无有效预览时保持隐藏。Agent 成功完成目录/状态恢复后，存在所选系统时显示并启用；恢复失败时保持禁用，若此前显示过预览则仍可见，否则隐藏 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
+| 标题栏活动系统选择器 `ActiveSystemSelector` | 以 260 DIP 宽度显示当前选中存储系统名称，并切换本机、导入或模拟系统；下拉项上限 280 DIP | 有页面级帮助。启动时偏好读取之前隐藏；若有效的只读缓存预览先完成，则显示系统名但选择器及页面交互仍禁用；无有效预览时保持隐藏。Agent 成功完成目录/状态恢复后，存在所选系统时显示并启用；恢复失败时保持禁用，若此前显示过预览则仍可见，否则隐藏 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
 | 工作区启动遮罩 | 在首屏偏好读取和 Agent 工作区恢复期间显示状态消息，防止过早操作半初始化页面 | 有效只读缓存预览完成时可显示页面内容，但页面仍不可命中输入，直到 Agent 恢复结束 | `MainWindow.xaml.cs` |
 | 本机真实编辑 `LocalRealOperationsSwitch` | 切换本机存储页面的真实编辑模式 | 管理员能力影响帮助文本；开关本身保持启用，真实操作仍受执行规则约束；工作区恢复期间页面交互被阻断 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
-| 全局通知卡 `NotificationCard` | 点击普通通知可关闭；点击错误通知打开可读错误消息；Enter/Space 同样触发 | 卡片退出期间不可交互；卡片无独立按钮 | `MainWindow.xaml`、`NotificationCard.xaml.cs` |
+| 全局通知卡 `NotificationCard` | 点击普通通知可关闭；点击错误通知打开可读错误消息；Enter/Space 同样触发 | 单层 InfoBar 本体使用不透明主题背景；卡片退出期间不可交互，卡片无独立按钮 | `MainWindow.xaml`、`NotificationCard.xaml(.cs)` |
 | 通知列表 `GlobalNotificationStack` | 承载当前可见的动态通知卡 | 每次发布的可显示通知生成一张卡；卡片数量与自动退出由通知服务控制 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
 
 ## 管理页
@@ -154,9 +154,9 @@
 
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
-| 消息列表 `MessageList` | 显示本进程通知历史；表头和每条消息依次为时间、级别、来源、信息标题，标题列只取通知标题；双击条目打开详情 | 单行紧凑排列且文字垂直居中；悬停有底色、选中有强调色底色和左侧标记；空列表显示提示；与 `Diagnostics` 故障日志分离 | `DevelopmentPage.xaml(.cs)` |
+| 消息列表 `MessageList` | 显示本进程通知历史；无表头，每条消息依次为时间、级别、来源、信息标题，标题列只取通知标题；双击条目打开详情 | 单行紧凑排列且文字垂直居中；悬停有底色、选中有强调色底色和左侧标记；空列表显示提示；与 `Diagnostics` 故障日志分离 | `DevelopmentPage.xaml(.cs)` |
 | 开发页横向／纵向分隔条 `TopAreaColumnSplitter`／`TopBottomAreaSplitter` | 拖拽调整左上和右上宽度、上下高度 | 窄窗隐藏右上区域和横向分隔条；上下分隔条仍可拖拽 | `DevelopmentPage.xaml(.cs)` |
-| 消息详情 `MessageDetailOverlay`／`MessageDetailText` | 在页面中央查看完整消息并用键盘复制 | 背景变暗；单个只读、可选文本框使用不透明主题背景并按内容调整高度，长文本可滚动；点击文本框外关闭 | `DevelopmentPage.xaml(.cs)` |
+| 消息详情 `MessageDetailOverlay`／`MessageDetailText` | 在页面中央查看完整消息并用键盘复制 | 背景变暗；单个只读、可选文本框由不透明实色底板承托并按内容调整高度，长文本可滚动；点击文本框外关闭 | `DevelopmentPage.xaml(.cs)` |
 | 测试页 | 说明完整测试工作区属于 WinPool 2.0 规划 | 当前为静态说明页，没有交互控件 | `TestPage.xaml` |
 
 ## 临时对话框与弹层

@@ -696,7 +696,7 @@ public sealed partial class MainWindow : Window
                 {
                     Content = $"{prefix} {candidate.DisplayName}",
                     Tag = candidate.Id,
-                    MaxWidth = 390,
+                    MaxWidth = 280,
                     HorizontalContentAlignment = HorizontalAlignment.Left
                 };
                 ActiveSystemSelector.Items.Add(item);

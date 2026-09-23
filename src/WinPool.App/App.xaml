@@ -14,13 +14,16 @@
                 <ResourceDictionary x:Key="Light">
                     <Color x:Key="WinPoolTopologyRestStrokeColor">#60000000</Color>
                     <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{StaticResource WinPoolTopologyRestStrokeColor}" />
+                    <SolidColorBrush x:Key="WinPoolOpaqueSurfaceBrush" Color="#FFFFFFFF" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
                     <Color x:Key="WinPoolTopologyRestStrokeColor">#40FFFFFF</Color>
                     <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{StaticResource WinPoolTopologyRestStrokeColor}" />
+                    <SolidColorBrush x:Key="WinPoolOpaqueSurfaceBrush" Color="#FF1C1C1C" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="WinPoolTopologyRestStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="WinPoolOpaqueSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
             <Color x:Key="WinPoolAccentColor">#0078D4</Color>

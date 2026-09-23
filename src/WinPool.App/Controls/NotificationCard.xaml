@@ -22,6 +22,9 @@
     </UserControl.Resources>
     <InfoBar
         x:Name="NotificationInfoBar"
+        Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
         IsClosable="False"
         IsOpen="True" />
 </UserControl>
