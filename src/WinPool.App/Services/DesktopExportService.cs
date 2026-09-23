@@ -21,7 +21,8 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
     {
         var picker = new FileSavePicker(ParentWindowId)
         {
-            SuggestedFileName = $"WinPool-{Environment.MachineName}-{DateTime.Now:yyyyMMdd-HHmmss}"
+            SuggestedFileName = $"WinPool-{Environment.MachineName}-{DateTime.Now:yyyyMMdd-HHmmss}",
+            DefaultFileExtension = ".json"
         };
         picker.FileTypeChoices.Add("JSON", [".json"]);
         var file = await picker.PickSaveFileAsync();
@@ -58,9 +59,8 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         {
             SuggestedFileName =
                 $"WinPool-{NormalizeFileName(document.DisplayName)}-{DateTime.Now:yyyyMMdd-HHmmss}",
-            DefaultFileExtension = ".winpool"
+            DefaultFileExtension = ".json"
         };
-        picker.FileTypeChoices.Add("WinPool system", [".winpool"]);
         picker.FileTypeChoices.Add("JSON", [".json"]);
         var file = await picker.PickSaveFileAsync();
         if (file is null)
@@ -115,11 +115,16 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         }
 
         await using var stream = File.OpenRead(file.Path);
-        var envelope = await JsonSerializer.DeserializeAsync<StorageSystemExportEnvelope>(
-            stream,
-            JsonOptions,
-            cancellationToken)
+        using var importJson = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        StorageSystemImportJsonValidator.Validate(importJson.RootElement);
+        var envelope = JsonSerializer.Deserialize<StorageSystemExportEnvelope>(
+            importJson.RootElement,
+            JsonOptions)
             ?? throw new InvalidDataException("The WinPool import is empty.");
+        if (envelope.System is null)
+        {
+            throw new InvalidDataException("The WinPool import is missing its system document.");
+        }
         if (envelope.Product != "WinPool"
             || envelope.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion
             || envelope.System.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion)
