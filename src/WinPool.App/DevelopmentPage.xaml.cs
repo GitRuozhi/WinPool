@@ -4,6 +4,8 @@ using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool_App.Controls;
 using WinPool.App.Services;
@@ -14,8 +16,17 @@ namespace WinPool_App;
 
 public sealed partial class DevelopmentPage : Page
 {
-    private readonly ObservableCollection<GlobalNotification> _messages = [];
+    private readonly ObservableCollection<SessionMessageItem> _messages = [];
     private bool _subscribed;
+
+    private sealed record SessionMessageItem(
+        string Id,
+        string CreatedAt,
+        string Severity,
+        string Source,
+        string Title,
+        string Message,
+        GlobalNotification Notification);
 
     public DevelopmentPage()
     {
@@ -61,6 +72,7 @@ public sealed partial class DevelopmentPage : Page
         {
             UpdateText();
             RefreshDiagnosticsPath();
+            RefreshMessages();
         }
         else if (e.PropertyName is nameof(WorkspaceViewModel.DiagnosticsDirectoryPath)
             or nameof(WorkspaceViewModel.DiagnosticsDirectoryExists))
@@ -74,40 +86,34 @@ public sealed partial class DevelopmentPage : Page
 
     private void UpdateText()
     {
-        PageTitle.Text = Text("开发者功能", "Developer features");
-        RoadmapTitle.Text = "WinPool 2.0";
-        RoadmapText.Text = Text(
-            "完整开发者与 AI Agent 工作区不属于 WinPool 1.x，计划作为 WinPool 2.0 功能推出。",
-            "The complete developer and AI Agent workspace is outside WinPool 1.x and is planned for WinPool 2.0.")
-            + Environment.NewLine
-            + Text(
-                "WinPool 1.x 仅提供诊断路径和本次运行消息；不提供自由命令界面、公共自动化契约或完整开发者工作区。",
-                "WinPool 1.x provides only a diagnostics path and current-session messages; it does not expose a free-form command surface, public automation contract, or complete developer workspace.");
-        DiagnosticsTitle.Text = Text("诊断日志路径", "Diagnostics log path");
-        DiagnosticsDescription.Text = Text(
-            "此处只显示当前数据根的 Diagnostics 路径。可选择并复制；WinPool 不会读取日志正文或为显示该路径创建目录。",
-            "This shows only the Diagnostics path under the current data root. It can be selected and copied; WinPool does not read log content or create the directory for this display.");
-        SessionMessagesTitle.Text = Text("本次运行消息", "Current-session messages");
+        SessionMessagesTitle.Text = Text("日志", "Logs");
         SessionMessagesDescription.Text = Text(
-            "仅保留内存中的最近 200 条消息。退出 WinPool 后清空；开发者页面隐藏时仍会继续记录。",
-            "Only the latest 200 in-memory messages are retained. They clear when WinPool exits and continue recording while this developer page is hidden.");
-        CopyAllMessagesButton.Content = Text("复制全部", "Copy all");
-        ClearMessagesButton.Content = Text("清空消息", "Clear messages");
-        CopySelectedMessageButton.Content = Text("复制所选详情", "Copy selected details");
-        CopyDiagnosticsPathButton.Content = Text("复制路径", "Copy path");
+            "仅保留本次运行最近 200 条内存消息。双击条目查看详情；退出 WinPool 后记录清空。",
+            "Shows up to 200 in-memory messages from this run. Double-click an entry for details; history clears when WinPool exits.");
+        DiagnosticsTitle.Text = Text("Diagnostics 路径", "Diagnostics path");
+        CopyAllMessagesButtonText.Text = Text("复制全部", "Copy all");
+        ClearMessagesButtonText.Text = Text("清空消息", "Clear messages");
+        CopyDiagnosticsPathButtonText.Text = Text("复制路径", "Copy path");
+        NoMessagesText.Text = Text("本次运行还没有消息。", "There are no messages in this run yet.");
+        AiEntryHint.Text = Text("人工智能入口，功能正在开发中。", "AI entry — feature in development.");
         AutomationProperties.SetName(DiagnosticsPathText, Text("诊断日志路径", "Diagnostics log path"));
-        AutomationProperties.SetName(MessageList, Text("本次运行消息", "Current-session messages"));
-        AutomationProperties.SetName(SelectedMessageDetail, Text("所选消息详情", "Selected message details"));
-        AutomationProperties.SetName(CopyDiagnosticsPathButton, (string)CopyDiagnosticsPathButton.Content);
-        AutomationProperties.SetName(CopyAllMessagesButton, (string)CopyAllMessagesButton.Content);
-        AutomationProperties.SetName(ClearMessagesButton, (string)ClearMessagesButton.Content);
-        AutomationProperties.SetName(CopySelectedMessageButton, (string)CopySelectedMessageButton.Content);
-        ContextHelp.Set(CopyAllMessagesButton, Text("复制当前显示的全部消息", "Copy all currently displayed messages"));
+        AutomationProperties.SetName(MessageList, Text("本次运行日志", "Current-session logs"));
+        AutomationProperties.SetName(CopyDiagnosticsPathButton, CopyDiagnosticsPathButtonText.Text);
+        AutomationProperties.SetName(CopyAllMessagesButton, CopyAllMessagesButtonText.Text);
+        AutomationProperties.SetName(ClearMessagesButton, ClearMessagesButtonText.Text);
+        ContextHelp.Set(CopyAllMessagesButton, Text("复制当前保留的全部本次运行消息", "Copy all retained messages from this run"));
         ContextHelp.Set(CopyDiagnosticsPathButton, Text("复制当前 Diagnostics 路径", "Copy the current Diagnostics path"));
-        ContextHelp.Set(ClearMessagesButton, Text("只清空本次运行消息。", "Clear only current-session messages."));
-        ContextHelp.Set(CopySelectedMessageButton, Text("复制完整所选消息", "Copy the complete selected message"));
-        // Keep the labels and the selected detail in the current UI language.
-        UpdateSelectedMessage();
+        ContextHelp.Set(ClearMessagesButton, Text("只清空本次运行消息，不会停止或修复持续异常。", "Clear only current-session messages; ongoing issues are not stopped or fixed."));
+        ContextHelp.Set(
+            DiagnosticsPathText,
+            Text("只显示当前数据根中的路径，不读取日志正文。", "Shows only the current data-root path; log contents are not read."));
+    }
+
+    private void DevelopmentLayout_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var isNarrow = e.NewSize.Width < 760;
+        RightTopEmptyArea.Visibility = isNarrow ? Visibility.Collapsed : Visibility.Visible;
+        Grid.SetColumnSpan(LogArea, isNarrow ? 2 : 1);
     }
 
     private void RefreshDiagnosticsPath()
@@ -118,17 +124,25 @@ public sealed partial class DevelopmentPage : Page
             !string.IsNullOrWhiteSpace(DiagnosticsPathText.Text),
             Text("当前没有可复制的 Diagnostics 路径。", "There is no Diagnostics path to copy yet."));
         DiagnosticsStatusText.Text = ViewModel.DiagnosticsDirectoryExists
-            ? Text("诊断目录已存在。", "The Diagnostics directory exists.")
+            ? Text("目录已存在", "Directory exists")
             : Text(
-                "尚未生成日志。显示该路径不会读取日志正文，也不会创建目录。",
-                "No diagnostics directory has been generated yet. Displaying this path does not read log content or create the directory.");
+                "尚未生成",
+                "Not generated yet");
     }
 
     private void RefreshMessages()
     {
-        var selectedId = (MessageList.SelectedItem as GlobalNotification)?.Id;
+        var selectedId = (MessageList.SelectedItem as SessionMessageItem)?.Id;
         var messages = ViewModel.NotificationService.History
             .OrderByDescending(message => message.CreatedAt)
+            .Select(message => new SessionMessageItem(
+                message.Id,
+                message.CreatedAt.LocalDateTime.ToString("g"),
+                FormatSeverity(message.Severity),
+                message.Source,
+                message.Title,
+                message.Message,
+                message))
             .ToArray();
         if (!_messages.SequenceEqual(messages))
         {
@@ -142,7 +156,7 @@ public sealed partial class DevelopmentPage : Page
         MessageList.SelectedItem = selectedId is null
             ? _messages.FirstOrDefault()
             : _messages.FirstOrDefault(message => message.Id.Equals(selectedId, StringComparison.Ordinal));
-        UpdateSelectedMessage();
+        NoMessagesText.Visibility = _messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var hasMessages = _messages.Count > 0;
         SetEnabledWithReason(
             CopyAllMessagesButton,
@@ -154,30 +168,86 @@ public sealed partial class DevelopmentPage : Page
             Text("本次运行还没有可清空的消息。", "There are no current-session messages to clear."));
     }
 
-    private void MessageList_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSelectedMessage();
-
-    private void UpdateSelectedMessage()
+    private async void MessageList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (MessageList.SelectedItem is not GlobalNotification message)
+        if (FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)?.Content
+            is not SessionMessageItem item)
         {
-            SelectedMessageTitle.Text = Text("选择一条消息以查看完整详情", "Select a message to view its full details");
-            SelectedMessageDetail.Text = string.Empty;
-            SetEnabledWithReason(
-                CopySelectedMessageButton,
-                false,
-                Text("请先选择一条消息。", "Select a message first."));
             return;
         }
 
-        SelectedMessageTitle.Text = message.Title;
-        SelectedMessageDetail.Text = FormatMessageDetails(message);
-        SetEnabledWithReason(CopySelectedMessageButton, true, string.Empty);
+        e.Handled = true;
+        await ShowMessageDetailsAsync(item.Notification);
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? element)
+        where T : DependencyObject
+    {
+        for (var current = element; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task ShowMessageDetailsAsync(GlobalNotification message)
+    {
+        var details = FormatMessageDetails(message);
+        var detailTextBox = new TextBox
+        {
+            AcceptsReturn = true,
+            Height = 280,
+            IsReadOnly = true,
+            IsSpellCheckEnabled = false,
+            Text = details,
+            TextWrapping = TextWrapping.Wrap
+        };
+        AutomationProperties.SetName(detailTextBox, Text("消息详情", "Message details"));
+
+        var copyButton = new Button
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children =
+                {
+                    new FontIcon { FontSize = 14, Glyph = "\uE8C8" },
+                    new TextBlock
+                    {
+                        Text = Text("复制详情", "Copy details"),
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                }
+            }
+        };
+        AutomationProperties.SetName(copyButton, Text("复制详情", "Copy details"));
+        ContextHelp.Set(copyButton, Text("复制完整消息详情到剪贴板", "Copy the complete message details to the clipboard"));
+        copyButton.Click += (_, _) => CopyToClipboard(details);
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(detailTextBox);
+        content.Children.Add(copyButton);
+        var dialog = new ContentDialog
+        {
+            RequestedTheme = DevelopmentLayout.RequestedTheme,
+            Title = message.Title,
+            Content = content,
+            CloseButtonText = Text("关闭", "Close"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        await DialogCoordinator.ShowAsync(dialog, DevelopmentLayout.XamlRoot);
     }
 
     private void CopyAllMessagesButton_Click(object sender, RoutedEventArgs e)
     {
         var separator = Environment.NewLine + Environment.NewLine + "――――" + Environment.NewLine + Environment.NewLine;
-        var text = string.Join(separator, _messages.Select(FormatMessageDetails));
+        var text = string.Join(separator, _messages.Select(item => FormatMessageDetails(item.Notification)));
         if (!string.IsNullOrWhiteSpace(text))
         {
             CopyToClipboard(text);
@@ -189,14 +259,6 @@ public sealed partial class DevelopmentPage : Page
         if (!string.IsNullOrWhiteSpace(DiagnosticsPathText.Text))
         {
             CopyToClipboard(DiagnosticsPathText.Text);
-        }
-    }
-
-    private void CopySelectedMessageButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (MessageList.SelectedItem is GlobalNotification message)
-        {
-            CopyToClipboard(FormatMessageDetails(message));
         }
     }
 

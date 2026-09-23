@@ -1208,27 +1208,61 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void DevelopmentPageKeepsTheWinPoolTwoRoadmapAndExposesOnlyInMemoryDiagnostics()
+    public void DevelopmentPageRemainsGatedAndUsesOnlyInMemoryHistoryAndDiagnosticsPath()
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml.cs"));
-        var view = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml"));
-        Assert.Contains("WinPool 2.0", page, StringComparison.Ordinal);
-        Assert.Contains("WinPool 1.x", page, StringComparison.Ordinal);
+        var viewPath = Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml");
+        var view = File.ReadAllText(viewPath);
+        var mainWindow = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var layout = XDocument.Load(viewPath).Root?.Element(presentation + "Grid")
+            ?? throw new InvalidOperationException("The Development page must define its root layout grid.");
+        var areas = layout.Elements(presentation + "Border").ToArray();
+        Assert.Equal(3, areas.Length);
+        Assert.Equal(
+            new[] { "LogArea", "RightTopEmptyArea", "LowerEmptyArea" },
+            areas.Select(area => (string?)area.Attribute(xaml + "Name")).ToArray());
+        Assert.Equal("0", (string?)areas[0].Attribute("Grid.Row"));
+        Assert.Equal("0", (string?)areas[0].Attribute("Grid.Column"));
+        Assert.Equal("0", (string?)areas[1].Attribute("Grid.Row"));
+        Assert.Equal("1", (string?)areas[1].Attribute("Grid.Column"));
+        Assert.Equal("1", (string?)areas[2].Attribute("Grid.Row"));
+        Assert.Equal("2", (string?)areas[2].Attribute("Grid.ColumnSpan"));
+        Assert.Empty(areas[1].Elements());
+        var lowerAreaContent = areas[2].Elements().ToArray();
+        Assert.Single(lowerAreaContent);
+        Assert.Equal("TextBlock", lowerAreaContent[0].Name.LocalName);
+        Assert.Equal("AiEntryHint", (string?)lowerAreaContent[0].Attribute(xaml + "Name"));
+
+        Assert.Contains("if (ViewModel.CurrentPreferences.DeveloperMode)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ShellPageKind.Development", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("private static bool IsDeveloperPage(ShellPageKind page)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("!IsDeveloperPage(page) || ViewModel.CurrentPreferences.DeveloperMode", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (!IsShellPageAvailable(page))", mainWindow, StringComparison.Ordinal);
         Assert.Contains("DiagnosticsPathText", view, StringComparison.Ordinal);
         Assert.Contains("MessageList", view, StringComparison.Ordinal);
-        Assert.Contains("RoadmapTitle", view, StringComparison.Ordinal);
+        Assert.Contains("DoubleTapped=\"MessageList_DoubleTapped\"", view, StringComparison.Ordinal);
+        Assert.Contains("FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)", page, StringComparison.Ordinal);
+        Assert.Contains("ShowMessageDetailsAsync(item.Notification)", page, StringComparison.Ordinal);
+        Assert.Contains("DialogCoordinator.ShowAsync(dialog, DevelopmentLayout.XamlRoot)", page, StringComparison.Ordinal);
+        Assert.Contains("CopyToClipboard(details)", page, StringComparison.Ordinal);
+        Assert.Contains("人工智能入口，功能正在开发中。", page, StringComparison.Ordinal);
+        Assert.Contains("AI entry — feature in development.", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<InfoBar", view, StringComparison.Ordinal);
         Assert.Contains("ContextHelpHost", view, StringComparison.Ordinal);
         Assert.Contains("SetDisabledReason", page, StringComparison.Ordinal);
         Assert.Contains("NotificationService.History", page, StringComparison.Ordinal);
+        Assert.Contains("DiagnosticsDirectoryPath", page, StringComparison.Ordinal);
         Assert.Contains("ClearHistory()", page, StringComparison.Ordinal);
         Assert.Contains("RefreshDiagnosticsDirectoryState()", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Directory.CreateDirectory", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Directory.EnumerateFiles", page, StringComparison.Ordinal);
         Assert.DoesNotContain("File.Read", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("File.Open", page, StringComparison.Ordinal);
         Assert.DoesNotContain("GetDevelopmentDiagnosticsRequest", page, StringComparison.Ordinal);
         Assert.DoesNotContain("IAgentConnection", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Process.Start", page, StringComparison.Ordinal);
@@ -1244,8 +1278,12 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml"));
         var card = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "Controls", "NotificationCard.xaml.cs"));
+        var cardXaml = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "Controls", "NotificationCard.xaml"));
         var notificationService = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Application", "GlobalNotificationService.cs"));
+        var developmentPage = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml.cs"));
         var monitorXaml = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml"));
         var monitorPage = File.ReadAllText(
@@ -1254,12 +1292,30 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "TestPage.xaml"));
 
         Assert.Contains("MaximumVisibleNotificationCards = 3", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("Take(MaximumVisibleNotificationCards)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("DefaultActiveCapacity = 3", notificationService, StringComparison.Ordinal);
+        Assert.Contains("VisibleNotificationCapacity = DefaultActiveCapacity", notificationService, StringComparison.Ordinal);
+        Assert.Contains("NotificationService = new GlobalNotificationService()", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (_notifications.Count >= activeCapacity)", notificationService, StringComparison.Ordinal);
+        Assert.Contains(".Take(GetMaximumVisibleNotificationCards())", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("RootGrid.ActualHeight", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("NotificationCardHeightDip = 128", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Math.Clamp(count, 1, MaximumVisibleNotificationCards)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("Width=\"384\"", cardXaml, StringComparison.Ordinal);
+        Assert.Contains("Height=\"128\"", cardXaml, StringComparison.Ordinal);
+        Assert.Contains("To=\"420\"", cardXaml, StringComparison.Ordinal);
+        Assert.Contains("Duration=\"0:0:0.24\"", cardXaml, StringComparison.Ordinal);
+        Assert.Contains("ExitAnimationCompleted=\"NotificationCard_ExitAnimationCompleted\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("if (VisibleNotifications.Any(item => item.IsDismissing))", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("CompleteNotificationExit(item)", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("NotificationService.History", mainWindow, StringComparison.Ordinal);
         Assert.Contains("DismissExpired()", mainWindow, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromSeconds(1)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("DialogCoordinator.ShowAsync", mainWindow, StringComparison.Ordinal);
         Assert.Contains("ShowErrorNotificationMessageAsync", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("NotificationService.History", developmentPage, StringComparison.Ordinal);
+        Assert.Contains("进入开发页查看详情", card, StringComparison.Ordinal);
+        Assert.Contains("Open Developer features for details", card, StringComparison.Ordinal);
+        Assert.Contains("notification.Message", card, StringComparison.Ordinal);
         Assert.DoesNotContain("CreatedAt <= cutoff", mainWindow, StringComparison.Ordinal);
         Assert.Contains("NotificationCard", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Invoked=\"NotificationCard_Invoked\"", windowXaml, StringComparison.Ordinal);
@@ -1417,7 +1473,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void TestAndDevelopmentPagesStillExposeNavigationIdentity()
+    public void TestAndDevelopmentPagesRemainBehindDeveloperModeNavigationGate()
     {
         var root = FindRepositoryRoot();
         var testPageXaml = File.ReadAllText(
@@ -1426,11 +1482,14 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "TestPage.xaml.cs"));
         var developmentPageCode = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "DevelopmentPage.xaml.cs"));
+        var mainWindow = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
 
         Assert.Contains("WinPool 2.0", testPageXaml, StringComparison.Ordinal);
         Assert.Contains("WinPool 1.x", testPageXaml, StringComparison.Ordinal);
-        Assert.Contains("WinPool 2.0", developmentPageCode, StringComparison.Ordinal);
-        Assert.Contains("WinPool 1.x", developmentPageCode, StringComparison.Ordinal);
+        Assert.Contains("ShellPageKind.Test or ShellPageKind.Development", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("!IsDeveloperPage(page) || ViewModel.CurrentPreferences.DeveloperMode", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("if (!IsShellPageAvailable(page))", mainWindow, StringComparison.Ordinal);
 
         foreach (var pageCode in new[] { testPageCode, developmentPageCode })
         {
