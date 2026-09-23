@@ -1359,7 +1359,7 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("MaximumNotificationCardHeightDip = 200", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Math.Clamp(count, 1, MaximumVisibleNotificationCards)", mainWindow, StringComparison.Ordinal);
         Assert.Contains("Width=\"384\"", cardXaml, StringComparison.Ordinal);
-        Assert.Contains("MinHeight=\"72\"", cardXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MinHeight=", cardXaml, StringComparison.Ordinal);
         Assert.Contains("MaxHeight=\"200\"", cardXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Height=\"128\"", cardXaml, StringComparison.Ordinal);
         Assert.Contains("To=\"420\"", cardXaml, StringComparison.Ordinal);

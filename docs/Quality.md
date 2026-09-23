@@ -2,6 +2,12 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
+## 2026-09-23 通知卡透明余高修正
+
+基线为 `40d8a9b` 加本轮修改。移除 `NotificationCard.xaml` 外层 `MinHeight=72`，让 384 DIP 宽的卡片高度跟随单层 InfoBar 内容；200 DIP 最大高度、堆叠间距和向右离场规则未修改。更新旧的架构断言后，`NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails` 定点测试 1/1 passed；隔离 App/Agent Release 构建 exit 0、0 warnings、0 errors，合并 288 shared／294 App-only／10 Agent-only／0 collisions。有效命令、日志、TRX 和运行树位于 `artifacts/verification-notification-card-height-20260923-r2/`；既有 `artifacts/Release` 的 592 个文件哈希及时间戳未变。首次 r1 命令因工作目录错误在编译前退出，记录已保留；r2 编译的项目库和测试中间输出仍使用共享 `artifacts/build/<项目>/Release`，没有将其当作完全隔离。
+
+当前用户运行的 `artifacts/Release` App/Agent 是旧版本，未为了本次小幅布局修正中断。因此新卡片的原生视觉高度与离场后占位未验证；本轮通过范围为源码、定点架构测试和隔离编译。此前 UIA 读到的短卡 InfoBar 高度约 53，但当时外层仍有 72 DIP 下限，不能作为修复后的原生证据。
+
 ## 2026-09-23 最新 13 项界面反馈：验证结果
 
 基线为 `5424902` 加本轮修改。最终 Architecture 47/47 passed、0 failed、0 skipped；`WinPool.slnx` 隔离 Release 构建 exit 0、0 warnings、0 errors，App/Agent 合并为 288 shared／294 App-only／10 Agent-only／0 collisions。TRX、实际构建命令与日志位于 `artifacts/verification-20260923-final-integration-5c02b9a7/`；合并产物位于其 `Release/`，共 592 文件。保护目录 `artifacts/Release` 的 App EXE 哈希和时间在构建前后相同。自动测试不代替原生界面检查。

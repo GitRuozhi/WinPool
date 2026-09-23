@@ -41,7 +41,7 @@
       <tr><td>开发页布局</td><td>外边距 24 DIP；横向和纵向分隔条各 8 DIP；上方 2*、下方 *</td><td>左上消息列表／右上空白／下方空白</td><td>分隔条可拖拽；宽度小于 760 DIP 时右上隐藏，消息列表横跨上方；不显示列表标题、说明和页面大标题</td></tr>
       <tr><td>消息列表条目</td><td>单行，行最小高 40 DIP；内边距 8×5 DIP；字号 12 DIP</td><td>时间／级别／来源／摘要</td><td>超宽内容省略号；悬停使用主题底色，选中使用强调底色与 3 DIP 左侧标记；双击显示详情</td></tr>
       <tr><td>消息详情</td><td>半透明黑色遮罩 <code>#80000000</code>；中央只读 TextBox，宽随页面缩到 160–640 DIP，高 96–380 DIP</td><td>无标题及按钮；短文本收缩高度，长文本显示竖向滚动</td><td>文本可选择并用 Ctrl+C 复制；点击文本框外关闭</td></tr>
-      <tr><td>右下消息卡</td><td>宽 384 DIP；内容高 72–200 DIP；卡间距 6 DIP</td><td>高度按实际内容变化；单层 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；无额外 Border 包裹</td></tr>
+      <tr><td>右下消息卡</td><td>宽 384 DIP；无额外最小高度；内容最大高 200 DIP；卡间距 6 DIP</td><td>高度由 InfoBar 实际内容决定；单层 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；外层 UserControl 不再留下透明空白</td></tr>
       <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；消息历史寿命独立</td></tr>
       <tr><td>分区数值</td><td>“起点”“终点”“容量”固定标签；起终点显示 <code>1,024MiB (自适应单位)</code></td><td>起终点数值右对齐，MiB 整数有千位分隔符，括号内自动换 GiB/TiB</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行仅展示自适应单位；操作按钮随选择切换新建／格式化</td></tr>
       <tr><td>拓扑剩余空间描边</td><td>Light <code>#60000000</code>；Dark <code>#40FFFFFF</code>（XAML AARRGGBB）；高对比度 <code>SystemColorWindowTextColor</code></td><td><span class="swatch" style="background:rgba(0,0,0,.376)"></span><span class="swatch" style="background:rgba(255,255,255,.251)"></span></td><td><code>WinPoolTopologyRestStrokeBrush</code>；保持高对比度系统资源</td></tr>
