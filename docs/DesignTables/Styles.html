@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinPool 前端样式核对表</title>
+  <style>
+    :root{color-scheme:light dark;font-family:"Segoe UI Variable","Microsoft YaHei UI",sans-serif}
+    body{max-width:1280px;margin:24px auto;padding:0 20px;line-height:1.5}
+    h1{font-size:24px;margin-bottom:6px}p{margin:8px 0 18px;color:#667}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:9px 11px;border:1px solid #8a8a8a55;text-align:left;vertical-align:top}
+    th{position:sticky;top:0;background:Canvas;font-weight:600}
+    tbody tr:nth-child(even){background:#8881}
+    code{font-family:Consolas,monospace;font-size:13px}
+    .swatch{display:inline-block;width:32px;height:18px;vertical-align:middle;margin-right:8px;border:1px solid #7776;border-radius:3px}
+    .small{font-size:12px}.back{margin-bottom:16px}
+  </style>
+</head>
+<body>
+  <div class="back"><a href="README.md">← 设计核对表索引</a></div>
+  <h1>前端样式核对表</h1>
+  <p>按当前 App.xaml 资源与主要 XAML 页面记录。色块仅显示硬编码的字面颜色；标有 ThemeResource 的颜色应在实际亮色、暗色和高对比度界面检查。</p>
+  <table>
+    <thead><tr><th>类别</th><th>当前值／资源</th><th>可视检查</th><th>使用位置与规则</th></tr></thead>
+    <tbody>
+      <tr><td>界面字体</td><td>WinUI 默认字体；文档建议 Segoe UI Variable</td><td>中文由系统回退字体呈现</td><td>普通文字不单独覆盖字族；日志时间列使用 Consolas，字号 12 DIP</td></tr>
+      <tr><td>图标字体</td><td><code>FontIcon</code>／<code>SymbolThemeFontFamily</code></td><td><span style="font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:22px"></span>　<span style="font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:22px"></span></td><td>按钮图标通常 14 DIP；分区恢复按钮 12 DIP，见按钮表</td></tr>
+      <tr><td>默认强调色</td><td><code>WinPoolAccentColor #0078D4</code></td><td><span class="swatch" style="background:#0078D4"></span>蓝色</td><td>App.xaml；设置可改变当前强调色，不能只凭本行判断运行时颜色</td></tr>
+      <tr><td>强调悬停遮罩</td><td><code>WinPoolAccentHoverColor #330078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.2)"></span>20% 蓝</td><td>强调元素指针悬停</td></tr>
+      <tr><td>强调按下遮罩</td><td><code>WinPoolAccentPressedColor #4D0078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.3)"></span>30% 蓝</td><td>强调元素按下</td></tr>
+      <tr><td>标题栏选择器悬停</td><td><code>#660078D4</code>（XAML AARRGGBB）</td><td><span class="swatch" style="background:rgba(0,120,212,.4)"></span>40% 蓝</td><td>活动系统选择器的标题栏悬停背景</td></tr>
+      <tr><td>强调描边</td><td><code>#60CDFF</code></td><td><span class="swatch" style="background:#60CDFF"></span>亮蓝</td><td><code>WinPoolAccentButtonStyle</code> 边框</td></tr>
+      <tr><td>强调按钮前景</td><td><code>#FFFFFF</code></td><td><span class="swatch" style="background:#FFFFFF"></span>白色</td><td>默认强调按钮文字；与运行时强调色的对比度需实机检查</td></tr>
+      <tr><td>系统控件强调别名</td><td><code>AccentFillColor*Brush</code>、<code>AccentTextFillColor*Brush</code>、<code>FocusStrokeColorOuterBrush</code></td><td>跟随 WinPool 强调色</td><td>选中、焦点、开关开启状态由 App.xaml 别名统一</td></tr>
+      <tr><td>卡片背景</td><td><code>CardBackgroundFillColorDefaultBrush</code></td><td>亮／暗／高对比度随主题</td><td>分区、结构、开发页各区域背景</td></tr>
+      <tr><td>卡片边框</td><td><code>CardStrokeColorDefaultBrush</code>，1 DIP</td><td>主题描边</td><td>主工作区边框、消息卡外框</td></tr>
+      <tr><td>卡片圆角</td><td>4 DIP</td><td>统一小圆角</td><td>分区、结构、开发三区域及消息卡</td></tr>
+      <tr><td>次要文字</td><td><code>TextFillColorSecondaryBrush</code></td><td>主题次要文字</td><td>日志时间、级别、来源和 AI 开发中提示；不用固定灰色</td></tr>
+      <tr><td>启动恢复过渡</td><td>工作区未读到可用预显时，中央 32 DIP <code>ProgressRing</code> 与状态文字</td><td>有效缓存载入后直接显示上次系统的页面内容</td><td>预显期间页面不可交互，标题栏系统名可见但选择器禁用；Agent 核对完成后放开交互。缓存不可用时保留过渡提示，避免先显示默认系统</td></tr>
+      <tr><td>开发页布局</td><td>外边距 24 DIP；区域间距 16 DIP；上方 2*、下方 *</td><td>左上日志／右上空白／下方空白</td><td>宽度小于 760 DIP 时右上隐藏，日志横跨上方；无页面大标题</td></tr>
+      <tr><td>日志条目</td><td>单行，最小高 28 DIP；内边距 8×4 DIP；字号 12 DIP</td><td>时间／级别／来源／摘要</td><td>超宽内容省略号；双击显示可复制详情浮层，外部点击关闭</td></tr>
+      <tr><td>详情浮层</td><td>原生 Flyout；只读 TextBox，宽 300–560 DIP，高 180–320 DIP</td><td>无标题及按钮</td><td>文本可选择并用 Ctrl+C 复制；外部点击或 Esc 关闭</td></tr>
+      <tr><td>右下消息卡</td><td>宽 384 DIP；内容高 72–200 DIP；卡间距 6 DIP</td><td>高度按实际内容变化</td><td>右下停靠；最多三张，窗口高度不足时减少张数</td></tr>
+      <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；日志寿命独立</td></tr>
+      <tr><td>分区数值</td><td>输入整数 MiB；起止位置显示 <code>xxMiB (自适应单位)</code></td><td>起止位置固定 MiB，括号内自动换 GiB/TiB</td><td>创建容量第一行可编辑且右侧常显 MiB、图标式 MAX，第二行仅展示自适应单位；起点和长度使用 1 MiB 网格</td></tr>
+      <tr><td>拓扑剩余空间描边</td><td>Light <code>#60000000</code>；Dark <code>#40FFFFFF</code>（XAML AARRGGBB）；高对比度 <code>SystemColorWindowTextColor</code></td><td><span class="swatch" style="background:rgba(0,0,0,.376)"></span><span class="swatch" style="background:rgba(255,255,255,.251)"></span></td><td><code>WinPoolTopologyRestStrokeBrush</code>；保持高对比度系统资源</td></tr>
+    </tbody>
+  </table>
+  <p class="small">视觉参考：<a href="https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography">Microsoft Windows typography</a>、<a href="https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font">Segoe Fluent Icons</a>。实际尺寸、焦点与主题效果仍以 WinUI 运行界面为准。</p>
+</body>
+</html>

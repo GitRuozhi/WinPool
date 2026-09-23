@@ -72,6 +72,8 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提交的本机事实，不初始化数据库、不取得写租约；校验现有 schema、文档格式和哈希后先呈现历史。Agent 就绪后自动顺序执行 Storage、Hardware 两次采集，沿用同一串行采集/合并/持久化入口，成功落库后发送类型化库存事件，失败发送失败事件且仍尝试下一阶段。App 的 `LocalInventoryObserver` 在工作区初始化前订阅，初始化后接收阶段结果；晚连接与重连补读 Agent 缓存。UI 线程统一应用新结果，拒绝旧/重复回报，保留模拟选择；两页手动刷新仍触发各自用途的采集。退出、提权交接与切换数据根前取消并等待启动采集，避免继续写旧数据根。IPC 为 11，核心 SQLite schema 仍为 17。
 
+窗口恢复上次系统另走 `ReadOnlyWorkspaceStartupReader`：在同一个只读 SQLite 快照内核对 schema、工作区选择及其指向的唯一活动文档；模拟文档核对元数据与 SHA-256，本机文档核对缓存格式。首个异步偏好等待前隐藏系统内容，页面偏好加载后只对验证成功的文档做临时预显，标题栏显示系统名但暂不接受操作；损坏、缺失或旧 schema 则显示居中加载态。预显不写数据库，也不放开工作区状态持久化。Agent 连接后仍由现有仓储完整恢复目录与选择；只有确认后的编辑文档签名变化才重建已显示编辑页，最后放开页面和系统选择器。读取本次运行消息历史不阻塞首屏。此路径只优化可见启动顺序，不把预显当成真实存储状态或 Agent 的提交权威。
+
 完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；同一 LUID 通过 D3DKMT 保存适配器类型标志、显示侧描述和渲染侧描述。`IndirectDisplayDevice` 为真时统一对象使用显示侧名称，保留 DXGI 原始描述，并禁止按相同 `VEN/DEV` 借用物理 GPU 的驱动和 PCI 位置。`Win32_VideoController`、`Win32_DesktopMonitor` 与 `WmiMonitorID` 在统一事实中属于字段补充，不形成第二组 GPU 或 Monitor 设备，驱动、型号和厂商仍可按可靠硬件标识补入 DXGI 对象。软件或间接显示 DXGI 适配器均不按标志或名称过滤。网络保持 `WinPool.NetworkAdapter` 统一来源键不变，内部以 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 作为对象集合边界，按接口索引关联全部 IP 地址与默认路由，并替换同次脚本采集产生的原始 `MSFT_NetAdapter` 观察。同一来源的成功刷新直接整组替换旧网络对象，不引入跨来源迁移规则。`WinPoolSystem` 是不持久化的运行时投影；入库的是来源事实，启动从来源事实重新生成统一模型，完整硬件在 Agent 启动第二阶段自动刷新，也可手动刷新。Monitor 不在报告投影中筛除，存储摘要不增加硬件页专用条件。
 
 `HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 复用现有系统切换入口；下拉选择先暂存，待 `DropDownClosed` 后再切换工作区和重建列表，避免在 WinUI 弹出层仍打开时使控件集合失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式为核心 SQLite 17 / 监控 SQLite 1 / IPC 11 / StorageSystemDocument 3 / 来源事实 1。
@@ -80,7 +82,9 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 
-模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。具体操作和边界见[模拟编辑细节](SimulationEditingDesign.md)及[系统 JSON 文件设计](SystemJsonDesign.md)。
+模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。当前编辑资格与几何边界见[模拟规则表](DesignTables/SimulationRules.md)；旧叙述稿已[归档](Archive/20260923-design-details/README.md)。
+
+模拟新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。分区页与结构页自动创建读取该几何，草稿规划先按同一粒度整理容量，规则校验及模拟提交再以共享几何核对，不能由界面独自夹紧超界容量。空盘勾选 MSR 时创建于 1–17 MiB；已有导入结构保持原始偏移及容量，不自动重排。
 
 模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。扩缩入口由分区页的“扩展分区／压缩分区”按钮打开同窗口串行对话框，输入整数 MiB，对话框只接受落在能力范围内的目标并在确认前逐次校验；页面容量框对已有分区只显示四舍五入后的当前容量，不作为目标输入，因此两位显示舍入不会再被当成隐式修改，也不会让按钮永久灰置。上述范围不是 Windows `Get-PartitionSupportedSize` 实测，也不允许真实写入；当前验收状态见活动 Plan。
 
@@ -94,11 +98,11 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presenter 负责本地化，App 负责布局和交互。人工反馈修复采用最多三张即时卡片，超出时移出最旧卡但保留会话 History，不提供合并或溢出入口；独立重复消息分开记录。普通卡 8 秒自动消失，错误卡 20 秒，普通卡点击消失，错误卡点击显示消息对话框。清空历史不删除活动消息。消息只保存有界文本与标识，不持有控件、异常对象或完整采集文档，不写数据库或新日志文件。进度显式不进入历史，持续异常按真实状态变化发出，不因轮询重复发布；消息消失只改变呈现。验证范围见 [Quality](Quality.md)。
 
-即时卡的宽高由 `NotificationCard` 固定，退出动画在 App 的展示层向右移动，动画结束后才释放可见项；服务的历史与生命周期不依赖动画。主窗口以展示项实例身份处理完成回调，避免旧卡回调移走同 ID 的新项。触发时机、图标、悬停和开发页布局见[界面交互细节](InteractionDesign.md)。
+即时卡的宽度由 `NotificationCard` 固定，高度随有界内容变化；退出动画在 App 的展示层向右移动，动画结束后才释放可见项；服务的历史与生命周期不依赖动画。主窗口以展示项实例身份处理完成回调，避免旧卡回调移走同 ID 的新项。触发时机、图标、悬停和样式分别见[设计核对表](DesignTables/README.md)。
 
-开发页消费现有消息服务并显示 DataRootLayout.DiagnosticsDirectory 的当前实际路径，不解析日志。消息缓存不依赖开发页生命周期或 DeveloperMode；退出 App 自然清空，不补采后台历史。开发者模式关闭仍隐藏开发页，错误卡固定提示到开发页查看详情，不另加开启模式判断。现有 CommandLog 不接入此页，不复制成第二套历史。原生 ToolTip 与开发页详情分别承担短说明和可复制长信息；禁用控件仍应支持鼠标悬停帮助。同窗口 ContentDialog 使用小型串行协调，不增加通用任务平台，也不增加可见功能入口。
+开发页只消费现有消息服务，不显示 Diagnostics 路径或读取日志文件。消息缓存不依赖开发页生命周期或 DeveloperMode；退出 App 自然清空，不补采后台历史。开发者模式关闭仍隐藏开发页，错误卡固定提示到开发页查看详情，不另加开启模式判断。现有 CommandLog 不接入此页，不复制成第二套历史。原生 ToolTip 与开发页详情分别承担短说明和可复制长信息；禁用控件仍应支持鼠标悬停帮助。其它需要确认的同窗口 ContentDialog 继续使用小型串行协调，不增加通用任务平台。
 
-开发页左上日志列表直接投影 History，不读取 Diagnostics 文件；列表条目双击后由串行 `ContentDialog` 显示只读可选文字并提供整段复制。右上和下方保留空区域，下方只给小号 AI 入口开发中提示；窄窗时日志区横跨上方。复制全部、清空和路径复制仍在日志区。
+开发页左上列表直接投影 History 的单行摘要，不读取 Diagnostics 文件；列表条目双击后用可点击外部关闭的原生 `Flyout` 仅显示只读可选文本框，用户可选择并复制正文。右上和下方保留空区域，下方只给小号 AI 入口开发中提示；窄窗时日志区横跨上方。此页不再显示标题、说明、路径和操作按钮。
 
 ## 数据与生命周期
 

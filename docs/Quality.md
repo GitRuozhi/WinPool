@@ -2,6 +2,16 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
+## 2026-09-23 最新 21 项要求：本轮结果
+
+本轮以 `1d94d2e` 加当前源码为基线。Release 自动回归：Application 291/291、Infrastructure 93/93、Architecture 47/47；Persistence 130 passed、3 个既有大型监控测量按门控 skipped，均 0 failed。新增启动只读读取器的子代理定点 Debug 回归 7/7 passed。TRX 位于 `artifacts/verification-20260923-final-r1/test-results`。Architecture 首轮 46/47：旧断言要求先呈现默认系统，已改为检查预显顺序，R2 47/47；Infrastructure 首轮 90/93：三个格式化测试夹具用非整数 MiB 创建分区，与新规则冲突，改为有效的 500 MiB 后 R2 93/93。首轮失败 TRX 均保留。新增分区几何回归还覆盖大小写不同的磁盘关联与删除中间分区后编号唯一。隔离 App/Agent Release 构建见同一验证目录的 `release-build.log`，exit 0、0 警告、0 错误，运行树在 `artifacts/verification-20260923-final-r1/Release`，合并 288 shared／294 App-only／10 Agent-only／0 collisions；未替换 `artifacts/Release`。
+
+有限原生核对在上述隔离 Release 运行树和现有标准数据根进行，没有清理数据。关闭 Agent 后冷启动：计时脚本约 663 ms 找到主窗口、约 1883 ms 读到 `[模拟] 分区边界`，当时标题栏选择器可见但禁用，说明 Agent 完成前已呈现上次系统；随后选择器启用。该计时包含 WinApp CLI 调用开销，不能作为准确绘制时延或逐帧“零闪烁”证明。重新启动后 UIA 与 `evidence/restart-partition-simulation.png` 核对上次分区页和模拟系统。测试结束将原选择恢复为本机系统／开发页，下一次启动再核对读回；App 和隔离 Agent 均已退出。
+
+开发页 `evidence/startup-restored-development.png` 显示左上单行日志、右上空区及下方提示；第二次双击日志后 `evidence/development-log-detail-r2.png` 显示仅有文本框的详情浮层，UIA 读到 `IsReadOnly=True` 和完整内容，点击下方空区后该编辑控件消失。未实际改动剪贴板，Ctrl+C 复制动作本轮 `unverified`。分区页 `evidence/partition-gap-mib-max.png` 显示独立的右侧“新建／格式化”、固定 MiB 输入后缀、第二行自动单位及图标式最大值；选择 MSR 后空隙时 UIA 读到起点 `17MiB (17 MiB)`、终点 `953674MiB (931.32 GiB)`、默认容量 `953657` MiB，改为 100 MiB 后按最大值恢复 `953657` MiB。选择磁盘头部 1 MiB 空隙时“新建”禁用，UIA HelpText 为“起点按 1 MiB 对齐后，剩余空间不足 1 MiB。”；未提交模拟新建或格式化。成功通知卡曾在 UIA 中显示 384×72 DIP；长短内容的高度变化及向右退场画面本轮 `unverified`。设计表及归档做了内容、链接和范围检查；图标及样式 HTML 在本机 Edge 呈现后的截图为 `evidence/buttons-table.png` 和 `evidence/styles-table.png`，图形与色块可见。真实存储写入未执行。
+
+下面“最近已记录的验证基线”及其后各段只说明此前对应提交/基线的范围，不自动覆盖本轮变化。
+
 ## 最近已记录的验证基线
 
 2026-09-23 系统 JSON、格式化方式、通知卡和开发页本轮：基线 `87c4f6e` 后的本轮改动。定点 Release 回归为 Application `V049PartitionSemanticsTests` 15/15、Infrastructure 格式协调与命令预览 28/28、Architecture 47/47，均 exit 0、0 failed/0 skipped；TRX 和日志在 `artifacts/verification-20260923-112235`。导入 JSON 嵌套形状补充检查的 Application 定点 Debug 回归另为 3/3 passed、0 failed（终端结果，未另存 TRX）；它只验证该校验器，不替代系统导入原生往返。首次 Infrastructure 因新增计划参数 bool 与文本辅助方法类型不匹配而编译失败；首次 Architecture 44/47，三项旧断言仍要求已移除的开发页路线标题和固定取三卡写法。修正类型并把断言更新为当前导航门、内存日志、三区域和卡片边界后，Infrastructure 与 Architecture 分别在 R2 得到上述通过结果。没有把首轮失败覆盖或记为通过。

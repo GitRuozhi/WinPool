@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinPool 按钮与图标核对表</title>
+  <style>
+    :root{color-scheme:light dark;font-family:"Segoe UI Variable","Microsoft YaHei UI",sans-serif}
+    body{max-width:1440px;margin:24px auto;padding:0 20px;line-height:1.5}
+    h1{font-size:24px;margin-bottom:6px}p{margin:8px 0 18px;color:CanvasText}
+    table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0 24px}
+    th,td{padding:8px 10px;border:1px solid #8a8a8a66;text-align:left;vertical-align:middle}
+    th{position:sticky;top:0;background:Canvas;font-weight:600}
+    tbody tr:nth-child(even){background:#8881}
+    code{font-family:Consolas,monospace;font-size:13px}
+    .glyph{font-family:"Segoe Fluent Icons","Segoe MDL2 Assets";font-size:24px;line-height:1;min-width:42px;text-align:center}
+    .small{font-size:12px}.back{margin-bottom:16px}.section{margin-top:30px}
+  </style>
+</head>
+<body>
+  <div class="back"><a href="README.md">← 设计核对表索引</a></div>
+  <h1>按钮与图标核对表</h1>
+  <p>按当前 WinPool App 源码记录可操作按钮及其实际图形。图形列优先使用 <code>Segoe Fluent Icons</code>，本机没有该字体时使用 <code>Segoe MDL2 Assets</code> 显示同一码位；个别字形轮廓可能随系统字体不同。含“无图标”的控件确实只显示文字或色块。菜单中的 Manage 命令与右侧命令按钮复用同一图标。</p>
+  <p class="small">字形参考：<a href="https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font">Microsoft Segoe Fluent Icons font</a>。替换字形前应核对操作语义、上下文帮助及自动化名称。</p>
+
+  <h2 class="section">窗口导航与 Manage</h2>
+  <table>
+    <thead><tr><th>图形</th><th>操作文字</th><th>码位</th><th>控件与源码</th></tr></thead>
+    <tbody>
+      <tr><td class="glyph">&#xE950;</td><td>硬件 Hardware</td><td><code>U+E950</code></td><td>标题栏导航项（仅开发者模式）— <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE80F;</td><td>管理 Manage</td><td><code>U+E80F</code></td><td>标题栏导航项 — <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE710;</td><td>结构 Storage structure</td><td><code>U+E710</code></td><td>标题栏导航项 — <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xEDA2;</td><td>分区 Disk partitions</td><td><code>U+EDA2</code></td><td>标题栏导航项 — <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE768;</td><td>测试 Disk tests</td><td><code>U+E768</code></td><td>标题栏导航项（仅开发者模式）— <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE9D9;</td><td>监控 Monitor</td><td><code>U+E9D9</code></td><td>标题栏导航项 — <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE943;</td><td>开发 Development</td><td><code>U+E943</code></td><td>标题栏导航项（仅开发者模式）— <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE713;</td><td>设置 Settings</td><td><code>U+E713</code></td><td>标题栏导航项 — <code>MainWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE8B5;</td><td>导入 Import / 导入模拟系统 Import simulated system</td><td><code>U+E8B5</code></td><td>所选“导入”快捷项及 System 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE72C;</td><td>刷新本机信息 Refresh local info</td><td><code>U+E72C</code></td><td>System 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE8AB;</td><td>转换本机到模拟 Convert local to simulation / 转换为 GPT Convert to GPT</td><td><code>U+E8AB</code></td><td>System、Disk 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xEDE1;</td><td>导出模拟系统 Export simulated system</td><td><code>U+EDE1</code></td><td>System 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE74D;</td><td>删除模拟系统 Delete simulation / 删除分区 Delete partition</td><td><code>U+E74D</code></td><td>System、Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE8AC;</td><td>重命名存储池／磁盘 Rename pool / disk；修改卷标 Change volume label</td><td><code>U+E8AC</code></td><td>Pool、Disk、Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE710;</td><td>创建存储池 Create pool / 新建分区 New partition</td><td><code>U+E710</code></td><td>Pool、Disk 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE90F;</td><td>编辑存储池、存储层或分区 Edit pool, tier, or partition</td><td><code>U+E90F</code></td><td>Pool、Tier、Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE945;</td><td>优化驱动器 Optimize drive</td><td><code>U+E945</code></td><td>Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE9CE;</td><td>初始化磁盘 Initialize disk / 格式化分区 Format partition</td><td><code>U+E9CE</code></td><td>Disk、Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xEDA2;</td><td>联机 Online / 脱机 Offline</td><td><code>U+EDA2</code></td><td>Disk 命令；文字依磁盘当前状态变化 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE90A;</td><td>系统属性对话框 System properties dialog</td><td><code>U+E90A</code></td><td>Disk、Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE838;</td><td>打开资源管理器 Open in File Explorer</td><td><code>U+E838</code></td><td>Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE8B7;</td><td>修改盘符和路径 Change drive letter and paths</td><td><code>U+E8B7</code></td><td>Partition/Volume 命令 — <code>MainPage.xaml.cs</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">硬件、结构与分区</h2>
+  <table>
+    <thead><tr><th>图形</th><th>操作文字</th><th>码位</th><th>控件与源码</th></tr></thead>
+    <tbody>
+      <tr><td class="glyph">&#xE72C; / &#xE711;</td><td>刷新硬件 Hardware refresh / 取消 Cancel</td><td><code>U+E72C</code> / <code>U+E711</code></td><td><strong>状态变化图形：</strong>采集中显示取消图标和“取消”；空闲时显示刷新图标 — <code>HardwarePage.cs</code></td></tr>
+      <tr><td class="glyph">&#xEDE1;</td><td>导出硬件报告 Export hardware report</td><td><code>U+EDE1</code></td><td>硬件页动态创建的导出按钮 — <code>HardwarePage.cs</code></td></tr>
+      <tr><td class="glyph">&#xE7A7;</td><td>撤销 Undo</td><td><code>U+E7A7</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE7A6;</td><td>重做 Redo</td><td><code>U+E7A6</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE711;</td><td>放弃全部 Discard all</td><td><code>U+E711</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE73E;</td><td>应用全部 Apply all</td><td><code>U+E73E</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE710;</td><td>创建存储池 Create pool / 创建虚拟磁盘和分区 Create virtual disk and partition</td><td><code>U+E710</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE74D;</td><td>解散存储池 Dissolve pool / 删除虚拟磁盘和分区 Delete virtual disk and partition</td><td><code>U+E74D</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE7E8;</td><td>退役磁盘 Retire disk</td><td><code>U+E7E8</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE72C;</td><td>热备磁盘 Hot spare disk</td><td><code>U+E72C</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>保存存储池属性 Save pool properties</td><td><code>U+E74E</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8FB;</td><td>联机 Online</td><td><code>U+E8FB</code></td><td>分区页磁盘操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8AE;</td><td>脱机 Offline</td><td><code>U+E8AE</code></td><td>分区页磁盘操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE9CE;</td><td>初始化 Initialize / 格式化 Format</td><td><code>U+E9CE</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8AB;</td><td>转换为 GPT Convert to GPT</td><td><code>U+E8AB</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE74D;</td><td>删除分区 Delete partition</td><td><code>U+E74D</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8A5;</td><td>扩展分区 Extend partition</td><td><code>U+E8A5</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE73F;</td><td>压缩分区 Shrink partition</td><td><code>U+E73F</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE838;</td><td>打开资源管理器 Open in File Explorer</td><td><code>U+E838</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE777;</td><td>恢复推荐值 Reset recommended value</td><td><code>U+E777</code></td><td>分区大小、文件系统、分配单元大小、快速格式化的重复重置按钮 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>最大容量 MAX</td><td><code>U+E74E</code></td><td>分区创建表单；与结构页最大容量按钮使用同一图形 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE710;</td><td>新建 Create</td><td><code>U+E710</code></td><td>分区创建表单 — <code>DiskPartitionPage.xaml</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">监控、设置、欢迎页与动态控件</h2>
+  <table>
+    <thead><tr><th>图形</th><th>操作文字</th><th>码位</th><th>控件与源码</th></tr></thead>
+    <tbody>
+      <tr><td class="glyph">色块，无字形</td><td>磁盘曲线颜色 Color swatch</td><td>—</td><td>监控页逐磁盘色块按钮；打开颜色选择器 — <code>MonitorPage.xaml</code> / <code>MonitorPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE790;</td><td>自动颜色 Automatic colors</td><td><code>U+E790</code></td><td>监控页 — <code>MonitorPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE7B5;</td><td>事件 Events</td><td><code>U+E7B5</code></td><td>监控页 — <code>MonitorPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>导出数据 Export data</td><td><code>U+E74E</code></td><td>监控页 — <code>MonitorPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8A7;</td><td>打开欢迎内容 Open welcome content</td><td><code>U+E8A7</code></td><td>设置页 — <code>SettingsPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8B7;</td><td>打开路径 Open path</td><td><code>U+E8B7</code></td><td>数据位置与 7-Zip 路径 — <code>SettingsPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>全部恢复默认 Reset all defaults</td><td><code>U+E74E</code></td><td>设置页 — <code>SettingsPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE774;</td><td>访问官网 Visit website</td><td><code>U+E774</code></td><td>设置页“关于” — <code>SettingsPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE777;</td><td>查看更新 Check for updates</td><td><code>U+E777</code></td><td>设置页“关于” — <code>SettingsPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8F2;</td><td>提交反馈 Send feedback / 加入 QQ 群 Join QQ group</td><td><code>U+E8F2</code></td><td>设置页“关于” — <code>SettingsPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE711;</td><td>关闭 Close</td><td><code>U+E711</code></td><td>欢迎页角落关闭按钮 — <code>WelcomeWindow.xaml</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>切换欢迎内容 Cycle welcome content；确认 Confirm</td><td>—</td><td>欢迎页底部两个文本按钮；Cycle 的标题由当前内容变化 — <code>WelcomeWindow.xaml.cs</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>选择曲线颜色 Select series color</td><td>—</td><td>监控页运行时颜色选择器弹层 — <code>MonitorPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE777;</td><td>恢复推荐值 Reset recommended value</td><td><code>U+E777</code></td><td>结构页按可编辑属性行生成；字段不同，操作均恢复该字段的推荐值 — <code>StorageStructurePage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>使用最大值 Use maximum</td><td><code>U+E74E</code></td><td>结构页 SSD/HDD/SCM 容量输入组；应用规划的对齐上限 — <code>StorageStructurePage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>复制命令预览 Copy command preview</td><td>—</td><td>结构页待处理操作条目；预览无命令时禁用 — <code>StorageStructurePage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>选择对比列对象 Select comparison column object</td><td>—</td><td>管理页按对象动态创建的纯文字列标题按钮 — <code>MainPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>属性表复制菜单 Copy current value / group / raw fields</td><td>—</td><td>属性表右键菜单项 — <code>PropertyTableContextMenu.cs</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>确认／取消／关闭 Confirm / Cancel / Close</td><td>—</td><td>各页面临时 WinUI 确认对话框的系统文本按钮；标签随操作变化，由所属流程创建</td></tr>
+      <tr><td class="glyph">&#xE76C; / &#xE70D;</td><td>展开 / 折叠 Expand / collapse</td><td><code>U+E76C</code> / <code>U+E70D</code></td><td><strong>状态变化图形：</strong>拓扑节点的当前展开状态决定图形 — <code>TopologyNodeViewModel.cs</code>、<code>TopologyNodeControl.xaml</code></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
