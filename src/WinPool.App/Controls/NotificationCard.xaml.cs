@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using WinPool.Application;
 using Windows.System;
+using Windows.UI.ViewManagement;
 
 namespace WinPool_App.Controls;
 
@@ -15,7 +16,10 @@ namespace WinPool_App.Controls;
 /// </summary>
 public sealed partial class NotificationCard : UserControl
 {
-    private const int MaximumCardMessageLength = 280;
+    private const int MaximumChineseCardTitleLength = 18;
+    private const int MaximumEnglishCardTitleLength = 30;
+    private bool _dismissAnimationStarted;
+    private readonly UISettings _uiSettings = new();
 
     public static readonly DependencyProperty NotificationProperty = DependencyProperty.Register(
         nameof(Notification),
@@ -28,6 +32,12 @@ public sealed partial class NotificationCard : UserControl
         typeof(bool),
         typeof(NotificationCard),
         new PropertyMetadata(false, OnDisplayLanguageChanged));
+
+    public static readonly DependencyProperty IsDismissingProperty = DependencyProperty.Register(
+        nameof(IsDismissing),
+        typeof(bool),
+        typeof(NotificationCard),
+        new PropertyMetadata(false, OnIsDismissingChanged));
 
     public NotificationCard()
     {
@@ -47,7 +57,15 @@ public sealed partial class NotificationCard : UserControl
         set => SetValue(IsChineseProperty, value);
     }
 
+    public bool IsDismissing
+    {
+        get => (bool)GetValue(IsDismissingProperty);
+        set => SetValue(IsDismissingProperty, value);
+    }
+
     public event EventHandler<NotificationCardEventArgs>? Invoked;
+
+    public event EventHandler? ExitAnimationCompleted;
 
     private static void OnNotificationChanged(
         DependencyObject dependencyObject,
@@ -59,6 +77,46 @@ public sealed partial class NotificationCard : UserControl
         DependencyPropertyChangedEventArgs args) =>
         ((NotificationCard)dependencyObject).UpdateNotification();
 
+    private static void OnIsDismissingChanged(
+        DependencyObject dependencyObject,
+        DependencyPropertyChangedEventArgs args) =>
+        ((NotificationCard)dependencyObject).StartDismissAnimation();
+
+    private void StartDismissAnimation()
+    {
+        if (!IsDismissing || _dismissAnimationStarted)
+        {
+            return;
+        }
+
+        _dismissAnimationStarted = true;
+        IsHitTestVisible = false;
+        IsTabStop = false;
+        if (!_uiSettings.AnimationsEnabled)
+        {
+            NotificationCardTranslation.X = 420;
+            QueueExitAnimationCompleted();
+            return;
+        }
+
+        try
+        {
+            DismissStoryboard.Begin();
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or ArgumentException)
+        {
+            NotificationCardTranslation.X = 420;
+            QueueExitAnimationCompleted();
+        }
+    }
+
+    private void QueueExitAnimationCompleted() =>
+        DispatcherQueue.TryEnqueue(() => ExitAnimationCompleted?.Invoke(this, EventArgs.Empty));
+
+    private void DismissStoryboard_Completed(object? sender, object e) =>
+        ExitAnimationCompleted?.Invoke(this, EventArgs.Empty);
+
     private void UpdateNotification()
     {
         if (Notification is not { } notification)
@@ -67,7 +125,9 @@ public sealed partial class NotificationCard : UserControl
         }
 
         NotificationInfoBar.Severity = NotificationSeverityConverter.ToInfoBarSeverity(notification.Severity);
-        NotificationInfoBar.Title = notification.Title;
+        NotificationInfoBar.Title = Shorten(
+            notification.Title,
+            IsChinese ? MaximumChineseCardTitleLength : MaximumEnglishCardTitleLength);
         NotificationInfoBar.Message = DisplayMessage(notification);
         var action = notification.Severity == GlobalNotificationSeverity.Error
             ? Text("单击查看此错误消息；完整详情在开发页。", "Click to view this error message; full details are on the Developer page.")
@@ -104,14 +164,15 @@ public sealed partial class NotificationCard : UserControl
     {
         if (notification.Severity != GlobalNotificationSeverity.Error)
         {
-            return Shorten(notification.Message, MaximumCardMessageLength);
+            return Shorten(notification.Message, IsChinese ? 44 : 80);
         }
 
         // Keep the required route to details visible even when an error body is
         // long. The original, untruncated message is available on click and in
         // the Developer page history.
         var prompt = Text("进入开发页查看详情", "Open Developer features for details");
-        var messageLength = Math.Max(0, MaximumCardMessageLength - prompt.Length - 1);
+        var maximumErrorTextLength = IsChinese ? 58 : 108;
+        var messageLength = Math.Max(0, maximumErrorTextLength - prompt.Length - 1);
         return string.IsNullOrWhiteSpace(notification.Message)
             ? prompt
             : $"{Shorten(notification.Message, messageLength)}\n{prompt}";

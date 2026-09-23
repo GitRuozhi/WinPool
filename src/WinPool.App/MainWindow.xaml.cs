@@ -33,6 +33,8 @@ namespace WinPool_App;
 public sealed partial class MainWindow : Window
 {
     private const int MaximumVisibleNotificationCards = 3;
+    private const double NotificationCardHeightDip = 128;
+    private const double NotificationStackSpacingDip = 6;
     private bool _initialized;
     private bool _updatingMode;
     private bool _updatingNavigation;
@@ -53,6 +55,7 @@ public sealed partial class MainWindow : Window
     private readonly AgentPreferencesSynchronizer _agentPreferencesSynchronizer;
     private readonly AgentInventorySynchronizer _agentInventorySynchronizer;
     private readonly DispatcherTimer _notificationDismissTimer;
+    private readonly DispatcherTimer _notificationExitFallbackTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
     private WelcomeWindow? _welcomeWindow;
 
@@ -60,7 +63,7 @@ public sealed partial class MainWindow : Window
 
     public IGlobalNotificationService NotificationService { get; }
 
-    /// <summary>Projects the three simple lower-right notification cards.</summary>
+    /// <summary>Projects up to three lower-right notification cards.</summary>
     public ObservableCollection<NotificationDisplayItem> VisibleNotifications { get; } = [];
 
     public ObservableCollection<ShellNavigationItem> ShellNavigationItems { get; } = [];
@@ -72,6 +75,9 @@ public sealed partial class MainWindow : Window
     {
         private GlobalNotification _notification;
         private bool _isChinese;
+        private bool _isDismissing;
+        private readonly TaskCompletionSource<bool> _dismissalAnimationCompleted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
         public NotificationDisplayItem(GlobalNotification notification, bool isChinese)
         {
@@ -84,6 +90,10 @@ public sealed partial class MainWindow : Window
         public GlobalNotification Notification => _notification;
 
         public bool IsChinese => _isChinese;
+
+        public bool IsDismissing => _isDismissing;
+
+        public Task DismissalAnimationCompleted => _dismissalAnimationCompleted.Task;
 
         public void Update(GlobalNotification notification, bool isChinese)
         {
@@ -99,6 +109,19 @@ public sealed partial class MainWindow : Window
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChinese)));
             }
         }
+
+        public void BeginDismissal()
+        {
+            if (_isDismissing)
+            {
+                return;
+            }
+
+            _isDismissing = true;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDismissing)));
+        }
+
+        public void CompleteDismissalAnimation() => _dismissalAnimationCompleted.TrySetResult(true);
     }
 
     public MainWindow(
@@ -145,6 +168,11 @@ public sealed partial class MainWindow : Window
         _notificationDismissTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _notificationDismissTimer.Tick += NotificationDismissTimer_Tick;
         _notificationDismissTimer.Start();
+        _notificationExitFallbackTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(750)
+        };
+        _notificationExitFallbackTimer.Tick += NotificationExitFallbackTimer_Tick;
         RefreshNotificationSurface();
 
         ExtendsContentIntoTitleBar = true;
@@ -282,6 +310,7 @@ public sealed partial class MainWindow : Window
         ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
             .CollectionChanged -= Notifications_CollectionChanged;
         _notificationDismissTimer.Stop();
+        _notificationExitFallbackTimer.Stop();
         NotificationService.ClearHistory();
 
         if (_closingForElevationHandoff)
@@ -1038,6 +1067,7 @@ public sealed partial class MainWindow : Window
         UpdateShellNavigationTextVisibility();
         UpdateCaptionInset();
         UpdateTitleBarPassthroughRegions();
+        RefreshNotificationSurface();
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1283,9 +1313,47 @@ public sealed partial class MainWindow : Window
     private void RefreshNotificationSurface()
     {
         var visible = NotificationService.Notifications
-            .Take(MaximumVisibleNotificationCards)
+            .Take(GetMaximumVisibleNotificationCards())
             .ToArray();
         var isChinese = ViewModel.Localization.IsChinese;
+
+        var visibleIds = visible
+            .Select(notification => notification.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var item in VisibleNotifications.ToArray())
+        {
+            if (visibleIds.Contains(item.Notification.Id))
+            {
+                if (!item.IsDismissing)
+                {
+                    var updated = visible.First(notification =>
+                        notification.Id.Equals(item.Notification.Id, StringComparison.Ordinal));
+                    item.Update(updated, isChinese);
+                }
+                // If the same ID returns while its old view is leaving, keep
+                // that view bound to its original record until completion.
+                // The post-exit sync creates a fresh view from the latest snapshot.
+            }
+            else if (!item.IsDismissing)
+            {
+                // Storyboard.Completed is the normal removal signal. This
+                // bounded fallback also releases the queue if that event is
+                // not delivered.
+                _notificationExitFallbackTimer.Stop();
+                _notificationExitFallbackTimer.Start();
+                item.BeginDismissal();
+            }
+        }
+
+        // Hold each departed item until its rightward exit has completed. New
+        // cards fill the freed slot afterward, keeping the visible stack within
+        // its current window capacity when an eviction and publish coincide.
+        if (VisibleNotifications.Any(item => item.IsDismissing))
+        {
+            return;
+        }
+        _notificationExitFallbackTimer.Stop();
+
         for (var desiredIndex = 0; desiredIndex < visible.Length; desiredIndex++)
         {
             var currentIndex = -1;
@@ -1321,6 +1389,60 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private int GetMaximumVisibleNotificationCards()
+    {
+        var availableHeight = Math.Max(
+            0,
+            RootGrid.ActualHeight
+                - CustomTitleBar.ActualHeight
+                - GlobalNotificationHost.Margin.Top
+                - GlobalNotificationHost.Margin.Bottom);
+        var count = (int)Math.Floor(
+            (availableHeight + NotificationStackSpacingDip)
+            / (NotificationCardHeightDip + NotificationStackSpacingDip));
+        return Math.Clamp(count, 1, MaximumVisibleNotificationCards);
+    }
+
+    private void NotificationCard_ExitAnimationCompleted(object? sender, EventArgs e)
+    {
+        // Use the display-item identity so a delayed completion from an old
+        // card cannot remove a new card that happens to carry the same ID.
+        if (sender is not NotificationCard card
+            || card.DataContext is not NotificationDisplayItem item
+            || !item.IsDismissing
+            || !VisibleNotifications.Contains(item))
+        {
+            return;
+        }
+
+        CompleteNotificationExit(item);
+    }
+
+    private void NotificationExitFallbackTimer_Tick(object? sender, object e)
+    {
+        _notificationExitFallbackTimer.Stop();
+        foreach (var item in VisibleNotifications.Where(candidate => candidate.IsDismissing).ToArray())
+        {
+            CompleteNotificationExit(item);
+        }
+    }
+
+    private void CompleteNotificationExit(NotificationDisplayItem item)
+    {
+        if (!item.IsDismissing || !VisibleNotifications.Remove(item))
+        {
+            return;
+        }
+
+        item.CompleteDismissalAnimation();
+        if (!VisibleNotifications.Any(candidate => candidate.IsDismissing))
+        {
+            _notificationExitFallbackTimer.Stop();
+        }
+
+        RefreshNotificationSurface();
+    }
+
     private async void NotificationCard_Invoked(
         object? sender,
         NotificationCardEventArgs e)
@@ -1339,9 +1461,28 @@ public sealed partial class MainWindow : Window
         _showingNotificationMessage = true;
         // Remove first so repeated taps cannot enqueue the same dialog behind
         // itself. The retained history remains the source of full metadata.
+        var displayItem = VisibleNotifications.FirstOrDefault(item =>
+            item.Notification.Id.Equals(e.Notification.Id, StringComparison.Ordinal));
         NotificationService.Dismiss(e.Notification.Id);
         try
         {
+            if (displayItem is not null)
+            {
+                try
+                {
+                    await displayItem.DismissalAnimationCompleted.WaitAsync(TimeSpan.FromMilliseconds(500));
+                }
+                catch (TimeoutException)
+                {
+                    // If the visual tree closes during its exit, still show
+                    // the full error message instead of waiting indefinitely.
+                    if (displayItem.IsDismissing)
+                    {
+                        CompleteNotificationExit(displayItem);
+                    }
+                }
+            }
+
             await ShowErrorNotificationMessageAsync(e.Notification);
         }
         catch (Exception exception)

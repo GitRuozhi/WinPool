@@ -177,7 +177,9 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <controls:NotificationCard
+                                ExitAnimationCompleted="NotificationCard_ExitAnimationCompleted"
                                 IsChinese="{Binding IsChinese}"
+                                IsDismissing="{Binding IsDismissing}"
                                 Invoked="NotificationCard_Invoked"
                                 Notification="{Binding Notification}"
                                 />
