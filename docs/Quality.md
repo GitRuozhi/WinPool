@@ -4,6 +4,14 @@
 
 ## 最近已记录的验证基线
 
+2026-09-23 系统 JSON、格式化方式、通知卡和开发页本轮：基线 `87c4f6e` 后的本轮改动。定点 Release 回归为 Application `V049PartitionSemanticsTests` 15/15、Infrastructure 格式协调与命令预览 28/28、Architecture 47/47，均 exit 0、0 failed/0 skipped；TRX 和日志在 `artifacts/verification-20260923-112235`。导入 JSON 嵌套形状补充检查的 Application 定点 Debug 回归另为 3/3 passed、0 failed（终端结果，未另存 TRX）；它只验证该校验器，不替代系统导入原生往返。首次 Infrastructure 因新增计划参数 bool 与文本辅助方法类型不匹配而编译失败；首次 Architecture 44/47，三项旧断言仍要求已移除的开发页路线标题和固定取三卡写法。修正类型并把断言更新为当前导航门、内存日志、三区域和卡片边界后，Infrastructure 与 Architecture 分别在 R2 得到上述通过结果。没有把首轮失败覆盖或记为通过。
+
+第一次隔离 Release 构建因格式开关 UIA 命名遗漏 `Microsoft.UI.Xaml.Automation` 引用而失败，同轮还报告 XAML 类型解析错误；失败日志保留于上述验证目录。补齐引用后在全新 `artifacts/verification-build-r2-20260923-113438/Release` 完整构建 exit 0、0 警告、0 错误，表明该轮已无上述 XAML 诊断；App/Agent 合并为 288 shared／294 App-only／10 Agent-only／0 collisions。导入形状校验器接入 App 后又进行一次隔离 WinUI App Release 编译，`artifacts/verification-20260923-import-json-app-release-r1/logs/app-release-build.log` 记录 exit 0、0 警告、0 错误，合并报告仍为 288／294／10／0；目标执行前确认不存在。所有构建均未替换 `artifacts/Release`。本轮未运行全解决方案测试、真实存储写入或完整设备/DPI/高对比度矩阵；有限原生交互结果如下。
+
+有限原生核对使用上述隔离运行树及现有标准数据根，未清理或迁移数据。主代理查看 `evidence/development-page.png`：无大标题，左上日志/右上空区/下方提示卡三块位置与边界正确；双击现有本次运行条目弹同窗只读详情，内容和复制结果由 UIA/剪贴板核对，测试后恢复原剪贴板。主代理查看 `format-full-on.png` 与 `format-quick-restored.png`：完整开启时快速关闭、恢复快速时完整关闭，两个开关的中文 UIA Name 和模拟说明可读；未点击格式化。保存选择器截图显示 `JSON (*.json)`；实际导出 `evidence/WinPool-SystemExport.json` 能由标准 JSON 解析，扩展名 `.json`、`Product=WinPool`、外层/内层 schema 均为 3、系统类型 Simulation。仅在本地保留原始系统数据，不公开。测试后 LastActivePage 恢复 StorageStructure，DeveloperMode、主题及语言保持原值，App/Agent 均正常退出。
+
+通知卡固定尺寸与向右退场已有源码、WinUI 元数据及编译核对，原生画面为 `unverified`。一次 15 秒 WinPool 单窗口 gdigrab 录屏正常封装 438 帧，但提取帧为全黑，不能作为卡片出现或动画证据；原视频、日志和黑帧留在同一 evidence 目录，不重录也不把黑帧报成通过。录制期间再次导出的模拟系统 JSON 可解析，未提交格式化或真实存储修改。完整中英文长消息、减少动态效果、480×300 窄高窗口卡片堆叠、点击／超时／挤出动画、完整 DPI/高对比度矩阵保持 `unverified`。
+
 2026-09-22 系统盘删除与模拟扩缩修正：用户回报的“同盘分区全部不能删除”和“扩展／压缩无效”经只读审计确认为实现缺陷。修正后 Application 278/278、Infrastructure 90/90、Architecture 47/47 全通过，TRX 位于 `artifacts/v055-delete-resize-fix-20260922-r1/test-results`，主代理已核对；完整隔离 Release 构建写入 `artifacts/v055-delete-resize-fix-20260922-r1/Release`，0 警告、0 错误，并集合并 288 shared／294 App-only／10 Agent-only／0 collisions。首轮隔离命令漏写路径尾部分隔符导致合并目标落错位置，该轮构建失败未被当作通过；修正后重新构建取得明确成功，误建的两个中间树已按文件处置规则移入项目根 Rubbish。修正后的运行树已替换为用户原先使用的 `artifacts/Release`（592 文件），替换前旧树完整保留在 `Rubbish/20260922_release-before-delete-resize-fix/Program/WinPool/artifacts/Release`。本轮原生扩缩与内置模拟删除仍为 `deferred_by_user`，未做真实存储修改。
 
 2026-09-22 更正：下述反馈修复只是已取得的局部证据，上轮据此归档过早，不能代表用户 15 项全部完成。当前已重开 [Plan](Plan.md)，逐项补查实现遗漏及原生验证缺口；既有通过记录仍保留，未验证项不自动转为完成。

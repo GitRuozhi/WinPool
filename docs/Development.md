@@ -80,6 +80,8 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 编辑状态由 `SimulationEditingSession` 集中管理。结构、即时分区和改名共用 `SimulationEditRequest`、规则与类型化步骤；目标分组、用途、分区表类型分别使用 `DestinationGroupId`、`DiskUsage`、`PartitionStyle`，不得塞入 `Name`。命令只解释步骤，未绑定 CIM 目标和无命令操作均明确说明，没有执行入口。
 
+模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。具体操作和边界见[模拟编辑细节](SimulationEditingDesign.md)及[系统 JSON 文件设计](SystemJsonDesign.md)。
+
 模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。扩缩入口由分区页的“扩展分区／压缩分区”按钮打开同窗口串行对话框，输入整数 MiB，对话框只接受落在能力范围内的目标并在确认前逐次校验；页面容量框对已有分区只显示四舍五入后的当前容量，不作为目标输入，因此两位显示舍入不会再被当成隐式修改，也不会让按钮永久灰置。上述范围不是 Windows `Get-PartitionSupportedSize` 实测，也不允许真实写入；当前验收状态见活动 Plan。
 
 模拟分区删除资格只由所选分区自身的 Boot／System 标记决定，页面、管理页投影和服务端共用 `StorageEditRules.CanDeleteSimulatedPartition`：同盘的系统身份、分区类型（含 EFI、MSR、恢复）和所属系统盘都不再单独禁止删除，但仍不得删除标记为 Boot 或 System 的分区。格式化保持更窄的范围，只允许普通 Primary／BasicData 且非 Boot／System，不随删除资格一起放宽。
@@ -92,7 +94,11 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presenter 负责本地化，App 负责布局和交互。人工反馈修复采用最多三张即时卡片，超出时移出最旧卡但保留会话 History，不提供合并或溢出入口；独立重复消息分开记录。普通卡 8 秒自动消失，错误卡 20 秒，普通卡点击消失，错误卡点击显示消息对话框。清空历史不删除活动消息。消息只保存有界文本与标识，不持有控件、异常对象或完整采集文档，不写数据库或新日志文件。进度显式不进入历史，持续异常按真实状态变化发出，不因轮询重复发布；消息消失只改变呈现。验证范围见 [Quality](Quality.md)。
 
+即时卡的宽高由 `NotificationCard` 固定，退出动画在 App 的展示层向右移动，动画结束后才释放可见项；服务的历史与生命周期不依赖动画。主窗口以展示项实例身份处理完成回调，避免旧卡回调移走同 ID 的新项。触发时机、图标、悬停和开发页布局见[界面交互细节](InteractionDesign.md)。
+
 开发页消费现有消息服务并显示 DataRootLayout.DiagnosticsDirectory 的当前实际路径，不解析日志。消息缓存不依赖开发页生命周期或 DeveloperMode；退出 App 自然清空，不补采后台历史。开发者模式关闭仍隐藏开发页，错误卡固定提示到开发页查看详情，不另加开启模式判断。现有 CommandLog 不接入此页，不复制成第二套历史。原生 ToolTip 与开发页详情分别承担短说明和可复制长信息；禁用控件仍应支持鼠标悬停帮助。同窗口 ContentDialog 使用小型串行协调，不增加通用任务平台，也不增加可见功能入口。
+
+开发页左上日志列表直接投影 History，不读取 Diagnostics 文件；列表条目双击后由串行 `ContentDialog` 显示只读可选文字并提供整段复制。右上和下方保留空区域，下方只给小号 AI 入口开发中提示；窄窗时日志区横跨上方。复制全部、清空和路径复制仍在日志区。
 
 ## 数据与生命周期
 
