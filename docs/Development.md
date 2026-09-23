@@ -134,7 +134,7 @@ V0.55 当前实施代码为核心 SQLite schema 17、监控 SQLite schema 1、IP
 
 V0.53 在 `UserPreferences` 中保存默认关闭的 `DeveloperMode`，旧格式缺少字段时按关闭处理，不升级偏好格式。主窗口从偏好重建可用导航；Hardware、Test、Development 同受该门控制，隐藏状态下启动目标、快捷键和记忆页面均回到 Manage。开发者导航顺序以 Hardware 在 Manage 之前开始。
 
-数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；测试使用隔离新根。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、冲突检测和故障恢复要求。
+数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；自动测试按夹具使用临时数据，普通开发与原生界面核对直接使用已核实的 WinPool 开发数据。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、冲突检测和故障恢复要求。
 
 普通启动采用 Windows App SDK 单实例机制；重复启动激活已有窗口。提权交接是整套 App + Agent 重启：新管理员 bootstrap 以 SID 绑定的 ready/continuation 事件进入等待，期间不初始化 WinUI、不取得实例键、也不连接或复用旧 Agent。旧 App 保存工作区并获得旧 Agent 的后台有序关闭确认后才允许 bootstrap 继续；后者必须按 PID、启动时间和路径核验旧 App、旧 Agent 均已退出，才进入普通启动并创建新的管理员 Agent。取消、事件失败、身份不符或超时均不得接管实例、复用旧 endpoint 或强杀旧进程。等待失败诊断写入数据根 `Diagnostics/elevation-handoff.jsonl`；IPC 正常断开不等同于 Agent 故障。SQLite 不是实时 Windows 状态的权威，未来真实操作执行前必须重新核对对象及前置条件。
 
@@ -155,9 +155,9 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 .\artifacts\Release\WinPool.App.exe
 ```
 
-不要部分覆盖正在运行的目录。构建前检查运行进程；优先采用独立输出树，需要停止 WinPool 时按 AGENTS 中的长期开发授权执行，无需逐次请示。正式分发保持完整目录；不包含脚本、PDB、源图、数据库、日志、测试结果或重复子程序。构建输出可保留 PDB，产物不提交。
+开发阶段默认关闭占用标准运行树的 WinPool App / Agent，然后直接构建到 `artifacts/Release`；可按开发需要修改或重建已核实的 WinPool 开发数据，无需逐次请示。不要在进程仍占用目录时部分覆盖。仅在用户明确要求并行保留版本，或标准目录确实不可用时，才考虑其他输出位置。正式分发保持完整目录；不包含脚本、PDB、源图、数据库、日志、测试结果或重复子程序。构建输出可保留 PDB，产物不提交。
 
-隔离构建必须同时核对最终合并命令：当前 `Directory.Build.targets` 的 `WinPoolMergeRuntimeCommand` 将目标直接写为 `artifacts/$(Configuration)`，只覆盖 `WinPoolLocalOutputRoot` / `WinPoolLocalTreeRoot` 不能隔离这个目标。应显式覆盖完整合并命令的 App、Agent 和 Destination 路径，使用全新目标；已有输出按文件处置规则先移动保留。`-ReplaceDestination` 会递归删除旧目标，遇到锁定文件也可能已部分删除，不能把构建失败当成原目录完整未动。本轮两次隔离编译分别使用独立和默认项目中间输出，均发现生成目标把 App/Agent 的 `.deps.json`、`.runtimeconfig.json` 和 App 的 `.pri` 写在默认 `artifacts/trees/Release`，而可执行文件写在指定隔离树；隔离合并树因此缺少五个运行文件。运行前必须核对这五项；当前验证从**同一次构建更新的默认树**定点复制五项到隔离 App/Agent 树，再合并到新的目标目录，不能从旧 `artifacts/Release` 混用文件。生成目标的路径传播缺陷尚待单独修复。
+旧的自定义隔离输出路径有生成目标传播缺陷：App/Agent 的 `.deps.json`、`.runtimeconfig.json` 及 App `.pri` 可能留在默认 `artifacts/trees/Release`，导致隔离运行树缺文件。这不是开发阶段的默认构建路线；不要为规避关闭进程或重建开发数据而重新尝试隔离构建。若未来确有明确的并行产物需求，应先修复并核对运行树文件完整性。
 
 现有 `build/Rebuild-WinPool.ps1` 会停止 WinPool、调用清理脚本直接清除可再生输出、重建并写入快捷方式。只有任务明确需要该完整动作时使用；`build/Clean-WinPool.ps1 -WhatIf` 可预览。它不是纯文档任务或普通检查的默认入口。
 

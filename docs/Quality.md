@@ -148,7 +148,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 dotnet list WinPool.slnx package --vulnerable --include-transitive
 ```
 
-所有自动测试使用隔离数据，不修改真实存储结构。记录实际命令、提交基线和结果；警告逐项说明，未解决失败不能作为完成。输出按 Development 的运行树规则隔离，不覆盖用户正在运行的程序。
+自动测试使用各自夹具规定的数据，不修改真实存储结构。开发阶段可直接关闭 WinPool 进程、修改或重建已核实的 WinPool 开发数据，构建输出默认写入标准 `artifacts/Release`；不为保留旧运行实例额外搭建隔离产物或重复测试。记录实际命令、提交基线和结果；警告逐项说明，未解决失败不能作为完成。
 
 App 和 Agent 独立产出、SHA-256 并集合并与碰撞失败机制继续验证；运行时查找与目录布局必须一致。命名管道身份/ACL、SQLite 所有权、原子提交及只读边界仍受直接回归保护。
 
