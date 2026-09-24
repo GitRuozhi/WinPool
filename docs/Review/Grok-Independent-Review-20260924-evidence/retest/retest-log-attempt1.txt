@@ -1,0 +1,22 @@
+exclusive retest start
+11:32:06.951 settings-before {
+  "Theme": "System",
+  "AccentColor": "System",
+  "Language": "SystemDefault",
+  "CreateMsrOnInitialize": true,
+  "PartitionIgnoreSizeBytes": 8388608,
+  "LastActivePage": "Settings",
+  "DeveloperMode": true,
+  "AutoCreateVirtualDisk": true,
+  "AutoCreatePartition": true,
+  "BuiltInSimulationCatalogSeeded": true,
+  "FormatVersion": 1
+}
+11:32:07.019 launched app pid=1776
+11:32:10.913 main hwnd=458902 title='WinPool'
+11:32:10.922 welcome present=True
+11:32:11.017 agent at welcome: 964 09/24/2026 11:32:10
+11:32:11.598 SHOT retest-01-welcome.png bytes=304457
+11:32:11.639 invoked ConfirmButton
+11:32:12.837 after dismiss welcome present=False
+11:32:13.379 SHOT retest-02-after-dismiss.png bytes=75318

@@ -1,0 +1,65 @@
+exclusive retest start
+11:32:46.242 settings-before {
+  "Theme": "System",
+  "AccentColor": "System",
+  "Language": "SystemDefault",
+  "CreateMsrOnInitialize": true,
+  "PartitionIgnoreSizeBytes": 8388608,
+  "LastActivePage": "Settings",
+  "DeveloperMode": true,
+  "AutoCreateVirtualDisk": true,
+  "AutoCreatePartition": true,
+  "BuiltInSimulationCatalogSeeded": true,
+  "FormatVersion": 1
+}
+11:32:46.284 launched app pid=2892
+11:32:47.360 main hwnd=328442 title='WinPool'
+11:32:47.368 welcome present=False
+11:32:47.437 agent at welcome: 22460 09/24/2026 11:32:46
+11:32:48.697 after dismiss welcome present=True
+11:32:49.286 SHOT retest-02-after-dismiss.png bytes=80287
+11:32:50.494 NAV 硬件 selected=True click=1166,295
+11:32:51.742 NAV 管理 selected=True click=1234,295
+11:32:52.915 NAV 存储结构编辑 selected=True click=1330,295
+11:32:54.078 NAV 磁盘分区编辑 selected=True click=1454,295
+11:32:55.229 NAV 测试 selected=True click=1550,295
+11:32:56.431 NAV 监控 selected=True click=1618,295
+11:32:57.584 NAV 开发 selected=True click=1686,295
+11:32:58.713 NAV 设置 selected=True click=1754,295
+11:32:58.719 nav-all-ok=True
+11:32:58.781 procs after nav: 2892 WinPool.App.exe, 22460 WinPool.Agent.exe
+11:32:58.804 agent-pid-stable-after-nav=True pid=22460 now=22460
+11:32:59.962 NAV 开发 selected=True click=1686,295
+11:33:00.525 dev-texts: 硬件 | 监控 | 信息 | 采集成功 | 信息 | 采集成功 | 警告 | 监控异常 | 信息图标 | 采集成功 | 自动采集：完整硬件
+11:33:00.532 monitor-warning-visible=True
+11:33:01.081 SHOT retest-03-development.png bytes=61347
+11:33:01.087 idle 15s
+11:33:16.438 welcome-returned-during-idle=True main-still=True
+11:33:16.497 after-idle agent-same=True app-count=1 procs=2892 WinPool.App.exe, 22460 WinPool.Agent.exe
+11:33:17.041 SHOT retest-04-after-idle.png bytes=58976
+11:33:18.178 NAV 设置 selected=True click=1754,295
+11:33:18.206 devmode before=On
+11:33:18.979 nav when dev off: 管理,存储结构编辑,磁盘分区编辑,监控,设置
+11:33:19.522 SHOT retest-05-devmode-off.png bytes=71748
+11:33:20.331 nav when dev on: 硬件,管理,存储结构编辑,磁盘分区编辑,测试,监控,开发,设置
+11:33:20.348 language combo name=''
+11:33:20.896 SHOT retest-06-devmode-restored.png bytes=73394
+11:33:20.919 invoked main Close
+11:33:32.048 close-poll i=19 apps=1 agents=22460
+11:33:32.053 agent-still-after-close=True same-pid=True after=22460 before=22460
+11:33:32.060 settings-after {
+  "Theme": "System",
+  "AccentColor": "System",
+  "Language": "SystemDefault",
+  "CreateMsrOnInitialize": true,
+  "PartitionIgnoreSizeBytes": 8388608,
+  "LastActivePage": "Settings",
+  "DeveloperMode": true,
+  "AutoCreateVirtualDisk": true,
+  "AutoCreatePartition": true,
+  "BuiltInSimulationCatalogSeeded": true,
+  "FormatVersion": 1
+}
+11:33:32.112 cleanup agent path=D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.Agent.exe
+11:33:32.667 after cleanup count=1
+11:33:32.672 DONE

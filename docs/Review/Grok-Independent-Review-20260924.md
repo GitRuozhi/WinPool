@@ -16,7 +16,7 @@ V0.56 作为 **本机只读采集 + 受控模拟编辑工作台** 已经能在�
 
 同一版本 **还不是** 可以按 GitHub About / 欢迎窗文案理解的「磁盘管理与存储空间替代品」。壳层已经摆出「真实编辑」开关和完整管理导航，真实写路径仍未接通；公开 Latest Release 停在 V0.51；欢迎窗写「开源免费」，根 README 写保留所有权利。质量门方面，Architecture 测试在本轮实测 **41 通过 / 6 失败**，不能再引用 2026-09-23 的 47/47 作为当前树证明。
 
-**审查判定**：预 1.0 研究型桌面工具，工程边界清楚，产品对外叙事与质量门落后于代码。进入本机真实编辑（`docs/Plan.md` 已定边界、尚未实施）之前，应先收口公开文案、架构门、Agent 生命周期和「真实编辑」开关语义。
+**审查判定**：预 1.0 研究型桌面工具，工程边界清楚，产品对外叙事与质量门落后于代码。进入本机真实编辑（`docs/Plan.md` 已定边界、尚未实施）之前，应先收口公开文案、架构门和「真实编辑」开关语义。2026-09-24 独占重测见第 6.4 节：关窗后托盘 Agent 继续运行是当前设计；争用期间看到的 Agent 换 PID 没有在独占会话里复现。
 
 | 面 | 判定 | 一句话 |
 | --- | --- | --- |
@@ -162,7 +162,7 @@ Agent `CommitSimulationEditAsync` 把参数错误、JSON、冲突、`SqliteExcep
 | 设置：V0.56、数据路径、7Z | passed | `09-settings.png` |
 | 开发页无大标题；双击详情；点外关闭 | passed | `14-development-detail.png`、`14b-development-detail-closed.png` |
 | 900×900 窄窗再恢复 | passed | `15-narrow-window.png`、`16-window-restored.png` |
-| App Close 后 Agent 随退 | **failed** | session-log 11:14:00 之后需手动停 Agent |
+| App Close 后 Agent 随退 | 见 6.4 | 争用会话里关窗后 Agent 仍在。独占重测确认这是托盘设计，不是换进程 |
 
 ### 6.2 关键画面
 
@@ -212,8 +212,10 @@ Agent `CommitSimulationEditAsync` 把参数错误、JSON、冲突、`SqliteExcep
 
 ### 6.3 实测缺陷
 
-1. **App 点标题栏 Close 后 Agent 仍在。** 本轮残留约 15–25 s 后仍需 `Stop-Process`。产品约定「配套 Agent 在用户托盘中运行」，关闭链路不完整。
-2. **会话中途 Agent 被替换。** 10:58:34 PID 42768，11:05:45 同路径新 PID 20328；开发页 11:05:48「监控异常」。`Diagnostics\monitor.jsonl` 当天无新条目。更像生命周期/单实例问题，未再单独打第二轮。
+下列第 1、2 条已被第 6.4 节独占重测改写，保留原文是为了标明争用会话当时看到了什么。
+
+1. **争用会话：App 点标题栏 Close 后 Agent 仍在。** 当时把这当成关闭链路缺陷。独占重测和第 6.4 节的代码对照表明：关窗只断开监控，不要求托盘 Agent 退出。
+2. **争用会话：Agent 被替换。** 10:58:34 PID 42768，11:05:45 同路径新 PID 20328，同时出现「监控异常」。独占重测里同一 Agent PID 贯穿导航、空闲和关窗，这一条不再当作产品会自己换进程。
 3. **硬件刷新成功详情「已完成本机只读硬件刷新。」连续两句。** UIA Value 同样重复。
 4. **中文界面下硬件十段标题仍为英文**（Computer、VirtualMemory 等），行内标签已是中文。
 5. **导航 ListItem 的 UIA Name 是 `WinPool.App.ViewModels.ShellNavigationItem`**，可见页名在子 Text。屏幕阅读器只报 Name 会失去目的地。
@@ -222,6 +224,27 @@ Agent `CommitSimulationEditAsync` 把参数错误、JSON、冲突、`SqliteExcep
 8. 结构页 320 DIP 右栏「自动创建虚拟磁盘 / 分区」从词中折行（「自动创建虚 / 拟磁盘」）。
 
 模拟系统下「刷新本机信息」禁用、本机下可用，与 Product 一致。空隙可建、系统分区不可格式化，与模拟规则一致。
+
+### 6.4 独占重测（2026-09-24 11:32–11:37）
+
+只重测被另一个审查进程抢过窗口的部分。当时没有第二套 WinPool 进程。证据在 [`retest/`](Grok-Independent-Review-20260924-evidence/retest/)。未改数据根，未提交模拟编辑。开发者模式测完拨回开，语言保持「跟随系统」，`LastActivePage` 测完恢复为 Settings。
+
+| 场景 | 结果 | 证据 |
+| --- | --- | --- |
+| 八页导航一次点准 | passed | `retest-log.txt`：`nav-all-ok=True` |
+| 导航与 15 秒空闲期间 Agent PID 不变 | passed | App 2892，Agent 22460，全程同一 PID |
+| 开发者模式关 / 开 | passed | 关后五项：管理、存储结构、磁盘分区、监控、设置（`retest-05-devmode-off.png`）；开后八项（`retest-06-devmode-restored.png`） |
+| 语言不被会话自己改掉 | passed | 设置仍是「跟随系统」，`app-settings` 的 `Language` 仍为 `SystemDefault` |
+| 空闲时欢迎窗盖住主界面 | 未见 | `retest-04-after-idle.png` 仍是开发页，没有欢迎层 |
+| 鼠标点标题栏关闭 | passed | App 退出，Agent **25708 仍在且 PID 不变**（`retest-close-log.txt`） |
+| 同一 Agent 上再开 App | passed | 第二次启动仍是 Agent 25708，没有新 Agent |
+| 启动「监控异常」 | 复现，原因与换进程不同 | 通知写明「上次监控异常结束：可能有数量未知的未保存样本」（`retest-02-after-dismiss.png`）。这出现在强制结束上一个 Agent 之后；同一 Agent 再开 App 时开发页仍有这一条，没有新的采集成功行叠在上面 |
+
+`MainWindow_Closed` 只保存界面状态并 `DetachAsync`，不发送 `RequestAgentShutdownRequest`。Agent 退出在托盘退出、提权重启和切换数据根。关窗后 Agent 仍在，与这段代码一致，从高优先级缺陷里拿掉。
+
+争用会话 11:05 的换 PID 没有在独占运行里复现。那次「监控异常」不能再写成产品自己替换了 Agent。
+
+强制结束后的「未保存样本」警告是另一件事：它会在下一次打开 App 时再次出现，即使中间的 Agent 没有再被杀掉。这留在中等发现，不并进「进程被换掉」。
 
 ---
 
@@ -314,8 +337,9 @@ Product 把高对比度与响应式写成现行能力；Quality 把窄窗/拖拽
 2. **GitHub Latest 停在 V0.51，README/设置页为 V0.56。** 下载面与说明错位。
 3. **欢迎窗与 GitHub About 宣称开源免费、替代磁盘管理；仓库未授许可证，真实写未开放。** `LocalizationService.WelcomeMessage`、`01-startup-welcome.png`。
 4. **活动 Plan 把验证机主机名与磁盘标识放在公开 `main`。** 未进 `src/`。
-5. **App 正常关闭后 Agent 不退出**（实测）。会话中还出现过一次 Agent 进程替换 +「监控异常」。
-6. **「真实编辑」是一级壳开关，能力未交付。** 确认框诚实，心智不诚实。
+5. **「真实编辑」是一级壳开关，能力未交付。** 确认框诚实，心智不诚实。
+
+原先的「关窗后 Agent 不退出 / 会话中途换 PID」已从高优先级拿掉，见 6.4。
 
 ### medium
 
@@ -330,15 +354,16 @@ Product 把高对比度与响应式写成现行能力；Quality 把窄窗/拖拽
 15. 无 WinUI 自动测试；通知退场、拖拽、HC/DPI 仍 unverified。
 16. App 与 Infrastructure.Windows 未 TreatWarningsAsErrors。
 17. Product/Quality/Design 现行段残留 V0.55 开发页叙述。
+18. **强制结束 Agent 之后，「监控异常 / 可能有数量未知的未保存样本」会在下一次打开 App 时再次出现**，即使这次没有再杀进程、也没有换 PID。独占重测见 `retest-02-after-dismiss.png` 与 `retest-close-log.txt` 的 launch2。
 
 ### low
 
-18. 分区 `368,757MiB` 粘连；结构页「自动创建虚拟磁盘」从词中折行。
-19. 硬件段标题英文、`VirtualMemory` 未拆词；刷新成功详情重复一句。
-20. 架构测试用源码字符串冻 UI 数字，策略本身放大漂移。
-21. AGENTS.md / Execution 注释版本戳陈旧（V0.49 / V0.2）。
-22. 远程残留 V0.39 分支。
-23. 激活管道 ACL 弱于 Agent 控制管道（本地打扰）。
+19. 分区 `368,757MiB` 粘连；结构页「自动创建虚拟磁盘」从词中折行。
+20. 硬件段标题英文、`VirtualMemory` 未拆词；刷新成功详情重复一句。
+21. 架构测试用源码字符串冻 UI 数字，策略本身放大漂移。
+22. AGENTS.md / Execution 注释版本戳陈旧（V0.49 / V0.2）。
+23. 远程残留 V0.39 分支。
+24. 激活管道 ACL 弱于 Agent 控制管道（本地打扰）。
 
 ---
 
@@ -392,7 +417,7 @@ Windows 11 has not yet received equivalent testing because current storage hardw
 
 5. 先定义用户看见的授权 UX，再接线执行器；收口管理右键 / 结构整批 / 分区即时。
 6. 「真实编辑」在未接通前不要表现为可打开的生产模式，或常驻「仍只读」说明。
-7. App 退出必须带走 Agent（或托盘明确「后台仍在监控」且有退出入口）。
+7. 关窗留下托盘 Agent 与当前代码一致。若要让用户知道后台仍在监控，应在关窗或托盘上说清楚，而不是把「进程还在」本身当成故障。
 8. 给默认用户一条不依赖开发页的错误详情路径。
 9. 提权 Agent 校验完整性级别；7Z/CSV 路径收紧到数据根或签名校验。
 
