@@ -2018,7 +2018,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             Style = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"],
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
             IsEnabled = item.CommandPreview.Count > 0,
             Content = new StackPanel

@@ -100,19 +100,19 @@
                     x:Name="UndoButton"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Undo_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE7A7;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="UndoButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -123,19 +123,19 @@
                     Grid.Row="1"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Redo_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE7A6;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="RedoButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -146,19 +146,19 @@
                     Grid.Column="1"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="DiscardAll_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE711;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="DiscardAllButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -170,19 +170,19 @@
                     Grid.Column="1"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="ApplyAll_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="ApplyAllButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -193,19 +193,19 @@
                     Grid.Column="2"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="CreatePool_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="CreatePoolButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -217,19 +217,19 @@
                     Grid.Column="2"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Dissolve_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="DissolveButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -289,19 +289,19 @@
                     Grid.Column="4"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Retire_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE7E8;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="RetireButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -313,19 +313,19 @@
                     Grid.Column="4"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="HotSpare_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE72C;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="HotSpareButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -336,19 +336,19 @@
                     Grid.Column="3"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="CreateVdisk_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="CreateVdiskButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -360,19 +360,19 @@
                     Grid.Column="3"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="DeleteVdisk_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="DeleteVdiskButtonLabel"
                             Grid.Column="1"
                             VerticalAlignment="Center"
+                            MaxWidth="130"
                             TextWrapping="Wrap" />
                     </Grid>
                 </Button>
@@ -423,7 +423,6 @@
                 x:Name="SavePoolPropertiesButton"
                 Style="{StaticResource WinPoolButtonBaseStyle}"
                 HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Stretch"
                 VerticalAlignment="Center"
                 Click="SavePoolProperties_Click">
                 <StackPanel Orientation="Horizontal" Spacing="6">
