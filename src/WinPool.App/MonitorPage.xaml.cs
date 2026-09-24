@@ -87,7 +87,6 @@ public sealed partial class MonitorPage : Page
     private readonly ObservableCollection<string> _storageEventRows = [];
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByInstance = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, MonitorRowViewModel> _rowsByDiskNumber = new();
-    private DateTimeOffset _storageEventCutoff = DateTimeOffset.UtcNow;
     private WorkspaceViewModel _viewModel = null!;
     private DispatcherQueueTimer? _pollTimer;
     private DispatcherQueueTimer? _preferenceSyncTimer;
@@ -132,35 +131,9 @@ public sealed partial class MonitorPage : Page
         Guard("UpdateText", UpdateText);
         Guard("BuildRows", BuildRows);
         RestoreExistingGraphSeries();
-        Monitoring.SetRate(_viewModel.CurrentAgentPreferences.MonitoringSampleRateHz);
-        Guard("PopulateRateOptions", PopulateRateOptions);
+        Guard("PopulateRateOptions", () => PopulateRateOptions(
+            _viewModel.CurrentAgentPreferences.MonitoringSampleRateHz));
         SyncContinuousMonitoringSwitch();
-        if (_viewModel.CurrentAgentPreferences.ContinuousMonitoringEnabled)
-        {
-            try
-            {
-                await App.InitialAgentConnectionTask;
-                if (App.InitialAgentWarningPublished)
-                {
-                    PublishMonitorStartFailure(Monitoring.LastError, "monitor.start.initial-agent");
-                }
-                else
-                {
-                    var started = await Monitoring.StartAsync(SelectedRate());
-                    if (!started)
-                    {
-                        PublishMonitorStartFailure(Monitoring.LastError, "monitor.start.failed");
-                    }
-                }
-            }
-            catch (Exception exception)
-            {
-                LogMonitorFailure("Start", exception);
-                PublishMonitorStartFailure(
-                    $"{exception.GetType().Name}: {exception.Message}",
-                    "monitor.start.exception");
-            }
-        }
         _pollTimer = DispatcherQueue.CreateTimer();
         ApplyPollInterval();
         _pollTimer.Tick += (_, _) => Poll();
@@ -218,7 +191,7 @@ public sealed partial class MonitorPage : Page
         base.OnNavigatedFrom(e);
     }
 
-    private async void PreferenceSyncTimer_Tick(
+    private void PreferenceSyncTimer_Tick(
         DispatcherQueueTimer sender,
         object args)
     {
@@ -230,21 +203,9 @@ public sealed partial class MonitorPage : Page
         try
         {
             SyncContinuousMonitoringSwitch();
-            var enabled = _viewModel.CurrentAgentPreferences.ContinuousMonitoringEnabled;
-            if (enabled && !Monitoring.IsRunning)
-            {
-                await Monitoring.StartAsync(SelectedRate());
-            }
-            else if (!enabled && Monitoring.IsRunning)
-            {
-                await Monitoring.StopAsync();
-            }
+            ApplyPollInterval();
         }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or OperationCanceledException)
+        catch (Exception exception)
         {
             LogMonitorFailure("PreferenceSync", exception);
         }
@@ -519,12 +480,12 @@ public sealed partial class MonitorPage : Page
         DiskRows.Width = width;
     }
 
-    private void PopulateRateOptions()
+    private void PopulateRateOptions(double rateHz)
     {
         RateOptions.ItemsSource = MonitoringService.RateOptions
             .Select(x => $"{x:0.#} Hz")
             .ToArray();
-        RateOptions.SelectedIndex = IndexOfRate(Monitoring.SampleRateHz);
+        RateOptions.SelectedIndex = IndexOfRate(rateHz);
     }
 
     private static int IndexOfRate(double rateHz)
@@ -613,15 +574,10 @@ public sealed partial class MonitorPage : Page
         return row;
     }
 
-    private async void Poll()
+    private void Poll()
     {
         try
         {
-            if (Monitoring.UsesAgent)
-            {
-                await Monitoring.RefreshRemoteStateAsync();
-            }
-
             PollCore();
         }
         catch (Exception ex)
@@ -703,13 +659,11 @@ public sealed partial class MonitorPage : Page
         }
         ActivityGraph.SetSeries(series);
         UpdateDiagnosticsAndStorageEvents();
-        PublishNewStorageHealthEvent();
     }
 
     private void UpdateDiagnosticsAndStorageEvents()
     {
         var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        var diagnostics = Monitoring.GetDiagnostics();
         var runtime = Monitoring.GetRuntimeDiagnostics();
         MonitorStatusText.Text = Monitoring.UsesAgent && !Monitoring.IsRemoteStateKnown
             ? zh ? "监控状态未知" : "Monitoring state unknown"
@@ -718,149 +672,6 @@ public sealed partial class MonitorPage : Page
                 ? $"运行时长：{FormatRuntimeDuration(runtime.SessionElapsedMilliseconds)}"
                 : $"Duration: {FormatRuntimeDuration(runtime.SessionElapsedMilliseconds)}"
             : zh ? "已停止" : "Stopped";
-
-        var issues = new List<MonitorIssueState>();
-        if (runtime.PersistencePaused)
-        {
-            issues.Add(new(
-                $"persistence-paused:{runtime.PersistenceFailureOccurrenceId ?? runtime.SessionOccurrenceId ?? "current"}",
-                zh
-                    ? $"⛔ 记录已暂停：{runtime.PersistenceFailure ?? "正在等待安全恢复"}"
-                    : $"⛔ Recording paused: {runtime.PersistenceFailure ?? "waiting for safe recovery"}"));
-        }
-
-        // Only an actual writer/rotation failure can contribute here.  A
-        // normal 250 ms batch is pending persistence, not a known loss.
-        var knownUnpersisted = Math.Max(0, runtime.ConfirmedLostSamples);
-        var knownLoss = SaturatingAdd(
-            knownUnpersisted,
-            Math.Max(0, diagnostics.PersistenceDroppedSamples));
-        if (knownLoss > 0)
-        {
-            issues.Add(new(
-                $"known-loss:{runtime.SessionOccurrenceId ?? "terminal"}",
-                zh
-                    ? $"⚠ 记录不完整：{knownLoss} 条样本未保存"
-                    : $"⚠ Incomplete recording: {knownLoss} samples were not saved"));
-        }
-
-        if (runtime.PersistenceDelayed && !runtime.PersistencePaused)
-        {
-            var samplingConfirmed = Monitoring.IsRunning
-                && Monitoring.IsRemoteStateKnown
-                && string.IsNullOrWhiteSpace(runtime.SamplingFailure);
-            issues.Add(new(
-                $"persistence-delay:{runtime.SessionOccurrenceId ?? "current"}",
-                samplingConfirmed
-                    ? zh
-                        ? $"⚠ 写入延迟：采样继续，{runtime.PendingPersistenceSamples} 条样本暂存内存"
-                        : $"⚠ Write delayed: sampling continues; {runtime.PendingPersistenceSamples} samples are buffered in memory"
-                    : zh
-                        ? $"⚠ 写入延迟：{runtime.PendingPersistenceSamples} 条样本待写入"
-                        : $"⚠ Write delayed: {runtime.PendingPersistenceSamples} samples are pending persistence"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(runtime.PersistenceFailure) && !runtime.PersistencePaused)
-        {
-            issues.Add(new(
-                $"persistence-failure:{runtime.PersistenceFailureOccurrenceId ?? runtime.SessionOccurrenceId ?? "current"}",
-                zh
-                    ? $"⚠ 记录失败：{runtime.PersistenceFailure}"
-                    : $"⚠ Recording failure: {runtime.PersistenceFailure}"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(runtime.ArchiveFailure))
-        {
-            issues.Add(new(
-                $"archive:{runtime.ArchiveFailureOccurrenceId ?? "current"}",
-                runtime.ArchiveRawDatabaseRetained
-                    ? zh
-                        ? $"⚠ 归档失败：原始数据库已保留。{runtime.ArchiveFailure}"
-                        : $"⚠ Archive failed: the raw database was retained. {runtime.ArchiveFailure}"
-                    : zh
-                        ? $"⚠ 归档校验失败：请保留现有归档并修复。{runtime.ArchiveFailure}"
-                        : $"⚠ Archive verification failed: retain the existing archive and repair it. {runtime.ArchiveFailure}"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(runtime.SamplingFailure))
-        {
-            issues.Add(new(
-                $"sampling:{runtime.SessionOccurrenceId ?? "current"}",
-                zh
-                    ? $"⚠ 采样已停止：{runtime.SamplingFailure}"
-                    : $"⚠ Sampling stopped: {runtime.SamplingFailure}"));
-        }
-
-        if (runtime.HasRecoveredInterruptedSession)
-        {
-            issues.Add(new(
-                $"interrupted-session:{runtime.RecoveredInterruptedSessionOccurrenceId ?? "current"}",
-                zh
-                    ? "⚠ 上次监控异常结束：可能有数量未知的未保存样本"
-                    : "⚠ Previous monitoring ended unexpectedly: an unknown number of samples may not have been saved"));
-        }
-
-        // SubscriberDroppedSamples is a session total. Only a currently deep
-        // subscriber queue means the live graph is still behind; when it
-        // drains this temporary presentation issue disappears.
-        if (diagnostics.ActiveSubscribers > 0
-            && diagnostics.SubscriberCapacity > 0
-            && (long)diagnostics.SubscriberBufferedSamples * 4
-                >= (long)diagnostics.SubscriberCapacity * 3)
-        {
-            issues.Add(new(
-                $"display-delay:{runtime.SessionOccurrenceId ?? "current"}",
-                zh
-                    ? "⚠ 实时显示延迟：部分实时图表样本未显示"
-                    : "⚠ Live display delayed: some chart samples were not displayed"));
-        }
-
-        if (diagnostics.ConsecutiveFailures > 0)
-        {
-            var failureCode = diagnostics.LastFailureCode ?? "unknown";
-            issues.Add(new(
-                $"communication:{failureCode}",
-                zh
-                    ? $"⚠ 通信或采样异常：{failureCode}"
-                    : $"⚠ Communication or sampling issue: {failureCode}"));
-        }
-        else if (!string.IsNullOrWhiteSpace(Monitoring.LastError)
-                 && !string.Equals(
-                     Monitoring.LastError,
-                     runtime.PersistenceFailure,
-                     StringComparison.Ordinal)
-                 && !string.Equals(
-                     Monitoring.LastError,
-                     runtime.ArchiveFailure,
-                     StringComparison.Ordinal)
-                 && !string.Equals(
-                     Monitoring.LastError,
-                     runtime.SamplingFailure,
-                     StringComparison.Ordinal))
-        {
-            issues.Add(new(
-                $"control:{Monitoring.IsRunning}:{Monitoring.LastError}",
-                Monitoring.IsRunning
-                    ? zh
-                        ? $"⚠ 监控控制异常：{Monitoring.LastError}"
-                        : $"⚠ Monitoring control issue: {Monitoring.LastError}"
-                    : zh
-                        ? $"⚠ 监控停止原因：{Monitoring.LastError}"
-                        : $"⚠ Monitoring stopped: {Monitoring.LastError}"));
-        }
-
-        // A missing Agent snapshot is not evidence that an earlier issue
-        // recovered. The service also retains actual recording gaps across
-        // page recreation and notification dismissal.
-        var stateIsAuthoritative = !Monitoring.UsesAgent || Monitoring.IsRemoteStateKnown;
-        var snapshot = Monitoring.UpdateIssueStates(
-            issues.Select(issue => issue with
-            {
-                IsPermanentGap = issue.Key.StartsWith("known-loss:", StringComparison.Ordinal)
-                    || issue.Key.StartsWith("interrupted-session:", StringComparison.Ordinal)
-            }),
-            stateIsAuthoritative);
-        PublishMonitorIssueTransitions(snapshot, zh);
 
         var displayRows = Monitoring.GetRecentStorageHealthEvents()
             .OrderByDescending(item => item.OccurredAtUtc)
@@ -880,55 +691,6 @@ public sealed partial class MonitorPage : Page
         }
     }
 
-    private void PublishMonitorIssueTransitions(
-        MonitorIssueStateSnapshot snapshot,
-        bool zh)
-    {
-        foreach (var transition in snapshot.Transitions)
-        {
-            var issue = transition.Issue;
-            var occurrenceKey = $"monitor-issue:{issue.Key}";
-            if (transition.Kind == MonitorIssueTransitionKind.Appeared)
-            {
-                _viewModel.NotificationService.Publish(
-                    GlobalNotificationSeverity.Warning,
-                    zh ? "监控异常" : "Monitoring issue",
-                    $"{MonitorTarget(zh)}{Environment.NewLine}{issue.Text}",
-                    "monitor",
-                    new GlobalNotificationOptions
-                    {
-                        OccurrenceKey = occurrenceKey,
-                        Code = "monitor.issue",
-                        SystemId = MonitorSystemId,
-                        Target = MonitorTarget(zh),
-                        Detail = issue.Text
-                    });
-                continue;
-            }
-
-            _viewModel.NotificationService.ResolveByKey(occurrenceKey);
-            _viewModel.NotificationService.Publish(
-                GlobalNotificationSeverity.Info,
-                zh ? "监控异常已恢复" : "Monitoring issue recovered",
-                $"{MonitorTarget(zh)}{Environment.NewLine}{(zh ? "已恢复：" : "Recovered: ")}{issue.Text}",
-                "monitor",
-                new GlobalNotificationOptions
-                {
-                    OccurrenceKey = $"monitor-recovered:{issue.Key}",
-                    ShowNotification = false,
-                    RecordInHistory = true,
-                    Code = "monitor.recovered",
-                    SystemId = MonitorSystemId,
-                    Target = MonitorTarget(zh),
-                    Detail = issue.Text
-                });
-        }
-    }
-
-    private string MonitorSystemId => _viewModel.SystemCatalog.Systems
-        .First(system => system.IsLocal)
-        .Id;
-
     private string MonitorTarget(bool zh)
     {
         var local = _viewModel.SystemCatalog.Systems.First(system => system.IsLocal);
@@ -937,64 +699,32 @@ public sealed partial class MonitorPage : Page
             : $"Local monitoring target: {local.DisplayName}";
     }
 
-    private static long SaturatingAdd(long first, long second) =>
-        first > long.MaxValue - second ? long.MaxValue : first + second;
+    private string MonitorSystemId => _viewModel.SystemCatalog.Systems
+        .First(system => system.IsLocal)
+        .Id;
+
+    private void PublishMonitorStartFailure(string? detail, string code)
+    {
+        var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        _viewModel.NotificationService.Publish(
+            GlobalNotificationSeverity.Warning,
+            _viewModel.Localization["MonitorIntro"],
+            $"{MonitorTarget(zh)}{Environment.NewLine}{(zh ? "监控未能启动或状态尚未确认。请检查 Agent 连接后重试。" : "Monitoring did not start or its state is not confirmed. Check the Agent connection, then try again.")}",
+            "monitor",
+            new GlobalNotificationOptions
+            {
+                OccurrenceKey = code,
+                Code = code,
+                SystemId = MonitorSystemId,
+                Target = MonitorTarget(zh),
+                Detail = detail ?? string.Empty
+            });
+    }
 
     private static string FormatRuntimeDuration(long milliseconds)
     {
         var elapsed = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
         return $"{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
-    }
-
-    private void PublishNewStorageHealthEvent()
-    {
-        var newest = Monitoring.GetRecentStorageHealthEvents()
-            .Where(item => item.OccurredAtUtc > _storageEventCutoff)
-            .OrderBy(item => item.OccurredAtUtc)
-            .LastOrDefault();
-        if (newest is null)
-        {
-            return;
-        }
-
-        _storageEventCutoff = newest.OccurredAtUtc;
-        var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        var title = zh ? "存储健康事件" : "Storage health event";
-        var summary =
-            $"{newest.Provider} · Event {newest.EventId} · {newest.Severity}";
-        if (newest.Severity is StorageHealthEventSeverity.Critical
-            or StorageHealthEventSeverity.Error)
-        {
-            _viewModel.NotificationService.Publish(
-                GlobalNotificationSeverity.Error,
-                title,
-                $"{MonitorTarget(zh)}{Environment.NewLine}{summary}",
-                "monitor",
-                new GlobalNotificationOptions
-                {
-                    OccurrenceKey = $"storage-event:{newest.Channel}:{newest.RecordId}:{newest.EventId}",
-                    Code = $"storage-event.{newest.EventId}",
-                    SystemId = MonitorSystemId,
-                    Target = MonitorTarget(zh),
-                    Detail = newest.Message
-                });
-        }
-        else if (newest.Severity == StorageHealthEventSeverity.Warning)
-        {
-            _viewModel.NotificationService.Publish(
-                GlobalNotificationSeverity.Warning,
-                title,
-                $"{MonitorTarget(zh)}{Environment.NewLine}{summary}",
-                "monitor",
-                new GlobalNotificationOptions
-                {
-                    OccurrenceKey = $"storage-event:{newest.Channel}:{newest.RecordId}:{newest.EventId}",
-                    Code = $"storage-event.{newest.EventId}",
-                    SystemId = MonitorSystemId,
-                    Target = MonitorTarget(zh),
-                    Detail = newest.Message
-                });
-        }
     }
 
     private MonitorRowViewModel ResolveRow(string instance)
@@ -1048,28 +778,16 @@ public sealed partial class MonitorPage : Page
         try
         {
             await _viewModel.SetContinuousMonitoringAsync(enabled);
-            if (!enabled)
-            {
-                await Monitoring.StopAsync();
-                return;
-            }
-
-            if (!await Monitoring.StartAsync(SelectedRate()))
-            {
-                LogMonitorFailure(
-                    "ContinuousMonitoringStart",
-                    new InvalidOperationException(
-                        $"LastError={Monitoring.LastError ?? "<null>"}; "
-                            + $"IsRunning={Monitoring.IsRunning}; "
-                            + $"SessionFilePath={Monitoring.SessionFilePath ?? "<null>"}"));
-                await _viewModel.SetContinuousMonitoringAsync(false);
-                ContinuousMonitoringSwitch.IsOn = false;
-                PublishMonitorStartFailure(Monitoring.LastError, "monitor.start.toggle");
-            }
         }
         catch (Exception exception)
         {
             LogMonitorFailure("ContinuousMonitoringClick", exception);
+            if (enabled)
+            {
+                PublishMonitorStartFailure(
+                    $"{exception.GetType().Name}: {exception.Message}",
+                    "monitor.start.toggle");
+            }
         }
         finally
         {
@@ -1095,7 +813,7 @@ public sealed partial class MonitorPage : Page
         }
 
         var rate = SelectedRate();
-        if (Math.Abs(Monitoring.SampleRateHz - rate) < 0.001)
+        if (Math.Abs(_viewModel.CurrentAgentPreferences.MonitoringSampleRateHz - rate) < 0.001)
         {
             return;
         }
@@ -1104,7 +822,6 @@ public sealed partial class MonitorPage : Page
         try
         {
             await _viewModel.SetMonitoringSampleRateAsync(rate);
-            await Monitoring.SetRateAsync(rate);
         }
         catch (Exception exception)
         {
@@ -1218,24 +935,6 @@ public sealed partial class MonitorPage : Page
         {
             PublishMonitorExportFailure(ex, "monitor.export.write");
         }
-    }
-
-    private void PublishMonitorStartFailure(string? detail, string code)
-    {
-        var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        _viewModel.NotificationService.Publish(
-            GlobalNotificationSeverity.Warning,
-            _viewModel.Localization["MonitorIntro"],
-            $"{MonitorTarget(zh)}{Environment.NewLine}{(zh ? "监控未能启动或状态尚未确认。请检查 Agent 连接后重试。" : "Monitoring did not start or its state is not confirmed. Check the Agent connection, then try again.")}",
-            "monitor",
-            new GlobalNotificationOptions
-            {
-                OccurrenceKey = code,
-                Code = code,
-                SystemId = MonitorSystemId,
-                Target = MonitorTarget(zh),
-                Detail = detail ?? string.Empty
-            });
     }
 
     private void PublishMonitorExportInfo(string message, string code)

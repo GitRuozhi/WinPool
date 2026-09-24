@@ -399,8 +399,8 @@
             <ScrollViewer
                 VerticalAlignment="Stretch"
                 VerticalScrollBarVisibility="Auto"
-                HorizontalScrollBarVisibility="Auto"
-                HorizontalScrollMode="Enabled">
+                HorizontalScrollBarVisibility="Disabled"
+                HorizontalScrollMode="Disabled">
                 <Border
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"

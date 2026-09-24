@@ -60,7 +60,6 @@ public sealed partial class MainPage : Page
     private const double ColumnGap = PropertyTableVisuals.ColumnGap;
     private const double RowHeight = PropertyTableVisuals.RowHeight;
     private const double MaxValueWidth = PropertyTableVisuals.ValueColumnMaxWidth;
-    private const double NameHeaderContentOverhead = 44; // 14 DIP icon + 6 DIP gap + 24 DIP button padding.
     private readonly Dictionary<string, int> _columnIndexByKey = new(StringComparer.Ordinal);
     private readonly List<Border> _columnCells = [];
     private readonly Dictionary<Border, TableCellContext> _tableCellContexts = [];
@@ -200,44 +199,14 @@ public sealed partial class MainPage : Page
                 var text = new TextBlock
                 {
                     Padding = new Thickness(10, 5, 10, 5),
-                    MaxWidth = isNameRow ? MaxValueWidth - NameHeaderContentOverhead : MaxValueWidth,
+                    MaxWidth = MaxValueWidth,
                     VerticalAlignment = VerticalAlignment.Center,
                     FontWeight = isNameRow ? FontWeights.SemiBold : FontWeights.Normal,
                     Text = value,
                     TextWrapping = TextWrapping.WrapWholeWords
                 };
-                FrameworkElement content = text;
-                if (isNameRow)
-                {
-                    var selector = new Button
-                    {
-                        Style = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"],
-                        HorizontalAlignment = HorizontalAlignment.Stretch,
-                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                        BorderThickness = new Thickness(0),
-                        Content = new StackPanel
-                        {
-                            Orientation = Orientation.Horizontal,
-                            Spacing = 6,
-                            Children =
-                            {
-                                new FontIcon { FontSize = 14, Glyph = "\uE76C" },
-                                text
-                            }
-                        },
-                        Tag = columns[i].Key
-                    };
-                    AutomationProperties.SetName(selector, columns[i].Name);
-                    ContextHelp.Set(selector, Text(
-                        "选择此列对象以查看其属性和可用操作。",
-                        "Select this column's object to view its properties and available actions."));
-                    selector.Click += ColumnHeader_Click;
-                    text.Padding = new Thickness(0);
-                    content = selector;
-                }
                 var cell = PropertyTableVisuals.CreateCell(
-                    content,
+                    text,
                     dividerBrush,
                     i == 0 ? 0 : ColumnGap,
                     tag: columns[i].Key);
@@ -343,9 +312,6 @@ public sealed partial class MainPage : Page
                 ViewModel.Localization["RawFields"],
                 ViewModel.Localization["Close"]));
     }
-
-    private void ColumnHeader_Click(object sender, RoutedEventArgs e) =>
-        SelectColumn(((FrameworkElement)sender).Tag as string);
 
     private void ColumnCell_PointerEntered(
         object sender,

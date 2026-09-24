@@ -276,9 +276,9 @@
             Grid.RowSpan="2"
             VerticalAlignment="Stretch"
             VerticalScrollBarVisibility="Auto"
-            HorizontalScrollBarVisibility="Auto"
-            HorizontalScrollMode="Enabled">
-                <StackPanel MinWidth="412">
+            HorizontalScrollBarVisibility="Disabled"
+            HorizontalScrollMode="Disabled">
+                <StackPanel>
                     <Border
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -290,9 +290,9 @@
                             ColumnSpacing="6"
                             RowSpacing="8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="32" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="2*" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" MinHeight="40" />
@@ -310,6 +310,7 @@
                             </Grid.RowDefinitions>
                             <TextBlock
                                 x:Name="DiskLocationLabel"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="DiskLocationValue"
@@ -319,6 +320,7 @@
                             <TextBlock
                                 x:Name="PartitionNumberLabel"
                                 Grid.Row="1"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="PartitionNumberValue"
@@ -328,10 +330,12 @@
                             <TextBlock
                                 x:Name="StartOffsetLabel"
                                 Grid.Row="2"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="EndOffsetLabel"
                                 Grid.Row="3"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <Grid
                                 Grid.Row="2"
@@ -341,90 +345,91 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <TextBlock
                                     x:Name="StartOffsetValue"
                                     Grid.Row="0"
-                                    Grid.Column="1"
+                                    Grid.Column="0"
                                     TextAlignment="Right"
-                                    TextWrapping="NoWrap"
+                                    TextWrapping="Wrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetMibPrefixValue"
                                     Grid.Row="0"
-                                    Grid.Column="2"
+                                    Grid.Column="1"
                                     Text="MiB ("
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetAdaptiveValue"
-                                    Grid.Row="0"
-                                    Grid.Column="3"
+                                    Grid.Row="1"
+                                    Grid.Column="0"
                                     TextAlignment="Right"
-                                    TextWrapping="NoWrap"
+                                    TextWrapping="Wrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetUnitValue"
-                                    Grid.Row="0"
-                                    Grid.Column="4"
+                                    Grid.Row="1"
+                                    Grid.Column="1"
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetUnavailableValue"
                                     Grid.Row="0"
-                                    Grid.Column="1"
-                                    Grid.ColumnSpan="4"
+                                    Grid.Column="0"
+                                    Grid.RowSpan="2"
+                                    Grid.ColumnSpan="2"
                                     Text="—"
                                     TextAlignment="Right"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetValue"
-                                    Grid.Row="1"
-                                    Grid.Column="1"
+                                    Grid.Row="2"
+                                    Grid.Column="0"
                                     TextAlignment="Right"
-                                    TextWrapping="NoWrap"
+                                    TextWrapping="Wrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetMibPrefixValue"
-                                    Grid.Row="1"
-                                    Grid.Column="2"
+                                    Grid.Row="2"
+                                    Grid.Column="1"
                                     Text="MiB ("
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetAdaptiveValue"
-                                    Grid.Row="1"
-                                    Grid.Column="3"
+                                    Grid.Row="3"
+                                    Grid.Column="0"
                                     TextAlignment="Right"
-                                    TextWrapping="NoWrap"
+                                    TextWrapping="Wrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetUnitValue"
-                                    Grid.Row="1"
-                                    Grid.Column="4"
+                                    Grid.Row="3"
+                                    Grid.Column="1"
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetUnavailableValue"
-                                    Grid.Row="1"
-                                    Grid.Column="1"
-                                    Grid.ColumnSpan="4"
+                                    Grid.Row="2"
+                                    Grid.Column="0"
+                                    Grid.RowSpan="2"
+                                    Grid.ColumnSpan="2"
                                     Text="—"
                                     TextAlignment="Right"
                                     Visibility="Collapsed"
@@ -433,6 +438,7 @@
                             <TextBlock
                                 x:Name="PartitionTypeLabel"
                                 Grid.Row="4"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <controls:ContextHelpHost Grid.Row="4" Grid.Column="2">
                                 <ComboBox
@@ -444,6 +450,7 @@
                             <TextBlock
                                 x:Name="DriveLetterLabel"
                                 Grid.Row="5"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <controls:ContextHelpHost Grid.Row="5" Grid.Column="2">
                                 <ComboBox
@@ -455,6 +462,7 @@
                             <TextBlock
                                 x:Name="VolumeLabelCaption"
                                 Grid.Row="6"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <controls:ContextHelpHost Grid.Row="6" Grid.Column="2">
                                 <TextBox
@@ -462,21 +470,25 @@
                                     MinHeight="32"
                                     KeyDown="VolumeLabelBox_KeyDown" />
                             </controls:ContextHelpHost>
-                            <StackPanel
+                            <Grid
                                 Grid.Row="7"
-                                Orientation="Horizontal"
-                                Spacing="5"
+                                ColumnSpacing="5"
                                 VerticalAlignment="Top">
-                                <TextBlock x:Name="SizeLabel" VerticalAlignment="Center" />
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SizeLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
                                 <Border
                                     x:Name="SizeChangedIndicator"
+                                    Grid.Column="1"
                                     Width="6"
                                     Height="6"
                                     Background="{ThemeResource AccentFillColorDefaultBrush}"
                                     CornerRadius="3"
                                     VerticalAlignment="Center"
                                     Visibility="Collapsed" />
-                            </StackPanel>
+                            </Grid>
                             <Button
                                 x:Name="ResetSizeButton"
                                 Grid.Row="7"
@@ -501,6 +513,7 @@
                                     <TextBox
                                         x:Name="SizeBox"
                                         Grid.Column="0"
+                                        MinWidth="0"
                                         MinHeight="32"
                                         TextChanged="SizeBox_TextChanged" />
                                     <TextBlock
@@ -524,21 +537,25 @@
                                     </controls:ContextHelpHost>
                                 </Grid>
                             </controls:ContextHelpHost>
-                            <StackPanel
+                            <Grid
                                 Grid.Row="8"
-                                Orientation="Horizontal"
-                                Spacing="5"
+                                ColumnSpacing="5"
                                 VerticalAlignment="Center">
-                                <TextBlock x:Name="FileSystemLabel" VerticalAlignment="Center" />
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="FileSystemLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
                                 <Border
                                     x:Name="FileSystemChangedIndicator"
+                                    Grid.Column="1"
                                     Width="6"
                                     Height="6"
                                     Background="{ThemeResource AccentFillColorDefaultBrush}"
                                     CornerRadius="3"
                                     VerticalAlignment="Center"
                                     Visibility="Collapsed" />
-                            </StackPanel>
+                            </Grid>
                             <Button
                                 x:Name="ResetFileSystemButton"
                                 Grid.Row="8"
@@ -556,21 +573,25 @@
                                     HorizontalAlignment="Stretch"
                                     SelectionChanged="FileSystemBox_SelectionChanged" />
                             </controls:ContextHelpHost>
-                            <StackPanel
+                            <Grid
                                 Grid.Row="9"
-                                Orientation="Horizontal"
-                                Spacing="5"
+                                ColumnSpacing="5"
                                 VerticalAlignment="Center">
-                                <TextBlock x:Name="ClusterLabel" VerticalAlignment="Center" />
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="ClusterLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
                                 <Border
                                     x:Name="ClusterChangedIndicator"
+                                    Grid.Column="1"
                                     Width="6"
                                     Height="6"
                                     Background="{ThemeResource AccentFillColorDefaultBrush}"
                                     CornerRadius="3"
                                     VerticalAlignment="Center"
                                     Visibility="Collapsed" />
-                            </StackPanel>
+                            </Grid>
                             <Button
                                 x:Name="ResetClusterButton"
                                 Grid.Row="9"
@@ -588,21 +609,25 @@
                                     HorizontalAlignment="Stretch"
                                     SelectionChanged="ClusterBox_SelectionChanged" />
                             </controls:ContextHelpHost>
-                            <StackPanel
+                            <Grid
                                 Grid.Row="10"
-                                Orientation="Horizontal"
-                                Spacing="5"
+                                ColumnSpacing="5"
                                 VerticalAlignment="Center">
-                                <TextBlock x:Name="QuickFormatLabel" VerticalAlignment="Center" />
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="QuickFormatLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
                                 <Border
                                     x:Name="QuickFormatChangedIndicator"
+                                    Grid.Column="1"
                                     Width="6"
                                     Height="6"
                                     Background="{ThemeResource AccentFillColorDefaultBrush}"
                                     CornerRadius="3"
                                     VerticalAlignment="Center"
                                     Visibility="Collapsed" />
-                            </StackPanel>
+                            </Grid>
                             <Button
                                 x:Name="ResetQuickFormatButton"
                                 Grid.Row="10"
@@ -627,6 +652,7 @@
                             <TextBlock
                                 x:Name="FullFormatLabel"
                                 Grid.Row="11"
+                                TextWrapping="Wrap"
                                 VerticalAlignment="Center" />
                             <controls:ContextHelpHost Grid.Row="11" Grid.Column="2">
                                 <ToggleSwitch

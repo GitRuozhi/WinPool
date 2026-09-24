@@ -32,7 +32,7 @@
         <StackPanel
             Padding="24,20,24,40"
             HorizontalAlignment="Stretch"
-            Spacing="16">
+            Spacing="8">
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
@@ -41,7 +41,7 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
@@ -103,7 +103,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
@@ -223,37 +223,39 @@
                     <Grid
                         Grid.Row="6"
                         Grid.Column="1"
-                        RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <controls:ContextHelpHost>
-                                <ComboBox
-                                    x:Name="DataLocationOptions"
-                                    Width="180"
-                                    MinHeight="32"
-                                    FontSize="14"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center"
-                                    SelectionChanged="DataLocationOptions_SelectionChanged" />
-                            </controls:ContextHelpHost>
-                            <Button
-                                x:Name="OpenDataLocationButton"
-                                Style="{StaticResource WinPoolInlineIconButtonStyle}"
+                        ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <controls:ContextHelpHost Grid.Column="0">
+                            <ComboBox
+                                x:Name="DataLocationOptions"
+                                Width="180"
                                 MinHeight="32"
+                                FontSize="14"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
-                                Click="OpenDataLocationButton_Click">
-                                <FontIcon FontSize="14" Glyph="&#xE8B7;" />
-                            </Button>
-                        </StackPanel>
+                                SelectionChanged="DataLocationOptions_SelectionChanged" />
+                        </controls:ContextHelpHost>
+                        <Button
+                            x:Name="OpenDataLocationButton"
+                            Grid.Column="1"
+                            Style="{StaticResource WinPoolInlineIconButtonStyle}"
+                            MinHeight="32"
+                            VerticalAlignment="Center"
+                            Click="OpenDataLocationButton_Click">
+                            <FontIcon FontSize="14" Glyph="&#xE8B7;" />
+                        </Button>
                         <TextBlock
                             x:Name="DataLocationPath"
-                            Grid.Row="1"
+                            Grid.Column="2"
+                            HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
                             FontSize="14"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="NoWrap"
                             TextTrimming="CharacterEllipsis"
                             ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </Grid>
@@ -286,7 +288,7 @@
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock
@@ -295,38 +297,40 @@
                         Text="7Z" />
                     <Grid
                         Grid.Column="1"
-                        RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <controls:ContextHelpHost>
-                                <ComboBox
-                                    x:Name="SevenZipOptions"
-                                    Width="180"
-                                    MinHeight="32"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center"
-                                    DropDownOpened="SevenZipOptions_DropDownOpened"
-                                    DropDownClosed="SevenZipOptions_DropDownClosed"
-                                    SelectionChanged="SevenZipOptions_SelectionChanged" />
-                            </controls:ContextHelpHost>
-                            <Button
-                                x:Name="OpenSevenZipLocationButton"
-                                Style="{StaticResource WinPoolInlineIconButtonStyle}"
+                        ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <controls:ContextHelpHost Grid.Column="0">
+                            <ComboBox
+                                x:Name="SevenZipOptions"
+                                Width="180"
                                 MinHeight="32"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
-                                Click="OpenSevenZipLocationButton_Click">
-                                <FontIcon FontSize="14" Glyph="&#xE8B7;" />
-                            </Button>
-                        </StackPanel>
+                                DropDownOpened="SevenZipOptions_DropDownOpened"
+                                DropDownClosed="SevenZipOptions_DropDownClosed"
+                                SelectionChanged="SevenZipOptions_SelectionChanged" />
+                        </controls:ContextHelpHost>
+                        <Button
+                            x:Name="OpenSevenZipLocationButton"
+                            Grid.Column="1"
+                            Style="{StaticResource WinPoolInlineIconButtonStyle}"
+                            MinHeight="32"
+                            VerticalAlignment="Center"
+                            Click="OpenSevenZipLocationButton_Click">
+                            <FontIcon FontSize="14" Glyph="&#xE8B7;" />
+                        </Button>
                         <TextBlock
                             x:Name="SevenZipPath"
-                            Grid.Row="1"
+                            Grid.Column="2"
+                            HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
                             FontSize="14"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="NoWrap"
                             TextTrimming="CharacterEllipsis"
                             ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </Grid>
@@ -345,7 +349,7 @@
                         <RowDefinition Height="Auto" MinHeight="32" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBlock

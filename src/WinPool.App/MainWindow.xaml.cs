@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
     private readonly IWorkspaceStateService _workspaceStateService;
     private readonly AgentPreferencesSynchronizer _agentPreferencesSynchronizer;
     private readonly AgentInventorySynchronizer _agentInventorySynchronizer;
+    private readonly MonitorAlertObserver _monitorAlertObserver;
     private readonly DispatcherTimer _notificationDismissTimer;
     private readonly DispatcherTimer _notificationExitFallbackTimer;
     private InputNonClientPointerSource? _nonClientPointerSource;
@@ -219,6 +220,7 @@ public sealed partial class MainWindow : Window
             DispatcherQueue);
         _agentPreferencesSynchronizer.Start();
         _agentInventorySynchronizer = new AgentInventorySynchronizer(ViewModel, agentConnection, DispatcherQueue);
+        _monitorAlertObserver = new MonitorAlertObserver(ViewModel, DispatcherQueue);
     }
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
@@ -362,6 +364,7 @@ public sealed partial class MainWindow : Window
         RefreshChrome();
         UpdateCaptionInset();
         UpdateCaptionButtonColors();
+        _monitorAlertObserver.Start();
     }
 
     private Task<StartupWorkspacePreview?> LoadStartupWorkspacePreviewAsync(
@@ -499,6 +502,7 @@ public sealed partial class MainWindow : Window
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        await _monitorAlertObserver.StopAsync();
         App.StopActivationChannel();
         _agentPreferencesSynchronizer.Dispose();
         _agentInventorySynchronizer.Dispose();

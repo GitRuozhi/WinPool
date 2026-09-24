@@ -213,9 +213,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         _formBuilt = true;
         PoolFormGrid.ColumnDefinitions.Clear();
-        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+        PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
         FillCombo(_clusterBox, ["4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB"], 4);
@@ -855,16 +855,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Background = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
             Visibility = Visibility.Collapsed
         };
-        var labelPanel = new StackPanel
+        var labelPanel = new Grid
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 5,
+            ColumnSpacing = 5,
             VerticalAlignment = VerticalAlignment.Center
         };
+        labelPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        labelPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(label, 0);
+        Grid.SetColumn(indicator, 1);
         labelPanel.Children.Add(label);
         labelPanel.Children.Add(indicator);
         value.VerticalAlignment = VerticalAlignment.Center;
         value.MinHeight = 32;
+        value.MinWidth = 0;
 
         Grid.SetRow(labelPanel, row);
         Grid.SetColumn(labelPanel, 0);

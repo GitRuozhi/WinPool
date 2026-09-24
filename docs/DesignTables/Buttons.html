@@ -20,7 +20,7 @@
 <body>
   <div class="back"><a href="README.md">← 设计核对表索引</a></div>
   <h1>按钮与图标核对表</h1>
-  <p>按当前 WinPool App 源码记录可操作按钮及其实际图形。应用自建按钮按控件角色采用两套尺寸：图标＋文字的普通按钮，以及 32×32 DIP 的行内单图标按钮；管理命令区与编辑操作区不另设按钮样式。两类均为 4 DIP 圆角，具体颜色与尺寸见<a href="Styles.html">样式表</a>。图形列优先使用 <code>Segoe Fluent Icons</code>，本机没有该字体时使用 <code>Segoe MDL2 Assets</code> 显示同一码位；个别字形轮廓可能随系统字体不同。表格列标题选择器和系统对话框文字按钮保留各自的原生交互语义。Manage 拓扑右键菜单保留完整命令集，下方操作区只显示精简按钮，两处出现的同类操作可共用图标。</p>
+  <p>按当前 WinPool App 源码记录可操作按钮及其实际图形。应用自建按钮按控件角色采用两套尺寸：图标＋文字的普通按钮，以及 32×32 DIP 的行内单图标按钮；管理命令区与编辑操作区不另设按钮样式。两类均为 4 DIP 圆角，具体颜色与尺寸见<a href="Styles.html">样式表</a>。图形列优先使用 <code>Segoe Fluent Icons</code>，本机没有该字体时使用 <code>Segoe MDL2 Assets</code> 显示同一码位；个别字形轮廓可能随系统字体不同。系统对话框文字按钮保留原生交互语义。Manage 拓扑右键菜单保留完整命令集，下方操作区只显示精简按钮，两处出现的同类操作可共用图标。</p>
   <p class="small">字形参考：<a href="https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font">Microsoft Segoe Fluent Icons font</a>。替换字形前应核对操作语义、上下文帮助及自动化名称。</p>
 
   <h2 class="section">窗口导航与 Manage</h2>
@@ -101,7 +101,6 @@
       <tr><td class="glyph">&#xE777;</td><td>恢复推荐值 Reset recommended value</td><td><code>U+E777</code></td><td>结构页按可编辑属性行生成；字段不同，操作均恢复该字段的推荐值 — <code>StorageStructurePage.xaml.cs</code></td></tr>
       <tr><td class="glyph">&#xE74E;</td><td>使用最大值 Use maximum</td><td><code>U+E74E</code></td><td>结构页 SSD/HDD/SCM 容量输入组；应用规划的对齐上限 — <code>StorageStructurePage.xaml.cs</code></td></tr>
       <tr><td class="glyph">&#xE8C8;</td><td>复制命令预览 Copy command preview</td><td><code>U+E8C8</code></td><td>结构页待处理操作条目；预览无命令时禁用 — <code>StorageStructurePage.xaml.cs</code></td></tr>
-      <tr><td class="glyph">&#xE76C;</td><td>选择对比列对象 Select comparison column object</td><td><code>U+E76C</code></td><td>管理页按对象动态创建的图标文字列标题选择器 — <code>MainPage.xaml.cs</code></td></tr>
       <tr><td class="glyph">无图标</td><td>属性表复制菜单 Copy current value / group / raw fields</td><td>—</td><td>属性表右键菜单项 — <code>PropertyTableContextMenu.cs</code></td></tr>
       <tr><td class="glyph">无图标</td><td>确认／取消／关闭 Confirm / Cancel / Close</td><td>—</td><td>各页面临时 WinUI 确认对话框的系统文本按钮；标签随操作变化，由所属流程创建</td></tr>
       <tr><td class="glyph">&#xE76C; / &#xE70D;</td><td>展开 / 折叠 Expand / collapse</td><td><code>U+E76C</code> / <code>U+E70D</code></td><td><strong>状态变化图形：</strong>拓扑节点的当前展开状态决定图形 — <code>TopologyNodeViewModel.cs</code>、<code>TopologyNodeControl.xaml</code></td></tr>

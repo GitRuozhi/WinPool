@@ -732,10 +732,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     /// </summary>
     public AgentPreferences CurrentAgentPreferences { get; private set; } = new();
 
+    public bool AgentPreferencesLoaded { get; private set; }
+
     public void ApplyAgentPreferences(AgentPreferences preferences)
     {
         ArgumentNullException.ThrowIfNull(preferences);
         CurrentAgentPreferences = preferences;
+        AgentPreferencesLoaded = true;
         OnPropertyChanged(nameof(CurrentAgentPreferences));
     }
 
@@ -951,6 +954,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         CurrentAgentPreferences = saved.Preferences;
+        AgentPreferencesLoaded = true;
         OnPropertyChanged(nameof(CurrentAgentPreferences));
     }
 

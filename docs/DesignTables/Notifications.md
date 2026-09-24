@@ -20,7 +20,8 @@
 | ReFS 证据提示 | 模拟格式化选择 ReFS 后进入提交流程 | 警告 | 是 | 仅选择控件不提交时不把操作报成功 | `DiskPartitionPage.PublishRefsNotice` |
 | 导入／导出系统 | 文件读写与验证实际完成，或产生明确失败 | 是，成功/失败对应级别 | 是 | 只打开或取消文件选择器不报成功 | `MainPage`、`WorkspaceViewModel` |
 | 模拟系统删除 | 用户确认且目录删除完成 | 是 | 是 | 取消确认不发布成功 | `MainPage.DeleteSimulationAsync` |
-| 监控异常 | 故障、采样缺口或归档失败首次进入新状态 | 是，警告或错误 | 是 | 同一异常的正常轮询不重复弹出 | `MonitorPage` |
+| 监控异常 | 全局观察器在 App 运行期间发现故障、采样缺口或归档失败首次进入新状态，无需打开监控页 | 是，警告或错误 | 是 | 同一异常的正常轮询不重复弹出；恢复时更新状态并记入消息列表 | `MonitorAlertObserver`、`MonitoringService` |
+| 存储健康事件 | 全局观察器收到新的警告、错误或严重存储健康事件，无需打开监控页 | 是，警告或错误 | 是 | 同一事件标识只报一次 | `MonitorAlertObserver`、`MonitoringService` |
 | 监控恢复 | 已记录异常状态实际恢复 | 视来源显示提示或仅记录 | 是 | 关闭故障卡片不代表恢复 | `MonitorPage` |
 | 设置操作 | 数据根迁移、重置或工具配置产生确定结果/失败 | 按结果显示 | 是 | 仅打开设置页或选择器取消不报成功 | `SettingsPage` |
 

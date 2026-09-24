@@ -68,6 +68,13 @@ public sealed class MonitoringService : IDisposable
 
     public bool UsesAgent => _agentConnection is not null;
 
+    /// <summary>
+    /// Whether this app-side service currently owns a polling loop. An Agent
+    /// snapshot can report an active session before this process has attached
+    /// to it; callers can then attach without starting a duplicate session.
+    /// </summary>
+    public bool HasPollingLoop => _loopCts is { IsCancellationRequested: false };
+
     public bool IsRunning { get; private set; }
 
     /// <summary>
@@ -94,7 +101,7 @@ public sealed class MonitoringService : IDisposable
         CancellationToken cancellationToken = default)
     {
         SampleRateHz = rateHz;
-        if (IsRunning)
+        if (IsRunning && HasPollingLoop)
         {
             return true;
         }

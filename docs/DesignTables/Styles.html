@@ -49,9 +49,9 @@
       <tr><td>消息详情</td><td>半透明黑色遮罩 <code>#80000000</code>；中央只读 TextBox，宽随页面缩到 160–640 DIP，高 96–380 DIP；实色底板与文本框使用 <code>WinPoolOpaqueSurfaceBrush</code></td><td>不透明主题背景，无标题及按钮；短文本收缩高度，长文本显示竖向滚动</td><td>文本可选择并用 Ctrl+C 复制；点击文本框外关闭</td></tr>
       <tr><td>右下消息卡</td><td>宽 384 DIP；无额外最小高度；内容最大高 200 DIP；卡间距 6 DIP；InfoBar 本体使用 <code>WinPoolOpaqueSurfaceBrush</code></td><td>高度由 InfoBar 实际内容决定；单层不透明 InfoBar</td><td>右下停靠；最多三张，窗口高度不足时减少张数；外层 UserControl 不再留下透明空白</td></tr>
       <tr><td>消息退出</td><td>右移 420 DIP、240 ms；回调失联 750 ms 兜底</td><td>向右消失</td><td>系统关闭动画效果时直接完成；消息历史寿命独立</td></tr>
-      <tr><td>编辑页右栏与分区数值</td><td>存储结构／分区右栏均从 320 DIP 开始，最小 240 DIP；左栏最小 120 DIP；分区内容最小宽 412 DIP，栏内横向滚动；“起点”“终点”“容量”固定标签</td><td>两栏可拖动调整；起点和终点共用两行数值网格：MiB 数字与括号内自适应数字分别占列、分别右对齐；MiB 数字有千位分隔符，括号内自动换 GiB/TiB。窄栏可滚动读尾部单位</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行只读换算值使用普通文字样式；操作按钮随选择切换新建／格式化</td></tr>
+      <tr><td>编辑页右栏与分区数值</td><td>存储结构／分区右栏均从 320 DIP 开始，最小 240 DIP；左栏最小 120 DIP；属性表单使用 1:2 弹性标签／值列，标签可换行，右栏不强制横向滚动；“起点”“终点”“容量”固定标签</td><td>两栏可拖动调整；起点和终点共用两行数值网格：MiB 数字与括号内自适应数字分别占列、分别右对齐；MiB 数字有千位分隔符，括号内自动换 GiB/TiB。窄栏内容按列宽换行</td><td>容量第一行标签、输入框、固定 MiB 后缀和图标式 MAX 对齐，第二行只读换算值使用普通文字样式；操作按钮随选择切换新建／格式化</td></tr>
       <tr><td>监控表格与工具栏</td><td>表头和数据行置于同一横向滚动区，内容最小宽 720 DIP；工具栏按可用宽度拆成两行</td><td>窄窗横滚时表头与数据列保持同一水平位置，工具按钮不覆盖采样控件</td><td>颜色选择色块使用行内单图标按钮命中尺寸；图表与表格之间仍可拖动</td></tr>
-      <tr><td>设置页字段</td><td>卡片内标签列固定 112 DIP；主题、强调色、语言下拉宽 220 DIP，路径和 7Z 下拉宽 180 DIP；路径下拉与 32 DIP 图标按钮紧邻同行，路径文字另起一行</td><td>宽窗口不拉长项名或下拉；最窄窗口字段仍可触达，长标签可换行</td><td>路径图标按钮通过自动化名称和悬停帮助说明“打开路径”；其余设置操作沿用普通按钮样式</td></tr>
+      <tr><td>设置页字段</td><td>卡片间距 8 DIP，卡片内标签列固定 160 DIP；主题、强调色、语言下拉宽 220 DIP，路径和 7Z 下拉宽 180 DIP；路径下拉、32 DIP 图标按钮和路径文字同一行</td><td>项名保持单行；路径占用剩余宽度，过长时省略显示并可悬停查看完整路径</td><td>路径图标按钮通过自动化名称和悬停帮助说明“打开路径”；其余设置操作沿用普通按钮样式</td></tr>
       <tr><td>拓扑剩余空间描边</td><td>Light <code>#60000000</code>；Dark <code>#40FFFFFF</code>（XAML AARRGGBB）；高对比度 <code>SystemColorWindowTextColor</code></td><td><span class="swatch" style="background:rgba(0,0,0,.376)"></span><span class="swatch" style="background:rgba(255,255,255,.251)"></span></td><td><code>WinPoolTopologyRestStrokeBrush</code>；保持高对比度系统资源</td></tr>
     </tbody>
   </table>
