@@ -1,0 +1,205 @@
+10:58:32.465 No leftover WinPool processes
+10:58:32.514 Launched App PID 8788
+10:59:24.996 App PID=8788 hwnd=12391486 title='欢迎使用 WinPool ！'
+10:59:25.077 WinUI windows: 2
+10:59:25.094   name='欢迎使用 WinPool ！' hwnd=12391486 bounds=1360,480,720,480
+10:59:25.104   name='WinPool' hwnd=1770526 bounds=1000,270,1440,900
+10:59:25.115 main='WinPool' welcome='欢迎使用 WinPool ！'
+10:59:26.041 Saved D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\01-startup-welcome.png size=304478 bounds=1360,480,720,480
+10:59:26.911 Saved D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\01-startup-main-behind-welcome.png size=440581 bounds=1000,270,1440,900
+10:59:27.713 UIA dump D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\uia-main-startup.txt elements=216
+10:59:27.752 UIA dump D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\uia-welcome-startup.txt elements=11
+10:59:27.760 startup capture done
+11:01:35.723 Welcome already gone
+11:01:36.601 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\02-manage.png bytes=109996 bounds=1000,270,1440,900
+11:01:36.819 UIA D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\uia-main-window.txt count=60
+11:01:37.743 NAV 硬件
+11:01:39.225 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\03-hardware.png bytes=124783 bounds=1000,270,1440,900
+11:01:40.154 NAV 存储结构编辑
+11:01:41.562 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\04-storage-structure.png bytes=146688 bounds=1000,270,1440,900
+11:01:42.477 NAV 磁盘分区编辑
+11:01:43.877 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\05-disk-partition.png bytes=109984 bounds=1000,270,1440,900
+11:01:44.751 NAV 测试
+11:01:46.129 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\06-test.png bytes=112079 bounds=1000,270,1440,900
+11:01:47.001 NAV 监控
+11:01:48.447 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\07-monitor.png bytes=172974 bounds=1000,270,1440,900
+11:01:49.391 NAV 开发
+11:01:50.801 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\08-development.png bytes=110081 bounds=1000,270,1440,900
+11:01:51.771 NAV 设置
+11:01:53.256 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\09-settings.png bytes=124836 bounds=1000,270,1440,900
+11:01:54.226 NAV 管理
+11:01:55.678 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\02b-manage-after-nav.png bytes=151743 bounds=1000,270,1440,900
+11:01:55.684 page tour done
+11:03:30.367 Copied 02b to 02-manage.png
+11:03:31.228 CLICK 1166,295 name='WinPool.App.ViewModels.ShellNavigationItem' auto=''
+11:03:41.474 NAVCLICK 硬件 ok=False
+11:04:06.603 app pid=8788 hwnd=1770526 title='WinPool'
+11:04:16.817 win 'WinPool' hwnd=1770526 bounds=1000,270,1440,900
+11:04:17.548 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\current-state.png bytes=115274
+11:04:17.677 NAVITEM sel=False bounds=1132,275,68,40 texts=硬件
+11:04:17.725 NAVITEM sel=False bounds=1200,275,68,40 texts=管理
+11:04:17.767 NAVITEM sel=False bounds=1268,275,124,40 texts=存储结构编辑
+11:04:17.782 NAVITEM sel=False bounds=1392,275,124,40 texts=磁盘分区编辑
+11:04:17.825 NAVITEM sel=False bounds=1516,275,68,40 texts=测试
+11:04:17.847 NAVITEM sel=False bounds=1584,275,68,40 texts=监控
+11:04:17.855 NAVITEM sel=False bounds=1652,275,68,40 texts=开发
+11:04:17.868 NAVITEM sel=True bounds=1720,275,68,40 texts=设置
+11:04:18.007 AutoIds: AboutCommunityButton=1, AboutCommunityLabel=1, AboutFeedbackLabel=1, AboutProductNameLabel=1, AboutProductNameValue=1, AboutProviderLabel=1, AboutUpdateLabel=1, AboutVersionLabel=1, AboutVersionValue=1, AboutWebsiteLabel=1, AccentOptions=1, AccentTitle=1, ActiveSystemSelector=1, Close=2, CommunityButtonText=1, DataLocationOptions=1, DataLocationPath=1, DataLocationTitle=1, DeveloperModeSwitch=1, DeveloperModeTitle=1, ExecutionTitle=1, FeedbackButton=1, FeedbackButtonText=1, Item 1=1, LanguageOptions=1, LanguageTitle=1, LocalRealOperationsLabel=1, LocalRealOperationsSwitch=1, Maximize=2, Minimize=2, MsrSwitch=1, MsrTitle=1, OpenDataLocationButton=1, OpenSevenZipLocationButton=1, PartitionGapBox=1, PartitionGapTitle=1, ResetAllButton=1, ResetAllButtonText=1, ResetAllTitle=1, SettingsExecutionModeSwitch=1, SevenZipOptions=1, SevenZipPath=1, SevenZipTitle=1, ShellNavigationList=1, StartupAgentSwitch=1, StartupAgentTitle=1, SystemMenuBar=1, ThemeOptions=1, ThemeTitle=1, TitleBar=1, UpdateButton=1, UpdateButtonText=1, VerticalLargeDecrease=1, VerticalLargeIncrease=1, VerticalScrollBar=1, VerticalSmallDecrease=1, VerticalSmallIncrease=1, WebsiteButton=1, WebsiteButtonText=1, WelcomeButton=1, WelcomeButtonText=1, WelcomeTitle=1, WindowTitleText=1
+11:04:18.033 Unique names count=57
+11:04:18.039 Names: Non Client Input Sink Window | AppWindow Custom Title Bar | Minimize | Maximize | Close | WinPool | WinPool.App.ViewModels.ShellNavigationItem | 硬件 | 管理 | 存储结构编辑 | 磁盘分区编辑 | 测试 | 监控 | 开发 | 设置 | 存储系统 | 真实编辑 | 主题 | 主题色 | 语言 | 欢迎页面 | 打开欢迎内容 | 开机启动 | 开发者模式 | 创建微软保留分区 | 分区缝隙隐藏阈值 | MiB | 数据存储位置 | 打开路径 | C:\Users\Admin\AppData\Local\WinPool | 恢复默认 | 全部恢复默认 | 7Z | D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\Tools\7zip\7za.exe | 产品 | 版本 | V0.56 | 提供方 | GitRuozhi | 官网 | 访问官网 | 更新 | 查看更新 | 反馈 | 提交反馈 | 轻松交流 | 加入 QQ 群 | 垂直 | 垂直小幅下降 | 垂直大幅下降 | 垂直大幅增长 | 垂直小幅增长 | 系统菜单栏 | 系统 | 最小化 | 最大化 | 关闭
+11:06:16.832 GOTO Settings marker=DeveloperModeSwitch ok=True
+11:06:16.980 Language combo name=''
+11:06:18.284 LANGITEM 跟随系统 bounds=1235,420,208,33
+11:06:18.295 LANGITEM 中文 bounds=1235,457,208,33
+11:06:18.301 LANGITEM English bounds=1235,494,208,33
+11:06:18.309 LANGITEM 跟随系统 bounds=1235,420,208,33
+11:06:18.316 LANGITEM 中文 bounds=1235,457,208,33
+11:06:18.323 LANGITEM English bounds=1235,494,208,33
+11:06:18.354 LANGITEM 模拟系统重构建议 bounds=4,1784,245,36
+11:06:18.444 Restored language item 跟随系统
+11:06:19.859 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\09b-settings-language-restore.png bytes=54946 bounds=1000,270,1440,900
+11:06:20.857 GOTO Hardware marker=HardwareRefresh ok=True
+11:06:22.175 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\03-hardware.png bytes=41044 bounds=1000,270,1440,900
+11:06:22.297 HW names: Non Client Input Sink Window | AppWindow Custom Title Bar | Minimize | Maximize | Close | WinPool | WinPool.App.ViewModels.ShellNavigationItem | 硬件 | WinPool.App.ViewModels.ShellNavigationItem | 管理 | WinPool.App.ViewModels.ShellNavigationItem | 存储结构编辑 | WinPool.App.ViewModels.ShellNavigationItem | 磁盘分区编辑 | WinPool.App.ViewModels.ShellNavigationItem | 测试 | WinPool.App.ViewModels.ShellNavigationItem | 监控 | WinPool.App.ViewModels.ShellNavigationItem | 开发 | WinPool.App.ViewModels.ShellNavigationItem | 设置 | 存储系统 | 真实编辑 | 真实编辑 | 刷新 | 刷新 | 导出 | 导出 | Computer | 主机名 | 制造商 | 型号 | 架构 | Computer, 主机名, 超多分区系统盘 | Computer, 制造商,  | Computer, 型号,  | Computer, 架构,  | System | 名称 | 版本 | 内部版本 | 激活状态 | 语言 | 当前用户 | 本地超级管理员 | 电源计划 | System, 名称, Windows 10 Pro | System, 版本, 22H2 | System, 内部版本, 19045.7463 | System, 激活状态,  | System, 语言,  | System, 当前用户,  | System, 本地超级管理员,  | System, 电源计划,  | Mainboard | 型号 | 主板厂商 | BIOS 模式 | BIOS 版本 | BIOS 厂商 | Mainboard, 型号,  | Mainboard, 主板厂商,  | Mainboard, BIOS 模式,  | Mainboard, BIOS 版本,  | Mainboard, BIOS 厂商,  | CPU | 型号 | 基准速度 | 物理核心 | 逻辑核心 | 一级缓存 | 二级缓存 | 三级缓存 | CPU, 型号,  | CPU, 基准速度,  | CPU, 物理核心,  | CPU, 逻辑核心,  | CPU, 一级缓存,  | CPU, 二级缓存, 
+11:06:22.309 HardwareRefresh Name='刷新' Enabled=False
+11:06:23.242 GOTO DiskPartition marker=PartitionActionButton ok=True
+11:06:24.615 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\05-disk-partition.png bytes=64171 bounds=1000,270,1440,900
+11:06:24.667 PartitionActionButton Name='新建分区' Enabled=False
+11:06:24.724 PART names: Non Client Input Sink Window | AppWindow Custom Title Bar | Minimize | Maximize | Close | WinPool | 硬件 | 管理 | 存储结构编辑 | 磁盘分区编辑 | 测试 | 监控 | 开发 | 设置 | 存储系统 | 真实编辑 | 真实编辑 | 虚拟磁盘 | 8-partition NVMe | Collapse 8-partition NVMe | 8-partition NVMe | 物理磁盘  GPT  1.82 TiB | EFI 系统分区 | 未格式化  100 MiB | 微软保留分区 | 未格式化  16 MiB | C: | C: | 主分区 | NTFS  200 GiB | D: Data1 | D: Data1 | 主分区 | NTFS  80 GiB | E: Data2 | E: Data2 | 主分区 | NTFS  80 GiB | 未分配 | 未分配 | 未分配 | 未分配  80 GiB | G: Data4 | G: Data4 | 主分区 | NTFS  80 GiB | Windows 恢复分区 | 未格式化  500 MiB | F: | F: | 主分区 | NTFS  1.31 TiB | Empty-HDD | Empty-HDD | 物理磁盘  RAW  3.64 TiB | Resize topology and properties | 联机 | 脱机 | 初始化磁盘 | 转换为 GPT | 删除分区 | 扩展分区 | 压缩分区 | 打开资源管理器 | 所在磁盘 | 分区编号 | — | 起点 | 终点 | —
+11:06:24.729 shortcut recapture done
+11:07:57.767 GOTO DiskPartition ok
+11:09:18.954 GOTO DiskPartition ok
+11:09:19.084 gap candidates=3
+11:09:19.106   type=ControlType.Group bounds=1622,372,112,114
+11:09:19.113   type=ControlType.Text bounds=1637,383,66,19
+11:09:19.121   type=ControlType.Text bounds=1660,404,59,16
+11:09:19.674 CLICK 1678,429 '未分配' type=ControlType.Group bounds=1622,372,112,114
+11:09:20.550 AFTER GAP button='新建分区' Enabled=True Help='在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。'
+11:09:20.589 start='368,757'
+11:09:20.595 end='450,677'
+11:09:21.559 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\12-disk-partition-gap.png bytes=86372
+11:09:21.613 C candidates=2
+11:09:21.619   type=ControlType.Group bounds=1268,372,112,114
+11:09:21.625   type=ControlType.Text bounds=1283,383,66,19
+11:09:22.132 CLICK 1324,429 'C:' type=ControlType.Group bounds=1268,372,112,114
+11:09:23.018 AFTER C: button='格式化分区' Enabled=False Help='系统或启动分区不能格式化；卷标、盘符和符合条件的模拟扩缩仍可编辑。'
+11:09:23.860 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\13-disk-partition-existing.png bytes=86652
+11:09:24.680 GOTO Hardware ok
+11:09:24.808 HWSECTION Computer
+11:09:24.815 HWSECTION System
+11:09:24.820 HWSECTION Mainboard
+11:09:24.826 HWSECTION CPU
+11:09:24.832 HWSECTION Memory
+11:09:24.839 HWSECTION VirtualMemory
+11:09:24.846 HWSECTION Storage
+11:09:24.851 HWSECTION GPU
+11:09:24.857 HWSECTION Monitor
+11:09:24.865 HWSECTION Network
+11:09:24.879 HW refresh Enabled=False Name='刷新'
+11:09:27.409 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\11-hardware-refresh-disabled-hover.png bytes=58656
+11:09:27.453 POP 'WinPool' class=WinUIDesktopWin32WindowClass bounds=1000,270,1440,900
+11:09:27.459 POP '欢迎使用 WinPool ！' class=WinUIDesktopWin32WindowClass bounds=1360,480,720,480
+11:09:29.577 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\03b-hardware-scrolled.png bytes=57957
+11:09:29.687 HWSECTION2 Computer
+11:09:29.693 HWSECTION2 System
+11:09:29.698 HWSECTION2 Mainboard
+11:09:29.704 HWSECTION2 CPU
+11:09:29.709 HWSECTION2 Memory
+11:09:29.715 HWSECTION2 VirtualMemory
+11:09:29.721 HWSECTION2 Storage
+11:09:29.727 HWSECTION2 GPU
+11:09:29.732 HWSECTION2 Monitor
+11:09:29.738 HWSECTION2 Network
+11:09:30.523 GOTO StorageStructure ok
+11:09:30.644 SPLIT bounds=2104,319,8,843 window=1000,270,1440,900 rightPx=328
+11:09:30.651 ApplyAll Name='' Enabled=False
+11:09:30.656 interaction part1 done
+11:10:59.087 dismiss welcome via invoke
+11:10:59.796 welcome gone=True
+11:11:01.926 SYSITEM '[本机] DESKTOP-BLE6H18' bounds=1888,248,258,32
+11:11:01.986 SYSITEM '[本机] DESKTOP-BLE6H18' bounds=1888,248,258,32
+11:11:02.003 SYSITEM '导航含 8 页（硬件/管理/存储结构编辑/磁盘分区编辑/测试/监控/开发/设置）——开发模式三页可见（本机为作者开发机，历史数据保留了开发者模式开启状态）' bounds=361,-3872,686,50
+11:11:03.516 selected system via '[本机] DESKTOP-BLE6H18'
+11:11:20.562 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\10a-system-local.png bytes=92298
+11:11:23.633 GOTO Manage ok
+11:11:23.779 ManageRefresh Enabled=True
+11:11:23.792 clicked manage refresh invoke
+11:11:24.304 NOTE 采集中… | 采集中…
+11:11:25.095 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\10-manage-refresh-notification.png bytes=127021
+11:11:25.605 NOTE 采集中… | 采集中…
+11:11:26.115 NOTE 采集中… | 采集中…
+11:11:26.679 NOTE 采集中… | 采集中…
+11:11:27.204 NOTE 采集成功: 最后扫描: 2026/9/24 11:11:23 | 采集成功
+11:11:28.083 GOTO Hardware ok
+11:11:28.554 HW refresh Enabled=True Name='刷新'
+11:11:28.622 clicked hardware refresh
+11:11:29.171 HNOTE 刷新率 | Monitor, 刷新率, 144 Hz | Monitor, 刷新率, 60 Hz | 采集中… | 采集中… | 采集成功: 最后扫描: 2026/9/24 11:11:23 | 采集成功
+11:11:29.207 refreshing (Cancel visible)
+11:11:29.980 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\11b-hardware-refresh-notification.png bytes=81697
+11:11:30.739 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\03c-hardware-local.png bytes=81697
+11:11:30.745 part2 done
+11:12:44.437 GOTO Hardware ok
+11:12:44.494 hwbtn='刷新' enabled=True i=0
+11:12:46.108 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\03c-hardware-local.png bytes=75828 bounds=1000,270,1440,900
+11:12:46.262 HWLOCAL Computer
+11:12:46.268 HWLOCAL System
+11:12:46.274 HWLOCAL Mainboard
+11:12:46.279 HWLOCAL CPU
+11:12:46.285 HWLOCAL Memory
+11:12:46.290 HWLOCAL VirtualMemory
+11:12:46.296 HWLOCAL Storage
+11:12:46.303 HWLOCAL GPU
+11:12:46.309 HWLOCAL Monitor
+11:12:46.314 HWLOCAL Network
+11:12:46.341 notes: 
+11:12:47.041 GOTO Development ok
+11:12:47.499 messages=6
+11:12:47.508 MSG 11:11:36 / 信息 / hardware / 硬件信息已刷新
+11:12:47.515 MSG 11:11:36 / 信息 / inventory / 采集成功
+11:12:47.522 MSG 11:11:26 / 信息 / inventory / 采集成功
+11:12:47.531 MSG 11:05:59 / 信息 / inventory / 采集成功
+11:12:47.538 MSG 11:05:50 / 信息 / inventory / 采集成功
+11:12:47.551 MSG 11:05:48 / 警告 / monitor / 监控异常
+11:12:48.072 dblclicked message
+11:12:48.731 DETAIL readonly=? Name='消息详情文本' bounds=1401,610,638,262
+11:12:48.742 DETAIL value len=191 readonly=True
+11:12:48.753 DETAIL head=硬件信息已刷新本机目标：DESKTOP-BLE6H18已完成本机只读硬件刷新。已完成本机只读硬件刷新。来源: hardware级别: 信息代码: hardware.refresh.completed相关对象: 本机目标：DESKTOP-BLE6H18系统标识: local:system:desktop-ble6h18首次发生: 2026
+11:12:49.473 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\14-development-detail.png bytes=77579 bounds=1000,270,1440,900
+11:12:50.167 detail after outside click: CLOSED
+11:12:50.893 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\14b-development-detail-closed.png bytes=68078 bounds=1000,270,1440,900
+11:12:50.941 orig bounds=1000,270,1440,900
+11:12:51.829 narrow bounds=1000,270,900,900
+11:12:51.857 narrow nav=开发
+11:12:52.601 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\15-narrow-window.png bytes=76815 bounds=1000,270,900,900
+11:12:53.375 restored bounds=1000,270,1440,900
+11:12:54.092 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\16-window-restored.png bytes=68074 bounds=1000,270,1440,900
+11:12:54.804 GOTO Settings ok
+11:12:54.860 devmode before=On
+11:12:55.915 nav after dev OFF: 管理,存储结构编辑,磁盘分区编辑,监控,设置
+11:12:56.660 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\17-developer-mode-off.png bytes=83600 bounds=1000,270,1440,900
+11:12:57.557 nav after dev ON: 硬件,管理,存储结构编辑,磁盘分区编辑,测试,监控,开发,设置
+11:12:58.281 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\18-developer-mode-on.png bytes=84538 bounds=1000,270,1440,900
+11:12:58.287 part3 done
+11:13:58.240 SYS [模拟] 超多分区系统盘
+11:13:59.595 GOTO Settings ok
+11:13:59.626 combo name='存储系统'
+11:13:59.663 devmode=On
+11:14:00.442 SHOT D:\Coding\Research03_WinPool\Program\WinPool\docs\Review\Grok-Independent-Review-20260924-evidence\19-restored-settings.png bytes=76574
+11:14:00.734 invoked Close
+11:14:01.312 App exited
+11:14:16.821 LEFTOVER:
+11:14:16.831   20328 WinPool.Agent.exe D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.Agent.exe
+11:14:16.842 {
+  "Theme": "System",
+  "AccentColor": "System",
+  "Language": "SystemDefault",
+  "CreateMsrOnInitialize": true,
+  "PartitionIgnoreSizeBytes": 8388608,
+  "LastActivePage": "Settings",
+  "DeveloperMode": true,
+  "AutoCreateVirtualDisk": true,
+  "AutoCreatePartition": true,
+  "BuiltInSimulationCatalogSeeded": true,
+  "FormatVersion": 1
+}
+11:14:16.847 close sequence done

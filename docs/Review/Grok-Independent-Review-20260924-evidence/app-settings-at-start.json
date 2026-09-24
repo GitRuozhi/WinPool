@@ -1,0 +1,13 @@
+{
+  "Theme": "System",
+  "AccentColor": "System",
+  "Language": "SystemDefault",
+  "CreateMsrOnInitialize": true,
+  "PartitionIgnoreSizeBytes": 8388608,
+  "LastActivePage": "Manage",
+  "DeveloperMode": true,
+  "AutoCreateVirtualDisk": true,
+  "AutoCreatePartition": true,
+  "BuiltInSimulationCatalogSeeded": true,
+  "FormatVersion": 1
+}

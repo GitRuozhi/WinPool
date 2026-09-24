@@ -1,0 +1,43 @@
+{
+  "review": "Grok-Independent-Review-20260924",
+  "product": "WinPool",
+  "version": "V0.56",
+  "gitHead": "58723748ad3591ec12c9b16dc142142e1330376b",
+  "runtime": "D:\\Coding\\Research03_WinPool\\Program\\WinPool\\artifacts\\Release",
+  "capture": "CopyFromScreen after SetForegroundWindow (native-winui-control)",
+  "screenshots": [
+    {"file": "01-startup.png", "bytes": 440581, "scene": "startup-welcome-over-manage"},
+    {"file": "01-startup-welcome.png", "bytes": 304478, "scene": "welcome-window"},
+    {"file": "01-startup-main-behind-welcome.png", "bytes": 440581, "scene": "main-with-welcome-overlay"},
+    {"file": "02-manage.png", "bytes": 151743, "scene": "manage-topology-and-table"},
+    {"file": "02b-manage-after-nav.png", "bytes": 151743, "scene": "manage-after-nav-tour"},
+    {"file": "03-hardware.png", "bytes": 41044, "scene": "hardware-simulation-top"},
+    {"file": "03b-hardware-scrolled.png", "bytes": 57957, "scene": "hardware-simulation-scrolled"},
+    {"file": "03c-hardware-local.png", "bytes": 75828, "scene": "hardware-local-after-refresh"},
+    {"file": "04-storage-structure.png", "bytes": 146688, "scene": "storage-structure-editor"},
+    {"file": "05-disk-partition.png", "bytes": 64171, "scene": "disk-partition-editor"},
+    {"file": "06-test.png", "bytes": 112079, "scene": "test-placeholder-page"},
+    {"file": "07-monitor.png", "bytes": 172974, "scene": "monitor-running-session"},
+    {"file": "08-development.png", "bytes": 110081, "scene": "development-message-list"},
+    {"file": "09-settings.png", "bytes": 124836, "scene": "settings-controls"},
+    {"file": "09b-settings-language-restore.png", "bytes": 54946, "scene": "settings-language-restored"},
+    {"file": "10-manage-refresh-notification.png", "bytes": 127021, "scene": "manage-collecting-notification"},
+    {"file": "10a-system-local.png", "bytes": 92298, "scene": "local-system-disk-partition-view"},
+    {"file": "11-hardware-refresh-disabled-hover.png", "bytes": 58656, "scene": "hardware-refresh-disabled-on-simulation"},
+    {"file": "11b-hardware-refresh-notification.png", "bytes": 81697, "scene": "hardware-refresh-in-progress-cards"},
+    {"file": "12-disk-partition-gap.png", "bytes": 86372, "scene": "gap-selected-create-partition"},
+    {"file": "13-disk-partition-existing.png", "bytes": 86652, "scene": "c-selected-format-partition"},
+    {"file": "14-development-detail.png", "bytes": 77579, "scene": "development-message-detail"},
+    {"file": "14b-development-detail-closed.png", "bytes": 68078, "scene": "development-detail-closed"},
+    {"file": "15-narrow-window.png", "bytes": 76815, "scene": "window-900x900"},
+    {"file": "16-window-restored.png", "bytes": 68074, "scene": "window-1440x900-restored"},
+    {"file": "17-developer-mode-off.png", "bytes": 83600, "scene": "developer-mode-off-nav-gate"},
+    {"file": "18-developer-mode-on.png", "bytes": 84538, "scene": "developer-mode-on-nav-restored"},
+    {"file": "19-restored-settings.png", "bytes": 76574, "scene": "restored-before-exit"}
+  ],
+  "uia": [
+    {"file": "uia-main-startup.txt", "elements": 216, "note": "main window at startup behind welcome"},
+    {"file": "uia-welcome-startup.txt", "elements": 11, "note": "welcome window"},
+    {"file": "uia-main-window.txt", "elements": 60, "note": "stale early dump while on development; prefer uia-main-startup.txt"}
+  ]
+}
