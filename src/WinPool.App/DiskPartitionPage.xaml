@@ -89,18 +89,18 @@
                     x:Name="OnlineButton"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Online_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE8FB;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="OnlineButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -112,18 +112,18 @@
                     Grid.Column="1"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Offline_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE8AE;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="OfflineButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -135,18 +135,18 @@
                     Grid.Column="2"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Initialize_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE9CE;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="InitializeButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -158,18 +158,18 @@
                     Grid.Column="3"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="ConvertGpt_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE8AB;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="ConvertGptButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -181,18 +181,18 @@
                     Grid.Column="4"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="DeletePartition_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="DeletePartitionButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -204,18 +204,18 @@
                     Grid.Column="5"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Extend_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE8A5;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="ExtendButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -227,18 +227,18 @@
                     Grid.Column="6"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="Shrink_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE73F;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="ShrinkButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -250,18 +250,18 @@
                     Grid.Column="7"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="OpenExplorer_Click">
-                    <Grid ColumnSpacing="6">
+                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <FontIcon Glyph="&#xE838;" FontSize="14" VerticalAlignment="Center" />
                         <TextBlock
                             x:Name="OpenExplorerButtonLabel"
                             Grid.Column="1"
+                            MaxWidth="128"
                             VerticalAlignment="Center"
                             TextWrapping="Wrap" />
                     </Grid>
@@ -288,7 +288,7 @@
                             x:Name="PartitionFormGrid"
                             Margin="8"
                             ColumnSpacing="6"
-                            RowSpacing="8">
+                            RowSpacing="4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="32" />
@@ -339,30 +339,25 @@
                                 VerticalAlignment="Center" />
                             <Grid
                                 Grid.Row="2"
-                                Grid.RowSpan="2"
-                                Grid.Column="2"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="2"
+                                ColumnSpacing="0"
                                 VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
                                 <TextBlock
                                     x:Name="StartOffsetValue"
-                                    Grid.Row="0"
                                     Grid.Column="0"
                                     TextAlignment="Right"
-                                    TextWrapping="Wrap"
+                                    TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetMibPrefixValue"
-                                    Grid.Row="0"
                                     Grid.Column="1"
                                     Text="MiB ("
                                     TextWrapping="NoWrap"
@@ -370,40 +365,47 @@
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetAdaptiveValue"
-                                    Grid.Row="1"
-                                    Grid.Column="0"
+                                    Grid.Column="2"
                                     TextAlignment="Right"
-                                    TextWrapping="Wrap"
+                                    TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetUnitValue"
-                                    Grid.Row="1"
-                                    Grid.Column="1"
+                                    Grid.Column="3"
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetUnavailableValue"
-                                    Grid.Row="0"
                                     Grid.Column="0"
-                                    Grid.RowSpan="2"
-                                    Grid.ColumnSpan="2"
+                                    Grid.ColumnSpan="4"
                                     Text="—"
                                     TextAlignment="Right"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="2"
+                                ColumnSpacing="0"
+                                VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
                                 <TextBlock
                                     x:Name="EndOffsetValue"
-                                    Grid.Row="2"
                                     Grid.Column="0"
                                     TextAlignment="Right"
-                                    TextWrapping="Wrap"
+                                    TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetMibPrefixValue"
-                                    Grid.Row="2"
                                     Grid.Column="1"
                                     Text="MiB ("
                                     TextWrapping="NoWrap"
@@ -411,25 +413,21 @@
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetAdaptiveValue"
-                                    Grid.Row="3"
-                                    Grid.Column="0"
+                                    Grid.Column="2"
                                     TextAlignment="Right"
-                                    TextWrapping="Wrap"
+                                    TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetUnitValue"
-                                    Grid.Row="3"
-                                    Grid.Column="1"
+                                    Grid.Column="3"
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetUnavailableValue"
-                                    Grid.Row="2"
                                     Grid.Column="0"
-                                    Grid.RowSpan="2"
-                                    Grid.ColumnSpan="2"
+                                    Grid.ColumnSpan="4"
                                     Text="—"
                                     TextAlignment="Right"
                                     Visibility="Collapsed"
@@ -672,7 +670,6 @@
                             x:Name="PartitionActionButton"
                             Style="{StaticResource WinPoolButtonBaseStyle}"
                             HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
                             VerticalAlignment="Center"
                             Click="PartitionActionButton_Click">
                             <StackPanel Orientation="Horizontal" Spacing="6">

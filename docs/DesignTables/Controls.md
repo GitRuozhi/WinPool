@@ -79,8 +79,9 @@
 | --- | --- | --- | --- |
 | 磁盘与分区拓扑 `TopologyControl` | 选择磁盘、分区或可见的未分配空间；展开节点浏览结构 | 未分配间隙小于设置的隐藏阈值时不投影到页面；可见但对齐后不足 1 MiB 的间隙会使操作按钮显示禁用原因 | `DiskPartitionPage.xaml(.cs)`、`TopologyNodeControl.xaml(.cs)` |
 | `TopologyScrollViewer` | 滚动浏览磁盘与分区拓扑 | 承载左侧结构树；节点选择更新右侧表单和操作状态 | `DiskPartitionPage.xaml` |
-| 分区页左右 `GridSplitter` | 调整磁盘拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，属性表单受栏宽约束，长 MiB 数值在栏内换行 | `DiskPartitionPage.xaml` |
+| 分区页左右 `GridSplitter` | 调整磁盘拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，属性表单受栏宽约束，起点与终点各在单行显示 | `DiskPartitionPage.xaml` |
 | `PartitionFormGrid` | 显示磁盘/分区身份字段和右侧编辑表单 | 当前选择决定哪些字段和按钮启用；表单放在纵向可滚动区域 | `DiskPartitionPage.xaml(.cs)` |
+| `StartOffsetValue`／`EndOffsetValue` 与自适应值 | 各显示一行起点或终点：千分位 MiB 数字及括号内自动换算数字 | MiB 与自适应数字分别右对齐；占用空闲复位按钮列以保留完整单行；无有效值时只显示破折号 | `DiskPartitionPage.xaml(.cs)` |
 | `OnlineButton` | 联机选中的模拟磁盘 | 仅选中模拟磁盘本身且磁盘当前脱机时启用；帮助说明只作用于模拟磁盘 | `DiskPartitionPage.xaml(.cs)` |
 | `OfflineButton` | 脱机选中的模拟磁盘 | 仅选中在线、非启动且非系统模拟磁盘时启用 | `DiskPartitionPage.xaml(.cs)` |
 | `InitializeButton` | 初始化选中的模拟磁盘 | 仅在线 RAW 且非启动/系统的模拟磁盘本身可用；帮助说明不会修改本机磁盘 | `DiskPartitionPage.xaml(.cs)` |
