@@ -43,6 +43,53 @@ public sealed class WindowsRealStorageSafetyInspectorTests
             topology, closure, fixture.Delete(DataId), CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData("EfiSystem", "c12a7328-f81f-11d2-ba4b-00a0c93ec93b")]
+    [InlineData("MicrosoftReserved", "e3c9e316-0b5c-4db8-817d-f92df00215ae")]
+    [InlineData("WindowsRecovery", "de94bba4-06d1-4d40-a16a-bfd50179d6ac")]
+    public async Task H04CanDeleteExactNewNonSystemPartitionOfSupportedRole(
+        string roleName, string roleGuid)
+    {
+        var fixture = new Fixture();
+        fixture.SetTargetRole(roleName, roleGuid);
+        var topology = await fixture.Capture();
+        var closure = fixture.Closure(topology);
+        var inspector = new WindowsRealStorageSafetyInspector(null, (_, _) => { });
+
+        await inspector.ValidateAsync(topology, closure, fixture.Delete(DataId), CancellationToken.None);
+
+        fixture.MarkTargetBoot();
+        topology = await fixture.Capture();
+        closure = fixture.Closure(topology);
+        await Assert.ThrowsAsync<InvalidDataException>(() => inspector.ValidateAsync(
+            topology, closure, fixture.Delete(DataId), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A05RejectsUnlistedGptRoleBeforeSafetyInspection()
+    {
+        var fixture = new Fixture();
+        fixture.SetTargetRole("Unknown", "11111111-2222-3333-4444-555555555555");
+        var topology = await fixture.Capture();
+        Assert.Throws<InvalidDataException>(() => fixture.Closure(topology));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(null)]
+    public async Task H04RejectsReadOnlyOrUnknownSelectedPartitionState(bool? isReadOnly)
+    {
+        var fixture = new Fixture();
+        fixture.SetTargetRole("MicrosoftReserved", "e3c9e316-0b5c-4db8-817d-f92df00215ae");
+        fixture.SetTargetReadOnlyState(isReadOnly);
+        var topology = await fixture.Capture();
+        var closure = fixture.Closure(topology);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new WindowsRealStorageSafetyInspector(
+            null, (_, _) => { }).ValidateAsync(
+                topology, closure, fixture.Delete(DataId), CancellationToken.None));
+    }
+
     [Fact]
     public async Task A05StillRejectsTargetBitLockerUnknownRuntimeUseAndProtectedPhysicalMember()
     {
@@ -81,6 +128,8 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         private readonly SystemId system = SystemId.New();
         private StorageSnapshot snapshot = InitialSnapshot();
         private bool targetShadowCopy;
+        private bool replaceTargetReadOnly;
+        private bool? targetReadOnlyState;
         private readonly WindowsRealStorageTopologyReader reader;
 
         public Fixture() => reader = new WindowsRealStorageTopologyReader(
@@ -102,6 +151,31 @@ public sealed class WindowsRealStorageSafetyInspectorTests
             Volumes = snapshot.Volumes.Where(item => item.PartitionStableId != DataId).ToArray()
         };
         public void MarkTargetShadowCopy() => targetShadowCopy = true;
+        public void SetTargetReadOnlyState(bool? value)
+        {
+            replaceTargetReadOnly = true;
+            targetReadOnlyState = value;
+        }
+        public void SetTargetRole(string type, string guid)
+        {
+            snapshot = snapshot with
+            {
+                Partitions = snapshot.Partitions.Select(item => item.StableId == DataId
+                    ? item with
+                    {
+                        Type = type, PartitionTypeId = guid, GptType = guid,
+                        IsHidden = true, DriveLetter = "", Path = "", FileSystem = "",
+                        FileSystemLabel = ""
+                    }
+                    : item).ToArray(),
+                Volumes = snapshot.Volumes.Where(item => item.PartitionStableId != DataId).ToArray()
+            };
+        }
+        public void MarkTargetBoot() => snapshot = snapshot with
+        {
+            Partitions = snapshot.Partitions.Select(item => item.StableId == DataId
+                ? item with { IsBoot = true } : item).ToArray()
+        };
 
         private StorageSystemDocument Document()
         {
@@ -126,12 +200,24 @@ public sealed class WindowsRealStorageSafetyInspectorTests
                             FactValueType.String, item.SourceRef))
                         .Add(WinPoolSourceField.Returned("IsClustered", false,
                             FactValueType.Boolean, item.SourceRef)) };
-                if (item.Id == DataId && targetShadowCopy)
+                if (item.Id == DataId && (targetShadowCopy || replaceTargetReadOnly))
                 {
-                    var selectedShadow = item.Field("IsShadowCopy")!;
-                    return item with { Fields = item.Fields.Replace(selectedShadow,
-                        WinPoolSourceField.Returned("IsShadowCopy", true,
-                            FactValueType.Boolean, item.SourceRef)) };
+                    var fields = item.Fields;
+                    if (targetShadowCopy)
+                    {
+                        var selectedShadow = item.Field("IsShadowCopy")!;
+                        fields = fields.Replace(selectedShadow,
+                            WinPoolSourceField.Returned("IsShadowCopy", true,
+                                FactValueType.Boolean, item.SourceRef));
+                    }
+                    if (replaceTargetReadOnly)
+                    {
+                        var selectedReadOnly = item.Field("IsReadOnly")!;
+                        fields = fields.Replace(selectedReadOnly,
+                            WinPoolSourceField.Returned("IsReadOnly", targetReadOnlyState,
+                                FactValueType.Boolean, item.SourceRef));
+                    }
+                    return item with { Fields = fields };
                 }
                 if (item.Id != EfiId) return item;
                 var shadow = item.Field("IsShadowCopy")!;

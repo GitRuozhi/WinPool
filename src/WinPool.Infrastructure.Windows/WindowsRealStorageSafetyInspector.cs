@@ -22,6 +22,13 @@ public interface IWindowsRealStorageSafetyInspector
 public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafetyInspector
 {
     private static readonly Guid BasicDataRole = Guid.Parse("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
+    private static readonly HashSet<Guid> DeletablePartitionRoles =
+    [
+        BasicDataRole,
+        Guid.Parse("c12a7328-f81f-11d2-ba4b-00a0c93ec93b"),
+        Guid.Parse("e3c9e316-0b5c-4db8-817d-f92df00215ae"),
+        Guid.Parse("de94bba4-06d1-4d40-a16a-bfd50179d6ac")
+    ];
     private readonly string[] additionalCriticalPaths;
     private readonly Action<IReadOnlyList<VolumeInfo>, CancellationToken> encryptionProbe;
 
@@ -92,10 +99,11 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
                 throw new InvalidDataException("Partition deletion needs one exact target in the current physical closure.");
             var selected = snapshot.Partitions.SingleOrDefault(item => item.StableId == target.ProviderKey)
                 ?? throw new InvalidDataException("The selected partition is absent from the current snapshot.");
-            if (selected.IsBoot || selected.IsSystem || selected.IsHidden
+            if (selected.IsBoot || selected.IsSystem
                 || !Guid.TryParse(selected.PartitionTypeId, out var role)
-                || role != BasicDataRole)
-                throw new InvalidDataException("Only the selected ordinary BasicData partition may be deleted.");
+                || !DeletablePartitionRoles.Contains(role)
+                || role == BasicDataRole && selected.IsHidden)
+                throw new InvalidDataException("The selected partition has an unsupported or protected role.");
             var source = topology.RequireObject(target);
             var paths = source.Field("AccessPaths");
             if (paths is not { ReadState: FieldReadState.Returned,
@@ -114,9 +122,9 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
                 && (role == Guid.Parse("e3c9e316-0b5c-4db8-817d-f92df00215ae")
                     || role == Guid.Parse("c12a7328-f81f-11d2-ba4b-00a0c93ec93b")
                     || role == Guid.Parse("de94bba4-06d1-4d40-a16a-bfd50179d6ac"));
-            if (RequiredBoolean(raw, "IsReadOnly", nonData)
+            if (RequiredBoolean(raw, "IsReadOnly", nonData && !deletingPartition)
                 || RequiredBoolean(raw, "IsOffline")
-                || RequiredBoolean(raw, "IsShadowCopy", nonData))
+                || RequiredBoolean(raw, "IsShadowCopy", nonData && !deletingPartition))
                 throw new InvalidDataException("A related partition is read-only, offline, or a shadow copy.");
             if (partition.PartitionTypeId is { Length: > 0 }
                 && Guid.TryParse(partition.PartitionTypeId, out var type)
