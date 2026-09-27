@@ -2795,17 +2795,26 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var candidate = RealPoolCandidate();
             if (candidate is null)
                 return;
+            var preferences = ViewModel.CurrentPreferences;
+            var autoCreateVirtualDisk = preferences.AutoCreateVirtualDisk;
+            var autoCreatePartition = preferences.AutoCreatePartition;
+            var createMsr = preferences.CreateMsrOnInitialize;
             var name = await PromptAsync(Text("创建单盘存储池", "Create single-disk storage pool"),
                 "WinPool");
             if (string.IsNullOrWhiteSpace(name))
                 return;
+            RealOperationProposalFactory.VirtualDiskOptions? virtualDisk = null;
+            if (autoCreateVirtualDisk)
+            {
+                virtualDisk = await PromptRealVirtualDiskOptionsAsync(name.Trim(),
+                    autoCreatePartition, createMsr);
+                if (virtualDisk is null)
+                    return;
+            }
             var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
                 StorageObjectKind.PhysicalDisk, candidate.StableId);
-            await SubmitRealAsync(RealOperationProposalFactory.OneStep(
-                ViewModel.ActiveDocument.SystemId, OperationIntent.CreateStoragePool,
-                target, new CreatePoolCommand(RealTargetReference.ForExisting(target), name),
-                $"One-member storage pool named {name}",
-                "Existing partitions and data on this physical disk become inaccessible"));
+            await SubmitRealAsync(RealOperationProposalFactory.CreateSingleMemberPool(
+                ViewModel.ActiveDocument.SystemId, target, name.Trim(), virtualDisk));
             return;
         }
         if (!ViewModel.IsUsingSimulatedInventory
@@ -2960,13 +2969,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
     }
 
+    private Task<RealOperationProposalFactory.VirtualDiskOptions?>
+        PromptRealVirtualDiskOptionsAsync(StoragePoolInfo pool) =>
+        PromptRealVirtualDiskOptionsAsync(pool.FriendlyName, null, null);
+
     private async Task<RealOperationProposalFactory.VirtualDiskOptions?>
-        PromptRealVirtualDiskOptionsAsync(StoragePoolInfo pool)
+        PromptRealVirtualDiskOptionsAsync(string poolName,
+            bool? fixedPartition, bool? fixedMsr)
     {
         var nameBox = new TextBox
         {
             Header = Text("虚拟磁盘名称", "Virtual disk name"),
-            Text = pool.FriendlyName + "_VD"
+            Text = poolName + "_VD"
         };
         var sizeBox = new TextBox
         {
@@ -2977,17 +2991,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             Content = Text("自动初始化 GPT 并建立 BasicData 分区",
                 "Initialize GPT and create a BasicData partition"),
-            IsChecked = ViewModel.CurrentPreferences.AutoCreatePartition
+            IsChecked = fixedPartition ?? ViewModel.CurrentPreferences.AutoCreatePartition,
+            IsEnabled = fixedPartition is null
         };
         var msrBox = new CheckBox
         {
             Content = Text("建立 16 MiB MSR", "Create a 16 MiB MSR"),
-            IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize
+            IsChecked = fixedPartition == false ? false
+                : fixedMsr ?? ViewModel.CurrentPreferences.CreateMsrOnInitialize,
+            IsEnabled = fixedMsr is null && partitionBox.IsChecked == true
         };
         var formatBox = new CheckBox
         {
             Content = Text("快速格式化 NTFS / 64 KiB", "Quick-format NTFS / 64 KiB"),
-            IsChecked = true
+            IsChecked = fixedPartition != false
         };
         var labelBox = new TextBox
         {
@@ -2999,6 +3016,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Header = Text("盘符 D–Z（可留空）", "Drive letter D–Z (optional)"),
             MaxLength = 1
         };
+        void UpdatePartitionOptions()
+        {
+            var partition = partitionBox.IsChecked == true;
+            if (fixedMsr is null)
+                msrBox.IsEnabled = partition;
+            formatBox.IsEnabled = partition;
+            labelBox.IsEnabled = partition && formatBox.IsChecked == true;
+            letterBox.IsEnabled = partition;
+        }
+        partitionBox.Checked += (_, _) => UpdatePartitionOptions();
+        partitionBox.Unchecked += (_, _) => UpdatePartitionOptions();
+        formatBox.Checked += (_, _) => UpdatePartitionOptions();
+        formatBox.Unchecked += (_, _) => UpdatePartitionOptions();
+        UpdatePartitionOptions();
         var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var panel = new StackPanel { Spacing = 8 };
         panel.Children.Add(nameBox);

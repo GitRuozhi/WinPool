@@ -150,6 +150,38 @@ public static class RealOperationProposalFactory
         return request;
     }
 
+    public static RealOperationIntentRequest CreateSingleMemberPool(
+        SystemId systemId, StorageObjectId physicalDisk, string poolName,
+        VirtualDiskOptions? virtualDisk)
+    {
+        var steps = new List<RealOperationStep>
+        {
+            new("create-pool",
+                new CreatePoolCommand(RealTargetReference.ForExisting(physicalDisk),
+                    poolName), [],
+                "The exact physical disk is RAW, has zero partitions and can join a pool",
+                $"One-member storage pool {poolName} exists",
+                "Existing partitions and data on the physical disk become inaccessible",
+                "Agent live Windows poolability check required")
+        };
+        if (virtualDisk is not null)
+            AppendVirtualDiskSteps(steps,
+                RealTargetReference.FromStep(StorageObjectKind.StoragePool,
+                    "create-pool"), virtualDisk);
+
+        var expected = virtualDisk is null
+            ? $"One-member storage pool named {poolName}"
+            : $"One-member storage pool {poolName}; Simple Fixed one-column " +
+              $"virtual disk {virtualDisk.Name} ({virtualDisk.SizeBytes} bytes)" +
+              (virtualDisk.InitializeAndPartition
+                  ? "; GPT and BasicData partition"
+                  : "; virtual disk remains RAW without partitions");
+        var request = new RealOperationIntentRequest(OperationIntent.CreateStoragePool,
+            systemId, [physicalDisk], steps, expected);
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
     public static RealOperationIntentRequest RebuildSingleMemberPool(
         SystemId systemId, StorageObjectId physicalDisk,
         StorageObjectId oldPool, StorageObjectId oldVirtualDisk,

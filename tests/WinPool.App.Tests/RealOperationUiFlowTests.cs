@@ -156,6 +156,68 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
+    public void CreatePoolWithoutAutomaticVirtualDiskHasOnlyTheExactPoolStep()
+    {
+        var system = SystemId.New();
+        var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk,
+            "selected-physical-id");
+        var proposal = RealOperationProposalFactory.CreateSingleMemberPool(
+            system, physical, "NewPool", null);
+
+        Assert.Equal(OperationIntent.CreateStoragePool, proposal.Intent);
+        Assert.Equal(physical, Assert.Single(proposal.Targets));
+        var step = Assert.Single(proposal.Steps);
+        Assert.Equal("create-pool", step.Id);
+        Assert.Empty(step.DependsOn);
+        var command = Assert.IsType<CreatePoolCommand>(step.Command);
+        Assert.Equal(physical, command.PhysicalDisk.Existing);
+        Assert.Equal("NewPool", command.Name);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AutomaticPoolVirtualDiskFreezesOptionsAndDependsOnCreatedPool(
+        bool autoCreatePartition)
+    {
+        var system = SystemId.New();
+        var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk,
+            "selected-physical-id");
+        var options = new RealOperationProposalFactory.VirtualDiskOptions(
+            "ExactVD", 32L * 1024 * 1024 * 1024,
+            autoCreatePartition, autoCreatePartition, autoCreatePartition,
+            autoCreatePartition ? "ExactLabel" : null,
+            autoCreatePartition ? 'E' : null);
+        var proposal = RealOperationProposalFactory.CreateSingleMemberPool(
+            system, physical, "ExactPool", options);
+
+        Assert.Equal(autoCreatePartition ? 7 : 2, proposal.Steps.Count);
+        var pool = Assert.IsType<CreatePoolCommand>(proposal.Steps[0].Command);
+        Assert.Equal("ExactPool", pool.Name);
+        var create = Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[1].Command);
+        Assert.Equal("create-pool", create.Pool.CreatedByStep);
+        Assert.Equal(["create-pool"], proposal.Steps[1].DependsOn);
+        Assert.Equal("ExactVD", create.Name);
+        Assert.Equal(32L * 1024 * 1024 * 1024, create.SizeBytes);
+        Assert.Equal(65536, create.InterleaveBytes);
+        Assert.Equal(1, create.DataColumns);
+        if (!autoCreatePartition)
+            return;
+
+        Assert.Equal("create-vdisk", proposal.Steps[2].DependsOn[0]);
+        var msr = Assert.IsType<CreatePartitionCommand>(proposal.Steps[3].Command);
+        Assert.Equal(RealPartitionRole.Msr, msr.Role);
+        var data = Assert.IsType<CreatePartitionCommand>(proposal.Steps[4].Command);
+        Assert.Equal(RealPartitionRole.BasicData, data.Role);
+        var format = Assert.IsType<FormatVolumeCommand>(proposal.Steps[5].Command);
+        Assert.Equal(RealFileSystem.Ntfs, format.FileSystem);
+        Assert.Equal(65536, format.ClusterBytes);
+        Assert.Equal("ExactLabel", format.Label);
+        var letter = Assert.IsType<SetDriveLetterCommand>(proposal.Steps[6].Command);
+        Assert.Equal('E', letter.NewLetter);
+    }
+
+    [Fact]
     public void StandaloneClearTargetsOneExistingOsDiskAndFixedRawState()
     {
         var system = SystemId.New();
