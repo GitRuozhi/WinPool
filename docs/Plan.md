@@ -1,6 +1,6 @@
-# 当前 Plan：本机真实存储编辑
+# 当前 Plan：本机真实存储编辑（未激活）
 
-状态：阶段边界已确定，实施尚未开始。上一阶段计划已[归档](Archive/20260924-before-real-edit/README.md)。
+状态：阶段边界已确定，实施尚未开始。V0.57 缺陷收口已完成并[归档](Archive/20260927-v057-closeout/README.md)，未激活本阶段；开发 Agent 每次实际操作前仍按 AGENTS 核对准确目标并取得批准。上一阶段计划已[归档](Archive/20260924-before-real-edit/README.md)。
 
 ## 范围
 

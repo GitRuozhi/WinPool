@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，当前阶段结果见 [V0.52 归档](Archive/V0.52/README.md)和[硬件报告执行归档](Archive/20260915-hardware-report/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.56。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，本轮结果见 [V0.57 收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.57。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。
 
 ## 环境与模块
 
@@ -94,6 +94,8 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 模拟分区删除资格只由所选分区自身的 Boot／System 标记决定，页面、管理页投影和服务端共用 `StorageEditRules.CanDeleteSimulatedPartition`：同盘的系统身份、分区类型（含 EFI、MSR、恢复）和所属系统盘都不再单独禁止删除，但仍不得删除标记为 Boot 或 System 的分区。格式化保持更窄的范围，只允许普通 Primary／BasicData 且非 Boot／System，不随删除资格一起放宽。
 
+系统 JSON 导入在转换及保存前验证来源投影：分别拒绝已知负偏移、非正容量，以及可证明的加法溢出、超出所属磁盘范围和重叠；缺失或冲突的字段不作为已知值参与几何运算。按显式磁盘身份分组，不按磁盘编号猜测关联，也不把编辑器的新建限制套在合法导入结构上。容量估算溢出统一转为参数拒绝，保留原始来源事实。
+
 内置模拟与导入模拟均可删除。`BuiltInSimulationCatalogPolicy` 只在首次成功初始化或显式恢复默认时补齐样例；`UserPreferences.BuiltInSimulationCatalogSeeded` 在持久化成功后设置，正常重载不重建已删除样例。目录可以没有模拟系统，此时使用本机选择。单项导入、转换及删除先完成仓储操作再更新内存目录；批量恢复默认逐项同步成功结果，避免失败重试使用旧修订。
 
 自动创建虚拟磁盘、分区保存在 App 的 `UserPreferences`，结构页开关保留原位置；选择对象不修改偏好，偏好变更不反向增删已有结构。新建操作读取偏好，相关保存串行取最新偏好以避免快速连切丢失字段。前台文件选择器采用带窗口身份的 `Microsoft.Windows.Storage.Pickers`，不再用提升模式不支持的旧 picker；不因此新增管理员写入存储的权限。
@@ -110,7 +112,7 @@ V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presente
 
 ## 数据与生命周期
 
-标准数据根是 `%LocalAppData%/WinPool`，便携模式使用程序旁可写 `Data`；`storage-location.json` 是定位活动根的启动指针。切换前验证目标，现有租约、单实例和生命周期机制继续保留。
+标准数据根是 `%LocalAppData%/WinPool`，便携模式使用程序旁可写 `Data`；启动指针为根目录之外的 `%LocalAppData%/WinPool.storage-location.json`，避免替换标准数据根时把活动指针一起移走。兼容读取标准根内旧指针；首次切换在目录改名前先固化当前指向。切换前验证目标，现有租约、单实例和生命周期机制继续保留。迁移核对表结构、主键与完整行摘要，核心库 checkpoint 在写入方静止后执行；若暂存副本缺少已提交 WAL 内容，拒绝切换并保留源，提示重启后重试。未确认的回滚树保留，不按名称自动清除。
 
 | 持久化来源 | 唯一写入者与用途 |
 | --- | --- |
@@ -120,17 +122,23 @@ V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presente
 | `monitoring.db` | Agent；新监控会话、设备与原始样本，独立格式版本，不迁移旧核心库监控记录 |
 | `MonitoringArchives` | Agent；封存库、临时压缩包、完成归档及恢复记录；不是历史查询数据库 |
 
-偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
+偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。App 的读取、局部变更和整体替换共用串行门，局部变更在取得门后读取最新偏好，保存成功再发布状态，避免旧快照覆盖其它设置。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
 
 监控拆库与归档已完成，证据见[阶段归档](Archive/20260921-monitoring-rotation/README.md)。核心库保持 schema 17 和旧监控结构；监控库独立 schema 1。固定活动路径为 `monitoring.db`，主文件与 WAL 达到 1 GiB 时触发轮换：采样继续进入有界内存，旧写入排空、TRUNCATE checkpoint 成功并关闭连接后，仅将自包含主库改名封存，再创建固定名称新库。CSV 读租约与切换互斥。切换允许短暂推迟落盘，不承诺进程崩溃时内存不丢失。
 
 CSV 仅导出当前活动监控库中的可用记录，不跨归档补齐会话。持久化诊断区分正常待写数量、最老待写年龄和确知未保存数量；正常 250 ms 攒批不是丢样，最老待写达到 2 秒时报告延迟。故障写入器的未提交数量按写入器身份只累计一次，恢复后的写入器失败另计；队列拒绝与已接受但未保存的样本分别计数，无法确认的异常结束缺口不编造条数。会话时长使用单调计时，归档诊断在停止采样后仍可刷新；通信成功不代替采样或落库成功。
+
+停止监控及后续空快照保留 App 本次运行观察到的最近会话 ID，允许导出活动库中该会话的已保存记录；新会话取代旧会话。零行返回无数据且不覆盖已有目标文件。CSV 接受用户选择的普通绝对路径（含 UNC），拒绝设备命名空间、备用数据流、保留设备名及异常路径组件。该限制不改变自选导出目录。
 
 归档在 `MonitoringArchives/sealed` 与 `MonitoringArchives/packages` 管理，恢复记录 `archive-ledger.json` 持久化归档根内相对路径，迁移数据根后按新根解析，不访问旧根。已完成归档不自动淘汰，不提供历史读取或解压缓存。后台串行压缩采用临时包，完整性、流式数据库 SHA-256 和清单内容核验通过后发布，才可释放本功能封存的原库；失败保留有效数据。故障恢复、缓冲计数与阶段验证状态见上述归档。
 
 `ControlledProcessRunner` 与 `SevenZipArchiveAdapter` 是现有 SQLite 基础设施内的两个小型职责，不恢复旧工具管理项目。7z 默认相对运行目录解析为 `Tools/7zip/7za.exe`，随附资源来自 `assets/ThirdParty/7zip/26.03`，许可证和来源说明一并打包。自定义覆盖只检查绝对路径和文件存在，失败不回退，不执行能力或版本预检；压缩及校验固定使用本次任务开始时取得的路径。产品不提供工具安装、更新或搜索。
 
 当前实施代码为核心 SQLite schema 17、监控 SQLite schema 1、IPC 11、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
+
+控制管道在握手、事件连接和请求执行前核对实际客户端令牌完整性；较低完整性或无法核实的客户端不能控制 Agent。握手后每次请求读取与响应写出分别有 30 秒传输期限，不把此期限用于业务操作。连接超时释放监听器，后续合法客户端可重连。模拟提交分别保留输入拒绝、修订冲突、持久化失败和取消的状态及诊断代码。
+
+App 使用更短的 25 秒控制连接复用期限，在发送任何请求字节前主动更新空闲连接；计时从上次传输开始，保持保守。已发出的请求不因断连自动重试，继续返回结果未知并走原有对账流程。
 
 V0.53 在 `UserPreferences` 中保存默认关闭的 `DeveloperMode`，旧格式缺少字段时按关闭处理，不升级偏好格式。主窗口从偏好重建可用导航；Hardware、Test、Development 同受该门控制，隐藏状态下启动目标、快捷键和记忆页面均回到 Manage。开发者导航顺序以 Hardware 在 Manage 之前开始。
 
@@ -159,7 +167,9 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 
 旧的自定义隔离输出路径有生成目标传播缺陷：App/Agent 的 `.deps.json`、`.runtimeconfig.json` 及 App `.pri` 可能留在默认 `artifacts/trees/Release`，导致隔离运行树缺文件。这不是开发阶段的默认构建路线；不要为规避关闭进程或重建开发数据而重新尝试隔离构建。若未来确有明确的并行产物需求，应先修复并核对运行树文件完整性。
 
-现有 `build/Rebuild-WinPool.ps1` 会停止 WinPool、调用清理脚本直接清除可再生输出、重建并写入快捷方式。只有任务明确需要该完整动作时使用；`build/Clean-WinPool.ps1 -WhatIf` 可预览。它不是纯文档任务或普通检查的默认入口。
+`build/Merge-RuntimeTrees.ps1` 先在相邻暂存树完成碰撞检查，并复制现有便携 `Data`；确认进程未占用后，将旧运行树移至项目根 `Rubbish/YYYYMMDD_winpool-build`，再发布新树。发布失败尝试恢复旧树，失败暂存树也保留。路径必须位于当前 checkout 内且不能含重解析点。
+
+`build/Rebuild-WinPool.ps1` 先仅移走中间输出，保留旧运行树直到新构建合并成功，然后写入快捷方式；运行前须关闭占用标准树的 WinPool 进程。`build/Clean-WinPool.ps1 -WhatIf` 可预览，默认只移动明确生成物，保留运行树的 `Data`、测试证据及其它未知 artifacts。两者均不直接删除旧文件，也不按进程名结束未知路径的进程。它们不是纯文档任务或普通检查的默认入口。
 
 未来正式 staging 使用仓库外未占用的新路径，复现同一并集和碰撞检查；不顺便部署、签名或发布。测试命令归 Quality。
 
