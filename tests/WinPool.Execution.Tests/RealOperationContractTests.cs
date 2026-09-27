@@ -204,25 +204,24 @@ public sealed class RealOperationContractTests
     }
 
     [Fact]
-    public void ClearDiskCannotBeReclassifiedAsR4OrBypassTypedWhitelist()
+    public void StandaloneClearDiskIsSingleExactR5Plan()
     {
         var fixture = Fixture.Create();
-        var proposal = new RealOperationIntentRequest(OperationIntent.ConvertDisk, fixture.SystemId, [fixture.Disk],
+        var physical = new StorageObjectId(fixture.SystemId, StorageObjectKind.PhysicalDisk, "physical-member");
+        var proposal = new RealOperationIntentRequest(OperationIntent.ClearDisk, fixture.SystemId, [fixture.Disk],
             [Step("clear", new ClearDiskCommand(RealTargetReference.ForExisting(fixture.Disk), false))],
-            "Disk is RAW");
+            RealOperationValidator.ClearDiskExpectedFinalState);
         var plan = RealOperationPlanFactory.Create(proposal, OperationId.New(), fixture.Context.Environment,
             fixture.Context.RealSession!, fixture.Context.CurrentInventoryVersion,
             fixture.Context.CurrentTargetFingerprint!, fixture.Context.CurrentPhysicalMemberFingerprint!,
             "fresh provider evidence", Now, Now.AddMinutes(2));
 
         Assert.Equal(RiskLevel.R5IrreversibleOrBroadDestruction, plan.Risk);
-        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(proposal with
-        {
-            Intent = OperationIntent.ClearDisk
-        }));
+        Assert.Equal(PolicyDecisionKind.RequiresConfirmation, fixture.Policy.Evaluate(plan, fixture.Context).Kind);
+        RealOperationValidator.Validate(proposal with { Targets = [fixture.Disk, physical] });
         var downgraded = plan with { Risk = RiskLevel.R4StorageStructureMutation };
         downgraded = downgraded with { PlanHash = OperationPlanHasher.Compute(downgraded) };
-        Assert.Equal("policy.real-plan-invalid", fixture.Policy.Evaluate(downgraded, fixture.Context).Code);
+        Assert.Equal("policy.risk-downgrade", fixture.Policy.Evaluate(downgraded, fixture.Context).Code);
         Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(proposal with
         {
             Steps = [proposal.Steps[0] with
@@ -230,6 +229,32 @@ public sealed class RealOperationContractTests
                 Command = new ClearDiskCommand(RealTargetReference.ForExisting(fixture.Disk), true)
             }]
         }));
+    }
+
+    [Fact]
+    public void StandaloneClearDiskRejectsMixedTargetsStepsAndUnclearOutcome()
+    {
+        var fixture = Fixture.Create();
+        var otherDisk = new StorageObjectId(fixture.SystemId, StorageObjectKind.OsDisk, "other-disk");
+        var partition = fixture.Partition;
+        var proposal = new RealOperationIntentRequest(OperationIntent.ClearDisk, fixture.SystemId, [fixture.Disk],
+            [Step("clear", new ClearDiskCommand(RealTargetReference.ForExisting(fixture.Disk), false))],
+            RealOperationValidator.ClearDiskExpectedFinalState);
+
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(
+            proposal with { Targets = [fixture.Disk, otherDisk] }));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(
+            proposal with { Targets = [fixture.Disk, partition] }));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(
+            proposal with { ExpectedFinalState = "Cleared" }));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(
+            proposal with { Steps = [proposal.Steps[0], Step("gpt",
+                new InitializeGptCommand(RealTargetReference.ForExisting(fixture.Disk)), ["clear"])] }));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(
+            proposal with { Steps = [proposal.Steps[0] with
+            {
+                Command = new ClearDiskCommand(RealTargetReference.FromStep(StorageObjectKind.OsDisk, "previous"), false)
+            }] }));
     }
 
     [Fact]

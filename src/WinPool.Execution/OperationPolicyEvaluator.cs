@@ -119,7 +119,7 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
             if (plan.Intent is OperationIntent.RepairStorageObject or OperationIntent.RawDeviceWrite ||
                 plan.Risk > RiskLevel.R5IrreversibleOrBroadDestruction ||
                 (plan.Risk >= RiskLevel.R5IrreversibleOrBroadDestruction &&
-                 plan.Intent is not (OperationIntent.ConvertDisk or
+                 plan.Intent is not (OperationIntent.ConvertDisk or OperationIntent.ClearDisk or
                      OperationIntent.DeleteStoragePool or OperationIntent.RebuildStoragePool or
                      OperationIntent.DeleteVirtualDisk or OperationIntent.DeletePartition)))
             {

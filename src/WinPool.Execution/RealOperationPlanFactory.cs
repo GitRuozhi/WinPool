@@ -64,6 +64,8 @@ public static class RealOperationPlanFactory
 
 public static class RealOperationValidator
 {
+    public const string ClearDiskExpectedFinalState = "Disk is RAW with zero partitions";
+
     public static void Validate(RealOperationIntentRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -77,6 +79,25 @@ public static class RealOperationValidator
             string.IsNullOrWhiteSpace(request.ExpectedFinalState))
         {
             throw new ArgumentException("The real operation proposal has an unsupported intent, target or expected state.");
+        }
+
+        if (request.Intent == OperationIntent.ClearDisk)
+        {
+            var diskTargets = request.Targets.Where(target => target.Kind == StorageObjectKind.OsDisk).ToArray();
+            if (diskTargets.Length != 1 || request.Targets.Count is < 1 or > 2 ||
+                request.Targets.Any(target => target != diskTargets[0] && target.Kind != StorageObjectKind.PhysicalDisk) ||
+                request.Steps.Count != 1 ||
+                request.Steps[0].Command is not ClearDiskCommand
+                {
+                    RemoveOem: false,
+                    Disk: { CreatedByStep: null, Existing: { } }
+                } clear ||
+                clear.Disk.Existing != diskTargets[0] ||
+                request.Steps[0].DependsOn is not { Count: 0 } ||
+                !StringComparer.Ordinal.Equals(request.ExpectedFinalState, ClearDiskExpectedFinalState))
+            {
+                throw new ArgumentException("A standalone clear requires one exact existing OS disk, one R5 clear step, and a RAW zero-partition result.");
+            }
         }
 
         var prior = new Dictionary<string, HashSet<StorageObjectKind>>(StringComparer.Ordinal);
@@ -245,6 +266,8 @@ public static class RealOperationValidator
 
     private static HashSet<StorageObjectKind> ProducedKinds(RealStorageCommand command) => command switch
     {
+        ClearDiskCommand => [StorageObjectKind.OsDisk],
+        InitializeGptCommand => [StorageObjectKind.OsDisk],
         CreatePartitionCommand => [StorageObjectKind.Partition],
         FormatVolumeCommand => [StorageObjectKind.Volume],
         CreatePoolCommand => [StorageObjectKind.StoragePool],
@@ -259,7 +282,7 @@ public static class RealOperationValidator
         OperationIntent.SetDiskOnlineState => command is SetDiskOnlineCommand,
         OperationIntent.InitializeDisk => command is InitializeGptCommand or CreatePartitionCommand,
         OperationIntent.ConvertDisk => command is ClearDiskCommand or InitializeGptCommand or CreatePartitionCommand,
-        OperationIntent.ClearDisk => false,
+        OperationIntent.ClearDisk => command is ClearDiskCommand,
         OperationIntent.CreatePartition => command is CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
         OperationIntent.DeletePartition => command is DeletePartitionCommand,
         OperationIntent.ResizePartition => command is ResizePartitionCommand,
