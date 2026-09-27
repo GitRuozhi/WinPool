@@ -236,6 +236,101 @@ public sealed class OperationPersistenceTests
         Assert.False(await writer.HasRealWriteBarrierAsync());
     }
 
+    [Fact]
+    public async Task CompletedCannotReleaseBarrierUntilEveryStepHasEvidence()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "test-agent");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = Plan();
+        await writer.PrepareAsync(plan, Guid.NewGuid(), "intent");
+        await writer.AcceptAsync(plan.OperationId, plan.PlanHash, Digest, plan.CreatedAt);
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Accepted, PersistedOperationState.Running,
+            Event(plan, "running")));
+        Assert.False(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Completed,
+            Event(plan, "premature-success")));
+        await VerifyStepAsync(writer, plan, "first");
+        Assert.False(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Completed,
+            Event(plan, "incomplete-success")));
+        Assert.True(await writer.HasRealWriteBarrierAsync());
+        await VerifyStepAsync(writer, plan, "second");
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Completed,
+            Event(plan, "complete")));
+        Assert.False(await writer.HasRealWriteBarrierAsync());
+    }
+
+    [Fact]
+    public async Task FailedNeedsNoVerifiedStepsAndEvidenceForItsFailure()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "test-agent");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = Plan();
+        await writer.PrepareAsync(plan, Guid.NewGuid(), "intent");
+        await writer.AcceptAsync(plan.OperationId, plan.PlanHash, Digest, plan.CreatedAt);
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Accepted, PersistedOperationState.Running,
+            Event(plan, "running")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.Failed,
+            null, "preflight_failed", Event(plan, "failed-before-call")));
+        Assert.False(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Failed,
+            Event(plan, "unfinished-failure")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "second",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.Skipped,
+            null, "stopped_after_previous_step", Event(plan, "skipped")));
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Failed,
+            Event(plan, "failed")));
+        Assert.False(await writer.HasRealWriteBarrierAsync());
+    }
+
+    [Fact]
+    public async Task PartialCompletionRejectsVerifiedStepAfterFailedEarlierStep()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "test-agent");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = Plan();
+        await writer.PrepareAsync(plan, Guid.NewGuid(), "intent");
+        await writer.AcceptAsync(plan.OperationId, plan.PlanHash, Digest, plan.CreatedAt);
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Accepted, PersistedOperationState.Running,
+            Event(plan, "running")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.Failed,
+            null, "preflight_failed", Event(plan, "first-failed")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "second",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.PreparingCall,
+            "{\"target\":\"disk\"}", null, Event(plan, "second-preparing")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "second",
+            PersistedOperationStepState.PreparingCall, PersistedOperationStepState.Verified,
+            null, "{\"post\":\"verified\"}", Event(plan, "second-verified")));
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.OutcomeUnknown,
+            Event(plan, "recovery")));
+        Assert.False(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.OutcomeUnknown, PersistedOperationState.PartiallyCompleted,
+            Event(plan, "invalid-partial")));
+        Assert.True(await writer.HasRealWriteBarrierAsync());
+    }
+
+    private static async Task VerifyStepAsync(
+        OperationPlanRepository writer, OperationPlan plan, string stepId)
+    {
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, stepId,
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.PreparingCall,
+            "{\"target\":\"disk\"}", null, Event(plan, stepId + "-preparing")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, stepId,
+            PersistedOperationStepState.PreparingCall, PersistedOperationStepState.Verified,
+            null, "{\"post\":\"verified\"}", Event(plan, stepId + "-verified")));
+    }
+
     private static ExecutionEvent Event(OperationPlan plan, string code) =>
         new(plan.OperationId, ExecutionEventKind.Progress,
             DateTimeOffset.UtcNow, code, code);

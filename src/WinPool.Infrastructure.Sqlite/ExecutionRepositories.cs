@@ -456,6 +456,9 @@ public sealed class OperationPlanRepository
             (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        // Persisted numeric values are fixed by the 17→18 schema contract.
+        // Terminal states release the global write barrier, so check the
+        // step evidence and verified-prefix shape in the same CAS statement.
         command.CommandText = """
             UPDATE operation_plans SET state = $next
             WHERE operation_id = $operation AND risk >= 4 AND state = $expected
@@ -463,7 +466,35 @@ public sealed class OperationPlanRepository
                   EXISTS(SELECT 1 FROM operation_steps
                          WHERE operation_id = $operation)
                   AND NOT EXISTS(SELECT 1 FROM operation_steps
-                                 WHERE operation_id = $operation AND state <> 8)));
+                                 WHERE operation_id = $operation AND state <> 8)))
+              AND ($next NOT IN (4, 6, 10) OR
+                  ($next = 4 AND EXISTS(SELECT 1 FROM operation_steps
+                      WHERE operation_id = $operation)
+                      AND NOT EXISTS(SELECT 1 FROM operation_steps
+                          WHERE operation_id = $operation AND
+                              (state <> 5 OR evidence_json IS NULL OR trim(evidence_json) = '')))
+                  OR ($next = 6 AND EXISTS(SELECT 1 FROM operation_steps
+                      WHERE operation_id = $operation AND state = 6)
+                      AND NOT EXISTS(SELECT 1 FROM operation_steps
+                          WHERE operation_id = $operation AND
+                              (state NOT IN (6, 8) OR
+                               (state = 6 AND
+                                (evidence_json IS NULL OR trim(evidence_json) = '')))))
+                  OR ($next = 10 AND EXISTS(SELECT 1 FROM operation_steps
+                      WHERE operation_id = $operation AND state = 5)
+                      AND EXISTS(SELECT 1 FROM operation_steps
+                      WHERE operation_id = $operation AND state IN (6, 8))
+                      AND NOT EXISTS(SELECT 1 FROM operation_steps
+                          WHERE operation_id = $operation AND
+                              (state NOT IN (5, 6, 8) OR
+                               (state IN (5, 6) AND
+                                (evidence_json IS NULL OR trim(evidence_json) = ''))))
+                      AND NOT EXISTS(SELECT 1 FROM operation_steps AS later
+                          JOIN operation_steps AS earlier
+                            ON earlier.operation_id = later.operation_id
+                           AND earlier.sequence_no < later.sequence_no
+                          WHERE later.operation_id = $operation
+                            AND later.state = 5 AND earlier.state <> 5)));
             """;
         command.Parameters.AddWithValue("$next", (int)next);
         command.Parameters.AddWithValue("$operation", Id(operationId.Value));
