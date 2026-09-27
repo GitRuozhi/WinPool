@@ -4,7 +4,7 @@
 
 ## 2026-09-27 单盘真实修改第一阶段：写入前进度
 
-当前仍在 [Plan](Plan.md) 的 P0 写入前准入及后续代码集成期，产品版本为 V0.57，V0.58 只是目标。已提交的 IPC 12、schema 18、Agent 持久状态与身份门、Windows 封闭适配及两页单盘入口已通过本阶段最终自动工程门：Release restore 成功，标准 Release 全解构建 0 警告、0 错误；全解测试 896 passed、0 failed，另有 3 项既有大型监控归档测量按门控 skipped；直接和传递依赖审计成功，未报告已知漏洞。App.Tests 15/15、Agent.Tests 67/67、Agent.Client.Tests 22/22、IPC.Tests 9/9 均包含在 896 项内。TRX、构建日志及审计结果位于 `artifacts/test-results/20260927-real-edit-stage1/final-gate-2310/`。这些自动结果只证明测试夹具覆盖的计划、IPC／状态、适配器和 UI 提案行为；P5 无写原生准入及 P6 实机用例尚未完成，不能沿用上一轮 V0.57 的 780 项回归充当本阶段验收。
+当前仍在 [Plan](Plan.md) 的 P0 写入前准入及后续代码集成期，产品版本为 V0.57，V0.58 只是目标。已提交的 IPC 12、schema 18、Agent 持久状态与身份门、Windows 封闭适配及两页单盘入口已通过本阶段最终自动工程门：Release restore 成功，标准 Release 全解构建 0 警告、0 错误；全解测试 896 passed、0 failed，另有 3 项既有大型监控归档测量按门控 skipped；直接和传递依赖审计成功，未报告已知漏洞。App.Tests 15/15、Agent.Tests 67/67、Agent.Client.Tests 22/22、IPC.Tests 9/9 均包含在 896 项内。TRX、构建日志及审计结果位于 `artifacts/test-results/20260927-real-edit-stage1/final-gate-layout/`。这些自动结果只证明测试夹具覆盖的计划、IPC／状态、适配器和 UI 提案行为；P5 无写原生准入及 P6 实机用例尚未完成，不能沿用上一轮 V0.57 的 780 项回归充当本阶段验收。
 
 P0 的固定只读拓扑已采集，但非提权探针的 BitLocker WMI 查询被拒绝，A 类逐命令支持性及 C 类现场能力仍缺完整证据。未执行真实磁盘写入，也未验证单盘创建、删除、重建或后置数据完整性。C01–C05 只有取得适用能力证据的分支才可进入实测；C04/C05 当前保持禁用，D01–D05 真实入口保持禁用。任何实际写入仍需重新采集并对准确操作与目标逐项授权，自动测试和只读采集都不能代替该证据。
 
