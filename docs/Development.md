@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，最近已完成结果见 [V0.57 收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前代码为 V0.57。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。本机真实修改第一阶段已进入计划编制，尚未实施；准确范围、执行契约和验收顺序以 [Plan](Plan.md) 为准，不把计划目标当成现有实现。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，最近已完成结果见 [V0.57 收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.57，V0.58 仅是第一阶段目标。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。本机真实修改第一阶段已有代码和定向自动验证，但仍处于 P0 写入前准入；准确范围、状态与验收顺序以 [Plan](Plan.md) 为准，尚无真实磁盘写入或实机成功证据。
 
 ## 环境与模块
 
@@ -10,15 +10,17 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 | --- | --- |
 | Domain | 稳定标识、单位和无副作用的存储规则、容量计算 |
 | Application | 存储事实模型、用例契约、编辑意图、操作规划和表现投影 |
-| Execution | 类型化计划/步骤、执行策略、风险和前置条件、结果与回放；真实修改默认拒绝 |
+| Execution | 类型化计划/步骤、执行策略、风险和前置条件、结果与回放；真实执行仅接受 Agent 冻结且通过权威门的封闭计划 |
 | Inventory / Monitoring | 采集与监控契约、适配接口及各自数据模型 |
-| Infrastructure.Windows | 固定只读 Windows 采集、Windows 适配、现有模拟协调与系统仓储适配 |
-| Infrastructure.Sqlite | 事务、仓储、数据格式实现 |
-| Ipc / Agent.Client | 封闭的 App–Agent 类型化传输、连接和结果传播 |
+| Infrastructure.Windows | 固定只读 Windows 采集、真实操作实时规划／安全预检／封闭步骤适配、现有模拟协调与系统仓储适配 |
+| Infrastructure.Sqlite | 事务、仓储、真实计划及逐步事件持久化、数据格式实现 |
+| Ipc / Agent.Client | IPC 12 封闭的 App–Agent 请求、连接和结果传播 |
 | App | WinUI 页面、输入、呈现和交互；不自行实现存储规则或写 SQLite |
-| Agent | 每用户可见托盘进程、采集/监控协调、SQLite 写租约和进程生命周期 |
+| Agent | 每用户可见托盘进程、采集/监控协调、真实操作会话门与后台编排、SQLite 写租约和进程生命周期 |
 
 依赖保持表现与适配层 → Application → Domain 的现有方向，Execution 与 Inventory 等边界按现有项目引用验证。优先在现有项目内拆分职责，不新增通用引擎项目、DSL、插件体系或公开 SDK。
+
+真实操作请求在 App 中只是提案：Agent 以经 OS 核实的管道对端 PID、启动时间、映像路径及进程实例绑定当前会话，重采 Windows 事实后冻结类型化计划、目标指纹、物理成员指纹、支持证据和哈希。准备使用 `PreparationId` 与会话／意图摘要幂等；接受前重验实时目标、机器、会话、管理员、武装态和一次确认。Agent 将接受结果和每步调用前状态写入核心 SQLite，长操作在后台执行，App 按 `OperationId` 查询；断流或退出不直接强杀已接受作业。未知结果保持写屏障，重启只读对账，不重放 Windows 写调用。缺服务、缺能力或身份／持久化证据不完整时拒绝真实操作。此链路的自动验证进度不代表实机已完成写入；当前单盘 A 类仍待 Plan 的工程门和实机验收，C 类现场能力尚未证实，D 类禁用。
 
 `TopologyLayoutEngine` 的布局决策归整数单位计划，像素/DPI 只负责最后映射；不把容量业务规则放入布局算法。修改布局算法时按需读[踩坑记录中的布局案例](Reference/开发踩坑记录.md#布局重构)。硬件页按来源对象展示，不以旧 13 类、154 项为数量契约。旧报告工厂和原始快照解释器已退出构建，有效 CIM/WMI 与原生补充读取保留。
 
@@ -41,7 +43,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 ## 规则与容量
 
-规则统一入口，内部按对象/操作分组。合法性规则输出允许、拒绝或信息不足，并携带稳定原因、受影响对象和依据/适用条件。App 用同一规则和模拟操作服务完成表单反馈、动作预检查及内存候选文档；UI 禁用不是校验边界。模拟提交到 Agent 时系统校验明确标记为 `SkippedForSimulation`，Agent 不重跑整套业务规则，只执行封闭请求、格式/哈希、修订、CommitId 对账、事务和单写入方等提交保护。未来真实执行必须由 Agent 重新检查实际 Windows 状态。
+规则统一入口，内部按对象/操作分组。合法性规则输出允许、拒绝或信息不足，并携带稳定原因、受影响对象和依据/适用条件。App 用同一规则和模拟操作服务完成表单反馈、动作预检查及内存候选文档；UI 禁用不是校验边界。模拟提交到 Agent 时系统校验明确标记为 `SkippedForSimulation`，Agent 不重跑整套业务规则，只执行封闭请求、格式/哈希、修订、CommitId 对账、事务和单写入方等提交保护。真实执行由 Agent 重新检查实际 Windows 状态，不能信任模拟规则或 App 提案作为实时证据。
 
 规则依赖必要的 OS/SKU、提供程序、布局、介质、用途、扇区及能力信息；只定义当前操作需要的字段。不把本机能力偷偷套用到导入系统。未知组合不默认放行，不为通过旧样例而放宽规则。
 
@@ -50,7 +52,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 - 保留适用的采集值及来源；改名等无容量影响的操作不重新估算。
 - 成员、布局或分配相关参数改变后，使受影响的容量/能力证据失效，重新估算并标记，保留未受影响事实。
 - 模拟 Simple、Mirror、Parity 分别按布局、数据副本、列数和校验列折算理想逻辑上界，排除热备与退役盘。MAX 与默认创建值向下对齐到 4 GiB，不再扣旧 1% 余量，也不以 Interleave 代替容量粒度；这不是 Windows 通用保证。混合介质逐层计算，物理占用与逻辑容量分别保存。
-- 理论估算、保守规划值和真实采集值区分。模拟应用后仍是估算；未来真实创建结束后才由重新采集结果更新。
+- 理论估算、保守规划值和真实采集值区分。模拟应用后仍是估算；真实创建完成后才由重新采集结果更新。
 - 200G 成员合计、UseMax 实得约 199.86G、规划预留至约 198G 是用户提供的示例，不是 Windows 的固定扣减公式。当前估算策略见本节，行为验证按 Quality 执行；调整策略时在对应任务或阶段计划中明确范围。
 - 容量余量不能替代合法性，也不保证真实操作成功。无法建立保守估算的组合返回尚不支持，不制造精确数字。
 
@@ -76,7 +78,7 @@ App 启动经 `ReadOnlyLocalInventoryReader` 以只读 SQLite 连接读取已提
 
 完整硬件刷新在既有 CIM/WMI 事实后追加 `WindowsGraphicsFactCollector` 和 `WindowsNetworkFactCollector`：前者以 DXGI LUID 保存适配器和输出，并用 D3D12 读取功能级别；同一 LUID 通过 D3DKMT 保存适配器类型标志、显示侧描述和渲染侧描述。`IndirectDisplayDevice` 为真时统一对象使用显示侧名称，保留 DXGI 原始描述，并禁止按相同 `VEN/DEV` 借用物理 GPU 的驱动和 PCI 位置。`Win32_VideoController`、`Win32_DesktopMonitor` 与 `WmiMonitorID` 在统一事实中属于字段补充，不形成第二组 GPU 或 Monitor 设备，驱动、型号和厂商仍可按可靠硬件标识补入 DXGI 对象。软件或间接显示 DXGI 适配器均不按标志或名称过滤。网络保持 `WinPool.NetworkAdapter` 统一来源键不变，内部以 `MSFT_NetAdapter` 的 `ConnectorPresent -or InterfaceType -ne 0` 作为对象集合边界，按接口索引关联全部 IP 地址与默认路由，并替换同次脚本采集产生的原始 `MSFT_NetAdapter` 观察。同一来源的成功刷新直接整组替换旧网络对象，不引入跨来源迁移规则。`WinPoolSystem` 是不持久化的运行时投影；入库的是来源事实，启动从来源事实重新生成统一模型，完整硬件在 Agent 启动第二阶段自动刷新，也可手动刷新。Monitor 不在报告投影中筛除，存储摘要不增加硬件页专用条件。
 
-`HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 复用现有系统切换入口；下拉选择先暂存，待 `DropDownClosed` 后再切换工作区和重建列表，避免在 WinUI 弹出层仍打开时使控件集合失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式为核心 SQLite 17 / 监控 SQLite 1 / IPC 11 / StorageSystemDocument 3 / 来源事实 1。
+`HardwareReportProjector` 按统一对象类型完整投影 CPU、内存、页面文件、GPU、Monitor 和 Network；报告可以选择字段行，但不能按来源类名选择或丢弃某个对象。字段备用来源只用于补值，不改变对象列集合。`ManageSystemSummaryProjector` 为管理页与硬件页提供同一存储摘要。App 通过 `PropertyTableVisuals` 小范围复用管理页与硬件页的项名上限、项值上限、列间距、行高和单元格样式：两页项名列使用 `Auto` 宽度及 220 DIP 上限，项值列使用 `Auto` 宽度及 250 DIP 上限；硬件项名网格位于分段横向 `ScrollViewer` 外，标签行高跟随值行。外层纵向 `ScrollViewer` 包含左对齐操作、即时反馈和整份报告，不呈现采集完成时间。设备列选择、悬停、选中后居中和所选列文本复制沿用管理页语义，硬件页不再打开字段详情对话框。标题栏的 `ActiveSystemSelector` 复用现有系统切换入口；下拉选择先暂存，待 `DropDownClosed` 后再切换工作区和重建列表，避免在 WinUI 弹出层仍打开时使控件集合失效。不建立第二套事实模型或通用表格框架。所有字段保持原值；内部格式为核心 SQLite 18 / 监控 SQLite 1 / IPC 12 / StorageSystemDocument 3 / 来源事实 1。
 
 `MainWindow` 的自绘标题栏行高 48 DIP，先启用 `ExtendsContentIntoTitleBar`，再设置 `AppWindow.TitleBar.PreferredHeightOption=Tall`。导航列表、真实编辑控件和可见的系统选择器容器是 Passthrough 交互区，剩余标题行由系统处理拖动；这些交互区加载或尺寸变化后排队重算物理像素矩形，避免语言和窗口布局变化后命中区域仍是旧坐标。系统选择器宽 260 DIP，容器及下拉项上限 280 DIP。App 自建按钮按角色使用两套尺寸：图标文字普通按钮以 `WinPoolButtonBaseStyle` 统一 4 DIP 圆角、32 DIP 最小高和内边距；行内单图标按钮以 `WinPoolInlineIconButtonStyle` 统一 32×32 DIP。按钮处在管理命令区或编辑操作区不改变其角色，也不派生第三套按钮高度。输入和下拉最小高 32 DIP，属性字段行采用 `Auto` 高度及 40 DIP 下限，文字换行时可增高；布局槽高度不是按钮高度。
 
@@ -124,7 +126,7 @@ V0.55 沿用 Application 的通知契约与 GlobalNotificationService，Presente
 
 偏好按变化原子保存；已存在文件不可读时禁止用默认值覆盖。App 的读取、局部变更和整体替换共用串行门，局部变更在取得门后读取最新偏好，保存成功再发布状态，避免旧快照覆盖其它设置。Agent 偏好的 `SavedAtUtc` 只比较是否变化，不按大小排序；通知、重连和文件观察汇入串行重载。Agent 自己维护指向自身可执行文件的 HKCU Run 项。执行模式和真实操作同意不持久化。
 
-监控拆库与归档已完成，证据见[阶段归档](Archive/20260921-monitoring-rotation/README.md)。核心库保持 schema 17 和旧监控结构；监控库独立 schema 1。固定活动路径为 `monitoring.db`，主文件与 WAL 达到 1 GiB 时触发轮换：采样继续进入有界内存，旧写入排空、TRUNCATE checkpoint 成功并关闭连接后，仅将自包含主库改名封存，再创建固定名称新库。CSV 读租约与切换互斥。切换允许短暂推迟落盘，不承诺进程崩溃时内存不丢失。
+监控拆库与归档已完成，证据见[阶段归档](Archive/20260921-monitoring-rotation/README.md)。核心库现为 schema 18，旧监控结构仍保留；监控库独立 schema 1。固定活动路径为 `monitoring.db`，主文件与 WAL 达到 1 GiB 时触发轮换：采样继续进入有界内存，旧写入排空、TRUNCATE checkpoint 成功并关闭连接后，仅将自包含主库改名封存，再创建固定名称新库。CSV 读租约与切换互斥。切换允许短暂推迟落盘，不承诺进程崩溃时内存不丢失。
 
 CSV 仅导出当前活动监控库中的可用记录，不跨归档补齐会话。持久化诊断区分正常待写数量、最老待写年龄和确知未保存数量；正常 250 ms 攒批不是丢样，最老待写达到 2 秒时报告延迟。故障写入器的未提交数量按写入器身份只累计一次，恢复后的写入器失败另计；队列拒绝与已接受但未保存的样本分别计数，无法确认的异常结束缺口不编造条数。会话时长使用单调计时，归档诊断在停止采样后仍可刷新；通信成功不代替采样或落库成功。
 
@@ -134,7 +136,7 @@ CSV 仅导出当前活动监控库中的可用记录，不跨归档补齐会话�
 
 `ControlledProcessRunner` 与 `SevenZipArchiveAdapter` 是现有 SQLite 基础设施内的两个小型职责，不恢复旧工具管理项目。7z 默认相对运行目录解析为 `Tools/7zip/7za.exe`，随附资源来自 `assets/ThirdParty/7zip/26.03`，许可证和来源说明一并打包。自定义覆盖只检查绝对路径和文件存在，失败不回退，不执行能力或版本预检；压缩及校验固定使用本次任务开始时取得的路径。产品不提供工具安装、更新或搜索。
 
-当前实施代码为核心 SQLite schema 17、监控 SQLite schema 1、IPC 11、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希，旧格式明确拒绝，不提供迁移或兼容回退。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
+当前实施代码为核心 SQLite schema 18、监控 SQLite schema 1、IPC 12、StorageSystemDocument 3、来源事实 1、StorageSnapshot 3；均是内部格式编号，不是产品版本。核心库从 schema 17 经受检迁移进入 18，真实计划、步骤和事件记录必须保留恢复屏障；旧文档格式仍明确拒绝，不提供文档迁移或兼容回退。新文档只持久化来源事实和应用状态，Snapshot 是无 setter 的只读重建投影，旧硬件报告模型及独立报告生产路径已退出。缓存仍校验哈希。监控样本逐项保存全部 `MonitorMetricKind`，未提供的指标写为 NULL，真实零保持为零；CSV 使用空单元格表达缺失。模拟文档 IPC 先分页读取有界元数据，再按 ID 单独读取正文，不扩大 4 MiB 帧上限。模拟提交的 CommitId 同时绑定文档、前后哈希、修订、OperationId 和 PlanHash，查询返回提交时的不可变文档回执。控制管道握手有独立 5 秒期限，连接级异常记录稳定代码并释放连接，监听任务终止会进入 Failed 并由托盘呈现。实际产品版本以 Directory.Build.props 为准，V0.52 验证状态见[归档](Archive/V0.52/README.md)及[实施核对](Archive/V0.52/实施核对.md)。
 
 控制管道在握手、事件连接和请求执行前核对实际客户端令牌完整性；较低完整性或无法核实的客户端不能控制 Agent。握手后每次请求读取与响应写出分别有 30 秒传输期限，不把此期限用于业务操作。连接超时释放监听器，后续合法客户端可重连。模拟提交分别保留输入拒绝、修订冲突、持久化失败和取消的状态及诊断代码。
 
@@ -144,7 +146,7 @@ V0.53 在 `UserPreferences` 中保存默认关闭的 `DeveloperMode`，旧格式
 
 数据重建只能针对明确的 WinPool 开发数据，不静默擦除未知根。首次打开旧格式应明确提示版本不支持/需重建；自动测试按夹具使用临时数据，普通开发与原生界面核对直接使用已核实的 WinPool 开发数据。必要的旧开发数据处置遵守 AGENTS 的移动规则。允许丢弃开发数据不取消单写入方、事务、冲突检测和故障恢复要求。
 
-普通启动采用 Windows App SDK 单实例机制；重复启动激活已有窗口。提权交接是整套 App + Agent 重启：新管理员 bootstrap 以 SID 绑定的 ready/continuation 事件进入等待，期间不初始化 WinUI、不取得实例键、也不连接或复用旧 Agent。旧 App 保存工作区并获得旧 Agent 的后台有序关闭确认后才允许 bootstrap 继续；后者必须按 PID、启动时间和路径核验旧 App、旧 Agent 均已退出，才进入普通启动并创建新的管理员 Agent。取消、事件失败、身份不符或超时均不得接管实例、复用旧 endpoint 或强杀旧进程。等待失败诊断写入数据根 `Diagnostics/elevation-handoff.jsonl`；IPC 正常断开不等同于 Agent 故障。SQLite 不是实时 Windows 状态的权威，未来真实操作执行前必须重新核对对象及前置条件。
+普通启动采用 Windows App SDK 单实例机制；重复启动激活已有窗口。提权交接是整套 App + Agent 重启：新管理员 bootstrap 以 SID 绑定的 ready/continuation 事件进入等待，期间不初始化 WinUI、不取得实例键、也不连接或复用旧 Agent。旧 App 保存工作区并获得旧 Agent 的后台有序关闭确认后才允许 bootstrap 继续；后者必须按 PID、启动时间和路径核验旧 App、旧 Agent 均已退出，才进入普通启动并创建新的管理员 Agent。取消、事件失败、身份不符或超时均不得接管实例、复用旧 endpoint 或强杀旧进程。等待失败诊断写入数据根 `Diagnostics/elevation-handoff.jsonl`；IPC 正常断开不等同于 Agent 故障。SQLite 不是实时 Windows 状态的权威，真实操作执行前必须重新核对对象及前置条件。
 
 ## 构建与运行树
 
@@ -183,7 +185,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 
 有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。此前界面与人工反馈阶段的 Plan 已[归档](Archive/20260924-before-real-edit/README.md)；2026-09-27 用户正式进入本机真实磁盘修改第一阶段，当前 [Plan](Plan.md) 已按单盘范围、显式重建和逐步失败对账编制，代码实施未开始。用户本轮只要求修改文档，后续收到实施指令才修改代码；每次真实操作继续按 AGENTS 取得准确授权。其他未激活 Design 不因此获得执行授权。
+用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。此前界面与人工反馈阶段的 Plan 已[归档](Archive/20260924-before-real-edit/README.md)；2026-09-27 用户正式进入本机真实磁盘修改第一阶段，当前 [Plan](Plan.md) 按单盘范围、显式重建和逐步失败对账执行，状态仍在 P0 写入前准入。每次真实操作继续按 AGENTS 取得准确授权；未激活 Design 不因此获得执行授权。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 
