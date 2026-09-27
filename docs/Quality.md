@@ -10,6 +10,8 @@ P0 的固定只读拓扑已采集，但非提权探针的 BitLocker WMI 查询�
 
 有限无写原生复核在 480 DIP 英文存储结构页属性视图确认两个自动创建开关均显示 `On`，真实模式开关处于关闭状态；截图为 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/native-480-en-storage-properties-real-off.png`。这只覆盖该窄宽文案与可见性，不代表 P5 完整原生准入。
 
+2026-09-27 P5 崩溃证据只读核验：本机 Application 日志查询范围为当日 00:00 至 23:45（查询截止时），共 348 条事件；其中 `Application Error`、`.NET Runtime`、`Windows Error Reporting` 三个相关来源共 26 条。`WinPool.App`、`WinPool.Agent`、`combase.dll`、`E_POINTER` 均未匹配到事件。扫描汇总保存在 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/p5-application-eventlog-summary.json`。这只说明本轮没有对应的新崩溃记录；历史 `combase.dll / E_POINTER` 根因仍未确认，P5 无写原生准入仍未完成。
+
 ## 2026-09-27 V0.57 缺陷收口
 
 基线 `3739691` 加本轮修复；最终 Release 全量回归 780 passed、0 failed、3 skipped，标准构建 0 警告/0 错误，直接及间接依赖漏洞审计覆盖 22 项目且无已知漏洞报告。3 项跳过为原有手工大规模归档测量，不记为通过。完整 TRX、构建日志及汇总位于 `artifacts/test-results/20260927-closeout-final-r3`；依赖审计位于 `20260927-closeout-final/dependency-audit.json`。
