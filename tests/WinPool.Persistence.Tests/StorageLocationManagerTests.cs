@@ -92,6 +92,39 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
+    public async Task PlanRejectsPointerToMissingPortableDatabase()
+    {
+        using var locations = TemporaryLocations.Create();
+        File.WriteAllText(locations.PointerPath, "{\"mode\":\"portable\"}");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var result = await manager.PlanSwitchAsync(
+            StorageLocationMode.Standard, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.core_database_unreadable");
+    }
+
+    [Fact]
+    public async Task PlanRejectsAmbiguousOutsideAndLegacyPointers()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        File.WriteAllText(locations.PointerPath, "{\"mode\":\"standard\"}");
+        locations.WriteStandard(StorageLocationManager.PointerFileName,
+            "{\"mode\":\"portable\"}");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var result = await manager.PlanSwitchAsync(
+            StorageLocationMode.Portable, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.pointer_ambiguous");
+    }
+
+    [Fact]
     public async Task PlanRejectsUnfinishedRealOperationInExistingTargetRoot()
     {
         using var locations = TemporaryLocations.Create();

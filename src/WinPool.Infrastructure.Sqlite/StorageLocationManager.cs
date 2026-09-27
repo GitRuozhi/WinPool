@@ -194,6 +194,13 @@ public sealed class StorageLocationManager : IStorageLocationManager
         {
             await switchGate.WaitAsync(cancellationToken);
             enteredGate = true;
+            if (HasAmbiguousLocationPointer())
+            {
+                return Result<StorageLocationSwitchPlan>(
+                    ApplicationStatus.Rejected, correlationId,
+                    "storage.location.pointer_ambiguous",
+                    "Both data-location pointers exist; the active root is ambiguous.");
+            }
             var sourceMode = await ReadModeAsync(cancellationToken);
             var sourceRoot = GetRoot(sourceMode);
             var targetRoot = GetRoot(targetMode);
@@ -288,6 +295,14 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     correlationId,
                     "storage.location.plan_not_issued",
                     "The switch plan was not issued by this manager.");
+            }
+
+            if (HasAmbiguousLocationPointer())
+            {
+                return Result<StorageLocationState>(
+                    ApplicationStatus.Rejected, correlationId,
+                    "storage.location.pointer_ambiguous",
+                    "Both data-location pointers exist; the active root is ambiguous.");
             }
 
             var currentMode = await ReadModeAsync(cancellationToken);
@@ -646,6 +661,10 @@ public sealed class StorageLocationManager : IStorageLocationManager
         return pointer.Mode;
     }
 
+    private bool HasAmbiguousLocationPointer() =>
+        File.Exists(pointerPath)
+        && File.Exists(Path.Combine(standardRoot, PointerFileName));
+
     private StorageLocationState CreateState(StorageLocationMode mode, string root) =>
         new(
             mode,
@@ -808,7 +827,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
             && header.SequenceEqual("SQLite format 3\0"u8);
     }
 
-    private static async Task<string?> ReadRealOperationBarrierAsync(
+    private async Task<string?> ReadRealOperationBarrierAsync(
         string root,
         bool requireDatabase,
         CancellationToken cancellationToken)
@@ -816,8 +835,11 @@ public sealed class StorageLocationManager : IStorageLocationManager
         var path = Path.Combine(root, DatabaseFileName);
         if (!File.Exists(path))
         {
-            return requireDatabase && Directory.Exists(root)
-                && Directory.EnumerateFileSystemEntries(root).Any()
+            return requireDatabase &&
+                (File.Exists(pointerPath)
+                 || File.Exists(Path.Combine(standardRoot, PointerFileName))
+                 || Directory.Exists(root)
+                    && Directory.EnumerateFileSystemEntries(root).Any())
                     ? "storage.location.core_database_unreadable" : null;
         }
 
