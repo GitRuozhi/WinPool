@@ -38,8 +38,7 @@ public sealed class MonitorCsvExporter
             : await databaseAccess.AcquireReadLeaseAsync(cancellationToken);
         var database = databaseAccess?.GetCurrentDatabase() ?? store
             ?? throw new InvalidOperationException("No monitoring database is configured for CSV export.");
-        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
-        var destination = Path.GetFullPath(destinationPath);
+        var destination = ValidateDestination(destinationPath);
         if (!string.Equals(
                 Path.GetExtension(destination),
                 ".csv",
@@ -135,6 +134,11 @@ public sealed class MonitorCsvExporter
                 await output.FlushAsync(cancellationToken);
             }
 
+            if (rowCount == 0)
+            {
+                TryRemoveTemporary(temporary);
+                return new MonitorCsvExportResult(destination, string.Empty, 0);
+            }
             var sha256 = await HashAsync(temporary, cancellationToken);
             File.Move(temporary, destination, overwrite);
             return new MonitorCsvExportResult(destination, sha256, rowCount);
@@ -144,6 +148,37 @@ public sealed class MonitorCsvExporter
             TryRemoveTemporary(temporary);
             throw;
         }
+    }
+
+    public static string ValidateDestination(string destinationPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        destinationPath = destinationPath.Replace('/', '\\');
+        if (!Path.IsPathFullyQualified(destinationPath)
+            || destinationPath.StartsWith(@"\\?\", StringComparison.Ordinal)
+            || destinationPath.StartsWith(@"\\.\", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("CSV export requires an ordinary absolute file path.", nameof(destinationPath));
+        }
+        var root = Path.GetPathRoot(destinationPath)!;
+        var parts = destinationPath[root.Length..].TrimStart('\\').Split('\\');
+        foreach (var part in parts)
+        {
+            var name = part.Split('.')[0];
+            if (part.Length == 0 || part.EndsWith(' ') || part.EndsWith('.')
+                || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+                || name.Equals("CON", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("NUL", StringComparison.OrdinalIgnoreCase)
+                || (name.Length == 4 && name[3] is >= '1' and <= '9'
+                    && (name.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                        || name.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))))
+            {
+                throw new ArgumentException("CSV export does not accept device names, streams, or ambiguous path components.", nameof(destinationPath));
+            }
+        }
+        return Path.GetFullPath(destinationPath);
     }
 
     private static string Csv(string value)

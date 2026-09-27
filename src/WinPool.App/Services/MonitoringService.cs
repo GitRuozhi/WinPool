@@ -45,6 +45,7 @@ public sealed class MonitoringService : IDisposable
     private DateTimeOffset _lastFlush = DateTimeOffset.MinValue;
     private bool _disposed;
     private SessionId? _remoteSessionId;
+    private SessionId? _lastExportSessionId;
     private readonly Dictionary<string, DateTimeOffset> _remoteLastTimestamps =
         new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<StorageHealthEvent> _recentStorageHealthEvents = [];
@@ -416,7 +417,9 @@ public sealed class MonitoringService : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         if (_agentConnection is not null)
         {
-            if (_remoteSessionId is not { } sessionId)
+            SessionId? exportSession;
+            lock (_sync) { exportSession = _lastExportSessionId; }
+            if (exportSession is not { } sessionId)
             {
                 return false;
             }
@@ -428,8 +431,12 @@ public sealed class MonitoringService : IDisposable
                     overwrite,
                     CorrelationId.New()),
                 cancellationToken);
-            return result.IsSuccess
-                   && result.Value is ExportArtifactResponse;
+            if (!result.IsSuccess)
+            {
+                if (result.Status == ApplicationStatus.Cancelled) { cancellationToken.ThrowIfCancellationRequested(); }
+                throw new InvalidOperationException(result.Messages.FirstOrDefault()?.Code ?? "agent.monitor.export_failed");
+            }
+            return result.Value is ExportArtifactResponse { RowCount: > 0 };
         }
 
         if (SessionFilePath is null || !File.Exists(SessionFilePath))
@@ -517,6 +524,7 @@ public sealed class MonitoringService : IDisposable
                 if (Math.Abs(existingRate - rateHz) < 0.05)
                 {
                     _remoteSessionId = active.SessionId;
+                    lock (_sync) { _lastExportSessionId = active.SessionId; }
                     SampleRateHz = existingRate;
                     await RefreshRemoteSnapshotAsync(cancellationToken);
                     signaled = true;
@@ -585,6 +593,7 @@ public sealed class MonitoringService : IDisposable
             }
 
             _remoteSessionId = sessionId;
+            lock (_sync) { _lastExportSessionId = sessionId; }
             signaled = true;
             ready.TrySetResult(true);
             await RunRemotePollLoopAsync(cancellationToken);
@@ -741,6 +750,7 @@ public sealed class MonitoringService : IDisposable
         _remoteSessionId = session.SessionId;
         lock (_sync)
         {
+            _lastExportSessionId = session.SessionId;
             foreach (var sample in latestSamples)
             {
                 var instance = sample.TargetId.ProviderKey.StartsWith(

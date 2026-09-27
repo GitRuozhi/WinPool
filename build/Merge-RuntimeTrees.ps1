@@ -19,10 +19,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Preserve-GeneratedOutput.ps1')
 
-$appRoot = [System.IO.Path]::GetFullPath($AppDir)
-$agentRoot = [System.IO.Path]::GetFullPath($AgentDir)
-$destinationRoot = [System.IO.Path]::GetFullPath($Destination.TrimEnd('\', '/'))
+$appRoot = Assert-WinPoolCheckoutPath $AppDir
+$agentRoot = Assert-WinPoolCheckoutPath $AgentDir
+$destinationRoot = Assert-WinPoolCheckoutPath $Destination
 
 if (-not (Test-Path -LiteralPath $appRoot)) {
     throw "App runtime tree was not found: $appRoot"
@@ -36,6 +37,15 @@ $normalizedAgent = $agentRoot.TrimEnd('\', '/')
 if ($destinationRoot -eq $normalizedApp -or $destinationRoot -eq $normalizedAgent) {
     throw "Destination must be independent of the App and Agent trees: $destinationRoot"
 }
+foreach ($sourceRoot in @($normalizedApp, $normalizedAgent)) {
+    if ($destinationRoot.StartsWith($sourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+        $sourceRoot.StartsWith($destinationRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Runtime sources and destination must not contain each other.'
+    }
+    Assert-WinPoolTreeHasNoLinks $sourceRoot
+}
+Assert-WinPoolRuntimeStopped $destinationRoot
+Assert-WinPoolTreeHasNoLinks $destinationRoot
 
 function Get-PublishFileMap([string]$root) {
     $map = @{}
@@ -123,16 +133,37 @@ if ($ReplaceDestination) {
 try {
     Merge-PublishTrees $appRoot $agentRoot $mergeRoot
     if ($ReplaceDestination) {
-        if (Test-Path -LiteralPath $destinationRoot) {
-            Remove-Item -LiteralPath $destinationRoot -Recurse -Force
+        # Portable data belongs to the user, not to the generated runtime.
+        $portableData = Join-Path $destinationRoot 'Data'
+        if (Test-Path -LiteralPath $portableData) {
+            $newData = Join-Path $temporaryRoot 'Data'
+            if (Test-Path -LiteralPath $newData) { throw 'The generated runtime unexpectedly contains Data.' }
+            Copy-Item -LiteralPath $portableData -Destination $newData -Recurse -Force
         }
-
-        Move-Item -LiteralPath $temporaryRoot -Destination $destinationRoot
-        $temporaryRoot = $null
+        Assert-WinPoolRuntimeStopped $destinationRoot
+        $previousRoot = $null
+        if (Test-Path -LiteralPath $destinationRoot) {
+            $previousRoot = Move-WinPoolGeneratedOutput $destinationRoot
+        }
+        try {
+            Move-Item -LiteralPath $temporaryRoot -Destination $destinationRoot -ErrorAction Stop
+            $temporaryRoot = $null
+        }
+        catch {
+            if ($previousRoot -and -not (Test-Path -LiteralPath $destinationRoot)) {
+                Move-Item -LiteralPath $previousRoot -Destination $destinationRoot -ErrorAction Stop
+                if (-not (Test-Path -LiteralPath $destinationRoot) -or (Test-Path -LiteralPath $previousRoot)) {
+                    throw "Runtime rollback could not be verified: $previousRoot"
+                }
+            }
+            throw
+        }
+        if ($previousRoot) { Write-Output "Previous runtime preserved: $previousRoot" }
     }
 }
 finally {
     if ($null -ne $temporaryRoot -and (Test-Path -LiteralPath $temporaryRoot)) {
-        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        $preserved = Move-WinPoolGeneratedOutput $temporaryRoot
+        Write-Output "Unpublished runtime preserved: $preserved"
     }
 }

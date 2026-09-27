@@ -48,6 +48,29 @@ public static class ConservativeCapacity
         long interleaveBytes = 65536,
         long knownPhysicalAllocatedBytes = 0)
     {
+        try
+        {
+            return PlanLogicalUpperBoundCore(dataMemberBytes, resiliency, dataCopies,
+                columns, parityColumns, interleaveBytes, knownPhysicalAllocatedBytes);
+        }
+        catch (OverflowException exception)
+        {
+            throw new ArgumentException(
+                "The modeled capacity exceeds the supported byte range.",
+                nameof(dataMemberBytes),
+                exception);
+        }
+    }
+
+    private static ConservativeCapacityEstimate PlanLogicalUpperBoundCore(
+        IReadOnlyList<long> dataMemberBytes,
+        string resiliency,
+        int dataCopies,
+        int? columns,
+        int parityColumns,
+        long interleaveBytes,
+        long knownPhysicalAllocatedBytes)
+    {
         ArgumentNullException.ThrowIfNull(dataMemberBytes);
         if (dataCopies < 1)
         {

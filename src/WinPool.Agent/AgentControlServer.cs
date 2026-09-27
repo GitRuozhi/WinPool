@@ -214,6 +214,8 @@ public sealed class CurrentUserAgentControlServer
     private readonly AgentEventHub eventHub;
     private readonly TimeSpan handshakeReadTimeout;
     private readonly Action<string, Exception> reportConnectionFailure;
+    private readonly Func<int, bool> verifyClientIntegrity;
+    private readonly TimeSpan requestTransferTimeout;
 
     public CurrentUserAgentControlServer(
         string pipeName,
@@ -231,7 +233,9 @@ public sealed class CurrentUserAgentControlServer
         IProcessIncarnationVerifier? processIncarnationVerifier = null,
         string? expectedClientExecutablePath = null,
         TimeSpan? handshakeReadTimeout = null,
-        Action<string, Exception>? reportConnectionFailure = null)
+        Action<string, Exception>? reportConnectionFailure = null,
+        Func<int, bool>? verifyClientIntegrity = null,
+        TimeSpan? requestTransferTimeout = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedUserSidHash);
@@ -282,6 +286,15 @@ public sealed class CurrentUserAgentControlServer
         }
         this.reportConnectionFailure = reportConnectionFailure
             ?? ((code, exception) => Trace.TraceError("{0}: {1}", code, exception));
+        var serverIntegrity = WindowsProcessIntegrity.TryRead(Environment.ProcessId);
+        this.verifyClientIntegrity = verifyClientIntegrity
+            ?? (processId => WindowsProcessIntegrity.CanControl(
+                WindowsProcessIntegrity.TryRead(processId), serverIntegrity));
+        this.requestTransferTimeout = requestTransferTimeout ?? IpcProtocol.RequestTransferTimeout;
+        if (this.requestTransferTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requestTransferTimeout));
+        }
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -379,6 +392,11 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-image-mismatch");
         }
+        if (validation.IsAccepted && !verifyClientIntegrity(handshake.ProcessId))
+        {
+            validation = new(false, HandshakeRejection.InvalidProcess,
+                "ipc.handshake.client-integrity-mismatch");
+        }
         var clientStartedAtUtc = validation.IsAccepted
             ? clientWitness?.StartedAtUtc
                 ?? readClientProcessStartedAtUtc(handshake.ProcessId)
@@ -442,7 +460,7 @@ public sealed class CurrentUserAgentControlServer
                     eventEndpoint!,
                     agentProcessId,
                     handshake.ProcessId,
-                    verifyClientProcess,
+                    processId => verifyClientProcess(processId) && verifyClientIntegrity(processId),
                     timeProvider)
                 .RunAsync(eventCancellation.Token)
             : Task.CompletedTask;
@@ -490,13 +508,26 @@ public sealed class CurrentUserAgentControlServer
                 IpcEnvelope envelope;
                 try
                 {
-                    envelope = await IpcFrameCodec.ReadAsync(stream, cancellationToken);
+                    using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    readTimeout.CancelAfter(requestTransferTimeout);
+                    try
+                    {
+                        envelope = await IpcFrameCodec.ReadAsync(stream, readTimeout.Token);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        throw new RequestTransferTimeoutException();
+                    }
                 }
                 catch (EndOfStreamException)
                 {
                     return;
                 }
 
+                if (!verifyClientIntegrity(handshake.ProcessId))
+                {
+                    throw new InvalidDataException("The client no longer has the Agent's integrity level.");
+                }
                 var decoded = codec.DecodeRequest(envelope);
                 coordinator.ProcessRegistry.TryRecordHeartbeat(
                     activeRegistration.ProcessInstanceId,
@@ -512,10 +543,17 @@ public sealed class CurrentUserAgentControlServer
                 var result = decoded.IsAccepted
                     ? await coordinator.HandleAsync(decoded.Request!, cancellationToken)
                     : codec.CreateDecodeRejection(decoded);
-                await IpcFrameCodec.WriteAsync(
-                    stream,
-                    codec.EncodeResponse(result, timeProvider.GetUtcNow()),
-                    cancellationToken);
+                using var writeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                writeTimeout.CancelAfter(requestTransferTimeout);
+                try
+                {
+                    await IpcFrameCodec.WriteAsync(stream,
+                        codec.EncodeResponse(result, timeProvider.GetUtcNow()), writeTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new RequestTransferTimeoutException();
+                }
 
                 if (coordinator.State == AgentLifecycleState.Stopped)
                 {
@@ -550,6 +588,7 @@ public sealed class CurrentUserAgentControlServer
     private static string ConnectionFailureCode(Exception exception) =>
         exception switch
         {
+            RequestTransferTimeoutException => "ipc.control.request_transfer_timeout",
             TimeoutException => "ipc.control.handshake_timeout",
             Microsoft.Data.Sqlite.SqliteException =>
                 "agent.persistence.process_registration_failed",
@@ -557,6 +596,11 @@ public sealed class CurrentUserAgentControlServer
                 "ipc.control.client_connection_failed",
             _ => "ipc.control.connection_failed"
         };
+
+    private sealed class RequestTransferTimeoutException : TimeoutException
+    {
+        public RequestTransferTimeoutException() : base("The Agent control frame transfer timed out.") { }
+    }
 }
 
 public static class AgentClientProcessVerifier

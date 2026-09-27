@@ -397,11 +397,13 @@ public sealed partial class HardwarePage : Page
         capture = new CancellationTokenSource(); Rebuild();
         try
         {
-            await viewModel.RefreshHardwareAsync(capture.Token);
-            PublishHardwareInfo(
-                Text("硬件信息已刷新", "Hardware information refreshed"),
-                Text("已完成本机只读硬件刷新。", "The local read-only hardware refresh completed."),
-                "hardware.refresh.completed");
+            if (await viewModel.RefreshHardwareAsync(capture.Token) == ManualScanOutcome.Completed)
+            {
+                PublishHardwareInfo(
+                    Text("硬件信息已刷新", "Hardware information refreshed"),
+                    Text("已完成本机只读硬件刷新。", "The local read-only hardware refresh completed."),
+                    "hardware.refresh.completed");
+            }
         }
         catch (OperationCanceledException) when (capture.IsCancellationRequested) { }
         catch (Exception exception) when (

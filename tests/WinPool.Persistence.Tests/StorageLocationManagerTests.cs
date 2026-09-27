@@ -318,6 +318,186 @@ public sealed class StorageLocationManagerTests
     }
 
     [Fact]
+    public async Task CoreWalPayloadUpdateCannotBeSilentlyDropped()
+    {
+        using var locations = TemporaryLocations.Create();
+        var fixtureRoot = Path.Combine(locations.BaseDirectory, "fixture");
+        await CreateCoreDatabaseAsync(fixtureRoot);
+        var fixturePath = Path.Combine(fixtureRoot, StorageLocationManager.DatabaseFileName);
+        var fixtureStore = new WinPoolSqliteStore(fixturePath);
+        await using (var writer = await fixtureStore.OpenConnectionAsync())
+        {
+            await using (var insert = writer.CreateCommand())
+            {
+                insert.CommandText = """
+                    INSERT INTO simulation_documents(
+                        document_id, document_schema_version, display_name,
+                        sanitized_json, sha256, revision, created_at_utc_ms, updated_at_utc_ms)
+                    VALUES('wal-document', 1, 'Before', '{}',
+                        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 1);
+                    """;
+                await insert.ExecuteNonQueryAsync();
+            }
+            await using (var checkpoint = writer.CreateCommand())
+            {
+                checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                await checkpoint.ExecuteNonQueryAsync();
+            }
+            await using (var update = writer.CreateCommand())
+            {
+                update.CommandText = "UPDATE simulation_documents SET display_name='After' WHERE document_id='wal-document';";
+                await update.ExecuteNonQueryAsync();
+            }
+
+            Directory.CreateDirectory(locations.StandardRoot);
+            var sourcePath = Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName);
+            File.Copy(fixturePath, sourcePath);
+            File.Copy(fixturePath + "-wal", sourcePath + "-wal");
+            Assert.True(new FileInfo(sourcePath + "-wal").Length > 0);
+        }
+
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var firstPlan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(StorageLocationMode.Portable,
+                CorrelationId.New(), CancellationToken.None)).Value);
+        var firstResult = await manager.ApplySwitchAsync(
+            firstPlan, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, firstResult.Status);
+        Assert.Contains(firstResult.Messages, message => message.Code == "storage.location.core_wal_pending");
+        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName)));
+
+        // Once the stopped writer's WAL is checkpointed, a new plan includes
+        // the updated main file and can safely migrate it.
+        var sourceConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName),
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false
+        }.ToString();
+        await using (var source = new SqliteConnection(sourceConnectionString))
+        {
+            await source.OpenAsync();
+            await using (var readCurrent = source.CreateCommand())
+            {
+                readCurrent.CommandText = "SELECT display_name FROM simulation_documents WHERE document_id='wal-document';";
+                Assert.Equal("After", Convert.ToString(await readCurrent.ExecuteScalarAsync()));
+            }
+            await using var checkpoint = source.CreateCommand();
+            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            await checkpoint.ExecuteNonQueryAsync();
+        }
+
+        var secondPlan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(StorageLocationMode.Portable,
+                CorrelationId.New(), CancellationToken.None)).Value);
+        var secondResult = await manager.ApplySwitchAsync(
+            secondPlan, CorrelationId.New(), CancellationToken.None);
+        Assert.True(secondResult.IsSuccess);
+        await using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName),
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await destination.OpenAsync();
+        await using var read = destination.CreateCommand();
+        read.CommandText = "SELECT display_name FROM simulation_documents WHERE document_id='wal-document';";
+        Assert.Equal("After", Convert.ToString(await read.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task ActiveCoreReaderBlocksMigrationAndRetainsWal()
+    {
+        using var locations = TemporaryLocations.Create();
+        await CreateCoreDatabaseAsync(locations.StandardRoot);
+        var databasePath = Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName);
+        var store = new WinPoolSqliteStore(databasePath);
+        await using (var setup = await store.OpenConnectionAsync())
+        {
+            await using var command = setup.CreateCommand();
+            command.CommandText = """
+                INSERT INTO simulation_documents(
+                    document_id, document_schema_version, display_name,
+                    sanitized_json, sha256, revision, created_at_utc_ms, updated_at_utc_ms)
+                VALUES('held-reader', 1, 'Original', '{}',
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1, 1);
+                PRAGMA wal_checkpoint(TRUNCATE);
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(StorageLocationMode.Portable,
+                CorrelationId.New(), CancellationToken.None)).Value);
+        // Private caches allow a WAL writer to commit while this read snapshot
+        // remains open. The production store uses shared cache, which would
+        // block the fixture's UPDATE before migration is reached.
+        var privateConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString();
+        await using var reader = new SqliteConnection(privateConnectionString);
+        await reader.OpenAsync();
+        using var transaction = reader.BeginTransaction(deferred: true);
+        await using (var hold = reader.CreateCommand())
+        {
+            hold.Transaction = (SqliteTransaction)transaction;
+            hold.CommandText = "SELECT display_name FROM simulation_documents WHERE document_id='held-reader';";
+            Assert.Equal("Original", Convert.ToString(await hold.ExecuteScalarAsync()));
+        }
+        await using (var writer = new SqliteConnection(privateConnectionString))
+        {
+            await writer.OpenAsync();
+            await using var update = writer.CreateCommand();
+            update.CommandText = """
+                UPDATE simulation_documents SET display_name='Intermediate' WHERE document_id='held-reader';
+                UPDATE simulation_documents SET display_name='Original' WHERE document_id='held-reader';
+                """;
+            await update.ExecuteNonQueryAsync();
+        }
+        Assert.True(File.Exists(databasePath + "-wal"));
+
+        var result = await manager.ApplySwitchAsync(
+            plan, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.True(File.Exists(databasePath + "-wal"));
+        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName)));
+    }
+
+    [Fact]
+    public async Task PlanningPreservesUnconfirmedRollbackAndStageRoots()
+    {
+        using var locations = TemporaryLocations.Create();
+        var rollback = Path.Combine(locations.BaseDirectory,
+            ".standard.winpool-rollback-" + Guid.NewGuid().ToString("N"));
+        var stage = Path.Combine(locations.BaseDirectory,
+            ".standard.winpool-stage-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(rollback);
+        Directory.CreateDirectory(stage);
+        File.WriteAllText(Path.Combine(rollback, "only-copy.txt"), "retain rollback");
+        File.WriteAllText(Path.Combine(stage, "staged.txt"), "retain stage");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "latest.txt"), "source");
+        File.WriteAllText(locations.PointerPath, "{\"mode\":\"portable\"}");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var state = await manager.GetCurrentAsync(CorrelationId.New(), CancellationToken.None);
+        var plan = await manager.PlanSwitchAsync(
+            StorageLocationMode.Standard, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(StorageLocationMode.Portable, state.Value!.Mode);
+        Assert.True(plan.IsSuccess);
+        Assert.Equal("retain rollback", File.ReadAllText(Path.Combine(rollback, "only-copy.txt")));
+        Assert.Equal("retain stage", File.ReadAllText(Path.Combine(stage, "staged.txt")));
+    }
+
+    [Fact]
     public async Task ApplyRejectsSameLengthContentChangeEvenWhenTimestampIsRestored()
     {
         using var locations = TemporaryLocations.Create();
@@ -375,6 +555,7 @@ public sealed class StorageLocationManagerTests
             File.ReadAllText(Path.Combine(
                 locations.StandardRoot,
                 StorageLocationManager.PointerFileName)));
+        Assert.Contains("standard", File.ReadAllText(locations.PointerPath), StringComparison.OrdinalIgnoreCase);
         Assert.True(File.Exists(Path.Combine(locations.StandardRoot, "winpool.db")));
         Assert.False(Directory.Exists(locations.PortableRoot));
         Assert.Equal(["quiesce", "commit-failed", "resume"], coordinator.Events);
@@ -384,6 +565,31 @@ public sealed class StorageLocationManagerTests
             CorrelationId.New(),
             CancellationToken.None);
         Assert.Equal(StorageLocationMode.Standard, current.Value!.Mode);
+    }
+
+    [Fact]
+    public async Task PortableToStandardCommitFailureKeepsOutsidePointerOnPortableSource()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard(StorageLocationManager.PointerFileName, "{\"mode\":\"portable\"}");
+        locations.WriteStandard("old-target.txt", "old standard");
+        Directory.CreateDirectory(locations.PortableRoot);
+        File.WriteAllText(Path.Combine(locations.PortableRoot, "latest.txt"), "latest portable");
+        var coordinator = new RecordingCoordinator();
+        var manager = locations.CreateManager(coordinator, new FailingCommitter(coordinator));
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(StorageLocationMode.Standard,
+                CorrelationId.New(), CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.Contains("portable", File.ReadAllText(locations.PointerPath), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("old standard", File.ReadAllText(Path.Combine(locations.StandardRoot, "old-target.txt")));
+        Assert.Equal("latest portable", File.ReadAllText(Path.Combine(locations.PortableRoot, "latest.txt")));
+        Assert.Equal(StorageLocationMode.Portable,
+            (await manager.GetCurrentAsync(CorrelationId.New(), CancellationToken.None)).Value!.Mode);
     }
 
     [Fact]
@@ -441,10 +647,7 @@ public sealed class StorageLocationManagerTests
     public async Task AtomicCommitterReplacesPointerAndLeavesNoTemporaryFile()
     {
         using var locations = TemporaryLocations.Create();
-        Directory.CreateDirectory(locations.StandardRoot);
-        var pointerPath = Path.Combine(
-            locations.StandardRoot,
-            StorageLocationManager.PointerFileName);
+        var pointerPath = locations.PointerPath;
         File.WriteAllText(pointerPath, """{"mode":"standard"}""");
         var committer = new AtomicStorageLocationPointerCommitter();
 
@@ -459,18 +662,15 @@ public sealed class StorageLocationManagerTests
             CancellationToken.None);
         Assert.Equal(StorageLocationMode.Portable, current.Value!.Mode);
         Assert.Empty(Directory.EnumerateFiles(
-            locations.StandardRoot,
-            StorageLocationManager.PointerFileName + ".tmp-*"));
+            locations.BaseDirectory,
+            Path.GetFileName(pointerPath) + ".tmp-*"));
     }
 
     [Fact]
     public async Task AtomicCommitterFailureKeepsExistingPointerAndCleansTemporaryFile()
     {
         using var locations = TemporaryLocations.Create();
-        Directory.CreateDirectory(locations.StandardRoot);
-        var pointerPath = Path.Combine(
-            locations.StandardRoot,
-            StorageLocationManager.PointerFileName);
+        var pointerPath = locations.PointerPath;
         var oldPointer = """{"mode":"standard"}""";
         File.WriteAllText(pointerPath, oldPointer);
         var committer = new AtomicStorageLocationPointerCommitter();
@@ -485,8 +685,8 @@ public sealed class StorageLocationManagerTests
 
         Assert.Equal(oldPointer, File.ReadAllText(pointerPath));
         Assert.Empty(Directory.EnumerateFiles(
-            locations.StandardRoot,
-            StorageLocationManager.PointerFileName + ".tmp-*"));
+            locations.BaseDirectory,
+            Path.GetFileName(pointerPath) + ".tmp-*"));
     }
 
     [Fact]
@@ -1404,6 +1604,8 @@ public sealed class StorageLocationManagerTests
         public string StandardRoot { get; }
 
         public string PortableRoot { get; }
+
+        public string PointerPath => StandardRoot + "." + StorageLocationManager.PointerFileName;
 
         public static TemporaryLocations Create()
         {

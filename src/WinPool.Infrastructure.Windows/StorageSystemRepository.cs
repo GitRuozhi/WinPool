@@ -104,6 +104,16 @@ public interface IStructuredSimulationEditRepository
         string commitId = "");
 }
 
+public sealed class SimulationCommitConflictException()
+    : InvalidOperationException("The simulation document changed before the edit was saved. Refresh it before retrying.")
+{
+}
+
+public sealed class SimulationCommitFailureException()
+    : IOException("The simulation edit could not be saved. Check storage diagnostics before retrying.")
+{
+}
+
 public static class SimulationDocumentCodec
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -462,8 +472,25 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
 
             if (!result.IsSuccess || result.Value is null)
             {
+                var code = result.Messages.FirstOrDefault()?.Code;
+                if (result.Status == ApplicationStatus.Rejected
+                    && code == "agent.persistence.simulation_commit_conflict")
+                {
+                    throw new SimulationCommitConflictException();
+                }
+                if (result.Status == ApplicationStatus.Cancelled)
+                {
+                    throw new OperationCanceledException(
+                        "The simulation commit was cancelled before completion.",
+                        cancellationToken);
+                }
+                if (result.Status == ApplicationStatus.Failed
+                    && code == "agent.persistence.simulation_commit_failed")
+                {
+                    throw new SimulationCommitFailureException();
+                }
                 throw new InvalidOperationException(
-                    result.Messages.FirstOrDefault()?.Code
+                    code
                     ?? "The Agent persistence request failed.");
             }
 

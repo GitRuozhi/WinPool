@@ -112,6 +112,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
     private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly SemaphoreSlim sendGate = new(1, 1);
     private readonly SemaphoreSlim eventRecoveryGate = new(1, 1);
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly object lifetimeSync = new();
@@ -120,12 +121,14 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly TaskCompletionSource disposeCompletion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Guid clientProcessInstanceId = Guid.NewGuid();
+    private readonly TimeSpan controlConnectionReuseIdleLimit;
     private readonly AgentClientEventFanout eventFanout = new();
     private NamedPipeClientStream? stream;
     private NamedPipeClientStream? eventStream;
     private CancellationTokenSource? eventCancellation;
     private Task? eventReaderTask;
     private AgentHandshake? handshake;
+    private long lastControlTransferStartedTimestamp = -1;
     private int disposeStarted;
     private int activeOperations;
 
@@ -142,7 +145,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         IAgentProcessLauncher launcher,
         TimeProvider? timeProvider,
         Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync,
-        IAgentProcessLiveness? agentProcessLiveness = null)
+        IAgentProcessLiveness? agentProcessLiveness = null,
+        TimeSpan? controlConnectionReuseIdleLimit = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpointPath);
         this.endpointPath = Path.GetFullPath(endpointPath);
@@ -151,6 +155,13 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             agentProcessLiveness ?? new WindowsAgentProcessLiveness();
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.beforeEventRecoveryConnectAsync = beforeEventRecoveryConnectAsync;
+        this.controlConnectionReuseIdleLimit = controlConnectionReuseIdleLimit
+            ?? IpcProtocol.ControlConnectionReuseIdleLimit;
+        if (this.controlConnectionReuseIdleLimit <= TimeSpan.Zero
+            || this.controlConnectionReuseIdleLimit >= IpcProtocol.RequestTransferTimeout)
+        {
+            throw new ArgumentOutOfRangeException(nameof(controlConnectionReuseIdleLimit));
+        }
     }
 
     public static string DefaultEndpointPath =>
@@ -351,18 +362,45 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     {
         ArgumentNullException.ThrowIfNull(request);
         using var operation = EnterOperation(cancellationToken);
-        var connected = await ConnectAsync(operation.Token);
-        if (!connected.IsSuccess)
+        try
         {
-            return new(
-                connected.Status,
-                null,
-                connected.Messages,
-                request.CorrelationId);
+            await sendGate.WaitAsync(operation.Token).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && !IsDisposing)
+        {
+            return Failure<AgentResponse>(ApplicationStatus.Cancelled,
+                request.CorrelationId, "agent.request.cancelled");
+        }
+        try
+        {
+            var connected = await ConnectAsync(operation.Token).ConfigureAwait(false);
+            if (!connected.IsSuccess)
+            {
+                return new(connected.Status, null, connected.Messages, request.CorrelationId);
+            }
 
-        return await SendConnectedAsync(request, operation.Token)
-            .ConfigureAwait(false);
+            try
+            {
+                return await SendConnectedAsync(request, operation.Token, enforceIdleLease: true)
+                    .ConfigureAwait(false);
+            }
+            catch (ControlConnectionIdleLeaseExpiredException)
+            {
+                // The request gate checked the lease before writing any byte.
+                // Renew once; never retry a request after transport has begun.
+                var renewed = await ReconnectAsync(operation.Token).ConfigureAwait(false);
+                if (!renewed.IsSuccess)
+                {
+                    return new(renewed.Status, null, renewed.Messages, request.CorrelationId);
+                }
+
+                return await SendConnectedAsync(request, operation.Token).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            sendGate.Release();
+        }
     }
 
     public async IAsyncEnumerable<AgentEvent> WatchAsync(
@@ -398,6 +436,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             await DisposeStreamAsync().ConfigureAwait(false);
             connectionGate.Dispose();
             requestGate.Dispose();
+            sendGate.Dispose();
             eventRecoveryGate.Dispose();
             lifetimeCancellation.Dispose();
         }
@@ -409,7 +448,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
     private async Task<ApplicationResult<AgentResponse>> SendConnectedAsync(
         AgentRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool enforceIdleLease = false)
     {
         using var operation = EnterOperation(cancellationToken);
         var requestGateAcquired = false;
@@ -427,7 +467,19 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     "agent.request.not_connected");
             }
 
+            if (enforceIdleLease
+                && (lastControlTransferStartedTimestamp < 0
+                    || timeProvider.GetElapsedTime(
+                        lastControlTransferStartedTimestamp,
+                        timeProvider.GetTimestamp()) >= controlConnectionReuseIdleLimit))
+            {
+                throw new ControlConnectionIdleLeaseExpiredException();
+            }
+
             var messageType = RequestMessageType(request);
+            // The server begins its next idle read only after this response.
+            // Starting the client's lease here is deliberately conservative.
+            lastControlTransferStartedTimestamp = timeProvider.GetTimestamp();
             transportStarted = true;
             await IpcFrameCodec.WriteAsync(
                 stream!,
@@ -1021,6 +1073,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private async ValueTask DisposeStreamAsync()
     {
         handshake = null;
+        lastControlTransferStartedTimestamp = -1;
         eventCancellation?.Cancel();
         if (eventStream is not null)
         {
@@ -1039,6 +1092,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             await stream.DisposeAsync();
             stream = null;
         }
+    }
+
+    private sealed class ControlConnectionIdleLeaseExpiredException : Exception
+    {
     }
 
     private void ThrowIfDisposed()

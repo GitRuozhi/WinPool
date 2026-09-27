@@ -28,6 +28,10 @@
   <ItemGroup>
     <Compile Include="..\..\src\WinPool.App\Services\MonitorIssueStateTracker.cs"
              Link="Services\MonitorIssueStateTracker.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\UserPreferencesUpdateCoordinator.cs"
+             Link="Services\UserPreferencesUpdateCoordinator.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\ManualScanRunner.cs"
+             Link="Services\ManualScanRunner.cs" />
   </ItemGroup>
 
 </Project>

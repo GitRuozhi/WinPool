@@ -369,9 +369,24 @@ internal sealed class DesktopAgentRuntime :
                 new SimulationDocumentSavedResponse(document),
                 request.CorrelationId);
         }
+        catch (SimulationDocumentConflictException)
+        {
+            return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return ApplicationResult<AgentResponse>.FromStatus(
+                ApplicationStatus.Cancelled, request.CorrelationId,
+                Message("agent.persistence.simulation_commit_cancelled"));
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            return ApplicationResult<AgentResponse>.FromStatus(
+                ApplicationStatus.Failed, request.CorrelationId,
+                Message("agent.persistence.simulation_commit_failed"));
+        }
         catch (Exception exception) when (exception is
-            ArgumentException or JsonException or InvalidDataException
-            or SimulationDocumentConflictException or Microsoft.Data.Sqlite.SqliteException)
+            ArgumentException or JsonException or InvalidDataException)
         {
             return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
         }

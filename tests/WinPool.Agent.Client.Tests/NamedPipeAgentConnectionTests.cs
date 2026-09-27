@@ -392,6 +392,161 @@ public sealed class NamedPipeAgentConnectionTests
         }
     }
 
+    [Fact]
+    public async Task IdleControlConnectionIsRenewedBeforeTheFirstRequestIsSent()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WinPool.Agent.Client.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var userHash = IpcIdentity.HashUserSid(WindowsIdentity.GetCurrent().User!.Value);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var operations = new SnapshotOperations(sessionId);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(operations,
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry), registry);
+        await File.WriteAllTextAsync(endpointPath, JsonSerializer.Serialize(new AgentEndpoint(
+            IpcProtocol.CurrentVersion, pipeName, nonce, sessionId,
+            Environment.ProcessId, DateTimeOffset.UtcNow)));
+
+        using var stop = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(pipeName, nonce, userHash, sessionId,
+            Environment.ProcessId, coordinator,
+            requestTransferTimeout: TimeSpan.FromSeconds(2));
+        var running = server.RunAsync(stop.Token);
+        try
+        {
+            await using var connection = new NamedPipeAgentConnection(endpointPath,
+                new RecordingLauncher(), null, null, new TrueAgentProcessLiveness(),
+                controlConnectionReuseIdleLimit: TimeSpan.FromMilliseconds(100));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            Assert.True((await connection.ConnectAsync(timeout.Token)).IsSuccess);
+            Assert.Equal(1, operations.SnapshotRequestCount);
+
+            // The server has not timed out yet. Renewing here proves the next
+            // request is never put on a connection near its idle deadline.
+            await Task.Delay(200, timeout.Token);
+            var first = connection.SendAsync(new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
+            var second = connection.SendAsync(new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
+            Assert.True((await first).IsSuccess);
+            Assert.True((await second).IsSuccess);
+            Assert.Equal(4, operations.SnapshotRequestCount); // initial, renewed, first, second
+
+            // Even after the server's accepted-idle timeout, the first user
+            // request must complete without exposing a stale-pipe failure.
+            await Task.Delay(TimeSpan.FromSeconds(2.2), timeout.Token);
+            var afterServerIdle = await connection.SendAsync(
+                new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
+            Assert.True(afterServerIdle.IsSuccess);
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await running; }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(5)]
+    public async Task AcceptedClientWithIncompleteRequestReleasesListener(int byteCount)
+    {
+        var processInstanceId = Guid.NewGuid();
+        var userHash = IpcIdentity.HashUserSid(WindowsIdentity.GetCurrent().User!.Value);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry), registry);
+        var failure = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(pipeName, nonce, userHash, sessionId,
+            Environment.ProcessId, coordinator,
+            requestTransferTimeout: TimeSpan.FromMilliseconds(200),
+            reportConnectionFailure: (code, _) => failure.TrySetResult(code));
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await using (var stalled = CurrentUserPipeFactory.CreateClient(pipeName))
+            {
+                await stalled.ConnectAsync(timeout.Token);
+                await WriteHandshakeAsync(stalled, nonce, userHash, processInstanceId, timeout.Token);
+                Assert.Equal(AgentControlMessageTypes.HandshakeAccepted,
+                    (await IpcFrameCodec.ReadAsync(stalled, timeout.Token)).MessageType);
+                // Valid length prefix followed by a partial payload, partial
+                // prefix, and a completely idle accepted peer are all bounded.
+                await stalled.WriteAsync(new byte[] { 100, 0, 0, 0, 123 }.AsMemory(0, byteCount), timeout.Token);
+                await stalled.FlushAsync(timeout.Token);
+                Assert.Equal("ipc.control.request_transfer_timeout", await failure.Task.WaitAsync(timeout.Token));
+            }
+            await using var healthy = CurrentUserPipeFactory.CreateClient(pipeName);
+            await healthy.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(healthy, nonce, userHash, processInstanceId, timeout.Token);
+            Assert.Equal(AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(healthy, timeout.Token)).MessageType);
+            var request = new GetAgentSnapshotRequest(CorrelationId.New());
+            await IpcFrameCodec.WriteAsync(healthy, new IpcEnvelope(IpcProtocol.CurrentVersion,
+                Guid.NewGuid(), request.CorrelationId.Value, AgentControlMessageTypes.GetSnapshot,
+                DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(request)), timeout.Token);
+            Assert.Equal(AgentControlMessageTypes.Response,
+                (await IpcFrameCodec.ReadAsync(healthy, timeout.Token)).MessageType);
+        }
+        finally
+        {
+            serverCancellation.Cancel();
+            try { await serverTask; }
+            catch (OperationCanceledException) when (serverCancellation.IsCancellationRequested) { }
+        }
+    }
+
+    [Fact]
+    public async Task ClientIntegrityFailureRejectsHandshakeWithoutPoisoningListener()
+    {
+        var userHash = IpcIdentity.HashUserSid(WindowsIdentity.GetCurrent().User!.Value);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var coordinator = new AgentSessionCoordinator(new SnapshotOperations(sessionId),
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry), registry);
+        var allowed = false;
+        using var stop = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(pipeName, nonce, userHash, sessionId,
+            Environment.ProcessId, coordinator, verifyClientIntegrity: _ => allowed);
+        var running = server.RunAsync(stop.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await using (var rejected = CurrentUserPipeFactory.CreateClient(pipeName))
+            {
+                await rejected.ConnectAsync(timeout.Token);
+                await WriteHandshakeAsync(rejected, nonce, userHash, Guid.NewGuid(), timeout.Token);
+                var reply = await IpcFrameCodec.ReadAsync(rejected, timeout.Token);
+                Assert.Equal(AgentControlMessageTypes.HandshakeRejected, reply.MessageType);
+                Assert.Contains("client-integrity-mismatch", reply.Payload.ToString());
+            }
+            allowed = true;
+            await using var accepted = CurrentUserPipeFactory.CreateClient(pipeName);
+            await accepted.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(accepted, nonce, userHash, Guid.NewGuid(), timeout.Token);
+            Assert.Equal(AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(accepted, timeout.Token)).MessageType);
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await running; }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        }
+    }
+
     private static ValueTask WriteHandshakeAsync(
         Stream stream,
         Guid nonce,

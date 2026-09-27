@@ -17,7 +17,7 @@ public static class SimulationSnapshotAuditor
         }
 
         CheckDuplicateLetters(snapshot, prefix, findings);
-        CheckPartitionGeometry(snapshot, prefix, findings);
+        findings.AddRange(AuditPartitionGeometry(snapshot, name));
         CheckMembership(snapshot, prefix, findings);
         CheckTierMedia(snapshot, prefix, findings);
         CheckVirtualDiskOsDisks(snapshot, prefix, findings);
@@ -59,46 +59,78 @@ public static class SimulationSnapshotAuditor
         }
     }
 
-    private static void CheckPartitionGeometry(
-        StorageSnapshot snapshot,
-        string prefix,
-        List<string> findings)
+    /// <summary>
+    /// Rejects only geometry that can be disproved from the imported facts.
+    /// Unlinked partitions are not grouped by disk number because that number
+    /// alone does not establish a stable disk relationship.
+    /// </summary>
+    public static IReadOnlyList<string> AuditPartitionGeometry(StorageSnapshot snapshot, string? name = null)
     {
-        foreach (var group in snapshot.Partitions.GroupBy(
-                     item => item.OsDiskStableId ?? $"disk-number:{item.DiskNumber}",
-                     StringComparer.OrdinalIgnoreCase))
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var prefix = string.IsNullOrWhiteSpace(name) ? string.Empty : $"{name}: ";
+        var findings = new List<string>();
+        var validEnds = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        bool Uncertain(string id, string field) => snapshot.FieldIssues.Any(issue =>
+            string.Equals(issue.ObjectId, id, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(issue.FieldName, field, StringComparison.OrdinalIgnoreCase));
+        foreach (var partition in snapshot.Partitions)
         {
-            var osDisk = snapshot.OsDisks.FirstOrDefault(item =>
-                string.Equals(item.StableId, group.Key, StringComparison.OrdinalIgnoreCase));
-            var ordered = group.OrderBy(item => item.Offset).ToArray();
-            for (var i = 0; i < ordered.Length; i++)
+            var offsetUnknown = Uncertain(partition.StableId, "Offset");
+            var sizeUnknown = Uncertain(partition.StableId, "Size");
+            if ((!offsetUnknown && partition.Offset < 0)
+                || (!sizeUnknown && partition.Size <= 0))
             {
-                var partition = ordered[i];
-                if (partition.Offset < 0 || partition.Size <= 0)
-                {
-                    findings.Add(
-                        $"{prefix}Partition {partition.StableId} has invalid offset {partition.Offset} or size {partition.Size}.");
-                }
+                findings.Add($"{prefix}Partition {partition.StableId} has invalid offset {partition.Offset} or size {partition.Size}.");
+                continue;
+            }
+            if (offsetUnknown || sizeUnknown)
+            {
+                // Missing or conflicting source values project as defaults.
+                // A complete end offset cannot be proven from those defaults.
+                continue;
+            }
+            if (partition.Offset > long.MaxValue - partition.Size)
+            {
+                findings.Add($"{prefix}Partition {partition.StableId} has an overflowing end offset.");
+                continue;
+            }
+            var end = partition.Offset + partition.Size;
+            validEnds[partition.StableId] = end;
+            var osDisk = snapshot.OsDisks.FirstOrDefault(item =>
+                string.Equals(item.StableId, partition.OsDiskStableId, StringComparison.OrdinalIgnoreCase));
+            if (osDisk is not null && !Uncertain(osDisk.StableId, "Size")
+                && end > osDisk.Size)
+            {
+                findings.Add($"{prefix}Partition {partition.StableId} ends beyond disk {osDisk.StableId} ({end} > {osDisk.Size}).");
+            }
+        }
 
-                if (osDisk is not null && partition.Offset + partition.Size > osDisk.Size)
-                {
-                    findings.Add(
-                        $"{prefix}Partition {partition.StableId} ends beyond disk {osDisk.StableId} ({partition.Offset + partition.Size} > {osDisk.Size}).");
-                }
-
-                if (i == 0)
+        foreach (var group in snapshot.Partitions
+                     .Where(item => !string.IsNullOrWhiteSpace(item.OsDiskStableId))
+                     .GroupBy(item => item.OsDiskStableId!, StringComparer.OrdinalIgnoreCase))
+        {
+            var ordered = group.OrderBy(item => item.Offset).ToArray();
+            long furthestEnd = -1;
+            string? furthestPartitionId = null;
+            foreach (var partition in ordered)
+            {
+                if (!validEnds.TryGetValue(partition.StableId, out var end))
                 {
                     continue;
                 }
-
-                var previous = ordered[i - 1];
-                if (previous.Offset + previous.Size > partition.Offset)
+                if (partition.Offset < furthestEnd)
                 {
                     findings.Add(
-                        $"{prefix}Partitions {previous.StableId} and {partition.StableId} overlap.");
+                        $"{prefix}Partitions {furthestPartitionId} and {partition.StableId} overlap.");
+                }
+                if (end > furthestEnd)
+                {
+                    furthestEnd = end;
+                    furthestPartitionId = partition.StableId;
                 }
             }
         }
+        return findings;
     }
 
     private static void CheckMembership(

@@ -131,30 +131,8 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         {
             throw new InvalidDataException("The WinPool import version is not supported.");
         }
-        Validate(envelope.System);
+        StorageSystemImportValidator.Validate(envelope.System);
         return envelope.System.AsImportedSimulation();
-    }
-
-    private static void Validate(StorageSystemDocument document)
-    {
-        if (string.IsNullOrWhiteSpace(document.DisplayName)
-            || string.IsNullOrWhiteSpace(document.Snapshot.Computer.StableId))
-        {
-            throw new InvalidDataException("The imported system is missing required identity data.");
-        }
-        var ids = document.Snapshot.PhysicalDisks.Select(x => x.StableId)
-            .Concat(document.Snapshot.StoragePools.Select(x => x.StableId))
-            .Concat(document.Snapshot.StorageTiers.Select(x => x.StableId))
-            .Concat(document.Snapshot.VirtualDisks.Select(x => x.StableId))
-            .Concat(document.Snapshot.OsDisks.Select(x => x.StableId))
-            .Concat(document.Snapshot.Partitions.Select(x => x.StableId))
-            .Concat(document.Snapshot.NetworkDisks.Select(x => x.StableId))
-            .ToArray();
-        if (ids.Any(string.IsNullOrWhiteSpace)
-            || ids.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ids.Length)
-        {
-            throw new InvalidDataException("The imported system contains invalid or duplicate object IDs.");
-        }
     }
 
     private static string NormalizeFileName(string value)

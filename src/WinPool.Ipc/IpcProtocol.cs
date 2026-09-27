@@ -13,6 +13,9 @@ public static class IpcProtocol
     public const int MaximumFrameBytes = 4 * 1024 * 1024;
     public static readonly TimeSpan MaximumHandshakeAge = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan HandshakeReadTimeout = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan RequestTransferTimeout = TimeSpan.FromSeconds(30);
+    // The client renews an idle connection before the server's read deadline.
+    public static readonly TimeSpan ControlConnectionReuseIdleLimit = TimeSpan.FromSeconds(25);
 }
 
 public sealed record IpcEnvelope(

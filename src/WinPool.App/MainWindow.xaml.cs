@@ -535,8 +535,11 @@ public sealed partial class MainWindow : Window
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
-                or InvalidOperationException)
+                or InvalidOperationException
+                or InvalidDataException
+                or OperationCanceledException)
         {
+            LogRecoverableWorkspaceStateFailure(exception);
         }
 
         try
@@ -670,6 +673,7 @@ public sealed partial class MainWindow : Window
                 : "Switch the local, imported, or simulated storage system currently being viewed or edited.");
         LocalRealOperationsSwitch.IsEnabled = true;
         RefreshShellNavigationText();
+        UpdateOverflowNavigationLabel();
         UpdateShellNavigationTextVisibility();
         UpdateActiveSystemName();
         SyncModeSwitch();
@@ -767,7 +771,11 @@ public sealed partial class MainWindow : Window
     private void UpdateCaptionInset()
     {
         var right = Math.Max(8, AppWindow.TitleBar.RightInset + 8);
-        ModeControls.Margin = new Thickness(8, 0, right, 0);
+        ModeControls.Margin = new Thickness(
+            RootGrid.ActualWidth > 0 && RootGrid.ActualWidth < 1280 ? 2 : 8,
+            0,
+            right,
+            0);
     }
 
     private async void LocalRealOperationsSwitch_Toggled(object sender, RoutedEventArgs e)
@@ -1184,6 +1192,68 @@ public sealed partial class MainWindow : Window
         {
             item.Title = ViewModel.Localization[keys[item.Page]];
         }
+        RefreshShellNavigationAutomationNames();
+        UpdateOverflowNavigationLabel();
+    }
+
+    private void RefreshShellNavigationAutomationNames()
+    {
+        foreach (var item in ShellNavigationItems)
+        {
+            if (ShellNavigationList.ContainerFromItem(item) is ListViewItem container)
+            {
+                SetShellNavigationAutomationName(container, item);
+            }
+        }
+    }
+
+    private static void SetShellNavigationAutomationName(ListViewItem container, ShellNavigationItem item)
+    {
+        if (!string.Equals(AutomationProperties.GetName(container), item.Title, StringComparison.Ordinal))
+        {
+            AutomationProperties.SetName(container, item.Title);
+        }
+    }
+
+    private void UpdateOverflowNavigationLabel()
+    {
+        ShellNavigationOverflowIcon.Glyph = SelectedShellItem?.Glyph ?? "\uE700";
+        var label = SelectedShellItem is null
+            ? ViewModel.Localization["NavigationMenu"]
+            : $"{ViewModel.Localization["NavigationMenu"]}: {SelectedShellItem.Title}";
+        AutomationProperties.SetName(ShellNavigationOverflowButton, label);
+        ToolTipService.SetToolTip(ShellNavigationOverflowButton, label);
+    }
+
+    private void ShellNavigationList_ContainerContentChanging(
+        ListViewBase sender,
+        ContainerContentChangingEventArgs args)
+    {
+        if (args.ItemContainer is ListViewItem container && args.Item is ShellNavigationItem item)
+        {
+            SetShellNavigationAutomationName(container, item);
+        }
+    }
+
+    private void ShellNavigationList_LayoutUpdated(object sender, object e) =>
+        RefreshShellNavigationAutomationNames();
+
+    private void ShellNavigationOverflowButton_Click(object sender, RoutedEventArgs e)
+    {
+        var flyout = new MenuFlyout();
+        foreach (var navigation in ShellNavigationItems)
+        {
+            var page = navigation.Page;
+            var item = new MenuFlyoutItem
+            {
+                Text = navigation.Title,
+                Icon = new FontIcon { Glyph = navigation.Glyph, FontSize = 14 }
+            };
+            item.Click += (_, _) => SelectShellPage(page);
+            flyout.Items.Add(item);
+        }
+
+        flyout.ShowAt(ShellNavigationOverflowButton);
     }
 
     private void SelectShellPage(ShellPageKind page, string? editorTargetStableId = null)
@@ -1198,6 +1268,7 @@ public sealed partial class MainWindow : Window
         SelectedShellItem = item;
         ShellNavigationList.SelectedItem = item;
         _updatingNavigation = false;
+        UpdateOverflowNavigationLabel();
         UpdateShellNavigationAccent();
         UpdateActiveSystemName();
         PersistLastActivePage(page);
@@ -1297,7 +1368,11 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(WorkspaceViewModel.CurrentPreferences))
         {
-            RefreshDeveloperNavigation();
+            var showingDeveloperPages = ShellNavigationItems.Any(item => IsDeveloperPage(item.Page));
+            if (showingDeveloperPages != ViewModel.CurrentPreferences.DeveloperMode)
+            {
+                RefreshDeveloperNavigation();
+            }
         }
     }
 
@@ -1343,8 +1418,27 @@ public sealed partial class MainWindow : Window
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
-                or InvalidOperationException)
+                or InvalidOperationException
+                or InvalidDataException
+                or OperationCanceledException)
         {
+            LogRecoverableWorkspaceStateFailure(exception);
+        }
+    }
+
+    private static void LogRecoverableWorkspaceStateFailure(Exception exception)
+    {
+        try
+        {
+            DiagnosticLog.AppendFailure(
+                StorageDataLocations.CurrentRoot,
+                "workspace-state.jsonl",
+                "WorkspaceStateSave",
+                exception);
+        }
+        catch
+        {
+            // Diagnostics must not turn a recoverable save failure into a UI crash.
         }
     }
 
@@ -1426,7 +1520,21 @@ public sealed partial class MainWindow : Window
 
     private void UpdateShellNavigationTextVisibility()
     {
-        var compactThreshold = ViewModel.Localization.IsChinese ? 1180 : 1500;
+        var narrow = RootGrid.ActualWidth > 0 && RootGrid.ActualWidth < 1280;
+        ShellNavigationList.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+        ShellNavigationOverflowButton.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
+        ShellNavigationOverflowButton.IsEnabled = ShellNavigationList.IsEnabled;
+        WindowTitleText.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+        WindowTitleHost.Margin = narrow ? new Thickness(4, 0, 4, 0) : new Thickness(14, 0, 20, 0);
+        LocalRealOperationsLabel.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+        ActiveSystemSelectorHost.MinWidth = narrow ? 0 : 180;
+        ActiveSystemSelectorHost.Margin = narrow ? new Thickness(4, 0, 4, 0) : new Thickness(24, 0, 12, 0);
+        ActiveSystemSelectorHost.HorizontalAlignment = narrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+        ActiveSystemSelector.MinWidth = narrow ? 0 : 178;
+        ModeControls.Spacing = narrow ? 0 : 8;
+        ModeControls.Margin = new Thickness(narrow ? 2 : 8, 0,
+            Math.Max(8, AppWindow.TitleBar.RightInset + 8), 0);
+        var compactThreshold = ViewModel.Localization.IsChinese ? 1400 : 1500;
         var compact = RootGrid.ActualWidth > 0 && RootGrid.ActualWidth < compactThreshold;
         foreach (var item in ShellNavigationItems)
         {
@@ -1492,7 +1600,13 @@ public sealed partial class MainWindow : Window
         RectInt32[] regions;
         try
         {
-            var elements = new List<FrameworkElement> { ShellNavigationList, ModeControls };
+            var elements = new List<FrameworkElement>
+            {
+                ShellNavigationList.Visibility == Visibility.Visible
+                    ? ShellNavigationList
+                    : ShellNavigationOverflowButton,
+                ModeControls
+            };
             if (ActiveSystemSelector.Visibility == Visibility.Visible)
             {
                 elements.Add(ActiveSystemSelectorHost);

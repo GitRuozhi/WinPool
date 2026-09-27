@@ -399,6 +399,80 @@ public sealed class SimulationEditCoordinatorTests
             request => Assert.IsType<LookupAgentSimulationCommitRequest>(request));
     }
 
+    [Theory]
+    [InlineData(ApplicationStatus.Rejected, "agent.persistence.simulation_commit_conflict", ApplicationStatus.Rejected, "simulation.commit.conflict", false)]
+    [InlineData(ApplicationStatus.Rejected, "agent.persistence.simulation_commit_conflict", ApplicationStatus.Rejected, "simulation.commit.conflict", true)]
+    [InlineData(ApplicationStatus.Failed, "agent.persistence.simulation_commit_failed", ApplicationStatus.Failed, "simulation.commit.storage_failed", false)]
+    [InlineData(ApplicationStatus.Failed, "agent.persistence.simulation_commit_failed", ApplicationStatus.Failed, "simulation.commit.storage_failed", true)]
+    [InlineData(ApplicationStatus.Cancelled, "agent.persistence.simulation_commit_cancelled", ApplicationStatus.Cancelled, "simulation.cancelled", false)]
+    [InlineData(ApplicationStatus.Cancelled, "agent.persistence.simulation_commit_cancelled", ApplicationStatus.Cancelled, "simulation.cancelled", true)]
+    public async Task ConfirmedCommitFailureKeepsItsDistinctResultAndDoesNotPublishCandidate(
+        ApplicationStatus agentStatus, string agentCode,
+        ApplicationStatus expectedStatus, string expectedCode, bool useDraftPlan)
+    {
+        var original = CreateDocument(StorageSystemKind.Simulation);
+        var active = original;
+        var connection = new LostCommitReplyConnection(commitStatus: agentStatus, commitCode: agentCode);
+        var repository = new AgentBackedStorageSystemRepository(connection);
+        await repository.SaveSimulationAsync(active);
+        var coordinator = new SimulationEditCoordinator(
+            () => active,
+            async (commit, token) =>
+            {
+                await repository.SaveEditAsync(
+                    commit.Document, commit.Plan, commit.Events, token, commit.CommitId);
+                active = commit.Document;
+            },
+            new SimulationOperationService());
+
+        var result = await ExecuteRenameAsync(coordinator, "Not saved", useDraftPlan);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal(expectedCode, Assert.Single(result.Messages).Code);
+        Assert.Same(original, active);
+        Assert.Equal(2, connection.Requests.Count);
+    }
+
+    [Fact]
+    public async Task DraftWithStaleRevisionIsRejectedBeforeExecutionOrCommit()
+    {
+        var active = CreateDocument(StorageSystemKind.Simulation);
+        var committed = false;
+        var coordinator = new SimulationEditCoordinator(
+            () => active,
+            (_, _) => { committed = true; return Task.CompletedTask; },
+            new SimulationOperationService());
+        var plan = new SimulationDraftPlan("stale", [new SimulationEditRequest(
+            SimulationEditKind.Rename, "physical:p1", Name: "Old draft")])
+        {
+            BaselineRevision = active.Revision + 1
+        };
+
+        var result = await coordinator.ExecutePlanAsync(plan, CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Equal("simulation.plan.revision_conflict", Assert.Single(result.Messages).Code);
+        Assert.False(committed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NumericOverflowCannotEscapeEitherSimulationEntryPoint(bool useDraftPlan)
+    {
+        var active = CreateDocument(StorageSystemKind.Simulation);
+        var committed = false;
+        var coordinator = new SimulationEditCoordinator(
+            () => active,
+            (_, _) => { committed = true; return Task.CompletedTask; },
+            new OverflowSimulationEditor());
+
+        var result = await ExecuteRenameAsync(coordinator, "Too large", useDraftPlan);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.False(committed);
+    }
+
     private static Task<ApplicationResult<SimulationEditReceipt>> ExecuteRenameAsync(
         SimulationEditCoordinator coordinator, string name, bool useDraftPlan)
     {
@@ -432,7 +506,10 @@ public sealed class SimulationEditCoordinatorTests
     }
 
     // Simulate Agent persistence and transport replies; client planning, execution and reconciliation are real.
-    private sealed class LostCommitReplyConnection(string lookupFault = "none") : IAgentConnection
+    private sealed class LostCommitReplyConnection(
+        string lookupFault = "none",
+        ApplicationStatus? commitStatus = null,
+        string? commitCode = null) : IAgentConnection
     {
         private CommitAgentSimulationEditRequest? firstCommit;
         public SimulationDocumentPayload? Current { get; private set; }
@@ -459,6 +536,13 @@ public sealed class SimulationEditCoordinatorTests
                 case CommitAgentSimulationEditRequest commit:
                     Assert.Equal(Current!.Sha256, commit.ExpectedPreviousSha256);
                     Assert.Equal(Current.Revision + 1, commit.Document.Revision);
+                    if (commitStatus is { } status)
+                    {
+                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(
+                            status, request.CorrelationId,
+                            new ApplicationMessage(commitCode!, commitCode!, string.Empty,
+                                ApplicationMessageSeverity.Error, [])));
+                    }
                     Current = commit.Document;
                     if (firstCommit is null)
                     {
@@ -576,5 +660,16 @@ public sealed class SimulationEditCoordinatorTests
             StorageSystemDocument document,
             SimulationDraftPlan plan) =>
             throw new InvalidOperationException("The simulation editor must not be invoked.");
+    }
+
+    private sealed class OverflowSimulationEditor : ISimulationOperationService
+    {
+        public SimulationOperationResult Apply(
+            StorageSystemDocument document,
+            SimulationEditRequest request) => throw new OverflowException();
+
+        public SimulationOperationResult ApplyPlan(
+            StorageSystemDocument document,
+            SimulationDraftPlan plan) => throw new OverflowException();
     }
 }

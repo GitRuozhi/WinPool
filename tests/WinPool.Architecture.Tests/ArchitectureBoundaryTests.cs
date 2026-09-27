@@ -14,20 +14,26 @@ public sealed class ArchitectureBoundaryTests
             ["WinPool.Ipc"] = [],
             ["WinPool.Inventory"] = ["WinPool.Application", "WinPool.Domain"],
             ["WinPool.Agent.Client"] = ["WinPool.Application", "WinPool.Ipc"],
-            ["WinPool.Monitoring"] = ["WinPool.Application", "WinPool.Domain"]
+            ["WinPool.Monitoring"] = ["WinPool.Application", "WinPool.Domain"],
+            ["WinPool.Infrastructure.Windows"] = ["WinPool.Application", "WinPool.Domain", "WinPool.Execution"],
+            ["WinPool.Infrastructure.Sqlite"] = ["WinPool.Application", "WinPool.Domain", "WinPool.Monitoring"],
+            ["WinPool.Agent"] = ["WinPool.Application", "WinPool.Infrastructure.Sqlite", "WinPool.Infrastructure.Windows", "WinPool.Ipc", "WinPool.Inventory", "WinPool.Monitoring"],
+            ["WinPool.App"] = ["WinPool.Agent.Client", "WinPool.Application", "WinPool.Infrastructure.Windows", "WinPool.Infrastructure.Sqlite", "WinPool.Monitoring"]
         };
 
     [Fact]
     public void NewDomainAndApplicationProjectsFollowApprovedDependencyDirection()
     {
         var root = FindRepositoryRoot();
+        var discoveredProjects = Directory.EnumerateFiles(Path.Combine(root, "src"), "WinPool.*.csproj", SearchOption.AllDirectories)
+            .Select(Path.GetFileNameWithoutExtension)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(AllowedReferences.Keys.OrderBy(name => name, StringComparer.Ordinal), discoveredProjects);
         foreach (var (projectName, allowed) in AllowedReferences)
         {
             var projectFile = Path.Combine(root, "src", projectName, $"{projectName}.csproj");
-            if (!File.Exists(projectFile))
-            {
-                continue;
-            }
+            Assert.True(File.Exists(projectFile), projectFile);
 
             var references = XDocument.Load(projectFile)
                 .Descendants("ProjectReference")
@@ -544,7 +550,14 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("PageRootGrid_SizeChanged", diskPartitionPage, StringComparison.Ordinal);
         Assert.Contains("HorizontalScrollBarVisibility=\"Auto\"", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalScrollMode=\"Enabled\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("StackPanel MinWidth=\"412\"", diskPartitionXaml, StringComparison.Ordinal);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        XNamespace controls = "using:WinPool_App.Controls";
+        var partitionLayout = XDocument.Parse(diskPartitionXaml);
+        var actionsScroll = partitionLayout.Descendants(presentation + "ScrollViewer")
+            .Single(element => (string?)element.Attribute(xaml + "Name") == "PartitionActionsScrollViewer");
+        Assert.Equal("Enabled", (string?)actionsScroll.Attribute("HorizontalScrollMode"));
+        Assert.NotNull(actionsScroll.Element(controls + "FixedWrapPanel"));
         Assert.DoesNotContain("Math.Min(420d", diskPartitionPage, StringComparison.Ordinal);
         Assert.Contains("PartitionActionButton", diskPartitionXaml, StringComparison.Ordinal);
         Assert.Equal(
@@ -850,7 +863,9 @@ public sealed class ArchitectureBoundaryTests
     public void ProductFacingVersionUsesTheRepositoryVersionSource()
     {
         var root = FindRepositoryRoot();
-        var versionSource = File.ReadAllText(Path.Combine(root, "Directory.Build.props"));
+        var versionSource = XDocument.Load(Path.Combine(root, "Directory.Build.props"));
+        var properties = versionSource.Root?.Element("PropertyGroup")
+            ?? throw new InvalidDataException("The product version source is missing its property group.");
         var productInformation = File.ReadAllText(
             Path.Combine(
                 root,
@@ -861,13 +876,28 @@ public sealed class ArchitectureBoundaryTests
         var settingsPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "SettingsPage.xaml.cs"));
 
-        Assert.Contains("<WinPoolVersionMajor>0</WinPoolVersionMajor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionMinor>5</WinPoolVersionMinor>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<WinPoolVersionIteration>5</WinPoolVersionIteration>", versionSource, StringComparison.Ordinal);
-        Assert.Contains("$(WinPoolArchitectureVersion)0", versionSource, StringComparison.Ordinal);
-        Assert.Contains("$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)", versionSource, StringComparison.Ordinal);
-        Assert.Contains("<InformationalVersion>$(WinPoolVersion)</InformationalVersion>", versionSource, StringComparison.Ordinal);
-        Assert.DoesNotContain("TechnicalVersion", versionSource, StringComparison.Ordinal);
+        var major = int.Parse(properties.Element("WinPoolVersionMajor")!.Value);
+        var minor = int.Parse(properties.Element("WinPoolVersionMinor")!.Value);
+        var iteration = int.Parse(properties.Element("WinPoolVersionIteration")!.Value);
+        Assert.InRange(major, 0, 99);
+        Assert.InRange(minor, 0, 9);
+        Assert.InRange(iteration, 0, 9);
+        Assert.Equal("V$(WinPoolVersionMajor).$(WinPoolVersionMinor)",
+            properties.Element("WinPoolArchitectureVersion")?.Value);
+        var displayVersionDefinitions = properties.Elements("WinPoolVersion").ToArray();
+        Assert.Equal(2, displayVersionDefinitions.Length);
+        Assert.Contains(displayVersionDefinitions, element =>
+            (string?)element.Attribute("Condition") == "'$(WinPoolVersionIteration)' == '0'"
+            && element.Value == "$(WinPoolArchitectureVersion)0");
+        Assert.Contains(displayVersionDefinitions, element =>
+            (string?)element.Attribute("Condition") == "'$(WinPoolVersionIteration)' != '0'"
+            && element.Value == "$(WinPoolArchitectureVersion)$(WinPoolVersionIteration)");
+        Assert.Equal("$(WinPoolVersionMajor).$(WinPoolVersionMinor).$(WinPoolVersionIteration)",
+            properties.Element("Version")?.Value);
+        Assert.Equal("$(WinPoolVersionMajor).$(WinPoolVersionMinor).$(WinPoolVersionIteration).0",
+            properties.Element("FileVersion")?.Value);
+        Assert.Equal("$(WinPoolVersion)", properties.Element("InformationalVersion")?.Value);
+        Assert.Null(properties.Element("TechnicalVersion"));
         Assert.Contains("AssemblyInformationalVersionAttribute", productInformation, StringComparison.Ordinal);
         Assert.Contains("$\"{Name}/{Version}\"", productInformation, StringComparison.Ordinal);
         Assert.DoesNotContain("AssemblyFileVersionAttribute", productInformation, StringComparison.Ordinal);
@@ -1006,13 +1036,17 @@ public sealed class ArchitectureBoundaryTests
         var windowSource = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
 
-        Assert.Contains("x:Name=\"ActiveSystemSelector\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"2\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment=\"Right\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("<ComboBox", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("Width=\"320\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("DropDownClosed=\"ActiveSystemSelector_DropDownClosed\"", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("SelectionChanged=\"ActiveSystemSelector_SelectionChanged\"", windowXaml, StringComparison.Ordinal);
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var titleBar = XDocument.Parse(windowXaml);
+        var selectorHost = titleBar.Descendants(presentation + "Border")
+            .Single(element => (string?)element.Attribute(xaml + "Name") == "ActiveSystemSelectorHost");
+        Assert.Equal("2", (string?)selectorHost.Attribute("Grid.Column"));
+        var selector = selectorHost.Element(presentation + "ComboBox");
+        Assert.NotNull(selector);
+        Assert.Equal("ActiveSystemSelector", (string?)selector.Attribute(xaml + "Name"));
+        Assert.Equal("ActiveSystemSelector_DropDownClosed", (string?)selector.Attribute("DropDownClosed"));
+        Assert.Equal("ActiveSystemSelector_SelectionChanged", (string?)selector.Attribute("SelectionChanged"));
         Assert.Contains("HorizontalContentAlignment\" Value=\"Left\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment = HorizontalAlignment.Left", windowSource, StringComparison.Ordinal);
         Assert.Contains("if (ActiveSystemSelector.IsDropDownOpen)", windowSource, StringComparison.Ordinal);
@@ -1031,6 +1065,28 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("ShellPageKind.StorageStructure or ShellPageKind.DiskPartition", windowSource, StringComparison.Ordinal);
         Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
         Assert.Contains("elements.Add(ActiveSystemSelectorHost)", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShellNavigationReappliesLocalizedNamesWhenItemContainersAreRecreated()
+    {
+        var root = FindRepositoryRoot();
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var layout = XDocument.Load(Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml"));
+        var navigation = layout.Descendants(presentation + "ListView")
+            .Single(element => (string?)element.Attribute(xaml + "Name") == "ShellNavigationList");
+        Assert.Equal("ShellNavigationList_ContainerContentChanging",
+            (string?)navigation.Attribute("ContainerContentChanging"));
+        Assert.Equal("ShellNavigationList_LayoutUpdated",
+            (string?)navigation.Attribute("LayoutUpdated"));
+
+        var source = File.ReadAllText(Path.Combine(root, "src", "WinPool.App", "MainWindow.xaml.cs"));
+        Assert.Contains("item.Title = ViewModel.Localization[keys[item.Page]]", source, StringComparison.Ordinal);
+        Assert.Contains("ShellNavigationList.ContainerFromItem(item)", source, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.GetName(container)", source, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetName(container, item.Title)", source, StringComparison.Ordinal);
+        Assert.Contains("RefreshShellNavigationAutomationNames();", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1168,10 +1224,13 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml.cs"));
         Assert.Contains("GridUnitType.Pixel", code, StringComparison.Ordinal);
         Assert.Contains("TableScroll_SizeChanged", code, StringComparison.Ordinal);
-        Assert.Contains("SetRateAsync", code, StringComparison.Ordinal);
-
         var monitoring = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "Services", "MonitoringService.cs"));
+        var alertObserver = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "Services", "MonitorAlertObserver.cs"));
+        Assert.Contains("ContinuousMonitoringSwitch_Toggled", code, StringComparison.Ordinal);
+        Assert.Contains("await monitoring.SetRateAsync(rateHz)", alertObserver, StringComparison.Ordinal);
+        Assert.Contains("public async Task SetRateAsync(double rateHz)", monitoring, StringComparison.Ordinal);
         Assert.Contains("existingRate - rateHz", monitoring, StringComparison.Ordinal);
         Assert.Contains("RestartRemoteAsync", monitoring, StringComparison.Ordinal);
         Assert.DoesNotContain("await StopAsync();\r\n        Start(rateHz);", monitoring, StringComparison.Ordinal);
@@ -1310,10 +1369,15 @@ public sealed class ArchitectureBoundaryTests
         Assert.Equal("Collapsed", (string?)detailOverlay.Attribute("Visibility"));
         var detailContent = detailOverlay.Elements().ToArray();
         Assert.Single(detailContent);
-        Assert.Equal("TextBox", detailContent[0].Name.LocalName);
-        Assert.Equal("True", (string?)detailContent[0].Attribute("IsReadOnly"));
-        Assert.Equal("Wrap", (string?)detailContent[0].Attribute("TextWrapping"));
-        Assert.Equal("Auto", (string?)detailContent[0].Attribute("ScrollViewer.VerticalScrollBarVisibility"));
+        Assert.Equal("Border", detailContent[0].Name.LocalName);
+        Assert.Equal("{ThemeResource WinPoolOpaqueSurfaceBrush}",
+            (string?)detailContent[0].Attribute("Background"));
+        var detailText = detailContent[0].Element(presentation + "TextBox");
+        Assert.NotNull(detailText);
+        Assert.Equal("MessageDetailText", (string?)detailText.Attribute(xaml + "Name"));
+        Assert.Equal("True", (string?)detailText.Attribute("IsReadOnly"));
+        Assert.Equal("Wrap", (string?)detailText.Attribute("TextWrapping"));
+        Assert.Equal("Auto", (string?)detailText.Attribute("ScrollViewer.VerticalScrollBarVisibility"));
         Assert.Contains("MessageDetailOverlay_Tapped", page, StringComparison.Ordinal);
         Assert.Contains("CloseMessageDetails()", page, StringComparison.Ordinal);
         Assert.Contains("FindAncestor<TextBox>(e.OriginalSource as DependencyObject)", page, StringComparison.Ordinal);
@@ -1358,6 +1422,10 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml"));
         var monitorPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "MonitorPage.xaml.cs"));
+        var monitorAlertObserver = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "Services", "MonitorAlertObserver.cs"));
+        var monitoringService = File.ReadAllText(
+            Path.Combine(root, "src", "WinPool.App", "Services", "MonitoringService.cs"));
         var testPage = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.App", "TestPage.xaml"));
 
@@ -1405,8 +1473,10 @@ public sealed class ArchitectureBoundaryTests
         Assert.DoesNotContain("ActiveOverflow", notificationService, StringComparison.Ordinal);
         Assert.DoesNotContain("MonitorIssueRows", monitorXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DismissMonitorIssue", monitorPage, StringComparison.Ordinal);
-        Assert.Contains("UpdateIssueStates(", monitorPage, StringComparison.Ordinal);
-        Assert.Contains("PublishMonitorIssueTransitions(", monitorPage, StringComparison.Ordinal);
+        Assert.Contains("UpdateIssueStates()", monitorAlertObserver, StringComparison.Ordinal);
+        Assert.Contains("monitoring.UpdateIssueStates(", monitorAlertObserver, StringComparison.Ordinal);
+        Assert.Contains("PublishIssueTransitions(snapshot, zh)", monitorAlertObserver, StringComparison.Ordinal);
+        Assert.Contains("public MonitorIssueStateSnapshot UpdateIssueStates(", monitoringService, StringComparison.Ordinal);
         Assert.DoesNotContain("<InfoBar", testPage, StringComparison.Ordinal);
     }
 

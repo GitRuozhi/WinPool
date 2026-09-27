@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -33,6 +34,9 @@ public sealed partial class WelcomeWindow : Window
         WelcomeTitleText.Text = localization["WelcomeTitle"];
         SetMessageText(WelcomeMessageText, localization["WelcomeMessage"]);
         ConfirmButton.Content = localization["WelcomeConfirm"];
+        AutomationProperties.SetName(CloseButton, localization.IsChinese ? "关闭欢迎窗口" : "Close welcome window");
+        AutomationProperties.SetName(CycleButton, localization.IsChinese ? "切换欢迎角色" : "Show another welcome mascot");
+        AutomationProperties.SetName(ConfirmButton, localization["WelcomeConfirm"]);
         ContextHelp.Set(CloseButton, localization.IsChinese
             ? "关闭欢迎窗口。"
             : "Close the welcome window.");

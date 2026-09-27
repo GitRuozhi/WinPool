@@ -12,7 +12,7 @@ namespace WinPool.App.ViewModels;
 public sealed partial class WorkspaceViewModel : ObservableObject
 {
     private readonly IHardwareInventoryProvider _hardwareInventoryProvider;
-    private readonly IUserPreferencesService _preferencesService;
+    private readonly UserPreferencesUpdateCoordinator _preferencesCoordinator;
     private bool _preferencesInitialized;
     private readonly IGlobalNotificationService _notificationService;
     private readonly IStorageSystemRepository _systemRepository;
@@ -26,8 +26,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly WinPool.Application.IManageDetailsProjector<StorageSystemDocument> _manageDetailsProjector;
     private readonly WinPool.Application.IManageNavigationProjector<StorageSystemDocument> _manageNavigationProjector;
     private readonly WinPool.Application.IManageCommandProjector<StorageSystemDocument> _manageCommandProjector;
-    private readonly SemaphoreSlim _scanGate = new(1, 1);
-    private readonly SemaphoreSlim _preferencesSaveGate = new(1, 1);
+    private readonly ManualScanRunner _manualScanRunner = new();
     private readonly TaskCompletionSource _workspaceReady = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<string, bool> _expandedStates = new(StringComparer.OrdinalIgnoreCase);
@@ -62,7 +61,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         WinPool.Application.IManageCommandProjector<StorageSystemDocument>? manageCommandProjector = null)
     {
         _hardwareInventoryProvider = hardwareInventoryProvider;
-        _preferencesService = preferencesService;
+        _preferencesCoordinator = new UserPreferencesUpdateCoordinator(
+            preferencesService,
+            () => CurrentPreferences,
+            preferences =>
+            {
+                CurrentPreferences = preferences;
+                if (_preferencesInitialized)
+                {
+                    OnPropertyChanged(nameof(CurrentPreferences));
+                }
+            });
         _notificationService = notificationService;
         _systemRepository = systemRepository;
         _simulationOperations = simulationOperations;
@@ -692,16 +701,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
-        var preferences = await _preferencesService.LoadAsync();
+        var preferences = await _preferencesCoordinator.LoadAsync();
         Localization.Language = preferences.Language;
-        CurrentPreferences = preferences;
         _preferencesInitialized = true;
     }
 
     public async Task RefreshPreferencesAsync(bool refreshLocalizedContent = true)
     {
-        var preferences = await _preferencesService.LoadAsync();
-        CurrentPreferences = preferences;
+        var preferences = await _preferencesCoordinator.LoadAsync();
         Localization.Language = preferences.Language;
         if (refreshLocalizedContent)
         {
@@ -748,30 +755,24 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public async Task SetThemeAsync(ThemePreference theme)
     {
-        CurrentPreferences = CurrentPreferences with { Theme = theme };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { Theme = theme });
     }
 
     public async Task SetAccentColorAsync(AccentColorPreference accentColor)
     {
-        CurrentPreferences = CurrentPreferences with { AccentColor = accentColor };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { AccentColor = accentColor });
     }
 
     public async Task SetLanguageAsync(LanguagePreference language)
     {
-        CurrentPreferences = CurrentPreferences with { Language = language };
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { Language = language });
         Localization.Language = language;
         RefreshLocalizedContent();
-        await _preferencesService.SaveAsync(CurrentPreferences);
     }
 
     public async Task SetDeveloperModeAsync(bool enabled)
     {
-        var updated = CurrentPreferences with { DeveloperMode = enabled };
-        await _preferencesService.SaveAsync(updated);
-        CurrentPreferences = updated;
-        OnPropertyChanged(nameof(CurrentPreferences));
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { DeveloperMode = enabled });
     }
 
     public async Task SetLastActivePageAsync(string page)
@@ -781,17 +782,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return;
         }
 
-        CurrentPreferences = CurrentPreferences with
-        {
-            LastActivePage = page
-        };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { LastActivePage = page });
     }
 
     public async Task SetCreateMsrOnInitializeAsync(bool create)
     {
-        CurrentPreferences = CurrentPreferences with { CreateMsrOnInitialize = create };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { CreateMsrOnInitialize = create });
     }
 
     public async Task SetAutoCreateVirtualDiskAsync(bool enabled)
@@ -814,8 +810,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         var bytes = (long)Math.Round(Math.Clamp(mib, 0, 1024) * 1024d * 1024d);
-        CurrentPreferences = CurrentPreferences with { PartitionIgnoreSizeBytes = bytes };
-        await _preferencesService.SaveAsync(CurrentPreferences);
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { PartitionIgnoreSizeBytes = bytes });
     }
 
     public async Task SetContinuousMonitoringAsync(bool enabled)
@@ -1152,45 +1147,17 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Serializes the preference writes introduced by app-level switches and
-    /// catalog seeding. Each update takes its snapshot only after the prior
-    /// save completes, so quickly toggling the two creation switches cannot
-    /// write one change over the other or over the seed marker.
+    /// All App preference entry points share the same serialized read/merge/save/apply path.
     /// </summary>
-    private async Task UpdateCurrentPreferencesAsync(
+    private Task UpdateCurrentPreferencesAsync(
         Func<UserPreferences, UserPreferences> update,
-        CancellationToken cancellationToken = default)
-    {
-        await _preferencesSaveGate.WaitAsync(cancellationToken);
-        try
-        {
-            var updated = update(CurrentPreferences);
-            await _preferencesService.SaveAsync(updated, cancellationToken);
-            CurrentPreferences = updated;
-            OnPropertyChanged(nameof(CurrentPreferences));
-        }
-        finally
-        {
-            _preferencesSaveGate.Release();
-        }
-    }
+        CancellationToken cancellationToken = default) =>
+        _preferencesCoordinator.UpdateAsync(update, cancellationToken);
 
-    private async Task ReplaceCurrentPreferencesAsync(
+    private Task ReplaceCurrentPreferencesAsync(
         UserPreferences preferences,
-        CancellationToken cancellationToken)
-    {
-        await _preferencesSaveGate.WaitAsync(cancellationToken);
-        try
-        {
-            await _preferencesService.SaveAsync(preferences, cancellationToken);
-            CurrentPreferences = preferences;
-            OnPropertyChanged(nameof(CurrentPreferences));
-        }
-        finally
-        {
-            _preferencesSaveGate.Release();
-        }
-    }
+        CancellationToken cancellationToken) =>
+        _preferencesCoordinator.ReplaceAsync(preferences, cancellationToken);
 
     private static SimulationOperationResult ResetBuiltInSimulation(
         StorageSystemDocument document)
@@ -1226,11 +1193,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public Task ScanAsync() => ScanCoreAsync(CollectionPurpose.Storage, CancellationToken.None);
-
-    public void ApplyLocalInventory(StorageSystemDocument document)
+    public async Task ScanAsync()
     {
-        if (!SystemCatalog.TryReplaceLocalReport(document)) return;
+        _ = await ScanCoreAsync(CollectionPurpose.Storage, CancellationToken.None);
+    }
+
+    public bool ApplyLocalInventory(StorageSystemDocument document)
+    {
+        if (!SystemCatalog.TryReplaceLocalReport(document)) return false;
         var restoring = _restoreInProgress;
         _restoreInProgress = true;
         try
@@ -1251,32 +1221,31 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             OnPropertyChanged(nameof(Snapshot));
         }
         finally { _restoreInProgress = restoring; }
+        return true;
     }
 
-    public Task RefreshHardwareAsync(CancellationToken cancellationToken) =>
-        SelectedSystem.IsLocal ? ScanCoreAsync(CollectionPurpose.Hardware, cancellationToken) : Task.CompletedTask;
+    public Task<ManualScanOutcome> RefreshHardwareAsync(CancellationToken cancellationToken) =>
+        SelectedSystem.IsLocal
+            ? ScanCoreAsync(CollectionPurpose.Hardware, cancellationToken)
+            : Task.FromResult(ManualScanOutcome.Skipped);
 
     public bool SelectSystem(string systemId) => SwitchSystem(systemId);
 
-    private async Task ScanCoreAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
+    private async Task<ManualScanOutcome> ScanCoreAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
     {
-        if (!await _scanGate.WaitAsync(0))
-        {
-            return;
-        }
-
-        await WhenWorkspaceReady;
-        IsScanning = true;
-        ScanError = string.Empty;
-        StatusMessage = Localization["Scanning"];
+        StorageSnapshot? completedSnapshot = null;
         var progressKey = ManualProgressKey(purpose);
-        _notificationService.DismissByKey(progressKey);
-        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted(progressKey));
-        try
+        return await _manualScanRunner.RunAsync(async token =>
         {
+            await WhenWorkspaceReady;
+            IsScanning = true;
+            ScanError = string.Empty;
+            StatusMessage = Localization["Scanning"];
+            _notificationService.DismissByKey(progressKey);
+            PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanStarted(progressKey));
             var localDocument = purpose == CollectionPurpose.Hardware
-                ? await _hardwareInventoryProvider.CollectHardwareAsync(cancellationToken)
-                : await _hardwareInventoryProvider.CollectLocalAsync(cancellationToken);
+                ? await _hardwareInventoryProvider.CollectHardwareAsync(token)
+                : await _hardwareInventoryProvider.CollectLocalAsync(token);
             var snapshot = localDocument.Snapshot;
             CommandLog.Log(
                 "inventory",
@@ -1290,14 +1259,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
             }
-            ApplyLocalInventory(localDocument);
+            if (!ApplyLocalInventory(localDocument))
+            {
+                return false;
+            }
             StatusMessage = $"{Localization["LastScan"]}: {snapshot.ScannedAt.LocalDateTime:G}";
-            _notificationService.DismissByKey(progressKey);
-            _notificationService.ResolveByKey(ManualFailedKey(purpose));
-            PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanCompleted(
-                StatusMessage,
-                snapshot.ScannedAt,
-                ManualCompletedKey(purpose)));
             foreach (var warning in snapshot.Warnings)
             {
                 _notificationService.PublishWarning(
@@ -1309,25 +1275,39 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             PublishStorageFindings(snapshot);
             BuildDetails();
             RebuildComparisonColumns();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            completedSnapshot = snapshot;
+            return true;
+        }, result =>
         {
-            _notificationService.DismissByKey(progressKey);
-            StatusMessage = string.Empty;
-        }
-        catch (Exception ex)
-        {
-            ScanError = $"{Localization["ScanFailed"]} {ex.Message}";
-            StatusMessage = ScanError;
-            _notificationService.DismissByKey(progressKey);
-            PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanFailed(
-                ManualFailedKey(purpose)));
-        }
-        finally
-        {
-            IsScanning = false;
-            _scanGate.Release();
-        }
+            try
+            {
+                _notificationService.DismissByKey(progressKey);
+                switch (result.Outcome)
+                {
+                    case ManualScanOutcome.Completed:
+                        _notificationService.ResolveByKey(ManualFailedKey(purpose));
+                        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanCompleted(
+                            StatusMessage,
+                            completedSnapshot!.ScannedAt,
+                            ManualCompletedKey(purpose)));
+                        break;
+                    case ManualScanOutcome.Canceled:
+                    case ManualScanOutcome.Skipped:
+                        StatusMessage = string.Empty;
+                        break;
+                    case ManualScanOutcome.Failed:
+                        ScanError = $"{Localization["ScanFailed"]} {result.Error!.Message}";
+                        StatusMessage = ScanError;
+                        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanFailed(
+                            ManualFailedKey(purpose)));
+                        break;
+                }
+            }
+            finally
+            {
+                IsScanning = false;
+            }
+        }, cancellationToken);
     }
 
     private static string ManualProgressKey(CollectionPurpose purpose) => $"inventory:manual:{purpose}:scanning";

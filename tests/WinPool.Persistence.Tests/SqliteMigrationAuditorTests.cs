@@ -63,6 +63,34 @@ public sealed class SqliteMigrationAuditorTests
             second.Tables.Select(item => item.RowCount));
     }
 
+    [Fact]
+    public async Task SamePrimaryKeysWithChangedDocumentPayloadDoNotMatch()
+    {
+        using var directory = TemporaryDirectory.Create();
+        var firstPath = Path.Combine(directory.Path, "first.db");
+        var secondPath = Path.Combine(directory.Path, "second.db");
+        await CreateWithPresetAsync(firstPath, "same-id");
+        File.Copy(firstPath, secondPath);
+        var store = new WinPoolSqliteStore(secondPath);
+        await using (var connection = await store.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE simulation_documents SET display_name='Changed' WHERE document_id='same-id';";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var auditor = new SqliteMigrationAuditor();
+        var first = await auditor.CaptureAsync(firstPath);
+        var second = await auditor.CaptureAsync(secondPath);
+        var firstDocument = first.Tables.Single(item => item.TableName == "simulation_documents");
+        var secondDocument = second.Tables.Single(item => item.TableName == "simulation_documents");
+
+        Assert.Equal(firstDocument.RowCount, secondDocument.RowCount);
+        Assert.Equal(firstDocument.PrimaryKeySha256, secondDocument.PrimaryKeySha256);
+        Assert.NotEqual(firstDocument.ContentSha256, secondDocument.ContentSha256);
+        Assert.False(first.HasSameLogicalIdentity(second));
+    }
+
     private static async Task CreateWithPresetAsync(string path, string documentId)
     {
         var store = new WinPoolSqliteStore(path);

@@ -35,6 +35,7 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel
+                x:Name="WindowTitleHost"
                 Grid.Column="0"
                 Margin="14,0,20,0"
                 VerticalAlignment="Center"
@@ -56,6 +57,8 @@
                 ItemsSource="{x:Bind ShellNavigationItems}"
                 SelectedItem="{x:Bind SelectedShellItem, Mode=TwoWay}"
                 SelectionChanged="ShellNavigationList_SelectionChanged"
+                ContainerContentChanging="ShellNavigationList_ContainerContentChanging"
+                LayoutUpdated="ShellNavigationList_LayoutUpdated"
                 SelectionMode="Single"
                 ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                 ScrollViewer.HorizontalScrollMode="Disabled"
@@ -103,6 +106,21 @@
                 </ListView.ItemTemplate>
             </ListView>
 
+            <Button
+                x:Name="ShellNavigationOverflowButton"
+                Grid.Column="1"
+                Width="40"
+                MinWidth="40"
+                Height="36"
+                Padding="0"
+                VerticalAlignment="Center"
+                Visibility="Collapsed"
+                Click="ShellNavigationOverflowButton_Click"
+                Loaded="TitleBarInteractiveElement_Loaded"
+                SizeChanged="TitleBarInteractiveElement_SizeChanged">
+                <FontIcon x:Name="ShellNavigationOverflowIcon" Glyph="&#xE700;" FontSize="16" />
+            </Button>
+
             <Border
                 x:Name="ActiveSystemSelectorHost"
                 Grid.Column="2"
@@ -120,8 +138,8 @@
                 PointerExited="ActiveSystemSelectorHost_PointerExited">
                 <ComboBox
                     x:Name="ActiveSystemSelector"
-                    Width="260"
                     MinWidth="178"
+                    HorizontalAlignment="Stretch"
                     Background="Transparent"
                     BorderThickness="0"
                     HorizontalContentAlignment="Left"

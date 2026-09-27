@@ -58,7 +58,8 @@ if (-not (Test-Path -LiteralPath $solutionPath)) {
 }
 
 Set-Location -LiteralPath $repositoryRoot
-& (Join-Path $PSScriptRoot 'Clean-WinPool.ps1')
+# Keep the last runnable tree until restore/build and union validation succeed.
+& (Join-Path $PSScriptRoot 'Clean-WinPool.ps1') -BuildIntermediatesOnly
 
 Invoke-Native 'dotnet' @('restore', $solutionPath)
 Invoke-Native 'dotnet' @(

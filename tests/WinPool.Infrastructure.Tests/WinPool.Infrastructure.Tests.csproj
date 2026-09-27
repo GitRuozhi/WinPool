@@ -24,4 +24,9 @@
     <ProjectReference Include="..\..\src\WinPool.Ipc\WinPool.Ipc.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WinPool.Monitoring\WinPool.Monitoring.csproj" />
+    <Compile Include="..\..\src\WinPool.App\Services\MonitoringService.cs" Link="AppServices\MonitoringService.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\MonitorIssueStateTracker.cs" Link="AppServices\MonitorIssueStateTracker.cs" />
+  </ItemGroup>
 </Project>

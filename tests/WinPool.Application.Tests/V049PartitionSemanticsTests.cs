@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using WinPool.Domain;
 
 namespace WinPool.Application.Tests;
@@ -195,6 +196,43 @@ public sealed class V049PartitionSemanticsTests
         var volume = Assert.Single(formatted.Snapshot.Volumes, item => item.PartitionStableId == partition.StableId);
         Assert.Equal(fileSystem.ToUpperInvariant(), volume.FileSystem.ToUpperInvariant());
         Assert.Equal(fileSystem.ToUpperInvariant(), formatted.Snapshot.FileSystemOf(partition).ToUpperInvariant());
+    }
+
+    [Theory]
+    [InlineData("VendorReserved")]
+    [InlineData("EfiSystem")]
+    [InlineData("WindowsRecovery")]
+    public void FormatRuleAndDirectSimulationRejectNonDataPartitionTypes(string type)
+    {
+        var document = Apply(InitializedDisk(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition, "osdisk:ssd0", SizeBytes: 953 * MiB));
+        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
+        // The document projects its snapshot from source facts. Change the
+        // partition fact so the type survives that projection.
+        var facts = document.SourceFacts!;
+        document = document with
+        {
+            SourceFacts = facts with
+            {
+                Objects = facts.Objects.Select(item => item.Id == partition.StableId
+                    ? item with
+                    {
+                        Fields = item.Fields
+                            .Add(WinPoolSourceField.Returned("Type", type, FactValueType.String, item.SourceRef))
+                            .Add(WinPoolSourceField.Returned("PartitionTypeId", "imported", FactValueType.String, item.SourceRef))
+                    }
+                    : item).ToImmutableArray()
+            }
+        };
+        var request = new SimulationEditRequest(SimulationEditKind.FormatPartition,
+            partition.StableId, FileSystem: "NTFS");
+
+        var projected = document.Snapshot.Partitions.Single(item => item.StableId == partition.StableId);
+        Assert.Equal(type, projected.Type);
+        Assert.False(StorageEditRules.CanFormatSimulatedPartition(projected));
+        Assert.Equal("storage.rule.format.target-type",
+            StorageEditRules.Evaluate(document.Snapshot, request).Code);
+        Assert.False(new SimulationOperationService().Apply(document, request).Succeeded);
     }
 
     [Theory]

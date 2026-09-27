@@ -555,7 +555,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     /// data partitions only, while the shared deletion policy is flags-only.
     /// </summary>
     private static bool IsFormatPartitionTarget(PartitionInfo? partition) =>
-        partition is { Type: "Primary" or "BasicData", IsBoot: false, IsSystem: false };
+        StorageEditRules.CanFormatSimulatedPartition(partition);
 
     private bool IsProtected(PartitionInfo partition) =>
         partition.IsBoot
@@ -1076,7 +1076,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             "EfiSystem" => Text("EFI 系统分区不能在此页格式化。", "An EFI system partition cannot be formatted on this page."),
             "MicrosoftReserved" => Text("Microsoft 保留分区不能在此页格式化。", "A Microsoft Reserved Partition cannot be formatted on this page."),
             "WindowsRecovery" => Text("Windows 恢复分区不能在此页格式化。", "A Windows recovery partition cannot be formatted on this page."),
-            _ => null
+            "Primary" or "BasicData" => null,
+            _ => Text("只有普通数据分区可以在此页格式化。", "Only a normal data partition can be formatted on this page.")
         };
     }
 
@@ -1904,12 +1905,23 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        Process.Start(new ProcessStartInfo
+        try
         {
-            FileName = "explorer.exe",
-            Arguments = $"\"{path}\"",
-            UseShellExecute = true
-        });
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{path}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception) when (exception is
+            System.ComponentModel.Win32Exception or InvalidOperationException
+                or IOException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync(
+                Text("无法打开", "Cannot open"),
+                Text("当前卷的本机路径无法打开。", "The selected volume's local path could not be opened."));
+        }
     }
 
     private async void PartitionActionButton_Click(object sender, RoutedEventArgs e)

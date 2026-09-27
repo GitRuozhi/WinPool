@@ -119,6 +119,7 @@ public sealed class SimulationEditCoordinator(
             parameters,
             DateTimeOffset.UtcNow);
 
+        var commitStarted = false;
         try
         {
             var policy = new OperationPolicyEvaluator();
@@ -171,6 +172,12 @@ public sealed class SimulationEditCoordinator(
 
             if (terminal?.Kind != ExecutionEventKind.Completed || store.Result is null)
             {
+                if (store.InvalidModel)
+                {
+                    return Failure(ApplicationStatus.Rejected, correlationId,
+                        "simulation.invalid-model",
+                        "The simulated model contains values that cannot be safely applied.");
+                }
                 var status = terminal?.Kind == ExecutionEventKind.Cancelled
                     ? ApplicationStatus.Cancelled
                     : terminal?.Kind == ExecutionEventKind.Rejected
@@ -183,6 +190,7 @@ public sealed class SimulationEditCoordinator(
                     store.FailureText ?? terminal?.Message ?? "The simulation operation did not complete.");
             }
 
+            commitStarted = true;
             await commitDocument(
                 new SimulationEditCommit(
                     store.Result.Document,
@@ -201,7 +209,7 @@ public sealed class SimulationEditCoordinator(
                     store.Result.Commands),
                 correlationId);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             return Failure(
                 ApplicationStatus.Cancelled,
@@ -217,8 +225,36 @@ public sealed class SimulationEditCoordinator(
                 "simulation.commit.outcome_unknown",
                 unknown.Message);
         }
+        catch (SimulationCommitConflictException conflict)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.commit.conflict", conflict.Message);
+        }
+        catch (SimulationCommitFailureException failure)
+        {
+            return Failure(ApplicationStatus.Failed, correlationId,
+                "simulation.commit.storage_failed", failure.Message);
+        }
+        catch (IOException) when (commitStarted)
+        {
+            return Failure(ApplicationStatus.OutcomeUnknown, correlationId,
+                "simulation.commit.outcome_unknown",
+                "The save connection failed after the commit began. Reconcile the document before retrying.");
+        }
+        catch (OverflowException)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.numeric-overflow",
+                "The modeled capacity exceeds the supported byte range.");
+        }
+        catch (ArgumentException)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.invalid-model",
+                "The simulated model contains values that cannot be safely applied.");
+        }
         catch (Exception exception) when (exception is
-            ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+            InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             return Failure(
                 ApplicationStatus.Failed,
@@ -253,7 +289,27 @@ public sealed class SimulationEditCoordinator(
                 "The simulation plan has no steps.");
         }
 
-        var applied = simulationEditor.ApplyPlan(document, plan);
+        if ((plan.BaselineSystemId is { } baselineSystem && baselineSystem != document.SystemId)
+            || (plan.BaselineRevision is { } baselineRevision && baselineRevision != document.Revision)
+            || (plan.BaselineInventoryVersion is { } baselineInventory
+                && !StringComparer.Ordinal.Equals(baselineInventory, document.InventoryVersion)))
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.plan.revision_conflict",
+                "The simulation changed since this plan was prepared. Refresh the draft before retrying.");
+        }
+
+        SimulationOperationResult applied;
+        try
+        {
+            applied = simulationEditor.ApplyPlan(document, plan);
+        }
+        catch (Exception exception) when (exception is OverflowException or ArgumentException)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.invalid-model",
+                "The simulated model contains values that cannot be safely applied.");
+        }
         if (!applied.Succeeded)
         {
             return Failure(
@@ -302,6 +358,7 @@ public sealed class SimulationEditCoordinator(
             DateTimeOffset.UtcNow);
         var commitId = Guid.NewGuid().ToString("N");
 
+        var commitStarted = false;
         try
         {
             var policy = new OperationPolicyEvaluator();
@@ -349,13 +406,20 @@ public sealed class SimulationEditCoordinator(
 
             if (terminal?.Kind != ExecutionEventKind.Completed || store.Result is null)
             {
+                var status = terminal?.Kind switch
+                {
+                    ExecutionEventKind.Cancelled => ApplicationStatus.Cancelled,
+                    ExecutionEventKind.Rejected => ApplicationStatus.Rejected,
+                    _ => ApplicationStatus.Failed
+                };
                 return Failure(
-                    ApplicationStatus.Failed,
+                    status,
                     correlationId,
                     terminal?.Code ?? "simulation.execution-incomplete",
                     store.FailureText ?? terminal?.Message ?? "The simulation plan did not complete.");
             }
 
+            commitStarted = true;
             await commitDocument(
                 new SimulationEditCommit(
                     store.Result.Document,
@@ -374,6 +438,11 @@ public sealed class SimulationEditCoordinator(
                     store.Result.Commands),
                 correlationId);
         }
+        catch (OperationCanceledException)
+        {
+            return Failure(ApplicationStatus.Cancelled, correlationId,
+                "simulation.cancelled", "The simulation operation was cancelled.");
+        }
         catch (SimulationCommitOutcomeUnknownException unknown)
         {
             return Failure(
@@ -382,8 +451,36 @@ public sealed class SimulationEditCoordinator(
                 "simulation.commit.outcome_unknown",
                 unknown.Message);
         }
+        catch (SimulationCommitConflictException conflict)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.commit.conflict", conflict.Message);
+        }
+        catch (SimulationCommitFailureException failure)
+        {
+            return Failure(ApplicationStatus.Failed, correlationId,
+                "simulation.commit.storage_failed", failure.Message);
+        }
+        catch (IOException) when (commitStarted)
+        {
+            return Failure(ApplicationStatus.OutcomeUnknown, correlationId,
+                "simulation.commit.outcome_unknown",
+                "The save connection failed after the commit began. Reconcile the document before retrying.");
+        }
+        catch (OverflowException)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.numeric-overflow",
+                "The modeled capacity exceeds the supported byte range.");
+        }
+        catch (ArgumentException)
+        {
+            return Failure(ApplicationStatus.Rejected, correlationId,
+                "simulation.invalid-model",
+                "The simulated model contains values that cannot be safely applied.");
+        }
         catch (Exception exception) when (exception is
-            ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+            InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             return Failure(
                 ApplicationStatus.Failed,
@@ -586,6 +683,7 @@ public sealed class SimulationEditCoordinator(
         public long AfterRevision { get; private set; }
         public SimulationOperationResult? Result { get; private set; }
         public string? FailureText { get; private set; }
+        public bool InvalidModel { get; private set; }
 
         public Task<SimulationMutationReceipt> ApplyAsync(
             OperationPlan plan,
@@ -599,12 +697,21 @@ public sealed class SimulationEditCoordinator(
 
             beforeDocument = current;
             BeforeRevision = current.Revision;
-            var result = request.Kind == SimulationEditKind.ResetDocument
-                ? resetEditor?.Invoke(current)
-                    ?? SimulationOperationResult.Failure(
-                        current,
-                        "The built-in simulation reset adapter is unavailable.")
-                : editor.Apply(current, request);
+            SimulationOperationResult result;
+            try
+            {
+                result = request.Kind == SimulationEditKind.ResetDocument
+                    ? resetEditor?.Invoke(current)
+                        ?? SimulationOperationResult.Failure(
+                            current,
+                            "The built-in simulation reset adapter is unavailable.")
+                    : editor.Apply(current, request);
+            }
+            catch (Exception exception) when (exception is ArgumentException or OverflowException)
+            {
+                InvalidModel = true;
+                throw;
+            }
             if (!result.Succeeded)
             {
                 FailureText = result.Error;

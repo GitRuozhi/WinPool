@@ -22,7 +22,9 @@ public static class StorageDataLocations
 
     public static string PortableRoot { get; } = Path.Combine(AppContext.BaseDirectory, "Data");
 
-    public static string PointerPath => Path.Combine(StandardRoot, PointerFileName);
+    // The Standard root is replaced during migration, so its authority lives
+    // beside it. Older installations may still have the in-root pointer.
+    public static string PointerPath => StandardRoot + "." + PointerFileName;
 
     public static StorageLocationMode Mode
     {
@@ -30,7 +32,7 @@ public static class StorageDataLocations
         {
             lock (Sync)
             {
-                _cachedMode ??= ResolveMode(PointerPath, PortableRoot);
+                _cachedMode ??= ResolveMode(PointerPath, StandardRoot, PortableRoot);
                 return _cachedMode.Value;
             }
         }
@@ -52,7 +54,7 @@ public static class StorageDataLocations
         var portableRoot = Path.Combine(
             Path.TrimEndingDirectorySeparator(Path.GetFullPath(productRoot)),
             "Data");
-        return ResolveMode(pointerPath, portableRoot) == StorageLocationMode.Portable
+        return ResolveMode(pointerPath, standardRoot, portableRoot) == StorageLocationMode.Portable
             ? portableRoot
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(standardRoot));
     }
@@ -80,7 +82,7 @@ public static class StorageDataLocations
                 CopyDirectory(source, target, cancellationToken);
             }
 
-            Directory.CreateDirectory(StandardRoot);
+            Directory.CreateDirectory(Path.GetDirectoryName(PointerPath)!);
             var temporaryPath = PointerPath + ".tmp";
             await using (var stream = File.Create(temporaryPath))
             {
@@ -105,28 +107,35 @@ public static class StorageDataLocations
 
     private static StorageLocationMode ResolveMode(
         string pointerPath,
+        string standardRoot,
         string portableRoot)
     {
-        try
+        var legacyPath = Path.Combine(standardRoot, PointerFileName);
+        if (File.Exists(pointerPath))
         {
-            if (File.Exists(pointerPath))
-            {
-                var pointer = JsonSerializer.Deserialize<StorageLocationPointer>(
-                    File.ReadAllText(pointerPath),
-                    PointerJsonOptions);
-                if (pointer is not null)
-                {
-                    return pointer.Mode;
-                }
-            }
+            return ReadMode(pointerPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        if (File.Exists(legacyPath))
         {
+            return ReadMode(legacyPath);
         }
 
         return File.Exists(Path.Combine(portableRoot, "settings.json"))
             ? StorageLocationMode.Portable
             : StorageLocationMode.Standard;
+    }
+
+    private static StorageLocationMode ReadMode(string path)
+    {
+        var pointer = JsonSerializer.Deserialize<StorageLocationPointer>(
+            File.ReadAllText(path),
+            PointerJsonOptions);
+        if (pointer is null || !Enum.IsDefined(pointer.Mode))
+        {
+            throw new JsonException("The storage location pointer is invalid.");
+        }
+
+        return pointer.Mode;
     }
 
     private static bool IsWritable(string directory)

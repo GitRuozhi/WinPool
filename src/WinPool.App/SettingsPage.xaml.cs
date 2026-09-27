@@ -216,7 +216,7 @@ public sealed partial class SettingsPage : Page
         {
             agentExclusion.Release();
             await RestartAgentAfterAbortedSwitchAsync();
-            PublishDataLocationFailure(zh, "migration-plan-failed");
+            PublishDataLocationFailure(zh, "migration-plan-failed", planResult.Messages);
             return;
         }
 
@@ -248,7 +248,7 @@ public sealed partial class SettingsPage : Page
         {
             agentExclusion.Release();
             await RestartAgentAfterAbortedSwitchAsync();
-            PublishDataLocationFailure(zh, "migration-apply-failed");
+            PublishDataLocationFailure(zh, "migration-apply-failed", applied.Messages);
             return;
         }
 
@@ -301,14 +301,27 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private void PublishDataLocationFailure(bool zh, string detail)
+    private void PublishDataLocationFailure(
+        bool zh,
+        string detail,
+        IReadOnlyList<ApplicationMessage>? resultMessages = null)
     {
+        var codes = resultMessages?
+            .Select(message => message.Code)
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+        var migrationFailed = detail.StartsWith("migration-", StringComparison.Ordinal);
         ViewModel.NotificationService.Publish(
             GlobalNotificationSeverity.Error,
             zh ? "数据位置切换失败" : "Data location switch failed",
-            zh
-                ? "未提交新的数据位置；请检查 Agent 与权限后重试。"
-                : "The new data location was not committed. Check the Agent and permissions, then try again.",
+            migrationFailed
+                ? zh
+                    ? "未提交新的数据位置。关闭并重启 WinPool 后重试；若仍失败，请保留原数据并检查诊断记录。"
+                    : "The new data location was not committed. Close and restart WinPool, then retry. If it fails again, preserve the source data and inspect diagnostics."
+                : zh
+                    ? "未提交新的数据位置；请检查 Agent 与权限后重试。"
+                    : "The new data location was not committed. Check the Agent and permissions, then try again.",
             "settings",
             new GlobalNotificationOptions
             {
@@ -316,7 +329,7 @@ public sealed partial class SettingsPage : Page
                 Code = "settings.datalocation.failure",
                 SystemId = SettingsSystemId,
                 Target = SettingsTarget(zh),
-                Detail = detail
+                Detail = codes.Length == 0 ? detail : $"{detail}: {string.Join(", ", codes)}"
             });
     }
 
@@ -1006,7 +1019,7 @@ public sealed partial class SettingsPage : Page
                 : ViewModel.Localization["AdminRequired"]);
         SettingsExecutionModeSwitch.SetValue(
             AutomationProperties.NameProperty,
-            ViewModel.Localization["LocalRealOperations"]);
+            ViewModel.Localization["ExecutionMode"]);
         _updatingMode = false;
     }
 
@@ -1016,6 +1029,9 @@ public sealed partial class SettingsPage : Page
         ThemeTitle.Text = l["Theme"];
         AccentTitle.Text = l["AccentColor"];
         LanguageTitle.Text = l["Language"];
+        AutomationProperties.SetName(ThemeOptions, l["Theme"]);
+        AutomationProperties.SetName(AccentOptions, l["AccentColor"]);
+        AutomationProperties.SetName(LanguageOptions, l["Language"]);
         DeveloperModeTitle.Text = l["DeveloperMode"];
         DeveloperModeSwitch.SetValue(
             AutomationProperties.NameProperty,
@@ -1036,6 +1052,12 @@ public sealed partial class SettingsPage : Page
         ExecutionTitle.Text = l["LocalRealOperations"];
         MsrTitle.Text = l["CreateMsrOnInitialize"];
         PartitionGapTitle.Text = l["PartitionGapThreshold"];
+        AutomationProperties.SetName(MsrSwitch, l["CreateMsrOnInitialize"]);
+        AutomationProperties.SetName(PartitionGapBox, l["PartitionGapThreshold"]);
+        AutomationProperties.SetName(WelcomeButton, l["OpenWelcome"]);
+        AutomationProperties.SetName(StartupAgentSwitch, l["Startup"]);
+        AutomationProperties.SetName(DataLocationOptions, l["DataLocation"]);
+        AutomationProperties.SetName(ResetAllButton, l["ResetAllButton"]);
         ContextHelp.Set(WelcomeButton,
             l.EffectiveLanguage == LanguagePreference.ZhCn
                 ? "打开欢迎内容。"

@@ -101,7 +101,7 @@ public sealed class ManageCommandProjector
                 // boot/system partition itself; do not turn its other controls
                 // into a blanket system-disk lockout.
                 var editable = isSimulation && primary && osDisk is { IsOffline: false };
-                var formatEligible = editable && partition is { IsBoot: false, IsSystem: false };
+                var formatEligible = editable && StorageEditRules.CanFormatSimulatedPartition(partition);
                 var deleteEligible = isSimulation
                     && osDisk is { IsOffline: false }
                     && StorageEditRules.CanDeleteSimulatedPartition(partition);

@@ -10,7 +10,8 @@ public sealed record SqliteTableMigrationAudit(
     string TableName,
     long RowCount,
     IReadOnlyList<string> PrimaryKeyColumns,
-    string PrimaryKeySha256);
+    string PrimaryKeySha256,
+    string ContentSha256);
 
 public sealed record SqliteMigrationAuditReport(
     int SchemaVersion,
@@ -42,7 +43,10 @@ public sealed record SqliteMigrationAuditReport(
                     StringComparer.Ordinal)
                 || !StringComparer.Ordinal.Equals(
                     expected.PrimaryKeySha256,
-                    actual.PrimaryKeySha256))
+                    actual.PrimaryKeySha256)
+                || !StringComparer.Ordinal.Equals(
+                    expected.ContentSha256,
+                    actual.ContentSha256))
             {
                 return false;
             }
@@ -61,8 +65,8 @@ public interface ISqliteMigrationAuditor
 
 /// <summary>
 /// Produces a bounded-memory, read-only migration audit. It intentionally
-/// fingerprints row identity rather than arbitrary payload fields; the root
-/// file manifest supplies the byte-for-byte SHA-256 evidence.
+/// fingerprints both row identity and complete row values. This also detects
+/// updates committed only to a WAL when a copied main file lacks those frames.
 /// </summary>
 public sealed class SqliteMigrationAuditor : ISqliteMigrationAuditor
 {
@@ -163,17 +167,23 @@ public sealed class SqliteMigrationAuditor : ISqliteMigrationAuditor
             : keyColumns;
         var keySql = string.Join(", ", selectedKeys.Select(QuoteIdentifier));
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {keySql} FROM {quotedTable} ORDER BY {keySql};";
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        command.CommandText = $"SELECT {keySql}, * FROM {quotedTable} ORDER BY {keySql};";
+        using var keyHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var contentHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         long rowCount = 0;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AppendInt64(hash, rowCount);
-            for (var index = 0; index < reader.FieldCount; index++)
+            AppendInt64(keyHash, rowCount);
+            AppendInt64(contentHash, rowCount);
+            for (var index = 0; index < selectedKeys.Length; index++)
             {
-                AppendValue(hash, reader.GetValue(index));
+                AppendValue(keyHash, reader.GetValue(index));
+            }
+            for (var index = selectedKeys.Length; index < reader.FieldCount; index++)
+            {
+                AppendValue(contentHash, reader.GetValue(index));
             }
 
             rowCount = checked(rowCount + 1);
@@ -183,7 +193,8 @@ public sealed class SqliteMigrationAuditor : ISqliteMigrationAuditor
             tableName,
             rowCount,
             selectedKeys,
-            Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
+            Convert.ToHexString(keyHash.GetHashAndReset()).ToLowerInvariant(),
+            Convert.ToHexString(contentHash.GetHashAndReset()).ToLowerInvariant());
     }
 
     private static void AppendValue(IncrementalHash hash, object value)

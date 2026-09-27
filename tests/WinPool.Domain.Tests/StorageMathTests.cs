@@ -55,6 +55,15 @@ public sealed class StorageMathTests
     }
 
     [Fact]
+    public void ConservativeCapacityReportsUnrepresentableImportedMemberSumAsInvalidInput()
+    {
+        var error = Assert.Throws<ArgumentException>(() =>
+            ConservativeCapacity.PlanLogicalUpperBound(
+                [long.MaxValue - 1, long.MaxValue - 1], "Simple"));
+        Assert.Contains("supported byte range", error.Message);
+    }
+
+    [Fact]
     public void ParityUsesColumnsAndParityOverhead()
     {
         var gib = 1024L * 1024 * 1024;

@@ -931,7 +931,7 @@ public sealed partial class MonitorPage : Page
 
             PublishMonitorExportInfo(l["Exported"], "monitor.export.completed");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             PublishMonitorExportFailure(ex, "monitor.export.write");
         }

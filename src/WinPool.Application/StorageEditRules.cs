@@ -34,6 +34,9 @@ public static class StorageEditRules
     public static bool CanDeleteSimulatedPartition(PartitionInfo? partition) =>
         partition is { IsBoot: false, IsSystem: false };
 
+    public static bool CanFormatSimulatedPartition(PartitionInfo? partition) =>
+        partition is { Type: "Primary" or "BasicData", IsBoot: false, IsSystem: false };
+
     public static StorageRuleDecision Evaluate(
         StorageSnapshot snapshot,
         SimulationEditRequest request)
@@ -349,9 +352,14 @@ public static class StorageEditRules
             return Deny("storage.rule.format.missing", "The selected partition was not found.");
         }
 
-        if (partition.IsBoot || partition.IsSystem || partition.Type is "EfiSystem" or "MicrosoftReserved" or "WindowsRecovery")
+        if (partition.IsBoot || partition.IsSystem)
         {
-            return Deny("storage.rule.format.system", "System, EFI, MSR, and recovery partitions cannot be formatted.");
+            return Deny("storage.rule.format.system", "A boot or system partition cannot be formatted.");
+        }
+
+        if (!CanFormatSimulatedPartition(partition))
+        {
+            return Deny("storage.rule.format.target-type", "Only Primary or BasicData partitions can be formatted.");
         }
 
         var fileSystem = (request.FileSystem ?? "NTFS").Trim().ToUpperInvariant();

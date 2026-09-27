@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Data.Sqlite;
 using WinPool.Application;
 using WinPool.Domain;
 
@@ -134,7 +135,9 @@ public sealed class StorageLocationManager : IStorageLocationManager
         this.standardRoot = NormalizeRoot(standardRoot);
         this.portableRoot = NormalizeRoot(portableRoot);
         EnsureRootsAreIndependent(this.standardRoot, this.portableRoot);
-        pointerPath = Path.Combine(this.standardRoot, PointerFileName);
+        // The Standard root is replaced as a directory during Portable -> Standard.
+        // Keep the authority beside it so the pointer survives either rename.
+        pointerPath = this.standardRoot + "." + PointerFileName;
         this.writeCoordinator = writeCoordinator;
         this.pointerCommitter = pointerCommitter
             ?? new AtomicStorageLocationPointerCommitter();
@@ -197,8 +200,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
             ValidateTreeHasNoReparsePoints(sourceRoot);
             ValidateTreeHasNoReparsePoints(targetRoot);
-            CleanupOwnedTransactionRoots(sourceRoot);
-            CleanupOwnedTransactionRoots(targetRoot);
+            // A process may have died between target and rollback renames.
+            // Transaction trees cannot be discarded based on their names alone.
             if (!CanWriteTarget(targetRoot))
             {
                 return Result<StorageLocationSwitchPlan>(
@@ -350,6 +353,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
                 var sourceDatabasePath = Path.Combine(
                     plan.SourceRoot,
                     DatabaseFileName);
+                var sourceWalPendingAtStaging = File.Exists(sourceDatabasePath + "-wal")
+                    && new FileInfo(sourceDatabasePath + "-wal").Length > 0;
                 var stagedSourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
                     ? await migrationAuditor.CaptureAsync(
                         sourceDatabasePath,
@@ -357,10 +362,37 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     : null;
                 if (stagedSourceDatabaseAudit is not null)
                 {
-                    await EnsureDatabaseIdentityAsync(
-                        stagedSourceDatabaseAudit,
-                        stagingRoot,
-                        cancellationToken);
+                    SqliteMigrationAuditReport stagedDatabaseAudit;
+                    try
+                    {
+                        stagedDatabaseAudit = await migrationAuditor.CaptureAsync(
+                            Path.Combine(stagingRoot, DatabaseFileName),
+                            cancellationToken);
+                    }
+                    catch (SqliteException exception)
+                    {
+                        if (sourceWalPendingAtStaging)
+                        {
+                            return Result<StorageLocationState>(
+                                ApplicationStatus.Rejected,
+                                correlationId,
+                                "storage.location.core_wal_pending",
+                                "The core database has committed WAL changes absent from the staged copy. The source was retained. Restart WinPool and retry the migration; if this recurs, preserve the data and inspect diagnostics.");
+                        }
+                        throw new IOException("The staged core database could not be audited.", exception);
+                    }
+                    if (!stagedSourceDatabaseAudit.HasSameLogicalIdentity(stagedDatabaseAudit))
+                    {
+                        return Result<StorageLocationState>(
+                            ApplicationStatus.Rejected,
+                            correlationId,
+                            sourceWalPendingAtStaging
+                                ? "storage.location.core_wal_pending"
+                                : "storage.location.plan_stale",
+                            sourceWalPendingAtStaging
+                                ? "The core database has committed WAL changes absent from the staged copy. The source was retained. Restart WinPool and retry the migration; if this recurs, preserve the data and inspect diagnostics."
+                                : "The staged core database differs from the source; create a new plan.");
+                    }
                 }
                 await VerifyMonitoringDatabaseAsync(stagingRoot, cancellationToken);
 
@@ -369,6 +401,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     cancellationToken);
 
                 DrainSourceDatabaseHandles(plan.SourceRoot);
+                await CheckpointCoreDatabaseAsync(plan.SourceRoot, cancellationToken);
 
             // Flush happens while acquiring the lease. Re-snapshot afterwards so
             // the immutable plan cannot silently omit writes made since planning.
@@ -386,6 +419,8 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
                 EnsureSameManifest(sourceSnapshot, stagedSnapshot, "staging");
 
+                var sourceWalPending = File.Exists(sourceDatabasePath + "-wal")
+                    && new FileInfo(sourceDatabasePath + "-wal").Length > 0;
                 var sourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
                     ? await migrationAuditor.CaptureAsync(
                         sourceDatabasePath,
@@ -398,8 +433,12 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     return Result<StorageLocationState>(
                         ApplicationStatus.Rejected,
                         correlationId,
-                        "storage.location.plan_stale",
-                        "The source database changed after staging; create a new plan.");
+                        sourceWalPending
+                            ? "storage.location.core_wal_pending"
+                            : "storage.location.plan_stale",
+                        sourceWalPending
+                            ? "The core database has committed WAL changes absent from the staged copy. The source was retained. Restart WinPool and retry the migration; if this recurs, preserve the data and inspect diagnostics."
+                            : "The source database changed after staging; create a new plan.");
                 }
 
                 if (sourceDatabaseAudit is not null)
@@ -421,6 +460,16 @@ public sealed class StorageLocationManager : IStorageLocationManager
                         correlationId,
                         "storage.location.target_changed",
                         "The target data changed after staging; create a new plan.");
+                }
+
+                // On an upgrade from the old in-root pointer, establish the
+                // outside authority before any replacement can move that root.
+                if (!File.Exists(pointerPath))
+                {
+                    await new AtomicStorageLocationPointerCommitter().CommitAsync(
+                        pointerPath,
+                        plan.SourceMode,
+                        cancellationToken);
                 }
 
                 ReplaceTargetWithStaging(
@@ -536,13 +585,18 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
     private async Task<StorageLocationMode> ReadModeAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(pointerPath))
+        var path = File.Exists(pointerPath)
+            ? pointerPath
+            : Path.Combine(standardRoot, PointerFileName);
+        if (!File.Exists(path))
         {
-            return StorageLocationMode.Standard;
+            return File.Exists(Path.Combine(portableRoot, "settings.json"))
+                ? StorageLocationMode.Portable
+                : StorageLocationMode.Standard;
         }
 
         await using var stream = new FileStream(
-            pointerPath,
+            path,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
@@ -734,7 +788,59 @@ public sealed class StorageLocationManager : IStorageLocationManager
         if (!sourceAudit.HasSameLogicalIdentity(targetAudit))
         {
             throw new IOException(
-                "The migrated SQLite database failed schema, row-count, or primary-key verification.");
+                "The migrated SQLite database failed schema or complete row-content verification.");
+        }
+    }
+
+    private static async Task CheckpointCoreDatabaseAsync(
+        string root,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(root, DatabaseFileName);
+        if (!IsSqliteDatabase(path)) return;
+
+        var journal = path + "-journal";
+        if (File.Exists(journal))
+        {
+            throw new IOException("The core database has a rollback journal; migration cannot omit it.");
+        }
+
+        var wal = path + "-wal";
+        if (!File.Exists(wal)) return;
+
+        try
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadWrite,
+                Cache = SqliteCacheMode.Private,
+                Pooling = false
+            }.ToString();
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync(cancellationToken);
+                await using var command = connection.CreateCommand();
+                command.CommandText = "PRAGMA busy_timeout=1000;";
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                await using var checkpoint = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await checkpoint.ReadAsync(cancellationToken)
+                    || checkpoint.GetInt64(0) != 0
+                    || checkpoint.GetInt64(1) != checkpoint.GetInt64(2))
+                {
+                    throw new IOException("The core database WAL checkpoint was incomplete.");
+                }
+            }
+        }
+        catch (SqliteException exception)
+        {
+            throw new IOException("The core database WAL could not be checkpointed.", exception);
+        }
+
+        if (File.Exists(wal) && new FileInfo(wal).Length != 0)
+        {
+            throw new IOException("The core database WAL still contains data after checkpoint.");
         }
     }
 
@@ -846,62 +952,6 @@ public sealed class StorageLocationManager : IStorageLocationManager
         {
             failure ??= exception;
         }
-    }
-
-    private void CleanupOwnedTransactionRoots(string targetRoot)
-    {
-        var normalizedTarget = NormalizeRoot(targetRoot);
-        var parent = Path.GetDirectoryName(normalizedTarget)
-            ?? throw new IOException("The target data root has no parent directory.");
-        EnsureExistingPathHasNoReparsePoint(parent);
-        if (!Directory.Exists(parent))
-        {
-            return;
-        }
-
-        var targetName = Path.GetFileName(normalizedTarget);
-        foreach (var candidate in Directory.EnumerateDirectories(parent))
-        {
-            if (!IsOwnedTransactionRoot(candidate, parent, targetName))
-            {
-                continue;
-            }
-
-            if (File.GetAttributes(candidate).HasFlag(FileAttributes.ReparsePoint))
-            {
-                throw new ReparsePointException();
-            }
-
-            deleteDirectoryTree(candidate);
-        }
-    }
-
-    private static bool IsOwnedTransactionRoot(
-        string candidate,
-        string expectedParent,
-        string targetName)
-    {
-        var fullCandidate = Path.GetFullPath(candidate);
-        if (!string.Equals(
-                Path.GetDirectoryName(fullCandidate),
-                Path.GetFullPath(expectedParent),
-                PathComparison))
-        {
-            return false;
-        }
-
-        var name = Path.GetFileName(fullCandidate);
-        foreach (var role in new[] { "stage", "rollback" })
-        {
-            var prefix = $".{targetName}.winpool-{role}-";
-            if (name.StartsWith(prefix, StringComparison.Ordinal)
-                && Guid.TryParseExact(name[prefix.Length..], "N", out _))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static string HashManifest(IReadOnlyList<SourceFile> files)
