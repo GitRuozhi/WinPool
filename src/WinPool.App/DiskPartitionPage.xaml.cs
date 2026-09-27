@@ -8,6 +8,7 @@ using WinPool.App.ViewModels;
 using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Execution;
 using SimulationEditKind = WinPool.Application.SimulationEditKind;
 using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 
@@ -64,6 +65,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
+        QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         OnlineButtonLabel.Text = Text("联机", "Online");
         OfflineButtonLabel.Text = Text("脱机", "Offline");
         InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
@@ -168,6 +171,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FileSystemBox.Items.Add("NTFS");
         FileSystemBox.Items.Add("ReFS");
         FileSystemBox.Items.Add("exFAT");
+        if (_selectedUnallocatedOffset is not null)
+            FileSystemBox.Items.Add(Text("不格式化", "Do not format"));
         FileSystemBox.SelectedIndex = 0;
     }
 
@@ -412,7 +417,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         DriveLetterBox.Items.Add(none);
         var current = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
         var used = UsedDriveLetters(exceptPartitionId: partition?.StableId);
-        var nextFree = NextFreeDriveLetter(used);
+        var nextFree = ViewModel.CanSubmitRealOperation
+            ? "DEFGHIJKLMNOPQRSTUVWXYZ".Select(letter => letter.ToString())
+                .FirstOrDefault(letter => !used.Contains(letter)) ?? string.Empty
+            : NextFreeDriveLetter(used);
         if (autoAssign && current.Length != 1)
         {
             current = nextFree;
@@ -420,6 +428,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         for (var letter = 'C'; letter <= 'Z'; letter++)
         {
+            if (ViewModel.CanSubmitRealOperation && letter == 'C'
+                && !string.Equals(current, "C", StringComparison.OrdinalIgnoreCase))
+                continue;
             var token = letter.ToString();
             if (used.Contains(token) && !token.Equals(current, StringComparison.OrdinalIgnoreCase))
             {
@@ -562,8 +573,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         || partition.IsSystem
         || partition.Type is "EfiSystem" or "MicrosoftReserved" or "WindowsRecovery";
 
-    private string SelectedFileSystemToken() =>
-        FileSystemBox.SelectedItem as string ?? "NTFS";
+    private string SelectedFileSystemToken()
+    {
+        var selected = FileSystemBox.SelectedItem as string ?? "NTFS";
+        return selected == Text("不格式化", "Do not format") ? string.Empty : selected;
+    }
 
     private bool IsInitialized(OsDiskInfo? disk) =>
         disk is not null && EditWorkspace.IsPartitionTableInitialized(disk);
@@ -591,7 +605,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var explorerPath = letter.Length == 1 ? $"{letter}:\\" : string.Empty;
         var diskOffline = disk?.IsOffline == true;
         var createMode = isGapSelection && alreadyGpt;
-        var propertyEnabled = simulated && !diskOffline && (isPartitionSelection || isGapSelection);
+        var realEditablePartition = ViewModel.CanSubmitRealOperation
+            && partition is { IsBoot: false, IsSystem: false, Type: "Primary" or "BasicData" };
+        var propertyEnabled = (simulated || (ViewModel.CanSubmitRealOperation && createMode)
+            || realEditablePartition)
+            && !diskOffline && (isPartitionSelection || isGapSelection);
         var createGeometry = _selectedUnallocatedOffset is long gapOffset && _selectedUnallocatedSize is long gapSize
             ? EditWorkspace.GetPartitionCreateGeometry(gapOffset, gapSize)
             : null;
@@ -632,15 +650,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var canShrink = propertyEnabled
             && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow;
 
-        OnlineButton.IsEnabled = simulated && isDiskSelection && disk is { IsOffline: true };
-        OfflineButton.IsEnabled = simulated
+        var real = ViewModel.CanSubmitRealOperation;
+        OnlineButton.IsEnabled = (simulated || real) && isDiskSelection && disk is { IsOffline: true };
+        OfflineButton.IsEnabled = (simulated || real)
             && isDiskSelection
             && disk is { IsOffline: false, IsBoot: false, IsSystem: false };
-        InitializeButton.IsEnabled = simulated && isDiskSelection && !diskOffline
+        InitializeButton.IsEnabled = (simulated || real) && isDiskSelection && !diskOffline
             && disk is { IsBoot: false, IsSystem: false } && raw;
         ConvertGptButton.IsEnabled = simulated && isDiskSelection && !diskOffline
             && disk is { IsBoot: false, IsSystem: false } && mbr;
-        DeletePartitionButton.IsEnabled = simulated && !diskOffline && destructivePartition;
+        DeletePartitionButton.IsEnabled = (simulated || realEditablePartition)
+            && !diskOffline && destructivePartition;
         ExtendButton.IsEnabled = canExtend;
         ShrinkButton.IsEnabled = canShrink;
         OpenExplorerButton.IsEnabled = !simulated
@@ -657,8 +677,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SizeBox.IsEnabled = propertyEnabled && createMode && createGeometry is { CanCreate: true };
         MaximumSizeButton.IsEnabled = propertyEnabled && createMode && createGeometry is { CanCreate: true, MaximumSizeBytes: not null };
         FileSystemBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
-        ClusterBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
-        var formatOptionsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved;
+        ClusterBox.IsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved
+            && !string.IsNullOrEmpty(SelectedFileSystemToken());
+        var formatOptionsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved
+            && !string.IsNullOrEmpty(SelectedFileSystemToken());
         QuickFormatSwitch.IsEnabled = formatOptionsEnabled;
         FullFormatSwitch.IsEnabled = formatOptionsEnabled;
         if (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery)
@@ -690,7 +712,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var shrinkReason = canShrink ? null : shrinkEligibilityReason;
 
         SetDisabledReason(OnlineButton,
-            !simulated
+            !simulated && !real
                 ? LocalReadOnlyReason()
                 : disk is null
                     ? Text("请选择一个模拟磁盘。", "Select a simulated disk.")
@@ -700,7 +722,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                             ? Text("该模拟磁盘已经联机；无需再次联机。", "This simulated disk is already online.")
                             : Text("只有脱机的模拟磁盘可以联机。", "Only an offline simulated disk can be brought online."));
         SetDisabledReason(OfflineButton,
-            !simulated
+            !simulated && !real
                 ? LocalReadOnlyReason()
                 : disk is null || !isDiskSelection
                     ? Text("请选择一个联机的模拟磁盘。", "Select an online simulated disk.")
@@ -710,7 +732,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                             ? Text("该模拟磁盘已经脱机。", "This simulated disk is already offline.")
                             : Text("只有联机的模拟磁盘可以脱机。", "Only an online simulated disk can be taken offline."));
         SetDisabledReason(InitializeButton,
-            !simulated
+            !simulated && !real
                 ? LocalReadOnlyReason()
                 : disk is null || !isDiskSelection
                     ? Text("请选择一个未初始化的模拟磁盘。", "Select an uninitialized simulated disk.")
@@ -786,6 +808,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 ? Text("请选择现有的普通模拟数据分区以格式化。", "Select an existing simulated data partition to format.")
                 : protectedPartitionReason);
         var createActionSelected = partition is null;
+        var realExistingFormatSupported = !realEditablePartition
+            || (SelectedFileSystemToken() is "NTFS" or "exFAT"
+                && SelectedClusterBytes() == 65536);
         PartitionActionButtonLabel.Text = createActionSelected
             ? Text("新建分区", "Create partition")
             : Text("格式化分区", "Format partition");
@@ -795,13 +820,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             createActionSelected ? Text("新建分区", "Create partition") : Text("格式化分区", "Format partition"));
         PartitionActionButton.IsEnabled = createActionSelected
             ? canCreatePartition
-            : propertyEnabled && isPartitionSelection && formattablePartition;
+            : propertyEnabled && isPartitionSelection && formattablePartition
+                && realExistingFormatSupported;
         ContextHelp.Set(
             PartitionActionButton,
             createActionSelected
                 ? Text("在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。", "Create a partition in the selected simulated GPT gap; capacity uses 1 MiB alignment.")
                 : Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
-        SetDisabledReason(PartitionActionButton, createActionSelected ? createReason : formatReason);
+        SetDisabledReason(PartitionActionButton, createActionSelected ? createReason
+            : realExistingFormatSupported ? formatReason
+            : Text("现有真实数据分区仅支持 64 KiB NTFS 或 exFAT 格式化。",
+                "Existing real data partitions support only 64 KiB NTFS or exFAT formatting."));
         SetDisabledReason(FileSystemBox, formatOptionsReason);
         SetDisabledReason(ClusterBox, formatOptionsReason);
         SetDisabledReason(QuickFormatSwitch, formatOptionsReason);
@@ -1033,7 +1062,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         OsDiskInfo? disk,
         bool diskOffline)
     {
-        if (!simulated)
+        if (!simulated && !(ViewModel.CanSubmitRealOperation
+            && (_selectedUnallocatedOffset is not null
+                || SelectedPartition() is { IsBoot: false, IsSystem: false,
+                    Type: "Primary" or "BasicData" })))
         {
             return LocalReadOnlyReason();
         }
@@ -1053,9 +1085,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         return null;
     }
 
-    private string LocalReadOnlyReason() =>
-        Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
-            "Local storage is read-only on this page; select or create a simulated system to edit.");
+    private string LocalReadOnlyReason() => ViewModel.CanSubmitRealOperation
+        ? Text("所选真实操作或目标尚未通过本阶段安全校验，入口保持禁用。",
+            "This real operation or target has not passed this stage's safety checks and remains disabled.")
+        : Text("本机存储在此页只读；请先取得 Agent 真实模式回执或选择模拟系统。",
+            "Local storage is read-only here until the Agent arms real mode, or select a simulation.");
 
     private string? DescribeFormatPartitionReason(PartitionInfo? partition)
     {
@@ -1442,7 +1476,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_filling || !ViewModel.IsUsingSimulatedInventory)
+        if (_filling || (!ViewModel.IsUsingSimulatedInventory && !ViewModel.CanSubmitRealOperation))
         {
             return;
         }
@@ -1459,6 +1493,19 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (string.Equals(next, volume.DriveLetter, StringComparison.OrdinalIgnoreCase)
             || (next.Length == 0 && volume.DriveLetter.Length == 0))
         {
+            return;
+        }
+
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            var previous = volume.DriveLetter.Length == 1
+                ? char.ToUpperInvariant(volume.DriveLetter[0]) : (char?)null;
+            var requested = next.Length == 1 ? char.ToUpperInvariant(next[0]) : (char?)null;
+            await SubmitRealAsync(RealPartitionIntent(OperationIntent.SetDriveLetter,
+                partition, new SetDriveLetterCommand(PartitionReference(partition),
+                    previous, requested),
+                $"Drive letter changes from {previous?.ToString() ?? "none"} to {requested?.ToString() ?? "none"}",
+                "No partition data loss expected"));
             return;
         }
 
@@ -1486,7 +1533,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async Task CommitVolumeLabelAsync()
     {
-        if (_filling || _renameInProgress || !ViewModel.IsUsingSimulatedInventory)
+        if (_filling || _renameInProgress ||
+            (!ViewModel.IsUsingSimulatedInventory && !ViewModel.CanSubmitRealOperation))
         {
             return;
         }
@@ -1507,6 +1555,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _renameInProgress = true;
         try
         {
+            if (ViewModel.CanSubmitRealOperation)
+            {
+                var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                    StorageObjectKind.Volume, volume.StableId);
+                await SubmitRealAsync(RealOneTargetIntent(OperationIntent.SetVolumeLabel,
+                    target, new RenameVolumeCommand(RealTargetReference.ForExisting(target), next),
+                    $"Volume label becomes {next}", "No file data loss expected"));
+                return;
+            }
             await SubmitAsync(
                 new SimulationEditRequest(
                     SimulationEditKind.Rename,
@@ -1529,6 +1586,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            await SubmitRealAsync(RealDiskIntent(OperationIntent.SetDiskOnlineState,
+                disk, new SetDiskOnlineCommand(DiskReference(disk), true),
+                "Disk online", "No partition data loss expected"));
+            return;
+        }
+
         await SubmitAsync(
             new SimulationEditRequest(
                 SimulationEditKind.SetDiskOffline,
@@ -1538,11 +1603,22 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("磁盘联机状态已写入模拟文档。", "The disk online state was saved to the simulation."));
     }
 
+    private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
+        await QueryRealOperationByIdAsync();
+
     private async void Offline_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
         if (disk is null)
         {
+            return;
+        }
+
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            await SubmitRealAsync(RealDiskIntent(OperationIntent.SetDiskOnlineState,
+                disk, new SetDiskOnlineCommand(DiskReference(disk), false),
+                "Disk offline", "Running access to this disk stops"));
             return;
         }
 
@@ -1560,6 +1636,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var disk = SelectedDisk();
         if (disk is null)
         {
+            return;
+        }
+
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            await SubmitRealAsync(RealDiskIntent(OperationIntent.InitializeDisk,
+                disk, new InitializeGptCommand(DiskReference(disk)),
+                "Disk initialized as GPT", "All existing partition data on the selected disk is lost"));
             return;
         }
 
@@ -1610,6 +1694,39 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             item.OsDiskStableId == disk.StableId
             && EditWorkspace.PartitionHoldsStoredData(item));
 
+    private RealTargetReference DiskReference(OsDiskInfo disk) =>
+        RealTargetReference.ForExisting(new StorageObjectId(
+            ViewModel.ActiveDocument.SystemId, StorageObjectKind.OsDisk, disk.StableId));
+
+    private RealTargetReference PartitionReference(PartitionInfo partition) =>
+        RealTargetReference.ForExisting(new StorageObjectId(
+            ViewModel.ActiveDocument.SystemId, StorageObjectKind.Partition,
+            partition.StableId));
+
+    private RealOperationIntentRequest RealPartitionIntent(
+        OperationIntent intent, PartitionInfo partition, RealStorageCommand command,
+        string expectedState, string dataLoss) =>
+        RealOneTargetIntent(intent,
+            new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                StorageObjectKind.Partition, partition.StableId),
+            command, expectedState, dataLoss);
+
+    private RealOperationIntentRequest RealOneTargetIntent(
+        OperationIntent intent, StorageObjectId target, RealStorageCommand command,
+        string expectedState, string dataLoss) =>
+        RealOperationProposalFactory.OneStep(ViewModel.ActiveDocument.SystemId,
+            intent, target, command, expectedState, dataLoss);
+
+    private RealOperationIntentRequest RealDiskIntent(
+        OperationIntent intent, OsDiskInfo disk, RealStorageCommand command,
+        string expectedState, string dataLoss)
+    {
+        var target = new StorageObjectId(
+            ViewModel.ActiveDocument.SystemId, StorageObjectKind.OsDisk, disk.StableId);
+        return RealOperationProposalFactory.OneStep(ViewModel.ActiveDocument.SystemId,
+            intent, target, command, expectedState, dataLoss);
+    }
+
     private async Task CreatePartitionAsync()
     {
         var disk = SelectedDisk();
@@ -1657,6 +1774,43 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var diskId = _selectedDiskId;
         var offset = createOffset;
         var quickFormat = QuickFormatSwitch.IsOn;
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            var diskTarget = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                StorageObjectKind.OsDisk, disk.StableId);
+            var realFileSystem = fileSystem.ToUpperInvariant() switch
+            {
+                "" => (RealFileSystem?)null,
+                "NTFS" => RealFileSystem.Ntfs,
+                "EXFAT" => RealFileSystem.ExFat,
+                "REFS" => RealFileSystem.ReFs,
+                "FAT32" => RealFileSystem.Fat32,
+                _ => throw new InvalidOperationException("Unsupported real file system selection.")
+            };
+            try
+            {
+                await SubmitRealAsync(RealOperationProposalFactory.CreatePartition(
+                    ViewModel.ActiveDocument.SystemId, diskTarget,
+                    partitionKind switch
+                    {
+                        PartitionKind.EfiSystem => RealPartitionRole.Efi,
+                        PartitionKind.MicrosoftReserved => RealPartitionRole.Msr,
+                        PartitionKind.WindowsRecovery => RealPartitionRole.Recovery,
+                        _ => RealPartitionRole.BasicData
+                    }, offset, createSizeBytes, realFileSystem,
+                    checked((int)SelectedClusterBytes()), !quickFormat,
+                    VolumeLabelBox.Text,
+                    partitionKind == PartitionKind.BasicData && letter is { Length: 1 }
+                        ? char.ToUpperInvariant(letter[0]) : null));
+            }
+            catch (ArgumentException exception)
+            {
+                await ShowMessageAsync(
+                    Text("真实分区参数不受支持", "Real partition parameters are unsupported"),
+                    exception.Message);
+            }
+            return;
+        }
         if (!await SubmitAsync(
                 new SimulationEditRequest(
                     SimulationEditKind.CreatePartition,
@@ -1826,6 +1980,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            await SubmitRealAsync(RealPartitionIntent(OperationIntent.ResizePartition,
+                partition, new ResizePartitionCommand(PartitionReference(partition),
+                    targetSize.Value),
+                $"Partition total size becomes {targetSize.Value} bytes",
+                extend ? "No file data loss expected; capacity changes"
+                    : "Shrinking may make data beyond the new boundary inaccessible"));
+            return;
+        }
+
         var request = new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize);
         var decision = StorageEditRules.Evaluate(_working, request);
         if (decision.Verdict != StorageRuleVerdict.Allow)
@@ -1859,6 +2024,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var partition = SelectedPartition();
         if (partition is null)
         {
+            return;
+        }
+
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            await SubmitRealAsync(RealPartitionIntent(OperationIntent.DeletePartition,
+                partition, new DeletePartitionCommand(PartitionReference(partition)),
+                "The selected partition is absent",
+                "All files and volume data on the selected partition become inaccessible"));
             return;
         }
 
@@ -1944,6 +2118,20 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         var fileSystem = SelectedFileSystemToken();
+
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            var parsedFileSystem = fileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase)
+                ? RealFileSystem.Ntfs : RealFileSystem.ExFat;
+            await SubmitRealAsync(RealPartitionIntent(OperationIntent.FormatVolume,
+                partition,
+                new FormatVolumeCommand(PartitionReference(partition), parsedFileSystem,
+                    checked((int)SelectedClusterBytes()), !QuickFormatSwitch.IsOn,
+                    VolumeLabelBox.Text),
+                $"Partition formatted as {fileSystem}",
+                "All existing files and volume data on the selected partition are erased"));
+            return;
+        }
 
         var holdsData = EditWorkspace.PartitionHoldsStoredData(partition);
         var usesRefs = fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase);

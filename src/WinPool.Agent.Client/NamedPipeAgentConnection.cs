@@ -271,7 +271,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                     AgentCapability.Monitoring
                     | AgentCapability.Inventory
                     | AgentCapability.Tray
-                    | AgentCapability.Persistence,
+                    | AgentCapability.Persistence
+                    | AgentCapability.RealStorageOperations,
                     endpoint.StartedAtUtc);
                 var snapshotResult = await SendConnectedAsync(
                         new GetAgentSnapshotRequest(CorrelationId.New()),
@@ -563,6 +564,22 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         catch (OperationCanceledException) when (IsDisposing)
         {
             await DisposeStreamAsync();
+            if (transportStarted && request is (
+                    PrepareAgentRealOperationRequest
+                    or AcceptAgentRealOperationRequest
+                    or StopAgentRealOperationFollowingStepsRequest))
+            {
+                return ApplicationResult<AgentResponse>.FromStatus(
+                    ApplicationStatus.OutcomeUnknown,
+                    request.CorrelationId,
+                    new ApplicationMessage(
+                        "agent.request.outcome_unknown",
+                        "agent.request.outcome_unknown",
+                        string.Empty,
+                        ApplicationMessageSeverity.Warning,
+                        []));
+            }
+
             return Failure<AgentResponse>(
                 ApplicationStatus.RequiresEnvironment,
                 request.CorrelationId,
@@ -969,6 +986,16 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.LoadManageInventory,
             ExportAgentMonitorCsvRequest => AgentControlMessageTypes.ExportMonitorCsv,
             SetAgentPreferenceRequest => AgentControlMessageTypes.SetAgentPreference,
+            EnterAgentRealModeRequest => AgentControlMessageTypes.EnterRealMode,
+            ExitAgentRealModeRequest => AgentControlMessageTypes.ExitRealMode,
+            PrepareAgentRealOperationRequest =>
+                AgentControlMessageTypes.PrepareRealOperation,
+            AcceptAgentRealOperationRequest =>
+                AgentControlMessageTypes.AcceptRealOperation,
+            QueryAgentRealOperationRequest =>
+                AgentControlMessageTypes.QueryRealOperation,
+            StopAgentRealOperationFollowingStepsRequest =>
+                AgentControlMessageTypes.StopRealOperationFollowingSteps,
             RequestAgentShutdownRequest => AgentControlMessageTypes.Shutdown,
             _ => throw new NotSupportedException(
                 $"Unsupported Agent request {request.GetType().Name}.")
@@ -1015,6 +1042,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<ExportArtifactResponse>(JsonOptions),
             nameof(AgentPreferenceSavedResponse) =>
                 response.Deserialize<AgentPreferenceSavedResponse>(JsonOptions),
+            nameof(AgentRealModeResponse) =>
+                response.Deserialize<AgentRealModeResponse>(JsonOptions),
+            nameof(AgentRealOperationResponse) =>
+                response.Deserialize<AgentRealOperationResponse>(JsonOptions),
             nameof(ShutdownResponse) =>
                 response.Deserialize<ShutdownResponse>(JsonOptions),
             _ => throw new InvalidDataException(

@@ -21,6 +21,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly IMachineRecordService _machineRecordService;
     private readonly IWorkspaceStateService _workspaceStateService;
     private readonly IAgentConnection? _agentConnection;
+    private readonly AgentRealModeSession? _realModeSession;
     private readonly WinPool.Application.IManageSystemProjector<StorageSystemDocument> _manageProjector;
     private readonly WinPool.Application.IManageComparisonProjector<StorageSystemDocument> _manageComparisonProjector;
     private readonly WinPool.Application.IManageDetailsProjector<StorageSystemDocument> _manageDetailsProjector;
@@ -78,6 +79,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _machineRecordService = machineRecordService;
         _workspaceStateService = workspaceStateService;
         _agentConnection = agentConnection;
+        _realModeSession = agentConnection is null ? null : new AgentRealModeSession(agentConnection);
         _manageProjector = manageProjector ?? new ManageSystemProjector();
         _manageComparisonProjector = manageComparisonProjector ?? new ManageComparisonProjector();
         _manageDetailsProjector = manageDetailsProjector ?? new ManageDetailsProjector();
@@ -137,6 +139,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public IAgentConnection? AgentConnection => _agentConnection;
 
+    public string RealProductSessionId => _realModeSession?.ProductSessionId ?? string.Empty;
+
     public Action<WinPool.Application.ManageObjectTarget, Microsoft.UI.Xaml.FrameworkElement, Windows.Foundation.Point>?
         NodeContextMenuRequested { get; set; }
 
@@ -149,6 +153,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public bool CanUseRealMode => Execution.CanUseRealMode;
 
     public bool IsRealMode => Execution.Mode == ExecutionMode.Real;
+
+    public bool CanSubmitRealOperation => IsRealMode && _realModeSession?.IsArmed == true && IsLocalSystem;
 
     public StorageSystemCatalog SystemCatalog { get; } = new();
 
@@ -1184,11 +1190,55 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             ["# Internal action: restore the built-in simulation. No Windows command."]);
     }
 
+    public async Task<string?> EnterRealModeAsync(CancellationToken cancellationToken = default)
+    {
+        if (!CanUseRealMode || _realModeSession is null)
+            return "agent.real_mode.unavailable";
+
+        try
+        {
+            var error = await _realModeSession.EnterAsync(cancellationToken);
+            if (error is not null)
+            {
+                TrySetExecutionMode(ExecutionMode.Simulation);
+                return error;
+            }
+            TrySetExecutionMode(ExecutionMode.Real);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            TrySetExecutionMode(ExecutionMode.Simulation);
+            return exception.Message;
+        }
+    }
+
+    public async Task<string?> ExitRealModeAsync(CancellationToken cancellationToken = default)
+    {
+        TrySetExecutionMode(ExecutionMode.Simulation);
+        if (_realModeSession is null)
+            return "agent.real_mode.unavailable";
+
+        try
+        {
+            return await _realModeSession.ExitAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            return exception.Message;
+        }
+    }
+
     public bool TrySetExecutionMode(ExecutionMode mode)
     {
+        if (mode == ExecutionMode.Real && _realModeSession?.IsArmed != true)
+            return false;
+        if (mode == ExecutionMode.Simulation)
+            _realModeSession?.DisarmLocally();
         var changed = Execution.TrySetMode(mode);
         OnPropertyChanged(nameof(IsRealMode));
         OnPropertyChanged(nameof(CanUseRealMode));
+        OnPropertyChanged(nameof(CanSubmitRealOperation));
         return changed;
     }
 

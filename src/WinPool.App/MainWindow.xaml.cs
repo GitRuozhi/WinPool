@@ -164,11 +164,6 @@ public sealed partial class MainWindow : Window
             new GlobalCommandLogService(),
             _workspaceStateService,
             agentConnection);
-        if (startupOptions.EnterRealModeAfterElevation)
-        {
-            ViewModel.TrySetExecutionMode(ExecutionMode.Real);
-        }
-
         InitializeComponent();
 
         ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
@@ -350,14 +345,24 @@ public sealed partial class MainWindow : Window
             ShellNavigationList.IsEnabled = true;
             UpdateActiveSystemName();
         }
-        if (_enteredRealModeAfterElevation && ViewModel.IsRealMode && ViewModel.CanUseRealMode)
+        if (_enteredRealModeAfterElevation && ViewModel.CanUseRealMode)
         {
-            PublishRealOperationsWarning();
-            NotificationService.PublishInfo(
-                ViewModel.Localization["ElevationTitle"],
-                ViewModel.Localization["ElevationRestarted"],
-                "elevation",
-                "elevation-restarted");
+            var enterError = await ViewModel.EnterRealModeAsync();
+            if (enterError is null)
+            {
+                PublishRealOperationsWarning();
+                NotificationService.PublishInfo(
+                    ViewModel.Localization["ElevationTitle"],
+                    ViewModel.Localization["ElevationRestarted"],
+                    "elevation",
+                    "elevation-restarted");
+            }
+            else
+            {
+                NotificationService.PublishError(
+                    ViewModel.Localization["Error"], enterError,
+                    "real-mode", "real-mode-startup-rejected");
+            }
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
@@ -800,7 +805,11 @@ public sealed partial class MainWindow : Window
     {
         if (requestedMode == ExecutionMode.Simulation)
         {
-            ViewModel.TrySetExecutionMode(ExecutionMode.Simulation);
+            var exitError = await ViewModel.ExitRealModeAsync();
+            if (exitError is not null)
+                NotificationService.PublishError(
+                    ViewModel.Localization["Error"], exitError,
+                    "real-mode", $"real-mode-exit:{DateTimeOffset.UtcNow.Ticks}");
             SyncModeSwitch();
             return false;
         }
@@ -835,8 +844,14 @@ public sealed partial class MainWindow : Window
 
             if (ViewModel.CanUseRealMode)
             {
-                ViewModel.TrySetExecutionMode(ExecutionMode.Real);
-                PublishRealOperationsWarning();
+                var enterError = await ViewModel.EnterRealModeAsync();
+                if (enterError is null)
+                    PublishRealOperationsWarning();
+                else
+                    NotificationService.PublishError(
+                        localization["Error"], enterError,
+                        "real-mode", $"real-mode-enter:{DateTimeOffset.UtcNow.Ticks}");
+                SyncModeSwitch();
                 return false;
             }
 

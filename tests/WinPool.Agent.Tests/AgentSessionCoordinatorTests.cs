@@ -7,6 +7,18 @@ namespace WinPool.Agent.Tests;
 public sealed class AgentSessionCoordinatorTests
 {
     [Fact]
+    public async Task RealModeRequestWithoutOsPeerOrServiceIsRejected()
+    {
+        var coordinator = CreateCoordinator(new RecordingShutdownActions());
+
+        var result = await coordinator.HandleAsync(
+            new EnterAgentRealModeRequest("product-session", CorrelationId.New()));
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Equal("agent.real_operation.unavailable", Assert.Single(result.Messages).Code);
+    }
+
+    [Fact]
     public async Task ShutdownRunsTheRequiredOrderAndStopsSession()
     {
         var actions = new RecordingShutdownActions

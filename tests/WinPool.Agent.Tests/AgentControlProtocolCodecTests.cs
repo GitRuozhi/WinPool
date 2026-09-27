@@ -424,6 +424,61 @@ public sealed class AgentControlProtocolCodecTests
         Assert.Equal(executablePath, typed.TextValue);
     }
 
+    [Fact]
+    public void CodecDecodesOnlyClosedRealLifecycleRequests()
+    {
+        var operationId = OperationId.New();
+        var proposal = new RealOperationIntentRequest(
+            OperationIntent.InitializeDisk,
+            SystemId.New(),
+            [],
+            [],
+            "GPT");
+        (string Type, AgentRequest Request)[] requests =
+        [
+            (AgentControlMessageTypes.EnterRealMode,
+                new EnterAgentRealModeRequest("session", CorrelationId.New())),
+            (AgentControlMessageTypes.ExitRealMode,
+                new ExitAgentRealModeRequest("session", CorrelationId.New())),
+            (AgentControlMessageTypes.PrepareRealOperation,
+                new PrepareAgentRealOperationRequest(
+                    proposal, Guid.NewGuid(), "session", CorrelationId.New())),
+            (AgentControlMessageTypes.AcceptRealOperation,
+                new AcceptAgentRealOperationRequest(operationId, "hash", "session", CorrelationId.New())),
+            (AgentControlMessageTypes.QueryRealOperation,
+                new QueryAgentRealOperationRequest(operationId, CorrelationId.New())),
+            (AgentControlMessageTypes.StopRealOperationFollowingSteps,
+                new StopAgentRealOperationFollowingStepsRequest(
+                    operationId, "hash", "session", CorrelationId.New()))
+        ];
+
+        foreach (var (type, request) in requests)
+        {
+            var payload = JsonSerializer.SerializeToElement(
+                request, request.GetType(), SerializerOptions);
+            var decoded = new AgentControlProtocolCodec().DecodeRequest(
+                Envelope(type, request.CorrelationId, payload));
+
+            Assert.True(decoded.IsAccepted, decoded.Code);
+            Assert.Equal(request.GetType(), decoded.Request!.GetType());
+            Assert.Equal(request.CorrelationId, decoded.Request.CorrelationId);
+            if (request is PrepareAgentRealOperationRequest prepared)
+            {
+                var roundTrip = Assert.IsType<PrepareAgentRealOperationRequest>(
+                    decoded.Request);
+                Assert.Equal(prepared.PreparationId, roundTrip.PreparationId);
+                Assert.Equal(prepared.ProductSessionId, roundTrip.ProductSessionId);
+                Assert.Equal(prepared.Intent.Intent, roundTrip.Intent.Intent);
+            }
+        }
+
+        var unknown = new AgentControlProtocolCodec().DecodeRequest(
+            Envelope("agent.request.execute_command", CorrelationId.New(),
+                JsonSerializer.SerializeToElement(new { command = "Clear-Disk" })));
+        Assert.False(unknown.IsAccepted);
+        Assert.Equal("ipc.request.unsupported_type", unknown.Code);
+    }
+
     private static IpcEnvelope Envelope(
         string messageType,
         CorrelationId correlationId,

@@ -61,6 +61,10 @@ internal static class Program
                 Path.Combine(
                     AppContext.BaseDirectory,
                     "WinPool.App.exe"));
+            var realModeGate = new AgentRealModeGate(
+                agentSessionId,
+                mainApplicationExecutablePath,
+                processIncarnationVerifier);
             var coordinator = new AgentSessionCoordinator(
                 processRegistry,
                 lifecycle,
@@ -72,7 +76,8 @@ internal static class Program
                     Processes: [],
                     LatestMonitorSamples: [],
                     RecentStorageHealthEvents: [],
-                    MonitorDiagnostics: new MonitorRuntimeDiagnostics(0, 0)));
+                    MonitorDiagnostics: new MonitorRuntimeDiagnostics(0, 0)),
+                realModeGate);
             context.AttachCoordinator(coordinator);
             var nonce = Guid.NewGuid();
             var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
@@ -131,6 +136,28 @@ internal static class Program
             using var writeOwner = AgentWriteOwnerLease.Acquire(
                 store,
                 $"agent-{agentSessionId:N}");
+            var realOperations = new AgentRealOperationService(
+                new OperationPlanRepository(store, writeOwner),
+                new WindowsRealStorageBackend(new WindowsRealStorageCommandAdapter()),
+                new WindowsRealMachineIdentityProvider(),
+                realModeGate);
+            try
+            {
+                AgentStartupTaskRunner.Complete(
+                    () => realOperations.InitializeRecoveryAsync());
+            }
+            catch (Exception exception)
+            {
+                // Keep inventory/simulation available, but the real service
+                // remains unready and rejects every new storage operation.
+                Trace.TraceError("agent.real_operation.recovery_failed: {0}", exception);
+                DiagnosticLog.AppendFailure(
+                    dataRoot,
+                    "agent-control.jsonl",
+                    "agent.real_operation.recovery_failed",
+                    exception);
+            }
+            coordinator.AttachRealOperationService(realOperations);
             var agentSessions = new AgentSessionRepository(store, writeOwner);
             AgentStartupTaskRunner.Complete(
                 () => agentSessions.RecoverOpenSessionsAsync(startedAtUtc));

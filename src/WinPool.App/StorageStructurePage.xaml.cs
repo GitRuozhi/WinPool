@@ -6,6 +6,7 @@ using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Execution;
 using SimulationEditKind = WinPool.Application.SimulationEditKind;
 using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 
@@ -15,7 +16,7 @@ namespace WinPool_App;
 /// Storage structure editor: left pool topology, bottom-left wrapping
 /// structure operations, and a right-hand property card that sizes to its
 /// grouped pool / tier / disk-and-partition fields plus one Save row.
-/// Simulation only.
+/// Simulation editing and the Agent-confirmed single-member real entry.
 /// </summary>
 public sealed partial class StorageStructurePage : EditorPageBase
 {
@@ -172,6 +173,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
+        QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         UndoButtonLabel.Text = ViewModel.Localization["Undo"];
         RedoButtonLabel.Text = ViewModel.Localization["Redo"];
         DiscardAllButtonLabel.Text = ViewModel.Localization["DiscardAll"];
@@ -2112,8 +2115,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !planBlocked
             && !HasInvalidSizeInput()
             && !_outcomeUnknown;
-        CreatePoolButton.IsEnabled = simulated
-            && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
+        var realPoolCandidate = RealPoolCandidate();
+        CreatePoolButton.IsEnabled = (simulated
+            && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId)))
+            || realPoolCandidate is not null;
         DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = simulated
             && _formDirty
@@ -2185,7 +2190,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                                     : Text("需要可应用的无阻塞模拟计划。", "A non-blocked simulated plan is required."));
         SetDisabledReason(
             CreatePoolButton,
-            !simulated
+            !simulated && realPoolCandidate is null
                 ? structureReason
                 : Text("当前已有一个模拟池草稿；请先保存、应用或放弃它。", "A simulated pool draft already exists; save, apply, or discard it first."));
         SetDisabledReason(
@@ -2242,6 +2247,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         if (!simulated)
         {
+            if (ViewModel.CanSubmitRealOperation)
+                return Text(
+                    "当前真实阶段仅开放单个可池化空白物理盘的建池入口；多盘冗余、混合介质分层及其结构编辑尚未验证。",
+                    "This real stage enables pool creation from one empty poolable physical disk. Multi-disk redundancy, mixed-media tiers and their structural edits are not yet verified.");
             return Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
                 "Local storage is read-only on this page; select or create a simulated system to edit.");
         }
@@ -2733,6 +2742,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async void CreatePool_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            var candidate = RealPoolCandidate();
+            if (candidate is null)
+                return;
+            var name = await PromptAsync(Text("创建单盘存储池", "Create single-disk storage pool"),
+                "WinPool");
+            if (string.IsNullOrWhiteSpace(name))
+                return;
+            var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                StorageObjectKind.PhysicalDisk, candidate.StableId);
+            await SubmitRealAsync(RealOperationProposalFactory.OneStep(
+                ViewModel.ActiveDocument.SystemId, OperationIntent.CreateStoragePool,
+                target, new CreatePoolCommand(RealTargetReference.ForExisting(target), name),
+                $"One-member storage pool named {name}",
+                "Existing partitions and data on this physical disk become inaccessible"));
+            return;
+        }
         if (!ViewModel.IsUsingSimulatedInventory
             || _working.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId)))
         {
@@ -2740,6 +2767,22 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         CreateDraftPoolAndSelect();
+    }
+
+    private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
+        await QueryRealOperationByIdAsync();
+
+    private PhysicalDiskInfo? RealPoolCandidate()
+    {
+        if (!ViewModel.CanSubmitRealOperation)
+            return null;
+        var candidates = _working.PhysicalDisks.Where(disk =>
+            disk.CanPool && !disk.IsBoot && !disk.IsSystem &&
+            !disk.IsPageFile && !disk.IsCrashDump && !disk.IsRetired &&
+            !disk.IsHotSpare).ToArray();
+        if (!string.IsNullOrWhiteSpace(_selectedPoolDiskId))
+            return candidates.SingleOrDefault(disk => disk.StableId == _selectedPoolDiskId);
+        return candidates.Length == 1 ? candidates[0] : null;
     }
 
     private void Dissolve_Click(object sender, RoutedEventArgs e)

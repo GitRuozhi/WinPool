@@ -379,6 +379,10 @@
                 </controls:ContextHelpHost>
                     </controls:FixedWrapPanel>
                 </ScrollViewer>
+                <Button x:Name="QueryRealOperationButton"
+                        HorizontalAlignment="Left"
+                        Click="QueryRealOperation_Click"
+                        Content="Query real operation by ID" />
             </StackPanel>
         </Border>
         <toolkit:GridSplitter

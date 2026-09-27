@@ -4,6 +4,7 @@ using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Execution;
 using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 using SimulationOperationResult = WinPool.Application.SimulationEditReceipt;
 
@@ -150,6 +151,163 @@ public class EditorPageBase : Page
             CloseButtonText = Text("关闭", "Close")
         };
         await DialogCoordinator.ShowAsync(dialog);
+    }
+
+    protected async Task<bool> SubmitRealAsync(RealOperationIntentRequest intent)
+    {
+        if (!ViewModel.CanSubmitRealOperation || ViewModel.AgentConnection is null)
+            return false;
+
+        try
+        {
+            RealOperationValidator.Validate(intent);
+        }
+        catch (ArgumentException exception)
+        {
+            await ShowMessageAsync(Text("真实操作参数不受支持", "Real operation parameters are unsupported"),
+                exception.Message);
+            return false;
+        }
+
+        var connection = ViewModel.AgentConnection;
+        var flow = new RealOperationRequestSession(connection, ViewModel.RealProductSessionId);
+        ApplicationResult<AgentResponse>? prepared = null;
+        try
+        {
+            prepared = await flow.PrepareAsync(intent, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            PublishOperationException(Text("真实准备失败", "Real preparation failed"),
+                "real", exception, "real.prepare.exception");
+            return false;
+        }
+
+        if (prepared is null || !prepared.IsSuccess ||
+            prepared.Value is not AgentRealOperationResponse { State: RealOperationState.Prepared } frozen ||
+            frozen.Plan.RealOperation is null)
+        {
+            if (prepared is not null)
+                PublishOperationResult(prepared.Status, prepared.Messages, prepared.CorrelationId,
+                    Text("真实准备未完成", "Real preparation did not complete"), "real");
+            return false;
+        }
+
+        var plan = frozen.Plan;
+        var specification = plan.RealOperation;
+        var stepLines = specification.Steps.Select((step, index) =>
+            $"{index + 1}. {step.Command.GetType().Name}\n" +
+            $"   {step.BeforeCondition}\n   {step.AfterCondition}\n" +
+            $"   {Text("数据损失", "Data loss")}: {step.DataLoss}");
+        var confirmation = string.Join(Environment.NewLine + Environment.NewLine, new[]
+        {
+            $"OperationId: {plan.OperationId.Value}",
+            $"Plan hash: {plan.PlanHash}",
+            $"{Text("目标", "Target")}: {plan.ImpactScope}",
+            $"{Text("不可逆影响", "Irreversible effects")}: {plan.IrreversibleEffects}",
+            $"{Text("过期时间", "Expires")}: {specification.ExpiresAt.LocalDateTime:G}",
+            string.Join(Environment.NewLine + Environment.NewLine, stepLines)
+        });
+        if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation))
+            return false;
+        flow.Confirm(frozen);
+
+        ApplicationResult<AgentResponse>? accepted = null;
+        try
+        {
+            accepted = await flow.AcceptOnceAsync(CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            PublishOperationException(Text("提交结果待核对", "Submission needs reconciliation"),
+                "real", exception, "real.accept.uncertain");
+        }
+
+        if (accepted is { IsSuccess: false } && accepted.Status != ApplicationStatus.OutcomeUnknown)
+        {
+            PublishOperationResult(accepted.Status, accepted.Messages, accepted.CorrelationId,
+                Text("真实提交被拒绝", "Real submission was rejected"), "real");
+            return false;
+        }
+
+        // Accept is short-lived. Query the assigned identity after a lost reply;
+        // never issue a second write request to infer whether the first ran.
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            ApplicationResult<AgentResponse> status;
+            try
+            {
+                status = await flow.QueryAsync(CancellationToken.None);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException)
+            {
+                PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
+                    "real", exception, "real.query.failed");
+                return false;
+            }
+            if (!status.IsSuccess || status.Value is not AgentRealOperationResponse current)
+                continue;
+            if (current.State is RealOperationState.Accepted or RealOperationState.Running)
+                continue;
+            var succeeded = current.State == RealOperationState.Succeeded;
+            await ShowMessageAsync(
+                succeeded ? Text("真实操作完成", "Real operation completed")
+                    : Text("真实操作需要核对", "Real operation needs review"),
+                $"OperationId: {plan.OperationId.Value}\n" +
+                $"{Text("状态", "State")}: {current.State}\n" +
+                $"{Text("代码", "Code")}: {current.Code ?? "-"}");
+            if (succeeded)
+                await ViewModel.ScanAsync();
+            return succeeded;
+        }
+
+        await ShowMessageAsync(Text("真实操作继续执行", "Real operation continues"),
+            $"OperationId: {plan.OperationId.Value}\n" +
+            Text("请稍后按此 OperationId 查询持久化状态。",
+                "Query this OperationId later for its persisted status."));
+        return false;
+    }
+
+    protected async Task QueryRealOperationByIdAsync()
+    {
+        if (ViewModel.AgentConnection is null)
+            return;
+        var raw = await PromptAsync(Text("查询真实操作", "Query real operation"), string.Empty);
+        if (raw is null)
+            return;
+        if (!Guid.TryParse(raw, out var parsed) || parsed == Guid.Empty)
+        {
+            await ShowMessageAsync(Text("操作 ID 无效", "Invalid operation ID"),
+                Text("请输入确认时显示的完整 OperationId。",
+                    "Enter the complete OperationId shown at confirmation."));
+            return;
+        }
+        try
+        {
+            var result = await ViewModel.AgentConnection.SendAsync(
+                new QueryAgentRealOperationRequest(new OperationId(parsed), CorrelationId.New()),
+                CancellationToken.None);
+            if (!result.IsSuccess || result.Value is not AgentRealOperationResponse current)
+            {
+                PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
+                    Text("真实状态查询失败", "Real status query failed"), "real");
+                return;
+            }
+            var steps = string.Join(Environment.NewLine, current.Steps.Select(step =>
+                $"{step.StepId}: {step.State} ({step.Code ?? "-"})"));
+            await ShowMessageAsync(Text("真实操作状态", "Real operation status"),
+                $"OperationId: {current.Plan.OperationId.Value}\n" +
+                $"Plan hash: {current.Plan.PlanHash}\n" +
+                $"{Text("状态", "State")}: {current.State}\n" +
+                $"{Text("需要对账", "Requires reconciliation")}: {current.RequiresReconciliation}\n" +
+                $"{Text("代码", "Code")}: {current.Code ?? "-"}\n{steps}");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
+                "real", exception, "real.query.failed");
+        }
     }
 
     /// <summary>Target text accompanies user-visible operation feedback.</summary>

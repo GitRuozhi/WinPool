@@ -33,6 +33,13 @@ public static class AgentControlMessageTypes
         "agent.request.load_manage_inventory";
     public const string ExportMonitorCsv = "agent.request.export_monitor_csv";
     public const string SetAgentPreference = "agent.request.set_agent_preference";
+    public const string EnterRealMode = "agent.request.enter_real_mode";
+    public const string ExitRealMode = "agent.request.exit_real_mode";
+    public const string PrepareRealOperation = "agent.request.prepare_real_operation";
+    public const string AcceptRealOperation = "agent.request.accept_real_operation";
+    public const string QueryRealOperation = "agent.request.query_real_operation";
+    public const string StopRealOperationFollowingSteps =
+        "agent.request.stop_real_operation_following_steps";
     public const string Shutdown = "agent.request.shutdown";
     public const string Response = "agent.response";
 }

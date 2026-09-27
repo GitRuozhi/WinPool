@@ -95,6 +95,18 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<ExportAgentMonitorCsvRequest>(envelope),
                 AgentControlMessageTypes.SetAgentPreference =>
                     Deserialize<SetAgentPreferenceRequest>(envelope),
+                AgentControlMessageTypes.EnterRealMode =>
+                    Deserialize<EnterAgentRealModeRequest>(envelope),
+                AgentControlMessageTypes.ExitRealMode =>
+                    Deserialize<ExitAgentRealModeRequest>(envelope),
+                AgentControlMessageTypes.PrepareRealOperation =>
+                    Deserialize<PrepareAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.AcceptRealOperation =>
+                    Deserialize<AcceptAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.QueryRealOperation =>
+                    Deserialize<QueryAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.StopRealOperationFollowingSteps =>
+                    Deserialize<StopAgentRealOperationFollowingStepsRequest>(envelope),
                 AgentControlMessageTypes.Shutdown =>
                     Deserialize<RequestAgentShutdownRequest>(envelope),
                 _ => null
@@ -528,6 +540,15 @@ public sealed class CurrentUserAgentControlServer
                 {
                     throw new InvalidDataException("The client no longer has the Agent's integrity level.");
                 }
+                if (processIncarnationVerifier is not null
+                    && !ProcessIncarnationMatcher.Matches(
+                        processIncarnationVerifier.TryRead(handshake.ProcessId),
+                        activeRegistration,
+                        expectedClientExecutablePath!))
+                {
+                    throw new InvalidDataException(
+                        "The client process incarnation changed during the control session.");
+                }
                 var decoded = codec.DecodeRequest(envelope);
                 coordinator.ProcessRegistry.TryRecordHeartbeat(
                     activeRegistration.ProcessInstanceId,
@@ -540,8 +561,18 @@ public sealed class CurrentUserAgentControlServer
                 {
                     await PersistProcessAsync(heartbeatRegistration, cancellationToken);
                 }
+                var verifiedPeer = processIncarnationVerifier is not null
+                    && clientWitness is not null
+                    ? new AgentVerifiedPeer(
+                        handshake.ProcessId,
+                        clientWitness.StartedAtUtc,
+                        clientWitness.ImagePath,
+                        activeRegistration.ProcessInstanceId,
+                        agentSessionId)
+                    : null;
                 var result = decoded.IsAccepted
-                    ? await coordinator.HandleAsync(decoded.Request!, cancellationToken)
+                    ? await coordinator.HandleAsync(
+                        decoded.Request!, verifiedPeer, cancellationToken)
                     : codec.CreateDecodeRejection(decoded);
                 using var writeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 writeTimeout.CancelAfter(requestTransferTimeout);

@@ -1,4 +1,6 @@
 using WinPool.Application;
+using WinPool.Domain;
+using WinPool.Execution;
 
 namespace WinPool.Agent;
 
@@ -88,6 +90,8 @@ public sealed class AgentSessionCoordinator
     private AgentShutdownWorkflow shutdownWorkflow = null!;
     private readonly AgentLifecycleStateStore lifecycle;
     private readonly Func<AgentSnapshot>? recoveringSnapshotFactory;
+    private readonly AgentRealModeGate? realModeGate;
+    private IRealOperationService? realOperationService;
     private AgentShutdownExecution? shutdownExecution;
     private Task<AgentShutdownExecution>? shutdownTask;
 
@@ -95,7 +99,9 @@ public sealed class AgentSessionCoordinator
         IAgentRequestOperations operations,
         AgentShutdownWorkflow shutdownWorkflow,
         AgentProcessRegistry processRegistry,
-        AgentLifecycleStateStore? lifecycle = null)
+        AgentLifecycleStateStore? lifecycle = null,
+        AgentRealModeGate? realModeGate = null,
+        IRealOperationService? realOperationService = null)
     {
         this.operations = operations ?? throw new ArgumentNullException(nameof(operations));
         this.shutdownWorkflow = shutdownWorkflow
@@ -103,12 +109,15 @@ public sealed class AgentSessionCoordinator
         ProcessRegistry = processRegistry
             ?? throw new ArgumentNullException(nameof(processRegistry));
         this.lifecycle = lifecycle ?? new AgentLifecycleStateStore(ProcessRegistry);
+        this.realModeGate = realModeGate;
+        this.realOperationService = realOperationService;
     }
 
     public AgentSessionCoordinator(
         AgentProcessRegistry processRegistry,
         AgentLifecycleStateStore lifecycle,
-        Func<AgentSnapshot> recoveringSnapshotFactory)
+        Func<AgentSnapshot> recoveringSnapshotFactory,
+        AgentRealModeGate? realModeGate = null)
     {
         ProcessRegistry = processRegistry
             ?? throw new ArgumentNullException(nameof(processRegistry));
@@ -116,6 +125,7 @@ public sealed class AgentSessionCoordinator
             ?? throw new ArgumentNullException(nameof(lifecycle));
         this.recoveringSnapshotFactory = recoveringSnapshotFactory
             ?? throw new ArgumentNullException(nameof(recoveringSnapshotFactory));
+        this.realModeGate = realModeGate;
     }
 
     public AgentProcessRegistry ProcessRegistry { get; }
@@ -146,6 +156,12 @@ public sealed class AgentSessionCoordinator
 
     public Task<ApplicationResult<AgentResponse>> HandleAsync(
         AgentRequest request,
+        CancellationToken cancellationToken = default) =>
+        HandleAsync(request, null, cancellationToken);
+
+    public Task<ApplicationResult<AgentResponse>> HandleAsync(
+        AgentRequest request,
+        AgentVerifiedPeer? verifiedPeer,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -153,6 +169,16 @@ public sealed class AgentSessionCoordinator
         if (request is RequestAgentShutdownRequest shutdownRequest)
         {
             return BeginShutdownAsync(shutdownRequest);
+        }
+
+        if (request is EnterAgentRealModeRequest
+            or ExitAgentRealModeRequest
+            or PrepareAgentRealOperationRequest
+            or AcceptAgentRealOperationRequest
+            or QueryAgentRealOperationRequest
+            or StopAgentRealOperationFollowingStepsRequest)
+        {
+            return HandleRealOperationAsync(request, verifiedPeer, cancellationToken);
         }
 
         lock (stateLock)
@@ -214,6 +240,146 @@ public sealed class AgentSessionCoordinator
         };
     }
 
+    public void AttachRealOperationService(IRealOperationService service)
+    {
+        ArgumentNullException.ThrowIfNull(service);
+        lock (stateLock)
+        {
+            if (realOperationService is not null)
+            {
+                throw new InvalidOperationException("A real operation service is already attached.");
+            }
+
+            realOperationService = service;
+        }
+    }
+
+    private async Task<ApplicationResult<AgentResponse>> HandleRealOperationAsync(
+        AgentRequest request,
+        AgentVerifiedPeer? peer,
+        CancellationToken cancellationToken)
+    {
+        IRealOperationService? service;
+        lock (stateLock)
+        {
+            if (lifecycle.State != AgentLifecycleState.Running)
+            {
+                return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+            }
+
+            service = realOperationService;
+        }
+
+        if (service is null || realModeGate is null || peer is null)
+        {
+            return RejectRealRequest(request.CorrelationId, "agent.real_operation.unavailable");
+        }
+
+        if (!realModeGate.TryValidatePeer(peer, out var code))
+        {
+            return RejectRealRequest(request.CorrelationId, code);
+        }
+
+        if (request is EnterAgentRealModeRequest enter)
+        {
+            if (!realModeGate.TryEnter(peer, enter.ProductSessionId, out code))
+            {
+                return RejectRealRequest(request.CorrelationId, code);
+            }
+
+            try
+            {
+                var entered = await service.EnterModeAsync(
+                    enter, TrustedSession(peer, enter.ProductSessionId, true), cancellationToken);
+                if (!entered.IsSuccess)
+                {
+                    realModeGate.TryExit(peer, enter.ProductSessionId);
+                }
+
+                return entered;
+            }
+            catch
+            {
+                realModeGate.TryExit(peer, enter.ProductSessionId);
+                throw;
+            }
+        }
+
+        if (request is ExitAgentRealModeRequest exit)
+        {
+            var wasArmed = realModeGate.TryExit(peer, exit.ProductSessionId);
+            return await service.ExitModeAsync(
+                exit, TrustedSession(peer, exit.ProductSessionId, wasArmed), cancellationToken);
+        }
+
+        if (request is QueryAgentRealOperationRequest query)
+        {
+            // Read-only reconciliation remains possible after mode exit or App replacement.
+            return await service.QueryAsync(
+                query, TrustedSession(peer, string.Empty, false), cancellationToken);
+        }
+
+        if (request is StopAgentRealOperationFollowingStepsRequest stop)
+        {
+            // Stopping steps that have not begun is available after mode exit.
+            // The service must match the persisted operation and plan hash.
+            var isArmed = realModeGate.TryUseForNewWrite(
+                peer, stop.ProductSessionId, out _);
+            return await service.StopFollowingStepsAsync(
+                stop, TrustedSession(peer, stop.ProductSessionId, isArmed), cancellationToken);
+        }
+
+        if (request is AcceptAgentRealOperationRequest accept)
+        {
+            // A repeated Accept for an already persisted operation is a status
+            // lookup. The service must reject a new acceptance unless armed.
+            var isArmed = realModeGate.TryUseForNewWrite(
+                peer, accept.ProductSessionId, out _);
+            return await service.AcceptAsync(
+                accept, TrustedSession(peer, accept.ProductSessionId, isArmed),
+                cancellationToken);
+        }
+
+        var productSessionId = request switch
+        {
+            PrepareAgentRealOperationRequest typed => typed.ProductSessionId,
+            _ => string.Empty
+        };
+        if (!realModeGate.TryUseForNewWrite(peer, productSessionId, out code))
+        {
+            return RejectRealRequest(request.CorrelationId, code);
+        }
+
+        var session = TrustedSession(peer, productSessionId, true);
+        return request switch
+        {
+            PrepareAgentRealOperationRequest typed =>
+                await service.PrepareAsync(typed, session, cancellationToken),
+            _ => RejectUnsupportedRequest(request.CorrelationId)
+        };
+    }
+
+    private static TrustedRealSession TrustedSession(
+        AgentVerifiedPeer peer,
+        string productSessionId,
+        bool isArmed) =>
+        new(
+            new SessionId(peer.AgentSessionId),
+            productSessionId,
+            peer.ProcessInstanceId.Value.ToString("D"),
+            peer.ProcessId,
+            peer.StartedAtUtc,
+            peer.ImagePath,
+            isArmed);
+
+    private static ApplicationResult<AgentResponse> RejectRealRequest(
+        CorrelationId correlationId,
+        string code) =>
+        ApplicationResult<AgentResponse>.FromStatus(
+            ApplicationStatus.Rejected,
+            correlationId,
+            Message(code, ApplicationMessageSeverity.Warning));
+
     private async Task<ApplicationResult<AgentResponse>> BeginShutdownAsync(
         RequestAgentShutdownRequest request)
     {
@@ -221,6 +387,13 @@ public sealed class AgentSessionCoordinator
             && lifecycle.State is AgentLifecycleState.Starting or AgentLifecycleState.Recovering)
         {
             return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+        }
+
+        if (realOperationService is AgentRealOperationService realService
+            && !await realService.TryCloseAdmissionForShutdownAsync())
+        {
+            return RejectRealRequest(
+                request.CorrelationId, "agent.shutdown.real_operation_unfinished");
         }
 
         Task<AgentShutdownExecution> executionTask;
