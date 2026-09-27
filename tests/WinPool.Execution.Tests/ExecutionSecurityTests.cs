@@ -33,6 +33,10 @@ public sealed class ExecutionSecurityTests
             OperationIntent.CreateVirtualDisk,
             OperationIntent.DeleteVirtualDisk,
             OperationIntent.ResizeVirtualDisk,
+            OperationIntent.SetDriveLetter,
+            OperationIntent.RenameStorageObject,
+            OperationIntent.SetVolumeLabel,
+            OperationIntent.RebuildStoragePool,
             OperationIntent.RepairStorageObject,
             OperationIntent.ClearDisk,
             OperationIntent.RawDeviceWrite
@@ -220,7 +224,7 @@ public sealed class ExecutionSecurityTests
     [Fact]
     public async Task ExecutorGate_RevalidatesPolicyBeforeConsumingAuthorization()
     {
-        var fixture = Fixture.Create(EnvironmentKind.UserProvidedDisposableMachine);
+        var fixture = Fixture.Create(EnvironmentKind.LocalMachine, ExecutionMode.Real, PrivilegeState.Administrator);
         var plan = fixture.CreatePlan(OperationIntent.InitializeDisk);
         var token = await fixture.IssueAsync(plan);
         var protectedContext = fixture.Context with
@@ -246,7 +250,7 @@ public sealed class ExecutionSecurityTests
     [Fact]
     public async Task LocalStorageMutationExecutor_AlwaysRejectsAfterAnOtherwiseValidGate()
     {
-        var fixture = Fixture.Create(EnvironmentKind.UserProvidedDisposableMachine);
+        var fixture = Fixture.Create(EnvironmentKind.LocalMachine, ExecutionMode.Real, PrivilegeState.Administrator);
         var plan = fixture.CreatePlan(OperationIntent.InitializeDisk);
         var token = await fixture.IssueAsync(plan);
         var gate = new ExecutorGate(fixture.Policy, fixture.Authority, fixture.Clock);
@@ -322,6 +326,16 @@ public sealed class ExecutionSecurityTests
                 kind == EnvironmentKind.UserProvidedDisposableMachine,
                 Now);
             var context = new ExecutionContext(environment, mode, privilege, Machine, InventoryVersion, false);
+            if (kind == EnvironmentKind.LocalMachine)
+            {
+                context = context with
+                {
+                    RealSession = new TrustedRealSession(SessionId.New(), "product-session", "process-instance", 1234,
+                        Now.AddMinutes(-1), "C:\\WinPool\\App.exe", true),
+                    CurrentTargetFingerprint = "target-fingerprint",
+                    CurrentPhysicalMemberFingerprint = "physical-member-fingerprint"
+                };
+            }
             var policy = new OperationPolicyEvaluator();
             var clock = timeProvider ?? new ManualTimeProvider(Now);
             var authority = new InMemoryOperationAuthority(policy, clock);
@@ -342,6 +356,19 @@ public sealed class ExecutionSecurityTests
 
         public OperationPlan CreatePlan(OperationIntent intent)
         {
+            if (Context.Environment.Kind == EnvironmentKind.LocalMachine &&
+                OperationSecurityCatalog.IsStorageStructureMutation(intent))
+            {
+                var disk = new StorageObjectId(SystemId, StorageObjectKind.OsDisk, "disk-unique-id");
+                var proposal = new RealOperationIntentRequest(intent, SystemId, [disk],
+                    [new RealOperationStep("initialize", new InitializeGptCommand(RealTargetReference.ForExisting(disk)),
+                        [], "RAW disk verified", "GPT verified", "Existing partition data may be lost", "test evidence")],
+                    "GPT initialized");
+                return RealOperationPlanFactory.Create(proposal, OperationId.New(), Context.Environment,
+                    Context.RealSession!, InventoryVersion, Context.CurrentTargetFingerprint!,
+                    Context.CurrentPhysicalMemberFingerprint!, "test evidence", Now, Now.AddMinutes(2));
+            }
+
             var request = CreateRequest(intent);
             var definition = OperationSecurityCatalog.Get(intent);
             return OperationPlan.Create(
@@ -361,7 +388,9 @@ public sealed class ExecutionSecurityTests
 
         public async Task<OperationAuthorizationToken> IssueAsync(OperationPlan plan)
         {
-            var result = await Authority.AuthorizeAsync(plan, Context, true, CancellationToken.None);
+            var result = plan.RealOperation is null
+                ? await Authority.AuthorizeAsync(plan, Context, true, CancellationToken.None)
+                : await Authority.AuthorizeConfirmedRealAsync(plan, Context, plan.PlanHash, CancellationToken.None);
             Assert.Equal(AuthorizationIssueKind.Issued, result.Kind);
             return Assert.IsType<OperationAuthorizationToken>(result.Token);
         }

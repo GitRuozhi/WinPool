@@ -49,7 +49,11 @@ public enum OperationIntent
     ResizeVirtualDisk,
     RepairStorageObject,
     ClearDisk,
-    RawDeviceWrite
+    RawDeviceWrite,
+    SetDriveLetter,
+    RenameStorageObject,
+    SetVolumeLabel,
+    RebuildStoragePool
 }
 
 public sealed record EnvironmentProfile(
@@ -95,6 +99,8 @@ public sealed record OperationPlan(
     DateTimeOffset CreatedAt,
     string PlanHash)
 {
+    public RealOperationSpecification? RealOperation { get; init; }
+
     public static OperationPlan Create(
         OperationRequest request,
         ExecutionCapability requiredCapabilities,
@@ -162,7 +168,15 @@ public sealed record ExecutionContext(
     PrivilegeState Privilege,
     string CurrentMachineBinding,
     string CurrentInventoryVersion,
-    bool IsReleaseBuild);
+    bool IsReleaseBuild)
+{
+    public TrustedRealSession? RealSession { get; init; }
+    public string? CurrentTargetFingerprint { get; init; }
+    public string? CurrentPhysicalMemberFingerprint { get; init; }
+    // Diagnostic only. Real policy compares CurrentInventoryVersion as a closure
+    // fingerprint of relevant target facts, not a timestamped raw snapshot hash.
+    public string? RawInventorySnapshotVersion { get; init; }
+}
 
 public enum ExecutionEventKind
 {

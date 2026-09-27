@@ -32,10 +32,14 @@ public static class OperationSecurityCatalog
             [OperationIntent.CreateVirtualDisk] = Mutation(RiskLevel.R4StorageStructureMutation, "Virtual disk topology"),
             [OperationIntent.DeleteVirtualDisk] = Mutation(RiskLevel.R4StorageStructureMutation, "Virtual disk topology"),
             [OperationIntent.ResizeVirtualDisk] = Mutation(RiskLevel.R4StorageStructureMutation, "Virtual disk topology"),
+            [OperationIntent.SetDriveLetter] = Mutation(RiskLevel.R4StorageStructureMutation, "Partition access path"),
+            [OperationIntent.RenameStorageObject] = Mutation(RiskLevel.R4StorageStructureMutation, "Storage object name"),
+            [OperationIntent.SetVolumeLabel] = Mutation(RiskLevel.R4StorageStructureMutation, "Volume label"),
 
             [OperationIntent.DeleteStoragePool] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Storage pool removal"),
             [OperationIntent.RepairStorageObject] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Storage object repair"),
             [OperationIntent.ClearDisk] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Whole disk"),
+            [OperationIntent.RebuildStoragePool] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Storage pool reconstruction"),
             [OperationIntent.RawDeviceWrite] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Raw device")
         };
 

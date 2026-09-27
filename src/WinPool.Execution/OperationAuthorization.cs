@@ -13,7 +13,11 @@ public sealed record OperationAuthorizationToken(
     string InventoryVersion,
     string TargetFingerprint,
     DateTimeOffset IssuedAt,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt)
+{
+    public string? SessionBinding { get; init; }
+    public string? PhysicalMemberFingerprint { get; init; }
+}
 
 public enum AuthorizationIssueKind
 {
@@ -38,7 +42,8 @@ public enum AuthorizationValidationKind
     InventoryMismatch,
     MachineMismatch,
     EnvironmentMismatch,
-    TargetMismatch
+    TargetMismatch,
+    SessionMismatch
 }
 
 public sealed record AuthorizationValidationResult(
@@ -55,6 +60,12 @@ public interface IOperationAuthority
         OperationPlan plan,
         ExecutionContext context,
         bool userConfirmed,
+        CancellationToken cancellationToken);
+
+    Task<AuthorizationIssueResult> AuthorizeConfirmedRealAsync(
+        OperationPlan plan,
+        ExecutionContext context,
+        string confirmedPlanHash,
         CancellationToken cancellationToken);
 
     AuthorizationValidationResult Consume(
@@ -100,11 +111,53 @@ public sealed class InMemoryOperationAuthority : IOperationAuthority
             return new(AuthorizationIssueKind.Rejected, null, decision.Code, decision.Message);
         }
 
+        if (OperationSecurityCatalog.IsStorageStructureMutation(plan.Intent))
+        {
+            return new(AuthorizationIssueKind.ConfirmationRequired, null,
+                "authority.prepared-real-confirmation-required",
+                "A real plan must be confirmed through its exact prepared hash and trusted session.");
+        }
+
         if (decision.Kind == PolicyDecisionKind.RequiresConfirmation && !userConfirmed)
         {
             return new(AuthorizationIssueKind.ConfirmationRequired, null, decision.Code, decision.Message);
         }
 
+        return Issue(plan, context);
+    }
+
+    public async Task<AuthorizationIssueResult> AuthorizeConfirmedRealAsync(
+        OperationPlan plan,
+        ExecutionContext context,
+        string confirmedPlanHash,
+        CancellationToken cancellationToken)
+    {
+        var decision = await _policy.EvaluateAsync(plan, context, cancellationToken).ConfigureAwait(false);
+        if (decision.Kind == PolicyDecisionKind.Rejected)
+        {
+            return new(AuthorizationIssueKind.Rejected, null, decision.Code, decision.Message);
+        }
+
+        if (!OperationSecurityCatalog.IsStorageStructureMutation(plan.Intent) ||
+            !StringComparer.Ordinal.Equals(confirmedPlanHash, plan.PlanHash) ||
+            plan.RealOperation is null || context.RealSession is null ||
+            !StringComparer.Ordinal.Equals(plan.RealOperation.SessionBinding, context.RealSession.Binding))
+        {
+            return new(AuthorizationIssueKind.Rejected, null,
+                "authority.real-confirmation-mismatch", "The confirmed prepared plan or session does not match.");
+        }
+
+        if (_timeProvider.GetUtcNow() >= plan.RealOperation.ExpiresAt)
+        {
+            return new(AuthorizationIssueKind.Rejected, null,
+                "authority.real-plan-expired", "The prepared real plan expired.");
+        }
+
+        return Issue(plan, context);
+    }
+
+    private AuthorizationIssueResult Issue(OperationPlan plan, ExecutionContext context)
+    {
         var now = _timeProvider.GetUtcNow();
         var token = new OperationAuthorizationToken(
             CreateTokenId(),
@@ -112,9 +165,13 @@ public sealed class InMemoryOperationAuthority : IOperationAuthority
             plan.EnvironmentId,
             context.CurrentMachineBinding,
             plan.InventoryVersion,
-            ComputeTargetFingerprint(plan.Targets),
+            plan.RealOperation?.TargetFingerprint ?? ComputeTargetFingerprint(plan.Targets),
             now,
-            now.Add(_lifetime));
+            now.Add(_lifetime))
+        {
+            SessionBinding = plan.RealOperation?.SessionBinding,
+            PhysicalMemberFingerprint = plan.RealOperation?.PhysicalMemberFingerprint
+        };
 
         if (!_grants.TryAdd(token.TokenId, new GrantState(token, false)))
         {
@@ -148,6 +205,11 @@ public sealed class InMemoryOperationAuthority : IOperationAuthority
             return Invalid(AuthorizationValidationKind.Expired, "authority.expired", "The authorization token expired.");
         }
 
+        if (plan.RealOperation is { } real && _timeProvider.GetUtcNow() >= real.ExpiresAt)
+        {
+            return Invalid(AuthorizationValidationKind.Expired, "authority.expired", "The prepared real plan expired.");
+        }
+
         if (token.EnvironmentId != plan.EnvironmentId ||
             token.EnvironmentId != context.Environment.Id)
         {
@@ -166,9 +228,27 @@ public sealed class InMemoryOperationAuthority : IOperationAuthority
             return Invalid(AuthorizationValidationKind.InventoryMismatch, "authority.inventory-mismatch", "The inventory changed after authorization.");
         }
 
-        if (!StringComparer.Ordinal.Equals(token.TargetFingerprint, ComputeTargetFingerprint(plan.Targets)))
+        if (!StringComparer.Ordinal.Equals(token.TargetFingerprint,
+                plan.RealOperation?.TargetFingerprint ?? ComputeTargetFingerprint(plan.Targets)) ||
+            (plan.RealOperation is not null &&
+             !StringComparer.Ordinal.Equals(token.TargetFingerprint, context.CurrentTargetFingerprint)))
         {
             return Invalid(AuthorizationValidationKind.TargetMismatch, "authority.target-mismatch", "The target set changed after authorization.");
+        }
+
+        if (plan.RealOperation is not null &&
+            (context.RealSession is not { IsArmed: true } session ||
+             !StringComparer.Ordinal.Equals(token.SessionBinding, session.Binding) ||
+             !StringComparer.Ordinal.Equals(token.SessionBinding, plan.RealOperation.SessionBinding)))
+        {
+            return Invalid(AuthorizationValidationKind.SessionMismatch, "authority.session-mismatch", "The real session changed after authorization.");
+        }
+
+        if (plan.RealOperation is not null &&
+            (!StringComparer.Ordinal.Equals(token.PhysicalMemberFingerprint, plan.RealOperation.PhysicalMemberFingerprint) ||
+             !StringComparer.Ordinal.Equals(token.PhysicalMemberFingerprint, context.CurrentPhysicalMemberFingerprint)))
+        {
+            return Invalid(AuthorizationValidationKind.TargetMismatch, "authority.physical-member-mismatch", "The physical member changed after authorization.");
         }
 
         var computedPlanHash = OperationPlanHasher.Compute(plan);

@@ -24,6 +24,11 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
 
     public PolicyDecision Evaluate(OperationPlan plan, ExecutionContext context)
     {
+        if (plan.Targets is null || plan.Parameters is null || plan.Steps is null)
+        {
+            return PolicyDecision.Reject("policy.plan-invalid", "The operation plan is incomplete.");
+        }
+
         if (plan.EnvironmentId != context.Environment.Id)
         {
             return PolicyDecision.Reject("policy.environment-mismatch", "The plan belongs to another environment.");
@@ -45,14 +50,31 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
             return PolicyDecision.Reject("policy.target-system-mismatch", "A target does not belong to the planned system.");
         }
 
-        var computedHash = OperationPlanHasher.Compute(plan);
+        string computedHash;
+        try
+        {
+            computedHash = OperationPlanHasher.Compute(plan);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
+                                        NotSupportedException or NullReferenceException)
+        {
+            return PolicyDecision.Reject("policy.plan-invalid", "The operation plan cannot be validated.");
+        }
         if (string.IsNullOrWhiteSpace(plan.PlanHash) ||
             !StringComparer.Ordinal.Equals(plan.PlanHash, computedHash))
         {
             return PolicyDecision.Reject("policy.plan-hash-invalid", "The operation plan changed after it was created.");
         }
 
-        var definition = OperationSecurityCatalog.Get(plan.Intent);
+        OperationSecurityDefinition definition;
+        try
+        {
+            definition = OperationSecurityCatalog.Get(plan.Intent);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return PolicyDecision.Reject("policy.unknown-intent", "The operation intent is not supported.");
+        }
 
         // This check deliberately precedes risk, capability and privilege handling.
         // Real mode, administrator elevation, or forged plan metadata can never
@@ -92,9 +114,45 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
             return PolicyDecision.Reject("policy.replay-environment-required", "Historical event replay requires a replay environment.");
         }
 
-        if (plan.Risk >= RiskLevel.R5IrreversibleOrBroadDestruction)
+        if (definition.MinimumRisk >= RiskLevel.R4StorageStructureMutation)
         {
-            return PolicyDecision.Reject("policy.r5-not-implemented", "R5 operations are not implemented in the current WinPool release.");
+            if (plan.Intent is OperationIntent.RepairStorageObject or OperationIntent.RawDeviceWrite ||
+                plan.Risk > RiskLevel.R5IrreversibleOrBroadDestruction ||
+                (plan.Risk >= RiskLevel.R5IrreversibleOrBroadDestruction &&
+                 plan.Intent is not (OperationIntent.ConvertDisk or
+                     OperationIntent.DeleteStoragePool or OperationIntent.RebuildStoragePool or
+                     OperationIntent.DeleteVirtualDisk or OperationIntent.DeletePartition)))
+            {
+                return PolicyDecision.Reject("policy.real-operation-not-listed", "This real storage operation is outside the closed stage-one list.");
+            }
+
+            if (context.Environment.Kind != WinPool.Domain.EnvironmentKind.LocalMachine ||
+                context.Environment.IsUserProvidedDisposableEnvironment)
+            {
+                return PolicyDecision.Reject("policy.local-machine-required", "Real storage mutation requires a verified local-machine environment.");
+            }
+
+            if (context.Mode != WinPool.Domain.ExecutionMode.Real ||
+                context.Privilege != WinPool.Domain.PrivilegeState.Administrator ||
+                context.RealSession is not { IsArmed: true, IsWellFormed: true } session)
+            {
+                return PolicyDecision.Reject("policy.real-session-required", "An armed administrator real session is required.");
+            }
+
+            if (!RealOperationValidator.IsValid(plan))
+            {
+                return PolicyDecision.Reject("policy.real-plan-invalid", "The plan lacks valid closed real storage steps.");
+            }
+
+            if (!StringComparer.Ordinal.Equals(plan.RealOperation!.MachineBinding, context.CurrentMachineBinding) ||
+                !StringComparer.Ordinal.Equals(plan.RealOperation.SessionBinding, session.Binding) ||
+                !StringComparer.Ordinal.Equals(plan.RealOperation.TargetFingerprint, context.CurrentTargetFingerprint) ||
+                !StringComparer.Ordinal.Equals(plan.RealOperation.PhysicalMemberFingerprint, context.CurrentPhysicalMemberFingerprint))
+            {
+                return PolicyDecision.Reject("policy.real-binding-mismatch", "The machine, session or target facts changed after planning.");
+            }
+
+            return PolicyDecision.Confirm("policy.real-confirmation-required", "Confirm the exact prepared real storage plan and its data loss.");
         }
 
         if (context.IsReleaseBuild &&

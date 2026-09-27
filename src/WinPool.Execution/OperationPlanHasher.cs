@@ -37,7 +37,8 @@ public static class OperationPlanHasher
             plan.RollbackDescription,
             plan.IrreversibleEffects,
             plan.PlannerAlgorithm,
-            plan.CreatedAt
+            plan.CreatedAt,
+            plan.RealOperation
         };
 
         var json = JsonSerializer.Serialize(canonical);
