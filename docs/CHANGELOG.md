@@ -4,7 +4,7 @@
 
 当前产品仍为 V0.57，V0.58 是 [Plan](Plan.md) 的目标版本；阶段尚处 P0 写入前准入，没有真实磁盘写入或实机验收。已加入 IPC 12 的封闭准备／接受／查询／停后续请求、经 OS 核实的 Agent 会话门、类型化实时计划及步骤、schema 18 的持久状态和重启对账、Windows 封闭适配，以及两页单盘操作的计划确认入口。H01 清空至 RAW 与 A16 删除重建要求独立列明损失并确认；模拟路径保留。当前 C04/C05 与 D 类真实入口禁用，C 类其它分支仍须现场能力证据。
 
-本阶段最终自动工程门已通过：Release restore 成功，标准 Release 全解构建 0 警告／0 错误，全解测试 896 passed、0 failed、3 项既有大型监控归档测量 skipped；直接和传递依赖审计成功，未报告已知漏洞。App.Tests 15/15、Agent.Tests 67/67、Agent.Client.Tests 22/22、IPC.Tests 9/9 包含在总数内；证据位于 `artifacts/test-results/20260927-real-edit-stage1/final-gate-layout/`。P0 只读拓扑已采，但 WDC 的只读／BitLocker 状态和 A 类逐命令支持性仍缺完整写前证据；P5 无写原生流程和 P6 真实设备验收仍未完成，也没有实盘写入。本条记录实施进度，不代表阶段完成或发布验收。
+本阶段最终自动工程门已通过：Release restore 成功，标准 Release 全解构建 0 警告／0 错误，全解测试 896 passed、0 failed、3 项既有大型监控归档测量 skipped；直接和传递依赖审计覆盖 23 项目，未报告已知漏洞。App.Tests 15/15、Agent.Tests 67/67、Agent.Client.Tests 22/22、IPC.Tests 9/9 包含在总数内；证据位于 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/`。P0 只读拓扑已采，但 WDC 的只读／BitLocker 状态和 A 类逐命令支持性仍缺完整写前证据；P5 无写原生流程和 P6 真实设备验收仍未完成，也没有实盘写入。本条记录实施进度，不代表阶段完成或发布验收。
 
 ## 2026-09-27：V0.57 实机操作前缺陷收口
 
