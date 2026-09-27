@@ -317,7 +317,7 @@ P0/P6 用当前只读采集填写，未知写“未采集”，不能按型号�
 | --- | --- |
 | 主机名/稳定绑定、Windows 版本/SKU/build、Storage 模块版本 | `DESKTOP-BLE6H18`；机器绑定哈希已采；Windows 10 Pro for Workstations 22H2/build 19045.7725；本机 Storage PowerShell 模块 2.0.0.0 |
 | WDC 型号/序列号、PhysicalDisk UniqueId/ObjectId、OS Disk UniqueId/路径/Number、容量/扇区 | `WDC WD40EZAZ-00SF3B0`，序列号尾 `FP80`；OS Disk 0，4,000,787,030,016 bytes，逻辑/物理扇区 512/4096 bytes；完整原始 Windows ID 仍须从固定采集提取并写入 H00 私有证据 |
-| WDC 当前池/层/VD/分区/卷/挂载及全部关联成员 | 仅 primordial 池，**无实际池、层、VD**；WDC 直接 GPT，分区 1 为 MSR（offset 17,408、size 16,759,808 bytes），分区 2 为近乎占满全盘的 BasicData NTFS，挂载 `E:`；WDC 闭包为单一物理盘 |
+| WDC 当前池/层/VD/分区/卷/挂载及全部关联成员 | 仅 primordial 池，**无实际池、层、VD**；WDC 直接 GPT，分区 1 为 MSR（offset 17,408、size 16,759,808 bytes），分区 2 为近乎占满全盘的 BasicData NTFS，挂载 `E:`；采集时该卷报告 281,477,120 bytes 已用（含文件系统元数据，内容未盘点），清理会失去原数据；WDC 闭包为单一物理盘。H00 须复采已用空间和其它前态，不能用本值代替当次损失说明 |
 | Boot/System/PageFile/CrashDump/只读/加密/健康/CanPool 和拒绝原因 | WDC 的 Boot/System/PageFile/CrashDump 均为 false，健康 Healthy/OK；`CanPool=false`，原因 `InsufficientCapacity`；普通采集显示 OS Disk 和 `E:` 数据分区 `IsReadOnly=false`，MSR 的该值为 null。独立管理员安全探针访问被拒，BitLocker 状态未知，写入前必须补齐独立安全核验 |
 | 两块 Samsung 的唯一身份、关联对象及结构基线 | 980 PRO 为 Disk 1，承担 Boot/System/PageFile/CrashDump，含 EFI、MSR、BasicData 和两个 Recovery；980 为 Disk 2，单个 BasicData NTFS、挂载 `D:`；两者与 WDC 闭包分离。原始完整身份与前后对比留 H00/P6 私有证据 |
 | 运行目录/数据根/仓库/证据与物理盘关系 | 仓库和本轮证据位于 `D:`（Samsung 980）；2026-09-27 当前 Agent 进程映像位于 `D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release`，App 已正常退出；数据位置指针为 `Standard`，当前数据根为 `C:\Users\Admin\AppData\Local\WinPool`（980 PRO）；分页文件在 `C:`。本轮只读进程映像/服务路径查询未发现 `E:` 依赖，H00 须在 App/Agent 实际运行时重新核对并检查 WDC `E:` 的占用与关联，不能凭此摘要直接清盘。 |
