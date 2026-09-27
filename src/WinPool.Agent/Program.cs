@@ -138,7 +138,11 @@ internal static class Program
                 $"agent-{agentSessionId:N}");
             var realOperations = new AgentRealOperationService(
                 new OperationPlanRepository(store, writeOwner),
-                new WindowsRealStorageBackend(new WindowsRealStorageCommandAdapter()),
+                new ExecutionEventRepository(store, writeOwner),
+                new WindowsRealStorageBackend(
+                    new WindowsRealStorageCommandAdapter(),
+                    new WindowsRealOperationPlanner(
+                        safetyInspector: new WindowsRealStorageSafetyInspector([dataRoot]))),
                 new WindowsRealMachineIdentityProvider(),
                 realModeGate);
             try

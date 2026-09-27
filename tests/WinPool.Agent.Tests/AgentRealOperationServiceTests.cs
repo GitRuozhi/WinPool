@@ -21,7 +21,7 @@ public sealed class AgentRealOperationServiceTests
         var repository = new OperationPlanRepository(store, lease);
         var backend = new RecordingBackend { PauseRunnerPreflight = true };
         var service = new AgentRealOperationService(
-            repository, backend, new FixedMachineIdentity(),
+            repository, new ExecutionEventRepository(store, lease), backend, new FixedMachineIdentity(),
             authority: null, timeProvider: null,
             isSessionStillArmed: _ => true,
             isAdministrator: () => true);
@@ -70,6 +70,8 @@ public sealed class AgentRealOperationServiceTests
         Assert.False(await repository.HasRealWriteBarrierAsync());
         Assert.All(status!.Steps,
             step => Assert.Equal(RealOperationStepState.StoppedBeforeCall, step.State));
+        Assert.All(status.Steps,
+            step => Assert.Equal("operation.step.skipped", step.Code));
     }
 
     [Fact]
@@ -85,7 +87,7 @@ public sealed class AgentRealOperationServiceTests
         var repository = new OperationPlanRepository(store, lease);
         var backend = new RecordingBackend { UnknownStepId = "partition" };
         var service = new AgentRealOperationService(
-            repository, backend, new FixedMachineIdentity(),
+            repository, new ExecutionEventRepository(store, lease), backend, new FixedMachineIdentity(),
             authority: null, timeProvider: null,
             isSessionStillArmed: _ => true,
             isAdministrator: () => true);
@@ -144,6 +146,8 @@ public sealed class AgentRealOperationServiceTests
         Assert.True(await repository.HasRealWriteBarrierAsync());
         Assert.Equal(RealOperationStepState.Verified, status!.Steps[0].State);
         Assert.Equal(RealOperationStepState.OutcomeUnknown, status.Steps[1].State);
+        Assert.Equal("fake.unknown", status.Steps[1].Code);
+        Assert.Equal("fake.reconciled", status.Code);
     }
 
     [Fact]
@@ -159,7 +163,7 @@ public sealed class AgentRealOperationServiceTests
         var repository = new OperationPlanRepository(store, lease);
         var backend = new RecordingBackend();
         var service = new AgentRealOperationService(
-            repository, backend, new FixedMachineIdentity(),
+            repository, new ExecutionEventRepository(store, lease), backend, new FixedMachineIdentity(),
             authority: null, timeProvider: null,
             isSessionStillArmed: _ => true,
             isAdministrator: () => true);

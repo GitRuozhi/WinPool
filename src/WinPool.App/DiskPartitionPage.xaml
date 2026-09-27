@@ -177,6 +177,18 @@
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
                 <Button
+                    x:Name="ClearDiskForPoolButton"
+                    Style="{StaticResource WinPoolButtonBaseStyle}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    Click="ClearDiskForPool_Click"
+                    Visibility="Collapsed">
+                    <TextBlock x:Name="ClearDiskForPoolButtonLabel"
+                               TextWrapping="Wrap" />
+                </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
+                <Button
                     x:Name="DeletePartitionButton"
                     Grid.Column="4"
                     Style="{StaticResource WinPoolButtonBaseStyle}"

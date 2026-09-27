@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\..\src\WinPool.Execution\WinPool.Execution.csproj" />
     <Compile Include="..\..\src\WinPool.App\Services\AgentRealModeSession.cs" Link="AgentRealModeSession.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\AgentShutdownReceiptPolicy.cs" Link="AgentShutdownReceiptPolicy.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationRequestSession.cs" Link="RealOperationRequestSession.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationProposalFactory.cs" Link="RealOperationProposalFactory.cs" />
   </ItemGroup>

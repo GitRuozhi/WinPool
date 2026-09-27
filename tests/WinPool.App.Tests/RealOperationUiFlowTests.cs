@@ -8,6 +8,24 @@ namespace WinPool.App.Tests;
 public sealed class RealOperationUiFlowTests
 {
     [Fact]
+    public void DataLocationSwitchNeedsExplicitCompletedShutdownReceipt()
+    {
+        var correlation = CorrelationId.New();
+        var completed = new ShutdownResponse(new ShutdownResult(true, [], 0, true));
+        Assert.True(AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(
+            ApplicationResult<AgentResponse>.Succeeded(completed, correlation)));
+        Assert.False(AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(
+            ApplicationResult<AgentResponse>.Succeeded(
+                new ShutdownResponse(new ShutdownResult(false, [], 0, true)), correlation)));
+        Assert.False(AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(
+            ApplicationResult<AgentResponse>.Succeeded(
+                new AgentAcknowledgement(), correlation)));
+        Assert.False(AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(
+            ApplicationResult<AgentResponse>.FromStatus(
+                ApplicationStatus.OutcomeUnknown, correlation)));
+    }
+
+    [Fact]
     public async Task RealModeNeedsPositiveAgentReplyAndDisarmsBeforeExitReply()
     {
         var connection = new RecordingConnection(request => request switch
@@ -106,6 +124,79 @@ public sealed class RealOperationUiFlowTests
                 system, disk, RealPartitionRole.Efi,
                 1024 * 1024, 256L * 1024 * 1024,
                 RealFileSystem.Fat32, 65536, false, null, null));
+    }
+
+    [Fact]
+    public void FirstVirtualDiskFreezesSimpleFixedAndOrderedOptionalPartitionSteps()
+    {
+        var system = SystemId.New();
+        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
+        var proposal = RealOperationProposalFactory.CreateFirstVirtualDisk(
+            system, pool, new RealOperationProposalFactory.VirtualDiskOptions(
+                "Data", 16L * 1024 * 1024 * 1024,
+                true, true, true, "WinPool_Test", 'E'));
+        Assert.Equal(OperationIntent.CreateVirtualDisk, proposal.Intent);
+        Assert.Equal(6, proposal.Steps.Count);
+        var create = Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[0].Command);
+        Assert.Equal(65536, create.InterleaveBytes);
+        Assert.Equal(1, create.DataColumns);
+        Assert.Equal(16L * 1024 * 1024 * 1024, create.SizeBytes);
+        Assert.Equal(RealPartitionRole.Msr,
+            Assert.IsType<CreatePartitionCommand>(proposal.Steps[2].Command).Role);
+        Assert.Equal(RealPartitionRole.BasicData,
+            Assert.IsType<CreatePartitionCommand>(proposal.Steps[3].Command).Role);
+        Assert.Contains("create-data", proposal.Steps[5].DependsOn);
+        Assert.Contains("format-data", proposal.Steps[5].DependsOn);
+
+        var noPartition = RealOperationProposalFactory.CreateFirstVirtualDisk(
+            system, pool, new RealOperationProposalFactory.VirtualDiskOptions(
+                "Raw", 16L * 1024 * 1024 * 1024,
+                false, false, false, null, null));
+        Assert.Single(noPartition.Steps);
+    }
+
+    [Fact]
+    public void StandaloneClearTargetsOneExistingOsDiskAndFixedRawState()
+    {
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "wdc-exact-id");
+        var proposal = RealOperationProposalFactory.ClearToRaw(system, disk);
+        Assert.Equal(OperationIntent.ClearDisk, proposal.Intent);
+        Assert.Equal(RealOperationValidator.ClearDiskExpectedFinalState,
+            proposal.ExpectedFinalState);
+        Assert.Equal(disk, Assert.Single(proposal.Targets));
+        var clear = Assert.IsType<ClearDiskCommand>(
+            Assert.Single(proposal.Steps).Command);
+        Assert.False(clear.RemoveOem);
+        Assert.Equal(disk, clear.Disk.Existing);
+    }
+
+    [Fact]
+    public void RebuildListsExactRemovalBeforeReplacementAndKeepsOnePhysicalMember()
+    {
+        var system = SystemId.New();
+        var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "member-id");
+        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "old-pool-id");
+        var disk = new StorageObjectId(system, StorageObjectKind.VirtualDisk, "old-vdisk-id");
+        var proposal = RealOperationProposalFactory.RebuildSingleMemberPool(
+            system, physical, pool, disk, "NewPool",
+            new RealOperationProposalFactory.VirtualDiskOptions(
+                "NewDisk", 16L * 1024 * 1024 * 1024,
+                true, true, true, "Data", 'E'));
+
+        Assert.Equal(OperationIntent.RebuildStoragePool, proposal.Intent);
+        Assert.Equal([physical, pool, disk], proposal.Targets);
+        Assert.Collection(proposal.Steps.Take(4),
+            step => Assert.IsType<DeleteVirtualDiskCommand>(step.Command),
+            step => Assert.IsType<DeletePoolCommand>(step.Command),
+            step => Assert.IsType<CreatePoolCommand>(step.Command),
+            step => Assert.IsType<CreateVirtualDiskCommand>(step.Command));
+        Assert.Equal(["delete-vdisk"], proposal.Steps[1].DependsOn);
+        Assert.Equal(["delete-pool"], proposal.Steps[2].DependsOn);
+        Assert.Equal(["create-pool"], proposal.Steps[3].DependsOn);
+        Assert.Equal("create-pool",
+            Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[3].Command)
+                .Pool.CreatedByStep);
     }
 
     private static ApplicationResult<AgentResponse> AssertDisarmedAtExit(

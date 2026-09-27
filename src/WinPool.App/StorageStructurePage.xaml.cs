@@ -173,6 +173,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        RebuildPoolButton.Content = Text("删除并重建单盘池", "Delete and rebuild single-disk pool");
         QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         UndoButtonLabel.Text = ViewModel.Localization["Undo"];
@@ -534,7 +535,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async Task CommitNameAsync(TextBox field)
     {
-        if (_filling || _renameInProgress || !ViewModel.IsUsingSimulatedInventory)
+        if (_filling || _renameInProgress ||
+            (!ViewModel.IsUsingSimulatedInventory && !ViewModel.CanSubmitRealOperation))
         {
             return;
         }
@@ -594,6 +596,40 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _renameInProgress = true;
         try
         {
+            if (ViewModel.CanSubmitRealOperation)
+            {
+                if (!CanUseRealSingleMemberPool(pool))
+                    return;
+                var system = ViewModel.ActiveDocument.SystemId;
+                StorageObjectKind kind;
+                RealStorageCommand command;
+                if (ReferenceEquals(field, _poolNameBox))
+                {
+                    kind = StorageObjectKind.StoragePool;
+                    var id = new StorageObjectId(system, kind, targetId);
+                    command = new RenamePoolCommand(RealTargetReference.ForExisting(id), requestedName);
+                }
+                else if (ReferenceEquals(field, _virtualDiskNameBox))
+                {
+                    kind = StorageObjectKind.VirtualDisk;
+                    var id = new StorageObjectId(system, kind, targetId);
+                    command = new RenameVirtualDiskCommand(RealTargetReference.ForExisting(id), requestedName);
+                }
+                else
+                {
+                    kind = StorageObjectKind.Volume;
+                    var id = new StorageObjectId(system, kind, targetId);
+                    command = new RenameVolumeCommand(RealTargetReference.ForExisting(id), requestedName);
+                }
+                var target = new StorageObjectId(system, kind, targetId);
+                await SubmitRealAsync(RealOperationProposalFactory.OneStep(
+                    system, kind == StorageObjectKind.Volume
+                        ? OperationIntent.SetVolumeLabel
+                        : OperationIntent.RenameStorageObject,
+                    target, command, $"Name becomes {requestedName}",
+                    "No file data loss expected"));
+                return;
+            }
             ApplicationResult<SimulationEditReceipt> result;
             try
             {
@@ -2119,7 +2155,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         CreatePoolButton.IsEnabled = (simulated
             && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId)))
             || realPoolCandidate is not null;
-        DissolveButton.IsEnabled = simulated && pool is { IsPrimordial: false } && !poolOffline;
+        DissolveButton.IsEnabled = (simulated || CanUseRealSingleMemberPool(pool))
+            && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = simulated
             && _formDirty
             && pool is { IsPrimordial: false }
@@ -2145,12 +2182,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false }
             && !EditWorkspace.IsDraftPool(pool.StableId)
             && !poolOffline;
-        CreateVdiskButton.IsEnabled = canEditPool
+        CreateVdiskButton.IsEnabled = (canEditPool || CanUseRealSingleMemberPool(pool))
             && realVdisk is null
-            && DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD") + DataDiskCount(pool!, "SCM") > 0;
+            && (CanUseRealSingleMemberPool(pool)
+                || DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD")
+                    + DataDiskCount(pool!, "SCM") > 0);
         var virtualDiskOffline = deleteTarget is not null && _working.OsDisks.Any(item =>
             item.VirtualDiskStableId == deleteTarget.StableId && item.IsOffline);
-        DeleteVdiskButton.IsEnabled = canEditPool && deleteTarget is not null && !virtualDiskOffline;
+        DeleteVdiskButton.IsEnabled = (canEditPool || CanUseRealSingleMemberPool(pool))
+            && deleteTarget is not null && !virtualDiskOffline;
+        RebuildPoolButton.Visibility = ViewModel.CanSubmitRealOperation
+            ? Visibility.Visible : Visibility.Collapsed;
+        RebuildPoolButton.IsEnabled = CanUseRealSingleMemberPool(pool)
+            && poolVdisks.Count == 1 && !virtualDiskOffline;
 
         var formEnabled = simulated
             && pool is { IsPrimordial: false }
@@ -2342,8 +2386,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             isDraft
                 ? Text("名称将在创建时生效。", "The name takes effect when the object is created.")
                 : Text("按 Enter 保存名称。", "Press Enter to save the name."));
-        _poolNameBox.IsEnabled = formEnabled;
-        _virtualDiskNameBox.IsEnabled = formEnabled;
+        var realSingleMember = CanUseRealSingleMemberPool(pool);
+        _poolNameBox.IsEnabled = formEnabled || realSingleMember;
+        _virtualDiskNameBox.IsEnabled = formEnabled || (realSingleMember && vdisk is not null);
         var formDisabledReason = ResolveStructureDisabledReason(
             ViewModel.IsUsingSimulatedInventory,
             pool,
@@ -2368,8 +2413,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             volumePartition is null
                 ? Text("卷标将在创建时生效。", "The volume label takes effect when the volume is created.")
                 : Text("按 Enter 保存卷标。", "Press Enter to save the volume label."));
-        _volumeNameBox.IsEnabled = formEnabled
-            && (vdisk is null || volumePartition is not null);
+        _volumeNameBox.IsEnabled = (formEnabled
+            && (vdisk is null || volumePartition is not null))
+            || (realSingleMember && volumePartition is not null);
         SetDisabledReason(_virtualDiskNameBox, formDisabledReason);
         SetDisabledReason(
             _volumeNameBox,
@@ -2785,9 +2831,55 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return candidates.Length == 1 ? candidates[0] : null;
     }
 
-    private void Dissolve_Click(object sender, RoutedEventArgs e)
+    private bool CanUseRealSingleMemberPool(StoragePoolInfo? pool) =>
+        ViewModel.CanSubmitRealOperation && pool is
+        {
+            IsPrimordial: false,
+            MemberPhysicalDiskIds.Count: 1
+        } && !EditWorkspace.IsDraftPool(pool.StableId)
+        && _working.PhysicalDisks.Any(disk =>
+            disk.StableId == pool.MemberPhysicalDiskIds[0]
+            && !disk.IsBoot && !disk.IsSystem && !disk.IsPageFile
+            && !disk.IsCrashDump);
+
+    private async void Dissolve_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
+        if (CanUseRealSingleMemberPool(pool))
+        {
+            var system = ViewModel.ActiveDocument.SystemId;
+            var poolId = new StorageObjectId(system, StorageObjectKind.StoragePool,
+                pool!.StableId);
+            var vdisks = _working.VirtualDisks.Where(item =>
+                item.PoolStableId == pool.StableId).ToArray();
+            if (vdisks.Length > 1)
+                return;
+            var targets = new List<StorageObjectId> { poolId };
+            var steps = new List<RealOperationStep>();
+            if (vdisks.Length == 1)
+            {
+                var vdiskId = new StorageObjectId(system,
+                    StorageObjectKind.VirtualDisk, vdisks[0].StableId);
+                targets.Add(vdiskId);
+                steps.Add(new RealOperationStep("delete-vdisk",
+                    new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(vdiskId)),
+                    [], "The exact virtual disk and its child objects are verified",
+                    "The virtual disk and its child volumes are absent",
+                    "All files, partitions and volumes in the virtual disk are lost",
+                    "Agent live Windows preflight required"));
+            }
+            steps.Add(new RealOperationStep("delete-pool",
+                new DeletePoolCommand(RealTargetReference.ForExisting(poolId)),
+                steps.Count == 0 ? [] : ["delete-vdisk"],
+                "The pool has no remaining virtual disk",
+                "The pool is absent and its one physical member is released",
+                "All remaining pool metadata is removed",
+                "Agent live Windows preflight required"));
+            await SubmitRealAsync(new RealOperationIntentRequest(
+                OperationIntent.DeleteStoragePool, system, targets, steps,
+                $"Delete pool {pool.FriendlyName} and all listed child objects"));
+            return;
+        }
         if (pool is null || pool.IsPrimordial || !ViewModel.IsUsingSimulatedInventory)
         {
             return;
@@ -2863,9 +2955,122 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
     }
 
+    private async Task<RealOperationProposalFactory.VirtualDiskOptions?>
+        PromptRealVirtualDiskOptionsAsync(StoragePoolInfo pool)
+    {
+        var nameBox = new TextBox
+        {
+            Header = Text("虚拟磁盘名称", "Virtual disk name"),
+            Text = pool.FriendlyName + "_VD"
+        };
+        var sizeBox = new TextBox
+        {
+            Header = Text("容量（GiB 整数）", "Capacity (whole GiB)"),
+            Text = "16"
+        };
+        var partitionBox = new CheckBox
+        {
+            Content = Text("自动初始化 GPT 并建立 BasicData 分区",
+                "Initialize GPT and create a BasicData partition"),
+            IsChecked = ViewModel.CurrentPreferences.AutoCreatePartition
+        };
+        var msrBox = new CheckBox
+        {
+            Content = Text("建立 16 MiB MSR", "Create a 16 MiB MSR"),
+            IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize
+        };
+        var formatBox = new CheckBox
+        {
+            Content = Text("快速格式化 NTFS / 64 KiB", "Quick-format NTFS / 64 KiB"),
+            IsChecked = true
+        };
+        var labelBox = new TextBox
+        {
+            Header = Text("卷标（可选）", "Volume label (optional)"),
+            Text = "WinPool_Test"
+        };
+        var letterBox = new TextBox
+        {
+            Header = Text("盘符 D–Z（可留空）", "Drive letter D–Z (optional)"),
+            MaxLength = 1
+        };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(nameBox);
+        panel.Children.Add(sizeBox);
+        panel.Children.Add(partitionBox);
+        panel.Children.Add(msrBox);
+        panel.Children.Add(formatBox);
+        panel.Children.Add(labelBox);
+        panel.Children.Add(letterBox);
+        panel.Children.Add(validation);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = Text("创建首块单盘虚拟磁盘", "Create first single-disk virtual disk"),
+            Content = new ScrollViewer { MaxHeight = 520, Content = panel },
+            PrimaryButtonText = Text("准备计划", "Prepare plan"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+        RealOperationProposalFactory.VirtualDiskOptions? options = null;
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            var name = nameBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(name)
+                || !long.TryParse(sizeBox.Text.Trim(), out var gib)
+                || gib < 1 || gib > long.MaxValue / (1024L * 1024 * 1024))
+            {
+                validation.Text = Text("请输入名称和有效的 GiB 正整数容量。",
+                    "Enter a name and a valid positive whole-GiB capacity.");
+                args.Cancel = true;
+                return;
+            }
+            var letterText = letterBox.Text.Trim().ToUpperInvariant();
+            if (letterText.Length > 0 &&
+                (letterText.Length != 1 || letterText[0] is < 'D' or > 'Z'))
+            {
+                validation.Text = Text("盘符仅可为 D–Z，或留空。",
+                    "The drive letter must be D–Z or blank.");
+                args.Cancel = true;
+                return;
+            }
+            var partition = partitionBox.IsChecked == true;
+            options = new RealOperationProposalFactory.VirtualDiskOptions(
+                name, gib * 1024L * 1024 * 1024,
+                partition, partition && msrBox.IsChecked == true,
+                partition && formatBox.IsChecked == true,
+                partition && formatBox.IsChecked == true ? labelBox.Text : null,
+                partition && letterText.Length == 1 ? letterText[0] : null);
+        };
+        return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary
+            ? options : null;
+    }
+
     private async void CreateVdisk_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
+        if (CanUseRealSingleMemberPool(pool))
+        {
+            if (_working.VirtualDisks.Any(item => item.PoolStableId == pool!.StableId))
+                return;
+            var options = await PromptRealVirtualDiskOptionsAsync(pool!);
+            if (options is null)
+                return;
+            var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                StorageObjectKind.StoragePool, pool!.StableId);
+            try
+            {
+                await SubmitRealAsync(RealOperationProposalFactory.CreateFirstVirtualDisk(
+                    ViewModel.ActiveDocument.SystemId, target, options));
+            }
+            catch (ArgumentException exception)
+            {
+                await ShowMessageAsync(Text("真实虚拟磁盘参数不受支持", "Real virtual disk parameters are unsupported"),
+                    exception.Message);
+            }
+            return;
+        }
         if (pool is null
             || pool.IsPrimordial
             || EditWorkspace.IsDraftPool(pool.StableId)
@@ -2928,9 +3133,93 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return ("Simple", 65536);
     }
 
-    private void DeleteVdisk_Click(object sender, RoutedEventArgs e)
+    private async void RebuildPool_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
+        if (!CanUseRealSingleMemberPool(pool))
+            return;
+        var oldVdisks = _working.VirtualDisks.Where(item =>
+            item.PoolStableId == pool!.StableId).ToArray();
+        if (oldVdisks.Length != 1)
+            return;
+        var oldVdisk = oldVdisks[0];
+        var physicalId = pool!.MemberPhysicalDiskIds[0];
+        var physical = _working.PhysicalDisks.SingleOrDefault(item =>
+            item.StableId == physicalId);
+        if (physical is null)
+            return;
+
+        var newPoolName = await PromptAsync(
+            Text("重建后的池名称", "New pool name after rebuild"), pool.FriendlyName);
+        if (string.IsNullOrWhiteSpace(newPoolName))
+            return;
+        var options = await PromptRealVirtualDiskOptionsAsync(pool);
+        if (options is null)
+            return;
+
+        var osDiskIds = _working.OsDisks.Where(item =>
+            item.VirtualDiskStableId == oldVdisk.StableId)
+            .Select(item => item.StableId).ToHashSet(StringComparer.Ordinal);
+        var partitions = _working.Partitions.Where(item =>
+            item.OsDiskStableId is { } id && osDiskIds.Contains(id))
+            .OrderBy(item => item.Offset).ToArray();
+        var partitionList = partitions.Length == 0
+            ? Text("（未发现子分区）", "(no child partitions reported)")
+            : string.Join(Environment.NewLine, partitions.Select(item =>
+                $"#{item.PartitionNumber} {item.Type} " +
+                $"offset={item.Offset} size={item.Size} " +
+                $"{item.DriveLetter}: {item.FileSystem} {item.FileSystemLabel} " +
+                $"id={item.StableId}"));
+        var loss = string.Join(Environment.NewLine,
+            $"Physical member: {physical.StableId} / {physical.Model} / {physical.SerialNumber}",
+            $"Old pool: {pool.StableId} / {pool.FriendlyName}",
+            $"Old virtual disk: {oldVdisk.StableId} / {oldVdisk.FriendlyName}",
+            Text("以下分区、卷、文件和盘符将全部丢失：",
+                "All partitions, volumes, files and drive letters below will be lost:"),
+            partitionList,
+            $"New pool: {newPoolName}",
+            $"New virtual disk: {options.Name} / {options.SizeBytes} bytes",
+            Text("失败会保留已完成步骤，不自动回滚或恢复旧数据。",
+                "Failure preserves completed steps; old data is not automatically restored."));
+        if (!await ConfirmAsync(Text("独立删除重建确认", "Separate delete-and-rebuild confirmation"),
+                loss))
+            return;
+
+        var system = ViewModel.ActiveDocument.SystemId;
+        try
+        {
+            await SubmitRealAsync(RealOperationProposalFactory.RebuildSingleMemberPool(
+                system,
+                new StorageObjectId(system, StorageObjectKind.PhysicalDisk, physical.StableId),
+                new StorageObjectId(system, StorageObjectKind.StoragePool, pool.StableId),
+                new StorageObjectId(system, StorageObjectKind.VirtualDisk, oldVdisk.StableId),
+                newPoolName, options));
+        }
+        catch (ArgumentException exception)
+        {
+            await ShowMessageAsync(Text("重建参数不受支持", "Rebuild parameters are unsupported"),
+                exception.Message);
+        }
+    }
+
+    private async void DeleteVdisk_Click(object sender, RoutedEventArgs e)
+    {
+        var pool = SelectedPool();
+        if (CanUseRealSingleMemberPool(pool))
+        {
+            var vdisks = _working.VirtualDisks.Where(item =>
+                item.PoolStableId == pool!.StableId).ToArray();
+            if (vdisks.Length != 1)
+                return;
+            var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                StorageObjectKind.VirtualDisk, vdisks[0].StableId);
+            await SubmitRealAsync(RealOperationProposalFactory.OneStep(
+                ViewModel.ActiveDocument.SystemId, OperationIntent.DeleteVirtualDisk,
+                target, new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(target)),
+                $"Virtual disk {vdisks[0].FriendlyName} and its child objects are absent",
+                "All partitions, volumes, drive letters and files on the virtual disk are lost"));
+            return;
+        }
         if (pool is null
             || pool.IsPrimordial
             || EditWorkspace.IsDraftPool(pool.StableId)

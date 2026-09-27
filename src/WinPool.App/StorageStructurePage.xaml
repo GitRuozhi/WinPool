@@ -379,6 +379,11 @@
                 </controls:ContextHelpHost>
                     </controls:FixedWrapPanel>
                 </ScrollViewer>
+                <Button x:Name="RebuildPoolButton"
+                        HorizontalAlignment="Left"
+                        Click="RebuildPool_Click"
+                        Visibility="Collapsed"
+                        Content="Delete and rebuild single-disk pool" />
                 <Button x:Name="QueryRealOperationButton"
                         HorizontalAlignment="Left"
                         Click="QueryRealOperation_Click"

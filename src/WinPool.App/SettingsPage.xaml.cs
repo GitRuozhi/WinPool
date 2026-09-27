@@ -187,7 +187,7 @@ public sealed partial class SettingsPage : Page
                 ShutdownReason.StorageLocationSwitch,
                 CorrelationId.New()),
             shutdownTimeout.Token);
-        if (shutdown.Value is ShutdownResponse response && !response.Result.Completed)
+        if (!AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(shutdown))
         {
             PublishDataLocationFailure(zh, "agent-shutdown-incomplete");
             return;

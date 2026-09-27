@@ -71,6 +71,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         OfflineButtonLabel.Text = Text("脱机", "Offline");
         InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
         ConvertGptButtonLabel.Text = Text("转换为 GPT", "Convert to GPT");
+        ClearDiskForPoolButtonLabel.Text = Text("清空至 RAW（独立操作）", "Clear to RAW (separate operation)");
         DeletePartitionButtonLabel.Text = Text("删除分区", "Delete partition");
         ExtendButtonLabel.Text = Text("扩展分区", "Extend partition");
         ShrinkButtonLabel.Text = Text("压缩分区", "Shrink partition");
@@ -659,6 +660,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && disk is { IsBoot: false, IsSystem: false } && raw;
         ConvertGptButton.IsEnabled = simulated && isDiskSelection && !diskOffline
             && disk is { IsBoot: false, IsSystem: false } && mbr;
+        ClearDiskForPoolButton.Visibility = real ? Visibility.Visible : Visibility.Collapsed;
+        ClearDiskForPoolButton.IsEnabled = real && isDiskSelection && !diskOffline
+            && disk is { IsBoot: false, IsSystem: false } && !raw;
         DeletePartitionButton.IsEnabled = (simulated || realEditablePartition)
             && !diskOffline && destructivePartition;
         ExtendButton.IsEnabled = canExtend;
@@ -755,6 +759,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                             : mbr
                                 ? Text("当前磁盘已满足转换条件。", "The current disk already meets the conversion conditions.")
                                 : Text("只有 MBR 模拟磁盘可以转换为 GPT。", "Only an MBR simulated disk can be converted to GPT."));
+        SetDisabledReason(ClearDiskForPoolButton,
+            !real ? LocalReadOnlyReason()
+                : disk is null || !isDiskSelection
+                    ? Text("请选择精确的本机磁盘。", "Select the exact local disk.")
+                    : disk.IsBoot || disk.IsSystem
+                        ? Text("系统或启动磁盘禁止清盘。", "A system or boot disk cannot be cleared.")
+                        : raw ? Text("RAW 磁盘无需清盘。", "A RAW disk does not need clearing.")
+                            : Text("该目标的实时安全预检尚未完成。", "Live safety preflight is required for this target."));
         SetDisabledReason(DeletePartitionButton, destructiveReason);
         SetDisabledReason(ExtendButton, extendReason);
         SetDisabledReason(ShrinkButton, shrinkReason);
@@ -1687,6 +1699,46 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             new SimulationEditRequest(SimulationEditKind.ConvertDisk, disk.StableId, PartitionStyle: "GPT"),
             Text("转换成功", "Conversion succeeded"),
             Text("磁盘已转换为 GPT。", "The disk was converted to GPT."));
+    }
+
+    private async void ClearDiskForPool_Click(object sender, RoutedEventArgs e)
+    {
+        var disk = SelectedDisk();
+        if (!ViewModel.CanSubmitRealOperation || disk is null ||
+            disk.IsBoot || disk.IsSystem || disk.IsOffline ||
+            _selectedPartitionId is not null || _selectedUnallocatedOffset is not null)
+            return;
+
+        var physical = _working.PhysicalDisks.SingleOrDefault(item =>
+            item.StableId == disk.PhysicalDiskStableId);
+        var partitions = _working.Partitions.Where(item =>
+            item.OsDiskStableId == disk.StableId).OrderBy(item => item.Offset).ToArray();
+        var partitionList = partitions.Length == 0
+            ? Text("（未发现分区）", "(no partitions reported)")
+            : string.Join(Environment.NewLine, partitions.Select(item =>
+                $"#{item.PartitionNumber} {item.Type} " +
+                $"offset={item.Offset} size={item.Size} " +
+                $"{item.DriveLetter}: {item.FileSystem} {item.FileSystemLabel} " +
+                $"id={item.StableId}"));
+        var preliminary = string.Join(Environment.NewLine,
+            $"OS disk: {disk.StableId}",
+            $"Physical member: {physical?.StableId ?? "unresolved"}",
+            $"Model: {physical?.Model ?? "unresolved"}",
+            $"Serial: {physical?.SerialNumber ?? "unresolved"}",
+            $"Size: {disk.Size} bytes",
+            Text("所有下列分区、卷、文件和盘符将丢失：",
+                "All partitions, volumes, files and drive letters below will be lost:"),
+            partitionList,
+            Text("此操作只清空至 RAW。建池或初始化 GPT 需要另建计划并再次确认。",
+                "This operation only clears to RAW. Pool creation or GPT initialization needs a separate plan and confirmation."));
+        if (!await ConfirmAsync(Text("独立清盘确认", "Separate disk-clear confirmation"),
+                preliminary))
+            return;
+
+        var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+            StorageObjectKind.OsDisk, disk.StableId);
+        await SubmitRealAsync(RealOperationProposalFactory.ClearToRaw(
+            ViewModel.ActiveDocument.SystemId, target));
     }
 
     private bool DiskHoldsStoredData(OsDiskInfo disk) =>

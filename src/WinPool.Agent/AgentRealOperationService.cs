@@ -16,6 +16,7 @@ namespace WinPool.Agent;
 public sealed class AgentRealOperationService : IRealOperationService
 {
     private readonly OperationPlanRepository plans;
+    private readonly ExecutionEventRepository events;
     private readonly IRealStorageBackend? backend;
     private readonly IRealMachineIdentityProvider machineIdentity;
     private readonly IOperationAuthority authority;
@@ -31,12 +32,13 @@ public sealed class AgentRealOperationService : IRealOperationService
 
     public AgentRealOperationService(
         OperationPlanRepository plans,
+        ExecutionEventRepository events,
         IRealStorageBackend? backend,
         IRealMachineIdentityProvider machineIdentity,
         AgentRealModeGate realModeGate,
         IOperationAuthority? authority = null,
         TimeProvider? timeProvider = null)
-        : this(plans, backend, machineIdentity, authority, timeProvider,
+        : this(plans, events, backend, machineIdentity, authority, timeProvider,
             realModeGate.IsSessionArmed,
             IsCurrentAgentAdministrator)
     {
@@ -44,6 +46,7 @@ public sealed class AgentRealOperationService : IRealOperationService
 
     internal AgentRealOperationService(
         OperationPlanRepository plans,
+        ExecutionEventRepository events,
         IRealStorageBackend? backend,
         IRealMachineIdentityProvider machineIdentity,
         IOperationAuthority? authority,
@@ -52,6 +55,7 @@ public sealed class AgentRealOperationService : IRealOperationService
         Func<bool> isAdministrator)
     {
         this.plans = plans ?? throw new ArgumentNullException(nameof(plans));
+        this.events = events ?? throw new ArgumentNullException(nameof(events));
         this.backend = backend;
         this.machineIdentity = machineIdentity
             ?? throw new ArgumentNullException(nameof(machineIdentity));
@@ -598,8 +602,9 @@ public sealed class AgentRealOperationService : IRealOperationService
     private ExecutionEvent Event(
         OperationId operationId,
         ExecutionEventKind kind,
-        string code) =>
-        new(operationId, kind, timeProvider.GetUtcNow(), code, code);
+        string code,
+        string? stepId = null) =>
+        new(operationId, kind, timeProvider.GetUtcNow(), code, stepId ?? code);
 
     private async Task<ApplicationResult<AgentResponse>> StatusAsync(
         PersistedOperation operation,
@@ -607,18 +612,31 @@ public sealed class AgentRealOperationService : IRealOperationService
         CancellationToken cancellationToken)
     {
         var steps = await plans.GetStepsAsync(operation.Plan.OperationId, cancellationToken);
+        var history = await events.ListAsync(operation.Plan.OperationId, cancellationToken);
+        var stepCodes = LatestStepCodes(steps, history);
         var response = new AgentRealOperationResponse(
             operation.Plan,
             ToPublicState(operation.State),
             steps.Select(step => new RealOperationStepProgress(
                 step.StepId,
                 ToPublicState(step.State),
-                null,
+                stepCodes.GetValueOrDefault(step.StepId),
                 step.TargetJson,
                 step.EvidenceJson)).ToArray(),
-            null,
+            history.LastOrDefault()?.Event.Code,
             operation.State == PersistedOperationState.OutcomeUnknown);
         return ApplicationResult<AgentResponse>.Succeeded(response, correlationId);
+    }
+
+    private static IReadOnlyDictionary<string, string> LatestStepCodes(
+        IReadOnlyList<PersistedOperationStep> steps,
+        IReadOnlyList<PersistedExecutionEvent> history)
+    {
+        var known = steps.Select(step => step.StepId).ToHashSet(StringComparer.Ordinal);
+        return history.Where(item => known.Contains(item.Event.Message))
+            .GroupBy(item => item.Event.Message, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last().Event.Code,
+                StringComparer.Ordinal);
     }
 
     private static RealOperationState ToPublicState(PersistedOperationState state) =>
@@ -685,8 +703,11 @@ public sealed class AgentRealOperationService : IRealOperationService
         try
         {
             var stored = await plans.GetStepsAsync(plan.OperationId);
+            var history = await events.ListAsync(plan.OperationId);
+            var stepCodes = LatestStepCodes(stored, history);
             var progress = stored.Select(step => new RealOperationStepProgress(
-                step.StepId, ToPublicState(step.State), null,
+                step.StepId, ToPublicState(step.State),
+                stepCodes.GetValueOrDefault(step.StepId),
                 step.TargetJson, step.EvidenceJson)).ToArray();
             var result = await backend!.ReconcileAsync(
                 plan, progress, CancellationToken.None);
@@ -737,10 +758,12 @@ public sealed class AgentRealOperationService : IRealOperationService
                 if (!await plans.TransitionStepAsync(
                         plan.OperationId, step.StepId,
                         step.State, next,
-                        observed.TargetEvidence,
+                        observed.TargetEvidence ?? step.TargetJson,
                         observed.ResultEvidence,
                         Event(plan.OperationId, ExecutionEventKind.Progress,
-                            "operation.reconciled_step")))
+                            string.IsNullOrWhiteSpace(observed.Code)
+                                ? "operation.reconciled_step"
+                                : observed.Code, step.StepId)))
                 {
                     return;
                 }
@@ -843,7 +866,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.Failed,
                     null, "preflight_failed",
                     Event(operationId, ExecutionEventKind.Failed,
-                        "operation.preflight_failed"));
+                        "operation.preflight_failed", step.Id));
                 interrupted = true;
                 break;
             }
@@ -860,7 +883,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.PreparingCall,
                     preflight.TargetEvidenceJson, null,
                     Event(operationId, ExecutionEventKind.Progress,
-                        "operation.step.preparing_call")))
+                        "operation.step.preparing_call", step.Id)))
             {
                 interrupted = true;
                 break;
@@ -873,7 +896,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.Skipped,
                     null, "stopped_before_call",
                     Event(operationId, ExecutionEventKind.Cancelled,
-                        "operation.step.skipped"));
+                        "operation.step.skipped", step.Id));
                 interrupted = true;
                 break;
             }
@@ -883,7 +906,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.CallIssued,
                     preflight.TargetEvidenceJson, null,
                     Event(operationId, ExecutionEventKind.Progress,
-                        "operation.step.call_issued")))
+                        "operation.step.call_issued", step.Id)))
             {
                 interrupted = true;
                 break;
@@ -903,7 +926,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.OutcomeUnknown,
                     null, "adapter_exception",
                     Event(operationId, ExecutionEventKind.Failed,
-                        "operation.step.outcome_unknown"));
+                        "operation.step.outcome_unknown", step.Id));
                 interrupted = true;
                 break;
             }
@@ -915,7 +938,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.CallIssued,
                     PersistedOperationStepState.OutcomeUnknown,
                     null, result.ResultEvidenceJson,
-                    Event(operationId, ExecutionEventKind.Failed, result.Code));
+                    Event(operationId, ExecutionEventKind.Failed, result.Code, step.Id));
                 interrupted = true;
                 break;
             }
@@ -926,7 +949,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.Verifying,
                     null, result.ResultEvidenceJson,
                     Event(operationId, ExecutionEventKind.Progress,
-                        "operation.step.verifying")))
+                        "operation.step.verifying", step.Id)))
             {
                 interrupted = true;
                 break;
@@ -943,7 +966,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                         next == PersistedOperationStepState.Verified
                             ? ExecutionEventKind.Progress
                             : ExecutionEventKind.Failed,
-                        result.Code)))
+                        result.Code, step.Id)))
             {
                 interrupted = true;
                 break;
@@ -969,12 +992,16 @@ public sealed class AgentRealOperationService : IRealOperationService
                 PersistedOperationStepState.Skipped,
                 null, "stopped_after_previous_step",
                 Event(operationId, ExecutionEventKind.Cancelled,
-                    "operation.step.skipped"));
+                    "operation.step.skipped", step.StepId));
         }
 
-        var progress = (await plans.GetStepsAsync(operationId))
+        var finalStepRecords = await plans.GetStepsAsync(operationId);
+        var finalEvents = await events.ListAsync(operationId);
+        var finalStepCodes = LatestStepCodes(finalStepRecords, finalEvents);
+        var progress = finalStepRecords
             .Select(step => new RealOperationStepProgress(
-                step.StepId, ToPublicState(step.State), null,
+                step.StepId, ToPublicState(step.State),
+                finalStepCodes.GetValueOrDefault(step.StepId),
                 step.TargetJson, step.EvidenceJson)).ToArray();
         RealReconciliationResult reconciled;
         try
