@@ -4,10 +4,9 @@ namespace WinPool.Infrastructure.Sqlite;
 
 public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
 {
-    // V0.48 starts from a deliberately clean schema 15 data root. Do not add
-    // migrations from earlier schemas: they contain retired product domains
-    // and are intentionally rejected by InitializeAsync.
-    public const int CurrentSchemaVersion = 17;
+    // Schemas before 17 contain retired product domains and remain rejected.
+    // Schema 17 is verified in full before the narrow, in-place 18 upgrade.
+    public const int CurrentSchemaVersion = 18;
 
     private readonly string connectionString;
 
@@ -62,7 +61,7 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         if (existing.HasUserTables)
         {
             var version = existing.Version;
-            if (version is null || version.Version < CurrentSchemaVersion)
+            if (version is null || version.Version < 17)
             {
                 throw new LegacySqliteSchemaNotSupportedException(version?.Version);
             }
@@ -71,6 +70,11 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
                 throw new UnsupportedSqliteSchemaVersionException(
                     version.Version,
                     CurrentSchemaVersion);
+            }
+
+            if (version.Version == 17)
+            {
+                await Upgrade17To18Async(cancellationToken);
             }
 
             return;
@@ -130,9 +134,10 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         }
 
         var version = await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken);
-        if (version?.Version == CurrentSchemaVersion)
+        if (version?.Version is 17 or CurrentSchemaVersion)
         {
-            await CurrentSchemaVerifier.VerifyAsync(connection, cancellationToken);
+            await CurrentSchemaVerifier.VerifyAsync(connection, cancellationToken,
+                version.Version == 17 ? Legacy17SchemaDefinition : CurrentSchemaDefinition);
         }
 
         return new ExistingDatabaseInspection(true, version);
@@ -159,6 +164,41 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         bool HasUserTables,
         SqliteSchemaVersion? Version);
 
+    private async Task Upgrade17To18Async(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction =
+            (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var version = connection.CreateCommand();
+        version.Transaction = transaction;
+        version.CommandText = "SELECT schema_version FROM schema_info WHERE singleton = 1;";
+        if (Convert.ToInt32(await version.ExecuteScalarAsync(cancellationToken),
+                System.Globalization.CultureInfo.InvariantCulture) != 17)
+        {
+            throw new InvalidDataException("The schema changed while upgrading from 17 to 18.");
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            ALTER TABLE operation_plans ADD COLUMN authorization_digest TEXT;
+            ALTER TABLE operation_plans ADD COLUMN accepted_at_utc_ms INTEGER;
+            ALTER TABLE operation_plans ADD COLUMN preparation_id TEXT;
+            ALTER TABLE operation_plans ADD COLUMN preparation_intent_hash TEXT;
+            ALTER TABLE operation_steps ADD COLUMN target_json TEXT;
+            ALTER TABLE operation_steps ADD COLUMN evidence_json TEXT;
+            ALTER TABLE operation_steps ADD COLUMN updated_at_utc_ms INTEGER;
+            CREATE UNIQUE INDEX ix_operation_plans_preparation_id
+                ON operation_plans(preparation_id);
+            UPDATE schema_info
+            SET schema_version = 18, applied_at_utc_ms = $applied
+            WHERE singleton = 1 AND schema_version = 17;
+            """;
+        command.Parameters.AddWithValue("$applied", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Validates a current-version database without opening it for write. The
     /// contract is the complete schema definition below, materialized only in
@@ -169,7 +209,8 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
     {
         public static async Task VerifyAsync(
             SqliteConnection actualConnection,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string expectedSchema)
         {
             await using var expectedConnection = new SqliteConnection(
                 new SqliteConnectionStringBuilder
@@ -183,7 +224,7 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             await expectedConnection.OpenAsync(cancellationToken);
             await using (var create = expectedConnection.CreateCommand())
             {
-                create.CommandText = CurrentSchemaDefinition;
+                create.CommandText = expectedSchema;
                 await create.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -501,6 +542,14 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             string Definition);
     }
 
+    private static readonly string Legacy17SchemaDefinition = CurrentSchemaDefinition
+        .Replace(",\n    authorization_digest TEXT,\n    accepted_at_utc_ms INTEGER,\n    preparation_id TEXT,\n    preparation_intent_hash TEXT", string.Empty,
+            StringComparison.Ordinal)
+        .Replace(",\n    target_json TEXT,\n    evidence_json TEXT,\n    updated_at_utc_ms INTEGER", string.Empty,
+            StringComparison.Ordinal)
+        .Replace("\nCREATE UNIQUE INDEX ix_operation_plans_preparation_id\n    ON operation_plans(preparation_id);", string.Empty,
+            StringComparison.Ordinal);
+
     private const string CurrentSchemaDefinition = """
         CREATE TABLE IF NOT EXISTS schema_info(
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -561,14 +610,23 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             risk INTEGER NOT NULL,
             state INTEGER NOT NULL,
             sanitized_json TEXT NOT NULL,
-            created_at_utc_ms INTEGER NOT NULL
+            created_at_utc_ms INTEGER NOT NULL,
+            authorization_digest TEXT,
+            accepted_at_utc_ms INTEGER,
+            preparation_id TEXT,
+            preparation_intent_hash TEXT
         );
+        CREATE UNIQUE INDEX ix_operation_plans_preparation_id
+            ON operation_plans(preparation_id);
         CREATE TABLE IF NOT EXISTS operation_steps(
             operation_id TEXT NOT NULL REFERENCES operation_plans(operation_id) ON DELETE CASCADE,
             step_id TEXT NOT NULL,
             sequence_no INTEGER NOT NULL,
             state INTEGER NOT NULL,
             sanitized_json TEXT NOT NULL,
+            target_json TEXT,
+            evidence_json TEXT,
+            updated_at_utc_ms INTEGER,
             PRIMARY KEY(operation_id, step_id)
         );
         CREATE TABLE IF NOT EXISTS execution_events(

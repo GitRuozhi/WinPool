@@ -182,7 +182,7 @@ public sealed class InventoryRepositoryTests
 
     [Theory]
     [InlineData(16)]
-    [InlineData(18)]
+    [InlineData(19)]
     public async Task StartupHistoryRejectsOtherSchemasWithoutChangingThem(int version)
     {
         await using var database = await InventoryDatabase.CreateAsync();

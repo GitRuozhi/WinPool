@@ -14,6 +14,8 @@ $solutionPath = Join-Path $repositoryRoot 'WinPool.slnx'
 $artifactsRoot = Join-Path $repositoryRoot 'artifacts'
 $runRoot = Join-Path $artifactsRoot $Configuration
 $appExe = Join-Path $runRoot 'WinPool.App.exe'
+. (Join-Path $PSScriptRoot 'Assert-RealOperationIdle.ps1')
+Assert-WinPoolRealOperationIdle -RuntimeRoot $runRoot
 
 $requiredExecutables = [ordered]@{
     'WinPool.App.exe' = 'WinPool.App.exe'

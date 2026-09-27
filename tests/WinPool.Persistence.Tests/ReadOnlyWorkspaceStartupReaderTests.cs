@@ -142,7 +142,7 @@ public sealed class ReadOnlyWorkspaceStartupReaderTests
 
     [Theory]
     [InlineData(16)]
-    [InlineData(18)]
+    [InlineData(19)]
     public async Task UnsupportedSchemasAreRejectedWithoutMutation(int schemaVersion)
     {
         await using var database = await TemporaryDatabase.CreateAsync();

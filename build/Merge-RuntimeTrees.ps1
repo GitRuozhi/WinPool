@@ -20,6 +20,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Preserve-GeneratedOutput.ps1')
+. (Join-Path $PSScriptRoot 'Assert-RealOperationIdle.ps1')
 
 $appRoot = Assert-WinPoolCheckoutPath $AppDir
 $agentRoot = Assert-WinPoolCheckoutPath $AgentDir
@@ -45,6 +46,7 @@ foreach ($sourceRoot in @($normalizedApp, $normalizedAgent)) {
     Assert-WinPoolTreeHasNoLinks $sourceRoot
 }
 Assert-WinPoolRuntimeStopped $destinationRoot
+Assert-WinPoolRealOperationIdle -RuntimeRoot $destinationRoot
 Assert-WinPoolTreeHasNoLinks $destinationRoot
 
 function Get-PublishFileMap([string]$root) {
@@ -141,6 +143,7 @@ try {
             Copy-Item -LiteralPath $portableData -Destination $newData -Recurse -Force
         }
         Assert-WinPoolRuntimeStopped $destinationRoot
+        Assert-WinPoolRealOperationIdle -RuntimeRoot $destinationRoot
         $previousRoot = $null
         if (Test-Path -LiteralPath $destinationRoot) {
             $previousRoot = Move-WinPoolGeneratedOutput $destinationRoot

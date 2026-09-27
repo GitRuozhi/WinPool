@@ -12,7 +12,7 @@ $evidence = Join-Path $fixture 'artifacts/test-results/existing.txt'
 foreach ($directory in @($scripts, $appTree, $agentTree, $runtime, (Split-Path -Parent $evidence))) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
-foreach ($script in @('Merge-RuntimeTrees.ps1', 'Clean-WinPool.ps1', 'Preserve-GeneratedOutput.ps1')) {
+foreach ($script in @('Merge-RuntimeTrees.ps1', 'Clean-WinPool.ps1', 'Preserve-GeneratedOutput.ps1', 'Assert-RealOperationIdle.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $script) -Destination $scripts
 }
 function Assert-True([bool]$condition, [string]$message) { if (-not $condition) { throw $message } }
