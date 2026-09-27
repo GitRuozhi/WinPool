@@ -200,6 +200,16 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
             ValidateTreeHasNoReparsePoints(sourceRoot);
             ValidateTreeHasNoReparsePoints(targetRoot);
+            var realBarrier = await ReadRealOperationBarrierAsync(
+                sourceRoot, requireDatabase: true, cancellationToken);
+            realBarrier ??= await ReadRealOperationBarrierAsync(
+                targetRoot, requireDatabase: false, cancellationToken);
+            if (realBarrier is not null)
+            {
+                return Result<StorageLocationSwitchPlan>(
+                    ApplicationStatus.Rejected, correlationId, realBarrier,
+                    "The storage location contains an unreadable or unfinished real operation.");
+            }
             // A process may have died between target and rollback renames.
             // Transaction trees cannot be discarded based on their names alone.
             if (!CanWriteTarget(targetRoot))
@@ -300,6 +310,16 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
             ValidateTreeHasNoReparsePoints(plan.SourceRoot);
             ValidateTreeHasNoReparsePoints(plan.TargetRoot);
+            var realBarrier = await ReadRealOperationBarrierAsync(
+                plan.SourceRoot, requireDatabase: true, cancellationToken);
+            realBarrier ??= await ReadRealOperationBarrierAsync(
+                plan.TargetRoot, requireDatabase: false, cancellationToken);
+            if (realBarrier is not null)
+            {
+                return Result<StorageLocationState>(
+                    ApplicationStatus.Rejected, correlationId, realBarrier,
+                    "The storage location contains an unreadable or unfinished real operation.");
+            }
             if (!CanWriteTarget(plan.TargetRoot))
             {
                 return Result<StorageLocationState>(
@@ -399,6 +419,17 @@ public sealed class StorageLocationManager : IStorageLocationManager
                 await using var writeLease = await writeCoordinator.QuiesceAndFlushAsync(
                     correlationId,
                     cancellationToken);
+
+                realBarrier = await ReadRealOperationBarrierAsync(
+                    plan.SourceRoot, requireDatabase: true, cancellationToken);
+                realBarrier ??= await ReadRealOperationBarrierAsync(
+                    plan.TargetRoot, requireDatabase: false, cancellationToken);
+                if (realBarrier is not null)
+                {
+                    return Result<StorageLocationState>(
+                        ApplicationStatus.Rejected, correlationId, realBarrier,
+                        "A real operation changed while the location switch was in progress.");
+                }
 
                 DrainSourceDatabaseHandles(plan.SourceRoot);
                 await CheckpointCoreDatabaseAsync(plan.SourceRoot, cancellationToken);
@@ -775,6 +806,60 @@ public sealed class StorageLocationManager : IStorageLocationManager
             FileShare.ReadWrite | FileShare.Delete);
         return stream.Read(header) == header.Length
             && header.SequenceEqual("SQLite format 3\0"u8);
+    }
+
+    private static async Task<string?> ReadRealOperationBarrierAsync(
+        string root,
+        bool requireDatabase,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(root, DatabaseFileName);
+        if (!File.Exists(path))
+        {
+            return requireDatabase && Directory.Exists(root)
+                && Directory.EnumerateFileSystemEntries(root).Any()
+                    ? "storage.location.core_database_unreadable" : null;
+        }
+
+        try
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadOnly,
+                Cache = SqliteCacheMode.Private,
+                Pooling = false
+            }.ToString();
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA quick_check;";
+            if (!StringComparer.Ordinal.Equals(
+                    (string?)await command.ExecuteScalarAsync(cancellationToken), "ok"))
+            {
+                return "storage.location.core_database_unreadable";
+            }
+
+            var version = await SqliteSchemaVersionReader.ReadAsync(
+                connection, cancellationToken);
+            if (version?.Version is not (17 or WinPoolSqliteStore.CurrentSchemaVersion))
+            {
+                return "storage.location.core_database_unreadable";
+            }
+
+            command.CommandText = """
+                SELECT EXISTS(SELECT 1 FROM operation_plans
+                    WHERE risk >= 4 AND state NOT IN (4, 5, 6, 7, 10));
+                """;
+            return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken),
+                System.Globalization.CultureInfo.InvariantCulture) != 0
+                    ? "storage.location.real_operation_unfinished" : null;
+        }
+        catch (Exception exception) when (exception is SqliteException or IOException
+            or UnauthorizedAccessException or InvalidDataException)
+        {
+            return "storage.location.core_database_unreadable";
+        }
     }
 
     private async Task EnsureDatabaseIdentityAsync(

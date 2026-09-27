@@ -9,6 +9,147 @@ namespace WinPool.Persistence.Tests;
 
 public sealed class StorageLocationManagerTests
 {
+    [Theory]
+    [InlineData(8)] // Prepared
+    [InlineData(9)] // Accepted
+    [InlineData(3)] // Running
+    [InlineData(11)] // OutcomeUnknown
+    public async Task PlanRejectsUnfinishedRealOperationInActiveRoot(int state)
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        InsertUnfinishedRealOperation(
+            Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName),
+            state);
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var result = await manager.PlanSwitchAsync(
+            StorageLocationMode.Portable, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.real_operation_unfinished");
+        Assert.False(Directory.Exists(locations.PortableRoot));
+    }
+
+    [Fact]
+    public async Task ApplyRechecksRealWriteBarrierAfterPlanning()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(StorageLocationMode.Portable,
+                CorrelationId.New(), CancellationToken.None)).Value);
+        InsertUnfinishedRealOperation(
+            Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName),
+            11);
+
+        var result = await manager.ApplySwitchAsync(
+            plan, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.real_operation_unfinished");
+        Assert.False(File.Exists(locations.PointerPath));
+    }
+
+    [Fact]
+    public async Task ApplyRechecksRealWriteBarrierAfterQuiescing()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        var path = Path.Combine(
+            locations.StandardRoot, StorageLocationManager.DatabaseFileName);
+        var manager = locations.CreateManager(new CallbackCoordinator(
+            () => InsertUnfinishedRealOperation(path, 11)));
+        var plan = Assert.IsType<StorageLocationSwitchPlan>(
+            (await manager.PlanSwitchAsync(StorageLocationMode.Portable,
+                CorrelationId.New(), CancellationToken.None)).Value);
+
+        var result = await manager.ApplySwitchAsync(
+            plan, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.real_operation_unfinished");
+        Assert.False(File.Exists(locations.PointerPath));
+    }
+
+    [Fact]
+    public async Task PlanRejectsPopulatedActiveRootWithoutCoreDatabase()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("settings.json", "{}");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var result = await manager.PlanSwitchAsync(
+            StorageLocationMode.Portable, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.core_database_unreadable");
+    }
+
+    [Fact]
+    public async Task PlanRejectsUnfinishedRealOperationInExistingTargetRoot()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "source");
+        var targetPath = Path.Combine(
+            locations.PortableRoot, StorageLocationManager.DatabaseFileName);
+        await new WinPoolSqliteStore(targetPath).InitializeAsync();
+        InsertUnfinishedRealOperation(targetPath, 11);
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var result = await manager.PlanSwitchAsync(
+            StorageLocationMode.Portable, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.real_operation_unfinished");
+    }
+
+    [Fact]
+    public async Task PlanRejectsUnreadableCoreDatabase()
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard("winpool.db", "database");
+        File.WriteAllText(Path.Combine(
+            locations.StandardRoot, StorageLocationManager.DatabaseFileName),
+            "corrupt core database");
+        var manager = locations.CreateManager(new RecordingCoordinator());
+
+        var result = await manager.PlanSwitchAsync(
+            StorageLocationMode.Portable, CorrelationId.New(), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Contains(result.Messages,
+            message => message.Code == "storage.location.core_database_unreadable");
+    }
+
+    private static void InsertUnfinishedRealOperation(string path, int state)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false
+        }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO operation_plans(operation_id, plan_hash, environment_id,
+                risk, state, sanitized_json, created_at_utc_ms)
+            VALUES($id, $hash, $environment, 4, $state, '{}', 1);
+            """;
+        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$hash", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$environment", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$state", state);
+        command.ExecuteNonQuery();
+    }
+
     [Fact]
     public async Task PlanThenApplyCopiesDatabaseAndAttachmentsAndRetainsSource()
     {
@@ -63,7 +204,7 @@ public sealed class StorageLocationManagerTests
             applied.Value.DatabasePath);
         Assert.Equal(
             "database",
-            File.ReadAllText(Path.Combine(locations.PortableRoot, "winpool.db")));
+            ReadCoreMarker(Path.Combine(locations.PortableRoot, "winpool.db")));
         Assert.Equal(
             """{"iops":42}""",
             File.ReadAllText(Path.Combine(
@@ -75,7 +216,7 @@ public sealed class StorageLocationManagerTests
         // Migration is copy + pointer commit: the old root remains recoverable.
         Assert.Equal(
             "database",
-            File.ReadAllText(Path.Combine(locations.StandardRoot, "winpool.db")));
+            ReadCoreMarker(Path.Combine(locations.StandardRoot, "winpool.db")));
         Assert.True(File.Exists(Path.Combine(
             locations.StandardRoot,
             "Artifacts",
@@ -129,7 +270,7 @@ public sealed class StorageLocationManagerTests
         Assert.Equal(StorageLocationMode.Portable, applied.Value!.Mode);
         Assert.Contains(applied.Messages, message =>
             message.Code == "storage.location.cleanup_pending");
-        Assert.Equal("database", File.ReadAllText(
+        Assert.Equal("database", ReadCoreMarker(
             Path.Combine(locations.PortableRoot, StorageLocationManager.DatabaseFileName)));
         var current = await manager.GetCurrentAsync(correlation, CancellationToken.None);
         Assert.Equal(StorageLocationMode.Portable, current.Value!.Mode);
@@ -274,7 +415,9 @@ public sealed class StorageLocationManagerTests
 
         Assert.True(result.IsSuccess);
         Assert.True(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db")));
-        Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "winpool.db-wal")));
+        var migratedWal = Path.Combine(locations.PortableRoot, "winpool.db-wal");
+        Assert.True(!File.Exists(migratedWal)
+            || !File.ReadAllBytes(migratedWal).SequenceEqual("stale"u8.ToArray()));
         Assert.Equal(["quiesce", "resume"], coordinator.Events);
     }
 
@@ -484,6 +627,8 @@ public sealed class StorageLocationManagerTests
         File.WriteAllText(Path.Combine(stage, "staged.txt"), "retain stage");
         Directory.CreateDirectory(locations.PortableRoot);
         File.WriteAllText(Path.Combine(locations.PortableRoot, "latest.txt"), "source");
+        await new WinPoolSqliteStore(Path.Combine(
+            locations.PortableRoot, StorageLocationManager.DatabaseFileName)).InitializeAsync();
         File.WriteAllText(locations.PointerPath, "{\"mode\":\"portable\"}");
         var manager = locations.CreateManager(new RecordingCoordinator());
 
@@ -501,8 +646,9 @@ public sealed class StorageLocationManagerTests
     public async Task ApplyRejectsSameLengthContentChangeEvenWhenTimestampIsRestored()
     {
         using var locations = TemporaryLocations.Create();
-        locations.WriteStandard("winpool.db", "AAAA");
-        var sourcePath = Path.Combine(locations.StandardRoot, "winpool.db");
+        locations.WriteStandard("winpool.db", "database");
+        locations.WriteStandard("marker.txt", "AAAA");
+        var sourcePath = Path.Combine(locations.StandardRoot, "marker.txt");
         var originalTimestamp = File.GetLastWriteTimeUtc(sourcePath);
         var coordinator = new RecordingCoordinator();
         var manager = locations.CreateManager(coordinator);
@@ -575,6 +721,8 @@ public sealed class StorageLocationManagerTests
         locations.WriteStandard("old-target.txt", "old standard");
         Directory.CreateDirectory(locations.PortableRoot);
         File.WriteAllText(Path.Combine(locations.PortableRoot, "latest.txt"), "latest portable");
+        await new WinPoolSqliteStore(Path.Combine(
+            locations.PortableRoot, StorageLocationManager.DatabaseFileName)).InitializeAsync();
         var coordinator = new RecordingCoordinator();
         var manager = locations.CreateManager(coordinator, new FailingCommitter(coordinator));
         var plan = Assert.IsType<StorageLocationSwitchPlan>(
@@ -750,7 +898,7 @@ public sealed class StorageLocationManagerTests
 
         Assert.True(result.IsSuccess);
         Assert.False(File.Exists(Path.Combine(locations.PortableRoot, "stale.txt")));
-        Assert.Equal("new-database", File.ReadAllText(
+        Assert.Equal("new-database", ReadCoreMarker(
             Path.Combine(locations.PortableRoot, "winpool.db")));
     }
 
@@ -1404,6 +1552,20 @@ public sealed class StorageLocationManagerTests
                     File.ReadAllBytes(path))))
             .ToArray();
 
+    private static string ReadCoreMarker(string path)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT display_name FROM simulation_documents WHERE document_id = 'fixture-marker';";
+        return (string)command.ExecuteScalar()!;
+    }
+
     private static void AssertNoMigrationTemporaryRoots(
         TemporaryLocations locations,
         string targetName) =>
@@ -1628,7 +1790,30 @@ public sealed class StorageLocationManagerTests
         {
             var path = Path.Combine(StandardRoot, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, contents);
+            if (!string.Equals(relativePath, StorageLocationManager.DatabaseFileName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                File.WriteAllText(path, contents);
+                return;
+            }
+
+            var store = new WinPoolSqliteStore(path);
+            store.InitializeAsync().GetAwaiter().GetResult();
+            using var connection = store.OpenConnectionAsync().GetAwaiter().GetResult();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO simulation_documents(
+                    document_id, document_schema_version, display_name,
+                    sanitized_json, sha256, revision, created_at_utc_ms,
+                    updated_at_utc_ms)
+                VALUES('fixture-marker', 1, $marker, '{}', 'fixture', 1, 1, 1)
+                ON CONFLICT(document_id) DO UPDATE SET display_name = excluded.display_name;
+                """;
+            command.Parameters.AddWithValue("$marker", contents);
+            command.ExecuteNonQuery();
+            command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            command.Parameters.Clear();
+            command.ExecuteNonQuery();
         }
 
         public void Dispose()
