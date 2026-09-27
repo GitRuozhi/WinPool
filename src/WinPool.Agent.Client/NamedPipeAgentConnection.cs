@@ -994,6 +994,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.AcceptRealOperation,
             QueryAgentRealOperationRequest =>
                 AgentControlMessageTypes.QueryRealOperation,
+            QueryAgentRealPartitionResizeRangeRequest =>
+                AgentControlMessageTypes.QueryRealPartitionResizeRange,
             StopAgentRealOperationFollowingStepsRequest =>
                 AgentControlMessageTypes.StopRealOperationFollowingSteps,
             RequestAgentShutdownRequest => AgentControlMessageTypes.Shutdown,
@@ -1046,6 +1048,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<AgentRealModeResponse>(JsonOptions),
             nameof(AgentRealOperationResponse) =>
                 response.Deserialize<AgentRealOperationResponse>(JsonOptions),
+            nameof(AgentRealPartitionResizeRangeResponse) =>
+                response.Deserialize<AgentRealPartitionResizeRangeResponse>(JsonOptions),
             nameof(ShutdownResponse) =>
                 response.Deserialize<ShutdownResponse>(JsonOptions),
             _ => throw new InvalidDataException(

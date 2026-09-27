@@ -176,6 +176,7 @@ public sealed class AgentSessionCoordinator
             or PrepareAgentRealOperationRequest
             or AcceptAgentRealOperationRequest
             or QueryAgentRealOperationRequest
+            or QueryAgentRealPartitionResizeRangeRequest
             or StopAgentRealOperationFollowingStepsRequest)
         {
             return HandleRealOperationAsync(request, verifiedPeer, cancellationToken);
@@ -343,6 +344,7 @@ public sealed class AgentSessionCoordinator
         var productSessionId = request switch
         {
             PrepareAgentRealOperationRequest typed => typed.ProductSessionId,
+            QueryAgentRealPartitionResizeRangeRequest typed => typed.ProductSessionId,
             _ => string.Empty
         };
         if (!realModeGate.TryUseForNewWrite(peer, productSessionId, out code))
@@ -355,6 +357,9 @@ public sealed class AgentSessionCoordinator
         {
             PrepareAgentRealOperationRequest typed =>
                 await service.PrepareAsync(typed, session, cancellationToken),
+            QueryAgentRealPartitionResizeRangeRequest typed =>
+                await service.QueryPartitionResizeRangeAsync(
+                    typed, session, cancellationToken),
             _ => RejectUnsupportedRequest(request.CorrelationId)
         };
     }

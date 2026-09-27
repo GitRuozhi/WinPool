@@ -38,6 +38,8 @@ public static class AgentControlMessageTypes
     public const string PrepareRealOperation = "agent.request.prepare_real_operation";
     public const string AcceptRealOperation = "agent.request.accept_real_operation";
     public const string QueryRealOperation = "agent.request.query_real_operation";
+    public const string QueryRealPartitionResizeRange =
+        "agent.request.query_real_partition_resize_range";
     public const string StopRealOperationFollowingSteps =
         "agent.request.stop_real_operation_following_steps";
     public const string Shutdown = "agent.request.shutdown";

@@ -105,6 +105,8 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<AcceptAgentRealOperationRequest>(envelope),
                 AgentControlMessageTypes.QueryRealOperation =>
                     Deserialize<QueryAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.QueryRealPartitionResizeRange =>
+                    Deserialize<QueryAgentRealPartitionResizeRangeRequest>(envelope),
                 AgentControlMessageTypes.StopRealOperationFollowingSteps =>
                     Deserialize<StopAgentRealOperationFollowingStepsRequest>(envelope),
                 AgentControlMessageTypes.Shutdown =>

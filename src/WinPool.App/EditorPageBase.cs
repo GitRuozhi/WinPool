@@ -194,20 +194,8 @@ public class EditorPageBase : Page
         }
 
         var plan = frozen.Plan;
-        var specification = plan.RealOperation;
-        var stepLines = specification.Steps.Select((step, index) =>
-            $"{index + 1}. {step.Command.GetType().Name}\n" +
-            $"   {step.BeforeCondition}\n   {step.AfterCondition}\n" +
-            $"   {Text("数据损失", "Data loss")}: {step.DataLoss}");
-        var confirmation = string.Join(Environment.NewLine + Environment.NewLine, new[]
-        {
-            $"OperationId: {plan.OperationId.Value}",
-            $"Plan hash: {plan.PlanHash}",
-            $"{Text("目标", "Target")}: {plan.ImpactScope}",
-            $"{Text("不可逆影响", "Irreversible effects")}: {plan.IrreversibleEffects}",
-            $"{Text("过期时间", "Expires")}: {specification.ExpiresAt.LocalDateTime:G}",
-            string.Join(Environment.NewLine + Environment.NewLine, stepLines)
-        });
+        var confirmation = RealOperationConfirmationFormatter.Format(plan,
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
         if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation))
             return false;
         flow.Confirm(frozen);
@@ -307,6 +295,74 @@ public class EditorPageBase : Page
         {
             PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
                 "real", exception, "real.query.failed");
+        }
+    }
+
+    protected async Task StopRealOperationFollowingStepsByIdAsync()
+    {
+        if (ViewModel.AgentConnection is null)
+            return;
+        var raw = await PromptAsync(Text("停止后续步骤", "Stop following steps"), string.Empty);
+        if (raw is null)
+            return;
+        if (!Guid.TryParse(raw, out var parsed) || parsed == Guid.Empty)
+        {
+            await ShowMessageAsync(Text("操作 ID 无效", "Invalid operation ID"),
+                Text("请输入确认时显示的完整 OperationId。",
+                    "Enter the complete OperationId shown at confirmation."));
+            return;
+        }
+
+        var flow = new RealOperationStopSession(
+            ViewModel.AgentConnection, ViewModel.RealProductSessionId);
+        try
+        {
+            var queried = await flow.QueryAsync(new OperationId(parsed), CancellationToken.None);
+            if (!queried.IsSuccess || queried.Value is not AgentRealOperationResponse observed)
+            {
+                PublishOperationResult(queried.Status, queried.Messages, queried.CorrelationId,
+                    Text("真实状态查询失败", "Real status query failed"), "real");
+                return;
+            }
+            if (observed.State is not (RealOperationState.Prepared
+                or RealOperationState.Accepted or RealOperationState.Running))
+            {
+                await ShowMessageAsync(Text("没有可停止的后续步骤", "No following steps to stop"),
+                    $"OperationId: {observed.Plan.OperationId.Value}\n" +
+                    $"{Text("状态", "State")}: {observed.State}\n" +
+                    Text("请按操作 ID 查询和核对当前结果。",
+                        "Query and reconcile the current result by OperationId."));
+                return;
+            }
+
+            var warning = $"OperationId: {observed.Plan.OperationId.Value}\n" +
+                $"Plan hash: {observed.Plan.PlanHash}\n" +
+                $"{Text("当前状态", "Current state")}: {observed.State}\n" +
+                Text("停止请求只阻止尚未开始的后续步骤；正在执行的 Windows 调用可能继续，已完成的步骤不会回滚。随后请按 ID 查询持久化结果。",
+                    "The stop request prevents later steps from starting. A Windows call already in progress may continue, and completed steps are not rolled back. Query the persisted result by ID afterward.");
+            var confirmed = await ConfirmAsync(
+                Text("确认停止后续步骤", "Confirm stop of following steps"), warning);
+            var stopTask = flow.StopAfterCurrentStepAsync(
+                observed, confirmed, CancellationToken.None);
+            if (stopTask is null)
+                return;
+            var result = await stopTask;
+            if (!result.IsSuccess || result.Value is not AgentRealOperationResponse status)
+            {
+                PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
+                    Text("停止请求未确认", "Stop request was not confirmed"), "real");
+                return;
+            }
+            await ShowMessageAsync(Text("已请求停止后续步骤", "Following-step stop requested"),
+                $"OperationId: {status.Plan.OperationId.Value}\n" +
+                $"{Text("当前状态", "Current state")}: {status.State}\n" +
+                Text("当前调用可能继续；请稍后查询并核对最终状态。",
+                    "The current call may continue. Query and reconcile the final state later."));
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            PublishOperationException(Text("停止结果待核对", "Stop result needs review"),
+                "real", exception, "real.stop.uncertain");
         }
     }
 

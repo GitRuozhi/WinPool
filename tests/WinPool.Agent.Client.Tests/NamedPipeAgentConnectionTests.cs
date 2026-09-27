@@ -675,6 +675,14 @@ public sealed class NamedPipeAgentConnectionTests
         var response = await connection.SendAsync(
             new GetAgentSnapshotRequest(correlation),
             CancellationToken.None);
+        var rangeResponse = await connection.SendAsync(
+            new QueryAgentRealPartitionResizeRangeRequest(
+                new StorageObjectId(SystemId.New(), StorageObjectKind.Partition,
+                    "synthetic-partition"), "synthetic-session", CorrelationId.New()),
+            CancellationToken.None);
+        Assert.Equal(ApplicationStatus.Rejected, rangeResponse.Status);
+        Assert.Contains(rangeResponse.Messages, message =>
+            message.Code == "agent.real_operation.unavailable");
         var manageInventoryResponse = await connection.SendAsync(
             new CaptureAgentManageInventoryRequest(
                 CorrelationId.New()),

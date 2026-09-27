@@ -9,6 +9,48 @@ namespace WinPool.Agent.Tests;
 public sealed class AgentRealOperationServiceTests
 {
     [Fact]
+    public async Task LiveResizeRangeRequiresArmedVerifiedSessionAndExactPartition()
+    {
+        var path = Path.Combine(Path.GetTempPath(),
+            "WinPool.Agent.RealOperation.Tests", Guid.NewGuid().ToString("N"),
+            "winpool.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var store = new WinPoolSqliteStore(path);
+        await store.InitializeAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(store, "agent-real-range-test");
+        var backend = new RecordingBackend();
+        var service = new AgentRealOperationService(
+            new OperationPlanRepository(store, lease),
+            new ExecutionEventRepository(store, lease), backend,
+            new FixedMachineIdentity(), authority: null, timeProvider: null,
+            isSessionStillArmed: session => session.IsArmed,
+            isAdministrator: () => true);
+        await service.InitializeRecoveryAsync();
+        var session = new TrustedRealSession(SessionId.New(), "product-session",
+            Guid.NewGuid().ToString("D"), 42, DateTimeOffset.UtcNow,
+            Path.GetFullPath("WinPool.App.exe"), true);
+        var system = SystemId.New();
+        var partition = new StorageObjectId(system, StorageObjectKind.Partition,
+            "partition-id");
+        var request = new QueryAgentRealPartitionResizeRangeRequest(
+            partition, session.ProductSessionId, CorrelationId.New());
+        var result = await service.QueryPartitionResizeRangeAsync(
+            request, session, CancellationToken.None);
+        var response = Assert.IsType<AgentRealPartitionResizeRangeResponse>(result.Value);
+        Assert.Equal(partition, response.Range.Partition);
+        Assert.Equal(1, backend.RangeReadCalls);
+        var unarmed = await service.QueryPartitionResizeRangeAsync(
+            request with { CorrelationId = CorrelationId.New() },
+            session with { IsArmed = false }, CancellationToken.None);
+        Assert.False(unarmed.IsSuccess);
+        var wrongSession = await service.QueryPartitionResizeRangeAsync(
+            request with { ProductSessionId = "other", CorrelationId = CorrelationId.New() },
+            session, CancellationToken.None);
+        Assert.False(wrongSession.IsSuccess);
+        Assert.Equal(1, backend.RangeReadCalls);
+    }
+
+    [Fact]
     public async Task StopBeforeFirstWindowsCallPersistsCancelledAndNeverExecutes()
     {
         var path = Path.Combine(Path.GetTempPath(),
@@ -243,7 +285,9 @@ public sealed class AgentRealOperationServiceTests
     {
         private int executeCalls;
         private int preflightCalls;
+        private int rangeReadCalls;
         public int ExecuteCalls => Volatile.Read(ref executeCalls);
+        public int RangeReadCalls => Volatile.Read(ref rangeReadCalls);
         public string? UnknownStepId { get; init; }
         public bool PauseRunnerPreflight { get; init; }
         public TaskCompletionSource RunnerPreflightEntered { get; } =
@@ -269,6 +313,20 @@ public sealed class AgentRealOperationServiceTests
                 "inventory-v1", "target-fingerprint-v1",
                 "physical-members-v1", "fake capability evidence",
                 now, now.AddMinutes(2)));
+        }
+
+        public Task<RealPartitionResizeRange> ReadPartitionResizeRangeAsync(
+            StorageObjectId partition,
+            TrustedRealSession session,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref rangeReadCalls);
+            return Task.FromResult(new RealPartitionResizeRange(
+                partition, 1024L * 1024 * 1024,
+                512L * 1024 * 1024, 4L * 1024 * 1024 * 1024,
+                768L * 1024 * 1024, 2L * 1024 * 1024 * 1024,
+                "target-fingerprint-v1", DateTimeOffset.UtcNow,
+                "real.resize.range.current"));
         }
 
         public async Task<RealStepPreflight> PreflightStepAsync(

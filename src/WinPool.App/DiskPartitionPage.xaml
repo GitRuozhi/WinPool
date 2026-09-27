@@ -285,6 +285,10 @@
                         HorizontalAlignment="Left"
                         Click="QueryRealOperation_Click"
                         Content="Query real operation by ID" />
+                <Button x:Name="StopRealOperationButton"
+                        HorizontalAlignment="Left"
+                        Click="StopRealOperation_Click"
+                        Content="Stop following real steps by ID" />
             </StackPanel>
         </Border>
         <ScrollViewer

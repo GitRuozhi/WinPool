@@ -15,6 +15,11 @@ public interface IRealStorageBackend
         OperationId operationId,
         CancellationToken cancellationToken);
 
+    Task<RealPartitionResizeRange> ReadPartitionResizeRangeAsync(
+        StorageObjectId partition,
+        TrustedRealSession session,
+        CancellationToken cancellationToken);
+
     Task<RealStepPreflight> PreflightStepAsync(
         OperationPlan plan,
         RealOperationStep step,
@@ -32,6 +37,18 @@ public interface IRealStorageBackend
         IReadOnlyList<RealOperationStepProgress> persistedSteps,
         CancellationToken cancellationToken);
 }
+
+/// <summary>Fresh provider limits and the narrower supported geometric intersection.</summary>
+public sealed record RealPartitionResizeRange(
+    StorageObjectId Partition,
+    long CurrentSizeBytes,
+    long ProviderMinBytes,
+    long ProviderMaxBytes,
+    long AllowedMinBytes,
+    long AllowedMaxBytes,
+    string TargetFingerprint,
+    DateTimeOffset CapturedAtUtc,
+    string Code);
 
 /// <summary>Reads the current OS identity independently of persisted plans.</summary>
 public interface IRealMachineIdentityProvider

@@ -176,6 +176,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RebuildPoolButton.Content = Text("删除并重建单盘池", "Delete and rebuild single-disk pool");
         QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
+        StopRealOperationButton.Content = Text("按 ID 停止后续真实步骤", "Stop following real steps by ID");
+        StopRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         UndoButtonLabel.Text = ViewModel.Localization["Undo"];
         RedoButtonLabel.Text = ViewModel.Localization["Redo"];
         DiscardAllButtonLabel.Text = ViewModel.Localization["DiscardAll"];
@@ -2817,6 +2819,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
         await QueryRealOperationByIdAsync();
+
+    private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
+        await StopRealOperationFollowingStepsByIdAsync();
 
     private PhysicalDiskInfo? RealPoolCandidate()
     {

@@ -172,6 +172,131 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
+    public void GptInitializationHonorsMsrPreferenceAndRealRefsRemainsDisabled()
+    {
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "disk-id");
+        var plain = RealOperationProposalFactory.InitializeGpt(system, disk, false);
+        Assert.Single(plain.Steps);
+        var withMsr = RealOperationProposalFactory.InitializeGpt(system, disk, true);
+        Assert.Equal(2, withMsr.Steps.Count);
+        var msr = Assert.IsType<CreatePartitionCommand>(withMsr.Steps[1].Command);
+        Assert.Equal(RealPartitionRole.Msr, msr.Role);
+        Assert.Equal(1024L * 1024, msr.OffsetBytes);
+        Assert.Equal(16L * 1024 * 1024, msr.SizeBytes);
+        Assert.Equal(["initialize-gpt"], withMsr.Steps[1].DependsOn);
+        Assert.Throws<ArgumentException>(() => RealOperationProposalFactory.CreatePartition(
+            system, disk, RealPartitionRole.BasicData, 1024 * 1024,
+            1024L * 1024 * 1024, RealFileSystem.ReFs, 65536,
+            false, "Data", null));
+    }
+
+    [Fact]
+    public void ExistingRealFormatRejectsRefsAndUnknownWithoutExFatFallback()
+    {
+        var system = SystemId.New();
+        var partition = new StorageObjectId(system, StorageObjectKind.Partition,
+            "partition-id");
+        Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "ReFS", 65536, false, "Data"));
+        Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "unknown", 65536, false, "Data"));
+        var ntfs = RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "NTFS", 65536, false, "Data");
+        Assert.Equal(RealFileSystem.Ntfs,
+            Assert.IsType<FormatVolumeCommand>(Assert.Single(ntfs!.Steps).Command).FileSystem);
+        var exfat = RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "exFAT", 65536, false, "Data");
+        Assert.Equal(RealFileSystem.ExFat,
+            Assert.IsType<FormatVolumeCommand>(Assert.Single(exfat!.Steps).Command).FileSystem);
+    }
+
+    [Fact]
+    public void FrozenConfirmationShowsExactTargetsTrustedFactsParametersAndLoss()
+    {
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "os-disk-0-id");
+        var clear = RealOperationProposalFactory.ClearToRaw(system, disk);
+        clear = clear with { Steps = [clear.Steps[0] with
+        {
+            BeforeCondition = "WDC WD40EZAZ serial ...FP80; OS disk number 0; PhysicalDisk id physical-unique",
+            DataLoss = "partition 1 offset 17408 size 16759808; partition 2 E: NTFS offset 17825792"
+        }] };
+        var text = RealOperationConfirmationFormatter.Format(Freeze(clear), true);
+        Assert.Contains("os-disk-0-id", text);
+        Assert.Contains("WDC WD40EZAZ", text);
+        Assert.Contains("OS disk number 0", text);
+        Assert.Contains("offset 17825792", text);
+        Assert.Contains("removeOem=False", text);
+        Assert.Contains("数据损失", text);
+
+        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
+        var create = RealOperationProposalFactory.CreateFirstVirtualDisk(
+            system, pool, new RealOperationProposalFactory.VirtualDiskOptions(
+                "NewVD", 16L * 1024 * 1024 * 1024,
+                true, true, true, "Data", 'E'));
+        var createText = RealOperationConfirmationFormatter.Format(Freeze(create), false);
+        Assert.Contains("pool-id", createText);
+        Assert.Contains("sizeBytes=17179869184", createText);
+        Assert.Contains("interleaveBytes=65536 dataColumns=1", createText);
+        Assert.Contains("role=Msr offsetBytes=1048576 sizeBytes=16777216", createText);
+        Assert.Contains("fileSystem=Ntfs clusterBytes=65536 full=False", createText);
+        Assert.Contains("createdByStep=", createText);
+    }
+
+    [Fact]
+    public async Task StopCancellationMakesNoStopRequestAndConfirmedStopUsesQueriedPlanHash()
+    {
+        var (_, plan) = CreatePlan();
+        var observed = new AgentRealOperationResponse(
+            plan, RealOperationState.Running, [], null, false);
+        var connection = new RecordingConnection(request => request switch
+        {
+            QueryAgentRealOperationRequest => ApplicationResult<AgentResponse>.Succeeded(
+                observed, request.CorrelationId),
+            StopAgentRealOperationFollowingStepsRequest => ApplicationResult<AgentResponse>.Succeeded(
+                observed, request.CorrelationId),
+            _ => throw new InvalidOperationException()
+        });
+        var flow = new RealOperationStopSession(connection, "product-session");
+        var queried = await flow.QueryAsync(plan.OperationId, CancellationToken.None);
+        var frozen = Assert.IsType<AgentRealOperationResponse>(queried.Value);
+        Assert.Null(flow.StopAfterCurrentStepAsync(frozen, false, CancellationToken.None));
+        Assert.Empty(connection.Requests.OfType<StopAgentRealOperationFollowingStepsRequest>());
+        var result = await flow.StopAfterCurrentStepAsync(frozen, true, CancellationToken.None)!;
+        Assert.True(result.IsSuccess);
+        var stop = Assert.Single(connection.Requests.OfType<StopAgentRealOperationFollowingStepsRequest>());
+        Assert.Equal(plan.OperationId, stop.OperationId);
+        Assert.Equal(plan.PlanHash, stop.PlanHash);
+        Assert.Equal("product-session", stop.ProductSessionId);
+    }
+
+    [Fact]
+    public void RealResizeUiUsesAgentAllowedRangeAndDoesNotUseSimulatedLimits()
+    {
+        var system = SystemId.New();
+        var partition = new StorageObjectId(system, StorageObjectKind.Partition,
+            "partition-id");
+        var range = new RealPartitionResizeRange(partition,
+            1024L * 1024 * 1024,
+            256L * 1024 * 1024, 8L * 1024 * 1024 * 1024,
+            768L * 1024 * 1024, 2L * 1024 * 1024 * 1024,
+            "fresh-fingerprint", DateTimeOffset.UtcNow, "real.resize_range_verified");
+        Assert.True(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            range, true, out var extendMin, out var extendMax));
+        Assert.Equal(1025, extendMin);
+        Assert.Equal(2048, extendMax);
+        Assert.True(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            range, false, out var shrinkMin, out var shrinkMax));
+        Assert.Equal(768, shrinkMin);
+        Assert.Equal(1023, shrinkMax);
+        Assert.True(RealPartitionResizeUiRange.IsSupportedFileSystem("RAW"));
+        Assert.True(RealPartitionResizeUiRange.IsSupportedFileSystem("NTFS"));
+        Assert.False(RealPartitionResizeUiRange.IsSupportedFileSystem("ReFS"));
+        Assert.False(RealPartitionResizeUiRange.IsSupportedFileSystem("exFAT"));
+    }
+
+    [Fact]
     public void RebuildListsExactRemovalBeforeReplacementAndKeepsOnePhysicalMember()
     {
         var system = SystemId.New();
@@ -215,6 +340,11 @@ public sealed class RealOperationUiFlowTests
             OperationIntent.InitializeDisk, disk,
             new InitializeGptCommand(RealTargetReference.ForExisting(disk)),
             "GPT", "Existing partition data is lost");
+        return (proposal, Freeze(proposal));
+    }
+
+    private static OperationPlan Freeze(RealOperationIntentRequest proposal)
+    {
         var now = DateTimeOffset.UtcNow;
         var session = new TrustedRealSession(SessionId.New(), "product-session",
             Guid.NewGuid().ToString("D"), 42, now,
@@ -227,7 +357,7 @@ public sealed class RealOperationUiFlowTests
             OperationId.New(), environment, session, "inventory",
             "target-fingerprint", "physical-fingerprint", "support", now,
             now.AddMinutes(2));
-        return (proposal, plan);
+        return plan;
     }
 
     private sealed class RecordingConnection(

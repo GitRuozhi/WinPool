@@ -67,6 +67,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
+        StopRealOperationButton.Content = Text("按 ID 停止后续真实步骤", "Stop following real steps by ID");
+        StopRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         OnlineButtonLabel.Text = Text("联机", "Online");
         OfflineButtonLabel.Text = Text("脱机", "Offline");
         InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
@@ -646,12 +648,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 _working,
                 partition.StableId,
                 SimulationEditKind.ShrinkPartition);
-        var canExtend = propertyEnabled
-            && extendCapability?.Decision.Verdict == StorageRuleVerdict.Allow;
-        var canShrink = propertyEnabled
-            && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow;
+        var realResizeCandidate = realEditablePartition && alreadyGpt &&
+            disk is { IsBoot: false, IsSystem: false } && !diskOffline &&
+            RealPartitionResizeUiRange.IsSupportedFileSystem(
+                volume?.FileSystem ?? partition?.FileSystem);
+        var canExtend = realResizeCandidate || (simulated && propertyEnabled
+            && extendCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
+        var canShrink = realResizeCandidate || (simulated && propertyEnabled
+            && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
 
         var real = ViewModel.CanSubmitRealOperation;
+        var realRefsUnsupported = real && createMode &&
+            SelectedFileSystemToken().Equals("ReFS", StringComparison.OrdinalIgnoreCase);
         OnlineButton.IsEnabled = (simulated || real) && isDiskSelection && disk is { IsOffline: true };
         OfflineButton.IsEnabled = (simulated || real)
             && isDiskSelection
@@ -712,8 +720,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ?? (partition is null
                 ? Text("请选择普通模拟数据分区以压缩。", "Select a normal simulated data partition to shrink.")
                 : ResizeCapabilityReason(shrinkCapability!, extend: false));
-        var extendReason = canExtend ? null : extendEligibilityReason;
-        var shrinkReason = canShrink ? null : shrinkEligibilityReason;
+        var realRangeReason = Text(
+            "真实扩缩仅允许普通 GPT NTFS 或 RAW 数据分区；点击后由 Agent 读取实时支持范围。",
+            "Real resize is limited to ordinary GPT NTFS or RAW data partitions; the Agent reads the live supported range when clicked.");
+        var extendReason = canExtend ? null : ViewModel.CanSubmitRealOperation
+            ? realRangeReason : extendEligibilityReason;
+        var shrinkReason = canShrink ? null : ViewModel.CanSubmitRealOperation
+            ? realRangeReason : shrinkEligibilityReason;
 
         SetDisabledReason(OnlineButton,
             !simulated && !real
@@ -831,7 +844,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             PartitionActionButton,
             createActionSelected ? Text("新建分区", "Create partition") : Text("格式化分区", "Format partition"));
         PartitionActionButton.IsEnabled = createActionSelected
-            ? canCreatePartition
+            ? canCreatePartition && !realRefsUnsupported
             : propertyEnabled && isPartitionSelection && formattablePartition
                 && realExistingFormatSupported;
         ContextHelp.Set(
@@ -839,7 +852,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             createActionSelected
                 ? Text("在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。", "Create a partition in the selected simulated GPT gap; capacity uses 1 MiB alignment.")
                 : Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
-        SetDisabledReason(PartitionActionButton, createActionSelected ? createReason
+        SetDisabledReason(PartitionActionButton, realRefsUnsupported
+            ? Text("ReFS 真实创建仍待 C01 现场能力证据，本阶段禁用。",
+                "Real ReFS creation requires C01 provider evidence and is disabled in this stage.")
+            : createActionSelected ? createReason
             : realExistingFormatSupported ? formatReason
             : Text("现有真实数据分区仅支持 64 KiB NTFS 或 exFAT 格式化。",
                 "Existing real data partitions support only 64 KiB NTFS or exFAT formatting."));
@@ -1618,6 +1634,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
         await QueryRealOperationByIdAsync();
 
+    private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
+        await StopRealOperationFollowingStepsByIdAsync();
+
     private async void Offline_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
@@ -1653,9 +1672,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         if (ViewModel.CanSubmitRealOperation)
         {
-            await SubmitRealAsync(RealDiskIntent(OperationIntent.InitializeDisk,
-                disk, new InitializeGptCommand(DiskReference(disk)),
-                "Disk initialized as GPT", "All existing partition data on the selected disk is lost"));
+            var system = ViewModel.ActiveDocument.SystemId;
+            var target = new StorageObjectId(system, StorageObjectKind.OsDisk, disk.StableId);
+            await SubmitRealAsync(RealOperationProposalFactory.InitializeGpt(
+                system, target, ViewModel.CurrentPreferences.CreateMsrOnInitialize));
             return;
         }
 
@@ -1812,6 +1832,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var fileSystem = partitionKind == PartitionKind.MicrosoftReserved
             ? string.Empty
             : SelectedFileSystemToken();
+        if (fileSystem == "ReFS" && ViewModel.CanSubmitRealOperation)
+        {
+            await ShowMessageAsync(Text("真实 ReFS 未开放", "Real ReFS is unavailable"),
+                Text("C01 现场能力尚未证实，真实 ReFS 创建保持禁用。",
+                    "C01 provider capability is unverified, so real ReFS creation remains disabled."));
+            return;
+        }
         if (fileSystem == "ReFS")
         {
             PublishRefsNotice();
@@ -2002,11 +2029,141 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             : null;
     }
 
+    private async Task ResizeRealAsync(PartitionInfo partition, bool extend)
+    {
+        if (ViewModel.AgentConnection is null)
+            return;
+        var system = ViewModel.ActiveDocument.SystemId;
+        var target = new StorageObjectId(system, StorageObjectKind.Partition,
+            partition.StableId);
+        ApplicationResult<AgentResponse> queried;
+        try
+        {
+            queried = await ViewModel.AgentConnection.SendAsync(
+                new QueryAgentRealPartitionResizeRangeRequest(target,
+                    ViewModel.RealProductSessionId, CorrelationId.New()),
+                CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            PublishOperationException(Text("实时扩缩范围读取失败", "Live resize range failed"),
+                "real", exception, "real.resize.range_query_failed");
+            return;
+        }
+        if (!queried.IsSuccess)
+        {
+            PublishOperationResult(queried.Status, queried.Messages, queried.CorrelationId,
+                Text("实时扩缩范围不可用", "Live resize range unavailable"), "real");
+            return;
+        }
+        if (queried.Value is not AgentRealPartitionResizeRangeResponse response ||
+            response.Range.Partition != target)
+        {
+            await ShowMessageAsync(Text("实时扩缩范围无效", "Invalid live resize range"),
+                Text("Agent 回执未匹配所选分区；未准备写入计划。",
+                    "The Agent response did not match the selected partition; no write plan was prepared."));
+            return;
+        }
+        var range = response.Range;
+        if (!RealPartitionResizeUiRange.TryGetWholeMibTargets(
+                range, extend, out var minimumMib, out var maximumMib))
+        {
+            await ShowMessageAsync(Text("当前没有可用目标", "No supported target"),
+                Text("Agent 已读取 Windows 支持范围与当前几何交集，但所选方向没有 1 MiB 整数目标。",
+                    "The Agent read the Windows supported range and current geometry intersection, but there is no whole-MiB target in this direction."));
+            return;
+        }
+        var targetSize = await PromptRealResizeTargetAsync(
+            range, extend, minimumMib, maximumMib);
+        if (targetSize is null)
+            return;
+        await SubmitRealAsync(RealPartitionIntent(OperationIntent.ResizePartition,
+            partition, new ResizePartitionCommand(RealTargetReference.ForExisting(target),
+                targetSize.Value),
+            $"Partition total size becomes {targetSize.Value} bytes",
+            extend ? "No file data loss expected; capacity changes"
+                : "Shrinking may make data beyond the new boundary inaccessible"));
+    }
+
+    private async Task<long?> PromptRealResizeTargetAsync(
+        RealPartitionResizeRange range, bool extend,
+        long minimumMib, long maximumMib)
+    {
+        var input = new TextBox
+        {
+            Header = Text("目标总容量（MiB，整数）", "Target total capacity (whole MiB)"),
+            Text = (extend ? minimumMib : maximumMib).ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            MinWidth = 320
+        };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock
+        {
+            Text = $"{Text("准确目标", "Exact target")}: {range.Partition.ProviderKey}\n" +
+                $"{Text("当前容量", "Current size")}: {range.CurrentSizeBytes} bytes\n" +
+                $"{Text("Windows 支持范围", "Windows provider range")}: " +
+                $"{range.ProviderMinBytes}–{range.ProviderMaxBytes} bytes\n" +
+                $"{Text("几何交集", "Geometry intersection")}: " +
+                $"{range.AllowedMinBytes}–{range.AllowedMaxBytes} bytes\n" +
+                $"{Text("本方向 1 MiB 目标范围", "Whole-MiB targets in this direction")}: " +
+                $"{minimumMib}–{maximumMib} MiB\n" +
+                $"{Text("采集时间", "Captured")}: {range.CapturedAtUtc.LocalDateTime:G}\n" +
+                $"Target fingerprint: {range.TargetFingerprint}",
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(input);
+        content.Children.Add(validation);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = extend ? Text("真实扩展分区", "Extend real partition")
+                : Text("真实压缩分区", "Shrink real partition"),
+            Content = new ScrollViewer { MaxHeight = 500, Content = content },
+            PrimaryButtonText = Text("准备 Agent 计划", "Prepare Agent plan"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Close
+        };
+        long? targetSize = null;
+        void Validate()
+        {
+            if (!long.TryParse(input.Text.Trim(), out var mib) ||
+                mib < minimumMib || mib > maximumMib ||
+                mib > long.MaxValue / BytesPerMiB)
+            {
+                targetSize = null;
+                validation.Text = Text("目标须在实时 1 MiB 范围内。",
+                    "The target must be within the live whole-MiB range.");
+            }
+            else
+            {
+                targetSize = mib * BytesPerMiB;
+                validation.Text = string.Empty;
+            }
+            dialog.IsPrimaryButtonEnabled = targetSize is not null;
+        }
+        input.TextChanged += (_, _) => Validate();
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            Validate();
+            args.Cancel = targetSize is null;
+        };
+        Validate();
+        return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary
+            ? targetSize : null;
+    }
+
     private async Task ResizeAsync(bool extend)
     {
         var partition = SelectedPartition();
         if (partition is null)
         {
+            return;
+        }
+
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            await ResizeRealAsync(partition, extend);
             return;
         }
 
@@ -2029,17 +2186,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var targetSize = await PromptResizeTargetAsync(partition, capability, extend);
         if (targetSize is null)
         {
-            return;
-        }
-
-        if (ViewModel.CanSubmitRealOperation)
-        {
-            await SubmitRealAsync(RealPartitionIntent(OperationIntent.ResizePartition,
-                partition, new ResizePartitionCommand(PartitionReference(partition),
-                    targetSize.Value),
-                $"Partition total size becomes {targetSize.Value} bytes",
-                extend ? "No file data loss expected; capacity changes"
-                    : "Shrinking may make data beyond the new boundary inaccessible"));
             return;
         }
 
@@ -2173,15 +2319,31 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         if (ViewModel.CanSubmitRealOperation)
         {
-            var parsedFileSystem = fileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase)
-                ? RealFileSystem.Ntfs : RealFileSystem.ExFat;
-            await SubmitRealAsync(RealPartitionIntent(OperationIntent.FormatVolume,
-                partition,
-                new FormatVolumeCommand(PartitionReference(partition), parsedFileSystem,
+            var system = ViewModel.ActiveDocument.SystemId;
+            var target = new StorageObjectId(system, StorageObjectKind.Partition,
+                partition.StableId);
+            RealOperationIntentRequest? proposal;
+            try
+            {
+                proposal = RealOperationProposalFactory.TryFormatExistingData(
+                    system, target, fileSystem,
                     checked((int)SelectedClusterBytes()), !QuickFormatSwitch.IsOn,
-                    VolumeLabelBox.Text),
-                $"Partition formatted as {fileSystem}",
-                "All existing files and volume data on the selected partition are erased"));
+                    VolumeLabelBox.Text);
+            }
+            catch (ArgumentException exception)
+            {
+                await ShowMessageAsync(Text("真实格式化参数不受支持", "Real format parameters are unsupported"),
+                    exception.Message);
+                return;
+            }
+            if (proposal is null)
+            {
+                await ShowMessageAsync(Text("真实文件系统未开放", "Real file system is unavailable"),
+                    Text("现有真实数据分区仅支持 NTFS 或 exFAT；ReFS 与未知文件系统保持禁用，不会改用其它格式。",
+                        "Existing real data partitions support only NTFS or exFAT. ReFS and unknown file systems stay disabled and are never changed to another format."));
+                return;
+            }
+            await SubmitRealAsync(proposal);
             return;
         }
 

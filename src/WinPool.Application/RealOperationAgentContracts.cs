@@ -36,6 +36,11 @@ public sealed record QueryAgentRealOperationRequest(
     OperationId OperationId,
     CorrelationId CorrelationId) : AgentRequest(CorrelationId);
 
+public sealed record QueryAgentRealPartitionResizeRangeRequest(
+    StorageObjectId Partition,
+    string ProductSessionId,
+    CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+
 public sealed record StopAgentRealOperationFollowingStepsRequest(
     OperationId OperationId,
     string PlanHash,
@@ -45,6 +50,9 @@ public sealed record StopAgentRealOperationFollowingStepsRequest(
 public sealed record AgentRealModeResponse(
     bool IsArmed,
     string Code) : AgentResponse;
+
+public sealed record AgentRealPartitionResizeRangeResponse(
+    RealPartitionResizeRange Range) : AgentResponse;
 
 public enum RealOperationState
 {
@@ -114,6 +122,11 @@ public interface IRealOperationService
 
     Task<ApplicationResult<AgentResponse>> QueryAsync(
         QueryAgentRealOperationRequest request,
+        TrustedRealSession session,
+        CancellationToken cancellationToken);
+
+    Task<ApplicationResult<AgentResponse>> QueryPartitionResizeRangeAsync(
+        QueryAgentRealPartitionResizeRangeRequest request,
         TrustedRealSession session,
         CancellationToken cancellationToken);
 

@@ -198,6 +198,46 @@ public sealed class AgentRealOperationService : IRealOperationService
         }
     }
 
+    public async Task<ApplicationResult<AgentResponse>> QueryPartitionResizeRangeAsync(
+        QueryAgentRealPartitionResizeRangeRequest request,
+        TrustedRealSession session,
+        CancellationToken cancellationToken)
+    {
+        if (request.Partition.Kind != StorageObjectKind.Partition ||
+            request.Partition.System.Value == Guid.Empty ||
+            string.IsNullOrWhiteSpace(request.Partition.ProviderKey))
+            return Reject(request.CorrelationId, "agent.real_resize.invalid_partition");
+        if (!CanEnter(session) ||
+            !StringComparer.Ordinal.Equals(request.ProductSessionId, session.ProductSessionId) ||
+            !isSessionStillArmed(session))
+            return Reject(request.CorrelationId, "agent.real_mode.administrator_required");
+
+        try
+        {
+            var range = await backend!.ReadPartitionResizeRangeAsync(
+                request.Partition, session, cancellationToken);
+            if (range.Partition != request.Partition ||
+                range.CurrentSizeBytes <= 0 ||
+                range.ProviderMinBytes <= 0 ||
+                range.ProviderMaxBytes < range.ProviderMinBytes ||
+                range.AllowedMinBytes < range.ProviderMinBytes ||
+                range.AllowedMaxBytes > range.ProviderMaxBytes ||
+                range.AllowedMinBytes > range.AllowedMaxBytes ||
+                string.IsNullOrWhiteSpace(range.TargetFingerprint) ||
+                string.IsNullOrWhiteSpace(range.Code))
+                return Reject(request.CorrelationId, "agent.real_resize.invalid_range");
+            return ApplicationResult<AgentResponse>.Succeeded(
+                new AgentRealPartitionResizeRangeResponse(range),
+                request.CorrelationId);
+        }
+        catch (Exception exception) when (exception is InvalidDataException
+            or ArgumentException or UnauthorizedAccessException
+            or InvalidOperationException or NotSupportedException)
+        {
+            return Reject(request.CorrelationId, "agent.real_resize.range_unavailable");
+        }
+    }
+
     public async Task<ApplicationResult<AgentResponse>> PrepareAsync(
         PrepareAgentRealOperationRequest request,
         TrustedRealSession session,

@@ -35,12 +35,65 @@ public static class RealOperationProposalFactory
         return request;
     }
 
+    public static RealOperationIntentRequest InitializeGpt(
+        SystemId systemId, StorageObjectId osDisk, bool createMsr)
+    {
+        var target = RealTargetReference.ForExisting(osDisk);
+        var steps = new List<RealOperationStep>
+        {
+            new("initialize-gpt", new InitializeGptCommand(target), [],
+                "The exact OS disk is RAW and has zero partitions",
+                "The exact disk is GPT", "GPT metadata replaces any prior table",
+                "Agent live Windows preflight required")
+        };
+        if (createMsr)
+        {
+            steps.Add(new RealOperationStep("create-msr",
+                new CreatePartitionCommand(target, RealPartitionRole.Msr,
+                    1024L * 1024, 16L * 1024 * 1024), ["initialize-gpt"],
+                "The new GPT disk has a free 16 MiB range at 1 MiB",
+                "A 16 MiB Microsoft Reserved partition exists",
+                "The reserved range is no longer available for data",
+                "Agent live Windows geometry check required"));
+        }
+        var request = new RealOperationIntentRequest(OperationIntent.InitializeDisk,
+            systemId, [osDisk], steps,
+            createMsr ? "GPT disk with one 16 MiB MSR at 1 MiB" : "GPT disk with zero partitions");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    public static RealOperationIntentRequest? TryFormatExistingData(
+        SystemId systemId, StorageObjectId partition, string? fileSystem,
+        int clusterBytes, bool fullFormat, string? label)
+    {
+        var format = fileSystem?.ToUpperInvariant() switch
+        {
+            "NTFS" => RealFileSystem.Ntfs,
+            "EXFAT" => RealFileSystem.ExFat,
+            _ => (RealFileSystem?)null
+        };
+        if (format is null)
+            return null;
+        var request = OneStep(systemId, OperationIntent.FormatVolume, partition,
+            new FormatVolumeCommand(RealTargetReference.ForExisting(partition),
+                format.Value, clusterBytes, fullFormat, label),
+            $"Partition formatted as {format.Value}",
+            "All existing files and volume data on the selected partition are erased");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
     public static RealOperationIntentRequest CreatePartition(
         SystemId systemId, StorageObjectId disk,
         RealPartitionRole role, long offsetBytes, long sizeBytes,
         RealFileSystem? fileSystem, int clusterBytes, bool fullFormat,
         string? label, char? letter)
     {
+        if (fileSystem == RealFileSystem.ReFs)
+            throw new ArgumentException(
+                "Real ReFS creation remains disabled until C01 has current provider evidence.",
+                nameof(fileSystem));
         var steps = new List<RealOperationStep>
         {
             new("create-partition",
