@@ -87,6 +87,22 @@ public sealed class WindowsRealStorageCommandAdapterTests
     }
 
     [Fact]
+    public async Task RefsFormatRemainsDisabledAtTheWindowsDispatchBoundary()
+    {
+        var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
+        var adapter = new WindowsRealStorageCommandAdapter(runner);
+        var partition = RealTargetReference.ForExisting(
+            new StorageObjectId(SystemId.New(), StorageObjectKind.Partition, "partition"));
+
+        var result = await adapter.ExecuteAsync(
+            new FormatVolumeCommand(partition, RealFileSystem.ReFs, 65536, false, "REFS"),
+            PartitionTarget(), CancellationToken.None);
+
+        Assert.False(result.ProviderReturned);
+        Assert.Equal(0, runner.Calls);
+    }
+
+    [Fact]
     public async Task DriveLetterOnEfiPartitionNeverReachesRunner()
     {
         var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
@@ -117,12 +133,42 @@ public sealed class WindowsRealStorageCommandAdapterTests
     }
 
     [Fact]
+    public async Task NonzeroProcessExitCannotBeReportedAsProviderSuccess()
+    {
+        var runner = new FakeRunner(new WindowsStorageProcessResult(1, SuccessJson, "provider details"));
+        var adapter = new WindowsRealStorageCommandAdapter(runner);
+        var disk = RealTargetReference.ForExisting(
+            new StorageObjectId(SystemId.New(), StorageObjectKind.OsDisk, "disk"));
+
+        var result = await adapter.ExecuteAsync(new InitializeGptCommand(disk),
+            DiskTarget(), CancellationToken.None);
+
+        Assert.True(result.ProviderReturned);
+        Assert.Equal("adapter.response-outcome-unknown", result.Code);
+        Assert.Equal(1, runner.Calls);
+    }
+
+    [Fact]
     public void CompressedFixedScriptFitsWindowsCommandLine()
     {
         var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(
             WindowsRealStoragePowerShellScript.Source);
 
         Assert.InRange(encoded.Length, 1, 30000);
+    }
+
+    [Fact]
+    public void FixedScriptRechecksEmptyOldDriveLetterBeforeAddingAccessPath()
+    {
+        var script = WindowsRealStoragePowerShellScript.Source;
+        var emptyOldCheck = script.IndexOf(
+            "$old.Length -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$partition.DriveLetter)",
+            StringComparison.Ordinal);
+        var addAccessPath = script.IndexOf("Add-PartitionAccessPath -InputObject $partition",
+            StringComparison.Ordinal);
+
+        Assert.True(emptyOldCheck >= 0);
+        Assert.True(addAccessPath > emptyOldCheck);
     }
 
     private const string SuccessJson =

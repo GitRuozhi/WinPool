@@ -49,6 +49,12 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         CancellationToken cancellationToken) =>
         planner.PrepareAsync(proposal, session, operationId, cancellationToken);
 
+    public Task<RealPartitionResizeRange> ReadPartitionResizeRangeAsync(
+        StorageObjectId partition,
+        TrustedRealSession session,
+        CancellationToken cancellationToken) =>
+        planner.ReadPartitionResizeRangeAsync(partition, session, cancellationToken);
+
     public async Task<RealStepPreflight> PreflightStepAsync(
         OperationPlan plan,
         RealOperationStep step,
@@ -171,6 +177,9 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
             return new RealStepResult(RealStepOutcome.OutcomeUnknown,
                 provider.Code, JsonSerializer.Serialize(provider));
         }
+        if (!StringComparer.Ordinal.Equals(provider.Code, "provider.returned"))
+            return new RealStepResult(RealStepOutcome.OutcomeUnknown,
+                "real.provider_reported_uncertain_result", JsonSerializer.Serialize(provider));
 
         var deadline = timeProvider.GetUtcNow().Add(PostCallWindow);
         do
@@ -255,7 +264,19 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         var reconciledSteps = new List<RealOperationStepProgress>(persistedSteps.Count);
         foreach (var step in persistedSteps)
         {
-            if (step.State == RealOperationStepState.Verified)
+            if (step.State == RealOperationStepState.Verifying
+                && IsProvenNoEffect(step, frozen.PhysicalMemberFingerprint))
+            {
+                reachedNonVerified = true;
+                reconciledSteps.Add(step with
+                {
+                    State = RealOperationStepState.Failed,
+                    Code = "real.reconciliation_proven_no_call"
+                });
+                continue;
+            }
+            if (step.State is RealOperationStepState.Verified
+                or RealOperationStepState.Verifying)
             {
                 if (reachedNonVerified || string.IsNullOrWhiteSpace(step.ResultEvidence))
                     return Unknown(persistedSteps, "real.reconciliation_step_order_unknown");
@@ -265,6 +286,8 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                         step.ResultEvidence);
                     if (evidence is null
                         || string.IsNullOrWhiteSpace(evidence.PostFingerprint)
+                        || !StringComparer.Ordinal.Equals(
+                            evidence.ProviderCode, "provider.returned")
                         || !StringComparer.Ordinal.Equals(
                             evidence.PhysicalMemberFingerprint,
                             frozen.PhysicalMemberFingerprint))
@@ -276,7 +299,15 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                     return Unknown(persistedSteps, "real.reconciliation_step_evidence_invalid");
                 }
                 verifiedCount++;
-                reconciledSteps.Add(step);
+                if (step.State == RealOperationStepState.Verifying)
+                    reachedNonVerified = true;
+                reconciledSteps.Add(step.State == RealOperationStepState.Verifying
+                    ? step with
+                    {
+                        State = RealOperationStepState.Verified,
+                        Code = "real.reconciliation_verified_persisted_result"
+                    }
+                    : step);
                 continue;
             }
 
@@ -381,11 +412,11 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         return matches[0];
     }
 
-    private sealed record VerifiedPostcondition(
+    internal sealed record VerifiedPostcondition(
         string? CreatedObjectId = null,
         string? CreatedOsDiskId = null);
 
-    private static VerifiedPostcondition? VerifyAfter(
+    internal static VerifiedPostcondition? VerifyAfter(
         RealStorageCommand command,
         WindowsStorageCommandTarget target,
         WindowsStorageCommandResult result,
@@ -432,11 +463,14 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                     && exact is not null && part.OsDiskStableId == exact.Id
                     && Guid.TryParse(part.PartitionTypeId, out var actualType)
                     && actualType == PartitionRoleGuid(value.Role)
+                    && CreatedPartitionHasNoImplicitFormatOrLetter(snapshot, part)
                     && SiblingPartitionsUnchanged(before, after, target.DiskNumber, part.Guid)
                     ? new(created.Id) : null;
             }
             case DeletePartitionCommand:
                 return exact is null
+                    && !snapshot.Partitions.Any(item =>
+                        GuidEquals(item.Guid, target.PartitionGuid))
                     && !snapshot.Volumes.Any(item => item.PartitionStableId
                         == FindExact(before, StorageObjectKind.Partition,
                             target.UniqueId, target.ObjectId,
@@ -454,12 +488,22 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
             {
                 if (exact is null || result.Code != "provider.returned") return null;
                 var part = snapshot.Partitions.Single(item => item.StableId == exact.Id);
+                var oldPart = FindExact(before, StorageObjectKind.Partition,
+                    target.UniqueId, target.ObjectId, target.PartitionGuid);
                 var volume = snapshot.Volumes.SingleOrDefault(item =>
                     item.PartitionStableId == part.StableId);
-                return volume is not null
+                return oldPart is not null && volume is not null
                     && part.FileSystem.Equals(value.FileSystem.ToString(), StringComparison.OrdinalIgnoreCase)
                     && part.AllocationUnitSize == value.ClusterBytes
-                    && (value.Label is null || StringComparer.Ordinal.Equals(part.FileSystemLabel, value.Label))
+                    && volume.FileSystem.Equals(value.FileSystem.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && volume.AllocationUnitSize == value.ClusterBytes
+                    && string.Equals(part.DriveLetter,
+                        before.Snapshot.Partitions.Single(item => item.StableId == oldPart.Id).DriveLetter,
+                        StringComparison.OrdinalIgnoreCase)
+                    && StringComparer.Ordinal.Equals(part.FileSystemLabel,
+                        value.Label ?? string.Empty)
+                    && StringComparer.Ordinal.Equals(volume.FileSystemLabel,
+                        value.Label ?? string.Empty)
                     && SiblingPartitionsUnchanged(before, after, target.DiskNumber,
                         target.PartitionGuid)
                     ? new(volume.StableId)
@@ -470,7 +514,8 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                         .Single(item => item.StableId == exact.Id).DriveLetter,
                         value.NewLetter?.ToString() ?? string.Empty,
                         StringComparison.OrdinalIgnoreCase)
-                    && MountPathsPreserved(before, after, exact.Id)
+                    && MountPathsMatchPlannedLetterChange(before, after, exact.Id,
+                        value.PreviousLetter, value.NewLetter)
                     ? new() : null;
             case RenameVolumeCommand value:
                 return exact is not null && snapshot.Volumes
@@ -527,6 +572,8 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                     && virtualDisk.Size == value.SizeBytes
                     && virtualDisk.TierStableIds.Count == 0
                     && osDisks.Length == 1
+                    && osDisks[0].PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
+                    && !snapshot.Partitions.Any(item => item.OsDiskStableId == osDisks[0].StableId)
                     ? new(created.Id, osDisks[0].StableId) : null;
             }
             case DeleteVirtualDiskCommand:
@@ -535,9 +582,31 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                     target.ObjectId, target.PartitionGuid);
                 if (old is null) return null;
                 var oldOsDisks = before.Snapshot.OsDisks.Where(item =>
-                    item.VirtualDiskStableId == old.Id).Select(item => item.StableId).ToArray();
+                    item.VirtualDiskStableId == old.Id).Select(item => item.StableId)
+                    .ToHashSet(StringComparer.Ordinal);
+                var oldPartitions = before.Snapshot.Partitions.Where(item =>
+                    item.OsDiskStableId is { } diskId && oldOsDisks.Contains(diskId)).ToArray();
+                var oldPartitionIds = oldPartitions.Select(item => item.StableId)
+                    .ToHashSet(StringComparer.Ordinal);
+                var oldVolumes = before.Snapshot.Volumes.Where(item =>
+                    item.PartitionStableId is { } partitionId
+                    && oldPartitionIds.Contains(partitionId)).ToArray();
+                var oldVolumeIds = oldVolumes.Select(item => item.StableId)
+                    .ToHashSet(StringComparer.Ordinal);
+                var oldVolumeIdentities = oldVolumes.Select(item => item.VolumeIdentity)
+                    .Where(item => !string.IsNullOrWhiteSpace(item))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 return exact is null && !snapshot.OsDisks.Any(item =>
                     item.VirtualDiskStableId == old.Id || oldOsDisks.Contains(item.StableId))
+                    && !snapshot.Partitions.Any(item =>
+                        oldPartitionIds.Contains(item.StableId)
+                        || item.OsDiskStableId is { } diskId && oldOsDisks.Contains(diskId)
+                        || oldPartitions.Any(oldPart => GuidEquals(item.Guid, oldPart.Guid)))
+                    && !snapshot.Volumes.Any(item =>
+                        oldVolumeIds.Contains(item.StableId)
+                        || item.PartitionStableId is { } partitionId
+                            && oldPartitionIds.Contains(partitionId)
+                        || oldVolumeIdentities.Contains(item.VolumeIdentity))
                     ? new() : null;
             }
             case ResizeVirtualDiskCommand value:
@@ -634,22 +703,55 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         other is not null && Guid.TryParse(value, out var actual)
             && Guid.TryParse(other, out var expected) && actual == expected;
 
-    private static bool MountPathsPreserved(
+    private static bool CreatedPartitionHasNoImplicitFormatOrLetter(
+        StorageSnapshot snapshot, PartitionInfo partition)
+    {
+        var volume = snapshot.Volumes.SingleOrDefault(item =>
+            item.PartitionStableId == partition.StableId);
+        return (partition.FileSystem is "" or "RAW")
+            && string.IsNullOrWhiteSpace(partition.DriveLetter)
+            && (volume is null || (volume.FileSystem is "" or "RAW")
+                && !volume.AccessPaths.Any(StorageAccessPath.IsDriveLetter));
+    }
+
+    private static bool MountPathsMatchPlannedLetterChange(
         WindowsRealStorageTopology before,
         WindowsRealStorageTopology after,
-        string partitionId)
+        string partitionId,
+        char? previousLetter,
+        char? newLetter)
     {
+        var oldPartition = before.Snapshot.Partitions.SingleOrDefault(item =>
+            item.StableId == partitionId);
+        var newPartition = after.Snapshot.Partitions.SingleOrDefault(item =>
+            item.StableId == partitionId);
         var oldVolume = before.Snapshot.Volumes.SingleOrDefault(item =>
             item.PartitionStableId == partitionId);
         var newVolume = after.Snapshot.Volumes.SingleOrDefault(item =>
             item.PartitionStableId == partitionId);
-        if (oldVolume is null || newVolume is null
+        if (oldPartition is null || newPartition is null
+            || oldVolume is null || newVolume is null
+            || !string.Equals(oldPartition.DriveLetter,
+                previousLetter?.ToString() ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(newPartition.DriveLetter,
+                newLetter?.ToString() ?? string.Empty, StringComparison.OrdinalIgnoreCase)
             || oldVolume.StableId != newVolume.StableId) return false;
         static string[] NonLetterPaths(VolumeInfo volume) => volume.AccessPaths
             .Where(path => !StorageAccessPath.IsDriveLetter(path))
             .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        static HashSet<string> LetterPaths(VolumeInfo volume) => volume.AccessPaths
+            .Select(path => StorageAccessPath.TryGetDriveLetter(path, out var letter)
+                ? letter : string.Empty)
+            .Where(letter => letter.Length != 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var expectedLetters = LetterPaths(oldVolume);
+        if (previousLetter is { } previous)
+            expectedLetters.Remove(previous.ToString());
+        if (newLetter is { } next)
+            expectedLetters.Add(next.ToString());
         return NonLetterPaths(oldVolume).SequenceEqual(
-            NonLetterPaths(newVolume), StringComparer.OrdinalIgnoreCase);
+                NonLetterPaths(newVolume), StringComparer.OrdinalIgnoreCase)
+            && expectedLetters.SetEquals(LetterPaths(newVolume));
     }
 
     private static WinPoolSourceObject? FindExact(

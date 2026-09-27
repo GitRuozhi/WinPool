@@ -31,6 +31,10 @@ public sealed class WindowsRealPlanSafetyTests
         Assert.Equal(RealOperationValidator.ClearDiskExpectedFinalState,
             plan.RealOperation!.ExpectedFinalState);
         Assert.Equal(2, plan.Targets.Count); // The Agent freezes the physical identity.
+        Assert.Contains("serial SERIAL-WDC", plan.RealOperation.Steps[0].BeforeCondition);
+        Assert.Contains("OS disk 7", plan.RealOperation.Steps[0].BeforeCondition);
+        Assert.Contains("step target OsDisk ID " + DiskId,
+            plan.RealOperation.Steps[0].BeforeCondition);
         _ = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation.Steps[0],
             new Dictionary<string, string>(), CancellationToken.None);
         Assert.Equal(0, fixture.Adapter.CallCount);
@@ -40,6 +44,133 @@ public sealed class WindowsRealPlanSafetyTests
             Targets = [disk, fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]
         }));
         fixture.SetRawDisk();
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData("11111111-1111-1111-1111-111111111111")]
+    [InlineData("de94bba4-06d1-4d40-a16a-bfd50179d6ac")]
+    [InlineData("unknown")]
+    public async Task ClearRejectsUnknownAndRecoveryPartitionRoles(string role)
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionsWithUnsupportedRole(role);
+        var disk = fixture.Id(StorageObjectKind.OsDisk, DiskId);
+        var proposal = fixture.Proposal(OperationIntent.ClearDisk, [disk],
+            [Step("clear", new ClearDiskCommand(RealTargetReference.ForExisting(disk), false))],
+            RealOperationValidator.ClearDiskExpectedFinalState);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task UnverifiedRefsCreationIsRejectedBeforeAnyWindowsCall()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitions();
+        var disk = fixture.Id(StorageObjectKind.OsDisk, DiskId);
+        var partition = RealTargetReference.FromStep(StorageObjectKind.Partition, "create");
+        var proposal = fixture.Proposal(OperationIntent.CreatePartition, [disk],
+            [Step("create", new CreatePartitionCommand(RealTargetReference.ForExisting(disk),
+                RealPartitionRole.BasicData, 145L << 20, 64L << 20)),
+             Step("format", new FormatVolumeCommand(partition, RealFileSystem.ReFs,
+                 65536, false, "UNVERIFIED"), ["create"])],
+            "New ReFS data partition");
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task OmittedFormatLabelIsPreviewedAsEmpty()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitions();
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var proposal = fixture.Proposal(OperationIntent.FormatVolume, [partition],
+            [Step("format", new FormatVolumeCommand(
+                RealTargetReference.ForExisting(partition), RealFileSystem.Ntfs,
+                65536, false, null))], "Selected partition formatted");
+
+        var plan = await fixture.Prepare(proposal);
+        Assert.Contains("label (empty)", plan.RealOperation!.Steps[0].AfterCondition);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task ResizeRangeUsesFreshProviderBoundsForExactDataPartition()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitions();
+        fixture.PartitionSizes.MinimumBytes = 64L << 20;
+        fixture.PartitionSizes.MaximumBytes = 200L << 20;
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+
+        var range = await fixture.ReadResizeRange(partition);
+
+        Assert.Equal(partition, range.Partition);
+        Assert.Equal(128L << 20, range.CurrentSizeBytes);
+        Assert.Equal(64L << 20, range.AllowedMinBytes);
+        Assert.Equal(200L << 20, range.AllowedMaxBytes);
+        Assert.Equal(1, fixture.PartitionSizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadResizeRange(
+            new StorageObjectId(SystemId.New(), StorageObjectKind.Partition, "partition:data")));
+
+        fixture.PartitionSizes.OnRead = fixture.SetRawDisk;
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadResizeRange(partition));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task DirectResizeProposalCannotExceedAdjacentPartitionGeometry()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionsWithFollowingPartition();
+        fixture.PartitionSizes.MinimumBytes = 64L << 20;
+        fixture.PartitionSizes.MaximumBytes = 512L << 20;
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var range = await fixture.ReadResizeRange(partition);
+        Assert.Equal(283L << 20, range.AllowedMaxBytes);
+
+        var proposal = fixture.Proposal(OperationIntent.ResizePartition, [partition],
+            [Step("resize", new ResizePartitionCommand(
+                RealTargetReference.ForExisting(partition), 400L << 20))],
+            "Selected partition resized");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task ResizeRejectsAnUnsupportedAssociatedVolumeEvenWhenPartitionFormatIsBlank()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionWithRefsVolume();
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.ReadResizeRange(partition));
+        var proposal = fixture.Proposal(OperationIntent.ResizePartition, [partition],
+            [Step("resize", new ResizePartitionCommand(
+                RealTargetReference.ForExisting(partition), 96L << 20))],
+            "Selected partition resized");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.PartitionSizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task PrepareRejectsALogicalDriveLetterMissingFromStorageSnapshot()
+    {
+        var fixture = new Fixture { LogicalDrives = [@"W:\"] };
+        fixture.SetGptPartitions();
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var proposal = fixture.Proposal(OperationIntent.SetDriveLetter, [partition],
+            [Step("letter", new SetDriveLetterCommand(
+                RealTargetReference.ForExisting(partition), null, 'W'))],
+            "Selected partition assigned W:");
+
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
@@ -67,6 +198,23 @@ public sealed class WindowsRealPlanSafetyTests
             new Dictionary<string, string> { ["remove"] = verified }, CancellationToken.None);
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(next.TargetEvidenceJson);
         Assert.Equal(PhysicalId, target!.UniqueId);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task VirtualDiskRemovalPreviewNamesItsExactChildOsDisk()
+    {
+        var fixture = new Fixture();
+        fixture.SetOldPool(withChild: true);
+        var virtualDisk = fixture.Id(StorageObjectKind.VirtualDisk, "vd:child");
+        var proposal = fixture.Proposal(OperationIntent.DeleteVirtualDisk, [virtualDisk],
+            [Step("remove", new DeleteVirtualDiskCommand(
+                RealTargetReference.ForExisting(virtualDisk)))],
+            "Selected virtual disk removed");
+
+        var plan = await fixture.Prepare(proposal);
+        Assert.Contains("OS disk ID osdisk:child", plan.RealOperation!.Steps[0].BeforeCondition);
+        Assert.Contains("OS disk osdisk:child (#9)", plan.RealOperation.Steps[0].DataLoss);
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
@@ -146,14 +294,18 @@ public sealed class WindowsRealPlanSafetyTests
                 new FixedTimeProvider());
             Adapter = new ForbiddenAdapter();
             Sizes = new SyntheticSizeReader();
-            var planner = new WindowsRealOperationPlanner(reader, new ForbiddenPartitionSizeReader(),
-                new AdministratorPrivilege(), new FixedTimeProvider(), new SyntheticSafetyInspector(), Sizes);
+            PartitionSizes = new SyntheticPartitionSizeReader();
+            var planner = new WindowsRealOperationPlanner(reader, PartitionSizes,
+                new AdministratorPrivilege(), new FixedTimeProvider(), new SyntheticSafetyInspector(), Sizes,
+                () => LogicalDrives);
             Backend = new WindowsRealStorageBackend(Adapter, planner, reader, new FixedTimeProvider());
         }
 
         public WindowsRealStorageBackend Backend { get; }
         public ForbiddenAdapter Adapter { get; }
         public SyntheticSizeReader Sizes { get; }
+        public SyntheticPartitionSizeReader PartitionSizes { get; }
+        public IReadOnlyList<string> LogicalDrives { get; set; } = [];
         public StorageObjectId Id(StorageObjectKind kind, string key) => new(system, kind, key);
         public RealOperationIntentRequest Proposal(OperationIntent intent,
             IReadOnlyList<StorageObjectId> targets, IReadOnlyList<RealOperationStep> steps,
@@ -162,6 +314,11 @@ public sealed class WindowsRealPlanSafetyTests
             proposal, new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
                 1234, Now.AddMinutes(-1), @"C:\Synthetic\WinPool.Agent.exe", true),
             OperationId.New(), CancellationToken.None);
+        public Task<RealPartitionResizeRange> ReadResizeRange(StorageObjectId partition) =>
+            Backend.ReadPartitionResizeRangeAsync(partition,
+                new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
+                    1234, Now.AddMinutes(-1), @"C:\Synthetic\WinPool.Agent.exe", true),
+                CancellationToken.None);
 
         public async Task<string> VerifiedEvidence(string? NewlyCreatedObjectId)
         {
@@ -185,6 +342,37 @@ public sealed class WindowsRealPlanSafetyTests
                 Partitions = [msr, data]
             };
         }
+        public void SetGptPartitionsWithFollowingPartition()
+        {
+            SetGptPartitions();
+            snapshot = snapshot with
+            {
+                Partitions = [..snapshot.Partitions,
+                    Partition("partition:following", 3, 300L << 20, 64L << 20,
+                        "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7")]
+            };
+        }
+
+        public void SetGptPartitionsWithUnsupportedRole(string role)
+        {
+            SetGptPartitions();
+            snapshot = snapshot with
+            {
+                Partitions = [snapshot.Partitions[0],
+                    snapshot.Partitions[1] with { PartitionTypeId = role, GptType = role }]
+            };
+        }
+
+        public void SetGptPartitionWithRefsVolume()
+        {
+            SetGptPartitions();
+            snapshot = snapshot with
+            {
+                Volumes = [new VolumeInfo("volume:refs", true, "partition:data",
+                    "ReFS", "", 128L << 20, 128L << 20, 65536,
+                    "Healthy", "OK", [@"E:\"])]
+            };
+        }
 
         public void SetOldPool(bool withChild = false) => SetPool(PoolId, "Old Pool", withChild);
         public void SetNewPool() => SetPool(NewPoolId, "Pool", false);
@@ -204,7 +392,11 @@ public sealed class WindowsRealPlanSafetyTests
             {
                 PhysicalDisks = [physical],
                 StoragePools = [baseline.StoragePools[0], pool],
-                VirtualDisks = withChild ? [child] : []
+                VirtualDisks = withChild ? [child] : [],
+                OsDisks = withChild
+                    ? [..baseline.OsDisks, new OsDiskInfo("osdisk:child", "Child", 9,
+                        "RAW", 256L << 20, false, false, false, null, child.StableId)]
+                    : baseline.OsDisks
             };
         }
 
@@ -257,7 +449,12 @@ public sealed class WindowsRealPlanSafetyTests
             string type) => new(id, true, 7, number, "GPT", offset, size,
             false, false, "", "", "", null, size, "Healthy", "OK", "", DiskId,
             PartitionTypeId: type,
-            Guid: number == 1 ? "2f8ae502-1e4e-4d94-b190-6284ccb62bea" : "8c4b7c34-04ba-46b1-80d7-9d967441a02d",
+            Guid: number switch
+            {
+                1 => "2f8ae502-1e4e-4d94-b190-6284ccb62bea",
+                3 => "35392fea-1075-4a47-b490-2bde5fb5c19d",
+                _ => "8c4b7c34-04ba-46b1-80d7-9d967441a02d"
+            },
             GptType: type);
     }
 
@@ -273,10 +470,19 @@ public sealed class WindowsRealPlanSafetyTests
     {
         public override DateTimeOffset GetUtcNow() => Now;
     }
-    private sealed class ForbiddenPartitionSizeReader : IPartitionSupportedSizeReader
+    private sealed class SyntheticPartitionSizeReader : IPartitionSupportedSizeReader
     {
+        public long MinimumBytes { get; set; } = 64L << 20;
+        public long MaximumBytes { get; set; } = 512L << 20;
+        public Action? OnRead { get; set; }
+        public int ReadCount { get; private set; }
         public Task<PartitionSupportedSize> ReadAsync(WindowsStorageCommandTarget target,
-            CancellationToken token) => throw new InvalidOperationException("No device access in synthetic tests.");
+            CancellationToken token)
+        {
+            ReadCount++;
+            OnRead?.Invoke();
+            return Task.FromResult(new PartitionSupportedSize(MinimumBytes, MaximumBytes));
+        }
     }
     private sealed class SyntheticSizeReader : IVirtualDiskCreationSizeReader
     {

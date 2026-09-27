@@ -113,6 +113,25 @@ public sealed class WindowsRealStorageBackendTests
     }
 
     [Fact]
+    public async Task ProviderErrorCannotBecomeVerifiedFromMatchingPostState()
+    {
+        var fixture = new Fixture();
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
+            new Dictionary<string, string>(), CancellationToken.None);
+        fixture.Adapter.ResultCode = "provider.error-outcome-unknown";
+        fixture.Adapter.OnExecute = () => fixture.SetOffline(true);
+
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight,
+            CancellationToken.None);
+
+        Assert.Equal(RealStepOutcome.OutcomeUnknown, result.Outcome);
+        Assert.Equal("real.provider_reported_uncertain_result", result.Code);
+        Assert.Equal(1, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
     public async Task ReconciliationSeparatesPartialUnknownCancelledAndNoCallFailure()
     {
         var fixture = new Fixture();
@@ -122,7 +141,7 @@ public sealed class WindowsRealStorageBackendTests
         var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
         var closure = topology.RequireSinglePhysicalClosure([fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
         var verifiedJson = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
-            closure.Fingerprint, closure.PhysicalMemberFingerprint, null, "synthetic-provider-return"));
+            closure.Fingerprint, closure.PhysicalMemberFingerprint, null, "provider.returned"));
 
         var partial = await fixture.Backend.ReconcileAsync(plan,
             [Progress(steps[0].Id, RealOperationStepState.Verified, verifiedJson),
@@ -163,7 +182,7 @@ public sealed class WindowsRealStorageBackendTests
             [fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
         var verifiedJson = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
             closure.Fingerprint, closure.PhysicalMemberFingerprint, null,
-            "synthetic-provider-return"));
+            "provider.returned"));
 
         var result = await fixture.Backend.ReconcileAsync(plan,
             [Progress(steps[0].Id, RealOperationStepState.Verified, verifiedJson),
@@ -189,6 +208,35 @@ public sealed class WindowsRealStorageBackendTests
         Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
         Assert.False(result.CanReleaseWriteBarrier);
         Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task RecoveryPromotesPersistedVerifiedResultWithoutReissuingCall()
+    {
+        var fixture = new Fixture();
+        var plan = await fixture.PrepareAsync();
+        fixture.SetOffline(true);
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var closure = topology.RequireSinglePhysicalClosure(
+            [fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
+        var evidence = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
+            closure.Fingerprint, closure.PhysicalMemberFingerprint, null,
+            "provider.returned"));
+
+        var recovered = await fixture.Backend.ReconcileAsync(plan,
+            [Progress("offline", RealOperationStepState.Verifying, evidence)],
+            CancellationToken.None);
+
+        Assert.Equal(RealOperationState.Succeeded, recovered.State);
+        Assert.True(recovered.CanReleaseWriteBarrier);
+        Assert.Equal(RealOperationStepState.Verified, Assert.Single(recovered.Steps).State);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+
+        var uncertain = await fixture.Backend.ReconcileAsync(plan,
+            [Progress("offline", RealOperationStepState.CallIssued)],
+            CancellationToken.None);
+        Assert.Equal(RealOperationState.OutcomeUnknown, uncertain.State);
+        Assert.False(uncertain.CanReleaseWriteBarrier);
     }
 
     [Fact]
@@ -367,6 +415,7 @@ public sealed class WindowsRealStorageBackendTests
     private sealed class SyntheticAdapter : IWindowsRealStorageCommandAdapter
     {
         public Action? OnExecute { get; set; }
+        public string ResultCode { get; set; } = "provider.returned";
         public int CallCount { get; private set; }
         public Task<WindowsStorageCommandResult> ExecuteAsync(
             RealStorageCommand command, WindowsStorageCommandTarget target,
@@ -374,7 +423,7 @@ public sealed class WindowsRealStorageBackendTests
         {
             CallCount++;
             OnExecute?.Invoke();
-            return Task.FromResult(new WindowsStorageCommandResult(true, "synthetic-provider-return",
+            return Task.FromResult(new WindowsStorageCommandResult(true, ResultCode,
                 target.UniqueId, target.ObjectId, null, target.DiskNumber, null, null, null));
         }
     }

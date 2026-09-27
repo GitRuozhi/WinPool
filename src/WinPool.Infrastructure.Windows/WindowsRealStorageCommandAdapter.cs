@@ -72,18 +72,23 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         try
         {
             var result = JsonSerializer.Deserialize<WindowsStorageCommandResult>(process.StandardOutput.Trim(), JsonOptions);
-            if (result is null || string.IsNullOrWhiteSpace(result.Code) ||
-                (process.ExitCode == 0 && !result.ProviderReturned && result.Code == "provider.returned"))
+            if (result is null || string.IsNullOrWhiteSpace(result.Code))
             {
                 return Unknown("The write process result was incomplete.");
             }
 
-            if (process.ExitCode != 0 && result.Code == "provider.returned")
+            if (process.ExitCode != 0)
             {
-                return Unknown("The provider returned but the write process exited abnormally.");
+                return Unknown("The write process exited abnormally; a storage call may have changed the target.");
             }
 
-            return result;
+            return result switch
+            {
+                { Code: "provider.returned", ProviderReturned: true } => result,
+                { Code: "adapter.preflight-rejected", ProviderReturned: false } => result,
+                { Code: "provider.error-outcome-unknown", ProviderReturned: true } => result,
+                _ => Unknown("The write process returned an inconsistent result.")
+            };
         }
         catch (JsonException)
         {
@@ -229,6 +234,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
                 value.OffsetBytes <= long.MaxValue - value.SizeBytes,
             ResizePartitionCommand value => value.SizeBytes > 0 && value.SizeBytes % mib == 0,
             FormatVolumeCommand value => Enum.IsDefined(value.FileSystem) &&
+                value.FileSystem != RealFileSystem.ReFs &&
                 (value.ClusterBytes == 65536 ||
                  (value.ClusterBytes == 4096 &&
                   (value.FileSystem == RealFileSystem.Fat32 || value.FileSystem == RealFileSystem.Ntfs))) &&
@@ -275,7 +281,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         var format = (FormatVolumeCommand)command;
         if (role == basic)
         {
-            return (format.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat or RealFileSystem.ReFs) &&
+            return (format.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat) &&
                 format.ClusterBytes == 65536;
         }
 

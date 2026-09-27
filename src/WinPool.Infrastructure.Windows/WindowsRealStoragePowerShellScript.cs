@@ -235,6 +235,9 @@ internal static class WindowsRealStoragePowerShellScript
                     if ($old.Length -gt 0 -and -not [string]::Equals([string]$partition.DriveLetter, $old, [StringComparison]::OrdinalIgnoreCase)) {
                         throw 'old-drive-letter-changed'
                     }
+                    if ($old.Length -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$partition.DriveLetter)) {
+                        throw 'old-drive-letter-changed'
+                    }
                     if ($new.Length -gt 0 -and @(Get-Partition -ErrorAction Stop | Where-Object { [string]::Equals([string]$_.DriveLetter, $new, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
                         throw 'new-drive-letter-in-use'
                     }

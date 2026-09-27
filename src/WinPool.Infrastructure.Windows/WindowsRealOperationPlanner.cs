@@ -18,6 +18,7 @@ public sealed class WindowsRealOperationPlanner
     private readonly IWindowsRealStorageSafetyInspector safetyInspector;
     private readonly IPrivilegeService privilege;
     private readonly TimeProvider timeProvider;
+    private readonly Func<IReadOnlyList<string>> logicalDriveRoots;
 
     public WindowsRealOperationPlanner(
         WindowsRealStorageTopologyReader? topologyReader = null,
@@ -25,7 +26,8 @@ public sealed class WindowsRealOperationPlanner
         IPrivilegeService? privilege = null,
         TimeProvider? timeProvider = null,
         IWindowsRealStorageSafetyInspector? safetyInspector = null,
-        IVirtualDiskCreationSizeReader? virtualDiskSizes = null)
+        IVirtualDiskCreationSizeReader? virtualDiskSizes = null,
+        Func<IReadOnlyList<string>>? logicalDriveRoots = null)
     {
         this.topologyReader = topologyReader ?? new WindowsRealStorageTopologyReader();
         this.partitionSizes = partitionSizes ?? new WindowsPartitionSupportedSizeReader();
@@ -33,6 +35,7 @@ public sealed class WindowsRealOperationPlanner
         this.safetyInspector = safetyInspector ?? new WindowsRealStorageSafetyInspector();
         this.privilege = privilege ?? new WindowsPrivilegeService();
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.logicalDriveRoots = logicalDriveRoots ?? Environment.GetLogicalDrives;
     }
 
     public async Task<OperationPlan> PrepareAsync(
@@ -88,7 +91,7 @@ public sealed class WindowsRealOperationPlanner
                 .ConfigureAwait(false);
             normalized.Add(step with
             {
-                BeforeCondition = DescribeBefore(step.Command, closure),
+                BeforeCondition = DescribeBefore(step.Command, closure, topology),
                 AfterCondition = DescribeAfter(step.Command),
                 DataLoss = DescribeLoss(step.Command, closure, topology.Snapshot),
                 SupportEvidence = "fresh-msft-storage:" + closure.Fingerprint
@@ -115,6 +118,56 @@ public sealed class WindowsRealOperationPlanner
                 + topology.Snapshot.Computer.OsBuild + "; physical member "
                 + closure.PhysicalDiskId,
             now, now.Add(InMemoryOperationAuthority.DefaultLifetime));
+    }
+
+    public async Task<RealPartitionResizeRange> ReadPartitionResizeRangeAsync(
+        StorageObjectId partitionId,
+        TrustedRealSession session,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
+            throw new UnauthorizedAccessException("An armed elevated Agent is required.");
+        if (partitionId.Kind != StorageObjectKind.Partition)
+            throw new InvalidDataException("A specific partition is required for a resize range.");
+
+        var topology = await topologyReader.CaptureAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (partitionId.System != topology.SystemId)
+            throw new InvalidDataException("The partition does not belong to the current local system.");
+        var closure = topology.RequireSinglePhysicalClosure([partitionId]);
+        var partition = ExistingPartition(topology.Snapshot,
+            RealTargetReference.ForExisting(partitionId));
+        var disk = topology.Snapshot.OsDisks.SingleOrDefault(item =>
+            item.StableId == partition.OsDiskStableId)
+            ?? throw new InvalidDataException("The partition has no exact OS disk.");
+        if (disk.IsBoot || disk.IsSystem || disk.IsOffline
+            || !disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
+            || partition.IsBoot || partition.IsSystem || !IsBasicData(partition)
+            || !IsSupportedResizeFileSystem(topology.Snapshot, partition))
+            throw new NotSupportedException("Only an ordinary online GPT NTFS or RAW data partition can be resized.");
+
+        var reference = RealTargetReference.ForExisting(partitionId);
+        await safetyInspector.ValidateAsync(topology, closure,
+            new ResizePartitionCommand(reference, partition.Size), cancellationToken)
+            .ConfigureAwait(false);
+        var target = WindowsRealStorageTargetBuilder.Build(topology, reference,
+            new Dictionary<string, string>());
+        var provider = await partitionSizes.ReadAsync(target, cancellationToken)
+            .ConfigureAwait(false);
+        var afterLookup = await topologyReader.CaptureAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!StringComparer.Ordinal.Equals(afterLookup.MachineBinding, topology.MachineBinding)
+            || !StringComparer.Ordinal.Equals(
+                afterLookup.RequireSinglePhysicalClosure([partitionId]).Fingerprint,
+                closure.Fingerprint))
+            throw new InvalidDataException("The partition topology changed while reading supported sizes.");
+
+        var (minimum, maximum) = AllowedResizeRange(topology.Snapshot,
+            partition, provider);
+        return new RealPartitionResizeRange(partitionId, partition.Size,
+            provider.MinimumBytes, provider.MaximumBytes, minimum, maximum,
+            closure.Fingerprint, timeProvider.GetUtcNow(), "real.resize_range_verified");
     }
 
     internal async Task ValidateCurrentStepAsync(
@@ -167,11 +220,18 @@ public sealed class WindowsRealOperationPlanner
                     throw new InvalidDataException("Clear requires an online, directly attached, non-system basic disk outside every real pool.");
                 var partitions = snapshot.Partitions.Where(item =>
                     item.OsDiskStableId == disk.StableId).ToArray();
+                var clearableGptRoles = new HashSet<Guid>
+                {
+                    Guid.Parse("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"),
+                    Guid.Parse("e3c9e316-0b5c-4db8-817d-f92df00215ae")
+                };
                 if (partitions.Length == 0 || partitions.Any(item =>
                         item.IsBoot || item.IsSystem
-                        || Guid.TryParse(item.PartitionTypeId, out var kind)
-                        && kind == Guid.Parse("de94bba4-06d1-4d40-a16a-bfd50179d6ac")))
-                    throw new InvalidDataException("Clear requires known non-protected partitions; OEM/recovery removal is outside this stage.");
+                        || item.IsHidden
+                        || !disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
+                        || !Guid.TryParse(item.PartitionTypeId, out var kind)
+                        || !clearableGptRoles.Contains(kind)))
+                    throw new InvalidDataException("Clear requires ordinary GPT data/MSR partitions only; OEM, recovery, boot, hidden and unknown roles are outside this stage.");
                 break;
             }
             case CreatePartitionCommand value:
@@ -189,20 +249,23 @@ public sealed class WindowsRealOperationPlanner
             {
                 var partition = ExistingPartition(snapshot, value.Partition);
                 if (partition.IsBoot || partition.IsSystem || !IsBasicData(partition)
-                    || partition.FileSystem is not ("NTFS" or "RAW" or ""))
+                    || !IsSupportedResizeFileSystem(snapshot, partition))
                     throw new InvalidDataException("Only an ordinary NTFS or unformatted data partition may be resized.");
                 var target = WindowsRealStorageTargetBuilder.Build(
                     topology, value.Partition, new Dictionary<string, string>());
                 var range = await partitionSizes.ReadAsync(target, cancellationToken)
                     .ConfigureAwait(false);
-                if (value.SizeBytes < range.MinimumBytes || value.SizeBytes > range.MaximumBytes)
-                    throw new InvalidDataException("The requested size is outside the provider's current supported range.");
+                var (minimum, maximum) = AllowedResizeRange(snapshot, partition, range);
+                if (value.SizeBytes < minimum || value.SizeBytes > maximum)
+                    throw new InvalidDataException("The requested size is outside the current provider and geometric range.");
                 if (value.SizeBytes == partition.Size)
                     throw new InvalidDataException("The requested partition size is unchanged.");
                 break;
             }
             case FormatVolumeCommand value:
             {
+                if (value.FileSystem == RealFileSystem.ReFs)
+                    throw new NotSupportedException("ReFS formatting is disabled until this host and provider are verified.");
                 var partition = CurrentPartition(topology, value.Partition,
                     verifiedStepOutputs);
                 if (partition is not null && (partition.IsBoot || partition.IsSystem
@@ -469,6 +532,47 @@ public sealed class WindowsRealOperationPlanner
         }
     }
 
+    private static (long Minimum, long Maximum) AllowedResizeRange(
+        StorageSnapshot snapshot,
+        PartitionInfo partition,
+        PartitionSupportedSize provider)
+    {
+        var disk = snapshot.OsDisks.SingleOrDefault(item =>
+            item.StableId == partition.OsDiskStableId)
+            ?? throw new InvalidDataException("The partition has no exact OS disk.");
+        const long mib = 1024L * 1024;
+        var currentEnd = checked(partition.Offset + partition.Size);
+        var conservativeDiskEnd = checked(disk.Size - mib);
+        var nextOffset = snapshot.Partitions.Where(item =>
+                item.OsDiskStableId == disk.StableId
+                && item.StableId != partition.StableId
+                && item.Offset >= currentEnd)
+            .Select(item => item.Offset).DefaultIfEmpty(conservativeDiskEnd).Min();
+        var geometryMaximum = checked(Math.Max(currentEnd, nextOffset) - partition.Offset);
+        var unalignedMinimum = Math.Max(mib, provider.MinimumBytes);
+        var unalignedMaximum = Math.Min(provider.MaximumBytes, geometryMaximum);
+        var minimum = checked((unalignedMinimum + mib - 1) / mib * mib);
+        var maximum = unalignedMaximum / mib * mib;
+        if (minimum > maximum)
+            throw new InvalidDataException("The provider and current geometry have no whole-MiB resize range.");
+        return (minimum, maximum);
+    }
+
+    private static bool IsSupportedResizeFileSystem(
+        StorageSnapshot snapshot, PartitionInfo partition)
+    {
+        var volumes = snapshot.Volumes.Where(item =>
+            StringComparer.Ordinal.Equals(item.PartitionStableId, partition.StableId)).ToArray();
+        if (volumes.Length > 1) return false;
+        var formats = new[] { partition.FileSystem }
+            .Concat(volumes.Select(item => item.FileSystem))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return formats.All(item => item is "NTFS" or "RAW") && formats.Length <= 1;
+    }
+
     private static long PlannedDiskSize(StorageSnapshot snapshot,
         RealOperationIntentRequest proposal, RealTargetReference reference)
     {
@@ -538,10 +642,12 @@ public sealed class WindowsRealOperationPlanner
         Guid.TryParse(partition.PartitionTypeId, out var actual)
         && actual == Guid.Parse("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
 
-    private static bool IsLetterUsed(StorageSnapshot snapshot, char letter) =>
+    private bool IsLetterUsed(StorageSnapshot snapshot, char letter) =>
         snapshot.Partitions.Any(item => item.DriveLetter.Equals(letter.ToString(), StringComparison.OrdinalIgnoreCase))
         || snapshot.Volumes.Any(item => item.DriveLetter.Equals(letter.ToString(), StringComparison.OrdinalIgnoreCase))
-        || snapshot.NetworkDisks.Any(item => item.DriveLetter.Equals(letter.ToString(), StringComparison.OrdinalIgnoreCase));
+        || snapshot.NetworkDisks.Any(item => item.DriveLetter.Equals(letter.ToString(), StringComparison.OrdinalIgnoreCase))
+        || logicalDriveRoots().Any(root => root.Length >= 2 && root[1] == ':'
+            && char.ToUpperInvariant(root[0]) == char.ToUpperInvariant(letter));
 
     private static RealFileSystem ParseFileSystem(string fileSystem) =>
         Enum.TryParse<RealFileSystem>(fileSystem, true, out var value)
@@ -556,9 +662,63 @@ public sealed class WindowsRealOperationPlanner
             throw new InvalidDataException("The volume label is invalid for the selected file system.");
     }
 
-    private static string DescribeBefore(RealStorageCommand command, RealTargetClosure closure) =>
-        "Current single-member Windows topology verified: " + closure.Fingerprint
-        + "; exact command target: " + command.GetType().Name;
+    private static string DescribeBefore(
+        RealStorageCommand command,
+        RealTargetClosure closure,
+        WindowsRealStorageTopology topology)
+    {
+        var physical = topology.Snapshot.PhysicalDisks.Single(item =>
+            item.StableId == closure.PhysicalDiskId);
+        var physicalReference = RealTargetReference.ForExisting(new StorageObjectId(
+            topology.SystemId, StorageObjectKind.PhysicalDisk, physical.StableId));
+        var physicalTarget = WindowsRealStorageTargetBuilder.Build(topology,
+            physicalReference, new Dictionary<string, string>());
+        var reference = WindowsRealStorageTargetBuilder.GetReference(command);
+        var source = reference.Existing is null ? null
+            : WindowsRealStorageTargetBuilder.Build(topology, reference,
+                new Dictionary<string, string>());
+        var identity = reference.Existing is { } existing
+            ? reference.Kind + " ID " + existing.ProviderKey
+                + ", UniqueId " + source!.UniqueId + ", ObjectId " + source.ObjectId
+                + (source.PartitionGuid.Length == 0 ? string.Empty
+                    : ", partition GUID " + source.PartitionGuid)
+                + (source.PartitionNumber is null ? string.Empty
+                    : ", partition " + source.PartitionNumber.Value.ToString(CultureInfo.InvariantCulture))
+                + (source.OffsetBytes is null ? string.Empty
+                    : ", offset " + source.OffsetBytes.Value.ToString(CultureInfo.InvariantCulture)
+                        + " bytes")
+                + (source.SizeBytes is null ? string.Empty
+                    : ", size " + source.SizeBytes.Value.ToString(CultureInfo.InvariantCulture)
+                        + " bytes")
+            : "new " + reference.Kind + " from prior step " + reference.CreatedByStep;
+        var virtualOsDisks = reference.Kind == StorageObjectKind.VirtualDisk
+            && reference.Existing is { } virtualId
+            ? topology.Snapshot.OsDisks.Where(item =>
+                item.VirtualDiskStableId == virtualId.ProviderKey).ToArray()
+            : [];
+        if (command is DeleteVirtualDiskCommand && virtualOsDisks.Length != 1)
+            throw new InvalidDataException("The selected virtual disk must have one exact OS disk before removal.");
+        var osDisk = source?.DiskNumber is { } number
+            ? topology.Snapshot.OsDisks.SingleOrDefault(item => item.Number == number)
+            : virtualOsDisks.Length == 1 ? virtualOsDisks[0]
+            : topology.Snapshot.OsDisks.SingleOrDefault(item =>
+                item.PhysicalDiskStableId == physical.StableId);
+        var osDiskTarget = osDisk is null ? null
+            : WindowsRealStorageTargetBuilder.Build(topology,
+                RealTargetReference.ForExisting(new StorageObjectId(topology.SystemId,
+                    StorageObjectKind.OsDisk, osDisk.StableId)),
+                new Dictionary<string, string>());
+        return "Physical disk " + physical.Model + ", serial " + physical.SerialNumber
+            + ", PhysicalDisk ID " + physical.StableId
+            + ", PhysicalDisk UniqueId " + physicalTarget.PhysicalMemberUniqueId
+            + "; OS disk " + (osDisk?.Number.ToString(CultureInfo.InvariantCulture)
+                ?? "created by prior step")
+            + ", OS disk ID " + (osDisk?.StableId ?? "pending")
+            + ", OS disk UniqueId " + (osDiskTarget?.OsDiskUniqueId ?? "pending")
+            + "; step target " + identity
+            + "; command " + command.GetType().Name
+            + "; topology fingerprint " + closure.Fingerprint;
+    }
 
     private static string DescribeAfter(RealStorageCommand command) => command switch
     {
@@ -572,9 +732,13 @@ public sealed class WindowsRealOperationPlanner
         ResizePartitionCommand value => "Selected partition total size "
             + value.SizeBytes.ToString(CultureInfo.InvariantCulture) + " bytes",
         FormatVolumeCommand value => "Selected partition formatted " + value.FileSystem
-            + " with " + value.ClusterBytes.ToString(CultureInfo.InvariantCulture) + " byte clusters",
+            + " with " + value.ClusterBytes.ToString(CultureInfo.InvariantCulture)
+            + " byte clusters; " + (value.Full ? "full format" : "quick format")
+            + "; label " + (string.IsNullOrEmpty(value.Label) ? "(empty)" : value.Label),
         SetDriveLetterCommand value => "Selected partition drive letter "
-            + (value.NewLetter?.ToString() ?? "removed"),
+            + (value.PreviousLetter?.ToString() ?? "none") + " -> "
+            + (value.NewLetter?.ToString() ?? "none")
+            + "; other mount paths preserved",
         RenameVolumeCommand value => "Selected volume label " + value.Label,
         CreatePoolCommand value => "Single-member pool " + value.Name,
         CreateVirtualDiskCommand value => "Single-column Simple/Fixed virtual disk "
@@ -602,7 +766,11 @@ public sealed class WindowsRealOperationPlanner
             + (value.Partition.Existing?.ProviderKey ?? "created by "
                 + value.Partition.CreatedByStep),
         DeleteVirtualDiskCommand value => "All partitions and volume data on virtual disk "
-            + value.VirtualDisk.Existing?.ProviderKey + ": "
+            + value.VirtualDisk.Existing?.ProviderKey + "; OS disk "
+            + string.Join(", ", snapshot.OsDisks.Where(disk =>
+                disk.VirtualDiskStableId == value.VirtualDisk.Existing?.ProviderKey)
+                .Select(disk => disk.StableId + " (#"
+                    + disk.Number.ToString(CultureInfo.InvariantCulture) + ")")) + ": "
             + DescribePartitions(snapshot, snapshot.Partitions.Where(partition =>
                 snapshot.OsDisks.Any(disk => disk.StableId == partition.OsDiskStableId
                     && disk.VirtualDiskStableId == value.VirtualDisk.Existing?.ProviderKey))),
