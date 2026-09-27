@@ -8,10 +8,25 @@
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <StackPanel
+            x:Name="NarrowPageNavigation"
+            Orientation="Horizontal"
+            Spacing="8"
+            Margin="0,0,0,8"
+            Visibility="Collapsed">
+            <Button x:Name="ShowTargetsButton" Click="ShowTargets_Click" />
+            <Button x:Name="ShowPropertiesButton" Click="ShowProperties_Click" />
+        </StackPanel>
+        <Grid x:Name="EditorLayoutGrid" Grid.Row="1"
+              SizeChanged="EditorLayoutGrid_SizeChanged">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" MinWidth="120" />
-            <ColumnDefinition Width="8" />
-            <ColumnDefinition Width="320" MinWidth="240" />
+            <ColumnDefinition x:Name="TargetsColumn" Width="*" MinWidth="120" />
+            <ColumnDefinition x:Name="SplitterColumn" Width="8" />
+            <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="240" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -19,6 +34,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Border
+            x:Name="TopologyBorder"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
@@ -54,6 +70,7 @@
             </ScrollViewer>
         </Border>
         <Border
+            x:Name="PendingActionsBorder"
             Grid.Row="1"
             Margin="0,8,0,0"
             Padding="8"
@@ -395,6 +412,7 @@
             </StackPanel>
         </Border>
         <toolkit:GridSplitter
+            x:Name="EditorSplitter"
             Grid.Column="1"
             Grid.RowSpan="3"
             HorizontalAlignment="Stretch"
@@ -403,6 +421,7 @@
             ResizeDirection="Columns"
             AutomationProperties.Name="Resize topology and properties" />
         <Grid
+            x:Name="PropertiesPane"
             Grid.Column="2"
             Grid.RowSpan="3">
             <Grid.RowDefinitions>
@@ -444,6 +463,7 @@
                 </StackPanel>
             </Button>
             </controls:ContextHelpHost>
+        </Grid>
         </Grid>
     </Grid>
 </editors:EditorPageBase>

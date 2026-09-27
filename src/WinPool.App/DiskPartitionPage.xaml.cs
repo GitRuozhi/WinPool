@@ -33,6 +33,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private bool _filling;
     private bool _renameInProgress;
     private bool _formatModeControlsReady;
+    private bool _narrowLayout;
+    private bool _showPropertiesInNarrowLayout;
+    private GridLength _widePropertiesWidth = new(320);
 
     public DiskPartitionPage()
     {
@@ -65,6 +68,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
+        ShowPropertiesButton.Content = Text("属性", "Properties");
         QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         StopRealOperationButton.Content = Text("按 ID 停止后续真实步骤", "Stop following real steps by ID");
@@ -158,6 +163,49 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FillFileSystemBox();
         FillClusterBox();
         FillPartitionTypeBox();
+    }
+
+    private void EditorLayoutGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var narrow = e.NewSize.Width < 720;
+        if (narrow && !_narrowLayout)
+            _widePropertiesWidth = PropertiesColumn.Width;
+        _narrowLayout = narrow;
+        UpdateEditorLayout();
+    }
+
+    private void ShowTargets_Click(object sender, RoutedEventArgs e)
+    {
+        _showPropertiesInNarrowLayout = false;
+        UpdateEditorLayout();
+    }
+
+    private void ShowProperties_Click(object sender, RoutedEventArgs e)
+    {
+        _showPropertiesInNarrowLayout = true;
+        UpdateEditorLayout();
+    }
+
+    private void UpdateEditorLayout()
+    {
+        NarrowPageNavigation.Visibility = _narrowLayout
+            ? Visibility.Visible : Visibility.Collapsed;
+        ShowTargetsButton.IsEnabled = _showPropertiesInNarrowLayout;
+        ShowPropertiesButton.IsEnabled = !_showPropertiesInNarrowLayout;
+        var showTargets = !_narrowLayout || !_showPropertiesInNarrowLayout;
+        var showProperties = !_narrowLayout || _showPropertiesInNarrowLayout;
+        TopologyBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
+        PartitionChromeBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
+        PropertiesPane.Visibility = showProperties ? Visibility.Visible : Visibility.Collapsed;
+        EditorSplitter.Visibility = _narrowLayout ? Visibility.Collapsed : Visibility.Visible;
+        TargetsColumn.MinWidth = _narrowLayout ? 0 : 120;
+        PropertiesColumn.MinWidth = _narrowLayout ? 0 : 240;
+        TargetsColumn.Width = showTargets
+            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        SplitterColumn.Width = new GridLength(_narrowLayout ? 0 : 8);
+        PropertiesColumn.Width = _narrowLayout
+            ? showProperties ? new GridLength(1, GridUnitType.Star) : new GridLength(0)
+            : _widePropertiesWidth;
     }
 
     private IEnumerable<Button> PropertyResetButtons()

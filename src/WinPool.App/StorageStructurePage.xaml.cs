@@ -30,6 +30,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _formDirty;
     private bool _updatingAutoVdisk;
     private bool _updatingAutoPartition;
+    private bool _narrowLayout;
+    private bool _showPropertiesInNarrowLayout;
+    private GridLength _widePropertiesWidth = new(320);
 
     private Stack<EditorDraftState> _undoStack => EditingSession.UndoStack;
     private Stack<EditorDraftState> _redoStack => EditingSession.RedoStack;
@@ -173,6 +176,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
+        ShowPropertiesButton.Content = Text("属性", "Properties");
         RebuildPoolButton.Content = Text("删除并重建单盘池", "Delete and rebuild single-disk pool");
         QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
@@ -208,6 +213,50 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
         ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
         ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前池属性草稿到待处理模拟修改。", "Save the current pool property draft into pending simulated changes."));
+    }
+
+    private void EditorLayoutGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var narrow = e.NewSize.Width < 720;
+        if (narrow && !_narrowLayout)
+            _widePropertiesWidth = PropertiesColumn.Width;
+        _narrowLayout = narrow;
+        UpdateEditorLayout();
+    }
+
+    private void ShowTargets_Click(object sender, RoutedEventArgs e)
+    {
+        _showPropertiesInNarrowLayout = false;
+        UpdateEditorLayout();
+    }
+
+    private void ShowProperties_Click(object sender, RoutedEventArgs e)
+    {
+        _showPropertiesInNarrowLayout = true;
+        UpdateEditorLayout();
+    }
+
+    private void UpdateEditorLayout()
+    {
+        NarrowPageNavigation.Visibility = _narrowLayout
+            ? Visibility.Visible : Visibility.Collapsed;
+        ShowTargetsButton.IsEnabled = _showPropertiesInNarrowLayout;
+        ShowPropertiesButton.IsEnabled = !_showPropertiesInNarrowLayout;
+        var showTargets = !_narrowLayout || !_showPropertiesInNarrowLayout;
+        var showProperties = !_narrowLayout || _showPropertiesInNarrowLayout;
+        TopologyBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
+        PendingActionsBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
+        StructureChromeBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
+        PropertiesPane.Visibility = showProperties ? Visibility.Visible : Visibility.Collapsed;
+        EditorSplitter.Visibility = _narrowLayout ? Visibility.Collapsed : Visibility.Visible;
+        TargetsColumn.MinWidth = _narrowLayout ? 0 : 120;
+        PropertiesColumn.MinWidth = _narrowLayout ? 0 : 240;
+        TargetsColumn.Width = showTargets
+            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        SplitterColumn.Width = new GridLength(_narrowLayout ? 0 : 8);
+        PropertiesColumn.Width = _narrowLayout
+            ? showProperties ? new GridLength(1, GridUnitType.Star) : new GridLength(0)
+            : _widePropertiesWidth;
     }
 
     private void EnsureForm()
