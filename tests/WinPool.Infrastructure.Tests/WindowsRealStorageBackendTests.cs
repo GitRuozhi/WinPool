@@ -151,6 +151,62 @@ public sealed class WindowsRealStorageBackendTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
+    [Fact]
+    public async Task RecoveryStopsOnlyNeverStartedTrailingStepsAfterVerifiedPrefix()
+    {
+        var fixture = new Fixture();
+        var plan = await fixture.PrepareAsync(twoSteps: true);
+        var steps = plan.RealOperation!.Steps;
+        fixture.SetOffline(true);
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var closure = topology.RequireSinglePhysicalClosure(
+            [fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
+        var verifiedJson = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
+            closure.Fingerprint, closure.PhysicalMemberFingerprint, null,
+            "synthetic-provider-return"));
+
+        var result = await fixture.Backend.ReconcileAsync(plan,
+            [Progress(steps[0].Id, RealOperationStepState.Verified, verifiedJson),
+                Progress(steps[1].Id, RealOperationStepState.Pending)],
+            CancellationToken.None);
+
+        Assert.Equal(RealOperationState.PartiallyCompleted, result.State);
+        Assert.True(result.CanReleaseWriteBarrier);
+        Assert.Equal(RealOperationStepState.StoppedBeforeCall, result.Steps[1].State);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task RecoveryKeepsPreparingCallUnknownEvenWhenTopologyIsUnchanged()
+    {
+        var fixture = new Fixture();
+        var plan = await fixture.PrepareAsync();
+
+        var result = await fixture.Backend.ReconcileAsync(plan,
+            [Progress(plan.RealOperation!.Steps[0].Id,
+                RealOperationStepState.PreparingCall)], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task RecoveryDoesNotClearBarrierWhenNoCallRecordHasExternalTopologyChange()
+    {
+        var fixture = new Fixture();
+        var plan = await fixture.PrepareAsync();
+        fixture.SetOffline(true);
+
+        var result = await fixture.Backend.ReconcileAsync(plan,
+            [Progress(plan.RealOperation!.Steps[0].Id,
+                RealOperationStepState.StoppedBeforeCall)], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
     private static RealOperationStepProgress Progress(
         string id, RealOperationStepState state, string? evidence = null) =>
         new(id, state, null, null, evidence);
@@ -174,7 +230,7 @@ public sealed class WindowsRealStorageBackendTests
             Adapter = new SyntheticAdapter();
             var planner = new WindowsRealOperationPlanner(
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
-                new FixedTimeProvider(Now));
+                new FixedTimeProvider(Now), new SyntheticSafetyInspector());
             Backend = new WindowsRealStorageBackend(Adapter, planner, Reader, new FixedTimeProvider(Now));
         }
 
@@ -333,6 +389,13 @@ public sealed class WindowsRealStorageBackendTests
         public Task<PartitionSupportedSize> ReadAsync(
             WindowsStorageCommandTarget target, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("This synthetic test must not query a device.");
+    }
+
+    private sealed class SyntheticSafetyInspector : IWindowsRealStorageSafetyInspector
+    {
+        public Task ValidateAsync(WindowsRealStorageTopology topology,
+            RealTargetClosure closure, RealStorageCommand command,
+            CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class AdministratorPrivilege : IPrivilegeService

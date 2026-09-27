@@ -10,7 +10,8 @@ public enum AgentCapability
     Monitoring = 1 << 0,
     Inventory = 1 << 2,
     Tray = 1 << 5,
-    Persistence = 1 << 6
+    Persistence = 1 << 6,
+    RealStorageOperations = 1 << 7
 }
 
 public readonly record struct AgentInstanceId(Guid Value);

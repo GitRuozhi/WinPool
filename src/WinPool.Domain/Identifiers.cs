@@ -73,7 +73,8 @@ public enum EnvironmentKind
     Simulation,
     Replay,
     UserProvidedDisposableMachine,
-    RemoteAgent
+    RemoteAgent,
+    LocalMachine
 }
 
 public enum AlgorithmConfidence

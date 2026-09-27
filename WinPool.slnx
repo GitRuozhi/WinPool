@@ -13,6 +13,7 @@
     <Project Path="src/WinPool.Monitoring/WinPool.Monitoring.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WinPool.App.Tests/WinPool.App.Tests.csproj" />
     <Project Path="tests/WinPool.Agent.Tests/WinPool.Agent.Tests.csproj" />
     <Project Path="tests/WinPool.Agent.Client.Tests/WinPool.Agent.Client.Tests.csproj" />
     <Project Path="tests/WinPool.Architecture.Tests/WinPool.Architecture.Tests.csproj" />
