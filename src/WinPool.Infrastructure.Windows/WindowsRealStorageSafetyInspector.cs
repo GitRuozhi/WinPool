@@ -21,14 +21,24 @@ public interface IWindowsRealStorageSafetyInspector
 /// </summary>
 public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafetyInspector
 {
+    private static readonly Guid BasicDataRole = Guid.Parse("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
     private readonly string[] additionalCriticalPaths;
+    private readonly Action<IReadOnlyList<VolumeInfo>, CancellationToken> encryptionProbe;
 
     public WindowsRealStorageSafetyInspector(
         IEnumerable<string>? additionalCriticalPaths = null)
+        : this(additionalCriticalPaths, RequireFullyDecryptedVolumes)
+    {
+    }
+
+    internal WindowsRealStorageSafetyInspector(
+        IEnumerable<string>? additionalCriticalPaths,
+        Action<IReadOnlyList<VolumeInfo>, CancellationToken> encryptionProbe)
     {
         this.additionalCriticalPaths = additionalCriticalPaths?
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath).ToArray() ?? [];
+        this.encryptionProbe = encryptionProbe ?? throw new ArgumentNullException(nameof(encryptionProbe));
     }
 
     public Task ValidateAsync(
@@ -70,6 +80,31 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
 
         var partitionIds = closure.Objects.Where(item => item.ObjectType == FactObjectType.Partition)
             .Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+        var deletingPartition = command is DeletePartitionCommand;
+        string[] selectedAccessPaths = [];
+        if (command is DeletePartitionCommand delete)
+        {
+            if (delete.Partition.Existing is not { } target
+                || target.System != topology.SystemId
+                || target.Kind != StorageObjectKind.Partition
+                || delete.Partition.CreatedByStep is not null
+                || !partitionIds.Contains(target.ProviderKey))
+                throw new InvalidDataException("Partition deletion needs one exact target in the current physical closure.");
+            var selected = snapshot.Partitions.SingleOrDefault(item => item.StableId == target.ProviderKey)
+                ?? throw new InvalidDataException("The selected partition is absent from the current snapshot.");
+            if (selected.IsBoot || selected.IsSystem || selected.IsHidden
+                || !Guid.TryParse(selected.PartitionTypeId, out var role)
+                || role != BasicDataRole)
+                throw new InvalidDataException("Only the selected ordinary BasicData partition may be deleted.");
+            var source = topology.RequireObject(target);
+            var paths = source.Field("AccessPaths");
+            if (paths is not { ReadState: FieldReadState.Returned,
+                    Value: { ValueKind: JsonValueKind.Array } value }
+                || value.EnumerateArray().Any(item => item.ValueKind != JsonValueKind.String))
+                throw new InvalidDataException("The selected partition's access paths are unknown.");
+            selectedAccessPaths = value.EnumerateArray().Select(item => item.GetString()!).ToArray();
+            partitionIds = new HashSet<string>(StringComparer.Ordinal) { selected.StableId };
+        }
         foreach (var partition in snapshot.Partitions.Where(item =>
                      partitionIds.Contains(item.StableId)))
         {
@@ -93,13 +128,13 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
         var volumes = snapshot.Volumes.Where(item =>
             item.PartitionStableId is not null
             && partitionIds.Contains(item.PartitionStableId)
-            && !string.IsNullOrWhiteSpace(item.FileSystem)
-            && !item.FileSystem.Equals("RAW", StringComparison.OrdinalIgnoreCase))
+            && (deletingPartition || !string.IsNullOrWhiteSpace(item.FileSystem)
+                && !item.FileSystem.Equals("RAW", StringComparison.OrdinalIgnoreCase)))
             .ToArray();
-        RequireFullyDecryptedVolumes(volumes, cancellationToken);
+        encryptionProbe(volumes, cancellationToken);
 
         if (MayInterruptRuntime(command))
-            RequireRuntimeIndependent(volumes);
+            RequireRuntimeIndependent(volumes, selectedAccessPaths);
     }
 
     private static bool RequiredBoolean(WinPoolSourceObject item, string name,
@@ -174,7 +209,8 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
         or SetDiskOnlineCommand { Online: false }
         or SetDriveLetterCommand { PreviousLetter: not null };
 
-    private void RequireRuntimeIndependent(IReadOnlyList<VolumeInfo> volumes)
+    private void RequireRuntimeIndependent(IReadOnlyList<VolumeInfo> volumes,
+        IReadOnlyList<string> selectedAccessPaths)
     {
         var critical = new[]
         {
@@ -187,8 +223,8 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
         }.Concat(additionalCriticalPaths)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => Path.GetFullPath(path!)).ToArray();
-        foreach (var volume in volumes)
-        foreach (var accessPath in volume.AccessPaths)
+        foreach (var accessPath in volumes.SelectMany(volume => volume.AccessPaths)
+                     .Concat(selectedAccessPaths))
         {
             if (!Path.IsPathFullyQualified(accessPath)) continue;
             var normalized = Path.GetFullPath(accessPath);
