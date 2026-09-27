@@ -458,7 +458,12 @@ public sealed class OperationPlanRepository
         command.Transaction = transaction;
         command.CommandText = """
             UPDATE operation_plans SET state = $next
-            WHERE operation_id = $operation AND risk >= 4 AND state = $expected;
+            WHERE operation_id = $operation AND risk >= 4 AND state = $expected
+              AND ($next <> 5 OR $expected NOT IN (3, 11) OR (
+                  EXISTS(SELECT 1 FROM operation_steps
+                         WHERE operation_id = $operation)
+                  AND NOT EXISTS(SELECT 1 FROM operation_steps
+                                 WHERE operation_id = $operation AND state <> 8)));
             """;
         command.Parameters.AddWithValue("$next", (int)next);
         command.Parameters.AddWithValue("$operation", Id(operationId.Value));
@@ -560,8 +565,8 @@ public sealed class OperationPlanRepository
     {
         (PersistedOperationState.Prepared, PersistedOperationState.Cancelled or PersistedOperationState.Rejected) => true,
         (PersistedOperationState.Accepted, PersistedOperationState.Running or PersistedOperationState.Cancelled or PersistedOperationState.OutcomeUnknown) => true,
-        (PersistedOperationState.Running, PersistedOperationState.Completed or PersistedOperationState.Failed or PersistedOperationState.PartiallyCompleted or PersistedOperationState.OutcomeUnknown) => true,
-        (PersistedOperationState.OutcomeUnknown, PersistedOperationState.Completed or PersistedOperationState.Failed or PersistedOperationState.PartiallyCompleted) => true,
+        (PersistedOperationState.Running, PersistedOperationState.Completed or PersistedOperationState.Cancelled or PersistedOperationState.Failed or PersistedOperationState.PartiallyCompleted or PersistedOperationState.OutcomeUnknown) => true,
+        (PersistedOperationState.OutcomeUnknown, PersistedOperationState.Completed or PersistedOperationState.Cancelled or PersistedOperationState.Failed or PersistedOperationState.PartiallyCompleted) => true,
         _ => false
     };
 

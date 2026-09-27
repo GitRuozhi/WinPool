@@ -177,6 +177,65 @@ public sealed class OperationPersistenceTests
         Assert.Empty(await writer.ListUnfinishedAsync());
     }
 
+    [Fact]
+    public async Task RunningCanCancelOnlyAfterEveryStepIsProvenSkippedBeforeCall()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "test-agent");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = Plan();
+        await writer.PrepareAsync(plan, Guid.NewGuid(), "intent");
+        await writer.AcceptAsync(plan.OperationId, plan.PlanHash, Digest, plan.CreatedAt);
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Accepted, PersistedOperationState.Running,
+            Event(plan, "running")));
+        Assert.False(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Cancelled,
+            Event(plan, "premature-cancel")));
+        Assert.True(await writer.HasRealWriteBarrierAsync());
+
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.PreparingCall,
+            "{\"disk\":\"stable-id\"}", null, Event(plan, "preparing")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first",
+            PersistedOperationStepState.PreparingCall, PersistedOperationStepState.Skipped,
+            null, "stopped_before_call", Event(plan, "skip-first")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "second",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.Skipped,
+            null, "stopped_before_call", Event(plan, "skip-second")));
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Running, PersistedOperationState.Cancelled,
+            Event(plan, "cancelled")));
+        Assert.False(await writer.HasRealWriteBarrierAsync());
+    }
+
+    [Fact]
+    public async Task RecoveredUnknownCanCancelOnlyAfterAllStepsAreSkipped()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "test-agent");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = Plan();
+        await writer.PrepareAsync(plan, Guid.NewGuid(), "intent");
+        await writer.AcceptAsync(plan.OperationId, plan.PlanHash, Digest, plan.CreatedAt);
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.Accepted, PersistedOperationState.OutcomeUnknown,
+            Event(plan, "recovery")));
+        Assert.False(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.OutcomeUnknown, PersistedOperationState.Cancelled,
+            Event(plan, "premature-cancel")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.Skipped,
+            null, "stopped_before_call", Event(plan, "skip-first")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "second",
+            PersistedOperationStepState.NotStarted, PersistedOperationStepState.Skipped,
+            null, "stopped_before_call", Event(plan, "skip-second")));
+        Assert.True(await writer.TransitionAsync(plan.OperationId,
+            PersistedOperationState.OutcomeUnknown, PersistedOperationState.Cancelled,
+            Event(plan, "cancelled")));
+        Assert.False(await writer.HasRealWriteBarrierAsync());
+    }
+
     private static ExecutionEvent Event(OperationPlan plan, string code) =>
         new(plan.OperationId, ExecutionEventKind.Progress,
             DateTimeOffset.UtcNow, code, code);
