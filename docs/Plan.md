@@ -1,16 +1,17 @@
 # 当前 Plan：本机真实磁盘修改第一阶段
 
-更新日期：2026-09-27。**阶段已正式进入；本轮交付为计划编制，代码实施和真实写入均未开始。** 用户本轮只授权修改文档。执行 Agent 收到后续实施指令后，从 P0 顺序推进。计划存在、进入阶段、管理员权限和打开真实编辑开关，都不代替具体磁盘操作授权。
+更新日期：2026-09-27。**阶段已正式进入，用户已指示执行本 Plan；P0–P5 正在实施或验证，P6 尚未开始，未进行真实磁盘写入。** 真实写入仍须按本 Plan 逐操作取得准确授权。计划存在、进入阶段、管理员权限和打开真实编辑开关，都不代替具体磁盘操作授权。
 
-基线：`b4a3508`，当前产品 **V0.57**。上一轮缺陷收口见 [V0.57 归档](Archive/20260927-v057-closeout/README.md)。本阶段目标版本 **V0.58**，只在实施及规定验收完成后调整唯一版本源；本次文档编制不改版本。实施开始先核对 HEAD，影响本计划的后续改动须记录差异。
+计划编制基线：`b4a3508`；本阶段实施起点：`c1427e1`，当前产品 **V0.57**。上一轮缺陷收口见 [V0.57 归档](Archive/20260927-v057-closeout/README.md)。本阶段目标版本 **V0.58**，只在实施及规定验收完成后调整唯一版本源；影响本计划的后续改动须记录差异。
 
 ## 1. 已确认决定与完成范围
 
-用户于 2026-09-27 确认以下三项，执行 Agent 不得自行更换：
+用户于 2026-09-27 确认以下四项，执行 Agent 不得自行更换：
 
 1. **先完成单盘可验证的真实操作。** 多盘冗余、混合介质分层等列入后续阶段，真实入口保持禁用。本阶段不再要求把两个编辑页的全部模拟功能都变为已验证真实功能。
 2. **显式删除重建纳入本阶段。** 每次列出受影响对象和数据损失，另行确认；不能把普通参数更新失败自动转换为删除重建。无成员池在真实模式只保留为草稿，加入合格成员后才能创建真实池。
 3. **真实批量操作逐步执行。** 中途失败停止后续步骤，保留已经发生的结果并重新采集对账；修复、剩余步骤和重试另建计划并确认，不承诺整批回滚。
+4. **首轮参数限于第 4.3 节的组合。** 数据分区格式化簇和单盘 VD 交错为 64 KiB；EFI/恢复分区簇为 4 KiB。其它组合保留模拟，真实写入暂不开放。
 
 交付目标：在现有存储结构编辑页、磁盘分区编辑页接通第 4 节列入的本机真实操作，完成受控 Agent 执行、失败恢复、实机结果核对；模拟编辑继续工作。读取、草稿、预览、提交、执行和已验证成功分别表示。
 
@@ -90,6 +91,7 @@ A 类被设备、系统或提供程序阻断时，不得自行改为 C/D 或宣�
 
 - 四类 GPT GUID 沿用当前 `SimulationCommandPreview.PartitionTypeId` 对应定义并核对官方参数，不开放自定义 GUID。EFI/Recovery 不引入未计划的属性修改、引导修复或 WinRE 配置。
 - 完整格式化实际写入目标卷，显示耗时和不可逆影响；测试用小分区，不对整个 4 TB 盘擅自做全盘格式化/擦除。
+- 格式化未填写新卷标时，Windows `Format-Volume` 的示例结果为空卷标；真实预览与后置核验均以空卷标为预期，不描述为“保留原卷标”。
 - BitLocker 锁定/加密状态不明、动态盘、集群/远程对象、未覆盖提供程序明确拒绝；解锁、解密、强制卸载、改只读、自动修复不作为隐含前置操作。
 - 已有分区不为匹配新建网格重新对齐。原始磁盘容量不等于 GPT 可用末端，须核对扇区保留区和真实可用范围。
 
@@ -117,9 +119,9 @@ C05 的特别条件：`Get-VirtualDiskSupportedSize` 文档描述的是池中新
 
 ### 4.3 本阶段写入参数组合
 
-本节固定参数范围已向用户提出确认，当前为建议稿，答复前不作为实施决定。建议首次交付按下表开放创建/格式化参数；其它既有模拟选项继续保留，真实模式明确显示“本阶段未验证”。这是阶段交付范围，不宣称 Windows 不支持其它值。容量是经过实时范围与粒度检查的变量，不限于验收的几个容量点；身份、边界和整数溢出由自动测试覆盖。
+本节参数范围已由用户确认。首次交付按下表开放创建/格式化参数；其它既有模拟选项继续保留，真实模式明确显示“本阶段未验证”。这是阶段交付范围，不宣称 Windows 不支持其它值。容量是经过实时范围与粒度检查的变量，不限于验收的几个容量点；身份、边界和整数溢出由自动测试覆盖。
 
-| 用途 | 待确认的首轮参数 |
+| 用途 | 已确认的首轮参数 |
 | --- | --- |
 | 新建 Simple/Fixed VD | 1 列，Interleave 65536 bytes；不开放其它交错或冗余组合 |
 | 普通 BasicData 格式化 | NTFS / exFAT，簇 65536 bytes，快速/完整分别实测 |
@@ -239,16 +241,18 @@ C05 的特别条件：`Get-VirtualDiskSupportedSize` 文档描述的是池中新
 
 | 阶段 | 状态 | 工作与产物 | 进入下一阶段的条件 |
 | --- | --- | --- | --- |
-| P0 基线/范围 | 未开始 | 读 AGENTS/Product/Development/本 Plan；核对 Git；建立 A/C/D 对照；只读确认机器/目标/能力，填写准入表 | A 类无未解释冲突；C 类不依赖待创建对象的初步依据明确，其余在获准创建后补查；不请求泛化写入授权 |
-| P1 契约/恢复 | 未开始 | 类型化步骤、真实环境/策略、持久状态、IPC 12、必要 schema 18；假适配器全流程 | 无真实写入下证明授权、重复提交、未知、部分完成及重启对账 |
-| P2 分区适配 | 未开始 | A01–A10、C01–C03 的条件分支，固定映射/输入/前后条件 | 直接自动验证通过；UI 不得只靠布尔开关越过未完成链路 |
-| P3 池/重建适配 | 未开始 | A11–A16、C04/C05、依赖和输出身份、显式重建；D 类拒绝 | 单盘创建/删除/重建及条件扩展的集成与失败矩阵通过 |
-| P4 两页接线 | 未开始 | 真实/模拟路由、预览、确认、查询、部分完成；管理快捷入口共享规则；480 DIP/中英 | 模拟回归及无写确认交互通过；无 Enter/快捷键/IPC 绕行 |
-| P5 写前工程门 | 未开始 | 第 9 节工程门及无写原生生命周期；固定构建/提交基线 | 无未解决失败；E_POINTER 本轮若复现须先解决到可稳定执行 |
+| P0 基线/范围 | 实施中 | 读 AGENTS/Product/Development/本 Plan；核对 Git；建立 A/C/D 对照；只读确认机器/目标/能力，填写准入表 | A 类无未解释冲突；C 类不依赖待创建对象的初步依据明确，其余在获准创建后补查；不请求泛化写入授权 |
+| P1 契约/恢复 | 已实现待验证 | 类型化步骤、真实环境/策略、持久状态、IPC 12、必要 schema 18；假适配器全流程 | 无真实写入下证明授权、重复提交、未知、部分完成及重启对账 |
+| P2 分区适配 | 已实现待验证 | A01–A10、C01–C03 的条件分支，固定映射/输入/前后条件 | 直接自动验证通过；UI 不得只靠布尔开关越过未完成链路 |
+| P3 池/重建适配 | 已实现待验证 | A11–A16、C04/C05、依赖和输出身份、显式重建；D 类拒绝 | 单盘创建/删除/重建及条件扩展的集成与失败矩阵通过 |
+| P4 两页接线 | 已实现待验证 | 真实/模拟路由、预览、确认、查询、部分完成；管理快捷入口共享规则；480 DIP/中英 | 模拟回归及无写确认交互通过；无 Enter/快捷键/IPC 绕行 |
+| P5 写前工程门 | 实施中 | 第 9 节工程门及无写原生生命周期；固定构建/提交基线 | 无未解决失败；E_POINTER 本轮若复现须先解决到可稳定执行 |
 | P6 实机验收 | 未开始 | 填第 10 节准入表，取得准确操作批准，顺序验收与证据 | A 类通过，满足条件的 C 类通过，保护盘核对及获准末态完成 |
 | P7 收口 | 未开始 | 版本、公开能力/限制、证据、最终受影响检查、本地提交和归档 | 第 12 节清单全部满足 |
 
 P1–P4 可按文件所有权并行实现，但共享构建/数据库集成和原生桌面由一个执行方串行运行。主代理审阅边界、集成和证据，不重复已通过同一检查。不先放开 UI 再补安全门，不跳至 P6 用设备试错代替契约验证。
+
+2026-09-27 进度事实：IPC 12、核心 schema 18、类型化 Windows 写适配器、两页路由、准确目标确认、停止后续步骤、真实扩缩范围、分区角色门及恢复屏障已实现。提交 `e57cc81` 的代码基线通过最终工程门：restore 成功，Release 构建零警告/零错误，12 个测试项目合计 896 通过、3 个既有测量用例跳过、0 失败，依赖审计覆盖 23 个项目且未报告漏洞，`git diff --check` 通过；日志/TRX 在忽略提交的 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/`。标准运行树原生只读验收确认 WDC 与两块 Samsung 分开显示，真实编辑关闭时写入控件禁用；两页在 480 DIP 的目标与属性视图中英可切换，英文自动创建开关显示 `On`。管理员只读 BitLocker 查询因 UAC 被取消而没有结果，P0 安全事实未闭合；管理员启动/真实开关、准备与最终确认取消等 P5 原生项目仍待验证。没有真实写入，H00–H11 尚未通过，当前产品仍为 V0.57，目标版本为 V0.58。
 
 首次实测的能力启用次序固定：P1–P4 用替身，真实适配器不进入默认测试/CI；P5 工程门通过后，才在开发中的标准运行树用同一受控链路为 P6 准备实际计划。每项仍先有适用能力证据、准确开发者批准和产品当次确认，首次尚未实测的项明确显示实验状态。交付时只启用已通过实测的组合；C/D 未满足条件的项全链路禁用。不得加绕过身份/授权/持久化的测试后门；构建时机器名/型号白名单也不是该启用方式。
 
@@ -305,18 +309,18 @@ git diff --check
 
 ### 10.1 写入前准入表
 
-P0/P6 用当前只读采集填写，未知写“未采集”，不能按型号或旧报告推断。本次规划不运行设备查询。
+P0/P6 用当前只读采集填写，未知写“未采集”，不能按型号或旧报告推断。2026-09-27 的 P0 固定只读采集已完成；原始本机证据保留在忽略提交的 `artifacts/test-results/real-admission-p0/read-only-topology.json`，以下只记录评审所需摘要。P6 写入前必须重采，不以 P0 快照直接放行。
 
 | 必填项 | 当前值 |
 | --- | --- |
-| 主机名/稳定绑定、Windows 版本/SKU/build、Storage 模块版本 | 未采集 |
-| WDC 型号/序列号、PhysicalDisk UniqueId/ObjectId、OS Disk UniqueId/路径/Number、容量/扇区 | 未采集 |
-| WDC 当前池/层/VD/分区/卷/挂载及全部关联成员 | 未采集 |
-| Boot/System/PageFile/CrashDump/只读/加密/健康/CanPool 和拒绝原因 | 未采集 |
-| 两块 Samsung 的唯一身份、关联对象及结构基线 | 未采集 |
-| 运行目录/数据根/仓库/证据与物理盘关系 | 未采集 |
-| A 类能力及 C01–C05 支持/缺环境/未知的证据 | 未采集 |
-| 程序版本/构建哈希、Git 基线、工程门证据 | 待实施 |
+| 主机名/稳定绑定、Windows 版本/SKU/build、Storage 模块版本 | `DESKTOP-BLE6H18`；机器绑定哈希已采；Windows 10 Pro for Workstations 22H2/build 19045.7725；本机 Storage PowerShell 模块 2.0.0.0 |
+| WDC 型号/序列号、PhysicalDisk UniqueId/ObjectId、OS Disk UniqueId/路径/Number、容量/扇区 | `WDC WD40EZAZ-00SF3B0`，序列号尾 `FP80`；OS Disk 0，4,000,787,030,016 bytes，逻辑/物理扇区 512/4096 bytes；完整原始 Windows ID 仍须从固定采集提取并写入 H00 私有证据 |
+| WDC 当前池/层/VD/分区/卷/挂载及全部关联成员 | 仅 primordial 池，**无实际池、层、VD**；WDC 直接 GPT，分区 1 为 MSR（offset 17,408、size 16,759,808 bytes），分区 2 为近乎占满全盘的 BasicData NTFS，挂载 `E:`；WDC 闭包为单一物理盘 |
+| Boot/System/PageFile/CrashDump/只读/加密/健康/CanPool 和拒绝原因 | WDC 的 Boot/System/PageFile/CrashDump 均为 false，健康 Healthy/OK；`CanPool=false`，原因 `InsufficientCapacity`；普通采集显示 OS Disk 和 `E:` 数据分区 `IsReadOnly=false`，MSR 的该值为 null。独立管理员安全探针访问被拒，BitLocker 状态未知，写入前必须补齐独立安全核验 |
+| 两块 Samsung 的唯一身份、关联对象及结构基线 | 980 PRO 为 Disk 1，承担 Boot/System/PageFile/CrashDump，含 EFI、MSR、BasicData 和两个 Recovery；980 为 Disk 2，单个 BasicData NTFS、挂载 `D:`；两者与 WDC 闭包分离。原始完整身份与前后对比留 H00/P6 私有证据 |
+| 运行目录/数据根/仓库/证据与物理盘关系 | 仓库和本轮证据位于 `D:`（Samsung 980）；2026-09-27 当前 Agent 进程映像位于 `D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release`，App 已正常退出；数据位置指针为 `Standard`，当前数据根为 `C:\Users\Admin\AppData\Local\WinPool`（980 PRO）；分页文件在 `C:`。本轮只读进程映像/服务路径查询未发现 `E:` 依赖，H00 须在 App/Agent 实际运行时重新核对并检查 WDC `E:` 的占用与关联，不能凭此摘要直接清盘。 |
+| A 类能力及 C01–C05 支持/缺环境/未知的证据 | 固定 MSFT 核心源采集完整、0 字段问题；A 类逐命令支持性尚未实测。微软资料把 ReFS 列为 Windows 10 Pro for Workstations 的功能，但本机直接 BasicData 格式化的 provider 支持仍未知，C01 禁用；C02–C05 尚无满足条件的现场证据，也禁用。不能按 SKU 或本表直接放行 |
+| 程序版本/构建哈希、Git 基线、工程门证据 | 当前 V0.57；代码基线 `e57cc81`；Release `WinPool.App.dll` SHA-256 `0F90CBB3535D5DDA955BE166A5D8B0DA7445582F810CE2322D2D58FA88DC55DB`，`WinPool.Agent.dll` SHA-256 `14972D902423538E69B90486FDB4F0C997CBA55D3DFA84FC554D0017435297AC`；本轮工程门日志/TRX 见 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/`。P6 前仍须重采并核对运行中的确切程序。 |
 | 具体计划/损失/批准引用/预期末态 | 尚未获得具体写入批准 |
 
 WDC 若属于涉及 Samsung 的池或不能证明独立，相关写入全部停止，不能先移出 WDC “做准备”。`-WhatIf` 不代替准入或实机验证。
@@ -350,7 +354,7 @@ WDC 若属于涉及 Samsung 的池或不能证明独立，相关写入全部停�
 | H10 | C04 满足时先另行批准删除 H09 的非分层 VD及其子对象，保留单成员池；再创建 HDD 层模板、以该层新建 VD，验关联/改名/删除重建；层 MAX 另按 C05 | 不对原非分层 VD凭显示分组挂层；真实层/关系有证据；不支持保留禁用 |
 | H11 | 独立批准最终清理或用户末态；完整复采、普通 App 重启重读 | 无未终结操作，末态正确，无 WinPool 导致的 Samsung 结构改变 |
 
-H00 必须提出具体测试末态。默认建议：WDC **在线 GPT、16 MiB MSR + 剩余可用范围一个 NTFS/64 KiB 数据分区、卷标 `WinPool_Test`**，盘符按确认的未占用字母。用户可选 RAW 或保留池；未明确选择及批准操作前不自动收尾清盘/格式化。“恢复”不表示恢复已销毁原数据。
+H00 的测试末态已由用户确定：WDC **在线 GPT、16 MiB MSR + 剩余可用范围一个 NTFS/64 KiB 数据分区、卷标 `WinPool_Test`、盘符 `E:`**。H11 前重核 `E:` 占用；若已被其它卷占用，停止并重新确认，不自动换字母。末态选择不代替各次清盘、删池、分区和格式化的精确授权。“恢复”不表示恢复已销毁原数据。
 
 测试前保存界面及偏好基线，结束后恢复语言、主题、开发者模式、自动建 VD/分区、MSR、监控等本轮临时改变的偏好。恢复偏好不触发真实结构变更，不能自动恢复真实编辑同意；普通重启后开关仍关闭。若中途受阻，记录当前偏好与设备末态，不用未经批准的写入来凑“恢复原状”。
 
@@ -391,7 +395,7 @@ H00 必须提出具体测试末态。默认建议：WDC **在线 GPT、16 MiB MS
 - [ ] 只本地提交任务文件，保留原外部审查/证据；不自行推送、tag、Release、发布二进制。
 - [ ] 完成后将 Plan 与简短核对归档到 `docs/Archive/<日期>-real-edit-stage1/` 并维护索引；后续项不自动激活。
 
-本次编制保持实施清单未完成；仅检查内容、链接、Git 范围，不运行构建、测试、原生程序或设备测试。
+执行中按 P0–P7 和第 12 节逐项更新实际结果；尚未取得证据的项不得提前勾选。
 
 ## 13. 官方依据与适用限制
 
@@ -403,8 +407,10 @@ H00 必须提出具体测试末态。默认建议：WDC **在线 GPT、16 MiB MS
 | [New-VirtualDisk](https://learn.microsoft.com/en-us/powershell/module/storage/new-virtualdisk?view=windowsserver2025-ps)、[Set-VirtualDisk](https://learn.microsoft.com/en-us/powershell/module/storage/set-virtualdisk?view=windowsserver2025-ps) | 创建/可设置属性分别核对，不由模拟输入推断可原地修改 |
 | [Get-VirtualDiskSupportedSize](https://learn.microsoft.com/en-us/powershell/module/storage/get-virtualdisksupportedsize?view=windowsserver2025-ps)、[Get-StorageTierSupportedSize](https://learn.microsoft.com/en-us/powershell/module/storage/get-storagetiersupportedsize?view=windowsserver2025-ps) | 分别核对创建容量的适用对象，不能把新建上限直接用作已有 VD/层扩展上限；见 C05 |
 | [Initialize-Disk](https://learn.microsoft.com/en-us/powershell/module/storage/initialize-disk?view=windowsserver2025-ps)、[Clear-Disk](https://learn.microsoft.com/en-us/powershell/module/storage/clear-disk?view=windowsserver2025-ps) | RAW 初始化与清除是不同动作，RemoveOEM 单独核对 |
-| [New-Partition](https://learn.microsoft.com/en-us/powershell/module/storage/new-partition?view=windowsserver2025-ps)、[Format-Volume](https://learn.microsoft.com/en-us/powershell/module/storage/format-volume?view=windowsserver2025-ps) | 分区/格式化分步，FS/簇/完整方式准确传参 |
+| [New-Partition](https://learn.microsoft.com/en-us/powershell/module/storage/new-partition?view=windowsserver2025-ps)、[Format-Volume](https://learn.microsoft.com/en-us/powershell/module/storage/format-volume) | 分区/格式化分步，FS/簇/完整方式准确传参；`Format-Volume` 示例 3 显示未指定新卷标时原卷标被清空 |
 | [Get-PartitionSupportedSize](https://learn.microsoft.com/en-us/powershell/module/storage/get-partitionsupportedsize?view=windowsserver2025-ps)、[Resize-Partition](https://learn.microsoft.com/en-us/powershell/module/storage/resize-partition?view=windowsserver2025-ps) | 查询实际 supported-size，操作后复采 |
+| [MSFT_Partition.GetSupportedSize](https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-partition-getsupportedsizes) | SizeMin 可随不可移动文件变化，SizeMax 由紧邻空闲区决定；UI 查询和执行前均重核 |
+| [微软 Windows 10 Pro for Workstations 发布说明](https://www.microsoft.com/en-us/microsoft-365/blog/2017/08/10/microsoft-announces-windows-10-pro-workstations/) | ReFS 为该 SKU 宣布的功能；并不证明当前 WDC 的直接分区能按所选簇格式化，C01 仍待现场证据 |
 | [Resize-VirtualDisk](https://learn.microsoft.com/en-us/powershell/module/storage/resize-virtualdisk?view=windowsserver2025-ps)、[卷扩容说明](https://learn.microsoft.com/en-us/windows-server/storage/storage-spaces/manage-volumes?tabs=windows-admin-center) | 提供程序决定扩缩能力；VD/层变化不等于分区扩展 |
 | [New-StorageTier](https://learn.microsoft.com/en-us/powershell/module/storage/new-storagetier?view=windowsserver2025-ps)、[Set-StorageTier](https://learn.microsoft.com/en-us/powershell/module/storage/set-storagetier?view=windowsserver2025-ps) | 模板/实例/显示分组有别；参数存在不保证现场适用 |
 | [Set-Partition](https://learn.microsoft.com/en-us/powershell/module/storage/set-partition?view=windowsserver2025-ps)、[Set-Volume](https://learn.microsoft.com/en-us/powershell/module/storage/set-volume?view=windowsserver2025-ps)、[Remove-StoragePool](https://learn.microsoft.com/en-us/powershell/module/storage/remove-storagepool?view=windowsserver2025-ps) | 盘符/标签/移除池用封闭精确适配步骤 |
