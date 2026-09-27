@@ -178,6 +178,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
         ShowPropertiesButton.Content = Text("属性", "Properties");
+        _autoVdiskSwitch.OnContent = Text("开", "On");
+        _autoVdiskSwitch.OffContent = Text("关", "Off");
+        _autoPartitionSwitch.OnContent = Text("开", "On");
+        _autoPartitionSwitch.OffContent = Text("关", "Off");
         RebuildPoolButton.Content = Text("删除并重建单盘池", "Delete and rebuild single-disk pool");
         QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
