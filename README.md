@@ -4,7 +4,7 @@
 
 WinPool is a Windows desktop application for viewing storage topology, monitoring devices, and editing simulated storage systems.
 
-The current product version is **V0.57**. The first stage of single-disk real editing still needs its pre-write admission and native checks (P0/P5). No real disk write or on-device acceptance result has been recorded, so this is not a verified feature. **V0.58 is a target version only.** Real multi-disk redundancy and mixed-media tiering remain disabled. See the [current plan](docs/Plan.md).
+The current product version is **V0.57**. On 2026-10-06, the user confirmed and performed one real volume-label change on the WDC E: volume to `WP_ADMIN_1006`; subsequent read-only reconciliation verified the result and completed its journal record. Single-disk real editing still needs outstanding P0/P5 checks and the full H00–H11 native acceptance sequence. **V0.58 is a target version only.** Real multi-disk redundancy and mixed-media tiering remain disabled. See the [current plan](docs/Plan.md).
 
 Startup first displays the last page and system from an integrity-checked, read-only local preview; the Agent then verifies them. If that preview is unavailable, a loading state prevents a flash of the default system. Manage and Hardware first display the last saved local inventory. On startup, the Agent collects storage first, then full hardware, and reports each result to the App. Both automatic collection and manual refresh show in-window progress, success or failure notifications; failed collection preserves the previous data. Loading history is not reported as a successful collection. Internal formats are document 3 / core SQLite 18 / monitoring SQLite 1 / IPC 12. The core database has a checked migration from schema 17; older inventory documents remain unsupported.
 
@@ -13,9 +13,9 @@ Startup first displays the last page and system from an integrity-checked, read-
 - View local storage through read-only discovery and inspect pools, tiers, disks, partitions, and related information.
 - Enable Developer mode in Settings to show Hardware, Test, and Development. Hardware appears before Manage and provides a read-only ten-section report, source details, local refresh, and complete system JSON export.
 - Edit simulated systems on the Storage structure and Disk/partition pages.
-- Both editing pages now have development-stage entry points for preparing single-disk real operations, confirming an Agent-frozen plan, and querying its OperationId. Startup still selects simulation mode. Automated checks of this path do not establish that a real disk operation has succeeded.
+- Both editing pages now have development-stage entry points for preparing single-disk real operations, confirming an Agent-frozen plan, and querying its OperationId. Startup still selects simulation mode. The verified volume-label change covers one operation; the broader native acceptance sequence remains incomplete.
 - Create simulated GPT partitions on a 1 MiB grid. The creation field uses whole MiB, defaults to the largest aligned capacity, and offers MAX; one action button switches between Create partition and Format partition according to the selection.
-- Export storage systems as JSON. Quick format and Full format are mutually exclusive. Simulated targets do not write to real disks; the local development path requires the current Plan's controlled confirmation flow and has not completed on-device acceptance.
+- Export storage systems as JSON. Quick format and Full format are mutually exclusive. Simulated targets do not write to real disks; the local development path requires the current Plan's controlled confirmation flow and has not completed full on-device acceptance.
 - Monitor supported devices with persistent session duration; problems use the shared notification cards and current-run message history.
 - Record new monitoring samples in a separate database, rotating at 1 GiB and archiving with the bundled 7-Zip; Settings accepts an optional custom 7Z path.
 - Use English or Simplified Chinese, themes, and keyboard navigation.

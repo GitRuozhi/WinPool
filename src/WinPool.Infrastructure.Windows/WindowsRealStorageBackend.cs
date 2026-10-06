@@ -258,6 +258,12 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                 frozen.PhysicalMemberFingerprint))
             return Unknown(persistedSteps, "real.reconciliation_physical_changed");
 
+        if (frozen.Steps.Count == 1
+            && frozen.Steps[0].Command is RenameVolumeCommand
+            && persistedSteps[0].State == RealOperationStepState.OutcomeUnknown)
+            return await ReconcileSingleRenameAsync(plan, persistedSteps,
+                topology, closure, cancellationToken).ConfigureAwait(false);
+
         var verifiedCount = 0;
         WindowsVerifiedStepEvidence? lastVerified = null;
         var reachedNonVerified = false;
@@ -369,6 +375,68 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
             reconciledSteps,
             "real.reconciliation_partial_verified",
             true);
+    }
+
+    private async Task<RealReconciliationResult> ReconcileSingleRenameAsync(
+        OperationPlan plan,
+        IReadOnlyList<RealOperationStepProgress> persistedSteps,
+        WindowsRealStorageTopology topology,
+        RealTargetClosure closure,
+        CancellationToken cancellationToken)
+    {
+        var frozen = plan.RealOperation!;
+        var step = frozen.Steps[0];
+        var progress = persistedSteps[0];
+        var command = (RenameVolumeCommand)step.Command;
+        // This recovery proves the affected volume and its frozen parent chain.
+        // It does not assert that every old field in the closure is unchanged,
+        // and it never invokes the write adapter or resumes another step.
+        try
+        {
+            if (!StringComparer.Ordinal.Equals(plan.PlanHash, OperationPlanHasher.Compute(plan))
+                || command.Volume.Existing is not { } existing
+                || command.Volume.CreatedByStep is not null
+                || string.IsNullOrWhiteSpace(progress.TargetEvidence)
+                || string.IsNullOrWhiteSpace(progress.ResultEvidence))
+                return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+            var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(progress.TargetEvidence);
+            var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence);
+            if (target is null || provider is not { ProviderReturned: true, Code: "provider.returned" }
+                || !StringComparer.Ordinal.Equals(target.ExpectedFingerprint, frozen.TargetFingerprint)
+                || !StringComparer.Ordinal.Equals(provider.UniqueId, target.UniqueId)
+                || !StringComparer.Ordinal.Equals(provider.ObjectId, target.ObjectId))
+                return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+
+            var currentObject = topology.RequireObject(existing);
+            var currentTarget = WindowsRealStorageTargetBuilder.Build(topology,
+                command.Volume, new Dictionary<string, string>());
+            if (currentObject.Id != existing.ProviderKey
+                || target != (currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint })
+                || VerifyAfter(command, target, provider, topology, topology) is null)
+                return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+
+            var proposal = new RealOperationIntentRequest(plan.Intent, plan.SystemId,
+                plan.Targets, frozen.Steps, frozen.ExpectedFinalState);
+            await planner.ValidateCurrentStepAsync(topology, closure, proposal, step,
+                cancellationToken, readOnlyRenameReconciliation: true).ConfigureAwait(false);
+
+            var evidence = new WindowsVerifiedStepEvidence(closure.Fingerprint,
+                closure.PhysicalMemberFingerprint, null, provider.Code);
+            var verified = progress with
+            {
+                State = RealOperationStepState.Verified,
+                Code = "real.reconciliation_verified_observed_rename",
+                ResultEvidence = JsonSerializer.Serialize(evidence)
+            };
+            return new RealReconciliationResult(RealOperationState.Succeeded, [verified],
+                "real.reconciliation_verified", true);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException
+            or IOException or UnauthorizedAccessException or InvalidOperationException
+            or NotSupportedException or ArgumentException)
+        {
+            return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+        }
     }
 
     private static bool IsProvenNoEffect(
@@ -518,9 +586,31 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                         value.PreviousLetter, value.NewLetter)
                     ? new() : null;
             case RenameVolumeCommand value:
-                return exact is not null && snapshot.Volumes
-                    .Single(item => item.StableId == exact.Id).FileSystemLabel == value.Label
+            {
+                if (exact is null || target.Kind != StorageObjectKind.Volume
+                    || string.IsNullOrWhiteSpace(target.UniqueId)
+                    || string.IsNullOrWhiteSpace(target.ObjectId)) return null;
+                var volume = snapshot.Volumes.Single(item => item.StableId == exact.Id);
+                var partition = snapshot.Partitions.SingleOrDefault(item =>
+                    item.StableId == volume.PartitionStableId);
+                var diskObject = FindExact(after, StorageObjectKind.OsDisk,
+                    target.OsDiskUniqueId, string.Empty, string.Empty);
+                // A volume has its own UniqueId/ObjectId. PartitionGuid belongs
+                // to its parent partition, not to the MSFT_Volume object.
+                return partition is not null && diskObject is not null
+                    && GuidEquals(partition.Guid, target.PartitionGuid)
+                    && GuidEquals(partition.Guid, target.ParentUniqueId)
+                    && partition.OsDiskStableId == diskObject.Id
+                    && snapshot.OsDisks.Single(item => item.StableId == diskObject.Id)
+                        .Number == target.DiskNumber
+                    && StringComparer.Ordinal.Equals(Text(diskObject, "Path"), target.OsDiskPath)
+                    && partition.DiskNumber == target.DiskNumber
+                    && partition.PartitionNumber == target.PartitionNumber
+                    && partition.Offset == target.OffsetBytes
+                    && partition.Size == target.SizeBytes
+                    && volume.FileSystemLabel == value.Label
                     ? new() : null;
+            }
             case CreatePoolCommand value:
             {
                 var created = FindExact(after, StorageObjectKind.StoragePool,
@@ -780,7 +870,7 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                 || StringComparer.Ordinal.Equals(Text(item, "UniqueId"), uniqueId))
             && (string.IsNullOrWhiteSpace(objectId)
                 || StringComparer.Ordinal.Equals(Text(item, "ObjectId"), objectId))
-            && (string.IsNullOrWhiteSpace(partitionGuid)
+            && (kind != StorageObjectKind.Partition || string.IsNullOrWhiteSpace(partitionGuid)
                 || Guid.TryParse(Text(item, "Guid"), out var observed)
                     && Guid.TryParse(partitionGuid, out var expected)
                     && observed == expected)).ToArray();

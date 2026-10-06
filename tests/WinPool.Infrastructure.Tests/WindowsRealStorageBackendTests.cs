@@ -255,6 +255,158 @@ public sealed class WindowsRealStorageBackendTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
+    [Fact]
+    public async Task RecoveryVerifiesSingleReturnedRenameFromCurrentFactsWithoutReplayingCall()
+    {
+        var fixture = new Fixture();
+        var (plan, progress) = await PrepareUncertainRenameAsync(fixture);
+        fixture.VolumeLabel = "NEW";
+        var safetyCalls = fixture.Safety.CallCount;
+
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.Succeeded, result.State);
+        Assert.True(result.CanReleaseWriteBarrier);
+        var verified = Assert.Single(result.Steps);
+        Assert.Equal(RealOperationStepState.Verified, verified.State);
+        var evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(verified.ResultEvidence!);
+        Assert.NotNull(evidence);
+        Assert.Equal(plan.RealOperation!.PhysicalMemberFingerprint, evidence.PhysicalMemberFingerprint);
+        Assert.NotEqual(plan.RealOperation.TargetFingerprint, evidence.PostFingerprint);
+        Assert.Equal(safetyCalls + 1, fixture.Safety.CallCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData("missing-target")]
+    [InlineData("missing-provider")]
+    [InlineData("invalid-provider")]
+    [InlineData("provider-not-returned")]
+    [InlineData("provider-error")]
+    [InlineData("provider-unique-id")]
+    [InlineData("provider-object-id")]
+    [InlineData("target-fingerprint")]
+    [InlineData("plan-hash")]
+    [InlineData("label")]
+    [InlineData("parent-guid")]
+    [InlineData("offset")]
+    [InlineData("size")]
+    [InlineData("disk-identity")]
+    [InlineData("disk-path")]
+    [InlineData("volume-unique-id")]
+    [InlineData("volume-object-id")]
+    [InlineData("physical-member")]
+    [InlineData("safety")]
+    public async Task RecoveryKeepsUnprovenRenameUnknownWithoutCallingAdapter(string change)
+    {
+        var fixture = new Fixture();
+        var (plan, progress) = await PrepareUncertainRenameAsync(fixture);
+        fixture.VolumeLabel = "NEW";
+        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(progress.TargetEvidence!)!;
+        var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
+        switch (change)
+        {
+            case "missing-target": progress = progress with { TargetEvidence = null }; break;
+            case "missing-provider": progress = progress with { ResultEvidence = null }; break;
+            case "invalid-provider": progress = progress with { ResultEvidence = "invalid-json" }; break;
+            case "provider-not-returned": provider = provider with { ProviderReturned = false }; break;
+            case "provider-error": provider = provider with { Code = "provider.error-outcome-unknown" }; break;
+            case "provider-unique-id": provider = provider with { UniqueId = "replacement" }; break;
+            case "provider-object-id": provider = provider with { ObjectId = "replacement" }; break;
+            case "target-fingerprint": target = target with { ExpectedFingerprint = "replacement" }; break;
+            case "plan-hash": plan = plan with { PlanHash = "replacement" }; break;
+            case "label": fixture.VolumeLabel = "WRONG"; break;
+            case "parent-guid":
+            case "offset":
+            case "size":
+            case "disk-identity":
+                fixture.SnapshotTransform = snapshot => snapshot with
+                {
+                    Partitions = [snapshot.Partitions[0] with
+                    {
+                        Guid = change == "parent-guid" ? "bbbf78d3-d8e8-4bfd-9b54-67c21adf11d1" : snapshot.Partitions[0].Guid,
+                        Offset = snapshot.Partitions[0].Offset + (change == "offset" ? 1048576 : 0),
+                        Size = snapshot.Partitions[0].Size + (change == "size" ? 1048576 : 0),
+                        OsDiskStableId = change == "disk-identity" ? "osdisk:replacement" : DiskId
+                    }],
+                    OsDisks = change == "disk-identity"
+                        ? [snapshot.OsDisks[0] with { StableId = "osdisk:replacement" }]
+                        : snapshot.OsDisks
+                };
+                break;
+            case "disk-path":
+            case "volume-unique-id":
+            case "volume-object-id":
+                fixture.FactsTransform = item => item.ObjectType ==
+                    (change == "disk-path" ? FactObjectType.Disk : FactObjectType.Volume)
+                    ? item with
+                    {
+                        Fields = item.Fields.Select(field => field.Name ==
+                            (change == "disk-path" ? "Path" : change == "volume-unique-id" ? "UniqueId" : "ObjectId")
+                            ? WinPoolSourceField.Returned(field.Name, "replacement",
+                                FactValueType.String, field.SourceRef) : field).ToImmutableArray()
+                    } : item;
+                break;
+            case "physical-member": fixture.ChangeSerial("REPLACEMENT"); break;
+            case "safety": fixture.Safety.Reject = true; break;
+        }
+        if (change.StartsWith("provider-", StringComparison.Ordinal))
+            progress = progress with { ResultEvidence = JsonSerializer.Serialize(provider) };
+        if (change == "target-fingerprint")
+            progress = progress with { TargetEvidence = JsonSerializer.Serialize(target) };
+
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal(RealOperationStepState.OutcomeUnknown, Assert.Single(result.Steps).State);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task NormalRenamePreparationStillRejectsAnAlreadyAppliedLabel()
+    {
+        var fixture = new Fixture();
+        var (plan, _) = await PrepareUncertainRenameAsync(fixture);
+        fixture.VolumeLabel = "NEW";
+        var request = new RealOperationIntentRequest(plan.Intent, plan.SystemId,
+            [fixture.Id(StorageObjectKind.Volume, "volume:7")],
+            plan.RealOperation!.Steps, plan.RealOperation.ExpectedFinalState);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PrepareAsync(
+            request, fixture.Session, OperationId.New(), CancellationToken.None));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task RecoveryDoesNotUseReturnedRenameEvidenceToResumeAMultiStepPlan()
+    {
+        var fixture = new Fixture();
+        var (plan, progress) = await PrepareUncertainRenameAsync(fixture, twoSteps: true);
+        fixture.VolumeLabel = "NEW";
+
+        var result = await fixture.Backend.ReconcileAsync(plan,
+            [progress, Progress("rename-again", RealOperationStepState.Pending)], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    private static async Task<(OperationPlan Plan, RealOperationStepProgress Progress)>
+        PrepareUncertainRenameAsync(Fixture fixture, bool twoSteps = false)
+    {
+        var plan = await fixture.PrepareRenameAsync(twoSteps);
+        var step = plan.RealOperation!.Steps[0];
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
+            new Dictionary<string, string>(), CancellationToken.None);
+        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        var provider = new WindowsStorageCommandResult(true, "provider.returned",
+            target.UniqueId, target.ObjectId, "", null, null, null, null);
+        return (plan, new RealOperationStepProgress(step.Id, RealOperationStepState.OutcomeUnknown,
+            "real.postcondition_unverified", preflight.TargetEvidenceJson, JsonSerializer.Serialize(provider)));
+    }
+
     private static RealOperationStepProgress Progress(
         string id, RealOperationStepState state, string? evidence = null) =>
         new(id, state, null, null, evidence);
@@ -267,6 +419,7 @@ public sealed class WindowsRealStorageBackendTests
         private readonly bool sharedOrdinaryPool;
         private string serial = "SERIAL-7";
         private bool offline;
+        private bool hasVolume;
 
         public Fixture(bool secondDisk = false, bool sharedOrdinaryPool = false)
         {
@@ -276,9 +429,10 @@ public sealed class WindowsRealStorageBackendTests
             Reader = new WindowsRealStorageTopologyReader(
                 Source, new SyntheticMachineIdentity(), new FixedTimeProvider(Now));
             Adapter = new SyntheticAdapter();
+            Safety = new SyntheticSafetyInspector();
             var planner = new WindowsRealOperationPlanner(
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
-                new FixedTimeProvider(Now), new SyntheticSafetyInspector());
+                new FixedTimeProvider(Now), Safety);
             Backend = new WindowsRealStorageBackend(Adapter, planner, Reader, new FixedTimeProvider(Now));
         }
 
@@ -286,10 +440,41 @@ public sealed class WindowsRealStorageBackendTests
         public WindowsRealStorageTopologyReader Reader { get; }
         public SyntheticAdapter Adapter { get; }
         public WindowsRealStorageBackend Backend { get; }
+        public SyntheticSafetyInspector Safety { get; }
+        public string VolumeLabel { get; set; } = "OLD";
+        public Func<StorageSnapshot, StorageSnapshot>? SnapshotTransform { get; set; }
+        public Func<WinPoolSourceObject, WinPoolSourceObject>? FactsTransform { get; set; }
+        public TrustedRealSession Session => new(SessionId.New(), "synthetic-product-session",
+            "synthetic-process-instance", 1234, Now.AddMinutes(-1),
+            @"C:\Synthetic\WinPool.Agent.exe", true);
 
         public StorageObjectId Id(StorageObjectKind kind, string key) => new(systemId, kind, key);
         public void SetOffline(bool value) => offline = value;
         public void ChangeSerial(string value) => serial = value;
+
+        public async Task<OperationPlan> PrepareRenameAsync(bool twoSteps = false)
+        {
+            hasVolume = true;
+            var volume = Id(StorageObjectKind.Volume, "volume:7");
+            var step = new RealOperationStep("rename",
+                new RenameVolumeCommand(RealTargetReference.ForExisting(volume), "NEW"),
+                [], "old label", "new label", "", "synthetic source facts");
+            var plan = await Backend.PrepareAsync(new RealOperationIntentRequest(OperationIntent.SetVolumeLabel,
+                systemId, [volume], [step], "new label"), Session, OperationId.New(), CancellationToken.None);
+            if (!twoSteps) return plan;
+            var second = new RealOperationStep("rename-again",
+                new RenameVolumeCommand(RealTargetReference.ForExisting(volume), "NEXT"),
+                [step.Id], "new label", "next label", "", "synthetic source facts");
+            var proposal = new RealOperationIntentRequest(OperationIntent.SetVolumeLabel,
+                systemId, plan.Targets, [plan.RealOperation!.Steps[0], second], "next label");
+            var environment = new EnvironmentProfile(plan.EnvironmentId,
+                EnvironmentKind.LocalMachine, MachineBinding,
+                ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure,
+                false, Now);
+            return RealOperationPlanFactory.Create(proposal, OperationId.New(), environment,
+                Session, plan.InventoryVersion, plan.RealOperation.TargetFingerprint,
+                plan.RealOperation.PhysicalMemberFingerprint, "synthetic source facts", Now, Now.AddMinutes(5));
+        }
 
         public async Task<OperationPlan> PrepareAsync(bool twoSteps = false)
         {
@@ -350,6 +535,20 @@ public sealed class WindowsRealStorageBackendTests
                     ? [OsDisk(DiskId, PhysicalId, 7, offline), OsDisk(OtherDiskId, OtherPhysicalId, 8, false)]
                     : [OsDisk(DiskId, PhysicalId, 7, offline)]
             };
+            if (hasVolume)
+                snapshot = snapshot with
+                {
+                    OsDisks = [snapshot.OsDisks[0] with { PartitionStyle = "GPT" }],
+                    Partitions = [new PartitionInfo("partition:7", true, 7, 1, "GPT",
+                        1048576, 128L << 20, false, false, "E", VolumeLabel, "NTFS", 65536,
+                        128L << 20, "Healthy", "OK", @"E:\", DiskId,
+                        PartitionTypeId: "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+                        Guid: "2f8ae502-1e4e-4d94-b190-6284ccb62bea",
+                        GptType: "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7")],
+                    Volumes = [new VolumeInfo("volume:7", true, "partition:7", "NTFS",
+                        VolumeLabel, 128L << 20, 128L << 20, 65536, "Healthy", "OK", [@"E:\"])]
+                };
+            if (SnapshotTransform is not null) snapshot = SnapshotTransform(snapshot);
             var facts = WinPoolSimulationFacts.Create(snapshot, systemId);
             var sources = facts.Sources.Select(source => source with
             {
@@ -368,6 +567,7 @@ public sealed class WindowsRealStorageBackendTests
                     "Path", $@"\\.\PHYSICALDRIVE{(item.Id == DiskId ? 7 : 8)}",
                     FactValueType.String, item.SourceRef)) }
                 : item).ToImmutableArray();
+            if (FactsTransform is not null) objects = objects.Select(FactsTransform).ToImmutableArray();
             facts = facts with
             {
                 IsSimulation = false,
@@ -442,9 +642,16 @@ public sealed class WindowsRealStorageBackendTests
 
     private sealed class SyntheticSafetyInspector : IWindowsRealStorageSafetyInspector
     {
+        public int CallCount { get; private set; }
+        public bool Reject { get; set; }
         public Task ValidateAsync(WindowsRealStorageTopology topology,
             RealTargetClosure closure, RealStorageCommand command,
-            CancellationToken cancellationToken) => Task.CompletedTask;
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (Reject) throw new InvalidDataException("Synthetic safety facts are unsafe.");
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class AdministratorPrivilege : IPrivilegeService

@@ -22,6 +22,8 @@ public interface IProcessIncarnationVerifier
 public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerifier
 {
     private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const uint Synchronize = 0x00100000;
+    private const uint WaitTimeout = 258;
 
     public ProcessIncarnation? TryRead(int processId)
     {
@@ -32,7 +34,7 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
 
         try
         {
-            var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+            var handle = OpenProcess(ProcessQueryLimitedInformation | Synchronize, false, processId);
             if (handle == nint.Zero)
             {
                 return null;
@@ -40,9 +42,13 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
 
             try
             {
+                // Retained handles keep an exited process's image and creation
+                // time queryable. Only an unsignaled process is still running.
+                if (WaitForSingleObject(handle, 0) != WaitTimeout) return null;
                 var imagePath = ReadImagePath(handle);
                 var startedAtUtc = ReadStartedAtUtc(handle);
                 return imagePath is null || startedAtUtc is null
+                    || WaitForSingleObject(handle, 0) != WaitTimeout
                     ? null
                     : new(processId, imagePath, startedAtUtc.Value);
             }
@@ -99,6 +105,9 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint OpenProcess(uint desiredAccess, bool inheritHandle, int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(nint handle, uint milliseconds);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

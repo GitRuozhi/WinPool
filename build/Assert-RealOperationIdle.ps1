@@ -4,11 +4,35 @@ $ErrorActionPreference = 'Stop'
 if (-not ('WinPoolBuildSqliteProbe' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Text;
 
 public static class WinPoolBuildSqliteProbe
 {
+    public sealed class UnfinishedRealOperation
+    {
+        public string OperationId { get; }
+        public string StateName { get; }
+
+        internal UnfinishedRealOperation(string operationId, long state)
+        {
+            Guid parsed;
+            OperationId = Guid.TryParse(operationId, out parsed)
+                ? parsed.ToString("D") : "(invalid OperationId)";
+            StateName = state switch
+            {
+                0 => "Planned",
+                1 => "AwaitingAuthorization",
+                2 => "Authorized",
+                3 => "Running",
+                8 => "Prepared",
+                9 => "Accepted",
+                11 => "OutcomeUnknown",
+                _ => "Unknown(" + state + ")"
+            };
+        }
+    }
+
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         out IntPtr database, int flags, IntPtr vfs);
@@ -60,7 +84,10 @@ public static class WinPoolBuildSqliteProbe
         finally { sqlite3_finalize(statement); }
     }
 
-    public static bool HasUnfinishedRealOperation(string path)
+    public static bool HasUnfinishedRealOperation(string path) =>
+        ProbeUnfinishedRealOperations(path).Length != 0;
+
+    public static UnfinishedRealOperation[] ProbeUnfinishedRealOperations(string path)
     {
         IntPtr database;
         int result = sqlite3_open_v2(path, out database, 1, IntPtr.Zero);
@@ -78,9 +105,27 @@ public static class WinPoolBuildSqliteProbe
                 "SELECT schema_version FROM schema_info WHERE singleton = 1;");
             if (version != 17 && version != 18)
                 throw new InvalidOperationException("Unsupported core schema " + version + ".");
-            return Scalar(database,
-                "SELECT COUNT(*) FROM operation_plans WHERE risk >= 4 " +
-                "AND state NOT IN (4,5,6,7,10);") != 0;
+            // Keep the write-barrier predicate unchanged. Bound both the row
+            // count and identifier text used in the diagnostic.
+            IntPtr statement;
+            result = sqlite3_prepare_v2(database,
+                "SELECT substr(operation_id,1,64), state FROM operation_plans WHERE risk >= 4 " +
+                "AND state NOT IN (4,5,6,7,10) ORDER BY operation_id LIMIT 10;",
+                -1, out statement, IntPtr.Zero);
+            if (result != 0) throw new InvalidOperationException(Error(database));
+            try
+            {
+                var operations = new List<UnfinishedRealOperation>();
+                while ((result = sqlite3_step(statement)) == 100)
+                {
+                    operations.Add(new UnfinishedRealOperation(
+                        Marshal.PtrToStringUTF8(sqlite3_column_text(statement, 0)) ?? "",
+                        sqlite3_column_int64(statement, 1)));
+                }
+                if (result != 101) throw new InvalidOperationException(Error(database));
+                return operations.ToArray();
+            }
+            finally { sqlite3_finalize(statement); }
         }
         finally { sqlite3_close(database); }
     }
@@ -156,8 +201,10 @@ function Assert-WinPoolRealOperationIdle {
         throw "Core database is a link: $database"
     }
     try {
-        if ([WinPoolBuildSqliteProbe]::HasUnfinishedRealOperation($database)) {
-            throw "Unfinished real operation in active WinPool database: $database"
+        $operations = @([WinPoolBuildSqliteProbe]::ProbeUnfinishedRealOperations($database))
+        if ($operations.Count -gt 0) {
+            $details = ($operations | ForEach-Object { "OperationId=$($_.OperationId), state=$($_.StateName)" }) -join '; '
+            throw "Unfinished real operation in active WinPool database: $database. Blocking operations (up to 10): $details. Start WinPool from the existing runtime tree and query by OperationId for read-only reconciliation before retrying runtime replacement."
         }
     } catch {
         throw "Runtime replacement refused: $($_.Exception.Message)"

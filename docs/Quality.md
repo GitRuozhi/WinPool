@@ -2,13 +2,31 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
-## 2026-10-06 单盘真实修改第一阶段：P5 续执行
+## 2026-10-06 卷标核对、进程存活与退出／重建修复
+
+用户在标准管理员 WinPool 手动将 WDC E: 卷标改为 `WP_ADMIN_1006`，操作 `fe551baa-75d2-4640-a6d1-9ee711ea6630`。Provider 成功证据已持久化，但 Volume 匹配错误要求卷自身具有父分区 GUID，导致后态未验证、OutcomeUnknown 屏障持续，完整退出与 rebuild 被拒绝。修复区分卷自身身份与父分区链，新增单步 RenameVolume 的严格只读恢复；其它命令、多步骤及证据不足仍保留屏障。
+
+直接 Release 回归 **51 passed、0 failed、0 skipped**，覆盖真实 Volume 不含 Guid 的后态、父链／几何／身份拒绝、只读恢复成功与不完整证据拒绝；恢复用例断言写适配器调用数为 0。独立修复版 Agent 构建 0 警告／0 错误。构建 guard 保持原阻断条件与只读数据库访问，增加明确 OperationId／状态诊断。
+
+用户批准本次受控切换后，修复版 Agent 通过既有事务将原操作更新为 Completed、步骤 Verified。冻结计划哈希保持 `b189d3bf77ffaa9ed4649fb9b955bf6077fbd65f64bde762b6d45111161e32d4`，未新增 accepted／call_issued 事件，只新增结果核对事件。当前后态、物理成员及安全事实已核对；E: NTFS 簇仍为 4 KiB，卷标保持用户测试值，没有重新改名或格式化。修复版 Agent 通过托盘正常完整退出，标准运行树的空闲 guard 通过。原核心库已一致性备份，完整前后记录、TRX 和日志保存在 `artifacts/test-results/20261006-rename-verification-repair-7dacef301b064bb98e070540c8b1483c/`。完整 H00–H11 设备验收仍未完成，产品仍为 V0.57。
+
+原生退出复测发现两处额外缺陷：进程核验没有检查存活，保留已退出进程句柄时仍可误接受原映像／启动时间；主窗口正常关闭遗漏所属欢迎窗，独立 `--page Welcome` 入口也未启动 Agent 退出监听。前者以退出码 0／259 的真实 Windows 子进程回归证明并修复；后者将欢迎窗关闭放在主窗口清理的任何 await 之前，并在全部启动目标分支前注册既有退出监听。
+
+最终标准运行树 rebuild 为 `standard-rebuild-r3.log`，restore 成功、零警告／零错误。原生 `Normal`（主窗与欢迎窗同时打开）和 `StandaloneWelcome` 两项均由一次托盘退出完成，验收程序刻意保留 App／Agent 进程句柄直到检查结束，两个进程均退出码 0、无强制终止。证据为 `native-exit-r3-Normal.json`、`native-exit-r3-StandaloneWelcome.json` 和对应 windows 清单；管理员令牌核对见 `native-welcome-r3-elevation.json`。完整退出的最终结果以这两项为准，不将中间残留状态算作通过。
+
+最终 R3 全解回归为 **970 passed、0 failed、3 skipped**，覆盖 12 个测试项目，guard 8/8、保留进程句柄回归 2/2；3 项跳过仍为既有大型监控归档测量。日志与 TRX 为 `final-tests-r3.log`、`final-regression-r3/`，汇总为 `automated-summary-r3.json`。`native-and-storage-final-summary.json` 确认两个原生 Agent 会话均 clean、无未终结真实操作、没有新增真实计划或写调用。文档本地链接与差异检查通过。
+
+中间构建、回归和失败退出证据保留。首次 guard 定点回归 6 passed／2 failed：一项坏 ID 夹具受外键阻止，已修正专用临时连接；另一项 pristine 数据根夹具因当时 WinPool 活实例而正确被拒绝。生产阻断条件未放宽；本次恢复仅通过 Agent 既有事务更新准确操作记录，没有手工 SQL 清除屏障。
+
+## 2026-10-06 早前 P5 续执行基线
+
+以下结果限定于修复提交 `747b71e` 对应的早前验证时点；后续用户卷标写入、管理员 CLI 及恢复结果以上一节为准。
 
 修复提交 `747b71e` 的稳定代码通过标准 Release 工程门：restore 成功，构建 0 警告／0 错误，12 个测试项目 **929 passed、0 failed、3 skipped**；跳过项仍是既有大型监控归档测量。23 项目直接／传递依赖审计未列出已知漏洞，`git diff --check` 通过。最终证据位于 `artifacts/test-results/20261006-real-edit-stage1/prewrite-gate-95f61ad60f3046c0ada0430c3900d7f8/`，以 `build-stable.log`、`tests.log`、`automated-summary-final.json`、`dependencies.json` 为准。前两份构建日志保留为实现中间态。直接回归另覆盖持久本机身份与新鲜事实、换盘／外机／缺事实拒绝、执行及未知状态禁用、准确计划取消、旧请求释放竞争、Agent 重启恢复屏障；使用替身与临时 SQLite，不调用物理写适配器。
 
 标准 App 普通权限启动后，真实编辑开关为 Off；选中 WDC 的 E: 时格式化、删除、扩展、压缩仍禁用，查询／停止后续步骤可见。UIA 证据为 `native-normal-start-uia.txt`。本次启动时间段 Application 日志完成查询，4 条事件中没有相关崩溃来源或 WinPool／历史签名匹配；证据为 `native-normal-crash-summary.json`，不据此宣称历史 E_POINTER 根因已修复。App 正常关闭，空闲 Agent 经准确路径核对后退出。生产核心库仍只有 40 个既有模拟记录，真实准备及接受均为 0，见 `native-no-real-plans.json`。
 
-当前工具进程不是管理员，本次管理员 App→Agent 准备／取消尚未验证。2026-09-28 的管理员固定只读安全探针曾通过，但写前必须重采；raw provider 身份的独立 planner 探针不等于实际 App→Agent 冻结计划。P0/P5 与 H00–H11 仍未闭合，未进行真实磁盘写入，产品保持 V0.57，V0.58 仍为目标。
+该验证时点工具进程不是管理员，管理员 App→Agent 准备／取消尚未验证。2026-09-28 的管理员固定只读安全探针曾通过，但写前必须重采；raw provider 身份的独立 planner 探针不等于实际 App→Agent 冻结计划。当时 P0/P5 与 H00–H11 未闭合，尚无真实磁盘写入，产品保持 V0.57，V0.58 仍为目标。
 
 ## 2026-09-27 单盘真实修改第一阶段：写入前进度
 

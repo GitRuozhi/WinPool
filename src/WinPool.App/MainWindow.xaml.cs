@@ -507,6 +507,9 @@ public sealed partial class MainWindow : Window
 
     private async void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        // The welcome is a separate top-level window. Close it before any
+        // asynchronous cleanup so it cannot keep the App process alive.
+        _welcomeWindow?.Close();
         await _monitorAlertObserver.StopAsync();
         App.StopActivationChannel();
         _agentPreferencesSynchronizer.Dispose();

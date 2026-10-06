@@ -120,16 +120,15 @@ public partial class App : Application
             Environment.GetCommandLineArgs().Skip(1),
             privilegeState);
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        // Every launch target must receive the Agent's ordered exit signal,
+        // including a standalone welcome window.
+        StartExitSignalListener();
         if (startupOptions.Target == ApplicationStartupTarget.Welcome)
         {
             Window = new WelcomeWindow(new LocalizationService());
             Window.Activate();
             return;
         }
-
-        // The exit-signal listener must run for the welcome window too:
-        // a tray exit while the welcome is open has to close this process.
-        StartExitSignalListener();
 
         var agentConnection = EnsureAgentConnection();
         Window = new MainWindow(startupOptions, agentConnection);

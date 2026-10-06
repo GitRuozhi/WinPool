@@ -53,6 +53,65 @@ public sealed class BuildOperationGuardTests
         _ = store;
     }
 
+    [Theory]
+    [InlineData(PersistedOperationState.Prepared)]
+    [InlineData(PersistedOperationState.Accepted)]
+    [InlineData(PersistedOperationState.Running)]
+    [InlineData(PersistedOperationState.OutcomeUnknown)]
+    public async Task RefusalIdentifiesOperationAndStateWithoutChangingDatabase(
+        PersistedOperationState state)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await using var fixture = new Fixture();
+        var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
+        var operationId = await fixture.PrepareAsync(store);
+        await fixture.ExecuteSqlAsync(store,
+            "UPDATE operation_plans SET state = $state;", ("$state", (object)(int)state));
+        var before = await File.ReadAllBytesAsync(store.DatabasePath);
+
+        Assert.NotEqual(0, await fixture.ProbeAsync());
+
+        Assert.Contains($"OperationId={operationId.Value:D}", fixture.LastProbeError);
+        Assert.Contains($"state={state}", fixture.LastProbeError);
+        Assert.Contains("existing runtime tree", fixture.LastProbeError);
+        Assert.Contains("query by OperationId for read-only reconciliation", fixture.LastProbeError);
+        Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
+    }
+
+    [Fact]
+    public async Task Schema17WithoutRealOperationsPassesWithoutUpgrade()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await using var fixture = new Fixture();
+        var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
+        await fixture.ExecuteSqlAsync(store,
+            "UPDATE schema_info SET schema_version = 17 WHERE singleton = 1;");
+        var before = await File.ReadAllBytesAsync(store.DatabasePath);
+
+        Assert.Equal(0, await fixture.ProbeAsync());
+        Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
+    }
+
+    [Fact]
+    public async Task MalformedIdentifierStillBlocksWithBoundedDiagnostic()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await using var fixture = new Fixture();
+        var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
+        await fixture.PrepareAsync(store);
+        var malformed = new string('x', 8192) + "\ninjected diagnostic";
+        // This dedicated fixture connection deliberately creates a malformed
+        // plan identifier despite the existing child-step reference.
+        await fixture.ExecuteSqlAsync(store,
+            "PRAGMA foreign_keys = OFF; UPDATE operation_plans SET operation_id = $id;",
+            ("$id", (object)malformed));
+
+        Assert.NotEqual(0, await fixture.ProbeAsync());
+        Assert.Contains("OperationId=(invalid OperationId), state=Prepared", fixture.LastProbeError);
+        Assert.DoesNotContain("injected diagnostic", fixture.LastProbeError);
+        Assert.True(fixture.LastProbeError.Length < 2048);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(),
@@ -61,6 +120,7 @@ public sealed class BuildOperationGuardTests
         public string PortableRoot => Path.Combine(root, "Release", "Data");
         public string ExternalPointer => StandardRoot + ".storage-location.json";
         private string RuntimeRoot => Path.Combine(root, "Release");
+        public string LastProbeError { get; private set; } = string.Empty;
 
         public async Task<WinPoolSqliteStore> CreateDatabaseAsync(string dataRoot)
         {
@@ -69,7 +129,7 @@ public sealed class BuildOperationGuardTests
             return store;
         }
 
-        public async Task PrepareAsync(WinPoolSqliteStore store)
+        public async Task<OperationId> PrepareAsync(WinPoolSqliteStore store)
         {
             await using var lease = AgentWriteOwnerLease.Acquire(store, "guard-test");
             var system = SystemId.New();
@@ -84,6 +144,24 @@ public sealed class BuildOperationGuardTests
                 request.RequestedAt);
             await new OperationPlanRepository(store, lease).PrepareAsync(
                 plan, Guid.NewGuid(), "guard-test-intent");
+            return plan.OperationId;
+        }
+
+        public async Task ExecuteSqlAsync(WinPoolSqliteStore store, string sql,
+            params (string Name, object Value)[] parameters)
+        {
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = store.DatabasePath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            }.ToString());
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            foreach (var parameter in parameters)
+                command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+            await command.ExecuteNonQueryAsync();
         }
 
         public async Task CancelAsync(WinPoolSqliteStore store)
@@ -100,9 +178,10 @@ public sealed class BuildOperationGuardTests
         public async Task<int> ProbeAsync()
         {
             var script = FindGuardScript();
-            var statement = ". '" + Escape(script) + "'; " +
+            var statement = "try { . '" + Escape(script) + "'; " +
                 "Assert-WinPoolRealOperationIdle -RuntimeRoot '" + Escape(RuntimeRoot) +
-                "' -StandardRoot '" + Escape(StandardRoot) + "'";
+                "' -StandardRoot '" + Escape(StandardRoot) +
+                "' } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }";
             var start = new ProcessStartInfo("pwsh")
             {
                 RedirectStandardError = true,
@@ -116,6 +195,7 @@ public sealed class BuildOperationGuardTests
             var error = await process.StandardError.ReadToEndAsync();
             var output = await process.StandardOutput.ReadToEndAsync();
             await process.WaitForExitAsync();
+            LastProbeError = error;
             if (process.ExitCode != 0) Console.WriteLine(error + output);
             return process.ExitCode;
         }

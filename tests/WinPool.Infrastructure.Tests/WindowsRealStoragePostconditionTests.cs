@@ -153,6 +153,106 @@ public sealed class WindowsRealStoragePostconditionTests
     }
 
     [Fact]
+    public void RenamedVolumeWithoutGuidIsVerifiedThroughItsExactParentPartition()
+    {
+        var part = Partition("partition:data");
+        var volume = Volume("volume:data", part.StableId, [@"E:\"])
+            with { FileSystemLabel = "OLD" };
+        var before = Topology(Snapshot() with { Partitions = [part], Volumes = [volume] });
+        var renamed = volume with { FileSystemLabel = "NEW" };
+        var after = Topology(Snapshot() with { Partitions = [part], Volumes = [renamed] });
+        var reference = RealTargetReference.ForExisting(Id(StorageObjectKind.Volume, volume.StableId));
+        var target = WindowsRealStorageTargetBuilder.Build(before, reference,
+            new Dictionary<string, string>());
+
+        Assert.Null(after.Facts.Objects.Single(item => item.Id == volume.StableId).Field("Guid"));
+        Assert.Equal(PartitionGuid, target.PartitionGuid);
+        Assert.NotNull(Verify(new RenameVolumeCommand(reference, "NEW"), target,
+            Returned(volume.StableId, volume.StableId), before, after));
+        Assert.Null(Verify(new RenameVolumeCommand(reference, "NEW"), target,
+            Returned(volume.StableId, volume.StableId), before, before));
+    }
+
+    [Theory]
+    [InlineData("parent-guid")]
+    [InlineData("partition-number")]
+    [InlineData("disk-number")]
+    [InlineData("disk-identity")]
+    [InlineData("offset")]
+    [InlineData("size")]
+    [InlineData("other-parent")]
+    [InlineData("missing-parent")]
+    public void RenamedVolumeRejectsChangedParentOrGeometry(string change)
+    {
+        var part = Partition("partition:data");
+        var volume = Volume("volume:data", part.StableId, []) with { FileSystemLabel = "OLD" };
+        var baseline = Snapshot() with { Partitions = [part], Volumes = [volume] };
+        var before = Topology(baseline);
+        var reference = RealTargetReference.ForExisting(Id(StorageObjectKind.Volume, volume.StableId));
+        var target = WindowsRealStorageTargetBuilder.Build(before, reference,
+            new Dictionary<string, string>());
+        var renamed = volume with { FileSystemLabel = "NEW" };
+        var changedPart = change switch
+        {
+            "parent-guid" => part with { Guid = "8263f3a4-bcce-4ff7-ade7-0d4aa0419f7b" },
+            "partition-number" => part with { PartitionNumber = 2 },
+            "disk-number" => part with { DiskNumber = 8 },
+            "disk-identity" => part with { OsDiskStableId = "disk:replacement" },
+            "offset" => part with { Offset = Offset + (1L << 20) },
+            "size" => part with { Size = Size + (1L << 20) },
+            _ => part
+        };
+        var changed = baseline with { Partitions = [changedPart], Volumes = [renamed] };
+        if (change == "disk-identity")
+            changed = changed with { OsDisks = [baseline.OsDisks[0] with { StableId = "disk:replacement" }] };
+        if (change == "other-parent")
+        {
+            var other = part with
+            {
+                StableId = "partition:other", PartitionNumber = 2,
+                Guid = "8263f3a4-bcce-4ff7-ade7-0d4aa0419f7b", Offset = Offset + Size
+            };
+            changed = changed with
+            {
+                Partitions = [part, other],
+                Volumes = [renamed with { PartitionStableId = other.StableId }]
+            };
+        }
+        if (change == "missing-parent")
+            changed = changed with { Volumes = [renamed with { PartitionStableId = null }] };
+
+        Assert.Null(Verify(new RenameVolumeCommand(reference, "NEW"), target,
+            Returned(volume.StableId, volume.StableId), before, Topology(changed)));
+    }
+
+    [Theory]
+    [InlineData("UniqueId")]
+    [InlineData("ObjectId")]
+    public void RenamedVolumeRejectsChangedProviderIdentity(string changedField)
+    {
+        var part = Partition("partition:data");
+        var volume = Volume("volume:data", part.StableId, []) with { FileSystemLabel = "OLD" };
+        var baseline = Snapshot() with { Partitions = [part], Volumes = [volume] };
+        var before = Topology(baseline);
+        var reference = RealTargetReference.ForExisting(Id(StorageObjectKind.Volume, volume.StableId));
+        var target = WindowsRealStorageTargetBuilder.Build(before, reference,
+            new Dictionary<string, string>());
+        var after = Topology(baseline with
+        {
+            Volumes = [volume with { FileSystemLabel = "NEW" }]
+        }, item => item.Id == volume.StableId ? item with
+        {
+            Fields = item.Fields.Select(field => field.Name == changedField
+                ? WinPoolSourceField.Returned(field.Name, "replacement-identity",
+                    FactValueType.String, field.SourceRef)
+                : field).ToImmutableArray()
+        } : item);
+
+        Assert.Null(Verify(new RenameVolumeCommand(reference, "NEW"), target,
+            Returned(volume.StableId, volume.StableId), before, after));
+    }
+
+    [Fact]
     public void NewVirtualDiskMustExposeOneRawPartitionFreeOsDisk()
     {
         var old = Snapshot() with
@@ -280,7 +380,8 @@ public sealed class WindowsRealStoragePostconditionTests
             false, false, false, PhysicalId, null)]
     };
 
-    private static WindowsRealStorageTopology Topology(StorageSnapshot snapshot)
+    private static WindowsRealStorageTopology Topology(StorageSnapshot snapshot,
+        Func<WinPoolSourceObject, WinPoolSourceObject>? transform = null)
     {
         var facts = WinPoolSimulationFacts.Create(snapshot, System);
         var sources = facts.Sources.Select(source => source with
@@ -300,6 +401,7 @@ public sealed class WindowsRealStoragePostconditionTests
             ? item with { Fields = item.Fields.Add(WinPoolSourceField.Returned(
                 "Path", @"\\.\PHYSICALDRIVE7", FactValueType.String, item.SourceRef)) }
             : item).ToImmutableArray();
+        if (transform is not null) objects = objects.Select(transform).ToImmutableArray();
         facts = facts with
         {
             IsSimulation = false, InventoryVersion = "synthetic",

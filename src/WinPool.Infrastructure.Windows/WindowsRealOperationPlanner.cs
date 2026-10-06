@@ -176,7 +176,8 @@ public sealed class WindowsRealOperationPlanner
         RealOperationIntentRequest proposal,
         RealOperationStep step,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? verifiedStepOutputs = null)
+        IReadOnlyDictionary<string, string>? verifiedStepOutputs = null,
+        bool readOnlyRenameReconciliation = false)
     {
         var snapshot = topology.Snapshot;
         verifiedStepOutputs ??= new Dictionary<string, string>();
@@ -304,7 +305,7 @@ public sealed class WindowsRealOperationPlanner
                         item.StableId == id.ProviderKey)
                         ?? throw new InvalidDataException("The selected volume is absent.");
                     ValidateLabel(value.Label, ParseFileSystem(volume.FileSystem));
-                    if (volume.FileSystemLabel == value.Label)
+                    if (!readOnlyRenameReconciliation && volume.FileSystemLabel == value.Label)
                         throw new InvalidDataException("The requested volume label is unchanged.");
                 }
                 break;
