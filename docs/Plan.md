@@ -1,6 +1,6 @@
 # 当前 Plan：本机真实磁盘修改第一阶段
 
-更新日期：2026-09-27。**阶段已正式进入，用户已指示执行本 Plan；P0–P5 正在实施或验证，P6 尚未开始，未进行真实磁盘写入。** 真实写入仍须按本 Plan 逐操作取得准确授权。计划存在、进入阶段、管理员权限和打开真实编辑开关，都不代替具体磁盘操作授权。
+更新日期：2026-10-06。**阶段已正式进入，用户已指示继续执行本 Plan；P0–P5 正在实施或验证，P6 尚未开始，未进行真实磁盘写入。** 真实写入仍须按本 Plan 逐操作取得准确授权。计划存在、进入阶段、管理员权限和打开真实编辑开关，都不代替具体磁盘操作授权。
 
 计划编制基线：`b4a3508`；本阶段实施起点：`c1427e1`，当前产品 **V0.57**。上一轮缺陷收口见 [V0.57 归档](Archive/20260927-v057-closeout/README.md)。本阶段目标版本 **V0.58**，只在实施及规定验收完成后调整唯一版本源；影响本计划的后续改动须记录差异。
 
@@ -246,7 +246,7 @@ C05 的特别条件：`Get-VirtualDiskSupportedSize` 文档描述的是池中新
 | P2 分区适配 | 已实现待验证 | A01–A10、C01–C03 的条件分支，固定映射/输入/前后条件 | 直接自动验证通过；UI 不得只靠布尔开关越过未完成链路 |
 | P3 池/重建适配 | 已实现待验证 | A11–A16、C04/C05、依赖和输出身份、显式重建；D 类拒绝 | 单盘创建/删除/重建及条件扩展的集成与失败矩阵通过 |
 | P4 两页接线 | 已实现待验证 | 真实/模拟路由、预览、确认、查询、部分完成；管理快捷入口共享规则；480 DIP/中英 | 模拟回归及无写确认交互通过；无 Enter/快捷键/IPC 绕行 |
-| P5 写前工程门 | 实施中 | 第 9 节工程门及无写原生生命周期；固定构建/提交基线 | 无未解决失败；E_POINTER 本轮若复现须先解决到可稳定执行 |
+| P5 写前工程门 | 实施中 | 2026-10-06 自动工程门通过，普通启动关闭态已原生核对；管理员准备／取消及其余无写生命周期仍待验证 | 无未解决失败；E_POINTER 本轮若复现须先解决到可稳定执行 |
 | P6 实机验收 | 未开始 | 填第 10 节准入表，取得准确操作批准，顺序验收与证据 | A 类通过，满足条件的 C 类通过，保护盘核对及获准末态完成 |
 | P7 收口 | 未开始 | 版本、公开能力/限制、证据、最终受影响检查、本地提交和归档 | 第 12 节清单全部满足 |
 
@@ -255,6 +255,8 @@ P1–P4 可按文件所有权并行实现，但共享构建/数据库集成和�
 2026-09-27 进度事实：IPC 12、核心 schema 18、类型化 Windows 写适配器、两页路由、准确目标确认、停止后续步骤、真实扩缩范围、分区角色门及恢复屏障已实现。提交 `e57cc81` 的代码基线通过最终工程门：restore 成功，Release 构建零警告/零错误，12 个测试项目合计 896 通过、3 个既有测量用例跳过、0 失败，依赖审计覆盖 23 个项目且未报告漏洞，`git diff --check` 通过；日志/TRX 在忽略提交的 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/`。标准运行树原生只读验收确认 WDC 与两块 Samsung 分开显示，真实编辑关闭时写入控件禁用；两页在 480 DIP 的目标与属性视图中英可切换，英文自动创建开关显示 `On`。管理员只读 BitLocker 查询因 UAC 被取消而没有结果，P0 安全事实未闭合；管理员启动/真实开关、准备与最终确认取消等 P5 原生项目仍待验证。没有真实写入，H00–H11 尚未通过，当前产品仍为 V0.57，目标版本为 V0.58。
 
 本轮 P5 崩溃核验另在 2026-09-27 23:45（本机时间）查询当日 Windows Application 日志：348 条事件中，26 条属于 `Application Error`、`.NET Runtime` 或 `Windows Error Reporting`；与 WinPool App/Agent、`combase.dll`、`E_POINTER` 匹配的事件为 0。只读汇总见忽略提交的 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/p5-application-eventlog-summary.json`。这仅说明本轮标准运行未记录新崩溃，历史 `E_POINTER` 根因尚未确认，P5 仍未完成。
+
+2026-10-06 续执行事实：修复提交 `747b71e` 收口了库存／真实预检的持久本机 ID 不一致、普通隐藏 MSR 阻断独立清盘准备、模式切换后控件状态、执行／待核对期间界面禁用以及取消最终确认后准备计划释放。稳定代码的标准 Release 构建零警告／零错误，12 个测试项目合计 **929 通过、3 个既有测量跳过、0 失败**；restore 成功，23 项目依赖审计未列出已知漏洞，差异检查通过。证据根为 `artifacts/test-results/20261006-real-edit-stage1/prewrite-gate-95f61ad60f3046c0ada0430c3900d7f8/`，以 `build-stable.log`、`tests.log`、`automated-summary-final.json` 为本次最终自动门；此前构建记录为实现中间态，不代替最终门。普通 App 原生启动后真实开关为关闭，选中 WDC 的 E: 时格式化／删除／扩缩均禁用；本次启动期间没有匹配的新崩溃事件。App／Agent 已退出，核心库仍为 40 个既有模拟记录、0 真实准备、0 接受。当前工具进程为非管理员；此前 9 月 28 日的管理员控制证据不能代替本次管理员准备／取消验证。P0/P5 未闭合，H00–H11 未通过，未进行真实磁盘写入，V0.58 尚未生效。
 
 首次实测的能力启用次序固定：P1–P4 用替身，真实适配器不进入默认测试/CI；P5 工程门通过后，才在开发中的标准运行树用同一受控链路为 P6 准备实际计划。每项仍先有适用能力证据、准确开发者批准和产品当次确认，首次尚未实测的项明确显示实验状态。交付时只启用已通过实测的组合；C/D 未满足条件的项全链路禁用。不得加绕过身份/授权/持久化的测试后门；构建时机器名/型号白名单也不是该启用方式。
 
@@ -318,11 +320,11 @@ P0/P6 用当前只读采集填写，未知写“未采集”，不能按型号�
 | 主机名/稳定绑定、Windows 版本/SKU/build、Storage 模块版本 | `DESKTOP-BLE6H18`；机器绑定哈希已采；Windows 10 Pro for Workstations 22H2/build 19045.7725；本机 Storage PowerShell 模块 2.0.0.0 |
 | WDC 型号/序列号、PhysicalDisk UniqueId/ObjectId、OS Disk UniqueId/路径/Number、容量/扇区 | `WDC WD40EZAZ-00SF3B0`，序列号尾 `FP80`；OS Disk 0，4,000,787,030,016 bytes，逻辑/物理扇区 512/4096 bytes；完整原始 Windows ID 仍须从固定采集提取并写入 H00 私有证据 |
 | WDC 当前池/层/VD/分区/卷/挂载及全部关联成员 | 仅 primordial 池，**无实际池、层、VD**；WDC 直接 GPT，分区 1 为 MSR（offset 17,408、size 16,759,808 bytes），分区 2 为近乎占满全盘的 BasicData NTFS，挂载 `E:`；采集时该卷报告 281,477,120 bytes 已用（含文件系统元数据，内容未盘点），清理会失去原数据；WDC 闭包为单一物理盘。H00 须复采已用空间和其它前态，不能用本值代替当次损失说明 |
-| Boot/System/PageFile/CrashDump/只读/加密/健康/CanPool 和拒绝原因 | WDC 的 Boot/System/PageFile/CrashDump 均为 false，健康 Healthy/OK；`CanPool=false`，原因 `InsufficientCapacity`；普通采集显示 OS Disk 和 `E:` 数据分区 `IsReadOnly=false`，MSR 的该值为 null。独立管理员安全探针访问被拒，BitLocker 状态未知，写入前必须补齐独立安全核验 |
+| Boot/System/PageFile/CrashDump/只读/加密/健康/CanPool 和拒绝原因 | WDC 的 Boot/System/PageFile/CrashDump 均为 false，健康 Healthy/OK；`CanPool=false`，原因 `InsufficientCapacity`。2026-09-28 09:44 的固定管理员只读采集及生产安全探针已返回 `read_only_safety_checks_passed`，补齐此前只读／BitLocker 未知；原始证据为 `artifacts/test-results/real-admission-p0/read-only-topology-20260928T014408998Z-2053c245c6754cfa97c37ab7309f6c82.json`。这不是写入批准，P6 前仍须以当次管理员环境重采并重新检查 |
 | 两块 Samsung 的唯一身份、关联对象及结构基线 | 980 PRO 为 Disk 1，承担 Boot/System/PageFile/CrashDump，含 EFI、MSR、BasicData 和两个 Recovery；980 为 Disk 2，单个 BasicData NTFS、挂载 `D:`；两者与 WDC 闭包分离。原始完整身份与前后对比留 H00/P6 私有证据 |
 | 运行目录/数据根/仓库/证据与物理盘关系 | 仓库和本轮证据位于 `D:`（Samsung 980）；2026-09-27 当前 Agent 进程映像位于 `D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release`，App 已正常退出；数据位置指针为 `Standard`，当前数据根为 `C:\Users\Admin\AppData\Local\WinPool`（980 PRO）；分页文件在 `C:`。本轮只读进程映像/服务路径查询未发现 `E:` 依赖，H00 须在 App/Agent 实际运行时重新核对并检查 WDC `E:` 的占用与关联，不能凭此摘要直接清盘。 |
 | A 类能力及 C01–C05 支持/缺环境/未知的证据 | 固定 MSFT 核心源采集完整、0 字段问题；A 类逐命令支持性尚未实测。微软资料把 ReFS 列为 Windows 10 Pro for Workstations 的功能，但本机直接 BasicData 格式化的 provider 支持仍未知，C01 禁用；C02–C05 尚无满足条件的现场证据，也禁用。不能按 SKU 或本表直接放行 |
-| 程序版本/构建哈希、Git 基线、工程门证据 | 当前 V0.57；代码基线 `e57cc81`；Release `WinPool.App.dll` SHA-256 `0F90CBB3535D5DDA955BE166A5D8B0DA7445582F810CE2322D2D58FA88DC55DB`，`WinPool.Agent.dll` SHA-256 `14972D902423538E69B90486FDB4F0C997CBA55D3DFA84FC554D0017435297AC`；本轮工程门日志/TRX 见 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/`。P6 前仍须重采并核对运行中的确切程序。 |
+| 程序版本/构建哈希、Git 基线、工程门证据 | 当前 V0.57；2026-10-06 修复提交 `747b71e`；Release `WinPool.App.dll` SHA-256 `04A1DEBFAD18CE2B375CA75A2680C49FEC8B099C8A8FF3B6FDA962C3244D90A0`，`WinPool.Agent.dll` SHA-256 `EE9FCE45EA07AFE5E87B5B29DECE64BBC7B4CE730AA18058F1D735D73EE606D5`；工程门日志/TRX 见第 8 节本次证据根。P6 前仍须重采并核对运行中的确切程序。 |
 | 具体计划/损失/批准引用/预期末态 | 尚未获得具体写入批准 |
 
 WDC 若属于涉及 Samsung 的池或不能证明独立，相关写入全部停止，不能先移出 WDC “做准备”。`-WhatIf` 不代替准入或实机验证。

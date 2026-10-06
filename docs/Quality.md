@@ -2,6 +2,14 @@
 
 本文件规定验证选择与结果含义。有活动阶段时，范围和进度记入 `docs/Plan.md`；已完成阶段见[归档](Archive/README.md)。技术约定见 [Development](Development.md)，真实操作边界见 [Product](Product.md)。
 
+## 2026-10-06 单盘真实修改第一阶段：P5 续执行
+
+修复提交 `747b71e` 的稳定代码通过标准 Release 工程门：restore 成功，构建 0 警告／0 错误，12 个测试项目 **929 passed、0 failed、3 skipped**；跳过项仍是既有大型监控归档测量。23 项目直接／传递依赖审计未列出已知漏洞，`git diff --check` 通过。最终证据位于 `artifacts/test-results/20261006-real-edit-stage1/prewrite-gate-95f61ad60f3046c0ada0430c3900d7f8/`，以 `build-stable.log`、`tests.log`、`automated-summary-final.json`、`dependencies.json` 为准。前两份构建日志保留为实现中间态。直接回归另覆盖持久本机身份与新鲜事实、换盘／外机／缺事实拒绝、执行及未知状态禁用、准确计划取消、旧请求释放竞争、Agent 重启恢复屏障；使用替身与临时 SQLite，不调用物理写适配器。
+
+标准 App 普通权限启动后，真实编辑开关为 Off；选中 WDC 的 E: 时格式化、删除、扩展、压缩仍禁用，查询／停止后续步骤可见。UIA 证据为 `native-normal-start-uia.txt`。本次启动时间段 Application 日志完成查询，4 条事件中没有相关崩溃来源或 WinPool／历史签名匹配；证据为 `native-normal-crash-summary.json`，不据此宣称历史 E_POINTER 根因已修复。App 正常关闭，空闲 Agent 经准确路径核对后退出。生产核心库仍只有 40 个既有模拟记录，真实准备及接受均为 0，见 `native-no-real-plans.json`。
+
+当前工具进程不是管理员，本次管理员 App→Agent 准备／取消尚未验证。2026-09-28 的管理员固定只读安全探针曾通过，但写前必须重采；raw provider 身份的独立 planner 探针不等于实际 App→Agent 冻结计划。P0/P5 与 H00–H11 仍未闭合，未进行真实磁盘写入，产品保持 V0.57，V0.58 仍为目标。
+
 ## 2026-09-27 单盘真实修改第一阶段：写入前进度
 
 当前仍在 [Plan](Plan.md) 的 P0 写入前准入及后续代码集成期，产品版本为 V0.57，V0.58 只是目标。已提交的 IPC 12、schema 18、Agent 持久状态与身份门、Windows 封闭适配及两页单盘入口已通过本阶段最终自动工程门：Release restore 成功，标准 Release 全解构建 0 警告、0 错误；全解测试 896 passed、0 failed，另有 3 项既有大型监控归档测量按门控 skipped；直接和传递依赖审计覆盖 23 项目，未报告已知漏洞。App.Tests 15/15、Agent.Tests 67/67、Agent.Client.Tests 22/22、IPC.Tests 9/9 均包含在 896 项内。TRX、构建日志及审计结果位于 `artifacts/test-results/20260927-real-edit-stage1/final-gate-localized/`。这些自动结果只证明测试夹具覆盖的计划、IPC／状态、适配器和 UI 提案行为；P5 无写原生准入及 P6 实机用例尚未完成，不能沿用上一轮 V0.57 的 780 项回归充当本阶段验收。
