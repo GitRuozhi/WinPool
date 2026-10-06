@@ -16,7 +16,7 @@ internal sealed class AgentInventoryCoordinator
     private readonly InventorySnapshotRepository snapshots;
     private readonly InventoryComparisonRepository comparisons;
     private readonly LocalInventoryDocumentRepository localDocument;
-    private readonly LocalSystemIdentityResolver localIdentity;
+    private readonly AgentLocalSystemIdentity localIdentity;
     private readonly ConcurrentDictionary<int, string> physicalDeviceIds = new();
     private readonly SemaphoreSlim localCaptureGate = new(1, 1);
     private readonly Action<AgentEvent> publish;
@@ -41,7 +41,8 @@ internal sealed class AgentInventoryCoordinator
         this.snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
         this.comparisons = comparisons ?? throw new ArgumentNullException(nameof(comparisons));
         this.localDocument = localDocument ?? throw new ArgumentNullException(nameof(localDocument));
-        this.localIdentity = localIdentity ?? throw new ArgumentNullException(nameof(localIdentity));
+        ArgumentNullException.ThrowIfNull(localIdentity);
+        this.localIdentity = new AgentLocalSystemIdentity(localDocument, localIdentity);
         this.deviceResolver = deviceResolver ?? throw new ArgumentNullException(nameof(deviceResolver));
         this.publish = publish ?? (_ => { });
     }
@@ -101,11 +102,7 @@ internal sealed class AgentInventoryCoordinator
             var provisional = EmbeddedPowerShellInventoryProvider.Project(
                 document.SystemId,
                 document.Snapshot);
-            var preferredSystemId = await TryReadPreferredLocalSystemIdAsync(cancellationToken);
-            var identity = await localIdentity.ResolveAsync(
-                Environment.MachineName,
-                preferredSystemId,
-                cancellationToken);
+            var identity = await localIdentity.ResolveAsync(cancellationToken);
             var canonicalSystemId = identity.SystemId;
             document = document with
             {
@@ -205,11 +202,7 @@ internal sealed class AgentInventoryCoordinator
 
             try
             {
-                var preferredSystemId = await TryReadPreferredLocalSystemIdAsync(cancellationToken);
-                var identity = await localIdentity.ResolveAsync(
-                    Environment.MachineName,
-                    preferredSystemId,
-                    cancellationToken);
+                var identity = await localIdentity.ResolveAsync(cancellationToken);
                 var canonicalSystemId = identity.SystemId;
                 var nativeSnapshot = Rebind(native.Value, canonicalSystemId);
                 var savedNative = await snapshots.SaveAsync(
@@ -305,24 +298,6 @@ internal sealed class AgentInventoryCoordinator
                 physicalDeviceIds[diskNumber] = disk.PnpDeviceId;
             }
         }
-    }
-
-    private async Task<SystemId?> TryReadPreferredLocalSystemIdAsync(
-        CancellationToken cancellationToken)
-    {
-        var persisted = await localDocument.LoadAsync(cancellationToken);
-        if (persisted is not null)
-        {
-            var previous = LocalInventoryDocumentCodec.Decode(persisted.Document);
-            if (StringComparer.OrdinalIgnoreCase.Equals(
-                    previous.Snapshot.Computer.Name,
-                    Environment.MachineName))
-            {
-                return previous.SystemId;
-            }
-        }
-
-        return null;
     }
 
     private static InventorySnapshot Rebind(

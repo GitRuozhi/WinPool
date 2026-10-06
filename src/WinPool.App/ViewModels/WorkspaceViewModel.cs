@@ -80,6 +80,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _workspaceStateService = workspaceStateService;
         _agentConnection = agentConnection;
         _realModeSession = agentConnection is null ? null : new AgentRealModeSession(agentConnection);
+        RealOperationSubmission.Changed += () => OnPropertyChanged(nameof(CanSubmitRealOperation));
         _manageProjector = manageProjector ?? new ManageSystemProjector();
         _manageComparisonProjector = manageComparisonProjector ?? new ManageComparisonProjector();
         _manageDetailsProjector = manageDetailsProjector ?? new ManageDetailsProjector();
@@ -154,7 +155,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public bool IsRealMode => Execution.Mode == ExecutionMode.Real;
 
-    public bool CanSubmitRealOperation => IsRealMode && _realModeSession?.IsArmed == true && IsLocalSystem;
+    public RealOperationSubmissionState RealOperationSubmission { get; } = new();
+
+    public bool CanSubmitRealOperation => IsRealMode && _realModeSession?.IsArmed == true && IsLocalSystem
+        && !RealOperationSubmission.IsBlocked;
 
     public StorageSystemCatalog SystemCatalog { get; } = new();
 

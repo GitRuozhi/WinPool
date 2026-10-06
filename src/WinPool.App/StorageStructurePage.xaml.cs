@@ -169,6 +169,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RefreshAll();
     }
 
+    internal void RefreshExecutionMode() => UpdateButtonState();
+
     private bool HasRoleDisks(string poolId, string usage) =>
         _working.PhysicalDisks.Any(disk =>
             string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
@@ -208,12 +210,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(RedoButton, Text("恢复最近撤销的模拟修改。", "Redo the most recently undone simulated change."));
         ContextHelp.Set(DiscardAllButton, Text("放弃所有未应用的模拟修改。", "Discard all unapplied simulated changes."));
         ContextHelp.Set(ApplyAllButton, Text("确认风险后将待处理结构修改写入模拟系统。", "Write pending structural changes to the simulated system after confirming risks."));
-        ContextHelp.Set(CreatePoolButton, Text("在模拟系统中创建新的存储池草稿。", "Create a new storage-pool draft in the simulated system."));
-        ContextHelp.Set(DissolveButton, Text("解散选中的模拟存储池；请先阅读确认提示。", "Dissolve the selected simulated storage pool; review the confirmation first."));
+        ContextHelp.Set(CreatePoolButton, Text("创建符合条件的存储池；真实创建需准确目标预览和单独确认。", "Create an eligible storage pool; real creation requires an exact-target preview and separate confirmation."));
+        ContextHelp.Set(DissolveButton, Text("解散选中的存储池；真实删除会使其关联数据丢失。", "Dissolve the selected storage pool; real deletion loses its associated data."));
         ContextHelp.Set(RetireButton, Text("将选中的模拟池成员标为已退役。", "Mark the selected simulated pool member as retired."));
         ContextHelp.Set(HotSpareButton, Text("将选中的模拟池成员标为热备。", "Mark the selected simulated pool member as a hot spare."));
-        ContextHelp.Set(CreateVdiskButton, Text("为符合条件的模拟池创建虚拟磁盘和分区。", "Create a virtual disk and partition for an eligible simulated pool."));
-        ContextHelp.Set(DeleteVdiskButton, Text("删除模拟虚拟磁盘及其分区；请先阅读确认提示。", "Delete the simulated virtual disk and partition; review the confirmation first."));
+        ContextHelp.Set(CreateVdiskButton, Text("为符合条件的存储池创建虚拟磁盘和分区；真实操作需单独确认。", "Create a virtual disk and partition for an eligible pool; a real operation requires separate confirmation."));
+        ContextHelp.Set(DeleteVdiskButton, Text("删除虚拟磁盘及其分区；真实删除会使其数据丢失。", "Delete a virtual disk and its partitions; real deletion loses their data."));
         ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
         ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
         ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前池属性草稿到待处理模拟修改。", "Save the current pool property draft into pending simulated changes."));
@@ -321,13 +323,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(_virtualDiskNameBox, Text("输入名称后按 Enter 保存；离开焦点不会提交。", "Enter a name and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(_volumeNameBox, Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(_autoVdiskSwitch, Text(
-            "软件设置：新建模拟存储池时是否自动创建虚拟磁盘；不会改动已有对象。",
-            "Software setting: whether a new simulated storage pool automatically creates a virtual disk; existing objects are unchanged."));
+            "软件设置：新建存储池时是否自动创建虚拟磁盘；开启本身不会修改磁盘。",
+            "Software setting: whether a new storage pool automatically creates a virtual disk; changing this switch does not modify a disk."));
         ContextHelp.Set(_autoPartitionSwitch, Text(
-            "软件设置：新建模拟虚拟磁盘时是否自动创建分区；不会改动已有对象。",
-            "Software setting: whether a new simulated virtual disk automatically creates a partition; existing objects are unchanged."));
-        ContextHelp.Set(_partitionStyleBox, Text("选择模拟分区表样式。", "Choose the simulated partition-table style."));
-        ContextHelp.Set(_fileSystemBox, Text("选择模拟卷文件系统；ReFS 没有等同于 64 KiB NTFS 的长期证据。", "Choose the simulated volume file system; ReFS has no long-run evidence equivalent to 64 KiB NTFS."));
+            "软件设置：新建虚拟磁盘时是否自动创建分区；开启本身不会修改磁盘。",
+            "Software setting: whether a new virtual disk automatically creates a partition; changing this switch does not modify a disk."));
+        ContextHelp.Set(_partitionStyleBox, Text("选择新分区表样式；真实模式仅开放本阶段已验证的组合。", "Choose the new partition-table style; real mode allows only combinations verified for this stage."));
+        ContextHelp.Set(_fileSystemBox, Text("选择卷文件系统；ReFS 没有等同于 64 KiB NTFS 的长期证据。", "Choose the volume file system; ReFS has no long-run evidence equivalent to 64 KiB NTFS."));
         ContextHelp.Set(_clusterBox, Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是 Windows 容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a Windows capacity guarantee."));
         foreach (var group in TierGroups())
         {
@@ -384,8 +386,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(
             CreateVdiskButton,
             createsPartition
-                ? Text("为符合条件的模拟池创建虚拟磁盘和分区。", "Create a virtual disk and partition for an eligible simulated pool.")
-                : Text("为符合条件的模拟池创建虚拟磁盘；自动创建分区已关闭。", "Create a virtual disk for an eligible simulated pool; auto-create partition is off."));
+                ? Text("为符合条件的存储池创建虚拟磁盘和分区；真实操作需单独确认。", "Create a virtual disk and partition for an eligible pool; a real operation requires separate confirmation.")
+                : Text("为符合条件的存储池创建虚拟磁盘；自动创建分区已关闭。", "Create a virtual disk for an eligible pool; auto-create partition is off."));
     }
 
     private async void AutoVdiskSwitch_Toggled(object sender, RoutedEventArgs e)
@@ -2330,10 +2332,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         : Text("当前虚拟磁盘不能删除。", "The current virtual disk cannot be deleted.")));
         SetDisabledReason(
             ShowHotSpareSwitch,
-            Text("本机存储在此页只读；请选择或创建模拟系统后使用图层开关。", "Local storage is read-only on this page; select or create a simulated system to use layer switches."));
+            Text("热备图层开关仅支持模拟系统。", "The hot-spare layer switch is available only in simulated systems."));
         SetDisabledReason(
             ShowRetiredSwitch,
-            Text("本机存储在此页只读；请选择或创建模拟系统后使用图层开关。", "Local storage is read-only on this page; select or create a simulated system to use layer switches."));
+            Text("退役图层开关仅支持模拟系统。", "The retired layer switch is available only in simulated systems."));
         UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
         UpdateFieldResets();
     }
@@ -2348,8 +2350,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             if (ViewModel.CanSubmitRealOperation)
                 return Text(
-                    "当前真实阶段仅开放单个可池化空白物理盘的建池入口；多盘冗余、混合介质分层及其结构编辑尚未验证。",
-                    "This real stage enables pool creation from one empty poolable physical disk. Multi-disk redundancy, mixed-media tiers and their structural edits are not yet verified.");
+                    "当前真实阶段仅开放符合条件的单盘池、虚拟磁盘和显式重建操作；多盘冗余与混合介质分层尚未验证。",
+                    "This real stage allows eligible single-disk pool, virtual disk and explicit rebuild operations; multi-disk redundancy and mixed-media tiers are not yet verified.");
             return Text("本机存储在此页只读；请选择或创建模拟系统后编辑。",
                 "Local storage is read-only on this page; select or create a simulated system to edit.");
         }

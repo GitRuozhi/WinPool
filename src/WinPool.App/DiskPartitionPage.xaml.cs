@@ -66,6 +66,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         RefreshAll();
     }
 
+    internal void RefreshExecutionMode() => UpdateButtonState();
+
     private void LocalizeChrome()
     {
         ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
@@ -104,29 +106,29 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         AutomationProperties.SetName(SizeBox, Text("容量", "Capacity"));
         AutomationProperties.SetName(SizeAdaptiveValue, Text("自适应容量单位", "Adaptive capacity unit"));
         ContextHelp.Set(OnlineButton,
-            Text("仅将模拟磁盘联机。", "Bring a simulated disk online only."));
+            Text("将符合条件的磁盘联机；本机真实操作需单独预览和确认。", "Bring an eligible disk online; a real local operation requires its own preview and confirmation."));
         ContextHelp.Set(OfflineButton,
-            Text("仅将非系统模拟磁盘脱机。", "Take a non-system simulated disk offline only."));
+            Text("将符合条件的非系统磁盘脱机；本机真实操作需单独预览和确认。", "Take an eligible non-system disk offline; a real local operation requires its own preview and confirmation."));
         ContextHelp.Set(InitializeButton,
-            Text("初始化空白模拟磁盘；不修改本机磁盘。", "Initialize a blank simulated disk; no local disk is changed."));
+            Text("初始化符合条件的 RAW 磁盘；本机真实操作会修改磁盘结构。", "Initialize an eligible RAW disk; a real local operation changes its disk structure."));
         ContextHelp.Set(ConvertGptButton,
             Text("将符合条件的模拟 MBR 磁盘转换为 GPT。", "Convert an eligible simulated MBR disk to GPT."));
         ContextHelp.Set(DeletePartitionButton,
-            Text("删除选中的非系统、非启动模拟分区。", "Delete the selected simulated partition when it is neither a system nor a boot partition."));
+            Text("删除符合条件的非系统、非启动分区；真实删除会使该分区的数据丢失。", "Delete an eligible non-system, non-boot partition; real deletion loses its data."));
         ContextHelp.Set(ExtendButton,
             Text(
-                "选择“扩展分区”后，输入更大的目标总容量（MiB 整数，按 1 MiB 对齐）；只验证建模几何，不是 Windows 支持容量实测。",
-                "Select Extend partition, then enter a larger total target capacity as a whole number of MiB (1 MiB-aligned); this validates modeled geometry, not a Windows supported-size result."));
+                "选择“扩展分区”后，输入更大的目标总容量（MiB 整数，按 1 MiB 对齐）；真实操作由 Agent 查询 Windows 实时支持范围。",
+                "Select Extend partition, then enter a larger total target capacity as a whole number of MiB (1 MiB-aligned); for real operations, the Agent queries the live Windows supported range."));
         ContextHelp.Set(ShrinkButton,
             Text(
-                "选择“压缩分区”后，输入更小的目标总容量（MiB 整数，按 1 MiB 对齐）；目标是总容量而非增量，只验证建模几何。",
-                "Select Shrink partition, then enter a smaller total target capacity as a whole number of MiB (1 MiB-aligned); the target is a total size, not an increment, and only modeled geometry is validated."));
+                "选择“压缩分区”后，输入更小的目标总容量（MiB 整数，按 1 MiB 对齐）；真实操作由 Agent 查询 Windows 实时支持范围。",
+                "Select Shrink partition, then enter a smaller total target capacity as a whole number of MiB (1 MiB-aligned); for real operations, the Agent queries the live Windows supported range."));
         ContextHelp.Set(OpenExplorerButton,
             Text("仅打开有本机盘符的现有本机卷。", "Open only an existing local volume with a local drive letter."));
         ContextHelp.Set(PartitionTypeBox,
-            Text("仅在 GPT 模拟未分配空间中选择固定分区类型。", "Choose a fixed partition type only in simulated GPT unallocated space."));
+            Text("在 GPT 未分配空间中选择固定分区类型。", "Choose a fixed partition type in GPT unallocated space."));
         ContextHelp.Set(DriveLetterBox,
-            Text("选择模拟卷盘符；保留分区不能分配盘符。", "Choose a simulated volume drive letter; reserved partitions cannot receive one."));
+            Text("选择卷盘符；保留分区不能分配盘符。", "Choose a volume drive letter; reserved partitions cannot receive one."));
         ContextHelp.Set(VolumeLabelBox,
             Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(SizeBox,
@@ -136,18 +138,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(MaximumSizeButton,
             Text("将容量填为选中空隙中的最大 1 MiB 对齐容量。", "Fill the largest 1 MiB-aligned capacity available in the selected gap."));
         ContextHelp.Set(FileSystemBox,
-            Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
+            Text("选择格式化文件系统；真实模式仅开放本阶段已验证的组合。", "Choose a format file system; real mode allows only combinations verified for this stage."));
         ContextHelp.Set(ClusterBox,
             Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。",
                 "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
         ContextHelp.Set(QuickFormatSwitch,
             Text(
-                "选择模拟快速格式化；此模式会进入模拟操作计划，不会格式化真实磁盘。",
-                "Choose simulated quick formatting. This mode is recorded in the simulation plan and does not format a real disk."));
+                "选择快速格式化；真实操作将在单独确认后格式化目标分区。",
+                "Choose quick format; a real operation formats the target partition after its own confirmation."));
         ContextHelp.Set(FullFormatSwitch,
             Text(
-                "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
-                "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
+                "选择完整格式化；真实操作将在单独确认后扫描并格式化目标分区。",
+                "Choose full format; a real operation scans and formats the target partition after its own confirmation."));
         foreach (var button in PropertyResetButtons())
         {
             ContextHelp.Set(button, ViewModel.Localization["ResetRecommended"]);
@@ -898,8 +900,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(
             PartitionActionButton,
             createActionSelected
-                ? Text("在选中的 GPT 模拟未分配空间中创建分区；容量按 1 MiB 对齐。", "Create a partition in the selected simulated GPT gap; capacity uses 1 MiB alignment.")
-                : Text("提交当前模拟分区格式化设置。", "Submit the current simulated partition formatting settings."));
+                ? Text("在选中的 GPT 未分配空间中创建分区；真实操作需单独预览和确认。", "Create a partition in the selected GPT gap; a real operation requires its own preview and confirmation.")
+                : Text("提交当前分区格式化设置；真实操作会清除目标分区的数据。", "Submit the partition format settings; a real operation erases data on the target partition."));
         SetDisabledReason(PartitionActionButton, realRefsUnsupported
             ? Text("ReFS 真实创建仍待 C01 现场能力证据，本阶段禁用。",
                 "Real ReFS creation requires C01 provider evidence and is disabled in this stage.")
@@ -917,31 +919,31 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private void RestoreFieldHelp()
     {
         ContextHelp.Set(PartitionTypeBox,
-            Text("仅在 GPT 模拟未分配空间中选择固定分区类型。", "Choose a fixed partition type only in simulated GPT unallocated space."));
+            Text("在 GPT 未分配空间中选择固定分区类型。", "Choose a fixed partition type in GPT unallocated space."));
         ContextHelp.Set(DriveLetterBox,
-            Text("选择模拟卷盘符；保留分区不能分配盘符。", "Choose a simulated volume drive letter; reserved partitions cannot receive one."));
+            Text("选择卷盘符；保留分区不能分配盘符。", "Choose a volume drive letter; reserved partitions cannot receive one."));
         ContextHelp.Set(VolumeLabelBox,
             Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
         ContextHelp.Set(SizeBox,
             SelectedPartition() is null
                 ? Text("以 MiB 正整数输入新分区大小；下一行显示自适应单位。", "Enter the new partition size as a whole number of MiB; the next line shows an adaptive unit.")
                 : Text(
-                    "这里只显示四舍五入后的当前容量。扩展或压缩请点击相应按钮，在对话框中输入精确的 MiB 整数目标总容量；扩缩只检查保存的几何、空闲空间和方向支持的模拟文件系统，不是 Windows 支持容量实测。",
-                    "This only shows the rounded current capacity. Click Extend or Shrink and enter an exact whole-MiB total target in the dialog; resize checks persisted geometry, free space, and direction-supported simulated file systems, not a Windows supported-size result."));
+                    "这里只显示四舍五入后的当前容量。扩展或压缩请点击相应按钮，在对话框中输入精确的 MiB 整数目标总容量；真实操作由 Agent 查询实时支持范围。",
+                    "This only shows the rounded current capacity. Click Extend or Shrink and enter an exact whole-MiB total target in the dialog; for real operations, the Agent queries the live supported range."));
         ContextHelp.Set(MaximumSizeButton,
             Text("将容量填为选中空隙中的最大 1 MiB 对齐容量。", "Fill the largest 1 MiB-aligned capacity available in the selected gap."));
         ContextHelp.Set(FileSystemBox,
-            Text("选择模拟格式化的文件系统。", "Choose the file system for simulated formatting."));
+            Text("选择格式化文件系统；真实模式仅开放本阶段已验证的组合。", "Choose a format file system; real mode allows only combinations verified for this stage."));
         ContextHelp.Set(ClusterBox,
             Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
         ContextHelp.Set(QuickFormatSwitch,
             Text(
-                "选择模拟快速格式化；此模式会进入模拟操作计划，不会格式化真实磁盘。",
-                "Choose simulated quick formatting. This mode is recorded in the simulation plan and does not format a real disk."));
+                "选择快速格式化；真实操作将在单独确认后格式化目标分区。",
+                "Choose quick format; a real operation formats the target partition after its own confirmation."));
         ContextHelp.Set(FullFormatSwitch,
             Text(
-                "选择模拟完整格式化；此模式会进入模拟操作计划，不会扫描真实介质。",
-                "Choose simulated full formatting. This mode is recorded in the simulation plan and does not scan real media."));
+                "选择完整格式化；真实操作将在单独确认后扫描并格式化目标分区。",
+                "Choose full format; a real operation scans and formats the target partition after its own confirmation."));
     }
 
     private static bool TryGetResizeTargetRange(

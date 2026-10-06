@@ -16,6 +16,7 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
         if (Environment.GetEnvironmentVariable("WINPOOL_READ_ONLY_ADMISSION") != "1")
             return;
 
+        var repositoryRoot = FindRepositoryRoot();
         var document = await new WindowsRealStorageFactSource()
             .CaptureFreshAsync(CancellationToken.None);
         var facts = document.SourceFacts
@@ -23,9 +24,13 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
         var snapshot = document.Snapshot;
         var machineBinding = await new WindowsRealMachineIdentityProvider()
             .ReadBindingAsync(CancellationToken.None);
+        var selectedPhysicalId = Environment.GetEnvironmentVariable(
+            "WINPOOL_ADMISSION_PHYSICAL_ID");
         string topologyState;
         object[] targetProbes = [];
         object? selectedSafetyProbe = null;
+        object? selectedPlanProbe = null;
+        string? selectedPlanStatus = null;
         try
         {
             var topology = new WindowsRealStorageTopology(
@@ -58,29 +63,26 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
                 }
             }).ToArray();
 
-            var selectedPhysicalId = Environment.GetEnvironmentVariable(
-                "WINPOOL_ADMISSION_PHYSICAL_ID");
             if (!string.IsNullOrWhiteSpace(selectedPhysicalId))
             {
                 var physical = snapshot.PhysicalDisks.Single(item =>
                     StringComparer.Ordinal.Equals(item.StableId, selectedPhysicalId));
                 var osDisk = snapshot.OsDisks.Single(item =>
                     item.PhysicalDiskStableId == physical.StableId);
+                var osDiskId = new StorageObjectId(document.SystemId,
+                    StorageObjectKind.OsDisk, osDisk.StableId);
+                var clearCommand = new ClearDiskCommand(
+                    RealTargetReference.ForExisting(osDiskId), false);
                 var closure = topology.RequireSinglePhysicalClosure(
-                    [new StorageObjectId(document.SystemId,
-                        StorageObjectKind.OsDisk, osDisk.StableId)]);
+                    [osDiskId]);
                 var exact = WindowsRealStorageTargetBuilder.Build(topology,
-                    RealTargetReference.ForExisting(new StorageObjectId(
-                        document.SystemId, StorageObjectKind.OsDisk,
-                        osDisk.StableId)), new Dictionary<string, string>());
+                    RealTargetReference.ForExisting(osDiskId),
+                    new Dictionary<string, string>());
                 string safety;
                 try
                 {
                     await new WindowsRealStorageSafetyInspector().ValidateAsync(
-                        topology, closure,
-                        new ClearDiskCommand(RealTargetReference.ForExisting(
-                            new StorageObjectId(document.SystemId,
-                                StorageObjectKind.OsDisk, osDisk.StableId)), false),
+                        topology, closure, clearCommand,
                         CancellationToken.None);
                     safety = "read_only_safety_checks_passed";
                 }
@@ -102,6 +104,56 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
                                 .Select(field => new { field.Name, field.ReadState,
                                     value = field.DisplayValue() }).ToArray()
                         }).ToArray() };
+
+                // Probe the Windows planner with the raw provider's SystemId.
+                // This does not cover the App/Agent canonical identity binding,
+                // persisted preparation, confirmation, or acceptance.
+                var proposal = new RealOperationIntentRequest(
+                    OperationIntent.ClearDisk, document.SystemId, [osDiskId],
+                    [new RealOperationStep("operation-1", clearCommand, [],
+                        "Agent live target verification required",
+                        RealOperationValidator.ClearDiskExpectedFinalState,
+                        "All partitions, volumes, files and drive letters on the exact disk are lost",
+                        "Agent live Windows preflight required")],
+                    RealOperationValidator.ClearDiskExpectedFinalState);
+                var session = new TrustedRealSession(SessionId.New(),
+                    "read-only-admission", "read-only-admission", Environment.ProcessId,
+                    DateTimeOffset.UtcNow.AddMinutes(-1),
+                    Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory,
+                        "testhost.exe"), true);
+                var dataRoot = StorageDataLocations.ResolveCurrentRoot(
+                    Path.Combine(repositoryRoot, "artifacts", "Release"));
+                var planner = new WindowsRealOperationPlanner(
+                    privilege: new WindowsPrivilegeService(),
+                    safetyInspector: new WindowsRealStorageSafetyInspector([dataRoot]));
+                try
+                {
+                    var plan = await planner.PrepareAsync(proposal, session,
+                        OperationId.New(), CancellationToken.None);
+                    selectedPlanStatus = "prepared";
+                    selectedPlanProbe = new
+                    {
+                        scope = "raw_provider_identity_planner_only",
+                        status = selectedPlanStatus,
+                        plan.OperationId,
+                        plan.PlanHash,
+                        plan.Risk,
+                        stepCount = plan.RealOperation?.Steps.Count
+                    };
+                }
+                catch (Exception exception)
+                {
+                    selectedPlanStatus = exception.GetType().Name + ": "
+                        + exception.Message;
+                    selectedPlanProbe = new
+                    {
+                        scope = "raw_provider_identity_planner_only",
+                        status = "rejected",
+                        exceptionType = exception.GetType().FullName,
+                        exception.Message,
+                        exception.StackTrace
+                    };
+                }
             }
         }
         catch (Exception exception)
@@ -135,20 +187,45 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
             relationships = snapshot.Relationships,
             fieldIssues = snapshot.FieldIssues,
             targetProbes,
-            selectedSafetyProbe
+            selectedSafetyProbe,
+            selectedPlanProbe
         };
-        var directory = Path.Combine(Directory.GetCurrentDirectory(),
+        var directory = Path.Combine(repositoryRoot,
             "artifacts", "test-results", "real-admission-p0");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "read-only-topology.json");
-        await File.WriteAllTextAsync(path,
-            JsonSerializer.Serialize(report, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            }));
+        var path = Path.Combine(directory,
+            $"read-only-topology-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}.json");
+        await using (var evidence = new FileStream(path, FileMode.CreateNew,
+            FileAccess.Write, FileShare.None))
+        {
+            await JsonSerializer.SerializeAsync(evidence, report,
+                new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+        }
         output.WriteLine("Read-only admission evidence saved locally: " + path);
         output.WriteLine("Topology status: " + topologyState);
         Assert.Equal(StorageSystemKind.Local, document.Kind);
         Assert.NotEmpty(snapshot.PhysicalDisks);
+        if (!string.IsNullOrWhiteSpace(selectedPhysicalId))
+            Assert.True(selectedPlanStatus == "prepared",
+                "Selected read-only plan probe failed. Topology: " + topologyState
+                + "; planner: " + (selectedPlanStatus ?? "not reached"));
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "WinPool.slnx")))
+                return directory.FullName;
+        }
+
+        throw new InvalidOperationException(
+            "WinPool.slnx was not found above the test binary directory: "
+            + AppContext.BaseDirectory);
     }
 }

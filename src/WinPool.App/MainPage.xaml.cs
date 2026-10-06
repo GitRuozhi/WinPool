@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using WinPool.App.ViewModels;
 using WinPool.App.Services;
@@ -80,6 +81,7 @@ public sealed partial class MainPage : Page
         base.OnNavigatedTo(e);
         ViewModel = (WorkspaceViewModel)e.Parameter;
         ViewModel.WorkspaceSelectionChanged += ViewModel_WorkspaceSelectionChanged;
+        ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         ViewModel.NodeContextMenuRequested = ShowNodeContextMenu;
         ActualThemeChanged += MainPage_ActualThemeChanged;
         Bindings.Update();
@@ -90,6 +92,7 @@ public sealed partial class MainPage : Page
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         ViewModel.WorkspaceSelectionChanged -= ViewModel_WorkspaceSelectionChanged;
+        ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.NodeContextMenuRequested = null;
         ActualThemeChanged -= MainPage_ActualThemeChanged;
         ViewModel.TopologyHorizontalOffset = TopologyScrollViewer.HorizontalOffset;
@@ -103,6 +106,12 @@ public sealed partial class MainPage : Page
         RebuildComparisonTable();
         BuildCommandButtons();
         ApplyColumnHighlight(centerSelected: false);
+    }
+
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(WorkspaceViewModel.CanSubmitRealOperation))
+            DispatcherQueue.TryEnqueue(BuildCommandButtons);
     }
 
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
@@ -670,10 +679,69 @@ public sealed partial class MainPage : Page
                 Spec("优化驱动器", "Optimize drive", "\uE945", command, OptimizeDrivesAsync),
             _ => throw new ArgumentOutOfRangeException(nameof(command))
         };
-        return command.IsEnabled
-            ? spec
-            : spec with { DisabledReason = ManageDisabledReason(command.Kind, surface) };
+        if (ViewModel.IsLocalSystem && IsRealEditorNavigationKind(command.Kind))
+            spec = spec with { Purpose = RealEditorNavigationPurpose(command.Kind) };
+
+        if (command.IsEnabled)
+            return spec;
+
+        if (CanNavigateRealEditor(command.Kind))
+            return spec with { Enabled = true };
+
+        return spec with { DisabledReason = ManageDisabledReason(command.Kind, surface) };
     }
+
+    private static bool IsRealEditorNavigationKind(ManageCommandKind kind) => kind is
+        ManageCommandKind.CreatePool or ManageCommandKind.RenamePool or ManageCommandKind.EditPool
+        or ManageCommandKind.InitializeDisk or ManageCommandKind.CreatePartition
+        or ManageCommandKind.ConvertDiskStyle or ManageCommandKind.OnlineDisk
+        or ManageCommandKind.OfflineDisk or ManageCommandKind.ChangeDriveLetter
+        or ManageCommandKind.RenamePartition or ManageCommandKind.FormatPartition
+        or ManageCommandKind.EditPartition or ManageCommandKind.DeletePartition;
+
+    private bool CanNavigateRealEditor(ManageCommandKind kind)
+    {
+        if (!ViewModel.IsLocalSystem || !ViewModel.CanSubmitRealOperation)
+            return false;
+
+        var target = ViewModel.SelectedWorkspaceItem?.Projection;
+        if (target is null || IsSyntheticOrUnstableTarget(target))
+            return false;
+
+        var snapshot = ViewModel.EffectiveActiveSnapshot;
+        return kind switch
+        {
+            ManageCommandKind.CreatePool or ManageCommandKind.RenamePool or ManageCommandKind.EditPool =>
+                target.Role == ManageObjectRole.StoragePool
+                && snapshot.StoragePools.Any(pool =>
+                    StringComparer.OrdinalIgnoreCase.Equals(pool.StableId, target.Id.ProviderKey)),
+            ManageCommandKind.InitializeDisk or ManageCommandKind.CreatePartition
+                or ManageCommandKind.ConvertDiskStyle or ManageCommandKind.OnlineDisk
+                or ManageCommandKind.OfflineDisk =>
+                IsDirectDiskRole(target.Role)
+                && snapshot.OsDisks.Any(disk =>
+                    StringComparer.OrdinalIgnoreCase.Equals(disk.StableId, target.Id.ProviderKey)
+                    || StringComparer.OrdinalIgnoreCase.Equals(disk.PhysicalDiskStableId, target.Id.ProviderKey)
+                    || StringComparer.OrdinalIgnoreCase.Equals(disk.VirtualDiskStableId, target.Id.ProviderKey)),
+            ManageCommandKind.ChangeDriveLetter or ManageCommandKind.RenamePartition
+                or ManageCommandKind.FormatPartition or ManageCommandKind.EditPartition
+                or ManageCommandKind.DeletePartition =>
+                (target.Role is ManageObjectRole.Partition or ManageObjectRole.Volume)
+                && ManageSelectionRules.ResolvePartition(
+                    snapshot, target.Id.ProviderKey, target.Role) is not null,
+            _ => false
+        };
+    }
+
+    private string RealEditorNavigationPurpose(ManageCommandKind kind) => kind switch
+    {
+        ManageCommandKind.CreatePool or ManageCommandKind.RenamePool or ManageCommandKind.EditPool => Text(
+            "打开存储结构编辑页。目标页会再次检查当前对象和可用能力；写入前须预览准确计划并单独确认。",
+            "Open Storage structure. The editor checks the current target and capability again; a write requires an exact plan preview and separate confirmation."),
+        _ => Text(
+            "打开磁盘分区编辑页。目标页会再次检查当前对象和可用能力；写入前须预览准确计划并单独确认。",
+            "Open Disk and partitions. The editor checks the current target and capability again; a write requires an exact plan preview and separate confirmation.")
+    };
 
     private CommandSpec Spec(
         string zh,
@@ -824,17 +892,15 @@ public sealed partial class MainPage : Page
                 : LocalWindowsTargetReason(target);
         }
 
-        if (ViewModel.IsLocalSystem)
-        {
-            return LocalReadOnlyReason(kind);
-        }
-
         if (IsSyntheticOrUnstableTarget(target))
         {
             return Text(
                 "此对象是派生汇总项，或没有稳定的 Windows 来源；不能直接执行该操作。",
                 "This is a derived item or it lacks a stable Windows source, so the operation cannot be applied directly.");
         }
+
+        if (ViewModel.IsLocalSystem)
+            return LocalDisabledReason(kind);
 
         return kind switch
         {
@@ -868,30 +934,33 @@ public sealed partial class MainPage : Page
         };
     }
 
-    private string LocalReadOnlyReason(ManageCommandKind kind) => kind switch
+    private string LocalDisabledReason(ManageCommandKind kind)
     {
-        ManageCommandKind.FormatPartition => Text(
-            "本机存储为只读；WinPool 不会格式化真实分区。",
-            "Local storage is read-only; WinPool will not format a real partition."),
-        ManageCommandKind.DeletePartition => Text(
-            "本机存储为只读；WinPool 不会删除真实分区。",
-            "Local storage is read-only; WinPool will not delete a real partition."),
-        ManageCommandKind.InitializeDisk => Text(
-            "本机存储为只读；WinPool 不会初始化真实磁盘。",
-            "Local storage is read-only; WinPool will not initialize a real disk."),
-        ManageCommandKind.ConvertDiskStyle => Text(
-            "本机存储为只读；WinPool 不会转换真实磁盘的分区样式。",
-            "Local storage is read-only; WinPool will not convert a real disk's partition style."),
-        ManageCommandKind.OnlineDisk or ManageCommandKind.OfflineDisk => Text(
-            "本机存储为只读；WinPool 不会改变真实磁盘的联机状态。",
-            "Local storage is read-only; WinPool will not change a real disk's online state."),
-        ManageCommandKind.CreatePartition => Text(
-            "本机存储为只读；WinPool 不会在真实磁盘上创建分区。",
-            "Local storage is read-only; WinPool will not create a partition on a real disk."),
-        _ => Text(
-            "本机存储为只读；请转换或选择模拟系统后编辑。",
-            "Local storage is read-only; convert it or select a simulated system to edit.")
-    };
+        if (kind == ManageCommandKind.OptimizePoolUsage)
+            return Text(
+                "真实池优化本阶段未开放。",
+                "Real pool optimization is not available in this stage.");
+
+        if (kind is ManageCommandKind.RenameTier or ManageCommandKind.CreateTier
+            or ManageCommandKind.EditTier)
+            return Text(
+                "真实存储层操作仍需现场能力验证；当前入口未开放。",
+                "Real storage-tier operations still need on-device capability checks; this entry is unavailable.");
+
+        if (kind == ManageCommandKind.RenameDisk)
+            return Text(
+                "本阶段没有物理磁盘改名操作；请打开编辑页查看可用的磁盘操作。",
+                "Physical-disk renaming is outside this stage. Open the editor to see available disk operations.");
+
+        if (!ViewModel.CanSubmitRealOperation)
+            return Text(
+                "真实编辑未开启或管理员 Agent 未就绪；打开编辑页可查看当前对象，启用后仍须通过目标和能力检查。",
+                "Real editing is off or the administrator Agent is not ready. Open the editor to inspect this target; enabling real editing still requires target and capability checks.");
+
+        return Text(
+            "此快捷入口无法定位到可编辑的本机对象；请在对应编辑页查看准确原因。",
+            "This shortcut cannot locate an editable local target. Open the corresponding editor for the exact reason.");
+    }
 
     private string LocalPartitionTargetReason(
         ManageCommandKind kind,

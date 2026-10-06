@@ -1369,6 +1369,18 @@ public sealed partial class MainWindow : Window
         {
             SyncModeSwitch();
         }
+        else if (e.PropertyName == nameof(WorkspaceViewModel.CanSubmitRealOperation))
+        {
+            switch (RootFrame.Content)
+            {
+                case StorageStructurePage storagePage:
+                    storagePage.RefreshExecutionMode();
+                    break;
+                case DiskPartitionPage partitionPage:
+                    partitionPage.RefreshExecutionMode();
+                    break;
+            }
+        }
         else if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSystem))
         {
             // The editor pages bind the active system snapshot on navigation.

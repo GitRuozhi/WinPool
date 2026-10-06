@@ -169,8 +169,24 @@ public class EditorPageBase : Page
             return false;
         }
 
-        var connection = ViewModel.AgentConnection;
-        var flow = new RealOperationRequestSession(connection, ViewModel.RealProductSessionId);
+        if (!ViewModel.RealOperationSubmission.TryReservePreparation())
+            return false;
+        var reservationId = ViewModel.RealOperationSubmission.ReservationId;
+        try
+        {
+            return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId);
+        }
+        finally
+        {
+            ViewModel.RealOperationSubmission.ReleasePreparation(reservationId);
+        }
+    }
+
+    private async Task<bool> SubmitReservedRealAsync(
+        RealOperationIntentRequest intent, IAgentConnection connection, string productSessionId)
+    {
+        var systemId = ViewModel.ActiveDocument.SystemId;
+        var flow = new RealOperationRequestSession(connection, productSessionId);
         ApplicationResult<AgentResponse>? prepared = null;
         try
         {
@@ -188,16 +204,35 @@ public class EditorPageBase : Page
             frozen.Plan.RealOperation is null)
         {
             if (prepared is not null)
+            {
                 PublishOperationResult(prepared.Status, prepared.Messages, prepared.CorrelationId,
                     Text("真实准备未完成", "Real preparation did not complete"), "real");
+                var reason = prepared.Messages.FirstOrDefault();
+                var detail = $"{Text("状态", "Status")}: {prepared.Status}\n" +
+                    $"{Text("代码", "Code")}: {reason?.Code ?? "agent.real_operation.unexpected_response"}\n" +
+                    $"CorrelationId: {prepared.CorrelationId.Value}";
+                if (!string.IsNullOrWhiteSpace(reason?.DiagnosticText))
+                    detail += $"\n{Text("诊断", "Diagnostic")}: {reason.DiagnosticText}";
+                await ShowMessageAsync(Text("真实准备未完成", "Real preparation did not complete"), detail);
+            }
             return false;
         }
 
         var plan = frozen.Plan;
+        if (!ViewModel.RealOperationSubmission.TrackPrepared(frozen))
+        {
+            await CancelPreparedRealAsync(connection, productSessionId, frozen);
+            return false;
+        }
         var confirmation = RealOperationConfirmationFormatter.Format(plan,
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
-        if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation))
+        if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation)
+            || !ViewModel.IsRealMode || !ViewModel.IsLocalSystem
+            || ViewModel.ActiveDocument.SystemId != systemId)
+        {
+            await CancelPreparedRealAsync(connection, productSessionId, frozen);
             return false;
+        }
         flow.Confirm(frozen);
 
         ApplicationResult<AgentResponse>? accepted = null;
@@ -215,14 +250,17 @@ public class EditorPageBase : Page
         {
             PublishOperationResult(accepted.Status, accepted.Messages, accepted.CorrelationId,
                 Text("真实提交被拒绝", "Real submission was rejected"), "real");
+            await CancelPreparedRealAsync(connection, productSessionId, frozen);
             return false;
         }
+        if (accepted is { IsSuccess: true, Value: AgentRealOperationResponse acceptedStatus })
+            ObserveFrozenRealStatus(plan, acceptedStatus);
 
         // Accept is short-lived. Query the assigned identity after a lost reply;
         // never issue a second write request to infer whether the first ran.
-        for (var attempt = 0; attempt < 30; attempt++)
+        for (var attempt = 0; attempt < 15; attempt++)
         {
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            await Task.Delay(TimeSpan.FromSeconds(2));
             ApplicationResult<AgentResponse> status;
             try
             {
@@ -236,9 +274,11 @@ public class EditorPageBase : Page
             }
             if (!status.IsSuccess || status.Value is not AgentRealOperationResponse current)
                 continue;
+            if (!ObserveFrozenRealStatus(plan, current))
+                continue;
             if (current.State is RealOperationState.Accepted or RealOperationState.Running)
                 continue;
-            var succeeded = current.State == RealOperationState.Succeeded;
+            var succeeded = current.State == RealOperationState.Succeeded && !current.RequiresReconciliation;
             await ShowMessageAsync(
                 succeeded ? Text("真实操作完成", "Real operation completed")
                     : Text("真实操作需要核对", "Real operation needs review"),
@@ -257,11 +297,48 @@ public class EditorPageBase : Page
         return false;
     }
 
+    private bool ObserveFrozenRealStatus(OperationPlan plan, AgentRealOperationResponse response) =>
+        response.Plan.OperationId == plan.OperationId
+        && StringComparer.Ordinal.Equals(response.Plan.PlanHash, plan.PlanHash)
+        && ViewModel.RealOperationSubmission.Observe(response);
+
+    private async Task CancelPreparedRealAsync(
+        IAgentConnection connection, string productSessionId, AgentRealOperationResponse frozen)
+    {
+        try
+        {
+            var result = await connection.SendAsync(new StopAgentRealOperationFollowingStepsRequest(
+                frozen.Plan.OperationId, frozen.Plan.PlanHash, productSessionId,
+                CorrelationId.New()), CancellationToken.None);
+            if (result.IsSuccess && result.Value is AgentRealOperationResponse current
+                && ObserveFrozenRealStatus(frozen.Plan, current)
+                && !ViewModel.RealOperationSubmission.IsBlocked)
+                return;
+            // Mode exit may already have cancelled this plan. Only a read-only
+            // query for the same frozen identity can prove that after a lost
+            // or rejected stop reply.
+            result = await connection.SendAsync(new QueryAgentRealOperationRequest(
+                frozen.Plan.OperationId, CorrelationId.New()), CancellationToken.None);
+            if (result.IsSuccess && result.Value is AgentRealOperationResponse queried
+                && ObserveFrozenRealStatus(frozen.Plan, queried)
+                && !ViewModel.RealOperationSubmission.IsBlocked)
+                return;
+            PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
+                Text("取消准备结果待核对", "Prepared cancellation needs review"), "real");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            PublishOperationException(Text("取消准备结果待核对", "Prepared cancellation needs review"),
+                "real", exception, "real.cancel_prepared.uncertain");
+        }
+    }
+
     protected async Task QueryRealOperationByIdAsync()
     {
         if (ViewModel.AgentConnection is null)
             return;
-        var raw = await PromptAsync(Text("查询真实操作", "Query real operation"), string.Empty);
+        var raw = await PromptAsync(Text("查询真实操作", "Query real operation"),
+            ViewModel.RealOperationSubmission.OperationId?.Value.ToString() ?? string.Empty);
         if (raw is null)
             return;
         if (!Guid.TryParse(raw, out var parsed) || parsed == Guid.Empty)
@@ -282,6 +359,9 @@ public class EditorPageBase : Page
                     Text("真实状态查询失败", "Real status query failed"), "real");
                 return;
             }
+            if (current.Plan.OperationId.Value != parsed)
+                throw new InvalidOperationException("The Agent response did not match the queried operation.");
+            ViewModel.RealOperationSubmission.Observe(current);
             var steps = string.Join(Environment.NewLine, current.Steps.Select(step =>
                 $"{step.StepId}: {step.State} ({step.Code ?? "-"})"));
             await ShowMessageAsync(Text("真实操作状态", "Real operation status"),
@@ -302,7 +382,8 @@ public class EditorPageBase : Page
     {
         if (ViewModel.AgentConnection is null)
             return;
-        var raw = await PromptAsync(Text("停止后续步骤", "Stop following steps"), string.Empty);
+        var raw = await PromptAsync(Text("停止后续步骤", "Stop following steps"),
+            ViewModel.RealOperationSubmission.OperationId?.Value.ToString() ?? string.Empty);
         if (raw is null)
             return;
         if (!Guid.TryParse(raw, out var parsed) || parsed == Guid.Empty)
@@ -324,6 +405,9 @@ public class EditorPageBase : Page
                     Text("真实状态查询失败", "Real status query failed"), "real");
                 return;
             }
+            if (observed.Plan.OperationId.Value != parsed)
+                throw new InvalidOperationException("The Agent response did not match the queried operation.");
+            ViewModel.RealOperationSubmission.Observe(observed);
             if (observed.State is not (RealOperationState.Prepared
                 or RealOperationState.Accepted or RealOperationState.Running))
             {
@@ -353,6 +437,10 @@ public class EditorPageBase : Page
                     Text("停止请求未确认", "Stop request was not confirmed"), "real");
                 return;
             }
+            if (status.Plan.OperationId != observed.Plan.OperationId
+                || !StringComparer.Ordinal.Equals(status.Plan.PlanHash, observed.Plan.PlanHash))
+                throw new InvalidOperationException("The Agent response did not match the stopped operation.");
+            ViewModel.RealOperationSubmission.Observe(status);
             await ShowMessageAsync(Text("已请求停止后续步骤", "Following-step stop requested"),
                 $"OperationId: {status.Plan.OperationId.Value}\n" +
                 $"{Text("当前状态", "Current state")}: {status.State}\n" +

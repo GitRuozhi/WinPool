@@ -66,6 +66,25 @@ public sealed class WindowsRealPlanSafetyTests
     }
 
     [Fact]
+    public async Task ClearAllowsHiddenGptMsrButRejectsHiddenBasicData()
+    {
+        var fixture = new Fixture();
+        var disk = fixture.Id(StorageObjectKind.OsDisk, DiskId);
+        var proposal = fixture.Proposal(OperationIntent.ClearDisk, [disk],
+            [Step("clear", new ClearDiskCommand(RealTargetReference.ForExisting(disk), false))],
+            RealOperationValidator.ClearDiskExpectedFinalState);
+
+        fixture.SetGptPartitions(hiddenMsr: true);
+        var plan = await fixture.Prepare(proposal);
+        Assert.Equal(RiskLevel.R5IrreversibleOrBroadDestruction, plan.Risk);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+
+        fixture.SetGptPartitions(hiddenMsr: true, hiddenData: true);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
     public async Task UnverifiedRefsCreationIsRejectedBeforeAnyWindowsCall()
     {
         var fixture = new Fixture();
@@ -330,12 +349,14 @@ public sealed class WindowsRealPlanSafetyTests
         }
 
         public void SetRawDisk() => snapshot = BaseSnapshot();
-        public void SetGptPartitions()
+        public void SetGptPartitions(bool hiddenMsr = false, bool hiddenData = false)
         {
             var msr = Partition("partition:msr", 1, 1L << 20, 16L << 20,
-                "e3c9e316-0b5c-4db8-817d-f92df00215ae");
+                "e3c9e316-0b5c-4db8-817d-f92df00215ae") with
+                { IsHidden = hiddenMsr };
             var data = Partition("partition:data", 2, 17L << 20, 128L << 20,
-                "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
+                "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7") with
+                { IsHidden = hiddenData };
             snapshot = BaseSnapshot() with
             {
                 OsDisks = [BaseSnapshot().OsDisks[0] with { PartitionStyle = "GPT" }],

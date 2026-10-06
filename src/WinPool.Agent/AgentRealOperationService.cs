@@ -132,6 +132,8 @@ public sealed class AgentRealOperationService : IRealOperationService
             await CancelPreparedAsync(
                 session.Binding, cancelDifferentSession: true,
                 cancellationToken);
+            if (await plans.HasRealWriteBarrierAsync(cancellationToken))
+                return Reject(request.CorrelationId, "agent.real_operation.write_barrier");
         }
         finally
         {
@@ -311,7 +313,8 @@ public sealed class AgentRealOperationService : IRealOperationService
         catch (Exception exception) when (IsExpectedFailure(exception))
         {
             return Reject(request.CorrelationId,
-                "agent.real_operation.prepare_failed");
+                "agent.real_operation.prepare_failed",
+                $"{exception.GetType().Name}: {exception.Message}");
         }
         finally
         {
@@ -614,11 +617,12 @@ public sealed class AgentRealOperationService : IRealOperationService
 
     private static ApplicationResult<AgentResponse> Reject(
         CorrelationId correlationId,
-        string code) =>
+        string code,
+        string diagnostic = "") =>
         ApplicationResult<AgentResponse>.FromStatus(
             ApplicationStatus.Rejected,
             correlationId,
-            new ApplicationMessage(code, code, string.Empty,
+            new ApplicationMessage(code, code, diagnostic,
                 ApplicationMessageSeverity.Warning, []));
 
     private static ApplicationResult<AgentResponse> Cancelled(

@@ -136,14 +136,24 @@ internal static class Program
             using var writeOwner = AgentWriteOwnerLease.Acquire(
                 store,
                 $"agent-{agentSessionId:N}");
+            var localDocument = new LocalInventoryDocumentRepository(store, writeOwner);
+            var localIdentity = new LocalSystemIdentityResolver(store, writeOwner);
+            var realMachineIdentity = new WindowsRealMachineIdentityProvider();
+            var realTopologyReader = new WindowsRealStorageTopologyReader(
+                new AgentRealStorageFactSource(
+                    new WindowsRealStorageFactSource(),
+                    new AgentLocalSystemIdentity(localDocument, localIdentity)),
+                realMachineIdentity);
             var realOperations = new AgentRealOperationService(
                 new OperationPlanRepository(store, writeOwner),
                 new ExecutionEventRepository(store, writeOwner),
                 new WindowsRealStorageBackend(
                     new WindowsRealStorageCommandAdapter(),
                     new WindowsRealOperationPlanner(
-                        safetyInspector: new WindowsRealStorageSafetyInspector([dataRoot]))),
-                new WindowsRealMachineIdentityProvider(),
+                        realTopologyReader,
+                        safetyInspector: new WindowsRealStorageSafetyInspector([dataRoot])),
+                    realTopologyReader),
+                realMachineIdentity,
                 realModeGate);
             try
             {
@@ -204,8 +214,8 @@ internal static class Program
                 new InventoryComparer(),
                 new InventorySnapshotRepository(store, writeOwner),
                 new InventoryComparisonRepository(store, writeOwner),
-                new LocalInventoryDocumentRepository(store, writeOwner),
-                new LocalSystemIdentityResolver(store, writeOwner),
+                localDocument,
+                localIdentity,
                 processIncarnationVerifier,
                 mainApplicationExecutablePath,
                 new WindowsStorageHealthEventSource(),

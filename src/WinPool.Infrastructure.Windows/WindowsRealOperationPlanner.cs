@@ -220,18 +220,21 @@ public sealed class WindowsRealOperationPlanner
                     throw new InvalidDataException("Clear requires an online, directly attached, non-system basic disk outside every real pool.");
                 var partitions = snapshot.Partitions.Where(item =>
                     item.OsDiskStableId == disk.StableId).ToArray();
+                var msrRole = Guid.Parse("e3c9e316-0b5c-4db8-817d-f92df00215ae");
                 var clearableGptRoles = new HashSet<Guid>
                 {
                     Guid.Parse("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"),
-                    Guid.Parse("e3c9e316-0b5c-4db8-817d-f92df00215ae")
+                    msrRole
                 };
                 if (partitions.Length == 0 || partitions.Any(item =>
                         item.IsBoot || item.IsSystem
-                        || item.IsHidden
                         || !disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
                         || !Guid.TryParse(item.PartitionTypeId, out var kind)
-                        || !clearableGptRoles.Contains(kind)))
-                    throw new InvalidDataException("Clear requires ordinary GPT data/MSR partitions only; OEM, recovery, boot, hidden and unknown roles are outside this stage.");
+                        || !clearableGptRoles.Contains(kind)
+                        || item.IsHidden && (kind != msrRole
+                            || !Guid.TryParse(item.GptType, out var gptKind)
+                            || gptKind != msrRole)))
+                    throw new InvalidDataException("Clear requires ordinary GPT data/MSR partitions only; OEM, recovery, boot, hidden non-MSR and unknown roles are outside this stage.");
                 break;
             }
             case CreatePartitionCommand value:

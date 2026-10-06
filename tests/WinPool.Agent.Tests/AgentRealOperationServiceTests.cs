@@ -8,6 +8,92 @@ namespace WinPool.Agent.Tests;
 
 public sealed class AgentRealOperationServiceTests
 {
+    [Theory]
+    [InlineData(PersistedOperationState.Accepted)]
+    [InlineData(PersistedOperationState.Running)]
+    public async Task RecoveredUnfinishedWritePreventsArmingNewAppSession(PersistedOperationState interruptedState)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "WinPool.Agent.RealOperation.Tests",
+            Guid.NewGuid().ToString("N"), "winpool.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var store = new WinPoolSqliteStore(path);
+        await store.InitializeAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(store, "agent-real-recovery-mode-test");
+        var repository = new OperationPlanRepository(store, lease);
+        var backend = new RecordingBackend();
+        var session = new TrustedRealSession(SessionId.New(), "old-product-session",
+            Guid.NewGuid().ToString("D"), 42, DateTimeOffset.UtcNow,
+            Path.GetFullPath("WinPool.App.exe"), true);
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "os-disk-unique-id");
+        var proposal = new RealOperationIntentRequest(OperationIntent.InitializeDisk, system, [disk],
+            [new RealOperationStep("gpt", new InitializeGptCommand(RealTargetReference.ForExisting(disk)),
+                [], "RAW", "GPT", "GPT metadata", "fake capability evidence")], "GPT disk");
+        var plan = await backend.PrepareAsync(proposal, session, OperationId.New(), CancellationToken.None);
+        await repository.PrepareAsync(plan, Guid.NewGuid(), "intent-test");
+        await repository.AcceptAsync(plan.OperationId, plan.PlanHash, new string('a', 64), DateTimeOffset.UtcNow);
+        if (interruptedState == PersistedOperationState.Running)
+            Assert.True(await repository.TransitionAsync(plan.OperationId, PersistedOperationState.Accepted,
+                PersistedOperationState.Running, new ExecutionEvent(plan.OperationId,
+                    ExecutionEventKind.Started, DateTimeOffset.UtcNow, "test.running", "test")));
+        var service = new AgentRealOperationService(repository, new ExecutionEventRepository(store, lease),
+            backend, new FixedMachineIdentity(), authority: null, timeProvider: null,
+            isSessionStillArmed: _ => true, isAdministrator: () => true);
+        await service.InitializeRecoveryAsync();
+        var nextSession = session with { ProductSessionId = "new-product-session" };
+        ApplicationResult<AgentResponse>? entered = null;
+        // Recovery can briefly hold the mutation gate while reconciling fake
+        // pending steps. Once released, the durable barrier must still reject.
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            entered = await service.EnterModeAsync(new EnterAgentRealModeRequest(
+                nextSession.ProductSessionId, CorrelationId.New()), nextSession, CancellationToken.None);
+            Assert.False(entered.IsSuccess);
+            if (entered.Messages.Single().Code != "agent.real_operation.busy")
+                break;
+            await Task.Delay(10);
+        }
+        Assert.Equal("agent.real_operation.write_barrier", Assert.Single(entered!.Messages).Code);
+        Assert.True(await repository.HasRealWriteBarrierAsync());
+        Assert.Equal(PersistedOperationState.OutcomeUnknown, (await repository.GetAsync(plan.OperationId))!.State);
+        Assert.Equal(0, backend.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task EnterModeCancelsOldPreparedPlanAndArmsWithoutAnyWindowsCall()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "WinPool.Agent.RealOperation.Tests",
+            Guid.NewGuid().ToString("N"), "winpool.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var store = new WinPoolSqliteStore(path);
+        await store.InitializeAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(store, "agent-real-prepared-mode-test");
+        var repository = new OperationPlanRepository(store, lease);
+        var backend = new RecordingBackend();
+        var service = new AgentRealOperationService(repository, new ExecutionEventRepository(store, lease),
+            backend, new FixedMachineIdentity(), authority: null, timeProvider: null,
+            isSessionStillArmed: _ => true, isAdministrator: () => true);
+        await service.InitializeRecoveryAsync();
+        var session = new TrustedRealSession(SessionId.New(), "old-product-session",
+            Guid.NewGuid().ToString("D"), 42, DateTimeOffset.UtcNow,
+            Path.GetFullPath("WinPool.App.exe"), true);
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "os-disk-unique-id");
+        var proposal = new RealOperationIntentRequest(OperationIntent.InitializeDisk, system, [disk],
+            [new RealOperationStep("gpt", new InitializeGptCommand(RealTargetReference.ForExisting(disk)),
+                [], "RAW", "GPT", "GPT metadata", "fake capability evidence")], "GPT disk");
+        var prepared = await service.PrepareAsync(new PrepareAgentRealOperationRequest(proposal,
+            Guid.NewGuid(), session.ProductSessionId, CorrelationId.New()), session, CancellationToken.None);
+        var frozen = Assert.IsType<AgentRealOperationResponse>(prepared.Value);
+        var nextSession = session with { ProductSessionId = "new-product-session" };
+        var entered = await service.EnterModeAsync(new EnterAgentRealModeRequest(
+            nextSession.ProductSessionId, CorrelationId.New()), nextSession, CancellationToken.None);
+        Assert.True(Assert.IsType<AgentRealModeResponse>(entered.Value).IsArmed);
+        Assert.Equal(PersistedOperationState.Cancelled, (await repository.GetAsync(frozen.Plan.OperationId))!.State);
+        Assert.False(await repository.HasRealWriteBarrierAsync());
+        Assert.Equal(0, backend.ExecuteCalls);
+    }
+
     [Fact]
     public async Task LiveResizeRangeRequiresArmedVerifiedSessionAndExactPartition()
     {

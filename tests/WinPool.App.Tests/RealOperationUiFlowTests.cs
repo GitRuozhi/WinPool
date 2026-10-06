@@ -8,6 +8,140 @@ namespace WinPool.App.Tests;
 public sealed class RealOperationUiFlowTests
 {
     [Fact]
+    public void PreparationReservationPreventsAnotherSubmitAndReleasesBeforeAccept()
+    {
+        var state = new RealOperationSubmissionState();
+        Assert.True(state.TryReservePreparation());
+        Assert.True(state.IsBlocked);
+        Assert.False(state.TryReservePreparation());
+        state.ReleasePreparation(state.ReservationId);
+        Assert.False(state.IsBlocked);
+        Assert.True(state.TryReservePreparation());
+    }
+
+    [Theory]
+    [InlineData(RealOperationState.Prepared, false)]
+    [InlineData(RealOperationState.Accepted, false)]
+    [InlineData(RealOperationState.Running, false)]
+    [InlineData(RealOperationState.OutcomeUnknown, false)]
+    [InlineData(RealOperationState.Failed, true)]
+    [InlineData(RealOperationState.PartiallyCompleted, true)]
+    [InlineData(RealOperationState.Succeeded, true)]
+    public void KnownOperationKeepsBarrierUntilMatchingReconciledTerminalStatus(
+        RealOperationState observedState, bool requiresReconciliation)
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        Assert.True(state.TryReservePreparation());
+        state.TrackPrepared(new AgentRealOperationResponse(plan, RealOperationState.Prepared, [], null, false));
+        // Polling timeout, transport failure, editor navigation and mode changes
+        // do not produce an authoritative status and cannot release this state.
+        state.ReleasePreparation(state.ReservationId);
+        Assert.True(state.Observe(new AgentRealOperationResponse(plan, observedState, [], null, requiresReconciliation)));
+        Assert.True(state.IsBlocked);
+        Assert.Equal(plan.OperationId, state.OperationId);
+        Assert.False(state.TryReservePreparation());
+
+        var (_, otherPlan) = CreatePlan();
+        Assert.False(state.Observe(new AgentRealOperationResponse(otherPlan, RealOperationState.Succeeded, [], null, false)));
+        Assert.False(state.Observe(new AgentRealOperationResponse(plan with { PlanHash = "different" },
+            RealOperationState.Succeeded, [], null, false)));
+        Assert.True(state.IsBlocked);
+        Assert.True(state.Observe(new AgentRealOperationResponse(plan, RealOperationState.Cancelled, [], null, false)));
+        Assert.False(state.IsBlocked);
+        Assert.Null(state.OperationId);
+        Assert.True(state.TryReservePreparation());
+    }
+
+    [Theory]
+    [InlineData(RealOperationState.Succeeded)]
+    [InlineData(RealOperationState.Rejected)]
+    [InlineData(RealOperationState.Cancelled)]
+    [InlineData(RealOperationState.Failed)]
+    [InlineData(RealOperationState.PartiallyCompleted)]
+    public void AllReconciledTerminalStatesReleaseTheExactBarrier(RealOperationState terminal)
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        Assert.True(state.TryReservePreparation());
+        state.TrackPrepared(new AgentRealOperationResponse(plan, RealOperationState.Prepared, [], null, false));
+        state.Observe(new AgentRealOperationResponse(plan, terminal, [], null, false));
+        Assert.False(state.IsBlocked);
+    }
+
+    [Fact]
+    public void QueryAfterReconnectAdoptsUnfinishedOperationAndCannotClearAnotherIdentity()
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.Running, [], null, false));
+        Assert.True(state.IsBlocked);
+        Assert.Equal(plan.OperationId, state.OperationId);
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.Succeeded, [], null, false));
+        Assert.False(state.IsBlocked);
+    }
+
+    [Fact]
+    public void OldSubmissionFinallyCannotReleaseANewerPreparation()
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        Assert.True(state.TryReservePreparation());
+        var oldReservationId = state.ReservationId;
+        state.TrackPrepared(new AgentRealOperationResponse(plan, RealOperationState.Prepared, [], null, false));
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.Succeeded, [], null, false));
+        Assert.True(state.TryReservePreparation());
+        state.ReleasePreparation(oldReservationId);
+        Assert.True(state.IsBlocked);
+        Assert.False(state.TryReservePreparation());
+        state.ReleasePreparation(state.ReservationId);
+        Assert.False(state.IsBlocked);
+    }
+
+    [Fact]
+    public void QueryDuringPreparationBindsDiscoveredWriteAndPreservesItsIdentity()
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        Assert.True(state.TryReservePreparation());
+        var reservationId = state.ReservationId;
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.Running, [], null, false));
+        state.ReleasePreparation(reservationId);
+        Assert.True(state.IsBlocked);
+        Assert.Equal(plan.OperationId, state.OperationId);
+        var (_, otherPlan) = CreatePlan();
+        Assert.False(state.TrackPrepared(new AgentRealOperationResponse(
+            otherPlan, RealOperationState.Prepared, [], null, false)));
+        Assert.False(state.Observe(new AgentRealOperationResponse(
+            otherPlan, RealOperationState.Cancelled, [], null, false)));
+        Assert.True(state.IsBlocked);
+        Assert.Equal(plan.OperationId, state.OperationId);
+    }
+
+    [Fact]
+    public async Task FinalConfirmationCancellationStopsExactPreparedPlanWithoutAccept()
+    {
+        var (_, plan) = CreatePlan();
+        var prepared = new AgentRealOperationResponse(plan, RealOperationState.Prepared, [], null, false);
+        var connection = new RecordingConnection(request => request switch
+        {
+            StopAgentRealOperationFollowingStepsRequest => ApplicationResult<AgentResponse>.Succeeded(
+                prepared with { State = RealOperationState.Cancelled }, request.CorrelationId),
+            _ => throw new InvalidOperationException("Cancellation must not accept a storage write.")
+        });
+        var state = new RealOperationSubmissionState();
+        Assert.True(state.TryReservePreparation());
+        state.TrackPrepared(prepared);
+        var flow = new RealOperationStopSession(connection, "product-session");
+        var result = await flow.StopAfterCurrentStepAsync(prepared, true, CancellationToken.None)!;
+        state.Observe(Assert.IsType<AgentRealOperationResponse>(result.Value));
+        var stop = Assert.IsType<StopAgentRealOperationFollowingStepsRequest>(Assert.Single(connection.Requests));
+        Assert.Equal(plan.OperationId, stop.OperationId);
+        Assert.Equal(plan.PlanHash, stop.PlanHash);
+        Assert.False(state.IsBlocked);
+    }
+
+    [Fact]
     public void DataLocationSwitchNeedsExplicitCompletedShutdownReceipt()
     {
         var correlation = CorrelationId.New();
