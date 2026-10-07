@@ -184,6 +184,8 @@ public sealed class LocalizationService : ObservableObject
             ["OriginalPool"] = ("原始池", "Primordial pool"),
             ["StoragePool"] = ("存储池", "Storage pool"),
             ["StorageTier"] = ("存储层", "Storage tier"),
+            ["PoolTierTemplate"] = ("池级层模板", "Pool tier template"),
+            ["VirtualDiskTierInstance"] = ("虚拟磁盘层实例", "Virtual-disk tier instance"),
             ["PerformanceTier"] = ("性能层", "Performance tier"),
             ["CapacityTier"] = ("容量层", "Capacity tier"),
             ["Computer"] = ("当前计算机", "This computer"),

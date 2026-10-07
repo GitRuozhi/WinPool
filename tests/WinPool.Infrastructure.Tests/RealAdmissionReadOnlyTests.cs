@@ -31,6 +31,8 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
         object? selectedSafetyProbe = null;
         object? selectedPlanProbe = null;
         string? selectedPlanStatus = null;
+        object? c01FormatCapability = null;
+        WindowsTierCapability? c04TierCapability = null;
         try
         {
             var topology = new WindowsRealStorageTopology(
@@ -49,6 +51,7 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
                         status = "eligible_for_further_command_checks",
                         closure.Fingerprint,
                         closure.PhysicalMemberFingerprint,
+                        closure.PoolMemberRoleEvidence,
                         relatedObjectIds = closure.Objects.Select(item => item.Id).ToArray()
                     };
                 }
@@ -67,6 +70,29 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
             {
                 var physical = snapshot.PhysicalDisks.Single(item =>
                     StringComparer.Ordinal.Equals(item.StableId, selectedPhysicalId));
+                var physicalId = new StorageObjectId(document.SystemId,
+                    StorageObjectKind.PhysicalDisk, physical.StableId);
+                var capabilityClosure = topology.RequireSinglePhysicalClosure([physicalId]);
+                var capabilityReader = new WindowsRealStorageCapabilityReader();
+                var volumeCapabilities = new List<WindowsVolumeFormatCapability>();
+                foreach (var volume in capabilityClosure.Objects.Where(item =>
+                             item.ObjectType == FactObjectType.Volume))
+                {
+                    volumeCapabilities.Add(await capabilityReader.ReadVolumeFormatAsync(
+                        topology, new StorageObjectId(document.SystemId,
+                            StorageObjectKind.Volume, volume.Id), CancellationToken.None));
+                }
+                c01FormatCapability = new
+                {
+                    scope = "current_exact_volumes_only",
+                    status = volumeCapabilities.Count == 0 ? "unknown_no_current_volume" : "queried",
+                    physical.StableId,
+                    capabilityClosure.PhysicalMemberFingerprint,
+                    note = "Read-only preliminary provider evidence; the H05 1024 MiB candidate must be queried again. No format capability is enabled by this report.",
+                    volumes = volumeCapabilities.ToArray()
+                };
+                c04TierCapability = await capabilityReader.ReadTierAsync(
+                    topology, physicalId, CancellationToken.None);
                 var osDisk = snapshot.OsDisks.Single(item =>
                     item.PhysicalDiskStableId == physical.StableId);
                 var osDiskId = new StorageObjectId(document.SystemId,
@@ -188,7 +214,9 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
             fieldIssues = snapshot.FieldIssues,
             targetProbes,
             selectedSafetyProbe,
-            selectedPlanProbe
+            selectedPlanProbe,
+            c01FormatCapability,
+            c04TierCapability
         };
         var directory = Path.Combine(repositoryRoot,
             "artifacts", "test-results", "real-admission-p0");

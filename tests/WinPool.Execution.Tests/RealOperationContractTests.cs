@@ -270,6 +270,138 @@ public sealed class RealOperationContractTests
         Assert.Equal("policy.real-plan-invalid", fixture.Policy.Evaluate(altered, fixture.Context).Code);
     }
 
+    [Theory]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public void InitializationContinuationAcceptsExactMsrNormalizationAndNewDataDependencies(
+        bool remove, bool msr, bool data)
+    {
+        var fixture = Fixture.Create();
+        var proposal = InitializationContinuation(fixture, remove, msr, data);
+        RealOperationValidator.Validate(proposal);
+        var physical = new StorageObjectId(fixture.SystemId, StorageObjectKind.PhysicalDisk, "physical-member");
+        RealOperationValidator.Validate(proposal with { Targets = proposal.Targets.Append(physical).ToArray() });
+        var plan = RealOperationPlanFactory.Create(proposal, OperationId.New(), fixture.Context.Environment,
+            fixture.Context.RealSession!, fixture.Context.CurrentInventoryVersion,
+            fixture.Context.CurrentTargetFingerprint!, fixture.Context.CurrentPhysicalMemberFingerprint!,
+            "observed provider initialization", Now, Now.AddMinutes(2));
+        Assert.True(RealOperationValidator.IsValid(plan));
+        Assert.Equal(OperationPlanHasher.Compute(plan), plan.PlanHash);
+    }
+
+    [Fact]
+    public void InitializationWithoutNativeMsrAllowsMsrOrDataCreationOnlyOnExactDisk()
+    {
+        var fixture = Fixture.Create();
+        RealOperationValidator.Validate(InitializationContinuation(fixture, false, true, false));
+        RealOperationValidator.Validate(InitializationContinuation(fixture, false, false, true));
+        var original = new RealOperationIntentRequest(OperationIntent.InitializeDisk, fixture.SystemId, [fixture.Disk],
+            [Step("init", new InitializeGptCommand(RealTargetReference.ForExisting(fixture.Disk)))], "GPT observed");
+        RealOperationValidator.Validate(original);
+        RealOperationValidator.Validate(original with
+        {
+            Steps = [original.Steps[0], Step("msr", new CreatePartitionCommand(
+                RealTargetReference.ForExisting(fixture.Disk), RealPartitionRole.Msr, 1L << 20, 16L << 20), ["init"])]
+        });
+    }
+
+    [Theory]
+    [InlineData("second-disk")]
+    [InlineData("unrelated-target")]
+    [InlineData("second-partition")]
+    [InlineData("missing-delete-target")]
+    [InlineData("second-delete")]
+    [InlineData("delete-after-create")]
+    [InlineData("initialize-and-delete")]
+    [InlineData("data-on-other-disk")]
+    [InlineData("second-data")]
+    [InlineData("efi")]
+    [InlineData("recovery")]
+    [InlineData("wrong-data-offset")]
+    [InlineData("format-existing")]
+    [InlineData("format-msr")]
+    [InlineData("letter-existing")]
+    [InlineData("letter-msr")]
+    [InlineData("letter-previous")]
+    [InlineData("missing-data-dependency")]
+    [InlineData("full-format")]
+    [InlineData("second-format")]
+    [InlineData("format-after-letter")]
+    public void InitializationContinuationRejectsArbitraryDeletionTargetsRolesAndOrdering(string change)
+    {
+        var fixture = Fixture.Create();
+        var proposal = InitializationContinuation(fixture, true, true, true);
+        var steps = proposal.Steps.ToList();
+        var other = new StorageObjectId(fixture.SystemId, StorageObjectKind.OsDisk, "other-disk");
+        switch (change)
+        {
+            case "second-disk": proposal = proposal with { Targets = proposal.Targets.Append(other).ToArray() }; break;
+            case "unrelated-target": proposal = proposal with { Targets = proposal.Targets.Append(
+                new StorageObjectId(fixture.SystemId, StorageObjectKind.Volume, "volume")).ToArray() }; break;
+            case "second-partition": proposal = proposal with { Targets = proposal.Targets.Append(
+                new StorageObjectId(fixture.SystemId, StorageObjectKind.Partition, "other-partition")).ToArray() }; break;
+            case "missing-delete-target": proposal = proposal with { Targets = [fixture.Disk] }; break;
+            case "second-delete": steps.Insert(1, Step("delete-again", steps[0].Command)); break;
+            case "delete-after-create": (steps[0], steps[1]) = (steps[1], steps[0]); break;
+            case "initialize-and-delete": steps.Insert(0, Step("init", new InitializeGptCommand(RealTargetReference.ForExisting(fixture.Disk)))); break;
+            case "data-on-other-disk":
+                proposal = proposal with { Targets = proposal.Targets.Append(other).ToArray() };
+                steps[2] = steps[2] with { Command = ((CreatePartitionCommand)steps[2].Command) with { Disk = RealTargetReference.ForExisting(other) } };
+                break;
+            case "second-data": steps.Insert(3, Step("data-again", steps[2].Command)); break;
+            case "efi": steps[2] = steps[2] with { Command = ((CreatePartitionCommand)steps[2].Command) with { Role = RealPartitionRole.Efi } }; break;
+            case "recovery": steps[2] = steps[2] with { Command = ((CreatePartitionCommand)steps[2].Command) with { Role = RealPartitionRole.Recovery } }; break;
+            case "wrong-data-offset": steps[2] = steps[2] with { Command = ((CreatePartitionCommand)steps[2].Command) with { OffsetBytes = 1L << 20 } }; break;
+            case "format-existing": steps[3] = steps[3] with { Command = ((FormatVolumeCommand)steps[3].Command) with { Partition = RealTargetReference.ForExisting(fixture.Partition) } }; break;
+            case "format-msr": steps[3] = steps[3] with { Command = ((FormatVolumeCommand)steps[3].Command) with { Partition = RealTargetReference.FromStep(StorageObjectKind.Partition, "msr") } }; break;
+            case "letter-existing": steps[4] = steps[4] with { Command = ((SetDriveLetterCommand)steps[4].Command) with { Partition = RealTargetReference.ForExisting(fixture.Partition) } }; break;
+            case "letter-msr": steps[4] = steps[4] with { Command = ((SetDriveLetterCommand)steps[4].Command) with { Partition = RealTargetReference.FromStep(StorageObjectKind.Partition, "msr") } }; break;
+            case "letter-previous": steps[4] = steps[4] with { Command = ((SetDriveLetterCommand)steps[4].Command) with { PreviousLetter = 'D' } }; break;
+            case "missing-data-dependency": break;
+            case "full-format": steps[3] = steps[3] with { Command = ((FormatVolumeCommand)steps[3].Command) with { Full = true } }; break;
+            case "second-format": steps.Insert(4, Step("format-again", steps[3].Command)); break;
+            case "format-after-letter": (steps[3], steps[4]) = (steps[4], steps[3]); break;
+        }
+        // Preserve a valid chain so these cases exercise the continuation
+        // shape itself rather than failing only on generic step ordering.
+        steps = Chain(steps);
+        if (change == "missing-data-dependency") steps[4] = steps[4] with { DependsOn = ["format"] };
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(proposal with { Steps = steps }));
+    }
+
+    [Theory]
+    [InlineData(OperationIntent.CreatePartition)]
+    [InlineData(OperationIntent.CreateStoragePool)]
+    [InlineData(OperationIntent.CreateVirtualDisk)]
+    public void InitializationDeletionIsNotPermittedInOrdinaryCreationIntents(OperationIntent intent)
+    {
+        var fixture = Fixture.Create();
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(
+            InitializationContinuation(fixture, true, true, true) with { Intent = intent }));
+    }
+
+    private static RealOperationIntentRequest InitializationContinuation(Fixture fixture, bool remove, bool msr, bool data)
+    {
+        var disk = RealTargetReference.ForExisting(fixture.Disk);
+        var steps = new List<RealOperationStep>();
+        if (remove) steps.Add(Step("delete-msr", new DeletePartitionCommand(RealTargetReference.ForExisting(fixture.Partition))));
+        if (msr) steps.Add(Step("msr", new CreatePartitionCommand(disk, RealPartitionRole.Msr, 1L << 20, 16L << 20)));
+        if (data)
+        {
+            steps.Add(Step("data", new CreatePartitionCommand(disk, RealPartitionRole.BasicData, (msr ? 17L : 1L) << 20, 128L << 20)));
+            var partition = RealTargetReference.FromStep(StorageObjectKind.Partition, "data");
+            steps.Add(Step("format", new FormatVolumeCommand(partition, RealFileSystem.Ntfs, 65536, false, "Data")));
+            steps.Add(Step("letter", new SetDriveLetterCommand(partition, null, 'E')));
+        }
+        return new RealOperationIntentRequest(OperationIntent.InitializeDisk, fixture.SystemId,
+            remove ? [fixture.Disk, fixture.Partition] : [fixture.Disk], Chain(steps), "Selected GPT layout");
+    }
+
+    private static List<RealOperationStep> Chain(IReadOnlyList<RealOperationStep> steps) => steps.Select((step, index) =>
+        step with { DependsOn = steps.Take(index).Select(previous => previous.Id).ToArray() }).ToList();
+
     private static RealOperationStep Step(string id, RealStorageCommand command, IReadOnlyList<string>? depends = null) =>
         new(id, command, depends ?? [], "Fresh identity and capability checked", "Postcondition checked", "Data loss listed", "Provider evidence");
 

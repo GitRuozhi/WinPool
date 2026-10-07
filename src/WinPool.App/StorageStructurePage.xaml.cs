@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
@@ -23,6 +23,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private string? _selectedPoolId;
     private string? _selectedPoolDiskId;
     private string? _selectedPoolVdiskId;
+    private string? _selectedPoolTierId;
     private TopologyEditInteraction _interaction = null!;
     private bool _formBuilt;
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
@@ -154,6 +155,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         EditingSession.Bind(ViewModel.SelectedSystem, EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot));
         _selectedPoolId = ResolvePoolId(targetStableId);
+        _selectedPoolTierId = null;
         _undoStack.Clear();
         _redoStack.Clear();
         _poolIntents.Clear();
@@ -170,6 +172,44 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     internal void RefreshExecutionMode() => UpdateButtonState();
+
+    protected override void OnRealInventoryRefreshed()
+    {
+        if (ViewModel.IsUsingSimulatedInventory)
+            return;
+
+        var priorPool = SelectedPool();
+        var priorMemberId = _selectedPoolDiskId
+            ?? (priorPool?.MemberPhysicalDiskIds.Count == 1
+                ? priorPool.MemberPhysicalDiskIds[0] : null);
+        var fresh = ViewModel.EffectiveActiveSnapshot;
+        EditingSession.Bind(ViewModel.SelectedSystem,
+            EditWorkspace.NormalizeTierCapacities(fresh));
+        NormalizeSelection();
+
+        if (_selectedPoolId is null && priorMemberId is not null)
+        {
+            var replacementPools = _working.StoragePools.Where(pool =>
+                !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Count == 1
+                && pool.MemberPhysicalDiskIds[0].Equals(priorMemberId,
+                    StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (replacementPools.Length == 1)
+            {
+                _selectedPoolId = replacementPools[0].StableId;
+                _selectedPoolDiskId = null;
+            }
+            else if (_working.PhysicalDisks.SingleOrDefault(disk =>
+                         disk.StableId.Equals(priorMemberId, StringComparison.OrdinalIgnoreCase)) is { } disk)
+            {
+                _selectedPoolDiskId = disk.StableId;
+                _selectedPoolId = disk.PoolStableId
+                    ?? _working.StoragePools.FirstOrDefault(item => item.IsPrimordial)?.StableId;
+            }
+        }
+
+        ResetLayerSwitchesForSelection();
+        RefreshAll();
+    }
 
     private bool HasRoleDisks(string poolId, string usage) =>
         _working.PhysicalDisks.Any(disk =>
@@ -199,6 +239,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HotSpareButtonLabel.Text = ViewModel.Localization["HotSpareDisk"];
         CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘和分区", "Create virtual disk and partition");
         DeleteVdiskButtonLabel.Text = Text("删除虚拟磁盘和分区", "Delete virtual disk and partition");
+        CreateHddTierButtonLabel.Text = Text("创建 HDD 层模板", "Create HDD tier template");
+        CreateTieredVdiskButtonLabel.Text = Text("按 HDD 层创建 16 GiB 虚拟磁盘", "Create 16 GiB HDD-tier virtual disk");
+        RenameHddTierButtonLabel.Text = Text("重命名 HDD 层", "Rename HDD tier");
+        DeleteHddTierButtonLabel.Text = Text("删除未使用 HDD 层", "Delete unused HDD tier");
         SavePoolPropertiesButtonLabel.Text = ViewModel.Localization["SavePoolProperties"];
         ShowHotSpareLabel.Text = ViewModel.Localization["ShowHotSpareLayer"];
         ShowRetiredLabel.Text = ViewModel.Localization["ShowRetiredLayer"];
@@ -216,6 +260,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(HotSpareButton, Text("将选中的模拟池成员标为热备。", "Mark the selected simulated pool member as a hot spare."));
         ContextHelp.Set(CreateVdiskButton, Text("为符合条件的存储池创建虚拟磁盘和分区；真实操作需单独确认。", "Create a virtual disk and partition for an eligible pool; a real operation requires separate confirmation."));
         ContextHelp.Set(DeleteVdiskButton, Text("删除虚拟磁盘及其分区；真实删除会使其数据丢失。", "Delete a virtual disk and its partitions; real deletion loses their data."));
+        ContextHelp.Set(CreateHddTierButton, Text("在精确单 HDD 池中建立 64 KiB、单列 HDD 层模板。", "Create a 64 KiB, one-column HDD tier template in the exact single-HDD pool."));
+        ContextHelp.Set(CreateTieredVdiskButton, Text("将 16 GiB Simple Fixed 虚拟磁盘绑定到选中的真实 HDD 层模板；Agent 会核验精确容量。", "Create a 16 GiB Simple Fixed virtual disk bound to the selected real HDD template; the Agent verifies the exact supported size."));
+        ContextHelp.Set(RenameHddTierButton, Text("重命名选中的真实 HDD 层；不更改其身份或关联。", "Rename the selected real HDD tier without changing its identity or association."));
+        ContextHelp.Set(DeleteHddTierButton, Text("只删除未关联虚拟磁盘的池级 HDD 层模板。", "Delete only an unused pool-level HDD tier template."));
         ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
         ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
         ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前池属性草稿到待处理模拟修改。", "Save the current pool property draft into pending simulated changes."));
@@ -1052,7 +1100,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _working,
             UnallocatedIgnoreBytes,
             EditingSession.Baseline,
-            visible);
+            visible,
+            showSourceTierTemplates: !ViewModel.IsUsingSimulatedInventory);
         var rootViewModel = new TopologyNodeViewModel(
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
             ViewModel,
@@ -1093,9 +1142,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             StorageUnitKind.PhysicalDisk => node.Unit.StableId == _selectedPoolDiskId,
             StorageUnitKind.VirtualDisk => node.Unit.StableId == _selectedPoolVdiskId,
+            StorageUnitKind.StorageTier => node.Unit.StableId == _selectedPoolTierId,
             StorageUnitKind.StoragePool => node.Unit.StableId == _selectedPoolId
                 && string.IsNullOrEmpty(_selectedPoolDiskId)
-                && string.IsNullOrEmpty(_selectedPoolVdiskId),
+                && string.IsNullOrEmpty(_selectedPoolVdiskId)
+                && string.IsNullOrEmpty(_selectedPoolTierId),
             _ => false
         };
 
@@ -1128,6 +1179,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case StorageUnitKind.PhysicalDisk:
                 _selectedPoolDiskId = node.Unit.StableId;
                 _selectedPoolVdiskId = null;
+                _selectedPoolTierId = null;
                 _selectedPoolId = node.Unit.ParentStableId
                     ?? _working.PhysicalDisks.FirstOrDefault(item =>
                         item.StableId == node.Unit.StableId)?.PoolStableId;
@@ -1135,13 +1187,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case StorageUnitKind.VirtualDisk:
                 _selectedPoolVdiskId = node.Unit.StableId;
                 _selectedPoolDiskId = null;
+                _selectedPoolTierId = null;
                 _selectedPoolId = node.Unit.ParentStableId
                     ?? _working.VirtualDisks.FirstOrDefault(item =>
+                        item.StableId == node.Unit.StableId)?.PoolStableId;
+                break;
+            case StorageUnitKind.StorageTier:
+                _selectedPoolTierId = node.Unit.StableId;
+                _selectedPoolDiskId = null;
+                _selectedPoolVdiskId = null;
+                _selectedPoolId = node.Unit.ParentStableId
+                    ?? _working.StorageTiers.FirstOrDefault(item =>
                         item.StableId == node.Unit.StableId)?.PoolStableId;
                 break;
             default:
                 _selectedPoolVdiskId = null;
                 _selectedPoolDiskId = null;
+                _selectedPoolTierId = null;
                 _selectedPoolId = node.Unit.Kind == StorageUnitKind.StoragePool
                     ? node.Unit.StableId
                     : node.Unit.ParentStableId;
@@ -1645,11 +1707,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     private Dictionary<string, StorageTierInfo> TierMap(string poolId) =>
-        _working.StorageTiers
-            .Where(item => string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(
-                item => EditWorkspace.NormalizeMedia(item.MediaType),
-                StringComparer.OrdinalIgnoreCase);
+        EditWorkspace.SelectPoolTiersForForm(
+            _working, poolId, _selectedPoolTierId, _selectedPoolVdiskId,
+            ViewModel.IsUsingSimulatedInventory);
 
     private int DataDiskCount(StoragePoolInfo pool, string media) =>
         _working.PhysicalDisks.Count(disk =>
@@ -1658,9 +1718,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !disk.IsHotSpare
             && EditWorkspace.NormalizeMedia(disk.MediaType) == media);
 
-    /// <summary>True when the tier object exists and holds member disks.</summary>
+    /// <summary>Source templates remain visible before any space is allocated.</summary>
     private bool TierVisible(string poolId, string media) =>
-        TierMap(poolId).GetValueOrDefault(media) is { MemberPhysicalDiskIds.Count: > 0 };
+        TierMap(poolId).GetValueOrDefault(media) is { } tier
+        && (!ViewModel.IsUsingSimulatedInventory || tier.MemberPhysicalDiskIds.Count > 0);
 
     /// <summary>Member disk count of the tier (0 when the tier does not exist).</summary>
     private int TierMemberCount(string poolId, string media) =>
@@ -2212,7 +2273,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         CreatePoolButton.IsEnabled = (simulated
             && !_working!.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId)))
             || realPoolCandidate is not null;
-        DissolveButton.IsEnabled = (simulated || CanUseRealSingleMemberPool(pool))
+        DissolveButton.IsEnabled = (simulated || CanDissolveRealSingleMemberPool(pool))
             && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = simulated
             && _formDirty
@@ -2241,6 +2302,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !poolOffline;
         CreateVdiskButton.IsEnabled = (canEditPool || CanUseRealSingleMemberPool(pool))
             && realVdisk is null
+            && (!CanUseRealSingleMemberPool(pool) || RealPoolTiers(pool!).Length == 0)
             && (CanUseRealSingleMemberPool(pool)
                 || DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD")
                     + DataDiskCount(pool!, "SCM") > 0);
@@ -2250,8 +2312,31 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && deleteTarget is not null && !virtualDiskOffline;
         RebuildPoolButton.Visibility = ViewModel.CanSubmitRealOperation
             ? Visibility.Visible : Visibility.Collapsed;
-        RebuildPoolButton.IsEnabled = CanUseRealSingleMemberPool(pool)
+        RebuildPoolButton.IsEnabled = CanRebuildRealSingleMemberPool(pool)
             && poolVdisks.Count == 1 && !virtualDiskOffline;
+
+        var realHddPool = IsSingleRealHddMemberPool(pool);
+        var realPoolTiers = realHddPool
+            ? RealPoolTiers(pool!) : Array.Empty<StorageTierInfo>();
+        var selectedRealTier = realHddPool ? SelectedRealPoolTier(pool!) : null;
+        var realPoolVdisks = realHddPool
+            ? _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray()
+            : Array.Empty<VirtualDiskInfo>();
+        CreateHddTierButton.IsEnabled = realHddPool
+            && realPoolVdisks.Length == 0 && realPoolTiers.Length == 0;
+        CreateTieredVdiskButton.IsEnabled = realHddPool
+            && realPoolVdisks.Length == 0 && realPoolTiers.Length == 1
+            && selectedRealTier is not null
+            && selectedRealTier.VirtualDiskStableId is null
+            && IsSupportedRealHddTier(pool!, selectedRealTier);
+        RenameHddTierButton.IsEnabled = realHddPool
+            && selectedRealTier is not null
+            && IsSupportedRealHddTier(pool!, selectedRealTier);
+        DeleteHddTierButton.IsEnabled = realHddPool
+            && realPoolVdisks.Length == 0 && realPoolTiers.Length == 1
+            && selectedRealTier is not null
+            && selectedRealTier.VirtualDiskStableId is null
+            && IsSupportedRealHddTier(pool!, selectedRealTier);
 
         var formEnabled = simulated
             && pool is { IsPrimordial: false }
@@ -2296,7 +2381,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 : Text("当前已有一个模拟池草稿；请先保存、应用或放弃它。", "A simulated pool draft already exists; save, apply, or discard it first."));
         SetDisabledReason(
             DissolveButton,
-            structureReason ?? Text("请选择可解散的普通模拟存储池。", "Select a normal simulated storage pool to dissolve."));
+            structureReason
+                ?? (!simulated && pool is not null && !CanDissolveRealSingleMemberPool(pool)
+                    ? Text("该池含多个虚拟磁盘或不受支持的层关联；当前阶段不能解散。",
+                        "This pool has multiple virtual disks or unsupported tier associations and cannot be dissolved in the current stage.")
+                    : Text("请选择可解散的普通模拟存储池。", "Select a normal simulated storage pool to dissolve.")));
         SetDisabledReason(
             SavePoolPropertiesButton,
             structureReason ?? Text("没有可保存的模拟池属性修改。", "There is no simulated pool property change to save."));
@@ -2321,7 +2410,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             structureReason
                 ?? (realVdisk is not null
                     ? Text("该池已有虚拟磁盘；此页每个池只支持创建一个。", "This pool already has a virtual disk; this page supports one per pool.")
-                    : Text("该池需要至少一块数据磁盘后才能创建虚拟磁盘。", "This pool needs at least one data disk before a virtual disk can be created.")));
+                    : CanUseRealSingleMemberPool(pool) && RealPoolTiers(pool!).Length > 0
+                        ? Text("该池已有真实层模板；请选中模板并使用明确的分层虚拟磁盘入口。", "This pool has a real tier template; select it and use the explicit tiered virtual-disk action.")
+                        : Text("该池需要至少一块数据磁盘后才能创建虚拟磁盘。", "This pool needs at least one data disk before a virtual disk can be created.")));
         SetDisabledReason(
             DeleteVdiskButton,
             structureReason
@@ -2330,6 +2421,34 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     : virtualDiskOffline
                         ? Text("该虚拟磁盘已脱机；请先在磁盘分区页联机。", "This virtual disk is offline; bring it online in the disk partition page first.")
                         : Text("当前虚拟磁盘不能删除。", "The current virtual disk cannot be deleted.")));
+        SetDisabledReason(CreateHddTierButton,
+            !realHddPool
+                ? Text("需要选中包含一块 HDD 的真实单盘池。", "Select a real single-HDD pool.")
+                : realPoolVdisks.Length > 0
+                    ? Text("创建 HDD 层模板前，池中不能有虚拟磁盘。", "The pool must have no virtual disk before creating an HDD template.")
+                    : realPoolTiers.Length > 0
+                        ? Text("该池已有层；当前入口只创建首个 HDD 模板。", "This pool already has a tier; this action creates only the first HDD template.")
+                        : null);
+        SetDisabledReason(CreateTieredVdiskButton,
+            !realHddPool || realPoolTiers.Length != 1 || selectedRealTier is null
+                ? Text("请选择该池唯一的真实 HDD 层模板。", "Select the pool's sole real HDD tier template.")
+                : realPoolVdisks.Length > 0
+                    ? Text("该池已有虚拟磁盘。", "The pool already has a virtual disk.")
+                    : selectedRealTier.VirtualDiskStableId is not null
+                        ? Text("所选层是虚拟磁盘实例，不能作为模板重复绑定。", "The selected tier belongs to a virtual disk and cannot be reused as a template.")
+                        : Text("Agent 会在准备时核验该层和 16 GiB 容量。", "The Agent verifies the tier and 16 GiB capacity during preparation."));
+        SetDisabledReason(RenameHddTierButton,
+            selectedRealTier is null
+                ? Text("请选择真实 HDD 层。", "Select a real HDD tier.")
+                : Text("只支持重命名单盘 HDD 层。", "Only the supported single-disk HDD tier can be renamed."));
+        SetDisabledReason(DeleteHddTierButton,
+            selectedRealTier is null
+                ? Text("请选择未使用的池级 HDD 层模板。", "Select an unused pool-level HDD tier template.")
+                : selectedRealTier.VirtualDiskStableId is not null
+                    ? Text("虚拟磁盘层实例随虚拟磁盘删除，不能单独删除。", "A virtual-disk tier instance is removed with its virtual disk and cannot be deleted separately.")
+                    : realPoolVdisks.Length > 0
+                        ? Text("池中仍有虚拟磁盘。", "The pool still has a virtual disk.")
+                        : Text("当前层不符合受支持的单盘 HDD 模板。", "This tier is outside the supported single-disk HDD template."));
         SetDisabledReason(
             ShowHotSpareSwitch,
             Text("热备图层开关仅支持模拟系统。", "The hot-spare layer switch is available only in simulated systems."));
@@ -2814,6 +2933,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _selectedPoolId = null;
         _selectedPoolDiskId = null;
         _selectedPoolVdiskId = null;
+        _selectedPoolTierId = null;
         ResetLayerSwitchesForSelection();
         RefreshAll();
     }
@@ -2840,6 +2960,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 item.StableId.Equals(_selectedPoolVdiskId, StringComparison.OrdinalIgnoreCase)))
         {
             _selectedPoolVdiskId = null;
+        }
+
+        if (_selectedPoolTierId is not null
+            && !_working.StorageTiers.Any(item =>
+                item.StableId.Equals(_selectedPoolTierId, StringComparison.OrdinalIgnoreCase)))
+        {
+            _selectedPoolTierId = null;
         }
     }
 
@@ -2868,8 +2995,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
             var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
                 StorageObjectKind.PhysicalDisk, candidate.StableId);
-            await SubmitRealAsync(RealOperationProposalFactory.CreateSingleMemberPool(
+            var submitted = await SubmitRealAsync(RealOperationProposalFactory.CreateSingleMemberPool(
                 ViewModel.ActiveDocument.SystemId, target, name.Trim(), virtualDisk));
+            if (submitted && virtualDisk is not null)
+                await ContinueRealVirtualDiskLayoutAsync(
+                    FindRealPoolForMember(candidate.StableId), virtualDisk);
             return;
         }
         if (!ViewModel.IsUsingSimulatedInventory
@@ -2911,42 +3041,219 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !disk.IsBoot && !disk.IsSystem && !disk.IsPageFile
             && !disk.IsCrashDump);
 
+    private bool IsSingleRealHddMemberPool(StoragePoolInfo? pool) =>
+        CanUseRealSingleMemberPool(pool)
+        && pool!.IsStable
+        && _working.PhysicalDisks.SingleOrDefault(disk =>
+            disk.StableId == pool.MemberPhysicalDiskIds[0]) is { IsStable: true } physical
+        && physical.MediaType.Equals("HDD", StringComparison.OrdinalIgnoreCase);
+
+    private StorageTierInfo[] RealPoolTiers(StoragePoolInfo pool) =>
+        _working.StorageTiers.Where(tier =>
+            tier.PoolStableId == pool.StableId)
+            .ToArray();
+
+    private StorageTierInfo? SelectedRealPoolTier(StoragePoolInfo pool) =>
+        _selectedPoolTierId is null
+            ? null
+            : RealPoolTiers(pool).SingleOrDefault(tier =>
+                tier.StableId.Equals(_selectedPoolTierId, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSupportedRealHddTier(StoragePoolInfo pool, StorageTierInfo tier) =>
+        tier.IsStable
+        && tier.PoolStableId == pool.StableId
+        && tier.MediaType.Equals("HDD", StringComparison.OrdinalIgnoreCase)
+        && tier.ResiliencySettingName.Equals("Simple", StringComparison.OrdinalIgnoreCase)
+        && tier.Interleave == 65536
+        && tier.NumberOfColumns == 1;
+
+    private bool HasOnlySupportedRealHddTiers(StoragePoolInfo pool,
+        IReadOnlyList<VirtualDiskInfo> virtualDisks)
+    {
+        var tiers = RealPoolTiers(pool);
+        if (tiers.Any(tier => !IsSupportedRealHddTier(pool, tier)))
+            return false;
+        var vdiskIds = virtualDisks.Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return tiers.All(tier => tier.VirtualDiskStableId is null
+            || vdiskIds.Contains(tier.VirtualDiskStableId));
+    }
+
+    private bool CanDissolveRealSingleMemberPool(StoragePoolInfo? pool)
+    {
+        if (!CanUseRealSingleMemberPool(pool))
+            return false;
+        var vdisks = _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray();
+        return vdisks.Length <= 1 && HasOnlySupportedRealHddTiers(pool!, vdisks);
+    }
+
+    private bool CanRebuildRealSingleMemberPool(StoragePoolInfo? pool)
+    {
+        if (!CanUseRealSingleMemberPool(pool))
+            return false;
+        var vdisks = _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray();
+        return vdisks.Length == 1 && HasOnlySupportedRealHddTiers(pool!, vdisks);
+    }
+
+    private async Task ContinueRealVirtualDiskLayoutAsync(
+        StoragePoolInfo? pool, RealOperationProposalFactory.VirtualDiskOptions options)
+    {
+        if (!options.InitializeAndPartition)
+            return;
+        if (!LastRealInventoryRefreshSucceeded || pool is null)
+        {
+            await ShowMessageAsync(Text("后续布局计划未准备", "Follow-up layout plan not prepared"),
+                Text("真实操作后没有可用的新扫描或无法唯一定位新池；未提交数据分区计划。",
+                    "A fresh post-operation scan is unavailable or the new pool could not be identified uniquely. No data-partition plan was submitted."));
+            return;
+        }
+
+        var vdisks = _working.VirtualDisks.Where(item =>
+            item.PoolStableId == pool.StableId && item.IsStable).ToArray();
+        if (vdisks.Length != 1 || vdisks[0].Size != options.SizeBytes)
+        {
+            await ShowMessageAsync(Text("后续布局计划未准备", "Follow-up layout plan not prepared"),
+                Text("新扫描未唯一确认容量匹配的新虚拟磁盘；未提交数据分区计划。",
+                    "The fresh scan did not uniquely confirm a new virtual disk with the requested capacity. No data-partition plan was submitted."));
+            return;
+        }
+
+        var osDisks = _working.OsDisks.Where(item =>
+            item.VirtualDiskStableId == vdisks[0].StableId).ToArray();
+        if (osDisks.Length != 1)
+        {
+            await ShowMessageAsync(Text("后续布局计划未准备", "Follow-up layout plan not prepared"),
+                Text("新扫描未唯一定位该虚拟磁盘对应的 Windows 磁盘；未提交数据分区计划。",
+                    "The fresh scan did not uniquely locate the Windows disk for this virtual disk. No data-partition plan was submitted."));
+            return;
+        }
+
+        await SubmitInitializedDiskLayoutAsync(osDisks[0], options.CreateMsr,
+            options.SizeBytes, options.FormatNtfs, options.Label, options.Letter);
+    }
+
+    private StoragePoolInfo? FindRealPoolForMember(string physicalDiskId)
+    {
+        var pools = _working.StoragePools.Where(pool => !pool.IsPrimordial
+            && pool.IsStable && pool.MemberPhysicalDiskIds.Count == 1
+            && pool.MemberPhysicalDiskIds[0].Equals(physicalDiskId,
+                StringComparison.OrdinalIgnoreCase)).ToArray();
+        return pools.Length == 1 ? pools[0] : null;
+    }
+
+    private async void CreateHddTier_Click(object sender, RoutedEventArgs e)
+    {
+        var pool = SelectedPool();
+        if (!IsSingleRealHddMemberPool(pool)
+            || _working.VirtualDisks.Any(item => item.PoolStableId == pool!.StableId)
+            || RealPoolTiers(pool!).Length != 0)
+            return;
+        var name = await PromptAsync(Text("HDD 层模板名称", "HDD tier template name"),
+            pool!.FriendlyName + "_HDD");
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+        var system = ViewModel.ActiveDocument.SystemId;
+        var poolId = new StorageObjectId(system, StorageObjectKind.StoragePool, pool.StableId);
+        try
+        {
+            await SubmitRealAsync(RealOperationProposalFactory.CreateHddTierTemplate(
+                system, poolId, name));
+        }
+        catch (ArgumentException exception)
+        {
+            await ShowMessageAsync(Text("HDD 层参数不受支持", "HDD tier parameters are unsupported"),
+                exception.Message);
+        }
+    }
+
+    private async void CreateTieredVdisk_Click(object sender, RoutedEventArgs e)
+    {
+        var pool = SelectedPool();
+        var tier = pool is null ? null : SelectedRealPoolTier(pool);
+        if (!IsSingleRealHddMemberPool(pool) || tier is null
+            || tier.VirtualDiskStableId is not null
+            || !IsSupportedRealHddTier(pool!, tier)
+            || RealPoolTiers(pool!).Length != 1
+            || _working.VirtualDisks.Any(item => item.PoolStableId == pool!.StableId))
+            return;
+        var name = await PromptAsync(Text("虚拟磁盘名称", "Virtual disk name"),
+            pool!.FriendlyName + "_VD");
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+        const long sizeBytes = 16L * 1024 * 1024 * 1024;
+        var system = ViewModel.ActiveDocument.SystemId;
+        try
+        {
+            await SubmitRealAsync(RealOperationProposalFactory.CreateTieredVirtualDisk(
+                system,
+                new StorageObjectId(system, StorageObjectKind.StoragePool, pool.StableId),
+                new StorageObjectId(system, StorageObjectKind.StorageTier, tier.StableId),
+                name, sizeBytes));
+        }
+        catch (ArgumentException exception)
+        {
+            await ShowMessageAsync(Text("分层虚拟磁盘参数不受支持", "Tiered virtual disk parameters are unsupported"),
+                exception.Message);
+        }
+    }
+
+    private async void RenameHddTier_Click(object sender, RoutedEventArgs e)
+    {
+        var pool = SelectedPool();
+        var tier = pool is null ? null : SelectedRealPoolTier(pool);
+        if (!IsSingleRealHddMemberPool(pool) || tier is null
+            || !IsSupportedRealHddTier(pool!, tier))
+            return;
+        var name = await PromptAsync(Text("HDD 层新名称", "New HDD tier name"), tier.FriendlyName);
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+        var system = ViewModel.ActiveDocument.SystemId;
+        try
+        {
+            await SubmitRealAsync(RealOperationProposalFactory.RenameHddTier(system,
+                new StorageObjectId(system, StorageObjectKind.StorageTier, tier.StableId), name));
+        }
+        catch (ArgumentException exception)
+        {
+            await ShowMessageAsync(Text("HDD 层名称不受支持", "HDD tier name is unsupported"),
+                exception.Message);
+        }
+    }
+
+    private async void DeleteHddTier_Click(object sender, RoutedEventArgs e)
+    {
+        var pool = SelectedPool();
+        var tier = pool is null ? null : SelectedRealPoolTier(pool);
+        if (!IsSingleRealHddMemberPool(pool) || tier is null
+            || tier.VirtualDiskStableId is not null
+            || !IsSupportedRealHddTier(pool!, tier)
+            || RealPoolTiers(pool!).Length != 1
+            || _working.VirtualDisks.Any(item => item.PoolStableId == pool!.StableId))
+            return;
+        var system = ViewModel.ActiveDocument.SystemId;
+        await SubmitRealAsync(RealOperationProposalFactory.DeleteHddTierTemplate(system,
+            new StorageObjectId(system, StorageObjectKind.StorageTier, tier.StableId)));
+    }
+
     private async void Dissolve_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
-        if (CanUseRealSingleMemberPool(pool))
+        if (CanDissolveRealSingleMemberPool(pool))
         {
             var system = ViewModel.ActiveDocument.SystemId;
             var poolId = new StorageObjectId(system, StorageObjectKind.StoragePool,
                 pool!.StableId);
             var vdisks = _working.VirtualDisks.Where(item =>
                 item.PoolStableId == pool.StableId).ToArray();
-            if (vdisks.Length > 1)
-                return;
-            var targets = new List<StorageObjectId> { poolId };
-            var steps = new List<RealOperationStep>();
-            if (vdisks.Length == 1)
-            {
-                var vdiskId = new StorageObjectId(system,
-                    StorageObjectKind.VirtualDisk, vdisks[0].StableId);
-                targets.Add(vdiskId);
-                steps.Add(new RealOperationStep("delete-vdisk",
-                    new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(vdiskId)),
-                    [], "The exact virtual disk and its child objects are verified",
-                    "The virtual disk and its child volumes are absent",
-                    "All files, partitions and volumes in the virtual disk are lost",
-                    "Agent live Windows preflight required"));
-            }
-            steps.Add(new RealOperationStep("delete-pool",
-                new DeletePoolCommand(RealTargetReference.ForExisting(poolId)),
-                steps.Count == 0 ? [] : ["delete-vdisk"],
-                "The pool has no remaining virtual disk",
-                "The pool is absent and its one physical member is released",
-                "All remaining pool metadata is removed",
-                "Agent live Windows preflight required"));
-            await SubmitRealAsync(new RealOperationIntentRequest(
-                OperationIntent.DeleteStoragePool, system, targets, steps,
-                $"Delete pool {pool.FriendlyName} and all listed child objects"));
+            var tierTemplates = RealPoolTiers(pool)
+                .Where(tier => tier.VirtualDiskStableId is null).ToArray();
+            var vdiskId = vdisks.Length == 1
+                ? new StorageObjectId(system, StorageObjectKind.VirtualDisk, vdisks[0].StableId)
+                : (StorageObjectId?)null;
+            var tierTemplateIds = tierTemplates.Select(tier =>
+                new StorageObjectId(system, StorageObjectKind.StorageTier, tier.StableId)).ToArray();
+            await SubmitRealAsync(RealOperationProposalFactory.DissolveSingleMemberPool(
+                system, poolId, vdiskId, tierTemplateIds));
             return;
         }
         if (pool is null || pool.IsPrimordial || !ViewModel.IsUsingSimulatedInventory)
@@ -2965,6 +3272,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _selectedPoolId = null;
             _selectedPoolDiskId = null;
             _selectedPoolVdiskId = null;
+            _selectedPoolTierId = null;
             ResetLayerSwitchesForSelection();
             CommitWorkingStep(next);
         }
@@ -3044,8 +3352,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         };
         var partitionBox = new CheckBox
         {
-            Content = Text("自动初始化 GPT 并建立 BasicData 分区",
-                "Initialize GPT and create a BasicData partition"),
+            Content = Text("初始化 GPT；新扫描后单独建立 BasicData 分区",
+                "Initialize GPT; create BasicData in a separate plan after a fresh scan"),
             IsChecked = fixedPartition ?? ViewModel.CurrentPreferences.AutoCreatePartition,
             IsEnabled = fixedPartition is null
         };
@@ -3087,6 +3395,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdatePartitionOptions();
         var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = Text(
+                "以下 MSR、BasicData、格式与盘符选项留待新扫描后的第二阶段计划。第一阶段只创建虚拟磁盘并初始化 GPT。",
+                "The MSR, BasicData, format, and drive-letter choices below are for a second-phase plan after a fresh scan. The first phase only creates the virtual disk and initializes GPT."),
+            TextWrapping = TextWrapping.Wrap
+        });
         panel.Children.Add(nameBox);
         panel.Children.Add(sizeBox);
         panel.Children.Add(partitionBox);
@@ -3152,8 +3467,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 StorageObjectKind.StoragePool, pool!.StableId);
             try
             {
-                await SubmitRealAsync(RealOperationProposalFactory.CreateFirstVirtualDisk(
+                var submitted = await SubmitRealAsync(RealOperationProposalFactory.CreateFirstVirtualDisk(
                     ViewModel.ActiveDocument.SystemId, target, options));
+                if (submitted)
+                    await ContinueRealVirtualDiskLayoutAsync(pool, options);
             }
             catch (ArgumentException exception)
             {
@@ -3227,7 +3544,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private async void RebuildPool_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
-        if (!CanUseRealSingleMemberPool(pool))
+        if (!CanRebuildRealSingleMemberPool(pool))
             return;
         var oldVdisks = _working.VirtualDisks.Where(item =>
             item.PoolStableId == pool!.StableId).ToArray();
@@ -3239,6 +3556,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             item.StableId == physicalId);
         if (physical is null)
             return;
+        var originalFacts = ViewModel.ActiveDocument.SourceFacts;
+        if (originalFacts is null)
+            return;
+        var system = originalFacts.SystemId;
 
         var newPoolName = await PromptAsync(
             Text("重建后的池名称", "New pool name after rebuild"), pool.FriendlyName);
@@ -3261,6 +3582,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 $"offset={item.Offset} size={item.Size} " +
                 $"{item.DriveLetter}: {item.FileSystem} {item.FileSystemLabel} " +
                 $"id={item.StableId}"));
+        var tierTemplates = RealPoolTiers(pool).Where(tier =>
+            tier.VirtualDiskStableId is null).ToArray();
+        var tierList = tierTemplates.Length == 0
+            ? Text("（无池级 HDD 层模板）", "(no pool-level HDD tier templates)")
+            : string.Join(Environment.NewLine, tierTemplates.Select(tier =>
+                $"{tier.StableId} / {tier.FriendlyName} / {tier.MediaType} / " +
+                $"{tier.ResiliencySettingName} / {tier.Interleave} / {tier.NumberOfColumns} columns"));
         var loss = string.Join(Environment.NewLine,
             $"Physical member: {physical.StableId} / {physical.Model} / {physical.SerialNumber}",
             $"Old pool: {pool.StableId} / {pool.FriendlyName}",
@@ -3268,29 +3596,67 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Text("以下分区、卷、文件和盘符将全部丢失：",
                 "All partitions, volumes, files and drive letters below will be lost:"),
             partitionList,
+            Text("以下池级 HDD 层模板也将按步骤显式删除；虚拟磁盘层实例随虚拟磁盘消失：",
+                "These pool-level HDD templates will also be deleted explicitly; virtual-disk tier instances disappear with the virtual disk:"),
+            tierList,
             $"New pool: {newPoolName}",
             $"New virtual disk: {options.Name} / {options.SizeBytes} bytes",
-            Text("失败会保留已完成步骤，不自动回滚或恢复旧数据。",
-                "Failure preserves completed steps; old data is not automatically restored."));
+            Text("先独立确认删除旧对象。随后读取释放成员，若有 GPT/分区则另建清盘计划并确认；再按新 RAW 事实另建池/虚拟磁盘计划并确认。",
+                "First confirm old-object removal. Then read the released member, separately confirm clearing any GPT/partitions, and separately confirm pool/virtual-disk creation from fresh RAW facts."),
+            Text("取消、失败或结果未知会停止后续准备；已完成步骤保留，不自动恢复旧数据。",
+                "Cancellation, failure or an unknown result stops subsequent preparation. Completed steps remain; old data is not automatically restored."));
         if (!await ConfirmAsync(Text("独立删除重建确认", "Separate delete-and-rebuild confirmation"),
                 loss))
             return;
 
-        var system = ViewModel.ActiveDocument.SystemId;
+        if (!ViewModel.CanSubmitRealOperation || ViewModel.ActiveDocument.SystemId != system)
+            return;
+        var tierTemplateIds = tierTemplates.Select(tier =>
+            new StorageObjectId(system, StorageObjectKind.StorageTier, tier.StableId)).ToArray();
         try
         {
-            await SubmitRealAsync(RealOperationProposalFactory.RebuildSingleMemberPool(
-                system,
+            var submitted = await RealOperationProposalFactory.ExecuteSingleMemberPoolRebuildAsync(
+                originalFacts,
                 new StorageObjectId(system, StorageObjectKind.PhysicalDisk, physical.StableId),
                 new StorageObjectId(system, StorageObjectKind.StoragePool, pool.StableId),
                 new StorageObjectId(system, StorageObjectKind.VirtualDisk, oldVdisk.StableId),
-                newPoolName, options));
+                newPoolName.Trim(), options, tierTemplateIds, SubmitRealAsync,
+                () => LastRealInventoryRefreshSucceeded && ViewModel.CanSubmitRealOperation
+                    && ViewModel.ActiveDocument.SystemId == system
+                        ? ViewModel.ActiveDocument.SourceFacts : null,
+                ConfirmReleasedDiskClearAsync);
+            if (submitted)
+                await ContinueRealVirtualDiskLayoutAsync(
+                    FindRealPoolForMember(physical.StableId), options);
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
         {
-            await ShowMessageAsync(Text("重建参数不受支持", "Rebuild parameters are unsupported"),
+            await ShowMessageAsync(Text("后续重建计划未准备", "Follow-up rebuild plan not prepared"),
                 exception.Message);
         }
+    }
+
+    private Task<bool> ConfirmReleasedDiskClearAsync(WinPoolFacts facts, OsDiskInfo disk)
+    {
+        var snapshot = WinPoolStorageProjection.Project(facts);
+        var physical = snapshot.PhysicalDisks.Single(item => item.StableId == disk.PhysicalDiskStableId);
+        var partitions = snapshot.Partitions.Where(item => item.OsDiskStableId == disk.StableId)
+            .OrderBy(item => item.Offset).ToArray();
+        var partitionList = partitions.Length == 0
+            ? Text("（未发现分区）", "(no partitions reported)")
+            : string.Join(Environment.NewLine, partitions.Select(item =>
+                $"#{item.PartitionNumber} {item.Type} offset={item.Offset} size={item.Size} " +
+                $"{item.DriveLetter}: {item.FileSystem} {item.FileSystemLabel} id={item.StableId}"));
+        return ConfirmAsync(Text("独立清盘确认", "Separate disk-clear confirmation"),
+            string.Join(Environment.NewLine,
+                $"OS disk: {disk.StableId}",
+                $"Physical member: {physical.StableId} / {physical.Model} / {physical.SerialNumber}",
+                $"Size: {disk.Size} bytes",
+                Text("旧池已删除。Windows 释放成员后可能自动生成 GPT 和 MSR；以下当前分区、卷、文件和盘符将丢失：",
+                    "The old pool is deleted. Windows may create GPT and an MSR when releasing the member. All current partitions, volumes, files and drive letters below will be lost:"),
+                partitionList,
+                Text("此操作只清空至 RAW。新建池和虚拟磁盘需要新扫描、独立计划并再次确认；取消或结果未知会停止后续准备。",
+                    "This operation only clears to RAW. Pool and virtual-disk creation need a fresh scan, a separate plan and confirmation. Cancellation or an unknown result stops subsequent preparation.")));
     }
 
     private async void DeleteVdisk_Click(object sender, RoutedEventArgs e)

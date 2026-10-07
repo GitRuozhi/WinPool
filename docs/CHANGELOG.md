@@ -1,5 +1,21 @@
 # WinPool 变更记录
 
+## 2026-10-07：单盘真实修改阶段完成（V0.58）
+
+真实写入采用类型化冻结计划和短时一次性 token；准备、确认及每步写入前复核实时目标身份、完整池成员与系统角色、BitLocker、运行依赖和适用能力。`SequentialPartial`／`OutcomeUnknown` 会停止后续写入，只读对账且不重放不确定调用，继续操作须另建计划。GPT 初始化后重新采集 provider 自动生成的分区，再以独立计划处理规范 MSR 与 BasicData；VDS 文件系统查询、精确卷 GUID BitLocker 查询、原生 MSR 属性、严格父级关联和 COM 安全上下文均已核实。
+
+H01–H11 单盘场景、P5 管理员交接与最终实机布局均已通过。H09/R5 的最终 Samsung scoped 比较为 0/0/4；H06 未知建池结果由只读对账闭合。H10 核对了池级 HDD 模板及其派生的 16 GiB 分层虚拟磁盘，Fixed、copies 和逐 tier 布局通过。H11 将指定 ReFS 卷从 1 GiB 扩至 2 GiB，以 16 MiB 内容块核对 SHA-256 `55B9…40A55`，收缩入口保持禁用；测试候选已删除并验证。
+
+修复池级模板与实际层实例的定位差异，实际层改名通过精确 VD 关联和 extent 成员核对执行；分层 VD 的后态保留 VD 层面的已返回空字段，并严格核对实际层实例的布局、预配和分配量。能力检查抛出的 `NotSupportedException` 在准备阶段返回明确拒绝，避免断开 IPC 后误报结果未知。真实手动、自动布局和 Agent 共用 GPT 可用几何，修复 4 TB 盘 MAX 超出尾边界 172,032 bytes 的问题。
+
+最终 WDC 操作 `2ee77722` 完成 3/3：Create、Format、DriveLetter。磁盘在线 GPT；MSR offset 1,048,576／size 16,777,216 bytes；BasicData offset 17,825,792／size 4,000,767,279,104 bytes（3,815,429 MiB）。MAX 为 GPT 尾部及整 MiB 对齐留出 1,925,120 bytes。E: 为 64 KiB NTFS，卷标 `WinPool_Test`。`final-layout-readonly-check.json` 通过；fresh 采集所有目标均 Returned，Samsung scoped 比较为 0/0/4。
+
+P5 经用户在产品入口确认后完成管理员交接，Real 模式开启且监控保持 20 Hz；Accepted／`call_issued` 事件计数不变，为 60／85。两次 `CreateProcessWithTokenW`／helper 启动失败；验证成功的启动路径为 medium Explorer 原生 Run。普通启动保持 RealOff 并复用 Agent，偏好恢复、普通重启后真实模式保持关闭以及 App／Agent 正常退出均通过。硬件刷新取得新结果；Hardware-purpose wrapper 的 `storageSourcesReturned=false` 是包装层来源状态，不代表 Storage CIM 失败。历史 `E_POINTER` 根因未证实。
+
+稳定源码的 12 个测试项目共 1,447 passed、0 failed、3 项 manual skip（合计 1,450）；Agent 92、App 54、Application 320、Infrastructure 597 项分别通过。Restore／标准构建 0 警告／0 错误（28.45 秒），23 项依赖审计未报告漏洞；V0.58 标准 App+Agent 构建 0 警告／0 错误（27.74 秒）。V0.58 runtime metadata 核对了两个 DLL 的产品版本和 `0.5.8.0` 文件版本，About UI Automation 名称为 `V0.58`；正常启动为 RealOff。较早 555/557 运行中的两项失败及其修复记录仍保留。
+
+最终审计覆盖 82 个计划、105 条 `call_issued` 事件、75 次 Accepted，未终结操作为 0；所有调用事件均关联到 WDC 目标，未发现无目标或无法映射到步骤的调用事件。`call_issued` 不代表 Windows 已成功修改存储。严格审计原状态仍为 `scope_or_call_correlation_mismatches_found`：保留 3 项历史 PhysicalMemberObjectId 缺口，另有 1 项早期 preflight_failed 格式化步骤缺少 target JSON（该步骤调用事件为 0）。不能据此声称所有历史字段或关联证据齐全。C03、C05、D 类真实操作继续按本阶段边界禁用。产品版本为 **V0.58**；阶段记录见 [Plan](Plan.md)，验证细节和限制见 [Quality](Quality.md)。
+
 ## 2026-10-06：卷标后态核对、进程存活与完整退出修复
 
 真实卷标改名按卷自身 UniqueId／ObjectId 匹配，并独立核对父分区 GUID、磁盘关联与几何，修复 Windows Volume 不含 Guid 时误判失败的问题。已有单步 RenameVolume 的未知结果仅在冻结计划、成功 Provider 证据、当前精确目标、卷标和安全检查完整匹配后只读恢复；不重放磁盘命令，其它未知操作继续保留屏障。rebuild 拒绝时增加具体 OperationId／状态与只读核对指引。

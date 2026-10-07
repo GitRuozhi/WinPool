@@ -234,7 +234,6 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
                 value.OffsetBytes <= long.MaxValue - value.SizeBytes,
             ResizePartitionCommand value => value.SizeBytes > 0 && value.SizeBytes % mib == 0,
             FormatVolumeCommand value => Enum.IsDefined(value.FileSystem) &&
-                value.FileSystem != RealFileSystem.ReFs &&
                 (value.ClusterBytes == 65536 ||
                  (value.ClusterBytes == 4096 &&
                   (value.FileSystem == RealFileSystem.Fat32 || value.FileSystem == RealFileSystem.Ntfs))) &&
@@ -281,8 +280,12 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         var format = (FormatVolumeCommand)command;
         if (role == basic)
         {
-            return (format.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat) &&
-                format.ClusterBytes == 65536;
+            return (format.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat or RealFileSystem.ReFs) &&
+                format.ClusterBytes == 65536 && (format.FileSystem != RealFileSystem.ReFs
+                    || !format.Full && !target.CreatedInThisPlan
+                        && format.Partition.Existing is not null
+                        && !string.IsNullOrWhiteSpace(target.RelatedUniqueId)
+                        && !string.IsNullOrWhiteSpace(target.RelatedObjectId));
         }
 
         var efi = Guid.Parse("c12a7328-f81f-11d2-ba4b-00a0c93ec93b");

@@ -22,7 +22,8 @@ namespace WinPool_App;
 public sealed partial class DiskPartitionPage : EditorPageBase
 {
     private const string NoneLetterValue = "";
-    private const long BytesPerMiB = 1024L * 1024;
+    private sealed record InitializedDiskLayoutOptions(
+        bool CreateMsr, long? DiskSizeBytes, bool FormatNtfs, string? Label, char? Letter);
 
     private string? _selectedDiskId;
     private string? _selectedPartitionId;
@@ -67,6 +68,53 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     }
 
     internal void RefreshExecutionMode() => UpdateButtonState();
+
+    protected override void OnRealInventoryRefreshed()
+    {
+        if (ViewModel.IsUsingSimulatedInventory)
+            return;
+
+        _working = ViewModel.EffectiveActiveSnapshot;
+        var selectedPartition = _selectedPartitionId is null
+            ? null
+            : _working.Partitions.FirstOrDefault(item =>
+                item.StableId.Equals(_selectedPartitionId, StringComparison.OrdinalIgnoreCase));
+        if (_selectedPartitionId is not null && selectedPartition is null)
+            _selectedPartitionId = null;
+        if (selectedPartition is not null)
+        {
+            _selectedDiskId = selectedPartition.OsDiskStableId ?? _selectedDiskId;
+            _selectedUnallocatedOffset = null;
+            _selectedUnallocatedSize = null;
+        }
+
+        if (_selectedDiskId is not null
+            && !_working.OsDisks.Any(item =>
+                item.StableId.Equals(_selectedDiskId, StringComparison.OrdinalIgnoreCase)))
+        {
+            _selectedDiskId = null;
+        }
+
+        if (_selectedUnallocatedOffset is long selectedOffset)
+        {
+            var selectedDisk = _selectedDiskId is null
+                ? null
+                : _working.OsDisks.FirstOrDefault(item =>
+                    item.StableId.Equals(_selectedDiskId, StringComparison.OrdinalIgnoreCase));
+            var gapStillExists = selectedDisk is not null && _selectedUnallocatedSize is long size
+                && EditWorkspace.UnallocatedGaps(selectedDisk,
+                    _working.Partitions.Where(item => item.OsDiskStableId == selectedDisk.StableId).ToArray())
+                    .Any(gap => gap.Offset == selectedOffset && gap.Size == size
+                        && gap.Size >= UnallocatedIgnoreBytes);
+            if (!gapStillExists)
+            {
+                _selectedUnallocatedOffset = null;
+                _selectedUnallocatedSize = null;
+            }
+        }
+
+        RefreshAll();
+    }
 
     private void LocalizeChrome()
     {
@@ -371,9 +419,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             var partition = SelectedPartition();
             var disk = SelectedDisk();
             var gap = _selectedUnallocatedOffset is not null;
-            var geometry = gap && _selectedUnallocatedOffset is long gapOffset && _selectedUnallocatedSize is long gapSize
-                ? EditWorkspace.GetPartitionCreateGeometry(gapOffset, gapSize)
-                : null;
+            var geometry = gap ? SelectedCreateGeometry() : null;
             var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
             DiskLocationValue.Text = disk is null
                 ? string.Empty
@@ -660,12 +706,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var createMode = isGapSelection && alreadyGpt;
         var realEditablePartition = ViewModel.CanSubmitRealOperation
             && partition is { IsBoot: false, IsSystem: false, Type: "Primary" or "BasicData" };
+        var realDeletablePartition = ViewModel.CanSubmitRealOperation
+            && partition is { IsBoot: false, IsSystem: false,
+                Type: "Primary" or "BasicData" or "EfiSystem" or "MicrosoftReserved" or "WindowsRecovery" };
         var propertyEnabled = (simulated || (ViewModel.CanSubmitRealOperation && createMode)
             || realEditablePartition)
             && !diskOffline && (isPartitionSelection || isGapSelection);
-        var createGeometry = _selectedUnallocatedOffset is long gapOffset && _selectedUnallocatedSize is long gapSize
-            ? EditWorkspace.GetPartitionCreateGeometry(gapOffset, gapSize)
-            : null;
+        var createGeometry = SelectedCreateGeometry();
         var hasIntegerSize = TryGetSizeBytes(out var requestedSizeBytes);
         var maximumCreateSizeBytes = createGeometry?.MaximumSizeBytes;
         var sizeFitsSelectedGap = hasIntegerSize
@@ -702,26 +749,40 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             disk is { IsBoot: false, IsSystem: false } && !diskOffline &&
             RealPartitionResizeUiRange.IsSupportedFileSystem(
                 volume?.FileSystem ?? partition?.FileSystem);
+        var realRefsResize = realResizeCandidate && string.Equals(
+            volume?.FileSystem ?? partition?.FileSystem, "ReFS", StringComparison.OrdinalIgnoreCase);
         var canExtend = realResizeCandidate || (simulated && propertyEnabled
             && extendCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
-        var canShrink = realResizeCandidate || (simulated && propertyEnabled
+        var canShrink = (realResizeCandidate && !realRefsResize) || (simulated && propertyEnabled
             && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
 
         var real = ViewModel.CanSubmitRealOperation;
+        var diskPartitions = disk is null ? Array.Empty<PartitionInfo>()
+            : _working.Partitions.Where(item =>
+                string.Equals(item.OsDiskStableId, disk.StableId,
+                    StringComparison.OrdinalIgnoreCase)).ToArray();
+        var canResumeRealLayout = real && isDiskSelection && alreadyGpt
+            && disk is { IsBoot: false, IsSystem: false, IsOffline: false }
+            && diskPartitions.Length <= 1
+            && diskPartitions.All(IsExactProviderMsr);
         var realRefsUnsupported = real && createMode &&
             SelectedFileSystemToken().Equals("ReFS", StringComparison.OrdinalIgnoreCase);
         OnlineButton.IsEnabled = (simulated || real) && isDiskSelection && disk is { IsOffline: true };
         OfflineButton.IsEnabled = (simulated || real)
             && isDiskSelection
             && disk is { IsOffline: false, IsBoot: false, IsSystem: false };
+        InitializeButtonLabel.Text = real && alreadyGpt
+            ? Text("完成布局", "Complete layout")
+            : ViewModel.Localization["InitializeDisk"];
         InitializeButton.IsEnabled = (simulated || real) && isDiskSelection && !diskOffline
-            && disk is { IsBoot: false, IsSystem: false } && raw;
+            && disk is { IsBoot: false, IsSystem: false } && raw
+            || canResumeRealLayout;
         ConvertGptButton.IsEnabled = simulated && isDiskSelection && !diskOffline
             && disk is { IsBoot: false, IsSystem: false } && mbr;
         ClearDiskForPoolButton.Visibility = real ? Visibility.Visible : Visibility.Collapsed;
         ClearDiskForPoolButton.IsEnabled = real && isDiskSelection && !diskOffline
             && disk is { IsBoot: false, IsSystem: false } && !raw;
-        DeletePartitionButton.IsEnabled = (simulated || realEditablePartition)
+        DeletePartitionButton.IsEnabled = (simulated || realDeletablePartition)
             && !diskOffline && destructivePartition;
         ExtendButton.IsEnabled = canExtend;
         ShrinkButton.IsEnabled = canShrink;
@@ -743,8 +804,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && !string.IsNullOrEmpty(SelectedFileSystemToken());
         var formatOptionsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved
             && !string.IsNullOrEmpty(SelectedFileSystemToken());
-        QuickFormatSwitch.IsEnabled = formatOptionsEnabled;
-        FullFormatSwitch.IsEnabled = formatOptionsEnabled;
+        var realRefsExistingFormat = real && !createMode
+            && SelectedFileSystemToken().Equals("ReFS", StringComparison.OrdinalIgnoreCase);
+        var realQuickOnlyRoleCreation = real && createMode
+            && (kind == PartitionKind.EfiSystem || kind == PartitionKind.WindowsRecovery);
+        QuickFormatSwitch.IsEnabled = formatOptionsEnabled && !realQuickOnlyRoleCreation;
+        FullFormatSwitch.IsEnabled = formatOptionsEnabled
+            && !realRefsExistingFormat && !realQuickOnlyRoleCreation;
         if (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery)
         {
             DriveLetterBox.IsEnabled = false;
@@ -770,9 +836,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ?? (partition is null
                 ? Text("请选择普通模拟数据分区以压缩。", "Select a normal simulated data partition to shrink.")
                 : ResizeCapabilityReason(shrinkCapability!, extend: false));
-        var realRangeReason = Text(
-            "真实扩缩仅允许普通 GPT NTFS 或 RAW 数据分区；点击后由 Agent 读取实时支持范围。",
-            "Real resize is limited to ordinary GPT NTFS or RAW data partitions; the Agent reads the live supported range when clicked.");
+        var realRangeReason = realRefsResize
+            ? Text("ReFS 真实分区仅开放扩展；压缩保持禁用，扩展范围由 Agent 实时核验。",
+                "Real ReFS partitions allow extension only; shrinking stays disabled and the Agent checks the live extension range.")
+            : Text(
+                "真实扩缩仅允许普通 GPT NTFS、ReFS 扩展或 RAW 数据分区；点击后由 Agent 读取实时支持范围。",
+                "Real resize is limited to ordinary GPT NTFS, ReFS extension, or RAW data partitions; the Agent reads the live supported range when clicked.");
         var extendReason = canExtend ? null : ViewModel.CanSubmitRealOperation
             ? realRangeReason : extendEligibilityReason;
         var shrinkReason = canShrink ? null : ViewModel.CanSubmitRealOperation
@@ -810,6 +879,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                             : raw
                                 ? Text("当前磁盘已满足初始化条件。", "The current disk already meets the initialization conditions.")
                                 : Text("只有 RAW 模拟磁盘可以初始化。", "Only a RAW simulated disk can be initialized."));
+        if (real && alreadyGpt)
+        {
+            SetDisabledReason(InitializeButton,
+                canResumeRealLayout
+                    ? Text("新扫描显示 GPT 且仅有零个或一个精确 provider MSR；可显式重新准备 MSR 和数据布局。",
+                        "The fresh scan shows GPT and zero or one exact provider MSR. You can explicitly prepare the MSR and data layout.")
+                    : Text("只有未启动且仅含精确 provider MSR 的 GPT 磁盘可继续布局。",
+                        "Only a non-system GPT disk containing no partition other than the exact provider MSR can continue layout."));
+        }
         SetDisabledReason(ConvertGptButton,
             !simulated
                 ? LocalReadOnlyReason()
@@ -883,9 +961,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 ? Text("请选择现有的普通模拟数据分区以格式化。", "Select an existing simulated data partition to format.")
                 : protectedPartitionReason);
         var createActionSelected = partition is null;
+        var selectedRealFileSystem = SelectedFileSystemToken();
         var realExistingFormatSupported = !realEditablePartition
-            || (SelectedFileSystemToken() is "NTFS" or "exFAT"
-                && SelectedClusterBytes() == 65536);
+            || (selectedRealFileSystem is "NTFS" or "exFAT" or "ReFS"
+                && SelectedClusterBytes() == 65536
+                && (!selectedRealFileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase)
+                    || QuickFormatSwitch.IsOn));
         PartitionActionButtonLabel.Text = createActionSelected
             ? Text("新建分区", "Create partition")
             : Text("格式化分区", "Format partition");
@@ -907,12 +988,21 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "Real ReFS creation requires C01 provider evidence and is disabled in this stage.")
             : createActionSelected ? createReason
             : realExistingFormatSupported ? formatReason
-            : Text("现有真实数据分区仅支持 64 KiB NTFS 或 exFAT 格式化。",
-                "Existing real data partitions support only 64 KiB NTFS or exFAT formatting."));
+            : Text("现有真实数据分区仅支持 64 KiB NTFS/exFAT；ReFS 限快速格式化，且必须为 64 KiB。",
+                "Existing real data partitions support 64 KiB NTFS/exFAT; ReFS is limited to quick format with 64 KiB."));
         SetDisabledReason(FileSystemBox, formatOptionsReason);
         SetDisabledReason(ClusterBox, formatOptionsReason);
-        SetDisabledReason(QuickFormatSwitch, formatOptionsReason);
-        SetDisabledReason(FullFormatSwitch, formatOptionsReason);
+        SetDisabledReason(QuickFormatSwitch, realQuickOnlyRoleCreation
+            ? Text("真实 EFI 和恢复分区仅支持快速格式化。",
+                "Real EFI and Recovery partition creation supports quick format only.")
+            : formatOptionsReason);
+        SetDisabledReason(FullFormatSwitch, realRefsExistingFormat
+            ? Text("C01 本阶段仅开放 64 KiB 快速 ReFS 格式化。",
+                "C01 currently enables only quick ReFS format with 64 KiB allocation units.")
+            : realQuickOnlyRoleCreation
+                ? Text("真实 EFI 和恢复分区仅支持快速格式化。",
+                    "Real EFI and Recovery partition creation supports quick format only.")
+                : formatOptionsReason);
         UpdatePropertyResetState();
     }
 
@@ -1228,6 +1318,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                         ClusterBox.SelectedIndex = 0;
                         SetSizeMib(defaultMib);
                         DriveLetterBox.SelectedIndex = 0;
+                        SetFormatMode(quickFormat: true);
                         break;
                     case PartitionKind.MicrosoftReserved:
                         FillFileSystemBoxFor(string.Empty);
@@ -1294,6 +1385,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (!_filling)
         {
             UpdatePropertyResetState();
+            UpdateButtonState();
         }
     }
 
@@ -1322,6 +1414,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         UpdatePropertyResetState();
+        UpdateButtonState();
     }
 
     private void SetFormatMode(bool quickFormat)
@@ -1437,10 +1530,16 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         return maximumMib > 0 ? maximumMib : null;
     }
 
-    private PartitionCreateGeometry? SelectedCreateGeometry() =>
-        _selectedUnallocatedOffset is long offset && _selectedUnallocatedSize is long size
-            ? EditWorkspace.GetPartitionCreateGeometry(offset, size)
+    private PartitionCreateGeometry? SelectedCreateGeometry()
+    {
+        if (_selectedUnallocatedOffset is not long offset || _selectedUnallocatedSize is not long size)
+            return null;
+        if (ViewModel.IsUsingSimulatedInventory)
+            return EditWorkspace.GetPartitionCreateGeometry(offset, size);
+        return SelectedDisk() is { } disk
+            ? EditWorkspace.GetRealPartitionCreateGeometry(disk.Size, offset, size)
             : null;
+    }
 
     private void SetSizeMib(long? sizeMib) =>
         SizeBox.Text = sizeMib?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
@@ -1723,9 +1822,34 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (ViewModel.CanSubmitRealOperation)
         {
             var system = ViewModel.ActiveDocument.SystemId;
+            if (string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase))
+            {
+                var options = await PromptInitializedDiskLayoutAsync(disk);
+                if (options is not null)
+                    await SubmitInitializedDiskLayoutAsync(disk, options.CreateMsr,
+                        options.DiskSizeBytes, options.FormatNtfs, options.Label, options.Letter);
+                return;
+            }
+
+            if (!string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase))
+                return;
             var target = new StorageObjectId(system, StorageObjectKind.OsDisk, disk.StableId);
-            await SubmitRealAsync(RealOperationProposalFactory.InitializeGpt(
-                system, target, ViewModel.CurrentPreferences.CreateMsrOnInitialize));
+            if (!await SubmitRealAsync(RealOperationProposalFactory.InitializeGpt(system, target))
+                || !LastRealInventoryRefreshSucceeded)
+                return;
+
+            var refreshedDisk = _working.OsDisks.FirstOrDefault(item =>
+                item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+            if (refreshedDisk is null)
+            {
+                await ShowMessageAsync(Text("磁盘初始化后无法继续", "Cannot continue after disk initialization"),
+                    Text("新扫描中找不到原目标磁盘；未提交后续布局计划。",
+                        "The fresh scan no longer contains the target disk. No follow-up layout plan was submitted."));
+                return;
+            }
+
+            await SubmitInitializedDiskLayoutAsync(refreshedDisk,
+                ViewModel.CurrentPreferences.CreateMsrOnInitialize);
             return;
         }
 
@@ -1746,6 +1870,135 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 CreateMsr: ViewModel.CurrentPreferences.CreateMsrOnInitialize),
             Text("初始化成功", "Initialization succeeded"),
             Text("磁盘已初始化为 GPT。", "The disk was initialized as GPT."));
+    }
+
+    private async Task<InitializedDiskLayoutOptions?> PromptInitializedDiskLayoutAsync(
+        OsDiskInfo disk)
+    {
+        var partitions = _working.Partitions.Where(partition =>
+            string.Equals(partition.OsDiskStableId, disk.StableId,
+                StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (partitions.Length > 1 || partitions.Any(partition => !IsExactProviderMsr(partition)))
+        {
+            await ShowMessageAsync(Text("布局计划被阻止", "Layout plan blocked"),
+                Text("新扫描中的分区不符合 GPT 空盘或唯一精确 provider MSR 条件。",
+                    "The fresh scan does not show an empty GPT disk or one exact provider MSR."));
+            return null;
+        }
+
+        var msr = partitions.SingleOrDefault();
+        var targetSummary = Text(
+            $"OS Disk: {disk.StableId}; size={disk.Size}; partition style={disk.PartitionStyle}\n" +
+            (msr is null
+                ? "Provider MSR: none"
+                : $"Provider MSR: {msr.StableId}; type={msr.PartitionTypeId}; offset={msr.Offset}; size={msr.Size}"),
+            $"OS disk: {disk.StableId}; size={disk.Size}; partition style={disk.PartitionStyle}\n" +
+            (msr is null
+                ? "Provider MSR: none"
+                : $"Provider MSR: {msr.StableId}; type={msr.PartitionTypeId}; offset={msr.Offset}; size={msr.Size}"));
+        var msrBox = new CheckBox
+        {
+            Content = Text("保留一个 16 MiB MSR（位于 1 MiB）", "Create one 16 MiB MSR at 1 MiB"),
+            IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize
+        };
+        var dataBox = new CheckBox
+        {
+            Content = Text("使用剩余空间建立 BasicData 分区", "Create a BasicData partition from the remaining space"),
+            IsChecked = false
+        };
+        var formatBox = new CheckBox
+        {
+            Content = Text("快速格式化为 NTFS / 64 KiB", "Quick-format as NTFS / 64 KiB"),
+            IsChecked = true
+        };
+        var labelBox = new TextBox
+        {
+            Header = Text("卷标（可选）", "Volume label (optional)"),
+            Text = "WinPool_Test"
+        };
+        var letterBox = new TextBox
+        {
+            Header = Text("盘符 D–Z（可留空）", "Drive letter D–Z (optional)"),
+            MaxLength = 1
+        };
+        var layoutPreview = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        void RefreshPreview()
+        {
+            var total = disk.Size / BytesPerMiB * BytesPerMiB;
+            var dataOffset = msrBox.IsChecked == true ? 17 * BytesPerMiB : BytesPerMiB;
+            var dataSize = total - dataOffset - BytesPerMiB;
+            layoutPreview.Text = dataBox.IsChecked == true
+                ? Text($"新数据分区起点：{dataOffset}；大小：{dataSize} bytes（已保留末尾 1 MiB）。",
+                    $"New BasicData offset: {dataOffset}; size: {dataSize} bytes (1 MiB tail reserve).")
+                : Text("不会创建 BasicData 分区。", "No BasicData partition will be created.");
+            formatBox.IsEnabled = dataBox.IsChecked == true;
+            labelBox.IsEnabled = dataBox.IsChecked == true && formatBox.IsChecked == true;
+            letterBox.IsEnabled = dataBox.IsChecked == true;
+        }
+        msrBox.Checked += (_, _) => RefreshPreview();
+        msrBox.Unchecked += (_, _) => RefreshPreview();
+        dataBox.Checked += (_, _) => RefreshPreview();
+        dataBox.Unchecked += (_, _) => RefreshPreview();
+        formatBox.Checked += (_, _) => RefreshPreview();
+        formatBox.Unchecked += (_, _) => RefreshPreview();
+        RefreshPreview();
+
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = targetSummary,
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(msrBox);
+        panel.Children.Add(dataBox);
+        panel.Children.Add(formatBox);
+        panel.Children.Add(labelBox);
+        panel.Children.Add(letterBox);
+        panel.Children.Add(layoutPreview);
+        panel.Children.Add(validation);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = Text("完成 GPT 磁盘布局", "Complete GPT disk layout"),
+            Content = new ScrollViewer { MaxHeight = 520, Content = panel },
+            PrimaryButtonText = Text("准备第二阶段计划", "Prepare second-phase plan"),
+            CloseButtonText = Text("取消", "Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            if (dataBox.IsChecked == true && disk.Size / BytesPerMiB * BytesPerMiB
+                    - (msrBox.IsChecked == true ? 17 * BytesPerMiB : BytesPerMiB)
+                    - BytesPerMiB <= 0)
+            {
+                validation.Text = Text("磁盘容量不足以建立所选布局。", "The disk is too small for the selected layout.");
+                args.Cancel = true;
+                return;
+            }
+            var letter = letterBox.Text.Trim().ToUpperInvariant();
+            if (dataBox.IsChecked == true && letter.Length > 0
+                && (letter.Length != 1 || letter[0] is < 'D' or > 'Z'))
+            {
+                validation.Text = Text("盘符只能为 D–Z，或留空。", "The drive letter must be D–Z or blank.");
+                args.Cancel = true;
+                return;
+            }
+        };
+        if (await DialogCoordinator.ShowAsync(dialog) != ContentDialogResult.Primary)
+            return null;
+
+        var createData = dataBox.IsChecked == true;
+        var diskSizeBytes = createData
+            ? disk.Size / BytesPerMiB * BytesPerMiB
+            : (long?)null;
+        var selectedLetter = letterBox.Text.Trim().ToUpperInvariant();
+        return new InitializedDiskLayoutOptions(
+            msrBox.IsChecked == true,
+            diskSizeBytes,
+            createData && formatBox.IsChecked == true,
+            createData && formatBox.IsChecked == true ? labelBox.Text.Trim() : null,
+            createData && selectedLetter.Length == 1 ? selectedLetter[0] : null);
     }
 
     private async void ConvertGpt_Click(object sender, RoutedEventArgs e)
@@ -2389,8 +2642,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             if (proposal is null)
             {
                 await ShowMessageAsync(Text("真实文件系统未开放", "Real file system is unavailable"),
-                    Text("现有真实数据分区仅支持 NTFS 或 exFAT；ReFS 与未知文件系统保持禁用，不会改用其它格式。",
-                        "Existing real data partitions support only NTFS or exFAT. ReFS and unknown file systems stay disabled and are never changed to another format."));
+                    Text("现有真实数据分区仅开放 64 KiB NTFS/exFAT，或 C01 条件下的 64 KiB 快速 ReFS；未知文件系统保持禁用，不会改用其它格式。",
+                        "Existing real data partitions allow 64 KiB NTFS/exFAT or C01's conditional quick ReFS with 64 KiB. Unknown file systems stay disabled and are never changed to another format."));
                 return;
             }
             await SubmitRealAsync(proposal);

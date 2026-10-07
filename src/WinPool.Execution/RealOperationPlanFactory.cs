@@ -171,6 +171,9 @@ public static class RealOperationValidator
                 throw new ArgumentException("A new EFI or Recovery partition requires its explicit fixed format step.");
             }
         }
+
+        if (request.Intent == OperationIntent.InitializeDisk)
+            ValidateInitializationShape(request);
     }
 
     public static bool IsValid(OperationPlan plan)
@@ -280,7 +283,7 @@ public static class RealOperationValidator
     private static bool IsAllowed(OperationIntent intent, RealStorageCommand command) => intent switch
     {
         OperationIntent.SetDiskOnlineState => command is SetDiskOnlineCommand,
-        OperationIntent.InitializeDisk => command is InitializeGptCommand or CreatePartitionCommand,
+        OperationIntent.InitializeDisk => command is InitializeGptCommand or DeletePartitionCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
         OperationIntent.ConvertDisk => command is ClearDiskCommand or InitializeGptCommand or CreatePartitionCommand,
         OperationIntent.ClearDisk => command is ClearDiskCommand,
         OperationIntent.CreatePartition => command is CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
@@ -301,6 +304,73 @@ public static class RealOperationValidator
         OperationIntent.RebuildStoragePool => command is ClearDiskCommand or DeleteVirtualDiskCommand or DeleteTierCommand or DeletePoolCommand or CreatePoolCommand or CreateTierCommand or CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand or InitializeGptCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
         _ => false
     };
+
+    private static void ValidateInitializationShape(RealOperationIntentRequest request)
+    {
+        var disks = request.Targets.Where(target => target.Kind == StorageObjectKind.OsDisk).ToArray();
+        var partitions = request.Targets.Where(target => target.Kind == StorageObjectKind.Partition).ToArray();
+        if (disks.Length != 1 || request.Targets.Any(target => target.Kind is not
+                (StorageObjectKind.OsDisk or StorageObjectKind.Partition or StorageObjectKind.PhysicalDisk)))
+            throw new ArgumentException("Initialization requires one exact existing OS disk and its listed normalization target only.");
+        var disk = RealTargetReference.ForExisting(disks[0]);
+        var steps = request.Steps;
+        if (steps[0].Command is InitializeGptCommand initialize)
+        {
+            // Retain the historical two-step shape for read-only recovery. New
+            // initialization proposals should observe Windows' GPT result first.
+            if (initialize.Disk != disk || partitions.Length != 0 || steps.Count > 2 ||
+                (steps.Count == 2 && steps[1].Command is not CreatePartitionCommand
+                    { Role: RealPartitionRole.Msr } ) ||
+                (steps.Count == 2 && ((CreatePartitionCommand)steps[1].Command).Disk != disk))
+                throw new ArgumentException("RAW initialization permits only GPT initialization and its explicit MSR step.");
+            return;
+        }
+
+        // A separately confirmed continuation can normalize one provider MSR,
+        // then build one optional MSR and one data partition on that same disk.
+        // The Windows planner must prove the deleted target's live role,
+        // geometry, absence of a file system, and sole-partition status.
+        var index = 0;
+        if (steps[index].Command is DeletePartitionCommand remove)
+        {
+            if (partitions.Length != 1 || remove.Partition != RealTargetReference.ForExisting(partitions[0]))
+                throw new ArgumentException("GPT normalization deletes one exact listed provider MSR.");
+            index++;
+        }
+        else if (partitions.Length != 0)
+            throw new ArgumentException("Initialization cannot include unrelated existing partitions.");
+
+        var hasMsr = false;
+        if (index < steps.Count && steps[index].Command is CreatePartitionCommand { Role: RealPartitionRole.Msr } msr)
+        {
+            if (msr.Disk != disk) throw new ArgumentException("The replacement MSR must use the exact initialized disk.");
+            hasMsr = true;
+            index++;
+        }
+        string? dataStep = null;
+        if (index < steps.Count && steps[index].Command is CreatePartitionCommand { Role: RealPartitionRole.BasicData } data)
+        {
+            if (data.Disk != disk || data.OffsetBytes != (hasMsr ? 17L : 1L) * 1048576)
+                throw new ArgumentException("The initialization data partition must follow the selected MSR layout on the same disk.");
+            dataStep = steps[index++].Id;
+        }
+        if (index < steps.Count && steps[index].Command is FormatVolumeCommand format)
+        {
+            if (dataStep is null || format.Partition != RealTargetReference.FromStep(StorageObjectKind.Partition, dataStep) ||
+                format.FileSystem != RealFileSystem.Ntfs || format.ClusterBytes != 65536 || format.Full)
+                throw new ArgumentException("Automatic initialization formats only its new data partition with quick NTFS/64 KiB.");
+            index++;
+        }
+        if (index < steps.Count && steps[index].Command is SetDriveLetterCommand letter)
+        {
+            if (dataStep is null || letter.Partition != RealTargetReference.FromStep(StorageObjectKind.Partition, dataStep) ||
+                letter.PreviousLetter is not null || letter.NewLetter is null)
+                throw new ArgumentException("Automatic initialization assigns a letter only to its new data partition.");
+            index++;
+        }
+        if (index != steps.Count)
+            throw new ArgumentException("Initialization continuation must follow delete-MSR, create-MSR, create-data, format and letter order.");
+    }
 
     private static void ValidateCommand(RealStorageCommand command)
     {

@@ -5,15 +5,32 @@ public sealed class InfrastructureTests
     [Fact]
     public void PhysicalDiskDeviceResolverUsesAQuickTargetedReadOnlyLookup()
     {
+        // A physical member disappears from Win32_DiskDrive after joining a
+        // concrete pool. Disk zero is therefore not a guaranteed basic disk.
+        using var searcher = new System.Management.ManagementObjectSearcher(
+            "root\\CIMV2", "SELECT Index,PNPDeviceID FROM Win32_DiskDrive");
+        searcher.Options.Timeout = TimeSpan.FromSeconds(5);
+        using var results = searcher.Get();
+        var available = new List<(int Number, string DeviceId)>();
+        foreach (System.Management.ManagementBaseObject disk in results)
+        using (disk)
+        {
+            if (disk["Index"] is uint index && index <= int.MaxValue
+                && disk["PNPDeviceID"] is string pnp && !string.IsNullOrWhiteSpace(pnp))
+                available.Add(((int)index, pnp.Trim()));
+        }
+        Assert.NotEmpty(available);
+        var selected = available.OrderBy(item => item.Number).First();
+        var resolver = new WinPool.Infrastructure.Windows.WindowsPhysicalDiskDeviceResolver();
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        var deviceId = new WinPool.Infrastructure.Windows.WindowsPhysicalDiskDeviceResolver()
-            .ResolvePnpDeviceId(0);
+        var deviceId = resolver.ResolvePnpDeviceId(selected.Number);
         timer.Stop();
 
-        Assert.False(string.IsNullOrWhiteSpace(deviceId));
+        Assert.Equal(selected.DeviceId, deviceId);
         Assert.True(
             timer.Elapsed < TimeSpan.FromSeconds(5),
             $"Targeted disk lookup took {timer.Elapsed.TotalMilliseconds:N0} ms.");
+        Assert.Null(resolver.ResolvePnpDeviceId(-1));
     }
 
     [Fact]

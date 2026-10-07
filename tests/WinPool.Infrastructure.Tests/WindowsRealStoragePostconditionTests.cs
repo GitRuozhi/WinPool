@@ -334,6 +334,132 @@ public sealed class WindowsRealStoragePostconditionTests
         WindowsRealStorageTopology after) =>
         WindowsRealStorageBackend.VerifyAfter(command, target, result, before, after);
 
+    [Fact]
+    public void HddTemplatePostconditionRequiresReturnedIdentityAndUnusedExactLayout()
+    {
+        var baseline = Snapshot() with
+        {
+            PhysicalDisks = [Physical() with { CanPool = false, PoolStableId = PoolId }],
+            StoragePools = [Primordial(), Pool()]
+        };
+        var tier = new StorageTierInfo("tier:new", true, "HDD", "HDD", "Simple", 0, 0,
+            PoolId, null, [PhysicalId], NumberOfColumns: 1, Interleave: 65536);
+        var before = Topology(baseline);
+        var command = new CreateTierCommand(RealTargetReference.ForExisting(Id(StorageObjectKind.StoragePool, PoolId)), "HDD", 65536, 1);
+        var target = Target(StorageObjectKind.StoragePool, PoolId);
+        var returned = Returned(tier.StableId, tier.StableId);
+        Assert.NotNull(Verify(command, target, returned, before, Topology(baseline with { StorageTiers = [tier] })));
+        Assert.Null(Verify(command, target, Returned("wrong-id", "wrong-object"), before, Topology(baseline with { StorageTiers = [tier] })));
+        Assert.Null(Verify(command, target, returned, before, Topology(baseline with
+        {
+            StorageTiers = [tier with { VirtualDiskStableId = "vd:unexpected" }],
+            VirtualDisks = [new VirtualDiskInfo("vd:unexpected", true, "Unexpected", "Healthy", "OK", "Simple", "Fixed",
+                1, 65536, Size, Size, PoolId, [tier.StableId], [])]
+        })));
+        Assert.Null(Verify(command, target, returned, before, Topology(baseline with { StorageTiers = [tier with { NumberOfColumns = 2 }] })));
+        Assert.Null(Verify(command, target, returned, before, Topology(baseline with { StorageTiers = [tier with { FriendlyName = "Provider ignored requested name" }] })));
+    }
+
+    [Fact]
+    public void TieredCreationBindsDistinctInstanceToReturnedVdAndFrozenTemplate()
+    {
+        var template = new StorageTierInfo("tier:template", true, "Any template name", "HDD", "Simple", 0, 0,
+            PoolId, null, [PhysicalId], NumberOfColumns: 1, Interleave: 65536);
+        var baseline = Snapshot() with
+        {
+            PhysicalDisks = [Physical() with { CanPool = false, PoolStableId = PoolId }],
+            StoragePools = [Primordial(), Pool()], StorageTiers = [template]
+        };
+        var vd = new VirtualDiskInfo("vd:returned", true, "Data", "Healthy", "OK", "Simple", "Fixed",
+            1, 65536, Size, Size, PoolId, ["tier:instance"], [9],
+            NumberOfDataCopies: 1, PhysicalDiskRedundancy: 0, AllocatedSize: Size);
+        // The provider changes both identity and name when cloning a template.
+        var instance = template with { StableId = "tier:instance", FriendlyName = "Cloned name", Size = Size,
+            VirtualDiskStableId = vd.StableId, FootprintOnPool = Size, NumberOfDataCopies = 1, PhysicalDiskRedundancy = 0 };
+        var disk = new OsDiskInfo("disk:created", "Data", 9, "RAW", Size, false, false, false, null, vd.StableId);
+        var created = baseline with { VirtualDisks = [vd], StorageTiers = [template, instance],
+            OsDisks = [..baseline.OsDisks, disk] };
+        var command = new CreateTieredVirtualDiskCommand(
+            RealTargetReference.ForExisting(Id(StorageObjectKind.StoragePool, PoolId)),
+            RealTargetReference.ForExisting(Id(StorageObjectKind.StorageTier, template.StableId)), "Data", Size);
+        var target = Target(StorageObjectKind.StoragePool, PoolId) with
+        { RelatedUniqueId = template.StableId, RelatedObjectId = template.StableId };
+        var returned = Returned(vd.StableId, vd.StableId) with
+        {
+            TieredCreationInput = new(template.StableId, template.StableId, PoolId, PhysicalId,
+                "HDD", "Simple", "Fixed", 1, 65536, Size)
+        };
+        var verified = Verify(command, target, returned, Topology(baseline), Topology(created));
+        Assert.NotNull(verified);
+        Assert.Equal(template.StableId, verified.TieredCreation!.TemplateStableId);
+        Assert.Equal(instance.StableId, verified.TieredCreation.TierInstanceStableId);
+        Assert.Equal(vd.StableId, verified.TieredCreation.VirtualDiskStableId);
+        Assert.Null(Verify(command, target, returned with { TieredCreationInput = null }, Topology(baseline), Topology(created)));
+        Assert.Null(Verify(command, target, returned with { UniqueId = "unreturned-vd" }, Topology(baseline), Topology(created)));
+        Assert.Null(Verify(command, target, returned, Topology(baseline), Topology(created with
+        { StorageTiers = [template, instance with { Size = Size + Offset }] })));
+        Assert.Throws<InvalidDataException>(() => Verify(command, target, returned, Topology(baseline), Topology(created with
+        { StorageTiers = [template, instance with { MemberPhysicalDiskIds = [] }] })));
+        Assert.Null(Verify(command, target, returned, Topology(baseline), Topology(created with
+        { OsDisks = [..baseline.OsDisks, disk with { PartitionStyle = "GPT" }] })));
+    }
+
+    [Fact]
+    public void VdDeletionRemovesInstancesAndPreservesPoolTemplates()
+    {
+        var template = new StorageTierInfo("tier:template", true, "HDD", "HDD", "Simple", 0, 0,
+            PoolId, null, [PhysicalId], NumberOfColumns: 1, Interleave: 65536);
+        var instance = template with { StableId = "tier:instance", Size = Size, VirtualDiskStableId = "vd:old" };
+        var baseline = Snapshot() with
+        {
+            PhysicalDisks = [Physical() with { CanPool = false, PoolStableId = PoolId }],
+            StoragePools = [Primordial(), Pool()], StorageTiers = [template, instance],
+            VirtualDisks = [new VirtualDiskInfo("vd:old", true, "Data", "Healthy", "OK", "Simple", "Fixed",
+                1, 65536, Size, Size, PoolId, [instance.StableId], [])]
+        };
+        var command = new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(Id(StorageObjectKind.VirtualDisk, "vd:old")));
+        var target = Target(StorageObjectKind.VirtualDisk, "vd:old");
+        var after = baseline with { VirtualDisks = [], StorageTiers = [template] };
+        Assert.NotNull(Verify(command, target, Returned(), Topology(baseline), Topology(after)));
+        Assert.Null(Verify(command, target, Returned(), Topology(baseline), Topology(after with { StorageTiers = [] })));
+        // Keep a valid graph while retaining the old instance identity. A
+        // relationship to the deleted VD would fail graph validation before
+        // the deletion postcondition can inspect the leftover instance.
+        Assert.Null(Verify(command, target, Returned(), Topology(baseline), Topology(after with
+        { StorageTiers = [template, instance with { VirtualDiskStableId = null }] })));
+        Assert.Null(Verify(new DeleteTierCommand(RealTargetReference.ForExisting(Id(StorageObjectKind.StorageTier, instance.StableId))),
+            Target(StorageObjectKind.StorageTier, instance.StableId), Returned(), Topology(baseline), Topology(after)));
+    }
+
+    [Fact]
+    public void OnlyProvenPoolTemplateMayHaveUnspecifiedCapacity()
+    {
+        var template = new StorageTierInfo("tier:template", true, "HDD", "HDD", "Simple", 0, 0,
+            PoolId, null, [PhysicalId], NumberOfColumns: 1, Interleave: 65536);
+        var baseline = Snapshot() with
+        {
+            PhysicalDisks = [Physical() with { CanPool = false, PoolStableId = PoolId }],
+            StoragePools = [Primordial(), Pool()], StorageTiers = [template]
+        };
+        WinPoolSourceObject Unspecified(WinPoolSourceObject item) => item.Id != template.StableId ? item
+            : item with { Fields = item.Fields.Where(field => field.Name is not ("Size" or "FootprintOnPool"))
+                .Append(WinPoolSourceField.Returned<long?>("Size", null, FactValueType.UInt64, item.SourceRef))
+                .Append(WinPoolSourceField.Returned<long?>("FootprintOnPool", null, FactValueType.UInt64, item.SourceRef)).ToImmutableArray() };
+        var topology = Topology(baseline, Unspecified);
+        Assert.Equal(PhysicalId, topology.RequireSinglePhysicalClosure([Id(StorageObjectKind.StorageTier, template.StableId)]).PhysicalDiskId);
+        var allocated = baseline with
+        {
+            StorageTiers = [template with { VirtualDiskStableId = "vd:allocated" }],
+            VirtualDisks = [new VirtualDiskInfo("vd:allocated", true, "Data", "Healthy", "OK", "Simple", "Fixed",
+                1, 65536, Size, Size, PoolId, [template.StableId], [])]
+        };
+        Assert.Throws<InvalidDataException>(() => Topology(allocated, Unspecified)
+            .RequireSinglePhysicalClosure([Id(StorageObjectKind.StorageTier, template.StableId)]));
+        var missing = Topology(baseline, item => item.Id == template.StableId
+            ? item with { Fields = item.Fields.Where(field => field.Name != "Size").ToImmutableArray() } : item);
+        Assert.Throws<InvalidDataException>(() => missing.RequireSinglePhysicalClosure([Id(StorageObjectKind.StorageTier, template.StableId)]));
+    }
+
     private static StorageObjectId Id(StorageObjectKind kind, string key) => new(System, kind, key);
 
     private static WindowsStorageCommandResult Returned(
@@ -384,6 +510,9 @@ public sealed class WindowsRealStoragePostconditionTests
         Func<WinPoolSourceObject, WinPoolSourceObject>? transform = null)
     {
         var facts = WinPoolSimulationFacts.Create(snapshot, System);
+        facts = facts with { Relationships = facts.Relationships.AddRange(snapshot.StorageTiers
+            .Where(tier => tier.VirtualDiskStableId is null).SelectMany(tier => tier.MemberPhysicalDiskIds
+                .Select(member => new WinPoolFactRelationship(tier.StableId, member, "template-pool-member", Now)))) };
         var sources = facts.Sources.Select(source => source with
         {
             Origin = source.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)
@@ -399,7 +528,12 @@ public sealed class WindowsRealStoragePostconditionTests
         }
         var objects = facts.Objects.Select(item => item.ObjectType == FactObjectType.Disk
             ? item with { Fields = item.Fields.Add(WinPoolSourceField.Returned(
-                "Path", @"\\.\PHYSICALDRIVE7", FactValueType.String, item.SourceRef)) }
+                "Path", @"\\.\PHYSICALDRIVE7", FactValueType.String, item.SourceRef))
+                .Add(WinPoolSourceField.Returned("IsClustered", false, FactValueType.Boolean, item.SourceRef)) }
+            : item.ObjectType == FactObjectType.StorageTier
+                ? item with { Fields = item.Fields.Add(WinPoolSourceField.Returned("AllocatedSize",
+                    snapshot.StorageTiers.Single(tier => tier.StableId == item.Id).Size, FactValueType.UInt64, item.SourceRef))
+                    .Add(WinPoolSourceField.Returned("ProvisioningType", 2, FactValueType.UInt64, item.SourceRef)) }
             : item).ToImmutableArray();
         if (transform is not null) objects = objects.Select(transform).ToImmutableArray();
         facts = facts with

@@ -9,7 +9,8 @@ public static class RealPartitionResizeUiRange
     public static bool IsSupportedFileSystem(string? fileSystem) =>
         string.IsNullOrWhiteSpace(fileSystem) ||
         fileSystem.Equals("RAW", StringComparison.OrdinalIgnoreCase) ||
-        fileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase);
+        fileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase) ||
+        fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase);
 
     public static bool TryGetWholeMibTargets(
         RealPartitionResizeRange range, bool extend,

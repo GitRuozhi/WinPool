@@ -217,9 +217,10 @@ public static class EditWorkspace
         StorageSnapshot snapshot,
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
         StorageSnapshot? committed = null,
-        IReadOnlyCollection<string>? visibleSimulatedLayers = null)
+        IReadOnlyCollection<string>? visibleSimulatedLayers = null,
+        bool showSourceTierTemplates = false)
     {
-        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed, visibleSimulatedLayers);
+        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed, visibleSimulatedLayers, showSourceTierTemplates);
         return new TopologyNode(
             new StorageUnitRef(PoolRowStableId, StorageUnitKind.VirtualDiskGroup, string.Empty, false),
             string.Empty,
@@ -233,7 +234,8 @@ public static class EditWorkspace
         StorageSnapshot snapshot,
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
         StorageSnapshot? committed = null,
-        IReadOnlyCollection<string>? visibleSimulatedLayers = null)
+        IReadOnlyCollection<string>? visibleSimulatedLayers = null,
+        bool showSourceTierTemplates = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var baseline = committed ?? snapshot;
@@ -247,7 +249,7 @@ public static class EditWorkspace
                      .ThenBy(pool => IsDraftPool(pool.StableId) ? 1 : 0)
                      .ThenBy(pool => pool.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline, visibleSimulatedLayers));
+            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline, visibleSimulatedLayers, showSourceTierTemplates));
         }
 
         // Single-draft rule: the plus-pool affordance is present only while
@@ -776,9 +778,28 @@ public sealed record StructureProblem(
     }
 
     /// <summary>
-    /// Calculates the usable geometry for one unallocated region when creating a partition.
-    /// Offsets and sizes are bytes. New partition starts and lengths use a 1 MiB grid; the first
-    /// disk MiB is reserved when the region begins at byte zero.
+    /// Calculates real GPT creation geometry inside an observed gap, retaining the
+    /// Windows planner's one-MiB reservation at each disk end.
+    /// </summary>
+    public static PartitionCreateGeometry GetRealPartitionCreateGeometry(
+        long diskSizeBytes, long gapOffsetBytes, long gapSizeBytes)
+    {
+        if (diskSizeBytes <= PartitionCreateAlignmentBytes || gapOffsetBytes < 0
+            || gapSizeBytes <= 0 || gapOffsetBytes >= diskSizeBytes
+            || gapSizeBytes > diskSizeBytes - gapOffsetBytes)
+            return PartitionCreateGeometry.Unavailable(gapOffsetBytes, null,
+                "The selected unallocated region exceeds the observed disk geometry.");
+
+        // The real Windows planner reserves one MiB at both GPT disk ends.
+        // Intersect only this selected gap; middle gaps keep their own boundary.
+        var usableEnd = Math.Min(gapOffsetBytes + gapSizeBytes,
+            diskSizeBytes - PartitionCreateAlignmentBytes);
+        return GetPartitionCreateGeometry(gapOffsetBytes, usableEnd - gapOffsetBytes);
+    }
+
+    /// <summary>
+    /// Calculates whole-MiB creation geometry for a modeled unallocated region.
+    /// The first disk MiB is reserved when the region begins at byte zero.
     /// </summary>
     public static PartitionCreateGeometry GetPartitionCreateGeometry(long gapOffsetBytes, long gapSizeBytes)
     {
@@ -1063,7 +1084,8 @@ public sealed record StructureProblem(
         StorageSnapshot snapshot,
         long minUnallocatedBytes,
         StorageSnapshot committed,
-        IReadOnlyCollection<string>? visibleSimulatedLayers)
+        IReadOnlyCollection<string>? visibleSimulatedLayers,
+        bool showSourceTierTemplates)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -1097,13 +1119,13 @@ public sealed record StructureProblem(
 
         AddVirtualDisks(poolNode, pool, snapshot, minUnallocatedBytes);
 
-        // Snapshot-driven tier cards, ordered like Manage: a tier renders
-        // only when it exists and holds at least one member disk, so a draft
-        // pool shows its performance/capacity tiers only after disks of the
-        // matching media type join.
+        // Source-backed pool templates have no allocated tier members yet.
+        // Show their own identities without treating template eligibility as
+        // allocated membership. Simulation/draft cards keep the member rule.
         foreach (var tier in snapshot.StorageTiers
                      .Where(item => item.PoolStableId == pool.StableId)
-                     .Where(item => item.MemberPhysicalDiskIds.Count > 0)
+                     .Where(item => item.MemberPhysicalDiskIds.Count > 0
+                         || (showSourceTierTemplates && !IsDraftPool(pool.StableId)))
                      .OrderBy(item => TopologyProjector.TierSortOrder(item.MediaType)))
         {
             poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, committed));
@@ -1112,6 +1134,41 @@ public sealed record StructureProblem(
         AddSimulatedLayers(poolNode, pool, members, snapshot, committed, visibleSimulatedLayers);
         AddUnallocatedGroup(poolNode, pool, members, snapshot, committed);
         return poolNode;
+    }
+
+    /// <summary>Selects form values without conflating same-media templates and VD instances.</summary>
+    public static Dictionary<string, StorageTierInfo> SelectPoolTiersForForm(
+        StorageSnapshot snapshot,
+        string poolId,
+        string? selectedTierId,
+        string? selectedVirtualDiskId,
+        bool isSimulatedInventory)
+    {
+        var tiers = snapshot.StorageTiers.Where(item =>
+            string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase));
+        if (isSimulatedInventory)
+        {
+            return tiers.ToDictionary(item => NormalizeMedia(item.MediaType), StringComparer.OrdinalIgnoreCase);
+        }
+
+        var result = new Dictionary<string, StorageTierInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in tiers.GroupBy(item => NormalizeMedia(item.MediaType), StringComparer.OrdinalIgnoreCase))
+        {
+            var candidates = group.ToArray();
+            var selected = candidates.Where(item => !string.IsNullOrWhiteSpace(selectedTierId)
+                && string.Equals(item.StableId, selectedTierId, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (selected.Length == 0 && !string.IsNullOrWhiteSpace(selectedVirtualDiskId))
+            {
+                selected = candidates.Where(item => string.Equals(
+                    item.VirtualDiskStableId, selectedVirtualDiskId, StringComparison.OrdinalIgnoreCase)).ToArray();
+            }
+
+            // Ambiguous media groups stay blank until an exact card/VD is selected.
+            if (selected.Length == 1) result.Add(group.Key, selected[0]);
+            else if (selected.Length == 0 && candidates.Length == 1) result.Add(group.Key, candidates[0]);
+        }
+
+        return result;
     }
 
     /// <summary>

@@ -632,6 +632,10 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 ? $"{tier.ResiliencySettingName} {interleave / 1024}K"
                 : tier.ResiliencySettingName;
             return TopologyProjector.JoinSummary(
+                !owner.IsUsingSimulatedInventory
+                    ? owner.Localization[tier.VirtualDiskStableId is null
+                        ? "PoolTierTemplate" : "VirtualDiskTierInstance"]
+                    : null,
                 spec,
                 $"{visibleMemberCount} {owner.Localization["PhysicalDisk"]}",
                 TopologyProjector.TierCapacityText(snapshot, tier));

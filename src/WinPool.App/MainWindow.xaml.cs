@@ -1350,6 +1350,15 @@ public sealed partial class MainWindow : Window
         UpdateShellNavigationTextVisibility();
     }
 
+    internal void RefreshActiveEditorAfterRealInventory(EditorPageBase source)
+    {
+        if (RootFrame.Content is EditorPageBase activePage
+            && !ReferenceEquals(activePage, source))
+        {
+            activePage.RefreshActiveRealInventoryFromWorkspace();
+        }
+    }
+
     private void ShellNavigationList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_updatingNavigation && ShellNavigationList.SelectedItem is ShellNavigationItem item)

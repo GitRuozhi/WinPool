@@ -98,6 +98,13 @@ internal static class WinPoolFactCapture
         }
         var relationships = ImmutableArray.CreateBuilder<WinPoolFactRelationship>();
         var ids = objects.Select(x => x.Id).ToHashSet();
+        void AssociationFailure(string className, string reason)
+        {
+            const string ns = "root/microsoft/windows/storage";
+            var sourceId = SourceId(ns, className);
+            sources[sourceId] = new(sourceId, FactOrigin.StorageCim, ns, className,
+                snapshot.ScannedAt, purpose, FieldReadState.Failed, reason);
+        }
         void Link(string? from, string? to, string kind)
         {
             if (from is not null && to is not null && ids.Contains(from) && ids.Contains(to)) relationships.Add(new(from, to, kind, snapshot.ScannedAt));
@@ -118,8 +125,16 @@ internal static class WinPoolFactCapture
         {
             var id = Find(FactObjectType.StoragePool, RawText(pool, "UniqueId"), RawText(pool, "ObjectId"));
             Link(Key(FactObjectType.StorageSubsystem, RawText(pool, "SubsystemAssociationKey")), id, "subsystem-pool");
-            if (pool.TryGetProperty("MemberPhysicalDiskKeys", out var members))
-                foreach (var member in members.EnumerateArray()) Link(id, Key(FactObjectType.PhysicalDisk, member.GetString() ?? ""), "pool-member");
+            if (pool.TryGetProperty("MemberPhysicalDiskKeys", out var members) && members.ValueKind == JsonValueKind.Array)
+                foreach (var member in members.EnumerateArray())
+                {
+                    var memberId = member.ValueKind == JsonValueKind.String
+                        ? Key(FactObjectType.PhysicalDisk, member.GetString() ?? "") : null;
+                    if (id is null || memberId is null)
+                        AssociationFailure("MSFT_PhysicalDisk", "PoolMemberAssociationNotExact");
+                    else Link(id, memberId, "pool-member");
+                }
+            else AssociationFailure("MSFT_PhysicalDisk", "PoolMemberAssociationUnavailable");
         }
         foreach (var disk in Rows("VirtualDisks"))
             Link(Key(FactObjectType.StoragePool, RawText(disk, "PoolAssociationKey")),
@@ -141,6 +156,12 @@ internal static class WinPoolFactCapture
             var id = Find(FactObjectType.StorageTier, RawText(tier, "UniqueId"), RawText(tier, "ObjectId"));
             Link(Key(FactObjectType.StoragePool, RawText(tier, "PoolAssociationKey")), id, "pool-tier");
             Link(Key(FactObjectType.VirtualDisk, RawText(tier, "VirtualDiskAssociationKey")), id, "virtual-disk-tier");
+            if (tier.TryGetProperty("MemberPhysicalDiskKeys", out var members))
+                foreach (var member in members.EnumerateArray())
+                    Link(id, Key(FactObjectType.PhysicalDisk, member.GetString() ?? ""), "tier-member");
+            if (tier.TryGetProperty("TemplatePhysicalDiskKeys", out var eligibleMembers))
+                foreach (var member in eligibleMembers.EnumerateArray())
+                    Link(id, Key(FactObjectType.PhysicalDisk, member.GetString() ?? ""), "template-pool-member");
         }
         // The mount path is an association observed in this capture, never a persistent volume identity.
         foreach (var logical in objects.Where(x => x.ObjectType == FactObjectType.LogicalDisk))

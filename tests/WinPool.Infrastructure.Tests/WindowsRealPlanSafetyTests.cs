@@ -85,6 +85,32 @@ public sealed class WindowsRealPlanSafetyTests
     }
 
     [Fact]
+    public async Task RealFinalGapMaximumPreparesWhileOldDisplayMaximumExceedsGptTailReserve()
+    {
+        const long diskSize = 4_000_787_030_016;
+        const long offset = 17L << 20;
+        var fixture = new Fixture();
+        fixture.SetGptWithCanonicalMsr(diskSize);
+        var disk = fixture.Id(StorageObjectKind.OsDisk, DiskId);
+        var geometry = EditWorkspace.GetRealPartitionCreateGeometry(diskSize, offset, diskSize - offset);
+        Assert.True(geometry.CanCreate);
+        Assert.Equal(3_815_429L << 20, geometry.MaximumSizeBytes);
+        var proposal = fixture.Proposal(OperationIntent.CreatePartition, [disk],
+            [Step("create", new CreatePartitionCommand(RealTargetReference.ForExisting(disk),
+                RealPartitionRole.BasicData, offset, geometry.MaximumSizeBytes!.Value))],
+            "Maximum whole-MiB data partition in the exact observed GPT gap");
+
+        var plan = await fixture.Prepare(proposal);
+        var frozen = Assert.IsType<CreatePartitionCommand>(Assert.Single(plan.RealOperation!.Steps).Command);
+        Assert.Equal(geometry.MaximumSizeBytes, frozen.SizeBytes);
+        Assert.Equal(offset, frozen.OffsetBytes);
+        var rejected = proposal with { Steps = [Step("create", frozen with { SizeBytes = 3_815_430L << 20 })] };
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(rejected));
+        Assert.Equal("The partition does not fit an observed usable GPT gap.", exception.Message);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
     public async Task UnverifiedRefsCreationIsRejectedBeforeAnyWindowsCall()
     {
         var fixture = new Fixture();
@@ -300,6 +326,183 @@ public sealed class WindowsRealPlanSafetyTests
         IReadOnlyList<string>? dependencies = null) => new(id, command, dependencies ?? [],
         "fresh identity", "typed result", "explicit data loss", "synthetic provider facts");
 
+    [Fact]
+    public async Task ExistingRefsFormatRequiresCurrentCapabilityAtPrepareAndPreflight()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionWithRefsVolume();
+        fixture.Capabilities.RefsSupported = true;
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var proposal = fixture.Proposal(OperationIntent.FormatVolume, [partition],
+            [Step("format", new FormatVolumeCommand(RealTargetReference.ForExisting(partition),
+                RealFileSystem.ReFs, 65536, false, "REFS"))], "ReFS quick format");
+        var plan = await fixture.Prepare(proposal);
+        Assert.Contains("live-refs-capability", plan.RealOperation!.Steps[0].SupportEvidence);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan,
+            plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None);
+        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        Assert.Equal("volume:refs", target.RelatedUniqueId);
+        fixture.Capabilities.RefsSupported = false;
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Backend.PreflightStepAsync(plan,
+            plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(0, false)]
+    public async Task RefsRequiresBothSuccessfulProviderMethodsAnd64KiB(int returnValue, bool hasCluster)
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionWithRefsVolume();
+        fixture.Capabilities.RefsSupported = true;
+        fixture.Capabilities.ReturnValue = (uint)returnValue;
+        fixture.Capabilities.Has64KiB = hasCluster;
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.ReadResizeRange(
+            fixture.Id(StorageObjectKind.Partition, "partition:data")));
+        Assert.Equal(0, fixture.PartitionSizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task VerifiedRefsAllowsExtensionButNeverShrink()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionWithRefsVolume();
+        fixture.Capabilities.RefsSupported = true;
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var range = await fixture.ReadResizeRange(partition);
+        Assert.Equal(range.CurrentSizeBytes, range.AllowedMinBytes);
+        var extend = fixture.Proposal(OperationIntent.ResizePartition, [partition],
+            [Step("resize", new ResizePartitionCommand(RealTargetReference.ForExisting(partition), 192L << 20))], "ReFS larger");
+        _ = await fixture.Prepare(extend);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(extend with
+        {
+            Steps = [Step("resize", new ResizePartitionCommand(RealTargetReference.ForExisting(partition), 96L << 20))]
+        }));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task HddTemplateCreationRequiresCurrentSubsystemSupportAndEmptyPool()
+    {
+        var fixture = new Fixture();
+        fixture.SetOldPool();
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var proposal = fixture.Proposal(OperationIntent.CreateStorageTier, [pool],
+            [Step("tier", new CreateTierCommand(RealTargetReference.ForExisting(pool), "HDD", 65536, 1))], "HDD template");
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(proposal));
+        fixture.Capabilities.TierSupported = true;
+        var plan = await fixture.Prepare(proposal);
+        Assert.Contains("no allocated size", plan.RealOperation!.Steps[0].AfterCondition);
+        fixture.Capabilities.TierSupported = false;
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Backend.PreflightStepAsync(plan,
+            plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        fixture.Capabilities.TierSupported = true;
+        fixture.SetOldPool(withChild: true);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task TieredCreationUsesExactUnusedTemplateRangeAndRetainsC05Barrier()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate();
+        fixture.Capabilities.TierSupported = true;
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
+        var proposal = fixture.Proposal(OperationIntent.CreateVirtualDisk, [pool, tier],
+            [Step("vd", new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool),
+                RealTargetReference.ForExisting(tier), "Data", 256L << 20))], "Tiered VD");
+        var plan = await fixture.Prepare(proposal);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
+            new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Equal("tier:hdd", JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!.RelatedObjectId);
+        fixture.Capabilities.TierMaximum = 128L << 20;
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan,
+            plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        var resize = fixture.Proposal(OperationIntent.ResizeStorageTier, [tier],
+            [Step("resize", new ResizeTierCommand(RealTargetReference.ForExisting(tier), 512L << 20))], "Larger tier");
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(resize));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TieredCreationPreparesAndRechecksLegalEnumerationOrOffsetRange(bool enumeration)
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate();
+        fixture.Capabilities.TierSupported = true;
+        fixture.Capabilities.TierCreationSize = WindowsRealStorageCapabilityReader.ParseTierCreationSize(0U,
+            enumeration ? new ulong[] { 160UL << 20, 224UL << 20 } : null,
+            enumeration ? null : 96UL << 20, enumeration ? null : 224UL << 20,
+            enumeration ? null : 64UL << 20);
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
+        var proposal = fixture.Proposal(OperationIntent.CreateVirtualDisk, [pool, tier],
+            [Step("vd", new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool),
+                RealTargetReference.ForExisting(tier), "Data", 160L << 20))], "Tiered VD");
+        var plan = await fixture.Prepare(proposal);
+        _ = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
+            new Dictionary<string, string>(), CancellationToken.None);
+        fixture.Capabilities.TierCreationSize = WindowsRealStorageCapabilityReader.ParseTierCreationSize(0U,
+            new ulong[] { 224UL << 20 }, null, null, null);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan,
+            plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        var resize = fixture.Proposal(OperationIntent.ResizeStorageTier, [tier],
+            [Step("resize", new ResizeTierCommand(RealTargetReference.ForExisting(tier), 256L << 20))], "Larger tier");
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(resize));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task HddRenameAndRemovalAreSeparateExactSupportedPlans()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate();
+        fixture.Capabilities.TierSupported = true;
+        var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
+        var rename = fixture.Proposal(OperationIntent.RenameStorageObject, [tier],
+            [Step("rename", new RenameTierCommand(RealTargetReference.ForExisting(tier), "Renamed"))], "Renamed tier");
+        _ = await fixture.Prepare(rename);
+        var delete = fixture.Proposal(OperationIntent.DeleteStorageTier, [tier],
+            [Step("remove", new DeleteTierCommand(RealTargetReference.ForExisting(tier)))], "Template removed");
+        _ = await fixture.Prepare(delete);
+        fixture.Capabilities.TierSupported = false;
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(delete));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task DissolveRequiresExplicitVdThenTierThenPoolRemoval()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate(withVirtualDisk: true);
+        fixture.Capabilities.TierSupported = true;
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
+        var vd = fixture.Id(StorageObjectKind.VirtualDisk, "vd:child");
+        var missingTier = fixture.Proposal(OperationIntent.DeleteStoragePool, [pool, vd],
+            [Step("vd", new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(vd))),
+             Step("pool", new DeletePoolCommand(RealTargetReference.ForExisting(pool)), ["vd"])], "Dissolved");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(missingTier));
+        var deleteTierFirst = fixture.Proposal(OperationIntent.DeleteStorageTier, [tier],
+            [Step("tier", new DeleteTierCommand(RealTargetReference.ForExisting(tier)))], "Removed");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(deleteTierFirst));
+        var complete = missingTier with
+        {
+            Targets = [pool, vd, tier],
+            Steps = [missingTier.Steps[0],
+                Step("tier", new DeleteTierCommand(RealTargetReference.ForExisting(tier)), ["vd"]),
+                Step("pool", new DeletePoolCommand(RealTargetReference.ForExisting(pool)), ["vd", "tier"])]
+        };
+        _ = await fixture.Prepare(complete);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
     private sealed class Fixture
     {
         private readonly SystemId system = SystemId.New();
@@ -314,9 +517,10 @@ public sealed class WindowsRealPlanSafetyTests
             Adapter = new ForbiddenAdapter();
             Sizes = new SyntheticSizeReader();
             PartitionSizes = new SyntheticPartitionSizeReader();
+            Capabilities = new SyntheticCapabilities();
             var planner = new WindowsRealOperationPlanner(reader, PartitionSizes,
                 new AdministratorPrivilege(), new FixedTimeProvider(), new SyntheticSafetyInspector(), Sizes,
-                () => LogicalDrives);
+                () => LogicalDrives, Capabilities);
             Backend = new WindowsRealStorageBackend(Adapter, planner, reader, new FixedTimeProvider());
         }
 
@@ -324,6 +528,7 @@ public sealed class WindowsRealPlanSafetyTests
         public ForbiddenAdapter Adapter { get; }
         public SyntheticSizeReader Sizes { get; }
         public SyntheticPartitionSizeReader PartitionSizes { get; }
+        public SyntheticCapabilities Capabilities { get; }
         public IReadOnlyList<string> LogicalDrives { get; set; } = [];
         public StorageObjectId Id(StorageObjectKind kind, string key) => new(system, kind, key);
         public RealOperationIntentRequest Proposal(OperationIntent intent,
@@ -349,6 +554,17 @@ public sealed class WindowsRealPlanSafetyTests
         }
 
         public void SetRawDisk() => snapshot = BaseSnapshot();
+        public void SetGptWithCanonicalMsr(long diskSize)
+        {
+            SetGptPartitions();
+            snapshot = snapshot with
+            {
+                OsDisks = [snapshot.OsDisks[0] with { Size = diskSize }],
+                PhysicalDisks = [snapshot.PhysicalDisks[0] with { Size = diskSize }],
+                StoragePools = [snapshot.StoragePools[0] with { Size = diskSize }],
+                Partitions = [snapshot.Partitions[0]]
+            };
+        }
         public void SetGptPartitions(bool hiddenMsr = false, bool hiddenData = false)
         {
             var msr = Partition("partition:msr", 1, 1L << 20, 16L << 20,
@@ -389,6 +605,7 @@ public sealed class WindowsRealPlanSafetyTests
             SetGptPartitions();
             snapshot = snapshot with
             {
+                Computer = snapshot.Computer with { WindowsProductName = "Windows 10 Pro for Workstations" },
                 Volumes = [new VolumeInfo("volume:refs", true, "partition:data",
                     "ReFS", "", 128L << 20, 128L << 20, 65536,
                     "Healthy", "OK", [@"E:\"])]
@@ -397,6 +614,21 @@ public sealed class WindowsRealPlanSafetyTests
 
         public void SetOldPool(bool withChild = false) => SetPool(PoolId, "Old Pool", withChild);
         public void SetNewPool() => SetPool(NewPoolId, "Pool", false);
+        public void SetHddTemplate(bool withVirtualDisk = false)
+        {
+            SetOldPool(withChild: withVirtualDisk);
+            snapshot = snapshot with
+            {
+                StorageTiers = withVirtualDisk
+                    ? [new StorageTierInfo("tier:hdd", true, "HDD", "HDD", "Simple", 0, 0, PoolId, null,
+                            [PhysicalId], NumberOfColumns: 1, Interleave: 65536),
+                        new StorageTierInfo("tier:instance", true, "HDD", "HDD", "Simple", 256L << 20, 256L << 20,
+                            PoolId, "vd:child", [PhysicalId], NumberOfColumns: 1, Interleave: 65536)]
+                    : [new StorageTierInfo("tier:hdd", true, "HDD", "HDD", "Simple", 0, 0, PoolId, null,
+                        [PhysicalId], NumberOfColumns: 1, Interleave: 65536)],
+                VirtualDisks = withVirtualDisk ? [snapshot.VirtualDisks[0] with { TierStableIds = ["tier:instance"] }] : []
+            };
+        }
         private void SetPool(string id, string name, bool withChild)
         {
             var baseline = BaseSnapshot();
@@ -424,6 +656,9 @@ public sealed class WindowsRealPlanSafetyTests
         private StorageSystemDocument Document()
         {
             var facts = WinPoolSimulationFacts.Create(snapshot, system);
+            facts = facts with { Relationships = facts.Relationships.AddRange(snapshot.StorageTiers
+                .Where(tier => tier.VirtualDiskStableId is null).SelectMany(tier => tier.MemberPhysicalDiskIds
+                    .Select(member => new WinPoolFactRelationship(tier.StableId, member, "template-pool-member", Now)))) };
             var sources = facts.Sources.Select(source => source with
             {
                 Origin = source.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)
@@ -520,6 +755,38 @@ public sealed class WindowsRealPlanSafetyTests
     {
         public Task ValidateAsync(WindowsRealStorageTopology topology, RealTargetClosure closure,
             RealStorageCommand command, CancellationToken token) => Task.CompletedTask;
+    }
+    private sealed class SyntheticCapabilities : IWindowsRealStorageCapabilityReader
+    {
+        public bool RefsSupported { get; set; }
+        public bool TierSupported { get; set; }
+        public bool Has64KiB { get; set; } = true;
+        public uint ReturnValue { get; set; }
+        public long TierMaximum { get; set; } = 512L << 20;
+        public VirtualDiskCreationSize? TierCreationSize { get; set; }
+        public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
+            WindowsRealStorageTopology topology, StorageObjectId volume, CancellationToken token)
+        {
+            var closure = topology.RequireSinglePhysicalClosure([volume]);
+            var partition = topology.Snapshot.Volumes.Single(item => item.StableId == volume.ProviderKey).PartitionStableId;
+            return Task.FromResult(new WindowsVolumeFormatCapability("queried", volume.ProviderKey,
+                partition, closure.PhysicalDiskId, volume.ProviderKey, volume.ProviderKey, Now,
+                closure.PhysicalMemberFingerprint,
+                new WindowsCapabilityMethodResult("returned", ReturnValue,
+                    new Dictionary<string, JsonElement?> { ["SupportedFileSystems"] = JsonSerializer.SerializeToElement(RefsSupported ? new[] { "NTFS", "ReFS" } : ["NTFS"]) }, null),
+                new WindowsCapabilityMethodResult("returned", ReturnValue,
+                    new Dictionary<string, JsonElement?> { ["SupportedClusterSizes"] = JsonSerializer.SerializeToElement(Has64KiB ? new[] { 4096, 65536 } : [4096]) }, null), null));
+        }
+        public Task<WindowsTierCapability> ReadTierAsync(WindowsRealStorageTopology topology,
+            StorageObjectId physical, CancellationToken token) => Task.FromResult(new WindowsTierCapability(
+                "queried", physical.ProviderKey, SubsystemId, SubsystemId, SubsystemId, Now, [],
+                new[] { "SupportsStorageTierCreation", "SupportsStorageTieredVirtualDiskCreation",
+                    "SupportsStorageTierDeletion", "SupportsStorageTierFriendlyNameModification" }
+                    .Select(name => WinPoolSourceField.Returned(name, TierSupported, FactValueType.Boolean, SubsystemId))
+                    .Append(WinPoolSourceField.Returned("PhysicalDisksPerStoragePoolMin", 1UL, FactValueType.UInt64, SubsystemId)).ToArray(), null));
+        public Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(WindowsRealStorageTopology topology,
+            StorageObjectId tier, CancellationToken token) => Task.FromResult(TierCreationSize
+                ?? new VirtualDiskCreationSize(64L << 20, TierMaximum, 64L << 20, []));
     }
     private sealed class AdministratorPrivilege : IPrivilegeService
     {

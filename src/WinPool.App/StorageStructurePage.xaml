@@ -394,6 +394,78 @@
                     </Grid>
                 </Button>
                 </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
+                <Button
+                    x:Name="CreateHddTierButton"
+                    Style="{StaticResource WinPoolButtonBaseStyle}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    Click="CreateHddTier_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="CreateHddTierButtonLabel" Grid.Column="1"
+                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
+                <Button
+                    x:Name="CreateTieredVdiskButton"
+                    Style="{StaticResource WinPoolButtonBaseStyle}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    Click="CreateTieredVdisk_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="CreateTieredVdiskButtonLabel" Grid.Column="1"
+                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
+                <Button
+                    x:Name="RenameHddTierButton"
+                    Style="{StaticResource WinPoolButtonBaseStyle}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    Click="RenameHddTier_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE8AC;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="RenameHddTierButtonLabel" Grid.Column="1"
+                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
+                <Button
+                    x:Name="DeleteHddTierButton"
+                    Style="{StaticResource WinPoolButtonBaseStyle}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    Click="DeleteHddTier_Click">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="DeleteHddTierButtonLabel" Grid.Column="1"
+                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
+                    </Grid>
+                </Button>
+                </controls:ContextHelpHost>
                     </controls:FixedWrapPanel>
                 </ScrollViewer>
                 <Button x:Name="RebuildPoolButton"

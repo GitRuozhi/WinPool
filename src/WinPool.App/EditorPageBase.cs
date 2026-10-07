@@ -17,18 +17,105 @@ namespace WinPool_App;
 /// </summary>
 public class EditorPageBase : Page
 {
+    private static readonly Guid MicrosoftReservedPartitionType =
+        new("e3c9e316-0b5c-4db8-817d-f92df00215ae");
+
     protected WorkspaceViewModel ViewModel { get; set; } = null!;
     protected SimulationEditingSession EditingSession { get; } = new();
     protected StorageSnapshot _working { get => EditingSession.Working; set => EditingSession.Working = value; }
 
     protected const double MinTopologyWidth = 320;
     protected const double TopologyWidthMargin = 20;
+    protected const long BytesPerMiB = 1024L * 1024;
 
     protected long UnallocatedIgnoreBytes =>
         Math.Max(0, ViewModel.CurrentPreferences.PartitionIgnoreSizeBytes);
 
     protected string Text(string zh, string en) =>
         ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? zh : en;
+
+    /// <summary>
+    /// Called after a completed real operation has produced a fresh local
+    /// inventory snapshot. Editor pages rebind their view state here while
+    /// preserving any selection whose stable object still exists.
+    /// </summary>
+    protected virtual void OnRealInventoryRefreshed()
+    {
+    }
+
+    internal void RefreshActiveRealInventoryFromWorkspace()
+    {
+        if (!ViewModel.IsUsingSimulatedInventory)
+            OnRealInventoryRefreshed();
+    }
+
+    protected bool LastRealInventoryRefreshSucceeded { get; private set; }
+
+    protected static bool IsExactProviderMsr(PartitionInfo partition) =>
+        partition.IsStable
+        && partition.Type.Equals("MicrosoftReserved", StringComparison.OrdinalIgnoreCase)
+        && Guid.TryParse(partition.PartitionTypeId, out var typeId)
+        && typeId == MicrosoftReservedPartitionType;
+
+    protected async Task<bool> SubmitInitializedDiskLayoutAsync(
+        OsDiskInfo disk, bool createMsr, long? virtualDiskSizeBytes = null,
+        bool formatNtfs = false, string? label = null, char? letter = null)
+    {
+        if (!string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync(Text("布局计划被阻止", "Layout plan blocked"),
+                Text("新扫描中的目标磁盘不是 GPT；未提交后续布局计划。",
+                    "The target disk in the fresh scan is not GPT. No follow-up layout plan was submitted."));
+            return false;
+        }
+
+        var partitions = _working.Partitions.Where(partition =>
+            string.Equals(partition.OsDiskStableId, disk.StableId,
+                StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (partitions.Any(partition => !IsExactProviderMsr(partition))
+            || partitions.Length > 1)
+        {
+            await ShowMessageAsync(Text("布局计划被阻止", "Layout plan blocked"),
+                Text("新扫描发现 MSR 以外的分区或多个 MSR。请先核对实际布局；未提交后续布局计划。",
+                    "The fresh scan found a non-MSR partition or multiple MSRs. Review the actual layout first; no follow-up layout plan was submitted."));
+            return false;
+        }
+
+        var system = ViewModel.ActiveDocument.SystemId;
+        var diskId = new StorageObjectId(system, StorageObjectKind.OsDisk, disk.StableId);
+        StorageObjectId? msrId = partitions.Length == 0
+            ? null
+            : new StorageObjectId(system, StorageObjectKind.Partition, partitions[0].StableId);
+        try
+        {
+            var proposal = RealOperationProposalFactory.ConfigureInitializedDisk(
+                system, diskId, msrId, createMsr, virtualDiskSizeBytes,
+                formatNtfs, label, letter);
+            return proposal is null || await SubmitRealAsync(proposal);
+        }
+        catch (ArgumentException exception)
+        {
+            await ShowMessageAsync(Text("布局参数不受支持", "Layout parameters are unsupported"),
+                exception.Message);
+            return false;
+        }
+    }
+
+    private async Task RefreshRealInventoryAsync()
+    {
+        LastRealInventoryRefreshSucceeded = false;
+        var previousSnapshot = ViewModel.EffectiveActiveSnapshot;
+        await ViewModel.ScanAsync();
+        var refreshed = ViewModel.EffectiveActiveSnapshot;
+        if (!ReferenceEquals(refreshed, previousSnapshot)
+            && string.IsNullOrWhiteSpace(ViewModel.ScanError))
+        {
+            LastRealInventoryRefreshSucceeded = true;
+            OnRealInventoryRefreshed();
+            if (App.Window is MainWindow mainWindow)
+                mainWindow.RefreshActiveEditorAfterRealInventory(this);
+        }
+    }
 
     protected static long ParseSize(string token) =>
         token.Replace("KiB", string.Empty, StringComparison.OrdinalIgnoreCase)
@@ -258,7 +345,11 @@ public class EditorPageBase : Page
 
         // Accept is short-lived. Query the assigned identity after a lost reply;
         // never issue a second write request to infer whether the first ran.
-        for (var attempt = 0; attempt < 15; attempt++)
+        // Each storage step includes fresh provider and safety reads. A normal
+        // multi-step pool operation can take longer than thirty seconds; keep
+        // querying the same accepted identity so its separately confirmed
+        // follow-up layout is still offered when completion is observed.
+        for (var attempt = 0; attempt < 60; attempt++)
         {
             await Task.Delay(TimeSpan.FromSeconds(2));
             ApplicationResult<AgentResponse> status;
@@ -286,7 +377,7 @@ public class EditorPageBase : Page
                 $"{Text("状态", "State")}: {current.State}\n" +
                 $"{Text("代码", "Code")}: {current.Code ?? "-"}");
             if (succeeded)
-                await ViewModel.ScanAsync();
+                await RefreshRealInventoryAsync();
             return succeeded;
         }
 
@@ -370,6 +461,11 @@ public class EditorPageBase : Page
                 $"{Text("状态", "State")}: {current.State}\n" +
                 $"{Text("需要对账", "Requires reconciliation")}: {current.RequiresReconciliation}\n" +
                 $"{Text("代码", "Code")}: {current.Code ?? "-"}\n{steps}");
+            if (current.State is not (RealOperationState.Prepared
+                or RealOperationState.Accepted or RealOperationState.Running))
+            {
+                await RefreshRealInventoryAsync();
+            }
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException)
         {

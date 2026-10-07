@@ -2,10 +2,12 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 using WinPool.Infrastructure.Sqlite;
+using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Agent;
 
@@ -310,7 +312,10 @@ public sealed class AgentRealOperationService : IRealOperationService
         {
             return Cancelled(request.CorrelationId);
         }
-        catch (Exception exception) when (IsExpectedFailure(exception))
+        // A planner capability refusal has no prepared plan or dispatched write.
+        // Return it to the caller instead of letting it tear down the IPC request.
+        catch (Exception exception) when (IsExpectedFailure(exception)
+            || exception is NotSupportedException)
         {
             return Reject(request.CorrelationId,
                 "agent.real_operation.prepare_failed",
@@ -902,13 +907,24 @@ public sealed class AgentRealOperationService : IRealOperationService
                         "The physical member identity changed before a real step.");
                 }
             }
-            catch
+            catch (Exception exception)
             {
+                var exceptionType = exception.GetType().FullName
+                    ?? exception.GetType().Name;
+                var diagnostic = $"{exceptionType}: {exception.Message}";
+                if (diagnostic.Length > 2048)
+                    diagnostic = diagnostic[..2048];
+                var noEffectEvidence = JsonSerializer.Serialize(
+                    new WindowsNoEffectStepEvidence(
+                        true,
+                        "operation.preflight_failed",
+                        plan.RealOperation!.PhysicalMemberFingerprint,
+                        diagnostic));
                 await plans.TransitionStepAsync(
                     operationId, step.Id,
                     PersistedOperationStepState.NotStarted,
                     PersistedOperationStepState.Failed,
-                    null, "preflight_failed",
+                    null, noEffectEvidence,
                     Event(operationId, ExecutionEventKind.Failed,
                         "operation.preflight_failed", step.Id));
                 interrupted = true;

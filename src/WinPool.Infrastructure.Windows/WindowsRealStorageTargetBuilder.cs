@@ -68,7 +68,10 @@ public static class WindowsRealStorageTargetBuilder
                 StringComparer.Ordinal.Equals(value.Id, closure.PhysicalDiskId)), "UniqueId"),
             subsystem is null ? string.Empty : Text(subsystem, "UniqueId"),
             closure.Fingerprint,
-            PartitionTypeGuid: partition?.PartitionTypeId ?? string.Empty);
+            PartitionTypeGuid: partition?.PartitionTypeId ?? string.Empty,
+            StorageSubsystemObjectId: subsystem is null ? string.Empty : Text(subsystem, "ObjectId"),
+            PhysicalMemberObjectId: Text(topology.Facts.Objects.Single(value =>
+                value.Id == closure.PhysicalDiskId), "ObjectId"));
     }
 
     public static RealTargetReference GetReference(RealStorageCommand command) => command switch
@@ -86,6 +89,7 @@ public static class WindowsRealStorageTargetBuilder
         DeletePoolCommand value => value.Pool,
         RenamePoolCommand value => value.Pool,
         CreateVirtualDiskCommand value => value.Pool,
+        CreateTieredVirtualDiskCommand value => value.Pool,
         DeleteVirtualDiskCommand value => value.VirtualDisk,
         ResizeVirtualDiskCommand value => value.VirtualDisk,
         RenameVirtualDiskCommand value => value.VirtualDisk,

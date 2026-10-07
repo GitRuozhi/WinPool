@@ -1,3 +1,4 @@
+using System.Text.Json;
 using WinPool.Domain;
 using WinPool.Execution;
 
@@ -27,7 +28,9 @@ public sealed record WindowsStorageCommandTarget(
     string RelatedUniqueId = "",
     string RelatedObjectId = "",
     string PartitionTypeGuid = "",
-    bool CreatedInThisPlan = false);
+    bool CreatedInThisPlan = false,
+    string StorageSubsystemObjectId = "",
+    string PhysicalMemberObjectId = "");
 
 /// <summary>
 /// A command return is evidence for post-call capture, not a verified success.
@@ -43,7 +46,26 @@ public sealed record WindowsStorageCommandResult(
     int? DiskNumber,
     int? PartitionNumber,
     int? ProviderJobId,
-    string? ProviderError);
+    string? ProviderError,
+    WindowsTieredCreationInput? TieredCreationInput = null,
+    JsonElement? LiveCapabilityEvidence = null,
+    WindowsNativeMsrSafetyEvidence? NativeMsrSafetyEvidence = null,
+    IReadOnlyList<WindowsVolumeSafetyEvidence>? VolumeSafetyEvidence = null,
+    IReadOnlyList<WindowsNativeMsrSafetyEvidence>? OfflinePartitionAttributes = null,
+    WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null);
+
+/// <summary>The fixed adapter's exact template and parameters passed to New-VirtualDisk.</summary>
+public sealed record WindowsTieredCreationInput(
+    string TemplateUniqueId,
+    string TemplateObjectId,
+    string PoolUniqueId,
+    string PhysicalMemberUniqueId,
+    string MediaType,
+    string ResiliencySettingName,
+    string ProvisioningType,
+    int NumberOfColumns,
+    long Interleave,
+    long SizeBytes);
 
 public interface IWindowsRealStorageCommandAdapter
 {

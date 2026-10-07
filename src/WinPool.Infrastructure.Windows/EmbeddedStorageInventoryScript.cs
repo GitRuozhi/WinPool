@@ -12,14 +12,221 @@ internal static class EmbeddedStorageInventoryScript
 
     public static string Source => ForPurpose(WinPool.Application.CollectionPurpose.Hardware);
 
+    internal const string OsDiskParentBinding = """
+function Resolve-OsDiskDeviceParents($disk) {
+    $number = [int]$disk.Number
+    $physicalKey = ''
+    $virtualKey = ''
+    if ($virtualDiskKeyByOsDisk.ContainsKey($number)) {
+        $virtualKey = [string]$virtualDiskKeyByOsDisk[$number]
+        if ($diskPhysicalMap.ContainsKey($number) -and $diskPhysicalMapSource[$number] -eq 'ProviderUniqueId') {
+            [void]$sourceQueryFailures.Add([ordered]@{
+                ClassName='MSFT_Disk'; Namespace='root/Microsoft/Windows/Storage';
+                ReasonCode='ConflictingPhysicalAndVirtualDiskParents'
+            })
+        }
+        # An OS disk's provider VD association determines its parent. Physical
+        # DeviceId and OS DiskNumber use different number spaces for pooled VDs.
+    } elseif ([string]$disk.BusType -in @('16','Spaces')) {
+        [void]$sourceQueryFailures.Add([ordered]@{
+            ClassName='MSFT_Disk'; Namespace='root/Microsoft/Windows/Storage';
+            ReasonCode='SpacesDiskLacksExactVirtualParent'
+        })
+    } elseif ($diskPhysicalMap.ContainsKey($number)) {
+        $physicalKey = [string]$diskPhysicalMap[$number]
+    }
+    if ([string]::IsNullOrWhiteSpace($physicalKey) -and [string]::IsNullOrWhiteSpace($virtualKey)) {
+        [void]$sourceQueryFailures.Add([ordered]@{
+            ClassName='MSFT_Disk'; Namespace='root/Microsoft/Windows/Storage';
+            ReasonCode='OsDiskParentAssociationUnavailable'
+        })
+    }
+    return [ordered]@{ PhysicalDiskAssociationKey=$physicalKey; VirtualDiskAssociationKey=$virtualKey }
+}
+
+""";
+
     public static string ForPurpose(WinPool.Application.CollectionPurpose purpose)
     {
         var compressed = Convert.FromBase64String(CompressedBase64);
         using var input = new MemoryStream(compressed);
         using var gzip = new GZipStream(input, CompressionMode.Decompress);
         using var reader = new StreamReader(gzip, Encoding.UTF8);
-        var source = AddPhysicalDiskAssociationFallback(reader.ReadToEnd());
+        var source = AddOsDiskParentBinding(AddCompleteProviderAssociations(AddTierAssociations(AddPhysicalDiskAssociationFallback(reader.ReadToEnd()))));
+        if (purpose == WinPool.Application.CollectionPurpose.Storage)
+            source = AddStorageProviderCacheDiscovery(source);
         return "$WinPoolIncludeHardware = " + (purpose == WinPool.Application.CollectionPurpose.Hardware ? "$true" : "$false") + "\n" + source;
+    }
+
+    private static string AddOsDiskParentBinding(string source)
+    {
+        const string collection = "$osDisks = foreach ($disk in $diskObjects) {";
+        const string physical = "PhysicalDiskAssociationKey = if ($diskPhysicalMap.ContainsKey([int]$disk.Number)) { [string]$diskPhysicalMap[[int]$disk.Number] } else { '' }";
+        const string virtualDisk = "VirtualDiskAssociationKey = if ($virtualDiskKeyByOsDisk.ContainsKey([int]$disk.Number)) { [string]$virtualDiskKeyByOsDisk[[int]$disk.Number] } else { '' }";
+        if (!source.Contains(collection, StringComparison.Ordinal) || !source.Contains(physical, StringComparison.Ordinal)
+            || !source.Contains(virtualDisk, StringComparison.Ordinal))
+            throw new InvalidDataException("The embedded OS-disk parent binding anchors were not found.");
+        return source.Replace(collection, OsDiskParentBinding + collection + "\n    $deviceParents = Resolve-OsDiskDeviceParents $disk", StringComparison.Ordinal)
+            .Replace(physical, "PhysicalDiskAssociationKey = $deviceParents.PhysicalDiskAssociationKey", StringComparison.Ordinal)
+            .Replace(virtualDisk, "VirtualDiskAssociationKey = $deviceParents.VirtualDiskAssociationKey", StringComparison.Ordinal);
+    }
+
+    private static string AddCompleteProviderAssociations(string source)
+    {
+        const string memberQuery = "$members = @(Get-PhysicalDisk -StoragePool $pool)";
+        const string diskMapping = """
+        try {
+            foreach ($mappedDisk in @(Get-Disk -VirtualDisk $virtual)) {
+                $osDiskNumbers += [int]$mappedDisk.Number
+                $virtualDiskKeyByOsDisk[[int]$mappedDisk.Number] = $virtualKey
+            }
+        }
+        catch {
+        }
+""";
+        const string completeDiskMapping = """
+        foreach ($mappedDisk in @(Get-SourceSet 'MSFT_Disk' { Get-Disk -VirtualDisk $virtual -ErrorAction Stop })) {
+            $exactDisks = @($diskObjects | Where-Object {
+                [int]$_.Number -eq [int]$mappedDisk.Number -and
+                [string]::Equals([string]$_.UniqueId, [string]$mappedDisk.UniqueId, [StringComparison]::Ordinal) -and
+                [string]::Equals([string]$_.ObjectId, [string]$mappedDisk.ObjectId, [StringComparison]::Ordinal)
+            })
+            if ($exactDisks.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$mappedDisk.UniqueId) -or
+                [string]::IsNullOrWhiteSpace([string]$mappedDisk.ObjectId) -or
+                ($virtualDiskKeyByOsDisk.ContainsKey([int]$mappedDisk.Number) -and
+                    $virtualDiskKeyByOsDisk[[int]$mappedDisk.Number] -ne $virtualKey)) {
+                [void]$sourceQueryFailures.Add([ordered]@{
+                    ClassName='MSFT_Disk'; Namespace='root/Microsoft/Windows/Storage';
+                    ReasonCode='VirtualDiskToCurrentOsDiskAssociationNotUnique'
+                })
+                continue
+            }
+            $osDiskNumbers += [int]$mappedDisk.Number
+            $virtualDiskKeyByOsDisk[[int]$mappedDisk.Number] = $virtualKey
+        }
+""";
+        if (!source.Contains(memberQuery, StringComparison.Ordinal) || !source.Contains(diskMapping, StringComparison.Ordinal))
+            throw new InvalidDataException("The embedded pool or virtual-disk association anchors were not found.");
+        return source.Replace(memberQuery,
+                "$members = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop })", StringComparison.Ordinal)
+            .Replace(diskMapping, completeDiskMapping, StringComparison.Ordinal);
+    }
+
+    private static string AddStorageProviderCacheDiscovery(string source)
+    {
+        const string existing = "$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-PhysicalDisk -ErrorAction Stop })";
+        const string replacement = """
+$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' {
+    try {
+        if ($subsystemObjects.Count -ne 1) { throw 'subsystem-not-unique' }
+        $subsystem = $subsystemObjects[0]
+        if (-not [string]::Equals([string]$subsystem.CimClass.CimClassName, 'MSFT_StorageSubSystem', [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(([string]$subsystem.CimSystemProperties.Namespace).Replace('\','/'), 'root/Microsoft/Windows/Storage', [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals([string]$subsystem.CimSystemProperties.ServerName, [Environment]::MachineName, [StringComparison]::OrdinalIgnoreCase) -or
+            [string]::IsNullOrWhiteSpace([string]$subsystem.UniqueId) -or
+            [string]::IsNullOrWhiteSpace([string]$subsystem.ObjectId)) {
+            throw 'subsystem-identity-not-exact-local'
+        }
+        # Service-cache discovery only; Level3 includes physical disks.
+        # https://learn.microsoft.com/powershell/module/storage/update-storageprovidercache
+        Update-StorageProviderCache -StorageSubSystem $subsystem -DiscoveryLevel Level3 -ErrorAction Stop | Out-Null
+    } catch {
+        throw ('StorageProviderCacheDiscoveryFailed:' + [string]$_.Exception.Message)
+    }
+    Get-PhysicalDisk -ErrorAction Stop
+})
+""";
+        if (!source.Contains(existing, StringComparison.Ordinal))
+            throw new InvalidDataException("The embedded physical-disk discovery anchor was not found.");
+        return source.Replace(existing, replacement, StringComparison.Ordinal);
+    }
+
+    private static string AddTierAssociations(string source)
+    {
+        const string memberPlaceholder = "MemberPhysicalDiskKeys = @() # No provider association; media equality does not establish membership.";
+        const string collectionAnchor = "$physicalDisks = foreach ($physical in $physicalObjects) {";
+        const string helpers = """
+function Get-ExactTierMemberKeys($tier, $virtual) {
+    try {
+    $result = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
+    if ($null -eq $result.ReturnValue -or [uint32]$result.ReturnValue -ne 0) { throw 'tier-extent-method-failed' }
+    $keys = @()
+    foreach ($extent in @($result.PhysicalExtents)) {
+        if ($null -eq $extent -or
+            -not [string]::Equals([string]$extent.StorageTierUniqueId, [string]$tier.UniqueId, [StringComparison]::Ordinal) -or
+            -not [string]::Equals([string]$extent.VirtualDiskUniqueId, [string]$virtual.UniqueId, [StringComparison]::Ordinal)) {
+            throw 'tier-extent-owner-not-exact'
+        }
+        $matches = @($physicalObjects | Where-Object {
+            [string]::Equals([string]$_.UniqueId, [string]$extent.PhysicalDiskUniqueId, [StringComparison]::Ordinal)
+        })
+        if ($matches.Count -ne 1) { throw 'tier-extent-physical-not-unique' }
+        $keys += Get-AssociationKey $matches[0] ''
+    }
+    return @($keys | Select-Object -Unique)
+    } catch {
+        [void]$sourceQueryFailures.Add([ordered]@{
+            ClassName = 'MSFT_StorageTier'; Namespace = 'root/Microsoft/Windows/Storage';
+            ReasonCode = 'ExactTierExtentFailed:' + [string]$_.Exception.Message
+        })
+        throw
+    }
+}
+
+""";
+        const string templates = """
+# Pool-level tiers have no allocation or Size. Read their exact provider pool
+# association and eligible pool members separately from instance allocations.
+foreach ($pool in $nonPrimordialPoolObjects) {
+    $poolKey = Get-AssociationKey $pool ''
+    foreach ($tier in @(Get-SourceSet 'MSFT_StorageTier' { Get-StorageTier -StoragePool $pool -ErrorAction Stop })) {
+        $tierKey = Get-AssociationKey $tier ''
+        if ($tierKeysSeen.ContainsKey($tierKey)) { continue }
+        try {
+            $parents = @(Get-StoragePool -StorageTier $tier -ErrorAction Stop | Where-Object { -not $_.IsPrimordial })
+            if ($parents.Count -ne 1 -or
+                -not [string]::Equals([string]$parents[0].UniqueId, [string]$pool.UniqueId, [StringComparison]::Ordinal) -or
+                -not [string]::Equals([string]$parents[0].ObjectId, [string]$pool.ObjectId, [StringComparison]::Ordinal)) {
+                throw 'tier-template-pool-not-exact'
+            }
+            if (@(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop).Count -ne 0) { throw 'tier-owner-association-incomplete' }
+            $members = @(Get-PhysicalDisk -StoragePool $parents[0] -ErrorAction Stop)
+            $memberKeys = @()
+            foreach ($member in $members) {
+                $exact = @($physicalObjects | Where-Object {
+                    [string]::Equals([string]$_.UniqueId, [string]$member.UniqueId, [StringComparison]::Ordinal) -and
+                    [string]::Equals([string]$_.ObjectId, [string]$member.ObjectId, [StringComparison]::Ordinal)
+                })
+                if ($exact.Count -ne 1) { throw 'tier-template-pool-member-not-exact' }
+                $memberKeys += Get-AssociationKey $exact[0] ''
+            }
+            $tierKeysSeen[$tierKey] = $true
+            $storageTiers += [ordered]@{
+                AssociationKey = $tierKey; UniqueId = [string]$tier.UniqueId; ObjectId = [string]$tier.ObjectId;
+                FriendlyName = [string]$tier.FriendlyName; MediaType = [string]$tier.MediaType;
+                ResiliencySettingName = [string]$tier.ResiliencySettingName;
+                Size = $null; FootprintOnPool = $null;
+                NumberOfColumns = $tier.NumberOfColumns; Interleave = $tier.Interleave;
+                NumberOfDataCopies = $tier.NumberOfDataCopies; PhysicalDiskRedundancy = $tier.PhysicalDiskRedundancy;
+                PoolAssociationKey = $poolKey; VirtualDiskAssociationKey = '';
+                MemberPhysicalDiskKeys = @(); TemplatePhysicalDiskKeys = @($memberKeys)
+            }
+        } catch {
+            [void]$sourceQueryFailures.Add([ordered]@{
+                ClassName = 'MSFT_StorageTier'; Namespace = 'root/Microsoft/Windows/Storage';
+                ReasonCode = 'ExactTemplateAssociationFailed:' + [string]$_.Exception.Message
+            })
+        }
+    }
+}
+
+""";
+        if (!source.Contains(memberPlaceholder, StringComparison.Ordinal)
+            || !source.Contains(collectionAnchor, StringComparison.Ordinal))
+            throw new InvalidDataException("The embedded tier association anchors were not found.");
+        return source.Replace("$virtualDiskKeyByOsDisk = @{}", helpers + "$virtualDiskKeyByOsDisk = @{}", StringComparison.Ordinal)
+            .Replace(memberPlaceholder, "MemberPhysicalDiskKeys = @(Get-ExactTierMemberKeys $tier $virtual)", StringComparison.Ordinal)
+            .Replace(collectionAnchor, templates + collectionAnchor, StringComparison.Ordinal);
     }
 
     private static string AddPhysicalDiskAssociationFallback(string source)
@@ -51,22 +258,46 @@ foreach ($physical in $physicalObjects) {
 }
 
 $diskPhysicalMap = @{}
+$diskPhysicalMapSource = @{}
 foreach ($disk in $diskObjects) {
     $physicalMatch = @()
+    $matchSource = 'ProviderUniqueId'
     try {
-        $physicalMatch = @($disk | Get-PhysicalDisk | Select-Object -First 1)
+        $physicalMatch = @($disk | Get-PhysicalDisk -ErrorAction Stop)
     }
     catch {
     }
+    if ($physicalMatch.Count -gt 1 -or ($physicalMatch.Count -eq 1 -and
+        -not [string]::Equals([string]$physicalMatch[0].UniqueId, [string]$disk.UniqueId, [StringComparison]::Ordinal))) {
+        [void]$sourceQueryFailures.Add([ordered]@{
+            ClassName='MSFT_Disk'; Namespace='root/Microsoft/Windows/Storage';
+            ReasonCode='PhysicalDiskProviderIdentityNotUnique'
+        })
+        continue
+    }
     # Removable USB media can lack this provider association even when its disk number is known.
-    if ($physicalMatch.Count -eq 0 -and $physicalByDeviceNumber.ContainsKey([int]$disk.Number)) {
+    if ($physicalMatch.Count -eq 0 -and -not $virtualDiskKeyByOsDisk.ContainsKey([int]$disk.Number) -and
+        $physicalByDeviceNumber.ContainsKey([int]$disk.Number)) {
         $candidates = @($physicalByDeviceNumber[[int]$disk.Number])
         if ($candidates.Count -eq 1) {
             $physicalMatch = $candidates
+            $matchSource = 'DeviceNumberFallback'
         }
     }
     if ($physicalMatch.Count -eq 1) {
+        $exactPhysical = @($physicalObjects | Where-Object {
+            [string]::Equals([string]$_.UniqueId, [string]$physicalMatch[0].UniqueId, [StringComparison]::Ordinal) -and
+            [string]::Equals([string]$_.ObjectId, [string]$physicalMatch[0].ObjectId, [StringComparison]::Ordinal)
+        })
+        if ($exactPhysical.Count -ne 1) {
+            [void]$sourceQueryFailures.Add([ordered]@{
+                ClassName='MSFT_Disk'; Namespace='root/Microsoft/Windows/Storage';
+                ReasonCode='PhysicalDiskCurrentIdentityNotUnique'
+            })
+            continue
+        }
         $diskPhysicalMap[[int]$disk.Number] = Get-AssociationKey $physicalMatch[0] "$($physicalMatch[0].DeviceId)|$($physicalMatch[0].FriendlyName)|$($physicalMatch[0].Size)"
+        $diskPhysicalMapSource[[int]$disk.Number] = $matchSource
     }
 }
 
@@ -76,6 +307,12 @@ foreach ($disk in $diskObjects) {
         {
             throw new InvalidDataException("The embedded physical-disk association block was not found.");
         }
-        return normalized.Replace(existing, corrected, StringComparison.Ordinal);
+        const string collectionAnchor = "$physicalDisks = foreach ($physical in $physicalObjects) {";
+        if (!normalized.Contains(collectionAnchor, StringComparison.Ordinal))
+            throw new InvalidDataException("The embedded physical-disk mapping insertion anchor was not found.");
+        // Resolve physical candidates after every provider VD-to-Disk mapping,
+        // so virtual OS disks never enter the physical-number fallback.
+        return normalized.Replace(existing, "", StringComparison.Ordinal)
+            .Replace(collectionAnchor, corrected + collectionAnchor, StringComparison.Ordinal);
     }
 }

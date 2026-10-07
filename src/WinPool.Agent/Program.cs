@@ -15,6 +15,10 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // VDS read-only filesystem classification requires process COM security
+        // before WinForms or WMI can initialize it with different defaults.
+        // A failed initialization leaves the volume probe closed to mutation.
+        _ = WindowsRealStorageSafetyInspector.InitializeReadOnlyVolumeProbe();
         ApplicationConfiguration.Initialize();
         var sid = WindowsIdentity.GetCurrent().User?.Value;
         if (string.IsNullOrWhiteSpace(sid))

@@ -1,4 +1,4 @@
-using WinPool.App.Services;
+﻿using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -7,6 +7,29 @@ namespace WinPool.App.Tests;
 
 public sealed class RealOperationUiFlowTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AutomaticInitializedDiskLayoutUsesTheSameRealMaximumGeometry(bool createMsr)
+    {
+        const long size = 32L << 30;
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "exact-created-disk");
+        var proposal = RealOperationProposalFactory.ConfigureInitializedDisk(system, disk, null,
+            createMsr, size, formatNtfs: true, label: "WinPool_Test", letter: 'E');
+        Assert.NotNull(proposal);
+        RealOperationValidator.Validate(proposal);
+        var data = Assert.Single(proposal.Steps.Select(step => step.Command)
+            .OfType<CreatePartitionCommand>(), command => command.Role == RealPartitionRole.BasicData);
+        var offset = (createMsr ? 17L : 1L) << 20;
+        var geometry = EditWorkspace.GetRealPartitionCreateGeometry(size, offset, size - offset);
+        Assert.Equal(offset, data.OffsetBytes);
+        Assert.Equal(geometry.MaximumSizeBytes, data.SizeBytes);
+        Assert.Equal(size - (1L << 20), data.OffsetBytes + data.SizeBytes);
+        Assert.Single(proposal.Steps.Select(step => step.Command).OfType<FormatVolumeCommand>());
+        Assert.Single(proposal.Steps.Select(step => step.Command).OfType<SetDriveLetterCommand>());
+    }
+
     [Fact]
     public void PreparationReservationPreventsAnotherSubmitAndReleasesBeforeAccept()
     {
@@ -261,7 +284,7 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
-    public void FirstVirtualDiskFreezesSimpleFixedAndOrderedOptionalPartitionSteps()
+    public void FirstVirtualDiskInitializesGptThenDefersLayoutUntilFreshRead()
     {
         var system = SystemId.New();
         var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
@@ -270,17 +293,15 @@ public sealed class RealOperationUiFlowTests
                 "Data", 16L * 1024 * 1024 * 1024,
                 true, true, true, "WinPool_Test", 'E'));
         Assert.Equal(OperationIntent.CreateVirtualDisk, proposal.Intent);
-        Assert.Equal(6, proposal.Steps.Count);
+        Assert.Equal(2, proposal.Steps.Count);
         var create = Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[0].Command);
         Assert.Equal(65536, create.InterleaveBytes);
         Assert.Equal(1, create.DataColumns);
         Assert.Equal(16L * 1024 * 1024 * 1024, create.SizeBytes);
-        Assert.Equal(RealPartitionRole.Msr,
-            Assert.IsType<CreatePartitionCommand>(proposal.Steps[2].Command).Role);
-        Assert.Equal(RealPartitionRole.BasicData,
-            Assert.IsType<CreatePartitionCommand>(proposal.Steps[3].Command).Role);
-        Assert.Contains("create-data", proposal.Steps[5].DependsOn);
-        Assert.Contains("format-data", proposal.Steps[5].DependsOn);
+        Assert.Equal("create-vdisk",
+            Assert.IsType<InitializeGptCommand>(proposal.Steps[1].Command).Disk.CreatedByStep);
+        Assert.Equal(["create-vdisk"], proposal.Steps[1].DependsOn);
+        Assert.Contains("provider-created MSR", proposal.ExpectedFinalState);
 
         var noPartition = RealOperationProposalFactory.CreateFirstVirtualDisk(
             system, pool, new RealOperationProposalFactory.VirtualDiskOptions(
@@ -325,7 +346,7 @@ public sealed class RealOperationUiFlowTests
         var proposal = RealOperationProposalFactory.CreateSingleMemberPool(
             system, physical, "ExactPool", options);
 
-        Assert.Equal(autoCreatePartition ? 7 : 2, proposal.Steps.Count);
+        Assert.Equal(autoCreatePartition ? 3 : 2, proposal.Steps.Count);
         var pool = Assert.IsType<CreatePoolCommand>(proposal.Steps[0].Command);
         Assert.Equal("ExactPool", pool.Name);
         var create = Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[1].Command);
@@ -338,17 +359,10 @@ public sealed class RealOperationUiFlowTests
         if (!autoCreatePartition)
             return;
 
-        Assert.Equal("create-vdisk", proposal.Steps[2].DependsOn[0]);
-        var msr = Assert.IsType<CreatePartitionCommand>(proposal.Steps[3].Command);
-        Assert.Equal(RealPartitionRole.Msr, msr.Role);
-        var data = Assert.IsType<CreatePartitionCommand>(proposal.Steps[4].Command);
-        Assert.Equal(RealPartitionRole.BasicData, data.Role);
-        var format = Assert.IsType<FormatVolumeCommand>(proposal.Steps[5].Command);
-        Assert.Equal(RealFileSystem.Ntfs, format.FileSystem);
-        Assert.Equal(65536, format.ClusterBytes);
-        Assert.Equal("ExactLabel", format.Label);
-        var letter = Assert.IsType<SetDriveLetterCommand>(proposal.Steps[6].Command);
-        Assert.Equal('E', letter.NewLetter);
+        Assert.Equal("create-vdisk",
+            Assert.IsType<InitializeGptCommand>(proposal.Steps[2].Command).Disk.CreatedByStep);
+        Assert.Equal(["create-vdisk"], proposal.Steps[2].DependsOn);
+        Assert.Contains("fresh read", proposal.ExpectedFinalState);
     }
 
     [Fact]
@@ -368,19 +382,21 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
-    public void GptInitializationHonorsMsrPreferenceAndRealRefsRemainsDisabled()
+    public void GptInitializationIsOnlyTheFirstPhaseAndRealRefsCreationRemainsDisabled()
     {
         var system = SystemId.New();
         var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "disk-id");
-        var plain = RealOperationProposalFactory.InitializeGpt(system, disk, false);
-        Assert.Single(plain.Steps);
-        var withMsr = RealOperationProposalFactory.InitializeGpt(system, disk, true);
-        Assert.Equal(2, withMsr.Steps.Count);
-        var msr = Assert.IsType<CreatePartitionCommand>(withMsr.Steps[1].Command);
-        Assert.Equal(RealPartitionRole.Msr, msr.Role);
-        Assert.Equal(1024L * 1024, msr.OffsetBytes);
-        Assert.Equal(16L * 1024 * 1024, msr.SizeBytes);
-        Assert.Equal(["initialize-gpt"], withMsr.Steps[1].DependsOn);
+        var initialization = RealOperationProposalFactory.InitializeGpt(system, disk);
+        Assert.Single(initialization.Steps);
+        Assert.IsType<InitializeGptCommand>(initialization.Steps[0].Command);
+        Assert.Contains("separate plan", initialization.ExpectedFinalState);
+        Assert.Null(RealOperationProposalFactory.ConfigureInitializedDisk(
+            system, disk, null, false));
+        var reconcileOnly = RealOperationProposalFactory.ConfigureInitializedDisk(
+            system, disk,
+            new StorageObjectId(system, StorageObjectKind.Partition, "provider-msr-id"),
+            false)!;
+        Assert.IsType<DeletePartitionCommand>(Assert.Single(reconcileOnly.Steps).Command);
         Assert.Throws<ArgumentException>(() => RealOperationProposalFactory.CreatePartition(
             system, disk, RealPartitionRole.BasicData, 1024 * 1024,
             1024L * 1024 * 1024, RealFileSystem.ReFs, 65536,
@@ -388,13 +404,15 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
-    public void ExistingRealFormatRejectsRefsAndUnknownWithoutExFatFallback()
+    public void ExistingRealFormatAllowsOnlyQuick64KiBRefsAndRejectsUnknown()
     {
         var system = SystemId.New();
         var partition = new StorageObjectId(system, StorageObjectKind.Partition,
             "partition-id");
         Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
-            system, partition, "ReFS", 65536, false, "Data"));
+            system, partition, "ReFS", 4096, false, "Data"));
+        Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "ReFS", 65536, true, "Data"));
         Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
             system, partition, "unknown", 65536, false, "Data"));
         var ntfs = RealOperationProposalFactory.TryFormatExistingData(
@@ -405,6 +423,69 @@ public sealed class RealOperationUiFlowTests
             system, partition, "exFAT", 65536, false, "Data");
         Assert.Equal(RealFileSystem.ExFat,
             Assert.IsType<FormatVolumeCommand>(Assert.Single(exfat!.Steps).Command).FileSystem);
+        var refs = RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "ReFS", 65536, false, "Data");
+        Assert.Equal(RealFileSystem.ReFs,
+            Assert.IsType<FormatVolumeCommand>(Assert.Single(refs!.Steps).Command).FileSystem);
+    }
+
+    [Fact]
+    public void RealHddTierActionsUseExactPoolAndTierTargets()
+    {
+        var system = SystemId.New();
+        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
+        var tier = new StorageObjectId(system, StorageObjectKind.StorageTier, "tier-id");
+        var createTier = RealOperationProposalFactory.CreateHddTierTemplate(
+            system, pool, "HDDTemplate");
+        Assert.Equal(OperationIntent.CreateStorageTier, createTier.Intent);
+        Assert.Equal(pool, Assert.Single(createTier.Targets));
+        var createTierCommand = Assert.IsType<CreateTierCommand>(
+            Assert.Single(createTier.Steps).Command);
+        Assert.Equal(pool, createTierCommand.Pool.Existing);
+        Assert.Equal("HDDTemplate", createTierCommand.Name);
+        Assert.Equal(65536, createTierCommand.InterleaveBytes);
+        Assert.Equal(1, createTierCommand.DataColumns);
+
+        var createVdisk = RealOperationProposalFactory.CreateTieredVirtualDisk(
+            system, pool, tier, "HDDData", 16L * 1024 * 1024 * 1024);
+        Assert.Equal(OperationIntent.CreateVirtualDisk, createVdisk.Intent);
+        Assert.Equal([pool, tier], createVdisk.Targets);
+        var createVdiskCommand = Assert.IsType<CreateTieredVirtualDiskCommand>(
+            Assert.Single(createVdisk.Steps).Command);
+        Assert.Equal(pool, createVdiskCommand.Pool.Existing);
+        Assert.Equal(tier, createVdiskCommand.Tier.Existing);
+        Assert.Equal(16L * 1024 * 1024 * 1024, createVdiskCommand.SizeBytes);
+
+        var rename = RealOperationProposalFactory.RenameHddTier(system, tier, "Renamed");
+        Assert.Equal(OperationIntent.RenameStorageObject, rename.Intent);
+        Assert.Equal(tier, Assert.Single(rename.Targets));
+        Assert.Equal("Renamed", Assert.IsType<RenameTierCommand>(
+            Assert.Single(rename.Steps).Command).Name);
+        var delete = RealOperationProposalFactory.DeleteHddTierTemplate(system, tier);
+        Assert.Equal(OperationIntent.DeleteStorageTier, delete.Intent);
+        Assert.Equal(tier, Assert.Single(delete.Targets));
+        Assert.IsType<DeleteTierCommand>(Assert.Single(delete.Steps).Command);
+    }
+
+    [Fact]
+    public void DissolveExplicitlyDeletesVirtualDiskThenPoolTierTemplateThenPool()
+    {
+        var system = SystemId.New();
+        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
+        var vdisk = new StorageObjectId(system, StorageObjectKind.VirtualDisk, "vdisk-id");
+        var template = new StorageObjectId(system, StorageObjectKind.StorageTier, "template-id");
+        var proposal = RealOperationProposalFactory.DissolveSingleMemberPool(
+            system, pool, vdisk, [template]);
+
+        Assert.Equal(OperationIntent.DeleteStoragePool, proposal.Intent);
+        Assert.Equal([pool, vdisk, template], proposal.Targets);
+        Assert.Collection(proposal.Steps,
+            step => Assert.IsType<DeleteVirtualDiskCommand>(step.Command),
+            step => Assert.IsType<DeleteTierCommand>(step.Command),
+            step => Assert.IsType<DeletePoolCommand>(step.Command));
+        Assert.Equal(["delete-vdisk"], proposal.Steps[1].DependsOn);
+        Assert.Equal(["delete-tier-1"], proposal.Steps[2].DependsOn);
+        Assert.Contains("tier instances are absent", proposal.Steps[0].AfterCondition);
     }
 
     [Fact]
@@ -435,9 +516,28 @@ public sealed class RealOperationUiFlowTests
         Assert.Contains("pool-id", createText);
         Assert.Contains("sizeBytes=17179869184", createText);
         Assert.Contains("interleaveBytes=65536 dataColumns=1", createText);
-        Assert.Contains("role=Msr offsetBytes=1048576 sizeBytes=16777216", createText);
-        Assert.Contains("fileSystem=Ntfs clusterBytes=65536 full=False", createText);
         Assert.Contains("createdByStep=", createText);
+
+        var msr = new StorageObjectId(system, StorageObjectKind.Partition, "provider-msr-id");
+        var layout = RealOperationProposalFactory.ConfigureInitializedDisk(
+            system, disk, msr, true, 16L * 1024 * 1024 * 1024,
+            true, "Data", 'E')!;
+        Assert.Equal([disk, msr], layout.Targets);
+        Assert.IsType<DeletePartitionCommand>(layout.Steps[0].Command);
+        var createMsr = Assert.IsType<CreatePartitionCommand>(layout.Steps[1].Command);
+        Assert.Equal(RealPartitionRole.Msr, createMsr.Role);
+        Assert.Equal(1024L * 1024, createMsr.OffsetBytes);
+        Assert.Equal(16L * 1024 * 1024, createMsr.SizeBytes);
+        var data = Assert.IsType<CreatePartitionCommand>(layout.Steps[2].Command);
+        Assert.Equal(RealPartitionRole.BasicData, data.Role);
+        Assert.Equal(17L * 1024 * 1024, data.OffsetBytes);
+        var format = Assert.IsType<FormatVolumeCommand>(layout.Steps[3].Command);
+        Assert.Equal(RealFileSystem.Ntfs, format.FileSystem);
+        Assert.Equal(["create-data"], layout.Steps[3].DependsOn);
+        var letter = Assert.IsType<SetDriveLetterCommand>(layout.Steps[4].Command);
+        Assert.Equal('E', letter.NewLetter);
+        Assert.Contains("create-data", layout.Steps[4].DependsOn);
+        Assert.Contains("format-data", layout.Steps[4].DependsOn);
     }
 
     [Fact]
@@ -488,36 +588,40 @@ public sealed class RealOperationUiFlowTests
         Assert.Equal(1023, shrinkMax);
         Assert.True(RealPartitionResizeUiRange.IsSupportedFileSystem("RAW"));
         Assert.True(RealPartitionResizeUiRange.IsSupportedFileSystem("NTFS"));
-        Assert.False(RealPartitionResizeUiRange.IsSupportedFileSystem("ReFS"));
+        Assert.True(RealPartitionResizeUiRange.IsSupportedFileSystem("ReFS"));
         Assert.False(RealPartitionResizeUiRange.IsSupportedFileSystem("exFAT"));
+        var refsRange = range with { AllowedMinBytes = range.CurrentSizeBytes };
+        Assert.False(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            refsRange, false, out _, out _));
+        Assert.True(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            refsRange, true, out _, out _));
     }
 
     [Fact]
-    public void RebuildListsExactRemovalBeforeReplacementAndKeepsOnePhysicalMember()
+    public void RebuildDeletionStageListsOnlyExactRemovalAndKeepsOnePhysicalMember()
     {
         var system = SystemId.New();
         var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "member-id");
         var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "old-pool-id");
         var disk = new StorageObjectId(system, StorageObjectKind.VirtualDisk, "old-vdisk-id");
+        var tier = new StorageObjectId(system, StorageObjectKind.StorageTier, "old-template-id");
         var proposal = RealOperationProposalFactory.RebuildSingleMemberPool(
             system, physical, pool, disk, "NewPool",
             new RealOperationProposalFactory.VirtualDiskOptions(
                 "NewDisk", 16L * 1024 * 1024 * 1024,
-                true, true, true, "Data", 'E'));
+                true, true, true, "Data", 'E'), [tier]);
 
         Assert.Equal(OperationIntent.RebuildStoragePool, proposal.Intent);
-        Assert.Equal([physical, pool, disk], proposal.Targets);
-        Assert.Collection(proposal.Steps.Take(4),
+        Assert.Equal([physical, pool, disk, tier], proposal.Targets);
+        Assert.Collection(proposal.Steps,
             step => Assert.IsType<DeleteVirtualDiskCommand>(step.Command),
-            step => Assert.IsType<DeletePoolCommand>(step.Command),
-            step => Assert.IsType<CreatePoolCommand>(step.Command),
-            step => Assert.IsType<CreateVirtualDiskCommand>(step.Command));
+            step => Assert.IsType<DeleteTierCommand>(step.Command),
+            step => Assert.IsType<DeletePoolCommand>(step.Command));
         Assert.Equal(["delete-vdisk"], proposal.Steps[1].DependsOn);
-        Assert.Equal(["delete-pool"], proposal.Steps[2].DependsOn);
-        Assert.Equal(["create-pool"], proposal.Steps[3].DependsOn);
-        Assert.Equal("create-pool",
-            Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[3].Command)
-                .Pool.CreatedByStep);
+        Assert.Equal(["delete-tier-1"], proposal.Steps[2].DependsOn);
+        Assert.DoesNotContain(proposal.Steps, step => step.Command is
+            CreatePoolCommand or CreateVirtualDiskCommand or InitializeGptCommand or ClearDiskCommand);
+        Assert.Contains("separate frozen confirmations", proposal.ExpectedFinalState);
     }
 
     private static ApplicationResult<AgentResponse> AssertDisarmedAtExit(

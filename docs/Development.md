@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 已完成基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.57，V0.58 仅是第一阶段目标。统一数据、模拟编辑及十段硬件报告已完成；硬件采集与报告边界见[实施核对](Archive/20260915-hardware-report/实施核对.md)。已知限制见 [CHANGELOG](CHANGELOG.md)。本机真实修改第一阶段已有代码、定向自动验证及用户执行的一项卷标写入，结果已通过只读对账核对；P0/P5 仍有待验项目，完整 H00–H11 原生验收尚未完成。准确范围、状态与验收顺序以 [Plan](Plan.md) 为准。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.58；统一数据、模拟编辑及十段硬件报告已完成。本机单盘真实修改阶段 H01–H11、P5 交接及最终工程门均已验证；版本元数据、About 页 V0.58 值、普通启动 RealOff、Agent 复用、偏好恢复和正常退出均已核对。实现边界见 [Product](Product.md)，最终验证与历史证据限制见 [CHANGELOG](CHANGELOG.md) 和 [Quality](Quality.md)。
 
 ## 环境与模块
 
@@ -20,9 +20,17 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 依赖保持表现与适配层 → Application → Domain 的现有方向，Execution 与 Inventory 等边界按现有项目引用验证。优先在现有项目内拆分职责，不新增通用引擎项目、DSL、插件体系或公开 SDK。
 
-真实操作请求在 App 中只是提案：Agent 以经 OS 核实的管道对端 PID、启动时间、映像路径及进程实例绑定当前会话，重采 Windows 事实后冻结类型化计划、目标指纹、物理成员指纹、支持证据和哈希。准备使用 `PreparationId` 与会话／意图摘要幂等；接受前重验实时目标、机器、会话、管理员、武装态和一次确认。Agent 将接受结果和每步调用前状态写入核心 SQLite，长操作在后台执行，App 按 `OperationId` 查询；断流或退出不直接强杀已接受作业。未知结果保持写屏障，重启只读对账，不重放 Windows 写调用。缺服务、缺能力或身份／持久化证据不完整时拒绝真实操作。自动验证与一项实机卷标结果各有其覆盖范围；当前单盘 A 类仍待 Plan 的其余工程门和完整实机验收，C 类现场能力尚未证实，D 类禁用。
+真实操作请求在 App 中只是类型化提案。Agent 先核实调用进程仍存活、PID、启动时间、映像路径和会话，再从 Windows 重采并冻结计划、准确目标指纹、完整物理成员关系、能力证据及哈希。接受计划须持有绑定该计划、目标和会话的短时一次性 token；Agent 在接受前和每步写调用前重新核对机器、管理员状态、目标身份、磁盘与池角色、BitLocker、运行依赖和适用能力。准备以 `PreparationId` 与会话／意图摘要幂等，步骤结果写入核心 SQLite，长操作在后台执行，App 按 `OperationId` 查询；断流或退出不强杀已接受作业。缺服务、能力、唯一关联或安全事实时拒绝真实操作。
 
-卷后态按自身 UniqueId／ObjectId 和独立父分区链匹配，不要求 Volume 具有父分区的 Guid 字段。单步 RenameVolume 的只读恢复须同时核对冻结计划哈希、调用前准确目标、成功 Provider 证据、当前身份／父链／卷标和安全事实；不能重放调用或续执行其它步骤。2026-10-06 用户已执行的 WDC E: 改名经此路径完成日志核对，证据见 [Quality](Quality.md)。本次异常恢复的受控停止另获用户批准；未知结果的退出与替换限制仍按 Plan 7.3 执行。
+真实计划只包含封闭的类型化命令。RAW 磁盘初始化 GPT 后必须重新采集，识别 provider 可能自动生成的 MSR；若需规范化布局，使用独立计划准确删除/创建 MSR，再创建 BasicData，不能在同一阶段暗中假设零分区。MSR 安全属性由原生 GPT 布局读取补证；卷的文件系统经只读 VDS 查询，BitLocker 状态按精确 Volume GUID 查询。虚拟磁盘、OS 磁盘和分区通过完整父子关联核对，不只依赖名称或 DiskNumber。缺失、冲突或不完整证据一律拒绝。
+
+单成员池重建拆成多份独立 Prepare／冻结确认／Accept 计划：先删除明确列出的旧对象，再按实时物理盘和直接 OS 磁盘关联复核；如 Windows 已自动创建 GPT/MSR，必须单独清至 RAW 并复采确认零分区，才能继续建池和虚拟磁盘。MSR 与 BasicData 布局再通过独立计划确认。取消、失败或结果未知都会停止后续计划，不自动接受、不重放写调用。
+
+普通多步骤池流程可能需 35–60 秒完成。`EditorPageBase` 最多等待 120 秒，每两秒只查询同一个 `OperationId` 的持久状态；不会再次发送 Accept 或续交后续计划。超过窗口就提示用户以后按该 ID 查询，待核实终态后才可继续独立计划。
+
+`SequentialPartial` 和 `OutcomeUnknown` 都会停止后续 Windows 写调用。Agent 只做只读采集和持久状态对账，不重放可能已成功的调用；需要修复或继续时，先确认现场状态，再生成新的准确计划。单成员池创建要求正面证明当前池角色、完整成员集合及 OS/运行依赖关系安全；只凭单盘名称或候选身份不足以放行。真实计划每步重核目标、系统角色、BitLocker 和运行依赖；写入仍需产品内当次确认。经验证的单盘范围开放，C03、C05、D 类、既有虚拟磁盘/层 MAX、多盘冗余、混合介质分层及新建 MBR 保持禁用。准确能力见 [Product](Product.md)，阶段证据以 [Plan](Plan.md) 和 [Quality](Quality.md) 为准。
+
+卷后态按自身 UniqueId／ObjectId 和独立父分区链匹配，不要求 Volume 具有父分区的 Guid 字段。单步 RenameVolume 的只读恢复须同时核对冻结计划哈希、调用前准确目标、成功 Provider 证据、当前身份／父链／卷标和安全事实；不能重放调用或续执行其它步骤。2026-10-06 用户已执行的 WDC E: 改名经此路径完成日志核对，证据见 [Quality](Quality.md)。当次异常恢复的受控停止另获用户批准；已完成阶段的退出与替换规则见[原阶段计划](Archive/20261007-real-edit-stage1/Plan-history.md) 第 7.3 节，现有 WDC 持续授权见 [AGENTS](../AGENTS.md)。
 
 进程实例核验除映像路径和启动时间外，必须确认进程仍在运行。在同一具有 SYNCHRONIZE 权限的句柄上，以零超时 `WaitForSingleObject` 在身份读取前后检查存活；只有 WAIT_TIMEOUT 可接受，已退出或等待失败均拒绝。退出进程的内核对象可因其它程序保留句柄而继续存在，仅能读取路径／时间不证明存活。Windows 语义见 [进程终止](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process)与 [WaitForSingleObject](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject)。
 
@@ -56,6 +64,8 @@ Agent 的既有退出信号覆盖全部 App 启动目标，包括独立 `--page 
 规则依赖必要的 OS/SKU、提供程序、布局、介质、用途、扇区及能力信息；只定义当前操作需要的字段。不把本机能力偷偷套用到导入系统。未知组合不默认放行，不为通过旧样例而放宽规则。
 
 容量至少明确原始物理容量、逻辑容量、已分配/物理占用、可用范围和估算来源，不能用同一个值替代。计算使用整数 bytes 和溢出检查；单位转换只在输入/显示边界进行。
+
+真实 GPT 创建统一使用 `EditWorkspace.GetRealPartitionCreateGeometry`：选定空隙与磁盘尾部 1 MiB 预留区取交集，再按 1 MiB 对齐。手动 MAX、自动布局和 Agent 校验共用此计算，保留相邻分区重叠检查；模拟几何继续使用自身规则。准备阶段的能力拒绝返回 `agent.real_operation.prepare_failed`，没有准备计划或写调用，不能误记为执行结果未知。
 
 - 保留适用的采集值及来源；改名等无容量影响的操作不重新估算。
 - 成员、布局或分配相关参数改变后，使受影响的容量/能力证据失效，重新估算并标记，保留未受影响事实。
@@ -195,7 +205,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 
 有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。此前界面与人工反馈阶段的 Plan 已[归档](Archive/20260924-before-real-edit/README.md)；2026-09-27 用户正式进入本机真实磁盘修改第一阶段，当前 [Plan](Plan.md) 按单盘范围、显式重建和逐步失败对账执行。2026-10-06 的用户单项卷标写入已核对，P0/P5 仍有待验项目，完整 H00–H11 尚未完成。2026-10-07 用户重申 WDC 全部真实操作已获批准、E: 无有效数据，执行时沿用 [AGENTS](../AGENTS.md) 的持续授权，范围内不再逐操作聊天索批；未激活 Design 不因此获得实施授权。
+用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。此前界面与人工反馈阶段的 Plan 已[归档](Archive/20260924-before-real-edit/README.md)；2026-09-27 用户正式进入本机真实磁盘修改第一阶段，当前阶段现已完成并归档。2026-10-07 用户重申 WDC 全部真实操作已获批准、E: 无有效数据，执行时沿用 [AGENTS](../AGENTS.md) 的持续授权，范围内不再逐操作聊天索批。H01–H11、最终布局、正常重启保护、P5 交接与最终工程门均已验证，产品版本为 V0.58；C03/C05/D 类能力仍禁用。未激活 Design 不因此获得实施授权。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 

@@ -9,11 +9,17 @@ public sealed record VirtualDiskCreationSize(
     long DivisorBytes,
     IReadOnlyList<long> EnumeratedSizes)
 {
+    // Pool sizes use absolute multiples. Tier GetSupportedSize instead describes
+    // a sequence beginning at TierSizeMin, with TierSizeDivisor as its increment.
+    public long RangeOriginBytes { get; init; }
+
     public bool Supports(long bytes) => bytes > 0 &&
         (EnumeratedSizes.Count > 0
             ? EnumeratedSizes.Contains(bytes)
             : bytes >= MinimumBytes && bytes <= MaximumBytes
-              && DivisorBytes > 0 && bytes % DivisorBytes == 0);
+              && MinimumBytes > 0 && MaximumBytes >= MinimumBytes
+              && DivisorBytes > 0 && RangeOriginBytes >= 0 && bytes >= RangeOriginBytes
+              && (bytes - RangeOriginBytes) % DivisorBytes == 0);
 }
 
 public interface IVirtualDiskCreationSizeReader
