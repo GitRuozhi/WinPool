@@ -1,8 +1,8 @@
 # WinPool 验证与验收
 
-日期：2026-10-07。V0.58 本机真实磁盘修改第一阶段已完成。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细最终 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-08。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/原生/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
-## 最终验收
+## V0.58 单盘真实修改第一阶段（历史，已归档）
 
 - **现场序列：** H00 基线及 H01–H11 适用操作已完成。包括分区/GPT/MSR、NTFS/exFAT/ReFS、EFI/Recovery、RAW 扩缩与删除、盘符/卷标、脱机/联机、建池、VD 与 HDD tier template、自动布局和分阶段重建。C03 因目标盘原已为 GPT 而 `not_required`；C05 现有 VD 与实际层实例扩展仍按边界条件禁用；D 类能力保持拒绝。
 - **C02 与末态：** ReFS 1 GiB/65,536-byte cluster 卷扩至 2 GiB 后，同一 16 MiB 测试文件 SHA-256 保持一致；Shrink 属性及 UIA 均为禁用，候选卷随后删除。最终 WDC 为在线 GPT，16 MiB MSR 与 MAX NTFS/65,536-byte cluster BasicData，卷标 `WinPool_Test`、E:。
@@ -18,7 +18,118 @@
 - Persisted-inventory helper 不证明具体一次 ScanAsync 的因果；Samsung comparison 也无法排除后台 I/O。
 - 最终门之后的版本号提升只由标准构建、metadata 和 About UIA 核对，不等同于完整测试门重跑。
 
-最终门和 H11 目标审计位于 [本次测试证据](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/)。完整 H11 结构、操作 ID、几何、文件哈希与退出证据见 [H11 最终检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。本阶段已归档；后续工作需另立范围和验收计划。
+第一阶段最终门和 H11 目标审计位于[历史测试证据](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/)。完整 H11 结构、操作 ID、几何、文件哈希与退出证据见 [H11 最终检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。以下 V0.59 工作流对齐是独立的活动阶段，不改写这份历史结果。
+
+## V0.59 工作流对齐的当前验收状态
+
+截至 2026-10-08，产品版本仍为 V0.58，`docs/Plan.md` 中 V0.59 阶段处于实施与验收中。P2–P8 已进入最新完整自动门；B5 的 WDC/Samsung 末态、受保护比较、性能与监控复测、偏好恢复及关闭/重启核验均已通过；Monitor Off 全新启动不再显示历史 WDC 恢复提示。唯一未完成的原生目标是 B4 单 HDD tiered MAX 正例，是否按已知限制豁免仍待用户决定。P10 文档已同步，版本提升和 Plan 归档依赖 MAX 的用户决定。本节不宣告整个 V0.59 阶段完成。
+
+### 自动门结果与证据范围
+
+- 早期第一轮聚合为 **1540 项：1530 Passed、7 Failed、3 Skipped**，使用本轮新增源码/测试之前的已编译结果；第二轮为 **1583 项：1577 Passed、3 Failed、3 Skipped**，三条失败分别涉及自动布局输出证据、分区磁盘预检和 pristine-root guard。两轮 TRX 保留原状态，均不能代表后续新测试结果。
+- 中间定向 `device-gate-tests` 五个 TRX 合计 **433 Total / 433 Passed / 0 Failed / 0 NotExecuted**：Agent.RealService 15、App 124、Application.Session 15、Infrastructure.RealSafetyBackend 271、Persistence.BuildOperationGuard 8。该定向门不是完整 solution 最终门；TRX 文件夹名含 `device` 不代表这些自动测试写过真实设备。
+- 较早完整工程门 [20261008-195646 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-195646/summary.json) 为 **12 项目，1622 Total / 1619 Passed / 0 Failed / 3 NotExecuted**；后续门 [20261008-202506 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-202506/summary.json) 为 **1655 / 1652 / 0 / 3**；再后门 [20261008-203645 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-203645/summary.json) 为 **1677 / 1674 / 0 / 3**，后续门 [20261008-210146 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-210146/summary.json) 为 **1714 / 1711 / 0 / 3**；[20261008-214608 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-214608/summary.json) 为 **1734 / 1731 / 0 / 3**。此前 [20261008-221503 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-221503/summary.json) 为 **12 项目，1766 Total / 1763 Passed / 0 Failed / 3 NotExecuted**，392 个源码哈希项未变化。当前 [20261008-223310 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-223310/summary.json) 为 **12 项目，1775 Total / 1772 Passed / 0 Failed / 3 NotExecuted**，12 项目全部退出码 0，393 个源码哈希项前后相同（`sourcesUnchanged: true`）；Restore/Release build 均退出码 0，0 warnings/0 errors，标准 App/Agent 合并无冲突。本门未请求 CapacityPreflight。三项 NotExecuted 是既有 archive/performance measurement；未执行不能记作通过。版本仍为 V0.58 iteration 8；依赖审计复用已有 23 项目结果，未重新运行。
+- 与完整门分开的定向回归：[backend-complete TRX](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/hddmax-provider-uncertain/backend-complete/results.trx) 为 259/259 Passed，[capacity-intersection TRX](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/hddmax-capacity-intersection/capacity-intersection.trx) 为 93/93 Passed，[no-effect focused TRX](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/hddmax-provider-uncertain/no-effect-tests-final/results.trx) 为 42/42 Passed；这些是定向门，不叠加到完整门总数中。容量交集回归用准确 pool 与 HDD template provider 范围计算可用共同网格；这一代码/夹具结果不能代替原生 MAX 创建成功。
+- 该定向门实际包含并通过 7 个 P6/P8 服务方法：每次做新鲜 scoped 安全采集、失败/不完整范围不回退或复用旧事实、重启对账使用持久物理选择器、格式错误的 durable selector 保持 Unknown 屏障、无 scoped 能力时仍做 fresh full 检查，以及 observer 故障不把已核验写入变成 Unknown。前六项使用合成事实源，不能证明生产 CIM 遍历耗时或真实写入；最后一项也不等于监控联动已端到端验收。
+- 较早定向门所记录的 Release 构建为 0 warnings、0 errors；复用的 23 项目依赖审计未报告漏洞。这些结果单独记录，不等同于重新执行依赖审计。
+
+完整 T01–T18 方法映射及逐项原生 H/B 限制见[自动覆盖交叉表](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/acceptance-map.md)。下表归纳覆盖种类；“自动覆盖”是方法/服务夹具的断言范围，不代表页面控件或真实设备已经通过。
+
+| T | 自动覆盖类别 | 自动证据的边界 |
+| --- | --- | --- |
+| T01 | `SimulationEditingSessionTests`、`RealStructureDraftPlannerTests` | 草稿拖放语义、撤销/放弃、冲突及零计划调用；没有实际页面拖拽端到端测试 |
+| T02 | `RealStructureDraftPlannerTests`、`RealOperationUiFlowTests` | 表单意图、名字、布局、精确容量/MAX 与偏好进入 helper/计划；页面绑定仍需原生验收 |
+| T03 | `SimulationEditingSessionTests`、`RealOperationUiFlowTests` | Enter 改名会话语义和 proposal；没有真实页面 Enter/失焦事件测试 |
+| T04 | `RealVirtualDiskCreationRangeTests`、`WindowsRealPlanSafetyTests`、Agent planner | 新建容量和 MAX 按准确 provider 范围解析；已有虚拟磁盘/层扩展负例拒绝 |
+| T05 | `RealOperationUiFlowTests`、`RealAutomaticLayoutProgressTests`、`WindowsRealPlanSafetyTests` | 普通/单 HDD 布局与分段输出通过 helper、planner 和服务断言；不等于原表单实机完成 |
+| T06 | `RealStructureDraftPlannerTests`、`WindowsRealPlanSafetyTests` | 显式重建、删除前的已知创建能力预检，以及已知不支持时不调用 adapter 的负例；最终门通过了分区目标在计划清空后创建结构的回归。设备侧仍须验证原界面完整顺序 |
+| T07 | `AgentRealOperationServiceTests`、`RealAutomaticLayoutProgressTests`、`RealOperationUiFlowTests` | 取消、部分完成、Unknown 停止及不重放；原生逐段取消路线仍需设备证据 |
+| T08 | `RealOperationUiFlowTests`、`AgentRealOperationServiceTests` | 准备互斥、重连查询与 durable identity；不代替完整原生重连验收 |
+| T09 | `SimulationEditingSessionTests`、`SimulationClearDiskTests`、Execution/Windows 安全测试 | 模拟 ClearDisk 独立关系变化及真实安全拒绝；夹具不修改真实磁盘 |
+| T10 | `DiskPartitionPage` 静态路径审阅及辅助状态规则 | 没有自动测试实例化/驱动联机状态或分区表按钮；字段和禁用原因由 H07 原生验证 |
+| T11 | `RealOperationUiFlowTests`、`WindowsRealPlanSafetyTests`、`SimulationClearDiskTests` | 精确 clear 目标、空 GPT 完整事实正例和未知/危险角色负例；模拟规则与真实设备结果分开 |
+| T12 | `RealOperationUiFlowTests`、`WindowsRealPlanSafetyTests` | 公式/helper 双向联动、整 MiB 约束、provider stale-range 拒绝；没有实际 textbox 输入事件测试 |
+| T13 | `RealAutomaticLayoutProgressTests`、`WindowsRealStorageBackendTests`、MSR safety inspector tests | 精确 MSR/provider 后态、偏好和拒绝续段；实盘 MSR 开/关结果由 B1/B2 核实 |
+| T14 | `ScopedInventoryProviderTests`、`ScopedFactRefreshTests`、`AgentInventoryCoordinatorTests`、`EditWorkspaceTests` | 实际范围、闭包、合并、失败保留、代次与并发语义；另有 12 个显示回归 cases 验证 scoped dissolve 后准确 OS disk 投影和拒绝不可靠 fallback；合成 provider 测试不代表全机或所有设备性能 |
+| T15 | `GlobalNotificationServiceTests`、`RealOperationUiFlowTests` | 进度生命周期和工作流屏障；没有图形遮罩控件、导航或窗口生命周期自动化 |
+| T16 | `MonitoringEditTests`、`MonitorTargetIdentityTests`、`MonitoringSqliteStoreTests`、Agent observer tests | 目标身份、编辑缺口、恢复与持久状态夹具；监控运行中的真实编辑路线仍需 H10/B3–B4 |
+| T17 | `RealStructureDraftPlannerTests`、`RealOperationUiFlowTests`、`RealOperationContractTests` | 65536-byte 参数意图、contract 和准确目标形状；不是页面输入到实际层的实机证明 |
+| T18 | `IpcProtocolTests`、Agent 恢复测试、scoped merge 与监控持久化/轮换测试 | 帧、恢复 identity、代次和持久缺口语义；App/Agent 真实重连和采样恢复仍需 H12/H10 设备证据 |
+
+### P6 范围采集与 P8 监控缺口
+
+- P6 的真实安全读路径每次按准确 selector 获取新的范围事实；scope 只携带 selector/scope，不缓存安全事实。范围失败或不完整时拒绝，不静默回退 full、不复用上次结果；merge 只在完整覆盖域中证明 absence，范围外对象、关系及失败范围的旧值/观察时间须保留。新鲜事实还须通过代次检查，不能用较旧 full 覆盖较新的 scoped 结果。相应 7 个直接服务方法在最新定向 TRX 中的精确名称见[P6/P8 交接](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/documentation-handoff-p6p8.md)。
+- 生产 `ReadOnlyProbe` 已修正。最新 `scoped-subsystem-fixed/target-proof.json` 将 scoped 与 full 捕获中的同一目标逐字段核对：物理盘 UniqueId/ObjectId、所属 StorageSubsystem UniqueId/ObjectId 及 fingerprint 均匹配，fingerprint 为 `bac984e6d81942c8de504684853e1af97d80491f7500afdfae3142df5e1428f6`。本次配对耗时 full **3293.1505 ms**、scoped **1966.4554 ms**；仅这一组顺序捕获不能外推到其他设备、所有 scope、整条 UI 链或安全写入时长。较早 full **2757.2775 ms** / scoped **1848.3027 ms** 的捕获仍作为历史测量保留，不与本次数据合并成趋势。
+- P8 将监控数据库升至 schema 2。精确且有效的 schema 1 在事务内迁移并保留旧样本；损坏或未知 schema 拒绝迁移。编辑缺口按真实 durable step、准确稳定对象身份和实际恢复样本记录，不伪造终点或补造样本；迁移不重写旧历史 TRX，也不迁移旧 core 库中的监控行。
+- P8 的 `MonitoringEditTests` 缺口/删除恢复用例、`MonitoringSqliteStoreTests` schema 1 迁移/损坏拒绝用例及轮换 multiset 用例在 `integration-tests` TRX 中有 Passed 记录；它们不属于 433 项定向 device gate。生产采样目标重绑、未受影响目标持续采样、实测 gap 关闭与重启/轮换端态尚不能由这些 helper/持久化测试替代。三个 archive/performance measurement 用例仍为 NotExecuted；小阈值轮换不等于生产 1 GiB 与完整 7-Zip 性能测量。
+
+### H00–H12 原界面与当前设备批次
+
+H00–H12 是[计划 §7.2](Plan.md)中的原界面设备验收路线，不是新增向导，也不能由 helper、源码字符串或筛选 TRX 替代。当前批次状态如下：
+
+| 批次 | 结果 | 已知范围 |
+| --- | --- | --- |
+| B0 基线 | `passed` | H00 写前基线及现有 NTFS 卷改名、联机/脱机、NTFS 扩缩和文件哈希路线；改名计时有专门范围，不能推广为所有操作的延迟保证 |
+| B1 无 MSR/RAW | `passed` | MSR 关闭、GPT 零分区/BasicData 不格式化、RAW 分区扩缩、删除及零分区 GPT 独立清空；NTFS 扩缩由 B0 核验 |
+| B2 有 MSR | `passed` | MSR 开启后核对 1 MiB/16 MiB 唯一规范 MSR，再独立清空至 RAW |
+| B3 普通结构 | `passed` | 普通批次已通过：仅建池 `2fe1658c967b417e876ce51e45745dcb`、首个普通 32 GiB VD `17ca0eea11d9468e85b05f279cb217e0`（RAW、零分区）、池改名往返 `ed926ae7f37e470cb4eedc31e7f4b1f3` / `68cce52422af46b580def639d9fb370b`，以及普通 MAX 原生创建/重建完整证据 [ordinary-max-native-proof.json](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B3/ordinary-max-native-proof.json)。重建后的两步解散 `b97b36a715614a1790b4d7101081e060` 均为 Verified；取消路线 `35a0109f703c4c42b8fb3b9ca777ab44` 的 `accepted_at_utc_ms` 为 null |
+| B4 单 HDD 分层 | `in progress` | 32 GiB HDD tiered VD 的修复后原生正向证据见 [hdd32-final-native-proof.json](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B4/hdd32-final-native-proof.json)，配套断言 `passed: true`、`Interleave=65,536`、MSR false，最终观察到 GPT 数据分区及 NTFS/65,536-byte cluster。旧 MAX 操作 `c2a5f8900b534f8f9e88e88406b81e13` 与 joint MAX 操作 `d92bd1e6-90c3-4f80-8b0d-f59bb040a350` 的只读恢复均是 Failed/NoEffect，不是 MAX 创建成功。native 单 HDD MAX 正例仍未完成；是否按已知限制处理的用户决定仍待，因此不关闭 B4 |
+| B5 恢复末态 | `passed` | 最终 WDC 布局 13 项原生断言、H06 窄屏/宽屏视觉均通过；最终 Samsung 限定比较 0 changes/0 evidence gaps（4 项共享 Primordial scope adjustments），WDC 八项末态检查为 true；恢复监控 session、六次重命名性能比较、标题栏关闭、Agent 托盘 Exit、普通重启/偏好基线核对及 223310 runtime 的 Monitor Off 无历史警告复核均通过。历史 3 个 gap endpoints 仍 Unknown 且未改写；这些历史端点不再冒充当前监控告警 |
+
+B0–B3 是当前实际通过的设备批次，不表示 H00–H12 的整体验收完成。H00–H12 原界面路线及批次对应关系如下；每个 H 点的通过状态须由对应现场记录判定，不能只凭方法名或批次名推定。
+
+| H | 原生界面设备路线 | 对应批次 |
+| --- | --- | --- |
+| H00 | 写前基线与准入：准确 WDC/Samsung 关联、偏好、盘符占用、依赖和未终结操作 | B0 |
+| H01 | 原结构页空草稿、拖入/移出、属性、撤销/放弃及 Apply 前零写入 | B3 |
+| H02 | 普通单盘池/VD 创建及自动布局、明确容量与 MAX | B3 |
+| H03 | 单 HDD 分层池/VD、模板/实际层和自动布局 | B4 |
+| H04 | 已有对象按 Enter 改名、失焦不提交及属性/反馈 | B0、B3、B4 |
+| H05 | 原流程明确的普通与单 HDD 分层删除重建、取消与删除前拒绝 | B3、B4 |
+| H06 | 两个原编辑页的视觉、起终点字段、窄窗口、拖动和滚动 | 本轮分区页视觉检查已通过：中英文 480×700 属性/目标页、纵向滚动、中文 1440×900 最终 E 卷均有截图；扩展无候选提示和压缩公式只读展示已核对。其余结构页/拖动场景仍按各批次核验 |
+| H07 | 联机/脱机、清空至 RAW、MSR 关闭/开启初始化及 GPT 按钮状态 | B0、B1、B2 |
+| H08 | 原界面真实扩展/压缩公式、范围边界及写后容量/哈希 | B0、B1 |
+| H09 | 操作进度、图形遮罩、准确范围刷新和终态反馈 | 横跨各批次 |
+| H10 | 监控运行中编辑、目标重绑、未受影响采样与真实缺口 | B3、B4、B5（恢复 session 通过；历史 3 个 endpoint 保留为 Unknown） |
+| H11 | 排除用户等待的分段时长/采集次数及前后比较 | B0 起记录；B5 配对见下方；不得外推到其他设备或所有操作 |
+| H12 | 最终复采、WDC 末态、Samsung 比较、偏好恢复和正常退出 | B5 |
+
+H04 的六次卷标往返已在 B0 留证，但不单独关闭其全部属性/反馈路线；B0 的改名时长也只覆盖该操作链。B3 普通结构批次已通过，普通 MAX 创建/重建及完整销毁均有原生证据；取消路线的 Accepted 仍为 null。B4 的 32 GiB 单 HDD tiered VD 正向观察与断言通过；MAX 正例仍缺，用户对已知限制的决定仍 pending，B4 暂不关闭。B5 最终 WDC 布局 13 项断言和 H06 视觉通过；Samsung 限定比较、WDC 八项末态核对、恢复监控采样、六次性能比较、标题栏与托盘退出、普通重启 Real Off/Monitor Off、偏好基线以及 223310 标准 runtime 下 Monitor Off 无历史告警检查均通过，详见下方最新记录。历史 3 个 gap endpoints 仍保留为 Unknown，且不再冒充当前异常告警。H03/H05/H09–H10 依赖单 HDD 分层、重建或监控联动的检查仍按原路线判定；B5 已收口，V0.59 全阶段仍待 B4 MAX 用户决定。
+
+较早 H10 只读监控快照记录新 session `a122c87fc2934ab2b584e1d9cd09ca24`：新建 VD 已有非 NULL activity/read/write 样本；当时 Samsung gap 为 0，WDC 入池后缺少准确的 OS-disk 绑定，仍有开放 gap。该快照只说明当时所列样本和缺口。B5 最终 session 与目标窗口的当前验收结果见下文；历史 open endpoints 仍保持 Unknown。
+
+本阶段对受保护 Samsung 的比较只说明记录中列出的准确关联对象与字段范围。正面 `IsPrimordial` aggregate 字段和范围外成员边按比较规则排除；`0 changes` / `0 evidence gaps` 不能推广为整机对象全部不变，也不能排除 Windows 后台 I/O。历史和本阶段 TRX 都是原始验收证据；禁止回写或修饰既有 TRX。修复后复跑必须生成新的 TRX，单独记录其结果，不能用来改写旧失败状态。
+
+### 第二次 MAX 只读恢复与阶段工程门历史：2026-10-08 21:21:03
+
+该时点 [完整门 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-212103/summary.json) 覆盖冻结后的 root/editor 源码：12 个项目，**1722 Total / 1719 Passed / 0 Failed / 3 NotExecuted**。392 个纳入哈希的源码文件前后完全一致（0 个哈希差异）；Restore 与 Release build 均退出码 0，构建 0 warnings/0 errors；未请求 CapacityPreflight。3 个 NotExecuted 仍是既有 archive/performance measurement，不计为通过。依赖审计复用已有 23 项目结果，没有重跑。本门不包含 App/Agent 启动、原生 UI 或真实存储操作；版本仍为 V0.58 iteration 8。最新工程门见下方独立记录。
+
+- **d92 标准启动后只读恢复。** [恢复证据](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/second-max-running-recovery/reconciled/asserted-observed-no-effect.json) 记录 operation 与 step 均为 state 6（Failed）；Accepted 与 `operation.step.call_issued` 各仅一次，`WindowsCallIssued=true`。判据为 `real.reconciliation_observed_tiered_creation_no_effect`；冻结前 fingerprint 与两次独立 fresh fingerprint 相同。provider 再次报告 eligible resources 不足。没有重放或成功创建证据；这证明本次已观察 NoEffect，不证明原操作没有调用 Windows。
+- **当时的 B4 / B5 状态。** d92 已离开 Running/Unknown 屏障，但单 HDD tiered MAX 的 native 成功正例仍缺失；不因只读 NoEffect 恢复而降低既定验收标准。该时点 B4 未关闭，B5 与 H06 尚待完成。后续的 32 GiB 正向证据、B5 布局证据和 H06 视觉验收见下方当前记录。
+
+### 最终完整工程门、B4/B5 与 H06 更新：2026-10-08 21:48:21（当时状态；后续由下文更新）
+
+- **完整工程门。** [summary.json](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-214608/summary.json) 为 12 项目 **1734 Total / 1731 Passed / 0 Failed / 3 NotExecuted**，12 项目退出码均为 0。392 个源码哈希项前后相同；Restore/Release build 均为 0，build 0 warnings/0 errors。未请求 CapacityPreflight，依赖审计复用 23 项已有结果。3 个 NotExecuted 是既有 archive/performance measurement，不计作通过。版本为 V0.58 iteration 8。自动门不验证 UI 或真实设备操作。
+- **B4 32 GiB 正例。** 修复后只读原生事实快照 [hdd32-final-native-proof.json](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B4/hdd32-final-native-proof.json) 的 [断言](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B4/hdd32-final-native-assertion.json) `passed: true`：WDC 上存在 32 GiB tiered VD、HDD template/interleave 65,536 bytes，MSR 偏好为 false，数据盘 GPT 且已格式化 NTFS/65,536-byte cluster。此正向证据不是 MAX 正例。旧 MAX 的 Failed/NoEffect 恢复记录仍保留；单 HDD MAX 正例的豁免/限制决定尚待用户回复，B4 不因此自动关闭。
+- **B5 布局正例。** [final-native-proof.json](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/final-native-proof.json) 的 [13 项断言](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/final-native-assertions.json) 全为 true：目标物理盘在线 GPT，恰有规范 MSR 与一个最大整 MiB 数据分区，MSR 无卷、数据区唯一关联 NTFS/65,536-byte cluster `WinPool_Test` E:；没有具体池或关联 VD。此布局子验收已通过；B5 仍待受保护 Samsung 比较、性能统计、偏好恢复、正常退出/重启及最终末态核对。
+- **H06 分区页视觉验收。** 当前现场以 WDC E: `WinPool_Test` 为准确选中对象。中文/英文 480×700 属性与目标页、纵向滚动底部及中文 1440×900 宽屏截图均已检查；两行起点/终点/容量、NTFS/64 KiB、底栏和窄屏布局可读。只读缩容预览显示 `3,815,429 MiB − 1 MiB = 3,815,428 MiB`；扩展入口因当前 provider 几何没有 1 MiB 目标而提示无可用目标。没有准备或提交扩缩操作。最终宽屏截图：[H06/partition-e-cn-1440x900-final-restored.png](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/H06/partition-e-cn-1440x900-final-restored.png)。其他 H12 性能、受保护对象、偏好和重启检查仍待。
+
+### App 正常关闭生命周期修复与当时工程门：2026-10-08 22:17（历史快照；后续由下文更新）
+
+- **原生退出异常与证据边界。** B5 原验证记录 [normal-exit-result.json](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/normal-exit-result.json)：App PID 14884 经已核实的 Agent 托盘 Exit 路径退出，Agent PID 18124 正常退出，但 App 退出码为 `-1073741189`。对应 [Windows 应用事件](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/normal-exit-application-events.json) 报告 CoreMessagingXP.dll `0xc000027b` 及 WER `combase.dll` `0x80004003`；没有相应的近期 managed crash 记录。源码审查发现旧 `Closed` 异步处理在 await 后仍访问 XAML/UI 状态的风险，因此实施了活窗口预关闭清理、同步 `Closed` 兜底、统一程序化关闭入口及关闭期间的输入/晚到回调防护。事件没有托管堆栈，故生命周期风险是修复依据，不能称为已确认的崩溃根因；没有吞掉或标记已处理 COM/Unhandled 异常。
+- **最终完整工程门。** [20261008-221503 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-221503/summary.json)：12 项目 **1766 Total / 1763 Passed / 0 Failed / 3 NotExecuted**，Restore 与 Release build 均退出码 0、0 warnings/0 errors，392 个源码哈希项前后相同；未请求 CapacityPreflight。App.Tests 为 179/179，Architecture.Tests 为 48/48。三项 NotExecuted 仍为既有 archive/performance measurement；依赖审计复用已有 23 项目结果。工程门只证明冻结源码通过自动检查，不验证原生关闭行为。
+- **保留的前置失败。** 较早的 [20261008-221056 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-221056/summary.json) 保留 **1766 Total / 1761 Passed / 2 Failed / 3 NotExecuted**，且 `sourcesUnchanged: false`：Architecture 的 Welcome 旧源码断言与 Persistence 归档临时目录 `archive-ledger.json` 文件占用失败。该 TRX 和错误记录未改写；修正后的冻结源码由 22:15 完整门单独验证，Persistence 文件占用未在该门复现。另一次构建尝试的 [build.log](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-221408/build.log) 也原样保留。前置错误不计入 22:15 门，也不因最终门成功而抹除。
+- **仍待原生复验。** 本次工程门没有启动 UI 或执行存储操作。Agent 托盘正常退出后的 App 进程码、系统标题栏关闭时保留 Agent 后台行为、普通重启 Real Off/偏好及 Accepted/CallIssued 计数稳定性，仍需 root 按 H12 现场复核；在该证据落盘前，正常退出/重启为 `unverified`，B5 与 V0.59 阶段不标为完成。
+
+### B5 监控恢复、性能与关闭最终核对：2026-10-08 22:38
+
+- **当前工程门。** [20261008-223310 summary](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-223310/summary.json) 是最后完整门：12 项目 **1775 Total / 1772 Passed / 0 Failed / 3 NotExecuted**，393 项源码哈希前后相同，Restore/Release build 退出码 0、0 warnings/0 errors，标准 App/Agent 合并 0 collisions。未请求 CapacityPreflight；依赖审计复用已有 23 项目结果。三个 NotExecuted 仍是既有 archive/performance measurement；版本保持 V0.58 iteration 8。新 Observer 告警呈现回归另有 [定向 9/9 记录](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/monitor-inactive-history-alert-fix/summary.json)。
+- **历史端点的当前告警呈现。** 先前全新启动且 Monitor Off 时，`recovered_endpoint_unknown` / `PendingVerification` 历史项被错误呈现为当前监控异常；这不代表持久 gap 已恢复或重新发生。最小 Observer/predicate 修复只改变活动告警分类，不改采样、身份判定和历史 endpoints；Infrastructure 的 9 项回归验证仅排除此特定 inactive 历史状态，同时保留其他 pending/active 告警。最新标准 runtime 原生记录显示 App 3916 / Agent 14740 启动时 Real Off、Monitor Off，WDC E: `WinPool_Test` 与 Samsung 结构可见，Monitor Off 下无历史“监控异常”提示，见 [main-initial](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-main-initial.txt)、[monitor-off](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-monitor-off.txt)、[disk UI](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-disk-ui.txt) 和 [main-later](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-main-later.txt)。
+- **监控 session 与操作计数。** [只读 receipt](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/audit-monitor-repaired-performance/session-810015f675bf45c5a5cf7c2c3bd2aca1/final-readonly-receipt.json) 记录 session `810015f675bf45c5a5cf7c2c3bd2aca1` 停止、`dropped_samples=0`、当前 session gap 为 0；三块准确目标各有 4,252 条完整有限值样本，均值 20.006 Hz、中位间隔 47 ms、最大间隔 65 ms。18 个 durable Accepted→View 窗口与另 18 个 AcceptClick→ViewReady 性能窗均通过；六次 rename 使 plan、Accepted、Accepted event、CallIssued boundary 分别增加 6，计数到 245 plans / 193 Accepted / 193 accepted events / 244 CallIssued。三个历史 open endpoints 仍为 Unknown，没有被此轮修复或关闭。
+- **六次改名性能。** [验证后比较](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/monitor-restored-performance/verified-performance-comparison.json) 匹配 incoming label `WinPool_Test` 的 B0/B5 样本 2/4/6；中位数由 **18.472 秒**降至 **15.437 秒**，减少 **16.43%**。计时范围是 accept click 到 view ready，排除 Prepare/input 与人工确认等待；六次样本均已 Verified 且具完整 matching scope。它只覆盖一块 WDC，不能外推至其他设备，B5 采集器逐阶段 `captureCount` 未记录。更早的 **15.76%** 统计来自 WDC 监控流为 0 的首轮，不是同负载对照，保留为历史而不作当前结论。监控/性能/受保护比较证据来自 221503 标准 runtime；223310 的源码仅改历史 inactive 告警呈现，没有重跑六次测量，也未更改采样语义。
+- **受保护对象与 WDC 末态。** [final2 独立执行 receipt](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/audit-final-production-full/final2-after-monitor-repair-six-renames-and-manage-refresh/independent-final-execution-receipt.json) 给出 Samsung 限定比较 `passed=true`、0 changes、0 evidence gaps，并有 4 项共享 Primordial scope adjustments；此范围不等于全机不变，不能排除 Windows 后台 I/O。[WDC 原生 crosscheck](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/audit-final-production-full/final2-after-monitor-repair-six-renames-and-manage-refresh/wdc-layout-native-crosscheck.json) 的 8 项检查全部 true。证据为 fresh read-only provider/UI refresh；未做真实结构写入。
+- **最终关闭和偏好。** 正常标题栏 Close 以进程句柄复核为 App exit code 0，同时 Agent 仍运行；之后 Agent 托盘 Exit 以原入口关闭 App 与 Agent，两者 exit code 0，见 [标题栏 Close](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/close-repaired-titlebar-native-result.json) 与 [最终 tray Exit](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-exit-result.json)。普通重启与第二次全新启动都保持 Real Off / Monitor Off、原偏好基线以及 245/193/244 计数；最终核对见 [final-after](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-after.json)。第一次标题栏探针 App 17736 的 ExitCode 缺失是仪器缺口、不计通过，详见[原始探针](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/close-repaired-titlebar-result.json)；修复前 App 14884 的 `0xc000027b` 事件仍作为历史证据保留。旧崩溃之后的原生复验通过，不证明其根因。独立[只读最终复核报告](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-readonly-review.md)与[结构化结果](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-readonly-review.json)覆盖四份 Monitor Off 界面快照、偏好/计数及限定时间段的事件与进程查询；它确认原生 Agent 托盘 Exit 两进程为 0，并明确不延伸为全历史或未来保证。
+- **剩余计划范围。** B5/H06/H10/H11/H12 当前已核验范围为 `passed`，上述测量和保护对象比较边界仍按单机/选定 scope 描述。唯一未关闭的 V0.59 原生目标是 B4 的单 HDD tiered MAX 成功正例；用户是否将其按已知限制豁免仍未答复，因此保持 V0.58 iteration 8 与活动 Plan，不宣告整个阶段完成。
 
 ## 选择验证范围
 

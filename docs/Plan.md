@@ -2,9 +2,9 @@
 
 日期：2026-10-08；已纳入用户对编辑页交互、执行反馈和采集性能的要求，以及本次接手调查和产品选择。
 
-**状态：已编制、待执行，未激活。** 本轮已完成静态调查、产品决定落实、执行/安全交叉复核和文档链接/差异检查；未修改代码、测试或实际版本，未启动程序、构建、设备验收或磁盘操作。收到后续明确执行指令才激活，随后连续完成本文件内的实施、验证、修复、末态恢复和本地提交。
+**状态：已实现待验证；仅分层 MAX 成功正例的验收边界待用户决定，Plan 保持活动。** 2026-10-08用户要求“完整执行计划直到完成”，已连续完成实施、范围内修复、适用验收、末态恢复、文档与本地提交。其他适用验收已通过；未答复不等于允许降低验收或提前升版。证据根为 `artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/`。
 
-第 4.5–4.11 节是已确定要求，不再次询问是否实施。用户本次确认普通和单 HDD 分层重建均为必交付、新建容量默认 MAX，并要求交互以现有模拟系统的操作逻辑为基准。第 9 节记录决定及其来源；不能把先前提出的连续步骤界面、草稿持久化等建议当成用户批准的新产品。已有 WDC 授权和产品禁项保持有效；本计划本身不激活实施。
+第 4.5–4.11 节是已确定要求，不再次询问是否实施。用户本次确认普通和单 HDD 分层重建均为必交付、新建容量默认 MAX，并要求交互以现有模拟系统的操作逻辑为基准。第 9 节记录决定及其来源；不能把先前提出的连续步骤界面、草稿持久化等建议当成用户批准的新产品。已有 WDC 授权和产品禁项保持有效。
 
 | 项目 | 基线与目标 |
 | --- | --- |
@@ -12,7 +12,7 @@
 | 接手基线 | `main`，`0609e90`；本地 HEAD 与当前本地上游引用 `origin/main` 相同，未联网核对远端；功能收口提交为 `6f51bc7`，后两次提交仅扩充 Plan |
 | 本阶段目标版本 | V0.59；实施与验收收口时将迭代值改为 9，本草稿不提前升版 |
 | 核心目标 | 将真实执行能力接回原产品建池、改池流程；按用户要求调整两编辑页、磁盘按钮与扩缩公式，修复 MSR 选项，缩短执行/刷新等待并联动预期改动 |
-| 当前进度 | 静态调查与计划交接检查已完成；实施、自动回归、原生交互和实机验收全部未开始 |
+| 当前进度 | P1/P2/P5–P8已验证，B0–B3、B4分层32 GiB及B5适用验收通过；最后工程门1772 passed/0 failed/3 NotExecuted、原生启动/正常退出通过，文档与本地提交完成。分层MAX两次被Windows拒绝，成功正例仍未通过，仅此验收边界待用户决定。保持V0.58 iteration8、活动Plan |
 
 ## 1. 依据与问题定位
 
@@ -30,7 +30,7 @@ V0.58 已证明大量受控真实操作可执行，结果见 [第一阶段归档
 
 ### 1.1 接手结论与证据限制
 
-- 版本源仍是 V0.58，已有真实类型化执行、安全核验、持久化对账和单 WDC 实机基础；本阶段接回产品流程，不重造执行系统。历史工程门为 1,447 passed / 3 NotExecuted，依据 Quality；本轮没有重跑，不能称当前全门已通过。
+- 编制时版本源为V0.58，已有真实类型化执行、安全核验、持久化对账和单WDC实机基础；本阶段接回产品流程，不重造执行系统。当时历史工程门1,447 passed/3 NotExecuted尚未重跑；实施后新门及实机结果见§10，不将编制时状态当现况。
 - 工作区原有未跟踪 `docs/Review/DeepSeek-Independent-Review-20260924.md` 及同名 `-evidence/` 目录。它们不是本轮产出，执行时保留、不清理、不自动提交。实施启动重新核对 Git 差异，不复原他人改动。
 - `StorageStructurePage` 的模拟路径已有草稿、原属性区、净差异和 Apply；真实路径另走参数对话框。`SimulationEditingSession.Bind` 会清空草稿/历史，不能直接在真实每段复采后调用它而丢掉剩余意图。
 - 普通创建范围已有 `WindowsVirtualDiskCreationSizeReader`；HDD 模板创建范围已有 `WindowsRealStorageCapabilityReader.ReadTierCreationSizeAsync`。缺的是原表单/MAX 到这些准确范围的接线，不能写成从零研究容量、也不能把模拟 4 GiB 取整当作真实 provider 规则。
@@ -160,7 +160,7 @@ V0.58 已证明大量受控真实操作可执行，结果见 [第一阶段归档
 
 合并只改变入口组织，不开放真实 MBR 转换 C03：真实 MBR 显示“转换为 GPT”但禁用并说明未支持；模拟沿用现有转换规则。不能把“转换为 GPT”偷偷实现成先清盘，也不把禁用当作本阶段缺陷再询问扩大范围。清空是用户显式选择的独立破坏动作，须显示准确磁盘、关联分区/卷、盘符和损失，并走类型化冻结计划确认。
 
-真实清空复用现有 `ClearDiskCommand` 等受控能力；不提供 diskpart 文本框、任意脚本或按盘号直接执行。池中物理成员、系统/启动/分页/转储盘、运行/证据依赖及关联不完整目标继续按现有规则拒绝。清空完成须核对同一磁盘 RAW/零分区、原分区和卷关联已移除；已经 RAW/零分区时不产生无意义重复写入。初始化无 MSR 后的 GPT/零分区也是应支持的清空前态：现 planner 对零分区的拒绝应做精确修复，只有本次完整采集证明空且安全检查全部通过才允许；不能由缓存的空集合推出允许。模拟仅更新模拟事实。
+真实清空复用现有 `ClearDiskCommand` 等受控能力；不提供 diskpart 文本框、任意脚本或按盘号直接执行。 现有真实安全前态限普通 GPT Data/MSR 或完整证据证明的零分区 GPT；真实 MBR 清空在 UI 同样禁用并解释，模拟 MBR 保持既有规则。本阶段不扩充 MBR 角色识别与清盘能力。池中物理成员、系统/启动/分页/转储盘、运行/证据依赖及关联不完整目标继续按现有规则拒绝。清空完成须核对同一磁盘 RAW/零分区、原分区和卷关联已移除；已经 RAW/零分区时不产生无意义重复写入。初始化无 MSR 后的 GPT/零分区也是应支持的清空前态：现 planner 对零分区的拒绝应做精确修复，只有本次完整采集证明空且安全检查全部通过才允许；不能由缓存的空集合推出允许。模拟仅更新模拟事实。
 
 ### 4.7 扩展/压缩的两行公式（用户已确定）
 
@@ -248,7 +248,21 @@ Windows 在 GPT 初始化时可能自动生成 MSR，现有 H07 证据记录过�
 
 ## 6. 工作包、执行顺序与停止规则
 
-P0 产品决定和静态盘点已在本轮完成；P1–P10 均为 **未开始**。实施状态只使用未开始、实施中、已实现待验证、已验证、受阻；测试结果另按 Quality 记录。激活时在本节表格逐项记录实际状态和证据路径，不复制一份并行 Plan。
+P0–P2、P5–P8已验证，P3/P4/P9仅分层MAX成功正例待决定，P10文档与本地提交收口；版本/归档依赖真实用户决定。实施状态只使用未开始、实施中、已实现待验证、已验证、受阻；测试结果另按Quality记录。
+
+| 包 | 当前状态 | 证据与剩余事项 |
+| --- | --- | --- |
+| P1 | 已验证 | 本次证据根 B0：六次原 UI 卷标操作，三次同向有效延迟样本；准确身份、偏好及未终结操作已记录。契约随 P3/P6/P8 扩展继续验证 |
+| P2 | 已验证 | 原入口草稿、内部拖放、净差异、撤销/重做/放弃、独立 Enter 改名及失焦零提交均已验证，B3 原流程普通创建/MAX 显式重建通过 |
+| P3/P4 | 已实现待验证 | 普通 MAX、部分完成取消恢复、MSR 开/关以及修复后分层 32 GiB 全部自动布局通过；分层 MAX 两次 Windows 拒绝、只读恢复 Failed/ObservedNoEffect，正例未通过，待用户决定是否接受为已知限制 |
+| P5 | 已验证 | 合并按钮、独立清空、BB/CC 双向公式、RAW/NTFS 扩缩及 MSR 关闭/规范开启通过；H06 中英文480×700/中文1440×900视觉通过 |
+| P6 | 已验证 | 范围闭包/代次/合并、RAW subsystem、actual tier 经 VD 到池、解散后显示投影均通过工程门与实机；最终三盘真实监控负载下六次改名中位数18.472→15.437秒，减少16.43% |
+| P7 | 已验证 | 同键工作消息、黑色遮罩和写后先刷新已实测；observer同批结果竞态、InvalidDataException异步边界及Agent对账先落盘已修，进入1763 passed工程门；关闭前清理已通过原生正常退出复验 |
+| P8 | 已验证 | bd1六state各5912非NULL样本、delete-vdisk准确缺口归因/旧身份终结/新身份重绑通过；810会话三盘各4252样本、20.006Hz/max65ms、Stopped/dropped0、当前gap0。旧NULL端点保持未知；MonitorOff历史pending误报警呈现修复通过最后门与原生启动检查 |
+| P9 | 已实现待验证 | B0–B3、B4 32 GiB及B5适用验收通过，H06视觉/最终性能/三盘监控/Samsung独立full比较/偏好/重启/正常退出通过；仅B4 MAX成功正例未通过。最后呈现修复后的普通启动与退出也通过 |
+| P10 | 已实现待验证 | 受影响文档与本地实现/文档提交完成；V0.58 iteration8及活动Plan保持，分层MAX验收调整未授权前不升版/归档 |
+
+早期执行记录保留：首轮 Release 构建零警告/零错误，12 项目共 1540 项，1530 通过、7 失败、3 显式跳过；第二轮 1583 项中 1577 通过、3 失败、3 跳过。失败为新增夹具或旧接口/协议/schema 断言，此后已修复，不能把早期失败轮改写或与 433/433 定向门拼作一次完整全绿。B0 首次优化同向三样本中位 18.472→14.179 秒，最终源码复测另记。管理员 OLE 拖放不可用已改为内部 pointer 手势，原草稿操作及 B3 真创建验证通过。首个 RAW 建池范围缺 subsystem 导致适配器 NoWindowsCall 拒绝，此后已修并由 B3 普通池/MAX 及 B4 单 HDD 池/32 GiB 实机正例闭合。最近完整门和新发现均见§10；源码再变更后重新执行最终门。
 
 ### 6.1 启动和公共契约：主代理负责
 
@@ -354,7 +368,7 @@ P0 产品决定和静态盘点已在本轮完成；P1–P10 均为 **未开始**
 | H09 | 操作至写后图形刷新 | 右下角同一常驻工作消息转圈，图形黑色遮罩；仅相关范围刷新且不等完成消息窗关闭，新视图准确、选择不串对象；适用失败路线不遗留无限动画 |
 | H10 | 监控运行中执行编辑 | 使用已安排的池/VD 创建、删除/重建及联机状态操作复用验收；预期目标变化用信息说明，不循环告警；唯一后继绑定和恢复正确，其他目标正常监控，真实缺口留证 |
 | H11 | 性能前后对比 | 记录第 4.10 节分段耗时/采集范围次数；排除用户等待，提供减少额外等待的量化证据，未定位延迟不报完成 |
-| H12 | 最终复采、恢复末态、正常退出 | WDC 恢复第 2.3 节末态；仅授权成员受影响；受保护 Samsung 结构比较无差异且范围完整；无未终结写操作；App/Agent 可正常关闭 |
+| H12 | 末态、保护范围及正常重启 | 按 B5 恢复已选 WDC 末态，取得新鲜完整采集后比较 Samsung 限定范围；无未终结/Unknown，恢复原偏好、普通重启 Real Off 后正常退出 |
 
 下面是设备操作顺序，不是新增产品向导。全程由一个设备负责人使用原UI，H06/H09/H10/H11穿插取证，监控维持运行并包含无关目标；不要为每个H编号各清一次盘。
 
@@ -408,4 +422,41 @@ P0 产品决定和静态盘点已在本轮完成；P1–P10 均为 **未开始**
 | W06 | 公式第一行BB/CC可编辑、第二行只读；告警来自WinPool自身监控；第4.5–4.11节改动必交付 | 本次调查前草稿已记录的用户决定，沿用而不再次索批 |
 | W07 | 真实MBR转换、既有VD/层扩展、多盘/混合介质等保持不支持；WDC授权持续，Samsung保护持续 | AGENTS/Product与本计划§2，不因UI入口恢复扩大能力 |
 
-截至本次编制没有必须等待用户选择的已知产品分歧。执行时出现真正的新冲突按§6.5处理；局部命名、类拆分、测试值回退、控件间距实现、诊断方法和范围内修复由执行Agent负责。后续明确的“执行本计划”指令才启动实施，不把本次编制请求或W01/W05回答当作改码/实盘执行指令。
+编制时没有必须等待用户选择的已知产品分歧；此后用户已明确要求完整执行，本计划于 2026-10-08 激活。执行时出现真正的新冲突按§6.5处理；局部命名、类拆分、测试值回退、控件间距实现、诊断方法和范围内修复由执行Agent负责。分层 MAX 的新限制与验收调整另行询问，不能将调查结论代替用户决定。
+
+
+## 10. 执行与验收记录（收口中）
+
+证据根沿用本计划顶部的唯一run。下面记录实际执行事实，历史失败不改写为成功。B5适用验收及最后告警呈现修复已通过；B4 MAX成功正例及因此依赖的升版/归档未关闭，本地提交另记。
+
+- **监控恢复与关闭修复后的工程门：** `Engineering/final-full-tests/20261008-221503/summary.json`；12 项目，1,766 Total / 1,763 Passed / 0 Failed / 3 NotExecuted，392 个源码文件哈希前后不变，restore/build exit 0，构建 0 warnings/0 errors。三个既有大型监控归档测量未执行，23 项目依赖审计复用本轮先前准确记录。门包含显示投影、历史恢复屏障和关闭前清理修复，在 V0.58 iteration8 运行；其后仅历史监控告警呈现修复的最后门另记，不能冒称 V0.59 已收口。
+- **B0–B2：** 原 UI 改名、在线/脱机往返、NTFS 压缩/扩回以及同一 16 MiB 文件哈希一致；RAW 1024→2048→1536 MiB 双向公式；零分区 GPT 清空；MSR 关闭最终 GPT/零分区、开启最终规范 MSR。中途23.24%和首轮末态15.76%仅留历史；后者WDC没有实际采样，不作同负载结论。最终新六次同向中位数18.472→15.437秒，减少16.43%，见下方及延迟报告。
+- **B3：** 原草稿拖动/撤销/重做/放弃在 Apply 前零写；AutoVD 关闭只建池，AutoPart 关闭首普通 VD 为准确 32 GiB RAW/零分区；已有池、VD Enter 改名往返与失焦零提交；原解散＋新目标普通 MAX 重建成功。准确 VD 3,999,688,294,400 bytes，规范 MSR 与 NTFS/64 KiB/W/原卷标，见 `B3/ordinary-max-native-proof.json` 及 assertion。新池完成后取消 VD 计划 accepted=null，保留剩余目标；再次 Apply 只创建剩余 VD及布局，没有重放解散/建池。
+- **实机发现的缺陷闭环：** RAW 物理闭包补准确 subsystem；actual tier 经唯一 VD 到池的 CIM 父链；不跨 Primordial 暂停 Samsung；Pending 步不覆盖 CallIssued 缺口归因；本机 VD state counter 按 fresh 唯一 OS 关联及严格 Disk N 后缀选择；observer 已应用同批报告的竞态；InvalidDataException 精确异步异常边界；tiered VD 顶层 Returned-null 按准确 actual tier 及非retained关系判断解散/删除/续布局。各修复已进入上述最终自动门，不通过放宽安全检查或缓存事实授权写入。
+- **真实 Unknown 恢复：** 首次分层创建 `e644c05fecd646d1aa20d51457d3919a` 已有 provider returned/准确32 GiB VD，但因错误 direct-tier-parent 采集进入 Unknown，App 漏捕异常退出。保留旧运行树、原 DB/PlanHash 和 Unknown 屏障，以全新 repair tree 只读启动原对账，得到 `real.reconciliation_verified_observed_tiered_creation`，原 CallIssued 仍仅一次；随后 guard 解除才标准重建。未直接改 DB、未重放 Create、未绕过标准运行树替换保护。
+- **B4 32 GiB：** 修复后的新 binary 通过原解散＋新单 HDD 草稿及全部自动布局，准确32 GiB、GPT/零MSR/一个NTFS64KiB/W数据卷，template与actual tier的UniqueId不同，见 `B4/hdd32-final-native-proof.json` / assertion；模板和实际层均已原字段 Enter 改名往返。MAX 两次失败与恢复另列，不算保型成功。
+- **H10：** 新 binary bd1会话六state每项5912条非NULL，ActiveBytes=32GiB，其余五项有效0；Samsung各5912样本/max64ms/gap0，Stopped/dropped0。其后992a会话三步解散旧 VD 两family gap准确归到 delete-vdisk（CallIssued+39ms），Verified后Removed终结；复用Disk3的新VD保持新稳定身份，旧对象样本不增长。此前历史误暂停3.353秒及错误step归因均保留；不声称整个开发过程无缺口、同一会话或所有阶段无丢样。
+
+- **B4 MAX 首次调查：** `c2a5f8900b534f8f9e88e88406b81e13` 层模板上限 3,999,956,729,856 bytes 经一次 Windows 调用后返回资源不足，进入 Unknown。精确池上限实际为 3,999,688,294,400 bytes，须取池/模板实时支持范围交集而非估算扣减。四份新鲜 full/scoped 闭包在准确 machine binding 下均匹配冻结 fingerprint，仅原 WDC/池/模板、无 VD/实际层/OS 磁盘，后台任务均终态。严格对账修复定向 42/42 通过；后续恢复及联合范围实测如下，不把错误当取消/无调用或成功。详见 `Engineering/hddmax-provider-uncertain/review.md`。
+
+- **首次 MAX 只读恢复与联合范围：** 全新 repair tree 普通启动仅查询原 `c2a5…`，严格双次新鲜闭包/终态任务/安全证据得到 Failed/ObservedNoEffect，原 Accepted/CallIssued 各一次，未重放调用。交集、准备端、执行端和旧冻结证据兼容修复通过定向 93/93、完整 backend 259/259，并进入最近工程门；不是 MAX 实机正例。
+- **第二次 MAX 与待定边界：** 原 UI 新建计划 `d92bd1e690c34f808b0df59bb040a350` 准确冻结联合上限 3,999,688,294,400 bytes，Windows 仍返回 eligible-resources 错误。准确故障域默认/显式对照一致，32 GiB 成功实例缓存已为零，本机完整 CIM 方法与官方文档未提供完整分层布局联合容量或只读 dry-run；不能继续凭经验扣容量或自动试写来制造 MAX 正例。调查见 `Engineering/hddmax-joint-range-provider-limit/review.md`。主代理已询问是否允许将此正例改为已知限制；答复前不降低验收条件。
+- **Agent 终态落盘缺陷已修复：** 第二次请求的只读 NoEffect 核验完成，但旧运行路径没有先保存 reconciled step 的 Failed/evidence，operation 的终态 CAS 因 step 仍为 OutcomeUnknown 被拒绝，留下 Running 屏障。startup 对账路径已正确保存步骤，解释了首次恢复成功。运行与恢复现共用步骤/证据先落盘流程，冲突保持 Unknown，并限制并发查询只启动一个 reconciler；23/23 定向服务测试通过，已进入最近完整门。原 `d92…` 以同一标准旧 runtime 重启仅只读对账到 Failed/ObservedNoEffect，原 Accepted/CallIssued 各一次；备份与现库全局 plans/Accepted/CallIssued 计数不变，无手改状态或重放。证据为 `Engineering/agent-runtime-reconciled-step-persistence/` 和 `Engineering/second-max-running-recovery/`。
+- **B5 指定末态已建立：** 原 Apply 解散仅剩 HDD 模板与池（2步），原分区页清空/初始化/规范 MSR（删除 provider MSR＋建立 canonical MSR）及新建 Data/Format/Letter（3步）均 Verified。`B5/final-native-proof.json` / `final-native-assertions.json` 独立只读核对全通过：准确 WDC UID/Serial/父链、在线 GPT、MSR 1,048,576／16,777,216 bytes；BasicData 17,825,792／4,000,767,279,104 bytes，NTFS/64KiB/WinPool_Test/E，尾部 1,925,120 bytes，无 concrete pool/VD。随后最终三盘监控/性能/H06视觉/新独立full Samsung比较/偏好/正常重启与退出通过，证据另列；B5通过不代表分层MAX正例通过。
+- **解散后分区页遗漏已修复：** scoped 新鲜事实已包含 released WDC 的 direct OS disk/same-device/MSR，但原投影依赖未扩采的旧 Primordial 成员列表而隐藏该盘，原 Manage full refresh 后立即显示。最小修复只在 `EditWorkspace.ProjectPartitionWorkspace` 允许已有唯一可靠 standalone physical→OS 映射显示，排除 concrete/未知池归属冲突；不变更采集、成员事实、CanPool 或写入安全门。42/42 定向投影测试通过（新增12），包括保留 Samsung、孤儿/重复/矛盾身份拒绝；已进入最终完整门，新标准运行树也显示 WDC 及两个 Samsung 的原分区。
+- **首轮末态性能与最终视觉：** H06中英文480×700与中文1440×900最终E卷视觉通过，缩容预览没有提交。App14884/Agent18124六次均Completed/Verified/fresh，18.472→15.561秒（15.76%）；但监控只有Samsung采样、WDC被旧恢复屏障阻止，仅保留历史。旧准确设备选择映射缺失也保留。原126条诊断/full底层总数缺失不改写；见延迟报告及 `B5/performance-final-comparison.json`，最终新测量另列。
+- **退出缺陷及修复复验：** 13:55Z通过Agent18124原托盘退出，Agent0、App14884异常 `0xC000027B`，Windows保留CoreMessagingXP/combase `E_POINTER` 签名，无新托管崩溃栈。关闭流程改为窗口存活时停止事件/计时器并等待清理，最后Close，Closed不再异步清理；风险定位不等于Windows栈确认根因。221503门后的原生标题Close、普通重启与两次原托盘退出均取得exit0，旧失败保留。旧首审计误查事件code得0，正确为Accepted187/CallIssued238前后不变，见 `B5/normal-exit-count-correction.json`。
+
+- **历史恢复屏障与最终监控：** 旧已完成建池的恢复缺口重启仍Pending，Agent只发布未终结操作，阻止新WDC采样。仅四个严格safe-reason且新鲜、非合并、唯一provider/counter映射可启动实际采样，收到所需family样本才恢复；未知/当前CallIssued仍暂停。32个新增用例及221503门通过。810015…会话三盘各4252完整非NULL样本，20.006Hz/max65ms；18个Accepted窗及另18个acceptClick→viewReady窗均gap0，Stopped/dropped0；旧三个NULL端点保持未知。见 `Engineering/audit-monitor-repaired-performance/session-810015f675bf45c5a5cf7c2c3bd2aca1/final-readonly-receipt.json`。
+- **最终新六次性能：** App17736/Agent15500六次均Completed/Verified/fresh，driver还等待可见 `E: <label>` 拓扑组；同向2/4/6中位数18.472→15.437秒，范围15.394–16.278秒，减少3.035秒/16.43%。126条诊断以准确六ID及两PID筛选：每次5 scoped底层、合计30；full底层总数仍缺，不将嵌套时间相加。权威 `B5/monitor-restored-performance/verified-performance-comparison.json` 及 `diagnostic-phases.json`；同目录准备时误读旧样本的 `performance-final-*` 为INVALID并保留错误记录。最后纯告警呈现变更未重做六次测量，不冒称对应最新源码重测。
+- **最后独立full与保护：** 六次结束及原Manage刷新后，只一次生产full于14:25:49.516–14:25:52.514Z取得16 Storage Returned/36 facts objects，unmerged/unscoped，原JSON未重写；生产codec视图typed DeepEquals=true。原v2 comparator给Samsung限定结构0change/0gaps/4 sharedPrimordial调整，WDC八项末态核验全true。natural provider SystemId和Agent durable SystemId分别保留，machine binding另有独立receipt。见 `Engineering/audit-final-production-full/final2-after-monitor-repair-six-renames-and-manage-refresh/`；不扩称全机无变化或无后台IO。
+- **关闭、偏好与计数：** 原标题Close App2972=0/Agent15500仍运行；普通重启App2988 RealOff/MonitorOff后原Agent托盘Exit两进程=0；再次全新App2008/Agent17932启动RealOff/MonitorOff后原托盘Exit均0。提前持有准确原生进程句柄读取退出码；首探针App17736消失但exitCode=null只记仪器缺口。偏好全恢复B0值、LastActivePage=DiskPartition，全库245plans/193Accepted/244CallIssued保持，本轮84操作、未终结/Unknown/重复调用/Samsung写目标均0。证据 `B5/close-repaired-*-result.json` 与 `close-repaired-final-after.json`；最后呈现修复后的启动/退出另记。
+- **早期门失败保持：** 221056旧Welcome源码断言及Persistence临时archive-ledger文件占用两项失败、过程中源码变化；221408因错误Grid.IsEnabled编译失败。修正后221503哈希稳定通过，不将早期轮改写为成功。
+- **最后工程门与原生检查：** `Engineering/final-full-tests/20261008-223310/summary.json` 为12项目1,775 Total/1,772 Passed/0 Failed/3 NotExecuted；393源码哈希前后不变，restore/build exit0，0warnings/errors，标准App/Agent合并0collisions，23项目依赖审计复用先前本轮记录，未请求CapacityPreflight。仅在监控未运行且PendingVerification的精确 `monitor.edit.recovered_endpoint_unknown` 历史状态不作为当前告警；其他未知/实时pending/active状态仍报警，历史诊断与端点不改，9/9直接回归并包含最终门。新标准App3916/Agent14740启动RealOff/MonitorOff，初始/后续UI均无该历史监控异常；原Agent托盘Exit两进程0，计数245/193/244与B0偏好保持。见 `B5/presentation-final-*`；首probe路径保护拦截因相对层级多一级，修正证据脚本后才操作，未改产品或DB。六次性能仍对应221503快照，没有在纯呈现修复后重测。
+- **本地交付：** 代码与直接回归已提交 `ecf2cb9`（98个src/tests文件），对应223310门源码；文档以本次独立提交记录。不包含原有DeepSeek Review、数据库、日志或生成产物，没有推送/tag/Release；不因保留MAX待定而留下已授权实现未提交。最终只读复核见 `B5/presentation-final-readonly-review.json`：223310原生启动/退出、245/193/244计数和B0偏好核对通过，实际事件查询截止14:40:52Z的相关Application事件及当前WinPool进程列表均为空。
+
+### 10.1 唯一剩余决定与后续确定步骤
+
+单HDD分层的MAX成功正例没有通过。两次准确上限调用均真实失败且只读对账终结，32 GiB分层和普通MAX成功不能代替它。已向用户询问能否保留MAX准确冻结/Windows失败、不自动缩容量，将此正例接受为已知限制；截至本次交付尚无答复。现有规则禁止Agent自行降低验收，保持V0.58 iteration8和活动Plan。
+
+若用户明确接受这一限制：将准确决定记录为W08，更新B4/完成条件与文档的已知限制；仅把版本源8改9，重建标准App/Agent并核对DLL版本及About V0.59、普通启动RealOff/MonitorOff、正常退出和调用数不变。不因机械升版重复破坏性设备测试或六次性能测量；说明完整门在升版前运行。随后将本Plan移至新 `docs/Archive/20261008-v059-product-alignment/`，核对目标不存在/不覆盖、相对链接与索引，更新现行文档链接并本地提交。若用户要求必须MAX成功，则继续针对准确provider行为调查；不试写搜索、不凭经验扣容量、不伪称MAX正例或自动换普通布局。

@@ -1,6 +1,6 @@
 # WinPool 文档归档
 
-归档记录历史，不自动定义当前要求。当前产品与开发边界见 [Product](../Product.md) 和 [Development](../Development.md)；当前没有活动 Plan，入口见 [Plan](../Plan.md)。本索引维护已完成阶段和保留的历史文件。
+归档记录历史，不自动定义当前要求。当前产品与开发边界见 [Product](../Product.md) 和 [Development](../Development.md)；真实操作回归产品设计仍按活动 [Plan](../Plan.md) 执行。本索引维护已完成阶段和保留的历史文件。
 
 历史双语原件保持原样，不要求补译；本索引以中文单一版本维护。旧相对链接按对应归档说明或源提交追溯，不批量重写历史内容。
 

@@ -1,6 +1,6 @@
 # 交互控件说明表
 
-状态：2026-09-23 按当前 XAML 与动态控件代码核对。相同用途的重复行按控件家族归纳；条件只列代码中已实现的规则。悬停帮助指由 `ContextHelp` 提供的帮助或禁用原因；没有特别注明时，不代表所有控件都有自定义悬停文本。按钮图形见[按钮与图标表](Buttons.html)。
+状态：2026-10-08 按当前 XAML 与动态控件代码核对。相同用途的重复行按控件家族归纳；条件只列代码中已实现的规则。悬停帮助指由 `ContextHelp` 提供的帮助或禁用原因；没有特别注明时，不代表所有控件都有自定义悬停文本。按钮图形见[按钮与图标表](Buttons.html)。
 
 ## 窗口与导航
 
@@ -10,6 +10,7 @@
 | --- | --- | --- | --- |
 | 标题栏导航列表 `ShellNavigationList` | 在硬件、管理、结构、分区、测试、监控、开发、设置页面间导航；选择项提供页面本地化名称和图标 | 硬件、测试、开发仅开发者模式可见；Agent 工作区恢复期间禁用，完成后启用 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
 | 标题栏活动系统选择器 `ActiveSystemSelector` | 以 260 DIP 宽度显示当前选中存储系统名称，并切换本机、导入或模拟系统；下拉项上限 280 DIP | 有页面级帮助。启动时偏好读取之前隐藏；若有效的只读缓存预览先完成，则显示系统名但选择器及页面交互仍禁用；无有效预览时保持隐藏。Agent 成功完成目录/状态恢复后，存在所选系统时显示并启用；恢复失败时保持禁用，若此前显示过预览则仍可见，否则隐藏 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
+| 系统标题栏关闭与程序化关闭 | 通过统一关闭准备保存 App 状态，再关闭主窗口；关闭准备期间页面输入禁用。单独关闭标题栏窗口保留后台 Agent；Agent 托盘 Exit 会结束 App 与 Agent | 数据位置替换等程序化关闭使用同一准备入口；H12 原生记录已核实标题栏 Close 保留 Agent、托盘 Exit 结束两进程 | `MainWindow.xaml.cs`、`App.xaml.cs`、`SettingsPage.xaml.cs` |
 | 工作区启动遮罩 | 在首屏偏好读取和 Agent 工作区恢复期间显示状态消息，防止过早操作半初始化页面 | 有效只读缓存预览完成时可显示页面内容，但页面仍不可命中输入，直到 Agent 恢复结束 | `MainWindow.xaml.cs` |
 | 本机真实编辑 `LocalRealOperationsSwitch` | 切换本机存储页面的真实编辑模式 | 管理员能力影响帮助文本；开关本身保持启用，真实操作仍受执行规则约束；工作区恢复期间页面交互被阻断 | `MainWindow.xaml`、`MainWindow.xaml.cs` |
 | 全局通知卡 `NotificationCard` | 点击普通通知可关闭；点击错误通知打开可读错误消息；Enter/Space 同样触发 | 单层 InfoBar 本体使用不透明主题背景；卡片退出期间不可交互，卡片无独立按钮 | `MainWindow.xaml`、`NotificationCard.xaml(.cs)` |
@@ -50,62 +51,66 @@
 
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
-| `TopologyScrollViewer`／结构拓扑 `TopologyControl` | 滚动、选择池/层/磁盘等结构对象；拓扑节点支持展开、拖放和右键交互 | 编辑表单只面向模拟系统；本机结构只读 | `StorageStructurePage.xaml`、`TopologyNodeControl.xaml(.cs)` |
-| `UndoButton` | 撤销最近一项未应用修改 | 撤销栈为空时禁用并说明原因 | `StorageStructurePage.xaml(.cs)` |
-| `RedoButton` | 恢复最近撤销的修改 | 重做栈为空时禁用并说明原因 | `StorageStructurePage.xaml(.cs)` |
-| `DiscardAllButton` | 放弃所有未应用模拟修改 | 没有未应用修改时禁用并说明原因 | `StorageStructurePage.xaml(.cs)` |
-| `ApplyAllButton` | 提交通过预检查的待处理模拟修改 | 需要模拟系统、非空可应用计划、无被阻止步骤、无构建错误、无非法容量且上次结果已知；禁用时显示对应原因 | `StorageStructurePage.xaml(.cs)` |
-| `CreatePoolButton` | 创建模拟池草稿 | 仅模拟系统可用；已有池草稿时禁用 | `StorageStructurePage.xaml(.cs)` |
-| `DissolveButton` | 解散所选普通模拟池 | 仅模拟系统中可编辑的非始祖、非离线池可用 | `StorageStructurePage.xaml(.cs)` |
-| `RetireButton` | 将所选池成员盘标记为已退役 | 需普通模拟池中的在线、非启动/系统成员盘；已退役时禁用 | `StorageStructurePage.xaml(.cs)` |
-| `HotSpareButton` | 将所选池成员盘标记为热备 | 需普通模拟池中的在线、非启动/系统成员盘；已为热备时禁用 | `StorageStructurePage.xaml(.cs)` |
-| `CreateVdiskButton` | 为所选池创建一个虚拟磁盘和分区 | 需可编辑池、至少一块数据盘，且池中没有现有虚拟磁盘 | `StorageStructurePage.xaml(.cs)` |
-| `DeleteVdiskButton` | 删除所选池现有虚拟磁盘和分区 | 需可编辑池、有可删除虚拟磁盘且其在线 | `StorageStructurePage.xaml(.cs)` |
-| `ShowHotSpareSwitch` | 显示或隐藏热备磁盘 | 模拟系统可用；本机存储只读并禁用 | `StorageStructurePage.xaml(.cs)` |
-| `ShowRetiredSwitch` | 显示或隐藏退役磁盘 | 模拟系统可用；本机存储只读并禁用 | `StorageStructurePage.xaml(.cs)` |
-| `PoolFormGrid` 动态属性表单 | 编辑选中池、层、虚拟磁盘和分区属性 | 文本框、组合框、数值框按所选对象生成；要求可编辑模拟池，离线盘、超出支持对象数或未知提交结果会限制编辑 | `StorageStructurePage.xaml(.cs)` |
+| `TopologyScrollViewer`／结构拓扑 `TopologyControl` | 滚动、选择池/层/磁盘等结构对象；节点支持展开、拖放和右键交互；结构表单可编辑模拟草稿，也可通过原入口准备本阶段支持的真实草稿 | 真实草稿仍限于页面与 Agent 支持的准确目标和布局；拖放只改变草稿关系，Apply 前不写盘 | `StorageStructurePage.xaml`、`TopologyNodeControl.xaml(.cs)` |
+| 结构页内容根 `Grid` | 为拓扑、操作区与属性区整体提供页面外边距 | 四周 24 DIP；内卡片 Padding 不代替页面外边距 | `StorageStructurePage.xaml` |
+| `UndoButton` | 撤销最近一项尚未应用的模拟或真实草稿修改 | 撤销栈为空或真实草稿正在执行/等待核对时禁用；已 Verified 的真实步骤不进入 Undo 历史 | `StorageStructurePage.xaml(.cs)` |
+| `RedoButton` | 恢复最近撤销的模拟或真实草稿修改 | 重做栈为空或真实草稿正在执行/等待核对时禁用 | `StorageStructurePage.xaml(.cs)` |
+| `DiscardAllButton` | 放弃当前所有未应用的模拟或真实草稿修改 | 无未应用修改，或真实 Apply、改名、操作忙时禁用；不会撤销已确认并执行的真实步骤 | `StorageStructurePage.xaml(.cs)` |
+| `ApplyAllButton` | 提交模拟待处理计划，或将真实草稿交给准确计划准备、冻结确认与 Agent 执行 | 需要非空可应用草稿、无阻止步骤/构建错误/非法容量及未知结果；真实目标还受真实模式、fresh 来源和执行门禁约束；禁用时显示原因 | `StorageStructurePage.xaml(.cs)`、`EditorPageBase.cs` |
+| `CreatePoolButton` | 在同一编辑草稿中创建新池；真实新池默认使用 Ordinary/MAX 意图 | 当前已有池草稿时禁用；自动创建虚拟磁盘由独立 `AutoCreateVirtualDiskSwitch` 偏好控制 | `StorageStructurePage.xaml(.cs)` |
+| `DissolveButton` | 将所选模拟池或受支持的真实池解散意图加入草稿；可在同一草稿中明确创建替代池并重新分配成员 | 真实池要求准确单物理成员、最多一个虚拟磁盘及受支持的 HDD 布局；Apply 按准确冻结计划执行，不提供独立重建向导 | `StorageStructurePage.xaml(.cs)` |
+| `RetireButton` | 将所选模拟池成员盘标记为已退役 | 当前仅支持模拟池中的在线、非启动/系统成员盘；真实模式禁用并说明原因；已退役时禁用 | `StorageStructurePage.xaml(.cs)` |
+| `HotSpareButton` | 将所选模拟池成员盘标记为热备 | 当前仅支持模拟池中的在线、非启动/系统成员盘；真实模式禁用并说明原因；已为热备时禁用 | `StorageStructurePage.xaml(.cs)` |
+| `CreateVdiskButton` | 为所选池加入虚拟磁盘创建草稿；独立自动分区偏好开启时按钮显示“创建虚拟磁盘和分区”，关闭时显示“创建虚拟磁盘” | 需符合当前模拟或真实布局条件且没有现有虚拟磁盘；真实模式允许受支持的准确空池创建首个虚拟磁盘。按钮生成草稿，仍由 Apply 执行 | `StorageStructurePage.xaml(.cs)` |
+| `DeleteVdiskButton` | 将所选虚拟磁盘及其准确关联后代加入删除草稿 | 需可编辑池并有可删除的目标；真实模式只接受页面支持的准确虚拟磁盘，不会因此解散池或自动重建 | `StorageStructurePage.xaml(.cs)` |
+| `ShowHotSpareSwitch` | 显示或隐藏模拟热备磁盘 | 当前仅模拟系统可用；真实模式禁用 | `StorageStructurePage.xaml(.cs)` |
+| `ShowRetiredSwitch` | 显示或隐藏模拟退役磁盘 | 当前仅模拟系统可用；真实模式禁用 | `StorageStructurePage.xaml(.cs)` |
+| `PoolFormGrid` 动态属性表单 | 编辑选中对象的草稿字段；真实池使用 Ordinary/单 HDD、名称、明确 GiB 或 MAX、自动 VD/分区、MSR、文件系统、簇、卷标及盘符等原表单意图 | 文本框、组合框、数值框按对象生成；自动 VD 与自动分区是独立已保存偏好，切换偏好不会改写现存草稿。真实不支持的原地布局/多成员变更会被阻止；真实 MAX 按本次 Agent provider 创建范围冻结成精确 bytes | `StorageStructurePage.xaml(.cs)` |
 | 结构页左右 `GridSplitter` | 调整拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，属性表单弹性列与换行标签适应栏宽；左侧操作区允许横向滚动 | `StorageStructurePage.xaml` |
-| `SavePoolPropertiesButton` | 保存所选池当前属性草稿到待处理修改 | 需模拟系统、普通非草稿池、表单有改动且池在线；禁用时显示原因 | `StorageStructurePage.xaml(.cs)` |
+| `SavePoolPropertiesButton` | 将所选池当前表单改动保存到模拟或真实草稿 | 需可编辑的非始祖池且表单有改动；真实字段受对象支持范围、离线/冲突及 busy 门禁限制；此按钮不直接写盘 | `StorageStructurePage.xaml(.cs)` |
 | SSD/HDD/SCM 层配置输入框 | 设置容量、精简/固定配置、复原能力、数据副本、容错数、磁盘数、列数及交错 | 动态使用 `ComboBox`、`TextBox`、`NumberBox`；数值按各字段边界归一化；无自定义帮助时字段标签说明用途 | `StorageStructurePage.xaml.cs` |
-| `MaximumButton` 层容量最大值按钮 | 将 SSD/HDD/SCM 容量填为当前规划的对齐上限 | 每个容量输入组生成一个；只在容量输入启用时可用；帮助说明该上限不保证 Windows 实际可用容量 | `StorageStructurePage.xaml.cs` |
+| `MaximumButton` 层容量最大值按钮 | 将 SSD/HDD/SCM 模拟层容量填为规划的对齐上限 | 每个容量输入组生成一个；帮助说明该规划值不保证 Windows 实际可用容量；它不同于真实新建虚拟磁盘的 provider MAX | `StorageStructurePage.xaml.cs` |
 | 动态属性行重置按钮 | 将已改动字段恢复推荐值 | 仅字段不同于已提交值时显示；每项提供推荐值帮助 | `StorageStructurePage.xaml.cs` |
-| 虚拟磁盘／分区选项 | 自动创建虚拟磁盘或分区、选择分区样式/文件系统/簇大小并填写容量 | 动态表单按池/虚拟磁盘情况生成；不可编辑状态、非法容量、已超出支持数量时禁用关联字段 | `StorageStructurePage.xaml.cs` |
+| `AutoCreateVirtualDiskSwitch`／`AutoCreatePartitionSwitch` 与虚拟磁盘布局选项 | 分别保存自动建 VD、自动建分区偏好；新建 VD 意图可带分区样式、文件系统/簇大小、容量、MSR、卷标和盘符 | 两项偏好独立；更改偏好不会插入/删除已有草稿对象。真实新建容量的 MAX 由该次 Agent provider 精确范围解析；不开放现有 VD/层 MAX 扩展或任意原地布局改写 | `StorageStructurePage.xaml(.cs)` |
 | `PendingActionsPanel` 与步骤 `Expander` | 列出当前待处理计划；展开查看步骤详情及只读命令预览 | 空计划显示空状态；步骤命令预览为空时复制命令按钮禁用并说明未通过预检查 | `StorageStructurePage.xaml(.cs)` |
 | 动态“复制命令预览”按钮 | 复制当前步骤预览文本 | 命令列表为空时禁用；复制不会执行命令 | `StorageStructurePage.xaml.cs` |
+| `RealTopologyOverlay`／`RealTopologyProgress` | 真实结构写入及写后刷新阶段遮罩图形区域并显示当前阶段；共享 busy 状态会刷新按钮禁用状态 | 准备阶段可显示 footer 进度；遮罩依 Workspace 图形遮挡状态显示，刷新尾段结束后释放 | `StorageStructurePage.xaml(.cs)`、`EditorPageBase.cs` |
 
 ## 分区页
 
 | 控件 | 用途 | 帮助／禁用条件 | 源码 |
 | --- | --- | --- | --- |
+| 分区页内容根 `Grid` | 为拓扑、操作区与属性区整体提供页面外边距 | 四周 24 DIP；内卡片 Padding 不代替页面外边距 | `DiskPartitionPage.xaml` |
 | 磁盘与分区拓扑 `TopologyControl` | 选择磁盘、分区或可见的未分配空间；展开节点浏览结构 | 未分配间隙小于设置的隐藏阈值时不投影到页面；可见但对齐后不足 1 MiB 的间隙会使操作按钮显示禁用原因 | `DiskPartitionPage.xaml(.cs)`、`TopologyNodeControl.xaml(.cs)` |
 | `TopologyScrollViewer` | 滚动浏览磁盘与分区拓扑 | 承载左侧结构树；节点选择更新右侧表单和操作状态 | `DiskPartitionPage.xaml` |
-| 分区页左右 `GridSplitter` | 调整磁盘拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，属性表单受栏宽约束，起点与终点各在单行显示 | `DiskPartitionPage.xaml` |
+| 分区页左右 `GridSplitter` | 调整磁盘拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，属性表单受栏宽约束；起点和终点各以 MiB 主值及自适应单位副值分行显示 | `DiskPartitionPage.xaml` |
 | `PartitionFormGrid` | 显示磁盘/分区身份字段和右侧编辑表单 | 当前选择决定哪些字段和按钮启用；表单放在纵向可滚动区域 | `DiskPartitionPage.xaml(.cs)` |
-| `StartOffsetValue`／`EndOffsetValue` 与自适应值 | 各显示一行起点或终点：千分位 MiB 数字及括号内自动换算数字 | MiB 与自适应数字分别右对齐；占用空闲复位按钮列以保留完整单行；无有效值时只显示破折号 | `DiskPartitionPage.xaml(.cs)` |
-| `OnlineButton` | 联机选中的模拟磁盘 | 仅选中模拟磁盘本身且磁盘当前脱机时启用；帮助说明只作用于模拟磁盘 | `DiskPartitionPage.xaml(.cs)` |
-| `OfflineButton` | 脱机选中的模拟磁盘 | 仅选中在线、非启动且非系统模拟磁盘时启用 | `DiskPartitionPage.xaml(.cs)` |
-| `InitializeButton` | 初始化选中的模拟磁盘 | 仅在线 RAW 且非启动/系统的模拟磁盘本身可用；帮助说明不会修改本机磁盘 | `DiskPartitionPage.xaml(.cs)` |
-| `ConvertGptButton` | 将选中的模拟 MBR 磁盘转换为 GPT | 仅在线、非启动/系统 MBR 模拟磁盘本身可用 | `DiskPartitionPage.xaml(.cs)` |
-| `DeletePartitionButton` | 删除选中的模拟分区 | 仅在线模拟系统中满足删除规则的分区可用；启动/系统分区受保护 | `DiskPartitionPage.xaml(.cs)` |
-| `ExtendButton` | 输入并应用模拟分区扩展后的目标总容量 | 需选中可扩展的普通模拟数据分区，并有合适的右侧连续空间；禁用帮助给出规则原因 | `DiskPartitionPage.xaml(.cs)` |
-| `ShrinkButton` | 输入并应用模拟分区压缩后的目标总容量 | 需选中支持压缩的普通模拟数据分区；仅 NTFS 或未格式化 RAW 支持，受几何/已用空间限制；禁用帮助给出原因 | `DiskPartitionPage.xaml(.cs)` |
+| `StartOffsetValue`／`EndOffsetValue` 与自适应值 | 起点、终点各自保留一个准确偏移；每个字段分两行显示千分位 MiB 主值和自适应单位副值 | 两行均由原始偏移 bytes 生成，不因显示取整改写几何；数值右对齐；无有效值时显示未知标记 | `DiskPartitionPage.xaml(.cs)` |
+| `DiskOnlineStateButton` 联机/脱机状态按钮 | 单一按钮按当前准确状态显示“联机”“脱机”或“状态未知”并执行相应状态变更 | 需选中磁盘本身、目标非启动/系统/分页文件/崩溃转储盘且操作不忙；真实模式必须从该磁盘准确 `SourceFacts` 读到 Returned 的 `IsOffline` 布尔值，缺失或未知时禁用 | `DiskPartitionPage.xaml(.cs)` |
+| `DiskPartitionStyleButton` 初始化/GPT 状态按钮 | RAW 显示初始化；MBR 显示“转换为 GPT”；GPT 显示已初始化 | 需选中在线准确磁盘；模拟 MBR 可按模拟规则转换，真实 MBR 转换 C03 显示但禁用并拒绝；真实 RAW 初始化使用 MSR 偏好并提交相应准确配置段 | `DiskPartitionPage.xaml(.cs)` |
+| `ClearDiskButton` 清空至 RAW | 将所选磁盘及关联分区/卷清至 RAW，不初始化或格式化 | 模拟 GPT/MBR 按原规则可用；真实仅支持 GPT 普通数据/MSR 分区，或本次完整来源事实证明零分区的 GPT，真实 MBR 禁用并说明原因。还要求准确在线且非受保护目标；真实操作通过 Agent 冻结计划确认，模拟操作仅改模拟事实 | `DiskPartitionPage.xaml(.cs)`、`EditorPageBase.cs` |
+| `DeletePartitionButton` | 删除选中的分区 | 模拟系统按模拟规则；真实仅允许准确、安全且可支持的分区目标；启动/系统分区及操作忙时禁用 | `DiskPartitionPage.xaml(.cs)` |
+| `ExtendButton` | 输入分区扩展量和目标总容量并提交扩展 | 模拟按连续空间及规则校验；真实限普通 GPT NTFS、ReFS 扩展或 RAW 数据分区，由 Agent 点击时读取实时支持范围；启动/系统、脱机、未知状态或操作忙时禁用 | `DiskPartitionPage.xaml(.cs)` |
+| `ShrinkButton` | 输入分区压缩量和目标总容量并提交压缩 | 模拟按文件系统、使用量和几何规则校验；真实限受支持的普通 GPT NTFS/RAW 数据分区，ReFS 压缩禁用，范围由 Agent 实时读取 | `DiskPartitionPage.xaml(.cs)` |
 | `OpenExplorerButton` | 打开选中本机卷 | 需本机分区、磁盘在线、盘符可用且对应目录存在；模拟系统禁用 | `DiskPartitionPage.xaml(.cs)` |
-| `PartitionTypeBox` | 为所选 GPT 未分配空间选择固定分区类型 | 只在可编辑的模拟 GPT 未分配空间中启用 | `DiskPartitionPage.xaml(.cs)` |
-| `DriveLetterBox` | 设置模拟卷盘符 | 仅适用的模拟卷或可分配盘符的新建分区可用；EFI/MSR/恢复分区不可分配 | `DiskPartitionPage.xaml(.cs)` |
-| `VolumeLabelBox` | 设置模拟卷标 | 仅有可改写卷标的模拟卷或新建分区可用；MSR 不设卷标；输入后按 Enter 提交 | `DiskPartitionPage.xaml(.cs)` |
+| `PartitionTypeBox` | 为选中的 GPT 未分配空间选择分区类型 | 仅可创建且几何有效的 GPT 空隙中启用；真实写入仍需 fresh Agent 准备和冻结确认 | `DiskPartitionPage.xaml(.cs)` |
+| `DriveLetterBox` | 设置已有卷或新分区的盘符 | 仅适用的数据卷/新建分区可用；EFI/MSR/恢复分区不能分配；真实更改经 Agent 准备与确认 | `DiskPartitionPage.xaml(.cs)` |
+| `VolumeLabelBox` | 设置现有卷或新分区的卷标 | 可改写的数据卷/新建分区可用；MSR 不设卷标；现有卷输入后按 Enter 提交，真实变更经 Agent 准备与确认 | `DiskPartitionPage.xaml(.cs)` |
 | `ResetSizeButton` | 将新建容量恢复为当前分区类型的推荐值 | 容量偏离推荐值时显示；帮助指出恢复推荐 MiB 容量 | `DiskPartitionPage.xaml(.cs)` |
 | `SizeBox` 与固定 `MiB` 后缀 | 输入新分区 MiB 容量；已有分区时显示当前 MiB 数值 | 创建时仅接受正 MiB 整数并受所选空隙的 1 MiB 对齐上限限制；已有分区时只读，扩展/压缩使用单独对话框 | `DiskPartitionPage.xaml`、`DiskPartitionPage.xaml.cs` |
 | `SizeAdaptiveValue` | 显示 `SizeBox` 当前容量对应的自适应容量单位 | 只读第二行；无有效整数或尚无可计算容量时显示说明或破折号 | `DiskPartitionPage.xaml(.cs)` |
-| `MaximumSizeButton` | 将创建容量填为当前空隙所能容纳的最大对齐值（MAX） | 只有模拟 GPT 可见间隙的几何可创建时启用；对齐后余量不足 1 MiB 时给出原因；使用 U+E74E 图标 | `DiskPartitionPage.xaml(.cs)` |
+| `MaximumSizeButton` | 将创建容量填为当前所选 GPT 空隙所能容纳的最大对齐值（MAX） | 几何有效时启用；真实值仅是当前页面候选，最终以 Agent fresh 计划为准；使用 U+E74E 图标 | `DiskPartitionPage.xaml(.cs)` |
 | `ResetFileSystemButton` | 恢复该分区类型推荐的文件系统 | 文件系统值偏离推荐项时显示 | `DiskPartitionPage.xaml(.cs)` |
-| `FileSystemBox` | 选择模拟格式化文件系统 | 仅可格式化的普通模拟数据分区或新建分区可用；受 MSR、启动/系统分区保护 | `DiskPartitionPage.xaml(.cs)` |
+| `FileSystemBox` | 选择可格式化的数据分区或新分区文件系统 | 仅数据分区/新建分区可用；MSR、启动/系统分区受限。真实默认 NTFS、64 KiB 簇、快速格式化；其它组合仅在当前 provider 能力和准确计划允许时可用 | `DiskPartitionPage.xaml(.cs)` |
 | `ResetClusterButton` | 恢复推荐的分配单元大小 | 分配单元值偏离推荐项时显示 | `DiskPartitionPage.xaml(.cs)` |
-| `ClusterBox` | 选择模拟分配单元大小 | 仅格式化选项可用时启用；帮助说明当前 64 KiB NTFS 已测建议的边界 | `DiskPartitionPage.xaml(.cs)` |
+| `ClusterBox` | 选择格式化时的分配单元大小 | 仅格式化选项可用时启用；真实选择随冻结格式化计划提交；帮助说明当前 64 KiB NTFS 已测建议的边界 | `DiskPartitionPage.xaml(.cs)` |
 | `ResetQuickFormatButton` | 恢复快速格式化选项的推荐值 | 快速格式化开关偏离推荐状态时显示 | `DiskPartitionPage.xaml(.cs)` |
-| `QuickFormatSwitch` | 选择模拟快速格式化选项 | 仅格式化选项可用时启用；悬停帮助说明模拟行为 | `DiskPartitionPage.xaml(.cs)` |
-| `FullFormatSwitch` | 选择模拟完整格式化选项 | 仅格式化选项可用时启用；悬停帮助明确不会扫描真实介质 | `DiskPartitionPage.xaml(.cs)` |
-| `PartitionActionButton` | 右侧底部唯一操作按钮；选未分配间隙时新建分区，选现有分区时格式化分区 | 文字、图标、自动化名称、用途帮助和禁用原因随选择切换；新建要求有效对齐几何及整数 MiB 容量，格式化要求可格式化的普通模拟数据分区；提交前按流程确认 | `DiskPartitionPage.xaml(.cs)` |
-| 扩展／压缩目标对话框输入框 | 输入目标总容量的 MiB 整数 | 扩展目标需大于当前大小；压缩目标需较小且满足建模几何、空闲空间与文件系统条件；不通过时主操作被阻止 | `DiskPartitionPage.xaml.cs` |
+| `QuickFormatSwitch` | 选择格式化时的快速格式化选项 | 仅适用格式化选项可用时启用；真实角色/文件系统限制仍由计划校验 | `DiskPartitionPage.xaml(.cs)` |
+| `FullFormatSwitch` | 选择格式化时的完整格式化选项 | 仅适用格式化选项可用时启用；部分真实文件系统和角色组合禁用；真实计划需 Agent 冻结确认 | `DiskPartitionPage.xaml(.cs)` |
+| `PartitionActionButton` | 右侧底部单一操作按钮；选 GPT 未分配空间时新建分区，选现有可格式化分区时格式化 | 文字、图标、自动化名称、帮助和禁用原因随选择切换；模拟操作沿用模拟规则；真实操作仅接受支持的准确目标并经 Agent 冻结确认 | `DiskPartitionPage.xaml(.cs)`、`EditorPageBase.cs` |
+| 扩展／压缩公式对话框 | 两行展示 `A ± B = C`；第一行使用 MiB 整数，第二行显示自适应单位 | 第一行 A 当前容量只读，B 变化量与 C 目标总量可编辑并双向联动；第二行全部只读。bytes 是唯一权威值，显示值不反向取整；真实操作点击后 fresh 查询 Agent 支持范围 | `DiskPartitionPage.xaml.cs`、`RealPartitionResizeUiRange` |
+| `RealTopologyOverlay`／`RealTopologyProgress` | 真实写入及写后刷新时遮罩分区图形区并显示当前阶段 | busy 门禁覆盖准备到刷新尾段；遮罩依共享 Workspace 状态出现/释放 | `DiskPartitionPage.xaml(.cs)`、`EditorPageBase.cs` |
+| `QueryRealOperationButton`／`StopRealOperationButton` | 在结构页或分区页按持久 OperationId 查询真实操作，或停止该操作的后续步骤 | 需 Agent 连接；操作身份与阶段按当前真实操作状态核对，不以关闭进度卡代替对账 | `StorageStructurePage.xaml(.cs)`、`DiskPartitionPage.xaml(.cs)`、`EditorPageBase.cs` |
 
 ## 监控页
 
@@ -135,7 +140,7 @@
 | `StartupAgentSwitch` | 控制是否在用户登录时启动 WinPool Agent | 有悬停说明 | `SettingsPage.xaml(.cs)` |
 | `DeveloperModeSwitch` | 显示硬件、测试、开发页面入口 | 有悬停说明；切换后刷新导航项 | `SettingsPage.xaml(.cs)` |
 | `SettingsExecutionModeSwitch` | 设置全局真实编辑模式 | 有说明；开关保持启用，权限不足时说明需要管理员，真实操作仍受执行规则约束 | `SettingsPage.xaml(.cs)` |
-| `MsrSwitch` | 控制模拟磁盘初始化是否创建 Microsoft 保留分区 | 有悬停说明；仅影响模拟初始化 | `SettingsPage.xaml(.cs)` |
+| `MsrSwitch` | 控制初始化及自动布局是否创建 Microsoft 保留分区 | 有悬停说明；作为软件偏好用于模拟流程及受支持的真实 RAW 初始化/自动布局 | `SettingsPage.xaml(.cs)` |
 | `PartitionGapBox` | 用 MiB 输入隐藏小分区缝隙的阈值；Enter 保存 | 有悬停说明；最大输入长度 4，只接受数值输入 | `SettingsPage.xaml(.cs)` |
 | `DataLocationOptions` | 迁移标准/便携数据位置 | 迁移期间下拉框禁用并说明正在等待确认；切换需确认，失败时恢复 | `SettingsPage.xaml(.cs)` |
 | `OpenDataLocationButton` | 在资源管理器中打开当前 WinPool 数据目录 | 32×32 DIP 行内单图标按钮，具有自动化名称和悬停帮助；路径不存在或打开失败时显示错误通知 | `SettingsPage.xaml(.cs)` |

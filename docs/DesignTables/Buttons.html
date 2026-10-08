@@ -20,7 +20,7 @@
 <body>
   <div class="back"><a href="README.md">← 设计核对表索引</a></div>
   <h1>按钮与图标核对表</h1>
-  <p>按当前 WinPool App 源码记录可操作按钮及其实际图形。应用自建按钮按控件角色采用两套尺寸：图标＋文字的普通按钮，以及 32×32 DIP 的行内单图标按钮；管理命令区与编辑操作区不另设按钮样式。两类均为 4 DIP 圆角，具体颜色与尺寸见<a href="Styles.html">样式表</a>。图形列优先使用 <code>Segoe Fluent Icons</code>，本机没有该字体时使用 <code>Segoe MDL2 Assets</code> 显示同一码位；个别字形轮廓可能随系统字体不同。系统对话框文字按钮保留原生交互语义。Manage 拓扑右键菜单保留完整命令集，下方操作区只显示精简按钮，两处出现的同类操作可共用图标。</p>
+  <p>按当前 WinPool App 源码记录可操作按钮及其实际图形。应用自建按钮按控件角色采用两套尺寸：图标＋文字的普通按钮，以及 32×32 DIP 的行内单图标按钮；管理命令区与编辑操作区不另设按钮样式。两类均为 4 DIP 圆角，具体颜色与尺寸见<a href="Styles.html">样式表</a>。图形列优先使用 <code>Segoe Fluent Icons</code>，本机没有该字体时使用 <code>Segoe MDL2 Assets</code> 显示同一码位；个别字形轮廓可能随系统字体不同。系统对话框文字按钮保留原生交互语义。Windows 标题栏关闭按钮是系统控件，不由本表分配自绘图标；其关闭准备和 Agent 后台行为见<a href="Controls.md">控件说明</a>。Manage 拓扑右键菜单保留完整命令集，下方操作区只显示精简按钮，两处出现的同类操作可共用图标。</p>
   <p class="small">字形参考：<a href="https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font">Microsoft Segoe Fluent Icons font</a>。替换字形前应核对操作语义、上下文帮助及自动化名称。</p>
 
   <h2 class="section">窗口导航与 Manage</h2>
@@ -62,22 +62,24 @@
       <tr><td class="glyph">&#xE7A6;</td><td>重做 Redo</td><td><code>U+E7A6</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
       <tr><td class="glyph">&#xE711;</td><td>放弃全部 Discard all</td><td><code>U+E711</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
       <tr><td class="glyph">&#xE73E;</td><td>应用全部 Apply all</td><td><code>U+E73E</code></td><td>结构页 — <code>StorageStructurePage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE710;</td><td>创建存储池 Create pool / 创建虚拟磁盘和分区 Create virtual disk and partition</td><td><code>U+E710</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE74D;</td><td>解散存储池 Dissolve pool / 删除虚拟磁盘和分区 Delete virtual disk and partition</td><td><code>U+E74D</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE710;</td><td>创建存储池 Create pool / 创建虚拟磁盘 Create virtual disk / 创建虚拟磁盘和分区 Create virtual disk and partition</td><td><code>U+E710</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code>。VD 按钮文字随独立自动创建分区偏好变化；普通新池的自动 VD 偏好也单独保存。切换偏好不会改写已存在草稿；创建、解散及替换均沿用原草稿和 Apply。</td></tr>
+      <tr><td class="glyph">无图标</td><td>自动创建虚拟磁盘 Auto-create virtual disk / 自动创建分区 Auto-create partition</td><td>—</td><td>结构页属性表单中的两个独立已保存偏好开关；分别控制新池草稿的 VD 插入和新 VD 的自动分区布局 — <code>StorageStructurePage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE74D;</td><td>解散存储池 Dissolve pool / 删除虚拟磁盘和分区 Delete virtual disk and partition</td><td><code>U+E74D</code></td><td>结构页操作按钮；解散与替代池可在同一草稿明确表达，真实操作逐段经准确计划确认 — <code>StorageStructurePage.xaml</code>、<code>StorageStructurePage.xaml.cs</code></td></tr>
       <tr><td class="glyph">&#xE7E8;</td><td>退役磁盘 Retire disk</td><td><code>U+E7E8</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
       <tr><td class="glyph">&#xE72C;</td><td>热备磁盘 Hot spare disk</td><td><code>U+E72C</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
       <tr><td class="glyph">&#xE74E;</td><td>保存存储池属性 Save pool properties</td><td><code>U+E74E</code></td><td>结构页操作按钮 — <code>StorageStructurePage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE8FB;</td><td>联机 Online</td><td><code>U+E8FB</code></td><td>分区页磁盘操作 — <code>DiskPartitionPage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE8AE;</td><td>脱机 Offline</td><td><code>U+E8AE</code></td><td>分区页磁盘操作 — <code>DiskPartitionPage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE9CE;</td><td>初始化 Initialize / 格式化分区 Format partition</td><td><code>U+E9CE</code></td><td>分区页初始化按钮；选中现有分区时，唯一的 <code>PartitionActionButton</code> 显示格式化 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
-      <tr><td class="glyph">&#xE8AB;</td><td>转换为 GPT Convert to GPT</td><td><code>U+E8AB</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8FB; / &#xE8AE;</td><td>联机 / 脱机 / 状态未知 Online / Offline / State unknown</td><td><code>U+E8FB</code> / <code>U+E8AE</code></td><td>分区页同一个磁盘状态按钮按准确状态切换文字与图标；真实状态缺失或未知时禁用 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
+      <tr><td class="glyph">&#xE9CE; / &#xE8AB;</td><td>初始化 RAW / 转换为 GPT / 已初始化 Initialize RAW / Convert to GPT / Already initialized</td><td><code>U+E9CE</code> / <code>U+E8AB</code></td><td>分区页同一个分区表状态按钮；MBR 在真实模式也显示“转换为 GPT”，但 C03 禁用并拒绝；真实 RAW 初始化使用 MSR 偏好 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
+      <tr><td class="glyph">&#xE74D;</td><td>清空至 RAW Clear to RAW</td><td><code>U+E74D</code></td><td>分区页独立磁盘操作；模拟 GPT/MBR 按原规则可用；真实仅支持准确在线 GPT 普通数据/MSR，或本次完整来源事实证明零分区的 GPT，真实 MBR 禁用；真实操作只经 Agent 冻结计划确认 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
       <tr><td class="glyph">&#xE74D;</td><td>删除分区 Delete partition</td><td><code>U+E74D</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE8A5;</td><td>扩展分区 Extend partition</td><td><code>U+E8A5</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE73F;</td><td>压缩分区 Shrink partition</td><td><code>U+E73F</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE8A5;</td><td>扩展分区 Extend partition</td><td><code>U+E8A5</code></td><td>真实仅开放受支持的普通 GPT NTFS、ReFS 扩展或 RAW 数据范围；点击时 Agent fresh 查询 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
+      <tr><td class="glyph">&#xE73F;</td><td>压缩分区 Shrink partition</td><td><code>U+E73F</code></td><td>真实仅开放受支持的普通 GPT NTFS/RAW 数据范围；ReFS 压缩禁用，点击时 Agent fresh 查询 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
       <tr><td class="glyph">&#xE838;</td><td>打开资源管理器 Open in File Explorer</td><td><code>U+E838</code></td><td>分区页操作 — <code>DiskPartitionPage.xaml</code></td></tr>
       <tr><td class="glyph">&#xE777;</td><td>恢复推荐值 Reset recommended value</td><td><code>U+E777</code></td><td>分区大小、文件系统、分配单元大小、快速格式化的重复重置按钮 — <code>DiskPartitionPage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE74E;</td><td>最大容量 MAX</td><td><code>U+E74E</code></td><td>分区创建表单；与结构页最大容量按钮使用同一图形 — <code>DiskPartitionPage.xaml</code></td></tr>
-      <tr><td class="glyph">&#xE710;</td><td>新建分区 Create partition</td><td><code>U+E710</code></td><td>选中未分配空间时，同一个 <code>PartitionActionButton</code> 显示新建 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>最大容量 MAX</td><td><code>U+E74E</code></td><td>分区创建表单按当前 GPT 空隙几何填入对齐候选上限；真实执行仍由 Agent fresh 计划核验 — <code>DiskPartitionPage.xaml</code></td></tr>
+      <tr><td class="glyph">&#xE710;</td><td>新建分区 / 格式化分区 Create partition / Format partition</td><td><code>U+E710</code></td><td>选中 GPT 空隙时，同一个 <code>PartitionActionButton</code> 显示新建；选中可格式化现有分区时显示格式化。真实入口仍受准确目标及 Agent 冻结计划约束 — <code>DiskPartitionPage.xaml(.cs)</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>扩缩公式 Resize formula</td><td>—</td><td>扩展/压缩对话框两行展示 `A ± B = C`；MiB 行 A 只读、B/C 可编辑并双向联动，单位副行只读，bytes 为唯一权威值 — <code>DiskPartitionPage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">无图标</td><td>按 ID 查询真实操作 / 停止后续步骤 Query real operation by ID / Stop following steps</td><td>—</td><td>结构页和分区页的 Agent 操作状态按钮 — <code>StorageStructurePage.xaml(.cs)</code>、<code>DiskPartitionPage.xaml(.cs)</code></td></tr>
     </tbody>
   </table>
 
@@ -99,7 +101,7 @@
       <tr><td class="glyph">&#xE72C; / &#xE73E;</td><td>切换欢迎内容 Cycle welcome content；确认 Confirm</td><td><code>U+E72C</code> / <code>U+E73E</code></td><td>欢迎页底部两个普通图标文字按钮；Cycle 的文字由当前内容变化 — <code>WelcomeWindow.xaml(.cs)</code></td></tr>
       <tr><td class="glyph">无图标</td><td>选择曲线颜色 Select series color</td><td>—</td><td>监控页运行时颜色选择器弹层 — <code>MonitorPage.xaml.cs</code></td></tr>
       <tr><td class="glyph">&#xE777;</td><td>恢复推荐值 Reset recommended value</td><td><code>U+E777</code></td><td>结构页按可编辑属性行生成；字段不同，操作均恢复该字段的推荐值 — <code>StorageStructurePage.xaml.cs</code></td></tr>
-      <tr><td class="glyph">&#xE74E;</td><td>使用最大值 Use maximum</td><td><code>U+E74E</code></td><td>结构页 SSD/HDD/SCM 容量输入组；应用规划的对齐上限 — <code>StorageStructurePage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>使用最大值 Use maximum</td><td><code>U+E74E</code></td><td>结构页 SSD/HDD/SCM 模拟层容量输入组；应用规划的对齐上限，不代表真实 provider 容量。真实新建 VD 的 MAX 在原容量字段中按该次 Agent provider 范围冻结为精确 bytes — <code>StorageStructurePage.xaml.cs</code></td></tr>
       <tr><td class="glyph">&#xE8C8;</td><td>复制命令预览 Copy command preview</td><td><code>U+E8C8</code></td><td>结构页待处理操作条目；预览无命令时禁用 — <code>StorageStructurePage.xaml.cs</code></td></tr>
       <tr><td class="glyph">无图标</td><td>属性表复制菜单 Copy current value / group / raw fields</td><td>—</td><td>属性表右键菜单项 — <code>PropertyTableContextMenu.cs</code></td></tr>
       <tr><td class="glyph">无图标</td><td>确认／取消／关闭 Confirm / Cancel / Close</td><td>—</td><td>各页面临时 WinUI 确认对话框的系统文本按钮；标签随操作变化，由所属流程创建</td></tr>
