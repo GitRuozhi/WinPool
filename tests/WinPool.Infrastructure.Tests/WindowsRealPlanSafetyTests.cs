@@ -48,6 +48,23 @@ public sealed class WindowsRealPlanSafetyTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
+    [Fact]
+    public async Task EmptyGptDiskCanBeClearedAfterExactZeroPartitionCountProof()
+    {
+        var fixture = new Fixture();
+        fixture.SetEmptyGptDisk();
+        var disk = fixture.Id(StorageObjectKind.OsDisk, DiskId);
+        var proposal = fixture.Proposal(OperationIntent.ClearDisk, [disk],
+            [Step("clear", new ClearDiskCommand(RealTargetReference.ForExisting(disk), false))],
+            RealOperationValidator.ClearDiskExpectedFinalState);
+
+        var plan = await fixture.Prepare(proposal);
+
+        Assert.Equal(RiskLevel.R5IrreversibleOrBroadDestruction, plan.Risk);
+        Assert.Contains("no existing partitions", plan.RealOperation!.Steps[0].DataLoss);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
     [Theory]
     [InlineData("11111111-1111-1111-1111-111111111111")]
     [InlineData("de94bba4-06d1-4d40-a16a-bfd50179d6ac")]
@@ -167,6 +184,142 @@ public sealed class WindowsRealPlanSafetyTests
         fixture.PartitionSizes.OnRead = fixture.SetRawDisk;
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadResizeRange(partition));
         Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task ResizePrepareRejectsAProviderRangeThatWentStaleAfterUiRead()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitions();
+        fixture.PartitionSizes.MinimumBytes = 64L << 20;
+        fixture.PartitionSizes.MaximumBytes = 200L << 20;
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var displayedRange = await fixture.ReadResizeRange(partition);
+        Assert.Equal(200L << 20, displayedRange.AllowedMaxBytes);
+
+        fixture.PartitionSizes.MaximumBytes = 150L << 20;
+        var proposal = fixture.Proposal(OperationIntent.ResizePartition, [partition],
+            [Step("resize", new ResizePartitionCommand(
+                RealTargetReference.ForExisting(partition), 180L << 20))],
+            "Selected partition resized");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(2, fixture.PartitionSizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task StructureCreationSupportAllowsAFullExistingPoolWithoutTreatingZeroRangeAsCapacity()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate(withVirtualDisk: true);
+        fixture.Capabilities.PoolCreationSupported = true;
+        fixture.Sizes.MaximumBytes = 0;
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+
+        var support = await fixture.ReadCreationSupport(physical, tiered: false);
+
+        Assert.Equal(physical, support.PhysicalTarget);
+        Assert.False(support.Tiered);
+        Assert.Equal(PoolId, support.CurrentPoolStableId);
+        Assert.True(support.SupportsStoragePoolCreation);
+        Assert.True(support.OrdinaryProviderMethodVerified);
+        Assert.Equal(1, fixture.Capabilities.TierReadCount);
+        Assert.Equal(1, fixture.Sizes.ProbeCount);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task StructureCreationSupportAllowsPartitionedDiskBeforePlannedClearWithoutFuturePoolCapacity()
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitions();
+        fixture.Capabilities.PoolCreationSupported = true;
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+
+        var support = await fixture.ReadCreationSupport(physical, tiered: false);
+
+        Assert.True(support.SupportsStoragePoolCreation);
+        Assert.False(support.OrdinaryProviderMethodVerified);
+        Assert.Null(support.CurrentPoolStableId);
+        Assert.Equal(1, fixture.Capabilities.TierReadCount);
+        Assert.Equal(0, fixture.Sizes.ProbeCount);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task StructureCreationSupportRejectsKnownUnsupportedPoolCreation()
+    {
+        var fixture = new Fixture();
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+
+        await Assert.ThrowsAsync<NotSupportedException>(() =>
+            fixture.ReadCreationSupport(physical, tiered: false));
+
+        Assert.Equal(1, fixture.Capabilities.TierReadCount);
+        Assert.Equal(0, fixture.Sizes.ProbeCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task TieredStructureCreationSupportRequiresBothExactTierFlagsAndOnePhysicalDiskMinimum()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate(withVirtualDisk: true);
+        fixture.Capabilities.PoolCreationSupported = true;
+        fixture.Capabilities.TierCreationSupported = true;
+        fixture.Capabilities.TieredVirtualDiskCreationSupported = true;
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+
+        var support = await fixture.ReadCreationSupport(physical, tiered: true);
+
+        Assert.True(support.Tiered);
+        Assert.True(support.SupportsStoragePoolCreation);
+        Assert.True(support.SupportsStorageTierCreation);
+        Assert.True(support.SupportsStorageTieredVirtualDiskCreation);
+        Assert.Equal(1UL, support.PhysicalDisksPerStoragePoolMin);
+        Assert.Equal(0, fixture.Sizes.ProbeCount);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task TieredStructureCreationSupportRejectsKnownMissingTierCapabilityBeforeAnyWrite()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate(withVirtualDisk: true);
+        fixture.Capabilities.PoolCreationSupported = true;
+        fixture.Capabilities.TierCreationSupported = true;
+        fixture.Capabilities.TieredVirtualDiskCreationSupported = false;
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+
+        await Assert.ThrowsAsync<NotSupportedException>(() =>
+            fixture.ReadCreationSupport(physical, tiered: true));
+
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        Assert.Equal(0, fixture.Sizes.ProbeCount);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+    }
+
+    [Fact]
+    public async Task TieredStructureCreationSupportRejectsSubsystemMinimumAboveOne()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate(withVirtualDisk: true);
+        fixture.Capabilities.PoolCreationSupported = true;
+        fixture.Capabilities.TierCreationSupported = true;
+        fixture.Capabilities.TieredVirtualDiskCreationSupported = true;
+        fixture.Capabilities.PhysicalDisksPerStoragePoolMin = 2;
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+
+        await Assert.ThrowsAsync<NotSupportedException>(() =>
+            fixture.ReadCreationSupport(physical, tiered: true));
+
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        Assert.Equal(0, fixture.Sizes.ProbeCount);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
     }
 
     [Fact]
@@ -436,6 +589,7 @@ public sealed class WindowsRealPlanSafetyTests
         var fixture = new Fixture();
         fixture.SetHddTemplate();
         fixture.Capabilities.TierSupported = true;
+        fixture.Sizes.Size = new(32L << 20, 512L << 20, 32L << 20, []);
         fixture.Capabilities.TierCreationSize = WindowsRealStorageCapabilityReader.ParseTierCreationSize(0U,
             enumeration ? new ulong[] { 160UL << 20, 224UL << 20 } : null,
             enumeration ? null : 96UL << 20, enumeration ? null : 224UL << 20,
@@ -455,6 +609,35 @@ public sealed class WindowsRealPlanSafetyTests
         var resize = fixture.Proposal(OperationIntent.ResizeStorageTier, [tier],
             [Step("resize", new ResizeTierCommand(RealTargetReference.ForExisting(tier), 256L << 20))], "Larger tier");
         await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(resize));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task HddMaximumReadsExactPoolIntersectionAndRechecksBothConstraintsBeforeDispatch()
+    {
+        var fixture = new Fixture();
+        fixture.SetHddTemplate();
+        fixture.Capabilities.TierSupported = true;
+        fixture.Sizes.Size = new(1073741824, 3999688294400, 1073741824, []);
+        fixture.Capabilities.TierCreationSize = new(268435456, 3999956729856, 268435456, [])
+            { RangeOriginBytes = 268435456 };
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
+        var range = await fixture.ReadCreationRange(tier);
+        Assert.Equal(3999688294400, range.ResolveMaximum());
+        Assert.False(range.Supports(3999956729856));
+        Assert.Equal(StorageObjectKind.StoragePool, fixture.Sizes.LastTarget!.Kind);
+        Assert.Equal(PoolId, fixture.Sizes.LastTarget.UniqueId);
+        Assert.Equal(PoolId, fixture.Sizes.LastTarget.ObjectId);
+        RealOperationIntentRequest Proposal(long size) => fixture.Proposal(OperationIntent.CreateVirtualDisk,
+            [pool, tier], [Step("vd", new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool),
+                RealTargetReference.ForExisting(tier), "HDD MAX", size))], "HDD MAX");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(Proposal(3999956729856)));
+        var plan = await fixture.Prepare(Proposal(range.ResolveMaximum()));
+        Assert.Contains("exact-pool-new-size:", plan.RealOperation!.Steps[0].SupportEvidence);
+        fixture.Sizes.Size = fixture.Sizes.Size with { MaximumBytes = 3998614552576 };
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan,
+            plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
@@ -508,6 +691,7 @@ public sealed class WindowsRealPlanSafetyTests
         private readonly SystemId system = SystemId.New();
         private StorageSnapshot snapshot;
         private readonly WindowsRealStorageTopologyReader reader;
+        private readonly WindowsRealOperationPlanner planner;
         public Fixture()
         {
             snapshot = BaseSnapshot();
@@ -518,7 +702,7 @@ public sealed class WindowsRealPlanSafetyTests
             Sizes = new SyntheticSizeReader();
             PartitionSizes = new SyntheticPartitionSizeReader();
             Capabilities = new SyntheticCapabilities();
-            var planner = new WindowsRealOperationPlanner(reader, PartitionSizes,
+            planner = new WindowsRealOperationPlanner(reader, PartitionSizes,
                 new AdministratorPrivilege(), new FixedTimeProvider(), new SyntheticSafetyInspector(), Sizes,
                 () => LogicalDrives, Capabilities);
             Backend = new WindowsRealStorageBackend(Adapter, planner, reader, new FixedTimeProvider());
@@ -543,6 +727,15 @@ public sealed class WindowsRealPlanSafetyTests
                 new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
                     1234, Now.AddMinutes(-1), @"C:\Synthetic\WinPool.Agent.exe", true),
                 CancellationToken.None);
+        public Task<RealStructureCreationSupport> ReadCreationSupport(StorageObjectId physical, bool tiered) =>
+            planner.ReadStructureCreationSupportAsync(physical, tiered,
+                new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
+                    1234, Now.AddMinutes(-1), @"C:\Synthetic\WinPool.Agent.exe", true),
+                CancellationToken.None);
+        public Task<RealVirtualDiskCreationRange> ReadCreationRange(StorageObjectId target) =>
+            planner.ReadVirtualDiskCreationRangeAsync(target,
+                new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
+                    1234, Now.AddMinutes(-1), @"C:\Synthetic\WinPool.Agent.exe", true), CancellationToken.None);
 
         public async Task<string> VerifiedEvidence(string? NewlyCreatedObjectId)
         {
@@ -576,9 +769,17 @@ public sealed class WindowsRealPlanSafetyTests
             snapshot = BaseSnapshot() with
             {
                 OsDisks = [BaseSnapshot().OsDisks[0] with { PartitionStyle = "GPT" }],
+                PhysicalDisks = [BaseSnapshot().PhysicalDisks[0] with
+                    { CanPool = false, CannotPoolReason = "Has partitions" }],
                 Partitions = [msr, data]
             };
         }
+        public void SetEmptyGptDisk() => snapshot = BaseSnapshot() with
+        {
+            OsDisks = [BaseSnapshot().OsDisks[0] with { PartitionStyle = "GPT" }],
+            Partitions = [],
+            Volumes = []
+        };
         public void SetGptPartitionsWithFollowingPartition()
         {
             SetGptPartitions();
@@ -742,13 +943,24 @@ public sealed class WindowsRealPlanSafetyTests
     }
     private sealed class SyntheticSizeReader : IVirtualDiskCreationSizeReader
     {
+        public VirtualDiskCreationSize? Size { get; set; }
+        public WindowsStorageCommandTarget? LastTarget { get; private set; }
         public long MaximumBytes { get; set; } = 512L << 20;
         public int ReadCount { get; private set; }
+        public int ProbeCount { get; private set; }
         public Task<VirtualDiskCreationSize> ReadAsync(WindowsStorageCommandTarget target,
             CancellationToken token)
         {
             ReadCount++;
-            return Task.FromResult(new VirtualDiskCreationSize(64L << 20, MaximumBytes, 64L << 20, []));
+            LastTarget = target;
+            return Task.FromResult(Size ?? new VirtualDiskCreationSize(64L << 20, MaximumBytes, 64L << 20, []));
+        }
+        public Task<VirtualDiskCreationSupportProbe> ProbeAsync(
+            WindowsStorageCommandTarget target, CancellationToken token)
+        {
+            ProbeCount++;
+            return Task.FromResult(new VirtualDiskCreationSupportProbe(
+                target.UniqueId, target.ObjectId, "Simple", 0, Now));
         }
     }
     private sealed class SyntheticSafetyInspector : IWindowsRealStorageSafetyInspector
@@ -760,10 +972,15 @@ public sealed class WindowsRealPlanSafetyTests
     {
         public bool RefsSupported { get; set; }
         public bool TierSupported { get; set; }
+        public bool PoolCreationSupported { get; set; }
+        public bool? TierCreationSupported { get; set; }
+        public bool? TieredVirtualDiskCreationSupported { get; set; }
+        public ulong PhysicalDisksPerStoragePoolMin { get; set; } = 1;
         public bool Has64KiB { get; set; } = true;
         public uint ReturnValue { get; set; }
         public long TierMaximum { get; set; } = 512L << 20;
         public VirtualDiskCreationSize? TierCreationSize { get; set; }
+        public int TierReadCount { get; private set; }
         public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
             WindowsRealStorageTopology topology, StorageObjectId volume, CancellationToken token)
         {
@@ -778,12 +995,33 @@ public sealed class WindowsRealPlanSafetyTests
                     new Dictionary<string, JsonElement?> { ["SupportedClusterSizes"] = JsonSerializer.SerializeToElement(Has64KiB ? new[] { 4096, 65536 } : [4096]) }, null), null));
         }
         public Task<WindowsTierCapability> ReadTierAsync(WindowsRealStorageTopology topology,
-            StorageObjectId physical, CancellationToken token) => Task.FromResult(new WindowsTierCapability(
-                "queried", physical.ProviderKey, SubsystemId, SubsystemId, SubsystemId, Now, [],
-                new[] { "SupportsStorageTierCreation", "SupportsStorageTieredVirtualDiskCreation",
-                    "SupportsStorageTierDeletion", "SupportsStorageTierFriendlyNameModification" }
-                    .Select(name => WinPoolSourceField.Returned(name, TierSupported, FactValueType.Boolean, SubsystemId))
-                    .Append(WinPoolSourceField.Returned("PhysicalDisksPerStoragePoolMin", 1UL, FactValueType.UInt64, SubsystemId)).ToArray(), null));
+            StorageObjectId physical, CancellationToken token)
+        {
+            TierReadCount++;
+            var memberships = topology.Facts.Relationships.Where(item => !item.IsRetained
+                && item.Kind == "pool-member" && item.ToId == physical.ProviderKey).ToArray();
+            var associations = memberships.SelectMany(membership =>
+                new[] { membership }.Concat(topology.Facts.Relationships.Where(item => !item.IsRetained
+                    && item.Kind == "subsystem-pool" && item.ToId == membership.FromId))).ToArray();
+            var fields = new[]
+            {
+                WinPoolSourceField.Returned("SupportsStoragePoolCreation", PoolCreationSupported,
+                    FactValueType.Boolean, SubsystemId),
+                WinPoolSourceField.Returned("SupportsStorageTierCreation",
+                    TierCreationSupported ?? TierSupported, FactValueType.Boolean, SubsystemId),
+                WinPoolSourceField.Returned("SupportsStorageTieredVirtualDiskCreation",
+                    TieredVirtualDiskCreationSupported ?? TierSupported, FactValueType.Boolean, SubsystemId),
+                WinPoolSourceField.Returned("SupportsStorageTierDeletion", TierSupported,
+                    FactValueType.Boolean, SubsystemId),
+                WinPoolSourceField.Returned("SupportsStorageTierFriendlyNameModification", TierSupported,
+                    FactValueType.Boolean, SubsystemId),
+                WinPoolSourceField.Returned("PhysicalDisksPerStoragePoolMin",
+                    PhysicalDisksPerStoragePoolMin, FactValueType.UInt64, SubsystemId)
+            };
+            return Task.FromResult(new WindowsTierCapability(
+                "queried", physical.ProviderKey, SubsystemId, SubsystemId, SubsystemId,
+                Now, associations, fields, null));
+        }
         public Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(WindowsRealStorageTopology topology,
             StorageObjectId tier, CancellationToken token) => Task.FromResult(TierCreationSize
                 ?? new VirtualDiskCreationSize(64L << 20, TierMaximum, 64L << 20, []));

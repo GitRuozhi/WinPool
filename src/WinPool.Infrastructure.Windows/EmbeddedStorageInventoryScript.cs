@@ -46,14 +46,14 @@ function Resolve-OsDiskDeviceParents($disk) {
 
 """;
 
-    public static string ForPurpose(WinPool.Application.CollectionPurpose purpose)
+    public static string ForPurpose(WinPool.Application.CollectionPurpose purpose, bool discoverProviderCache = true)
     {
         var compressed = Convert.FromBase64String(CompressedBase64);
         using var input = new MemoryStream(compressed);
         using var gzip = new GZipStream(input, CompressionMode.Decompress);
         using var reader = new StreamReader(gzip, Encoding.UTF8);
         var source = AddOsDiskParentBinding(AddCompleteProviderAssociations(AddTierAssociations(AddPhysicalDiskAssociationFallback(reader.ReadToEnd()))));
-        if (purpose == WinPool.Application.CollectionPurpose.Storage)
+        if (purpose == WinPool.Application.CollectionPurpose.Storage && discoverProviderCache)
             source = AddStorageProviderCacheDiscovery(source);
         return "$WinPoolIncludeHardware = " + (purpose == WinPool.Application.CollectionPurpose.Hardware ? "$true" : "$false") + "\n" + source;
     }

@@ -63,7 +63,8 @@ public sealed class DiskPerformanceSampler : IDisposable
         var writes = ReadCounter(_writeCounter);
         var queues = ReadCounter(_queueCounter);
         return activity.Keys
-            .Where(x => !x.Equals("_Total", StringComparison.OrdinalIgnoreCase))
+            .Where(x => !x.Equals("_Total", StringComparison.OrdinalIgnoreCase)
+                && reads.ContainsKey(x) && writes.ContainsKey(x) && queues.ContainsKey(x))
             .Select(x => new DiskPerformanceSample(
                 x,
                 Math.Clamp(activity.GetValueOrDefault(x), 0, 100),
@@ -106,7 +107,7 @@ public sealed class DiskPerformanceSampler : IDisposable
                 var item = Marshal.PtrToStructure<PdhFmtCounterValueItem>(
                     IntPtr.Add(buffer, i * itemSize));
                 var name = Marshal.PtrToStringUni(item.Name) ?? string.Empty;
-                if (name.Length > 0)
+                if (name.Length > 0 && item.Value.Status is 0 or 1 && double.IsFinite(item.Value.DoubleValue))
                 {
                     result[name] = item.Value.DoubleValue;
                 }

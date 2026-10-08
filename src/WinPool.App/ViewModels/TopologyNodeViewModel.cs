@@ -9,7 +9,8 @@ public sealed record TopologyEditInteraction(
     Func<TopologyNodeViewModel, bool> IsSelected,
     Action<TopologyNodeViewModel> OnSelect,
     bool AllowDiskDrag,
-    Action<string, string>? OnDiskDropped = null);
+    Action<string, string>? OnDiskDropped = null,
+    Func<bool>? CanEditNow = null);
 
 public sealed partial class TopologyNodeViewModel : ObservableObject
 {

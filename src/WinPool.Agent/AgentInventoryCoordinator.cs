@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
@@ -85,40 +88,86 @@ internal sealed class AgentInventoryCoordinator
         return physicalDeviceId;
     }
 
-    public async Task<ApplicationResult<AgentResponse>> CaptureManageAsync(
+    public Task<ApplicationResult<AgentResponse>> CaptureManageAsync(
         CaptureAgentManageInventoryRequest request,
         CancellationToken cancellationToken,
-        bool isAutomatic = false)
+        bool isAutomatic = false) => CaptureManageCoreAsync(request, cancellationToken, isAutomatic, null);
+
+    public Task<ApplicationResult<AgentResponse>> CaptureManageScopedAsync(StorageInventoryScope scope,
+        CorrelationId correlationId, CancellationToken cancellationToken) =>
+        CaptureManageCoreAsync(new(correlationId, CollectionPurpose.Storage), cancellationToken, false, scope);
+
+    private async Task<ApplicationResult<AgentResponse>> CaptureManageCoreAsync(
+        CaptureAgentManageInventoryRequest request, CancellationToken cancellationToken, bool isAutomatic,
+        StorageInventoryScope? scope)
     {
+        var queuedAt = Stopwatch.GetTimestamp();
         await localCaptureGate.WaitAsync(cancellationToken);
+        var gateAt = Stopwatch.GetTimestamp();
+        StorageOperationTiming.Record("inventory.queue", queuedAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
         try
         {
             if (!Enum.IsDefined(request.Purpose)) return Failed(request.CorrelationId, "agent.inventory.invalid_purpose");
-            publish(new AgentInventoryStartedEvent(request.Purpose, DateTimeOffset.UtcNow, isAutomatic));
-            var document = request.Purpose == CollectionPurpose.Hardware
-                ? await manageProvider.CollectHardwareAsync(cancellationToken)
-                : await manageProvider.CollectLocalAsync(cancellationToken);
-            CachePhysicalDeviceIds(document);
-            var provisional = EmbeddedPowerShellInventoryProvider.Project(
-                document.SystemId,
-                document.Snapshot);
             var identity = await localIdentity.ResolveAsync(cancellationToken);
             var canonicalSystemId = identity.SystemId;
+            var cached = await localDocument.LoadAsync(cancellationToken);
+            var previous = cached is null ? null : LocalInventoryDocumentCodec.Decode(cached.Document);
+            var generation = checked((previous?.SourceFacts?.Sources.Select(x => x.CaptureGeneration).DefaultIfEmpty(0).Max() ?? 0) + 1);
+            if (scope is not null)
+            {
+                scope.Validate();
+                if (scope.SystemId != canonicalSystemId || previous?.SourceFacts is not { } authority
+                    || authority.SystemId != canonicalSystemId)
+                    return Failed(request.CorrelationId, "agent.inventory.scope_system_or_authority_missing");
+                // The client can request IDs; it cannot substitute a raw selector for a current target.
+                // Persisted before locators are retained only when the object has already disappeared.
+                var locators = scope.Targets.Select(target => authority.Objects.Any(x => x.Id == target.ProviderKey)
+                    ? StorageInventoryScopeFactory.Resolve(authority, target)
+                    : scope.BeforeLocators.Single(x => x.Target == target)).ToArray();
+                var presentTargets = scope.Targets.Where(target => authority.Objects.Any(x => x.Id == target.ProviderKey)).ToArray();
+                IReadOnlyList<string> beforeIds = presentTargets.Length == 0 ? [] : StorageInventoryScopeFactory.Create(authority,
+                    scope.OperationId, scope.StepId, presentTargets, generation, includeRetainedRelationships: true).BeforeObjectIds;
+                // Historical authority defines the absence domain; caller-supplied IDs never enlarge it.
+                scope = scope with { BeforeLocators = locators, BeforeObjectIds = beforeIds, Generation = generation };
+                scope.Validate();
+                if (manageProvider is not IScopedHardwareInventoryProvider)
+                    return Failed(request.CorrelationId, "agent.inventory.scope_provider_unavailable");
+            }
+            publish(new AgentInventoryStartedEvent(request.Purpose, DateTimeOffset.UtcNow, isAutomatic));
+            var captureAt = Stopwatch.GetTimestamp();
+            var document = scope is not null
+                ? await ((IScopedHardwareInventoryProvider)manageProvider).CollectScopedAsync(scope, cancellationToken)
+                : request.Purpose == CollectionPurpose.Hardware
+                ? await manageProvider.CollectHardwareAsync(cancellationToken)
+                : await manageProvider.CollectLocalAsync(cancellationToken);
+            var capturedAt = Stopwatch.GetTimestamp();
+            StorageOperationTiming.Record("inventory.collect", captureAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString(), 1);
+            if (scope is not null && (document.SystemId != canonicalSystemId
+                || document.SourceFacts?.ScopedCollection?.Scope != scope || document.SourceFacts.IsMerged))
+                throw new InvalidDataException("Scoped inventory returned mismatched or merged evidence.");
             document = document with
             {
                 SystemId = canonicalSystemId,
-                SourceFacts = document.SourceFacts is null ? null : document.SourceFacts with { SystemId = canonicalSystemId }
+                SourceFacts = document.SourceFacts is null ? null : document.SourceFacts with
+                {
+                    SystemId = canonicalSystemId,
+                    Sources = document.SourceFacts.Sources.Select(x => x with { CaptureGeneration = generation }).ToImmutableArray()
+                }
             };
-            var cached = await localDocument.LoadAsync(cancellationToken);
-            if (cached is not null && document.SourceFacts is not null)
+            var incomplete = scope is not null && document.SourceFacts?.ScopedCollection?.Complete != true;
+            if (previous is not null && document.SourceFacts is not null)
             {
-                var previous = LocalInventoryDocumentCodec.Decode(cached.Document);
                 if (previous.SystemId == canonicalSystemId && previous.SourceFacts is not null)
                     document = document with { SourceFacts = WinPoolFactRefresh.Merge(previous.SourceFacts, document.SourceFacts) };
             }
+            CachePhysicalDeviceIds(document);
+            StorageOperationTiming.Record("inventory.merge", capturedAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
+            var projectionAt = Stopwatch.GetTimestamp();
             var projected = EmbeddedPowerShellInventoryProvider.Project(
                 canonicalSystemId,
                 document.Snapshot);
+            StorageOperationTiming.Record("inventory.project", projectionAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
+            var persistenceAt = Stopwatch.GetTimestamp();
             var saved = await snapshots.SaveAsync(
                 projected,
                 PersistedSystemKind.Local,
@@ -133,7 +182,18 @@ internal sealed class AgentInventoryCoordinator
                 throw new InvalidDataException("The Local inventory identity is inconsistent.");
             }
             await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
+            StorageOperationTiming.Record("inventory.persist", persistenceAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
+            Trace.WriteLine(JsonSerializer.Serialize(new { Event = "inventory.coordinator", Purpose = scope is null ? request.Purpose.ToString() : "ScopedStorage",
+                OperationId = scope?.OperationId.Value, StepId = scope?.StepId, Scope = scope?.Key, Generation = generation,
+                QueueMilliseconds = Stopwatch.GetElapsedTime(queuedAt, gateAt).TotalMilliseconds,
+                CaptureMilliseconds = Stopwatch.GetElapsedTime(captureAt, capturedAt).TotalMilliseconds,
+                MergeProjectionPersistenceMilliseconds = Stopwatch.GetElapsedTime(capturedAt).TotalMilliseconds,
+                Complete = !incomplete }));
             publish(new AgentInventoryUpdatedEvent(request.Purpose, payload, DateTimeOffset.UtcNow, isAutomatic));
+            if (incomplete)
+                return new(ApplicationStatus.PartiallyCompleted, new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
+                    [new ApplicationMessage("agent.inventory.scope_incomplete", "agent.inventory.scope_incomplete",
+                        "The target closure was not completely refreshed; prior facts remain retained.", ApplicationMessageSeverity.Warning, [])], request.CorrelationId);
             return Succeeded(
                 new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
                 request.CorrelationId,

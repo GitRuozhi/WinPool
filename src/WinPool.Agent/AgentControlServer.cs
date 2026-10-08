@@ -105,6 +105,14 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<AcceptAgentRealOperationRequest>(envelope),
                 AgentControlMessageTypes.QueryRealOperation =>
                     Deserialize<QueryAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.QueryRealVirtualDiskCreationRange =>
+                    Deserialize<QueryAgentRealVirtualDiskCreationRangeRequest>(envelope),
+                AgentControlMessageTypes.QueryRealStructureCreationSupport =>
+                    Deserialize<QueryAgentRealStructureCreationSupportRequest>(envelope),
+                AgentControlMessageTypes.ListRecoverableRealOperations =>
+                    Deserialize<ListAgentRecoverableRealOperationsRequest>(envelope),
+                AgentControlMessageTypes.CaptureManageScopedInventory =>
+                    Deserialize<CaptureAgentManageScopedInventoryRequest>(envelope),
                 AgentControlMessageTypes.QueryRealPartitionResizeRange =>
                     Deserialize<QueryAgentRealPartitionResizeRangeRequest>(envelope),
                 AgentControlMessageTypes.StopRealOperationFollowingSteps =>

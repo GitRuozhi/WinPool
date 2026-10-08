@@ -997,7 +997,7 @@ public sealed class ArchitectureBoundaryTests
             "private async void RootGrid_Loaded",
             StringComparison.Ordinal);
         var loadedEnd = source.IndexOf(
-            "private async void MainWindow_Closed",
+            "private void MainWindow_Closed",
             StringComparison.Ordinal);
         Assert.True(loadedStart >= 0 && loadedEnd > loadedStart);
         var loaded = source[loadedStart..loadedEnd];
@@ -1481,13 +1481,13 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void IpcProtocolCurrentVersionIsTwelve()
+    public void IpcProtocolCurrentVersionIsThirteen()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
 
-        Assert.Contains("public const int CurrentVersion = 12;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 13;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
     }
 

@@ -90,14 +90,18 @@ public sealed class InfrastructureTests
                 WinPool.Infrastructure.Windows.WindowsPowerShellRunner))
             .ToArray();
 
-        var method = Assert.Single(publicMethods);
-        Assert.Equal("RunInventoryAsync", method.Name);
-        Assert.DoesNotContain(
-            method.GetParameters(),
-            parameter => parameter.ParameterType == typeof(string));
-        Assert.Equal(
-            [typeof(CancellationToken)],
-            method.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.Equal(2, publicMethods.Length);
+        Assert.All(publicMethods, method =>
+        {
+            Assert.Equal("RunInventoryAsync", method.Name);
+            Assert.DoesNotContain(method.GetParameters(), parameter => parameter.ParameterType == typeof(string));
+            Assert.All(method.GetParameters(), parameter => Assert.Contains(parameter.ParameterType,
+                new[] { typeof(CancellationToken), typeof(WinPool.Application.StorageInventoryScope) }));
+        });
+        Assert.Contains(publicMethods, method => method.GetParameters().Select(parameter => parameter.ParameterType)
+            .SequenceEqual([typeof(CancellationToken)]));
+        Assert.Contains(publicMethods, method => method.GetParameters().Select(parameter => parameter.ParameterType)
+            .SequenceEqual([typeof(WinPool.Application.StorageInventoryScope), typeof(CancellationToken)]));
     }
 
     [Fact]

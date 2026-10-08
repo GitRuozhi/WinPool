@@ -30,6 +30,8 @@ public sealed class WindowsRealStorageTopology
         ArgumentNullException.ThrowIfNull(document);
         if (document.Kind != StorageSystemKind.Local
             || document.SourceFacts is not { IsSimulation: false } facts
+            || facts.IsMerged
+            || facts.ScopedCollection is { Complete: false }
             || facts.SystemId != document.SystemId
             || string.IsNullOrWhiteSpace(facts.InventoryVersion)
             || string.IsNullOrWhiteSpace(machineBinding)
@@ -481,22 +483,31 @@ public sealed record WindowsPoolMemberRoleEvidence(string InventoryVersion, stri
 
 public interface IWindowsRealStorageFactSource
 {
+    bool SupportsScopedCapture => false;
     Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken);
+    Task<StorageSystemDocument> CaptureFreshAsync(StorageInventoryScope scope, CancellationToken cancellationToken) =>
+        Task.FromException<StorageSystemDocument>(new NotSupportedException("The real fact source does not support exact scoped collection."));
 }
 
 public sealed class WindowsRealStorageFactSource : IWindowsRealStorageFactSource
 {
     private readonly IHardwareInventoryProvider provider;
+    public bool SupportsScopedCapture => provider is IScopedHardwareInventoryProvider;
 
     public WindowsRealStorageFactSource(IHardwareInventoryProvider? provider = null) =>
         this.provider = provider ?? new WindowsHardwareInventoryProvider(purpose: CollectionPurpose.Storage);
 
     public Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken) =>
         provider.CollectLocalAsync(cancellationToken);
+
+    public Task<StorageSystemDocument> CaptureFreshAsync(StorageInventoryScope scope, CancellationToken cancellationToken) =>
+        provider is IScopedHardwareInventoryProvider scoped ? scoped.CollectScopedAsync(scope, cancellationToken)
+            : Task.FromException<StorageSystemDocument>(new NotSupportedException("The real inventory provider does not support exact scoped collection."));
 }
 
 public sealed class WindowsRealStorageTopologyReader
 {
+    public bool SupportsScopedCapture => source.SupportsScopedCapture;
     private readonly IWindowsRealStorageFactSource source;
     private readonly IRealMachineIdentityProvider machineIdentity;
     private readonly TimeProvider timeProvider;
@@ -519,5 +530,19 @@ public sealed class WindowsRealStorageTopologyReader
             .ConfigureAwait(false);
         return new WindowsRealStorageTopology(
             document, binding, timeProvider.GetUtcNow());
+    }
+
+    public async Task<WindowsRealStorageTopology> CaptureScopedAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        scope.Validate();
+        var binding = await machineIdentity.ReadBindingAsync(cancellationToken).ConfigureAwait(false);
+        var document = await source.CaptureFreshAsync(scope, cancellationToken).ConfigureAwait(false);
+        if (document.SystemId != scope.SystemId || document.SourceFacts is not { IsMerged: false, ScopedCollection: { Complete: true } collected }
+            || collected.Scope.SystemId != scope.SystemId || collected.Scope.OperationId != scope.OperationId
+            || collected.Scope.StepId != scope.StepId || collected.Scope.Generation != scope.Generation
+            || !collected.Scope.Targets.SequenceEqual(scope.Targets))
+            throw new InvalidDataException("Real scoped preflight requires fresh complete evidence for the requested operation and targets.");
+        return new WindowsRealStorageTopology(document, binding, timeProvider.GetUtcNow());
     }
 }

@@ -53,6 +53,8 @@ public static class SimulationCommandPreview
                 break;
             case SimulationEditKind.SetDiskOffline:
                 lines.Add("Set-Disk -InputObject $targetDisk -IsOffline $" + (step.Offline == true ? "true" : "false")); break;
+            case SimulationEditKind.ClearDisk:
+                lines.Add("# Simulated only: remove this disk's modeled partitions and related volumes, then set it to RAW. No Windows command is bound."); break;
             case SimulationEditKind.CreatePartition:
                 foreach (var partition in after.Partitions.Where(x => !before.Partitions.Any(old => old.StableId == x.StableId)))
                     AddPartition(lines, partition, after, step.QuickFormat);

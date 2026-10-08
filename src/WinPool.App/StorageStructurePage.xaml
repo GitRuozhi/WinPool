@@ -7,7 +7,7 @@
     xmlns:editors="using:WinPool_App"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
-    <Grid>
+    <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -39,6 +39,7 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
+            <Grid>
             <ScrollViewer
                 x:Name="TopologyScrollViewer"
                 Padding="8"
@@ -68,6 +69,13 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+            <Border x:Name="RealTopologyOverlay" Background="#B3000000" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" Margin="16">
+                    <ProgressRing x:Name="RealTopologyProgress" IsActive="False" Width="36" Height="36" />
+                    <TextBlock x:Name="RealTopologyPhase" Foreground="White" TextWrapping="Wrap" TextAlignment="Center" />
+                </StackPanel>
+            </Border>
+            </Grid>
         </Border>
         <Border
             x:Name="PendingActionsBorder"
@@ -396,11 +404,11 @@
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
                 <Button
-                    x:Name="CreateHddTierButton"
+                    x:Name="CreateHddTierButton" Visibility="Collapsed"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Center"
-                    Click="CreateHddTier_Click">
+                    Click="CreateVdisk_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -414,11 +422,11 @@
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
                 <Button
-                    x:Name="CreateTieredVdiskButton"
+                    x:Name="CreateTieredVdiskButton" Visibility="Collapsed"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Center"
-                    Click="CreateTieredVdisk_Click">
+                    Click="CreateVdisk_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -432,11 +440,11 @@
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
                 <Button
-                    x:Name="RenameHddTierButton"
+                    x:Name="RenameHddTierButton" Visibility="Collapsed"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Center"
-                    Click="RenameHddTier_Click">
+                    Click="SavePoolProperties_Click">
                     <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -468,11 +476,6 @@
                 </controls:ContextHelpHost>
                     </controls:FixedWrapPanel>
                 </ScrollViewer>
-                <Button x:Name="RebuildPoolButton"
-                        HorizontalAlignment="Left"
-                        Click="RebuildPool_Click"
-                        Visibility="Collapsed"
-                        Content="Delete and rebuild single-disk pool" />
                 <Button x:Name="QueryRealOperationButton"
                         HorizontalAlignment="Left"
                         Click="QueryRealOperation_Click"

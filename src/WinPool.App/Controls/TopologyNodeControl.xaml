@@ -48,7 +48,8 @@
         </VisualStateGroup>
     </VisualStateManager.VisualStateGroups>
 
-    <Grid Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}">
+    <!-- Keep the whole card a pointer surface, including empty header space. -->
+    <Grid Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}" Background="Transparent">
         <Border
             x:Name="NodeBorder"
             Margin="0"

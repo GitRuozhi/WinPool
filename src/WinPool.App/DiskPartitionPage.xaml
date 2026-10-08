@@ -7,7 +7,7 @@
     xmlns:editors="using:WinPool_App"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
-    <Grid>
+    <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -38,35 +38,43 @@
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <ScrollViewer
-                x:Name="TopologyScrollViewer"
-                Padding="8"
-                HorizontalScrollBarVisibility="Auto"
-                HorizontalScrollMode="Enabled"
-                SizeChanged="TopologyScrollViewer_SizeChanged"
-                VerticalScrollBarVisibility="Auto">
-                <ItemsControl
-                    x:Name="TopologyControl"
-                    HorizontalAlignment="Stretch">
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical" Spacing="6" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <controls:TopologyNodeControl
-                                HorizontalAlignment="Stretch"
-                                ViewModel="{Binding}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+            <Grid>
+                <ScrollViewer
+                    x:Name="TopologyScrollViewer"
+                    Padding="8"
+                    HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Enabled"
+                    SizeChanged="TopologyScrollViewer_SizeChanged"
+                    VerticalScrollBarVisibility="Auto">
+                    <ItemsControl
+                        x:Name="TopologyControl"
+                        HorizontalAlignment="Stretch">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Vertical" Spacing="6" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <controls:TopologyNodeControl
+                                    HorizontalAlignment="Stretch"
+                                    ViewModel="{Binding}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <Border x:Name="RealTopologyOverlay" Background="#B3000000" Visibility="Collapsed">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" Margin="16">
+                        <ProgressRing x:Name="RealTopologyProgress" IsActive="False" Width="36" Height="36" />
+                        <TextBlock x:Name="RealTopologyPhase" Foreground="White" TextWrapping="Wrap" TextAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Grid>
         </Border>
         <toolkit:GridSplitter
             x:Name="EditorSplitter"
@@ -102,106 +110,68 @@
                     MinimumItemHeight="44"
                     Spacing="6">
                 <controls:ContextHelpHost>
+                    <Button
+                        x:Name="DiskOnlineStateButton"
+                        Style="{StaticResource WinPoolButtonBaseStyle}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Center"
+                        Click="DiskOnlineState_Click">
+                        <Grid HorizontalAlignment="Center" ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="DiskOnlineStateButtonIcon" Glyph="&#xE8AE;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="DiskOnlineStateButtonLabel"
+                                Grid.Column="1"
+                                MaxWidth="128"
+                                VerticalAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </Grid>
+                    </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
+                    <Button
+                        x:Name="DiskPartitionStyleButton"
+                        Style="{StaticResource WinPoolButtonBaseStyle}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Center"
+                        Click="DiskPartitionStyleButton_Click">
+                        <Grid HorizontalAlignment="Center" ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="DiskPartitionStyleButtonIcon" Glyph="&#xE9CE;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="DiskPartitionStyleButtonLabel"
+                                Grid.Column="1"
+                                MaxWidth="128"
+                                VerticalAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </Grid>
+                    </Button>
+                </controls:ContextHelpHost>
+                <controls:ContextHelpHost>
                 <Button
-                    x:Name="OnlineButton"
+                    x:Name="ClearDiskButton"
                     Style="{StaticResource WinPoolButtonBaseStyle}"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Center"
-                    Click="Online_Click">
+                    Click="ClearDisk_Click">
                     <Grid HorizontalAlignment="Center" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE8FB;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="OnlineButtonLabel"
-                            Grid.Column="1"
-                            MaxWidth="128"
-                            VerticalAlignment="Center"
-                            TextWrapping="Wrap" />
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="ClearDiskButtonLabel"
+                                   Grid.Column="1"
+                                   MaxWidth="128"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap" />
                     </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="OfflineButton"
-                    Grid.Column="1"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="Offline_Click">
-                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE8AE;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="OfflineButtonLabel"
-                            Grid.Column="1"
-                            MaxWidth="128"
-                            VerticalAlignment="Center"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="InitializeButton"
-                    Grid.Column="2"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="Initialize_Click">
-                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE9CE;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="InitializeButtonLabel"
-                            Grid.Column="1"
-                            MaxWidth="128"
-                            VerticalAlignment="Center"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="ConvertGptButton"
-                    Grid.Column="3"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="ConvertGpt_Click">
-                    <Grid HorizontalAlignment="Center" ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE8AB;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="ConvertGptButtonLabel"
-                            Grid.Column="1"
-                            MaxWidth="128"
-                            VerticalAlignment="Center"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="ClearDiskForPoolButton"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="ClearDiskForPool_Click"
-                    Visibility="Collapsed">
-                    <TextBlock x:Name="ClearDiskForPoolButtonLabel"
-                               TextWrapping="Wrap" />
                 </Button>
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
@@ -380,44 +350,32 @@
                                 Grid.Column="1"
                                 Grid.ColumnSpan="2"
                                 ColumnSpacing="0"
+                                RowSpacing="2"
                                 VerticalAlignment="Center">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock
                                     x:Name="StartOffsetValue"
-                                    Grid.Column="0"
+                                    Grid.Row="0"
                                     TextAlignment="Right"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
-                                    x:Name="StartOffsetMibPrefixValue"
-                                    Grid.Column="1"
-                                    Text="MiB ("
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="StartOffsetAdaptiveValue"
-                                    Grid.Column="2"
+                                    Grid.Row="1"
                                     TextAlignment="Right"
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
-                                    x:Name="StartOffsetUnitValue"
-                                    Grid.Column="3"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
                                     x:Name="StartOffsetUnavailableValue"
-                                    Grid.Column="0"
-                                    Grid.ColumnSpan="4"
+                                    Grid.RowSpan="2"
                                     Text="—"
                                     TextAlignment="Right"
                                     Visibility="Collapsed"
@@ -428,44 +386,32 @@
                                 Grid.Column="1"
                                 Grid.ColumnSpan="2"
                                 ColumnSpacing="0"
+                                RowSpacing="2"
                                 VerticalAlignment="Center">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock
                                     x:Name="EndOffsetValue"
-                                    Grid.Column="0"
+                                    Grid.Row="0"
                                     TextAlignment="Right"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
-                                    x:Name="EndOffsetMibPrefixValue"
-                                    Grid.Column="1"
-                                    Text="MiB ("
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
                                     x:Name="EndOffsetAdaptiveValue"
-                                    Grid.Column="2"
+                                    Grid.Row="1"
                                     TextAlignment="Right"
                                     TextWrapping="NoWrap"
                                     Visibility="Collapsed"
                                     VerticalAlignment="Center" />
                                 <TextBlock
-                                    x:Name="EndOffsetUnitValue"
-                                    Grid.Column="3"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
                                     x:Name="EndOffsetUnavailableValue"
-                                    Grid.Column="0"
-                                    Grid.ColumnSpan="4"
+                                    Grid.RowSpan="2"
                                     Text="—"
                                     TextAlignment="Right"
                                     Visibility="Collapsed"

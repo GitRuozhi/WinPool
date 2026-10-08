@@ -7,7 +7,7 @@ public static class RealOperationPlanFactory
     public const int FormatVersion = 1;
     public const string AdapterVersion = "windows-storage-1";
     public static readonly AlgorithmIdentity Algorithm = new(
-        "ALGO-REAL-PLAN-001", "1.0.0", AlgorithmConfidence.Derived, "docs/Plan.md#6-类型化计划实时校验与适配器");
+        "ALGO-REAL-PLAN-001", "1.0.0", AlgorithmConfidence.Derived, "docs/Archive/20261007-real-edit-stage1/Plan-history.md#6-类型化计划实时校验与适配器");
 
     public static OperationPlan Create(
         RealOperationIntentRequest proposal,

@@ -61,6 +61,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
     IMonitorSessionPersistenceFactory,
     IMonitoringDatabaseAccess,
     IMonitoringPersistenceBackgroundDiagnostics,
+    IMonitorEditGapHistory,
     IAsyncDisposable
 {
     public const string MonitoringDatabaseFileName = "monitoring.db";
@@ -88,6 +89,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
     private string? recoveredInterruptedSessionOccurrenceId;
     private bool initialized;
     private bool disposed;
+    private readonly Dictionary<string, (MonitorEditGap Gap, PersistedMonitorSession Session)> carriedEditGaps = new(StringComparer.Ordinal);
 
     public RotatingMonitorSessionPersistenceFactory(
         string dataRoot,
@@ -146,6 +148,46 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
 
     public Task<IAsyncDisposable> AcquireReadLeaseAsync(CancellationToken cancellationToken) =>
         accessGate.AcquireReadAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<MonitorEditGap>> LoadOpenEditGapsAsync(CancellationToken cancellationToken)
+    {
+        await using var read = await accessGate.AcquireReadAsync(cancellationToken);
+        return await new MonitorEditGapRepository(GetCurrentDatabase()).ListAsync(openOnly: true, cancellationToken: cancellationToken);
+    }
+
+    internal async Task SaveEditGapAsync(MonitorEditGap gap, CancellationToken cancellationToken)
+    {
+        await using var read = await accessGate.AcquireReadAsync(cancellationToken);
+        var store = activeStore ?? throw new IOException("The monitoring database is temporarily unavailable.");
+        var lease = activeLease ?? throw new IOException("The monitoring write owner is temporarily unavailable.");
+        await new MonitorEditGapRepository(store, lease).SaveAsync(gap, cancellationToken);
+    }
+
+    private async Task CaptureOpenEditGapsAsync(MonitoringSqliteStore store, CancellationToken cancellationToken, bool replace = false)
+    {
+        if (replace) carriedEditGaps.Clear();
+        var gaps = await new MonitorEditGapRepository(store).ListAsync(openOnly: true, cancellationToken: cancellationToken);
+        foreach (var gap in gaps)
+        {
+            var session = await new MonitorSessionRepository(store).GetAsync(gap.SessionId, cancellationToken)
+                ?? throw new InvalidDataException("An edit gap has no owning monitoring session.");
+            carriedEditGaps[gap.GapId] = (gap, session);
+        }
+    }
+
+    private async Task RestoreOpenEditGapsAsync(MonitoringSqliteStore store, AgentWriteOwnerLease lease, CancellationToken cancellationToken)
+    {
+        var sessions = new MonitorSessionRepository(store, lease);
+        var gaps = new MonitorEditGapRepository(store, lease);
+        var existing = (await gaps.ListAsync(cancellationToken: cancellationToken)).Select(x => x.GapId).ToHashSet(StringComparer.Ordinal);
+        foreach (var (gap, session) in carriedEditGaps.Values)
+        {
+            if (existing.Contains(gap.GapId)) continue;
+            if (await sessions.GetAsync(session.SessionId, cancellationToken) is null) await sessions.CreateAsync(session, cancellationToken);
+            await gaps.SaveAsync(gap, cancellationToken);
+        }
+        carriedEditGaps.Clear();
+    }
 
     public ISqliteDatabaseStore GetCurrentDatabase()
     {
@@ -300,6 +342,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
             // writer: insufficient space leaves the fixed active database and
             // its live writer untouched so sampling can safely continue.
             EnsureReplacementDatabaseSpace();
+            await CaptureOpenEditGapsAsync(oldSegment.Store, cancellationToken, replace: true);
             // This waits for CompleteAndFlushAsync. A writer fault cannot be
             // mistaken for a drained old database before we release its lease
             // or checkpoint the fixed active file.
@@ -334,6 +377,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
             try
             {
                 await nextPersistence.StartAsync(session, cancellationToken);
+                await RestoreOpenEditGapsAsync(nextStore, nextLease, cancellationToken);
                 replacement = new ActiveSegment(nextStore, nextLease, nextPersistence);
             }
             catch
@@ -568,6 +612,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
                 Interlocked.Exchange(ref recoveredInterruptedSessionCount, recovered);
                 recoveredInterruptedSessionOccurrenceId = $"interrupted:{Guid.NewGuid():N}";
             }
+            await RestoreOpenEditGapsAsync(store, lease, cancellationToken);
             activeStore = store;
             activeLease = lease;
         }
@@ -618,6 +663,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
             await new MonitorSessionRepository(store, lease).RecoverInterruptedSessionsAsync(
                 DateTimeOffset.UtcNow,
                 cancellationToken: cancellationToken);
+            await CaptureOpenEditGapsAsync(store, cancellationToken);
         }
 
         await store.CheckpointAndCloseAsync(cancellationToken);
@@ -754,6 +800,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
                 {
                     await persistence.ResumeAsync(session, cancellationToken);
                 }
+                await RestoreOpenEditGapsAsync(store, lease, cancellationToken);
 
                 Exception? archiveFailure = null;
                 try
@@ -894,7 +941,7 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
 
 internal sealed class RotatingMonitorSessionPersistence :
     IMonitorSessionPersistence,
-    IMonitorSessionPersistenceDiagnostics
+    IMonitorSessionPersistenceDiagnostics, IMonitorEditGapPersistence
 {
     private readonly RotatingMonitorSessionPersistenceFactory factory;
     private readonly SessionId expectedSessionId;
@@ -1054,6 +1101,12 @@ internal sealed class RotatingMonitorSessionPersistence :
 
             return segment!.Persistence.TryWrite(sample);
         }
+    }
+
+    public Task SaveEditGapAsync(MonitorEditGap gap, CancellationToken cancellationToken)
+    {
+        if (gap.SessionId != expectedSessionId) throw new InvalidDataException("The edit gap belongs to another monitoring session.");
+        return factory.SaveEditGapAsync(gap, cancellationToken);
     }
 
     public async Task AddDroppedSamplesAsync(long count, CancellationToken cancellationToken)

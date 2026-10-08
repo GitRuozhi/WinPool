@@ -257,6 +257,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 SimulationEditKind.FormatPartition => FormatPartition(document.Snapshot, request),
                 SimulationEditKind.DeletePartition => DeletePartition(document.Snapshot, request),
                 SimulationEditKind.ConvertDisk => ConvertDisk(document.Snapshot, request),
+                SimulationEditKind.ClearDisk => ClearDisk(document.Snapshot, request),
                 SimulationEditKind.SetDiskOffline => SetDiskOffline(document.Snapshot, request),
                 SimulationEditKind.InitializeDisk => InitializeDisk(document.Snapshot, request),
                 SimulationEditKind.CreatePartition => CreatePartition(document.Snapshot, request),
@@ -613,6 +614,36 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 .ToArray(),
             Volumes = snapshot.Volumes
                 .Where(x => x.PartitionStableId is null || !removedPartitionIds.Contains(x.PartitionStableId))
+                .ToArray()
+        };
+    }
+
+    private static StorageSnapshot ClearDisk(StorageSnapshot snapshot, SimulationEditRequest request)
+    {
+        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey)
+            ?? throw new InvalidOperationException("The selected OS disk was not found.");
+        if (!string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only a known GPT or MBR simulated disk can be cleared to RAW.");
+        }
+
+        var removedPartitionIds = snapshot.Partitions
+            .Where(item => string.Equals(item.OsDiskStableId, disk.StableId, StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return snapshot with
+        {
+            OsDisks = snapshot.OsDisks
+                .Select(item => string.Equals(item.StableId, disk.StableId, StringComparison.OrdinalIgnoreCase)
+                    ? item with { PartitionStyle = "RAW" }
+                    : item)
+                .ToArray(),
+            Partitions = snapshot.Partitions
+                .Where(item => !removedPartitionIds.Contains(item.StableId))
+                .ToArray(),
+            Volumes = snapshot.Volumes
+                .Where(item => item.PartitionStableId is null || !removedPartitionIds.Contains(item.PartitionStableId))
                 .ToArray()
         };
     }

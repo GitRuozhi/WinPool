@@ -27,7 +27,8 @@ public enum SimulationEditKind
     DissolveStoragePool,
     DeleteEmptyStoragePool,
     DeleteVirtualDisk,
-    SetDiskUsage
+    SetDiskUsage,
+    ClearDisk
 }
 
 /// <summary>

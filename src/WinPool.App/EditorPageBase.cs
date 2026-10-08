@@ -15,8 +15,47 @@ namespace WinPool_App;
 /// snapshot, typed simulation-operation submission, small dialogs, and the
 /// size parsing helpers used by both editors.
 /// </summary>
-public class EditorPageBase : Page
+public partial class EditorPageBase : Page
 {
+    public EditorPageBase()
+    {
+        Loaded += (_, _) =>
+        {
+            if (ViewModel is null) return;
+            ViewModel.RealOperationActivityChanged -= SyncRealOperationActivity;
+            ViewModel.RealOperationActivityChanged += SyncRealOperationActivity;
+            SyncRealOperationActivity();
+        };
+        Unloaded += (_, _) =>
+        {
+            if (ViewModel is not null) ViewModel.RealOperationActivityChanged -= SyncRealOperationActivity;
+        };
+    }
+
+    private void SyncRealOperationActivity() => OnRealOperationActivityChanged(
+        ViewModel.IsRealOperationBusy, ViewModel.IsRealGraphObscured, ViewModel.RealOperationPhase);
+
+    protected virtual void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase) { }
+    protected bool IsRealStructureApplyInProgress { get; private set; }
+    protected AgentRealOperationResponse? LastRealOperationResponse { get; private set; }
+    private bool structureHasWritten;
+    private readonly string realProgressKey = "real:editor:" + Guid.NewGuid().ToString("N");
+
+    private void ReportRealActivity(string phase, bool overlay = false)
+    {
+        ViewModel.SetRealOperationActivity(true, overlay || structureHasWritten, phase);
+        ViewModel.NotificationService.Publish(GlobalNotificationSeverity.Info,
+            Text("真实磁盘操作", "Real storage operation"), phase, "real",
+            new GlobalNotificationOptions { OccurrenceKey = realProgressKey, IsProgress = true,
+                AutoDismiss = false, RecordInHistory = false });
+    }
+
+    private void EndRealActivity()
+    {
+        if (IsRealStructureApplyInProgress) return;
+        ViewModel.NotificationService.DismissByKey(realProgressKey);
+        ViewModel.SetRealOperationActivity(false, false, string.Empty);
+    }
     private static readonly Guid MicrosoftReservedPartitionType =
         new("e3c9e316-0b5c-4db8-817d-f92df00215ae");
 
@@ -101,11 +140,22 @@ public class EditorPageBase : Page
         }
     }
 
-    private async Task RefreshRealInventoryAsync()
+    private async Task RefreshRealInventoryAsync(StorageInventoryScope? scope = null)
     {
         LastRealInventoryRefreshSucceeded = false;
         var previousSnapshot = ViewModel.EffectiveActiveSnapshot;
-        await ViewModel.ScanAsync();
+        if (scope is null)
+            await ViewModel.ScanAsync();
+        else
+        {
+            if (!await ViewModel.RefreshRealOperationScopeAsync(scope)) return;
+            // The observer may already have applied this exact complete batch before its reply arrived.
+            LastRealInventoryRefreshSucceeded = true;
+            OnRealInventoryRefreshed();
+            if (App.Window is MainWindow scopedWindow)
+                scopedWindow.RefreshActiveEditorAfterRealInventory(this);
+            return;
+        }
         var refreshed = ViewModel.EffectiveActiveSnapshot;
         if (!ReferenceEquals(refreshed, previousSnapshot)
             && string.IsNullOrWhiteSpace(ViewModel.ScanError))
@@ -259,6 +309,9 @@ public class EditorPageBase : Page
         if (!ViewModel.RealOperationSubmission.TryReservePreparation())
             return false;
         var reservationId = ViewModel.RealOperationSubmission.ReservationId;
+        LastRealOperationResponse = null;
+        LastRealInventoryRefreshSucceeded = false;
+        ReportRealActivity(Text("正在准备准确计划", "Preparing the exact plan"));
         try
         {
             return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId);
@@ -266,6 +319,7 @@ public class EditorPageBase : Page
         finally
         {
             ViewModel.RealOperationSubmission.ReleasePreparation(reservationId);
+            EndRealActivity();
         }
     }
 
@@ -279,7 +333,7 @@ public class EditorPageBase : Page
         {
             prepared = await flow.PrepareAsync(intent, CancellationToken.None);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
             PublishOperationException(Text("真实准备失败", "Real preparation failed"),
                 "real", exception, "real.prepare.exception");
@@ -306,6 +360,13 @@ public class EditorPageBase : Page
         }
 
         var plan = frozen.Plan;
+        StorageInventoryScope? refreshScope = null;
+        if (ViewModel.ActiveDocument.SourceFacts is { } sourceFacts)
+        {
+            var anchors = plan.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+            if (anchors.Length > 0)
+                refreshScope = StorageInventoryScopeFactory.Create(sourceFacts, plan.OperationId, null, anchors);
+        }
         if (!ViewModel.RealOperationSubmission.TrackPrepared(frozen))
         {
             await CancelPreparedRealAsync(connection, productSessionId, frozen);
@@ -313,6 +374,7 @@ public class EditorPageBase : Page
         }
         var confirmation = RealOperationConfirmationFormatter.Format(plan,
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
+        ReportRealActivity(Text("等待确认准确计划", "Waiting for exact-plan confirmation"));
         if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation)
             || !ViewModel.IsRealMode || !ViewModel.IsLocalSystem
             || ViewModel.ActiveDocument.SystemId != systemId)
@@ -321,13 +383,14 @@ public class EditorPageBase : Page
             return false;
         }
         flow.Confirm(frozen);
+        ReportRealActivity(Text("正在接受并执行", "Accepting and executing"));
 
         ApplicationResult<AgentResponse>? accepted = null;
         try
         {
             accepted = await flow.AcceptOnceAsync(CancellationToken.None);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
             PublishOperationException(Text("提交结果待核对", "Submission needs reconciliation"),
                 "real", exception, "real.accept.uncertain");
@@ -349,15 +412,15 @@ public class EditorPageBase : Page
         // multi-step pool operation can take longer than thirty seconds; keep
         // querying the same accepted identity so its separately confirmed
         // follow-up layout is still offered when completion is observed.
-        for (var attempt = 0; attempt < 60; attempt++)
+        for (var attempt = 0; attempt < 1200; attempt++)
         {
-            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
             ApplicationResult<AgentResponse> status;
             try
             {
                 status = await flow.QueryAsync(CancellationToken.None);
             }
-            catch (Exception exception) when (exception is IOException or InvalidOperationException)
+            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
             {
                 PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
                     "real", exception, "real.query.failed");
@@ -367,18 +430,33 @@ public class EditorPageBase : Page
                 continue;
             if (!ObserveFrozenRealStatus(plan, current))
                 continue;
+            LastRealOperationResponse = current;
+            var hasWritten = current.Steps.Any(step => step.State is RealOperationStepState.CallIssued
+                or RealOperationStepState.WaitingForProvider or RealOperationStepState.Verifying
+                or RealOperationStepState.Verified or RealOperationStepState.OutcomeUnknown);
+            if (IsRealStructureApplyInProgress && hasWritten) structureHasWritten = true;
+            ReportRealActivity(Text("正在执行 / 核对", "Executing / verifying") + ": "
+                + string.Join(", ", current.Steps.Select(step => $"{step.StepId}: {step.State}")), hasWritten);
             if (current.State is RealOperationState.Accepted or RealOperationState.Running)
                 continue;
             var succeeded = current.State == RealOperationState.Succeeded && !current.RequiresReconciliation;
-            await ShowMessageAsync(
+            if (succeeded || hasWritten)
+            {
+                ReportRealActivity(Text("正在刷新相关对象", "Refreshing related objects"), hasWritten);
+                await RefreshRealInventoryAsync(refreshScope);
+            }
+            var observedNoEffect = current.State == RealOperationState.Failed
+                && current.Code == "real.reconciliation_observed_tiered_creation_no_effect";
+            PublishOperationFeedback(succeeded ? GlobalNotificationSeverity.Info : GlobalNotificationSeverity.Warning,
                 succeeded ? Text("真实操作完成", "Real operation completed")
+                    : observedNoEffect ? Text("创建失败", "Creation failed")
                     : Text("真实操作需要核对", "Real operation needs review"),
-                $"OperationId: {plan.OperationId.Value}\n" +
-                $"{Text("状态", "State")}: {current.State}\n" +
-                $"{Text("代码", "Code")}: {current.Code ?? "-"}");
-            if (succeeded)
-                await RefreshRealInventoryAsync();
-            return succeeded;
+                observedNoEffect
+                    ? Text("Windows 拒绝了此容量或布局，已核实没有创建新对象。请调整目标后重新应用。",
+                        "Windows rejected this capacity or layout. No new objects were observed. Adjust the target and apply again.")
+                    : $"{current.State}: {current.Code ?? "-"}", "real", current.Code ?? "real.completed",
+                $"OperationId: {plan.OperationId.Value}");
+            return succeeded && LastRealInventoryRefreshSucceeded;
         }
 
         await ShowMessageAsync(Text("真实操作继续执行", "Real operation continues"),
@@ -388,10 +466,13 @@ public class EditorPageBase : Page
         return false;
     }
 
-    private bool ObserveFrozenRealStatus(OperationPlan plan, AgentRealOperationResponse response) =>
-        response.Plan.OperationId == plan.OperationId
-        && StringComparer.Ordinal.Equals(response.Plan.PlanHash, plan.PlanHash)
-        && ViewModel.RealOperationSubmission.Observe(response);
+    private bool ObserveFrozenRealStatus(OperationPlan plan, AgentRealOperationResponse response)
+    {
+        if (response.Plan.OperationId != plan.OperationId
+            || !StringComparer.Ordinal.Equals(response.Plan.PlanHash, plan.PlanHash)) return false;
+        ViewModel.ObserveRealOperation(response);
+        return true;
+    }
 
     private async Task CancelPreparedRealAsync(
         IAgentConnection connection, string productSessionId, AgentRealOperationResponse frozen)
@@ -417,7 +498,7 @@ public class EditorPageBase : Page
             PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
                 Text("取消准备结果待核对", "Prepared cancellation needs review"), "real");
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
             PublishOperationException(Text("取消准备结果待核对", "Prepared cancellation needs review"),
                 "real", exception, "real.cancel_prepared.uncertain");
@@ -428,8 +509,9 @@ public class EditorPageBase : Page
     {
         if (ViewModel.AgentConnection is null)
             return;
-        var raw = await PromptAsync(Text("查询真实操作", "Query real operation"),
-            ViewModel.RealOperationSubmission.OperationId?.Value.ToString() ?? string.Empty);
+        var raw = ViewModel.RealOperationSubmission.OperationId?.Value.ToString()
+            ?? ViewModel.LastRealOperationStatus?.Plan.OperationId.Value.ToString()
+            ?? await PromptAsync(Text("查询真实操作", "Query real operation"), string.Empty);
         if (raw is null)
             return;
         if (!Guid.TryParse(raw, out var parsed) || parsed == Guid.Empty)
@@ -452,7 +534,15 @@ public class EditorPageBase : Page
             }
             if (current.Plan.OperationId.Value != parsed)
                 throw new InvalidOperationException("The Agent response did not match the queried operation.");
-            ViewModel.RealOperationSubmission.Observe(current);
+            ViewModel.ObserveRealOperation(current);
+            if (current.State is not (RealOperationState.Prepared or RealOperationState.Accepted or RealOperationState.Running)
+                && ViewModel.ActiveDocument.SourceFacts is { } facts)
+            {
+                var anchors = current.Plan.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+                if (anchors.Length > 0)
+                    await RefreshRealInventoryAsync(StorageInventoryScopeFactory.Create(facts,
+                        current.Plan.OperationId, "query-result", anchors));
+            }
             var steps = string.Join(Environment.NewLine, current.Steps.Select(step =>
                 $"{step.StepId}: {step.State} ({step.Code ?? "-"})"));
             await ShowMessageAsync(Text("真实操作状态", "Real operation status"),
@@ -461,13 +551,8 @@ public class EditorPageBase : Page
                 $"{Text("状态", "State")}: {current.State}\n" +
                 $"{Text("需要对账", "Requires reconciliation")}: {current.RequiresReconciliation}\n" +
                 $"{Text("代码", "Code")}: {current.Code ?? "-"}\n{steps}");
-            if (current.State is not (RealOperationState.Prepared
-                or RealOperationState.Accepted or RealOperationState.Running))
-            {
-                await RefreshRealInventoryAsync();
-            }
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
             PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
                 "real", exception, "real.query.failed");
@@ -543,7 +628,7 @@ public class EditorPageBase : Page
                 Text("当前调用可能继续；请稍后查询并核对最终状态。",
                     "The current call may continue. Query and reconcile the final state later."));
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
             PublishOperationException(Text("停止结果待核对", "Stop result needs review"),
                 "real", exception, "real.stop.uncertain");

@@ -15,6 +15,57 @@ public sealed class AgentInventoryCoordinatorTests
         ["computer", "cpu", "gpu", "monitor", "gpu-supplement", "monitor-supplement"];
 
     [Fact]
+    public async Task ScopedRefreshUsesAuthorityLocatorsSerializesWithFullCaptureAndPreservesUnrelatedFacts()
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        var source = Source("physical:0", "MSFT_PhysicalDisk", 0, CollectionPurpose.Storage);
+        WinPoolSourceObject Disk(string id, WinPoolSource src) => new(id, FactObjectType.PhysicalDisk, src.Id, "identity:" + id, true,
+            [WinPoolSourceField.Returned("UniqueId", "provider-" + id, FactValueType.String, src.Id)]);
+        var baseline = await harness.CaptureAsync(Capture(0, CollectionPurpose.Storage, [source], [Disk("a", source), Disk("b", source)]), CollectionPurpose.Storage);
+        var target = new StorageObjectId(baseline.SystemId, StorageObjectKind.PhysicalDisk, "a");
+        var scope = StorageInventoryScopeFactory.Create(baseline.SourceFacts!, OperationId.New(), "step-1", [target]);
+        // IPC selectors are re-resolved by the Agent, not trusted over persisted Windows identities.
+        scope = scope with { BeforeLocators = [scope.BeforeLocators[0] with { IdentityValue = "wrong-client-selector" }], BeforeObjectIds = ["a", "b"] };
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fullSource = source with { Id = "physical:1", CapturedAt = Start.AddSeconds(1) };
+        harness.provider.CaptureOverride = async _ =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+            return Capture(1, CollectionPurpose.Storage, [fullSource], [Disk("a", fullSource), Disk("b", fullSource)]);
+        };
+        var full = harness.coordinator.CaptureManageAsync(new(CorrelationId.New()), CancellationToken.None);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        harness.provider.ScopedCapture = freshScope =>
+        {
+            Assert.Equal("provider-a", freshScope.BeforeLocators[0].IdentityValue);
+            Assert.Equal(new[] { "a" }, freshScope.BeforeObjectIds);
+            Assert.True(freshScope.Generation > 1);
+            var scopedSource = fullSource with { Id = "physical:2", CapturedAt = Start.AddSeconds(2),
+                Coverage = new(freshScope.Key, ["a"], true, freshScope.Generation) };
+            var facts = Capture(2, CollectionPurpose.Storage, [scopedSource], [Disk("a", scopedSource)]).SourceFacts! with
+            { SystemId = freshScope.SystemId, Collections = [], ScopedCollection = new(freshScope, Start.AddSeconds(2), Start.AddSeconds(2), true) };
+            return Task.FromResult(new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "local:scoped-fixture",
+                StorageSystemKind.Local, "Scoped fixture", facts, [], Start.AddSeconds(2)) { SystemId = freshScope.SystemId });
+        };
+        var scopedTask = harness.coordinator.CaptureManageScopedAsync(scope, CorrelationId.New(), CancellationToken.None);
+        Assert.False(scopedTask.IsCompleted);
+        Assert.Equal(0, harness.provider.ScopedCalls);
+        release.TrySetResult();
+        Assert.Equal(ApplicationStatus.Succeeded, (await full).Status);
+        var result = await scopedTask;
+        Assert.Equal(ApplicationStatus.Succeeded, result.Status);
+        Assert.Equal(1, harness.provider.ScopedCalls);
+        var saved = LocalInventoryDocumentCodec.Decode(Assert.IsType<ManageInventoryCaptureResponse>(result.Value).Document);
+        Assert.Equal(new[] { "a", "b" }, saved.SourceFacts!.Objects.Select(x => x.Id).Order(StringComparer.Ordinal));
+        Assert.True(saved.SourceFacts.IsMerged);
+        Assert.True(saved.SourceFacts.ScopedCollection!.Complete);
+        var reloaded = await harness.ReopenAsync();
+        Assert.Equal(WinPoolFactsCodec.Encode(saved.SourceFacts), WinPoolFactsCodec.Encode(reloaded.SourceFacts!));
+    }
+
+    [Fact]
     public async Task StartupCapturesStorageThenHardwareOnceAndPublishesPersistedReports()
     {
         await using var harness = await InventoryHarness.CreateAsync();
@@ -341,15 +392,24 @@ public sealed class AgentInventoryCoordinatorTests
         public ValueTask DisposeAsync() => lease.DisposeAsync();
     }
 
-    private sealed class FixedHardwareProvider : IHardwareInventoryProvider
+    private sealed class FixedHardwareProvider : IHardwareInventoryProvider, IScopedHardwareInventoryProvider
     {
         public Queue<(CollectionPurpose Purpose, StorageSystemDocument? Document)> Sequence { get; } = new();
         public StorageSystemDocument? Next { get; set; }
         public CollectionPurpose ExpectedPurpose { get; set; }
+        public Func<CollectionPurpose, Task<StorageSystemDocument>>? CaptureOverride { get; set; }
+        public Func<StorageInventoryScope, Task<StorageSystemDocument>>? ScopedCapture { get; set; }
+        public int ScopedCalls { get; private set; }
+        public Task<StorageSystemDocument> CollectScopedAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
+        {
+            ScopedCalls++;
+            return ScopedCapture?.Invoke(scope) ?? throw new InvalidOperationException("No scoped fixture was configured.");
+        }
         public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken) => Take(CollectionPurpose.Storage);
         public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) => Take(CollectionPurpose.Hardware);
         private Task<StorageSystemDocument> Take(CollectionPurpose purpose)
         {
+            if (CaptureOverride is not null) return CaptureOverride(purpose);
             if (Sequence.TryDequeue(out var capture))
             {
                 Assert.Equal(capture.Purpose, purpose);

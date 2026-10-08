@@ -55,6 +55,7 @@ public sealed partial class MonitorRowViewModel : ObservableObject
     public Color AutoColor { get; set; }
 
     public string? InstanceName { get; set; }
+    public StorageObjectId? TargetId { get; set; }
 }
 
 public sealed partial class MonitorPage : Page
@@ -87,6 +88,7 @@ public sealed partial class MonitorPage : Page
     private readonly ObservableCollection<string> _storageEventRows = [];
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByInstance = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, MonitorRowViewModel> _rowsByDiskNumber = new();
+    private readonly Dictionary<string, MonitorRowViewModel> _rowsByStableId = new(StringComparer.Ordinal);
     private WorkspaceViewModel _viewModel = null!;
     private DispatcherQueueTimer? _pollTimer;
     private DispatcherQueueTimer? _preferenceSyncTimer;
@@ -515,6 +517,7 @@ public sealed partial class MonitorPage : Page
         _rows.Clear();
         _rowsByInstance.Clear();
         _rowsByDiskNumber.Clear();
+        _rowsByStableId.Clear();
         var snapshot = _viewModel.Snapshot;
         foreach (var disk in snapshot.OsDisks.OrderBy(x => x.Number))
         {
@@ -535,7 +538,7 @@ public sealed partial class MonitorPage : Page
                     .Where(x => x.OsDiskStableId == disk.StableId && !string.IsNullOrWhiteSpace(x.DriveLetter))
                     .OrderBy(x => x.PartitionNumber)
                     .Select(x => x.DriveLetter + ":"));
-            AddRow(
+            var row = AddRow(
                 disk.FriendlyName,
                 pool,
                 volumes,
@@ -543,6 +546,8 @@ public sealed partial class MonitorPage : Page
                 FormatCapacity(disk.Size),
                 disk.Number,
                 !string.IsNullOrWhiteSpace(volumes));
+            var stableId = physical?.StableId ?? virtualDisk?.StableId;
+            if (stableId is not null) _rowsByStableId[stableId] = row;
         }
     }
 
@@ -639,6 +644,20 @@ public sealed partial class MonitorPage : Page
         }
 
         var series = new List<DiskGraphSeries>();
+        var editStates = Monitoring.GetRuntimeDiagnostics().EditTargets.ToDictionary(x => x.TargetId);
+        foreach (var row in _rows)
+        {
+            if (row.TargetId is not { } id || !editStates.TryGetValue(id, out var edit)) continue;
+            var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+            if (edit.Status != MonitorEditTargetStatus.Restored)
+                row.ActivityText = edit.Status switch
+                {
+                    MonitorEditTargetStatus.Editing => zh ? "编辑中" : "Editing",
+                    MonitorEditTargetStatus.RemovedByEdit => zh ? "已删除" : "Removed by edit",
+                    MonitorEditTargetStatus.NeedsSelection => zh ? "需重新选择" : "Needs selection",
+                    _ => zh ? "待核验" : "Pending verification"
+                };
+        }
         foreach (var row in _rows)
         {
             if (!row.ShowInGraph || row.InstanceName is null)
@@ -734,7 +753,22 @@ public sealed partial class MonitorPage : Page
             return row;
         }
 
-        var number = MonitoringService.ParseDiskNumber(instance);
+        if (Monitoring.UsesAgent && Monitoring.GetSeriesTarget(instance) is { } target)
+        {
+            var stateSeries = instance.StartsWith("Storage Space:", StringComparison.OrdinalIgnoreCase);
+            if (!stateSeries && _rowsByStableId.TryGetValue(target.ProviderKey, out row!))
+            {
+                row.TargetId = target;
+                return row;
+            }
+            row = AddRow(Monitoring.GetSeriesDisplayName(instance), string.Empty, string.Empty,
+                stateSeries ? _viewModel.Localization["VirtualDisk"] : string.Empty, string.Empty, null, !stateSeries);
+            row.TargetId = target;
+            if (!stateSeries) _rowsByStableId[target.ProviderKey] = row;
+            return row;
+        }
+
+        var number = Monitoring.UsesAgent ? null : MonitoringService.ParseDiskNumber(instance);
         if (number is not null && _rowsByDiskNumber.TryGetValue(number.Value, out row!))
         {
             return row;

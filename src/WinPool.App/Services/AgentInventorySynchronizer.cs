@@ -156,6 +156,8 @@ internal sealed class AgentInventorySynchronizer : IDisposable
         }
 
         connectionFaultActive = false;
+        if (!viewModel.IsRealOperationBusy)
+            _ = viewModel.RecoverRealOperationsAsync();
         viewModel.NotificationService.ResolveByKey(ConnectionFaultKey);
         viewModel.NotificationService.PublishInfo(
             viewModel.Localization.IsChinese

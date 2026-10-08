@@ -53,9 +53,13 @@ public sealed partial class MainWindow : Window
     private DateTimeOffset _editorDocumentUpdatedAt;
     private bool _requestingElevation;
     private bool _closingForElevationHandoff;
+    private bool _closePreparationStarted;
+    private bool _allowWindowClose;
+    private bool _windowClosed;
     private bool _showingNotificationMessage;
     private readonly ApplicationStartupTarget _startupTarget;
     private readonly bool _enteredRealModeAfterElevation;
+    private readonly CancellationTokenSource _startupCancellation = new();
     private string _preferredShellPage = "Manage";
     private readonly UISettings _uiSettings = new();
     private readonly AccessibilitySettings _accessibilitySettings = new();
@@ -200,6 +204,7 @@ public sealed partial class MainWindow : Window
         RootGrid.Loaded += RootGrid_Loaded;
         RootGrid.SizeChanged += RootGrid_SizeChanged;
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
+        AppWindow.Closing += AppWindow_Closing;
         Closed += MainWindow_Closed;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         // Persist on selection change after restore is complete. The close-path
@@ -220,7 +225,7 @@ public sealed partial class MainWindow : Window
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
     {
-        if (_initialized)
+        if (_initialized || _closePreparationStarted)
         {
             return;
         }
@@ -238,16 +243,29 @@ public sealed partial class MainWindow : Window
         try
         {
             await ViewModel.InitializePreferencesAsync();
+            if (_closePreparationStarted)
+            {
+                return;
+            }
+
             _preferredShellPage = ViewModel.CurrentPreferences.LastActivePage;
             BuildShellNavigation();
         }
         catch (Exception exception)
         {
-            ViewModel.NotificationService.PublishError(
-                "WinPool",
-                $"偏好设置初始化失败：{exception.Message}",
-                "startup",
-                "startup-preferences-failed");
+            if (!_closePreparationStarted)
+            {
+                ViewModel.NotificationService.PublishError(
+                    "WinPool",
+                    $"偏好设置初始化失败：{exception.Message}",
+                    "startup",
+                    "startup-preferences-failed");
+            }
+        }
+
+        if (_closePreparationStarted)
+        {
+            return;
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
@@ -258,21 +276,37 @@ public sealed partial class MainWindow : Window
         try
         {
             _ = _agentInventorySynchronizer.LoadHistoryAsync();
-            using var startupPreviewCancellation = new CancellationTokenSource();
+            using var startupPreviewCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                _startupCancellation.Token);
             var startupPreviewTask = LoadStartupWorkspacePreviewAsync(startupPreviewCancellation.Token);
             var agentConnectionTask = App.InitialAgentConnectionTask;
             var firstStartupTask = await Task.WhenAny(startupPreviewTask, agentConnectionTask);
+            if (_closePreparationStarted)
+            {
+                return;
+            }
+
             if (firstStartupTask == agentConnectionTask && !startupPreviewTask.IsCompleted)
             {
                 // The handshake can finish before catalog loading starts. Give
                 // the local readonly preview a short chance before the slower
                 // Agent restore is allowed to become the first visible page.
                 await Task.WhenAny(startupPreviewTask, Task.Delay(TimeSpan.FromMilliseconds(200)));
+                if (_closePreparationStarted)
+                {
+                    return;
+                }
             }
+
             var previewDisplayed = false;
             if (startupPreviewTask.IsCompleted)
             {
                 var preview = await startupPreviewTask;
+                if (_closePreparationStarted)
+                {
+                    return;
+                }
+
                 if (preview is not null
                     && ViewModel.ApplyWorkspaceStartupPreview(preview.State, preview.Document))
                 {
@@ -297,14 +331,24 @@ public sealed partial class MainWindow : Window
             }
 
             await agentConnectionTask;
+            if (_closePreparationStarted)
+            {
+                return;
+            }
+
             ViewModel.NotifyWorkspaceLoading();
             UpdateWorkspaceStartupMessage(ViewModel.StatusMessage);
             await ViewModel.InitializeAsync();
+            if (_closePreparationStarted)
+            {
+                return;
+            }
+
             workspaceRestored = true;
         }
         catch (Exception exception)
         {
-            if (!App.InitialAgentWarningPublished)
+            if (!_closePreparationStarted && !App.InitialAgentWarningPublished)
             {
                 ViewModel.NotificationService.PublishError(
                     "WinPool",
@@ -315,39 +359,54 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            ViewModel.CompleteWorkspacePrepare();
-            // The editor pages capture the active snapshot once at
-            // navigation. When the workspace finished loading after a startup
-            // navigation, re-create the visible editor so the page does not
-            // stay on the pre-init snapshot.
-            if ((SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
-                && (!_startupPreviewDisplayed || EditorDocumentChanged()))
+            if (!_closePreparationStarted)
             {
-                _suppressWorkspaceStatePersistence = true;
-                try
+                ViewModel.CompleteWorkspacePrepare();
+                // The editor pages capture the active snapshot once at
+                // navigation. When the workspace finished loading after a startup
+                // navigation, re-create the visible editor so the page does not
+                // stay on the pre-init snapshot.
+                if ((SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
+                    && (!_startupPreviewDisplayed || EditorDocumentChanged()))
                 {
-                    SelectShellPage(SelectedShellItem.Page);
+                    _suppressWorkspaceStatePersistence = true;
+                    try
+                    {
+                        SelectShellPage(SelectedShellItem.Page);
+                    }
+                    finally
+                    {
+                        _suppressWorkspaceStatePersistence = false;
+                    }
                 }
-                finally
-                {
-                    _suppressWorkspaceStatePersistence = false;
-                }
-            }
 
-            _workspaceInitializationComplete = workspaceRestored;
-            if (workspaceRestored)
-            {
-                _startupPreviewDisplayed = false;
+                _workspaceInitializationComplete = workspaceRestored;
+                if (workspaceRestored)
+                {
+                    _startupPreviewDisplayed = false;
+                }
+
+                HideWorkspaceStartupOverlay();
+                RootFrame.Visibility = Visibility.Visible;
+                RootFrame.IsHitTestVisible = workspaceRestored || !_startupPreviewDisplayed;
+                ShellNavigationList.IsEnabled = true;
+                UpdateActiveSystemName();
             }
-            HideWorkspaceStartupOverlay();
-            RootFrame.Visibility = Visibility.Visible;
-            RootFrame.IsHitTestVisible = workspaceRestored || !_startupPreviewDisplayed;
-            ShellNavigationList.IsEnabled = true;
-            UpdateActiveSystemName();
         }
+
+        if (_closePreparationStarted)
+        {
+            return;
+        }
+
         if (_enteredRealModeAfterElevation && ViewModel.CanUseRealMode)
         {
             var enterError = await ViewModel.EnterRealModeAsync();
+            if (_closePreparationStarted)
+            {
+                return;
+            }
+
             if (enterError is null)
             {
                 PublishRealOperationsWarning();
@@ -369,7 +428,10 @@ public sealed partial class MainWindow : Window
         RefreshChrome();
         UpdateCaptionInset();
         UpdateCaptionButtonColors();
-        _monitorAlertObserver.Start();
+        if (!_closePreparationStarted)
+        {
+            _monitorAlertObserver.Start();
+        }
     }
 
     private Task<StartupWorkspacePreview?> LoadStartupWorkspacePreviewAsync(
@@ -505,85 +567,178 @@ public sealed partial class MainWindow : Window
         _workspaceStartupMessage = null;
     }
 
-    private async void MainWindow_Closed(object sender, WindowEventArgs args)
+    private void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        // The welcome is a separate top-level window. Close it before any
-        // asynchronous cleanup so it cannot keep the App process alive.
-        _welcomeWindow?.Close();
-        await _monitorAlertObserver.StopAsync();
-        App.StopActivationChannel();
-        _agentPreferencesSynchronizer.Dispose();
-        _agentInventorySynchronizer.Dispose();
-        ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
-            .CollectionChanged -= Notifications_CollectionChanged;
-        _notificationDismissTimer.Stop();
-        _notificationExitFallbackTimer.Stop();
-        NotificationService.ClearHistory();
-
-        if (_closingForElevationHandoff)
+        if (_allowWindowClose || _windowClosed)
         {
-            // The old Agent owns the ordered monitoring stop, endpoint release
-            // and SQLite lease release. The App has already persisted its
-            // workspace before it authorized that Agent shutdown.
-            ViewModel.Monitoring.Dispose();
             return;
         }
 
-        // Persistence runs before the monitoring detach and each segment owns
-        // its failure: the process may not stay alive long, so the cheapest,
-        // most important writes happen first and cannot starve each other.
-        try
+        args.Cancel = true;
+        RequestClose();
+    }
+
+    /// <summary>
+    /// Starts the one close path while this window and its dispatcher are live.
+    /// Agent exit, elevation handoff, data-location replacement, and the title
+    /// bar all enter here before the native window is destroyed.
+    /// </summary>
+    internal void RequestClose()
+    {
+        if (_closePreparationStarted || _allowWindowClose || _windowClosed)
         {
-            if (ViewModel.CanPersistWorkspaceUiState)
-            {
-                await _workspaceStateService.SaveAsync(
-                    ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
-            }
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or InvalidDataException
-                or OperationCanceledException)
-        {
-            LogRecoverableWorkspaceStateFailure(exception);
+            return;
         }
 
-        try
-        {
-            await ViewModel.SetLastActivePageAsync(
-                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException)
-        {
-        }
+        _closePreparationStarted = true;
+        RootGrid.IsHitTestVisible = false;
+        RootFrame.IsHitTestVisible = false;
+        RootFrame.IsEnabled = false;
+        ShellNavigationList.IsEnabled = false;
+        ShellNavigationOverflowButton.IsEnabled = false;
+        ActiveSystemSelector.IsEnabled = false;
+        LocalRealOperationsSwitch.IsEnabled = false;
+        _startupCancellation.Cancel();
+        StopCloseTimeUiSources();
 
+        // Close the separate welcome window and stop UI producers synchronously
+        // before awaiting the monitor observer or persistence.
+        _welcomeWindow?.Close();
+        App.StopActivationChannel();
+        _agentPreferencesSynchronizer.Dispose();
+        _agentInventorySynchronizer.Dispose();
+        var monitorObserverStop = _monitorAlertObserver.StopAsync();
+        NotificationService.ClearHistory();
+        _ = PrepareCloseAndCloseAsync(monitorObserverStop);
+    }
+
+    private void StopCloseTimeUiSources()
+    {
+        RootGrid.Loaded -= RootGrid_Loaded;
+        RootGrid.SizeChanged -= RootGrid_SizeChanged;
+        RootGrid.ActualThemeChanged -= RootGrid_ActualThemeChanged;
+        ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        ViewModel.WorkspaceSelectionChanged -= ViewModel_WorkspaceSelectionChanged;
+        _uiSettings.ColorValuesChanged -= UiSettings_ColorValuesChanged;
+        ((System.Collections.Specialized.INotifyCollectionChanged)NotificationService.Notifications)
+            .CollectionChanged -= Notifications_CollectionChanged;
+        _notificationDismissTimer.Tick -= NotificationDismissTimer_Tick;
+        _notificationDismissTimer.Stop();
+        _notificationExitFallbackTimer.Tick -= NotificationExitFallbackTimer_Tick;
+        _notificationExitFallbackTimer.Stop();
+    }
+
+    private async Task PrepareCloseAndCloseAsync(Task monitorObserverStop)
+    {
         try
         {
-            if (ViewModel.Monitoring.UsesAgent)
+            await monitorObserverStop;
+
+            if (_closingForElevationHandoff)
             {
-                await ViewModel.Monitoring.DetachAsync();
+                // The old Agent owns the ordered monitoring stop, endpoint release
+                // and SQLite lease release. The App already persisted its
+                // workspace before authorizing that Agent shutdown.
+                ViewModel.Monitoring.Dispose();
+                return;
             }
-            else
+
+            // Keep the existing order: save workspace state before detaching
+            // the monitoring client from the Agent.
+            try
             {
-                await ViewModel.Monitoring.StopAsync();
+                if (ViewModel.CanPersistWorkspaceUiState)
+                {
+                    await _workspaceStateService.SaveAsync(
+                        ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+                }
             }
-            ViewModel.Monitoring.Dispose();
+            catch (Exception exception) when (
+                exception is IOException
+                    or UnauthorizedAccessException
+                    or InvalidOperationException
+                    or InvalidDataException
+                    or OperationCanceledException)
+            {
+                LogRecoverableWorkspaceStateFailure(exception);
+            }
+
+            if (_workspaceInitializationComplete)
+            {
+                try
+                {
+                    await ViewModel.SetLastActivePageAsync(
+                        (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
+                }
+                catch (Exception exception) when (
+                    exception is IOException
+                        or UnauthorizedAccessException
+                        or InvalidOperationException)
+                {
+                }
+            }
+
+            try
+            {
+                if (ViewModel.Monitoring.UsesAgent)
+                {
+                    await ViewModel.Monitoring.DetachAsync();
+                }
+                else
+                {
+                    await ViewModel.Monitoring.StopAsync();
+                }
+                ViewModel.Monitoring.Dispose();
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or InvalidOperationException
+                    or ObjectDisposedException)
+            {
+            }
         }
-        catch (Exception exception) when (
-            exception is IOException
-                or InvalidOperationException
-                or ObjectDisposedException)
+        catch (Exception exception)
+        {
+            LogClosePreparationFailure(exception);
+        }
+        finally
+        {
+            _allowWindowClose = true;
+            if (!_windowClosed)
+            {
+                Close();
+            }
+        }
+    }
+
+    private void MainWindow_Closed(object sender, WindowEventArgs args)
+    {
+        _windowClosed = true;
+        _startupCancellation.Cancel();
+    }
+
+    private static void LogClosePreparationFailure(Exception exception)
+    {
+        try
+        {
+            DiagnosticLog.AppendFailure(
+                StorageDataLocations.CurrentRoot,
+                "app-close.jsonl",
+                "MainWindowClosePreparation",
+                exception);
+        }
+        catch
         {
         }
     }
 
     private void ShowWelcomeWindow()
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (_welcomeWindow is not null)
         {
             _welcomeWindow.Activate();
@@ -597,6 +752,11 @@ public sealed partial class MainWindow : Window
 
     internal void ShowStartupWelcome()
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (_startupTarget is ApplicationStartupTarget.None
             or ApplicationStartupTarget.Welcome)
         {
@@ -604,10 +764,31 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    internal void ShowWelcome() => RootGrid.DispatcherQueue.TryEnqueue(ShowWelcomeWindow);
+    internal void ShowWelcome()
+    {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
+        RootGrid.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_closePreparationStarted && !_windowClosed)
+            {
+                ShowWelcomeWindow();
+            }
+        });
+    }
+
+    internal bool IsCloseInProgress => _closePreparationStarted || _windowClosed;
 
     internal void ActivateTarget(ApplicationStartupTarget target)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (target == ApplicationStartupTarget.Welcome)
         {
             ShowWelcome();
@@ -649,17 +830,33 @@ public sealed partial class MainWindow : Window
 
     public void ApplyTheme(ThemePreference preference)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         RootGrid.RequestedTheme = preference switch
         {
             ThemePreference.Light => ElementTheme.Light,
             ThemePreference.Dark => ElementTheme.Dark,
             _ => ElementTheme.Default
         };
-        RootGrid.DispatcherQueue.TryEnqueue(UpdateCaptionButtonColors);
+        RootGrid.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_closePreparationStarted && !_windowClosed)
+            {
+                UpdateCaptionButtonColors();
+            }
+        });
     }
 
     public void RefreshChrome()
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         var language = ViewModel.Localization.EffectiveLanguage;
         var suffix = ViewModel.PrivilegeState == PrivilegeState.Administrator
             ? (language == LanguagePreference.ZhCn ? " [管理员]" : " [Administrator]")
@@ -778,6 +975,11 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCaptionInset()
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         var right = Math.Max(8, AppWindow.TitleBar.RightInset + 8);
         ModeControls.Margin = new Thickness(
             RootGrid.ActualWidth > 0 && RootGrid.ActualWidth < 1280 ? 2 : 8,
@@ -907,8 +1109,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 _closingForElevationHandoff = true;
-                _welcomeWindow?.Close();
-                Close();
+                RequestClose();
                 return true;
             }
 
@@ -1048,6 +1249,11 @@ public sealed partial class MainWindow : Window
 
     public void ApplyAccentColor(AccentColorPreference preference)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         var useSystemAccent = _accessibilitySettings.HighContrast
             || preference == AccentColorPreference.System;
         var color = useSystemAccent
@@ -1276,6 +1482,11 @@ public sealed partial class MainWindow : Window
 
     private void SelectShellPage(ShellPageKind page, string? editorTargetStableId = null)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (!IsShellPageAvailable(page))
         {
             page = ShellPageKind.Manage;
@@ -1369,6 +1580,11 @@ public sealed partial class MainWindow : Window
 
     private void RootGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         UpdateShellNavigationTextVisibility();
         UpdateCaptionInset();
         QueueTitleBarPassthroughRegionUpdate();
@@ -1377,6 +1593,11 @@ public sealed partial class MainWindow : Window
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (e.PropertyName == nameof(WorkspaceViewModel.IsRealMode))
         {
             SyncModeSwitch();
@@ -1400,6 +1621,11 @@ public sealed partial class MainWindow : Window
             // raise this event; only an actual identity change needs navigation.
             DispatcherQueue.TryEnqueue(() =>
             {
+                if (_closePreparationStarted || _windowClosed)
+                {
+                    return;
+                }
+
                 UpdateActiveSystemName();
                 RefreshSelectedSystemEditor();
             });
@@ -1441,12 +1667,17 @@ public sealed partial class MainWindow : Window
         || _editorDocumentRevision != ViewModel.SelectedSystem.Revision
         || _editorDocumentUpdatedAt != ViewModel.SelectedSystem.UpdatedAt;
 
-    private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e) =>
-        PersistWorkspaceState();
+    private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e)
+    {
+        if (!_closePreparationStarted && !_windowClosed)
+        {
+            PersistWorkspaceState();
+        }
+    }
 
     /// <summary>
     /// Saves-on-change run fire-and-forget on UI-driven triggers. The awaited
-    /// close-time fallback in MainWindow_Closed remains the safety net.
+    /// close-time awaited save in PrepareCloseAndCloseAsync remains the safety net.
     /// </summary>
     private static async void FireAndForget(Func<Task> action)
     {
@@ -1497,8 +1728,18 @@ public sealed partial class MainWindow : Window
 
     private void UiSettings_ColorValuesChanged(UISettings sender, object args)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         RootGrid.DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closePreparationStarted || _windowClosed)
+            {
+                return;
+            }
+
             if (ViewModel.CurrentPreferences.AccentColor == AccentColorPreference.System)
             {
                 ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
@@ -1509,12 +1750,22 @@ public sealed partial class MainWindow : Window
 
     private void RootGrid_ActualThemeChanged(FrameworkElement sender, object args)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         ApplyAccentColor(ViewModel.CurrentPreferences.AccentColor);
         UpdateCaptionButtonColors();
     }
 
     private void UpdateCaptionButtonColors()
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         var foreground = _accessibilitySettings.HighContrast
             ? _uiSettings.GetColorValue(UIColorType.Foreground)
             : RootGrid.ActualTheme == ElementTheme.Light
@@ -1624,12 +1875,28 @@ public sealed partial class MainWindow : Window
     private void TitleBarInteractiveElement_SizeChanged(object sender, SizeChangedEventArgs e) =>
         QueueTitleBarPassthroughRegionUpdate();
 
-    private void QueueTitleBarPassthroughRegionUpdate() =>
-        DispatcherQueue.TryEnqueue(UpdateTitleBarPassthroughRegions);
+    private void QueueTitleBarPassthroughRegionUpdate()
+    {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_closePreparationStarted && !_windowClosed)
+            {
+                UpdateTitleBarPassthroughRegions();
+            }
+        });
+    }
 
     private void UpdateTitleBarPassthroughRegions()
     {
-        if (!ExtendsContentIntoTitleBar || CustomTitleBar.XamlRoot is null)
+        if (_closePreparationStarted
+            || _windowClosed
+            || !ExtendsContentIntoTitleBar
+            || CustomTitleBar.XamlRoot is null)
         {
             return;
         }
@@ -1676,11 +1943,19 @@ public sealed partial class MainWindow : Window
         object? sender,
         System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
-        RefreshNotificationSurface();
+        if (!_closePreparationStarted && !_windowClosed)
+        {
+            RefreshNotificationSurface();
+        }
     }
 
     private void NotificationDismissTimer_Tick(object? sender, object e)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         // The service owns duration and lifecycle resolution. The shell never
         // derives expiry from timestamps.
         NotificationService.DismissExpired();
@@ -1689,6 +1964,11 @@ public sealed partial class MainWindow : Window
 
     private void RefreshNotificationSurface()
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         var visible = NotificationService.Notifications
             .Take(GetMaximumVisibleNotificationCards())
             .ToArray();
@@ -1782,6 +2062,11 @@ public sealed partial class MainWindow : Window
 
     private void NotificationCard_ExitAnimationCompleted(object? sender, EventArgs e)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         // Use the display-item identity so a delayed completion from an old
         // card cannot remove a new card that happens to carry the same ID.
         if (sender is not NotificationCard card
@@ -1797,6 +2082,11 @@ public sealed partial class MainWindow : Window
 
     private void NotificationExitFallbackTimer_Tick(object? sender, object e)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         _notificationExitFallbackTimer.Stop();
         foreach (var item in VisibleNotifications.Where(candidate => candidate.IsDismissing).ToArray())
         {
@@ -1806,6 +2096,11 @@ public sealed partial class MainWindow : Window
 
     private void CompleteNotificationExit(NotificationDisplayItem item)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (!item.IsDismissing || !VisibleNotifications.Remove(item))
         {
             return;
@@ -1824,6 +2119,11 @@ public sealed partial class MainWindow : Window
         object? sender,
         NotificationCardEventArgs e)
     {
+        if (_closePreparationStarted || _windowClosed)
+        {
+            return;
+        }
+
         if (e.Notification.Severity != GlobalNotificationSeverity.Error)
         {
             NotificationService.Dismiss(e.Notification.Id);
@@ -1848,6 +2148,11 @@ public sealed partial class MainWindow : Window
                 try
                 {
                     await displayItem.DismissalAnimationCompleted.WaitAsync(TimeSpan.FromMilliseconds(500));
+                    if (_closePreparationStarted || _windowClosed)
+                    {
+                        return;
+                    }
+
                 }
                 catch (TimeoutException)
                 {
@@ -1858,6 +2163,11 @@ public sealed partial class MainWindow : Window
                         CompleteNotificationExit(displayItem);
                     }
                 }
+            }
+
+            if (_closePreparationStarted || _windowClosed)
+            {
+                return;
             }
 
             await ShowErrorNotificationMessageAsync(e.Notification);

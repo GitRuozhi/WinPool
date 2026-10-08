@@ -85,6 +85,105 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
+    public void ScopedDissolveShowsExactStandaloneDiskWithoutRefreshingPrimordialOrLosingSiblings()
+    {
+        var snapshot = PostDissolveScopedDisplaySnapshot();
+        var primordial = Assert.Single(snapshot.StoragePools);
+        Assert.DoesNotContain("native-wdc-physical", primordial.MemberPhysicalDiskIds);
+        var nodes = EditWorkspace.ProjectPartitionWorkspace(snapshot, minUnallocatedBytes: 0);
+        Assert.Equal(new[] { "native-wdc-os", "samsung-os-a", "samsung-os-b" }, nodes.Select(node => node.Unit.StableId));
+        var wdc = Assert.Single(nodes, node => node.Unit.StableId == "native-wdc-os");
+        Assert.Contains(wdc.Children, node => node.Unit.StableId == "native-provider-msr");
+        Assert.Contains(wdc.Children, node => EditWorkspace.IsUnallocated(node.Unit.StableId));
+        // Displaying the exact existing OS view does not repair or authorize facts.
+        Assert.Same(primordial, snapshot.StoragePools[0]);
+        Assert.Null(snapshot.PhysicalDisks[0].PoolStableId);
+        Assert.DoesNotContain("native-wdc-physical", primordial.MemberPhysicalDiskIds);
+    }
+
+    [Theory]
+    [InlineData("concrete-member", false)]
+    [InlineData("concrete-member", true)]
+    [InlineData("concrete-reference", false)]
+    [InlineData("concrete-reference", true)]
+    [InlineData("unresolved-pool", false)]
+    [InlineData("unresolved-pool", true)]
+    public void ConcreteOrUnresolvedPoolOwnershipCannotBeOverriddenByDisplayFallback(string ownership, bool stalePrimordialEdge)
+    {
+        var source = PostDissolveScopedDisplaySnapshot();
+        var primordial = source.StoragePools[0] with
+        {
+            MemberPhysicalDiskIds = stalePrimordialEdge
+                ? source.StoragePools[0].MemberPhysicalDiskIds.Append("native-wdc-physical").ToArray()
+                : source.StoragePools[0].MemberPhysicalDiskIds
+        };
+        var concrete = primordial with { StableId = "concrete-pool", IsPrimordial = false,
+            MemberPhysicalDiskIds = ownership == "concrete-member" ? ["native-wdc-physical"] : [] };
+        var snapshot = source with
+        {
+            StoragePools = [primordial, concrete],
+            PhysicalDisks = source.PhysicalDisks.Select(disk => disk.StableId == "native-wdc-physical"
+                ? disk with { PoolStableId = ownership == "concrete-reference" ? concrete.StableId
+                    : ownership == "unresolved-pool" ? "missing-pool" : null } : disk).ToArray()
+        };
+        var nodes = EditWorkspace.ProjectPartitionWorkspace(snapshot);
+        Assert.DoesNotContain(nodes, node => node.Unit.StableId == "native-wdc-os");
+        Assert.Equal(new[] { "samsung-os-a", "samsung-os-b" }, nodes.Select(node => node.Unit.StableId));
+    }
+
+    [Theory]
+    [InlineData("orphan")]
+    [InlineData("no-mapping")]
+    [InlineData("unreliable-physical")]
+    [InlineData("duplicate-physical")]
+    [InlineData("duplicate-os-view")]
+    public void StandaloneDisplayRequiresUniqueExistingIdentityMapping(string missing)
+    {
+        var source = PostDissolveScopedDisplaySnapshot();
+        var snapshot = missing switch
+        {
+            "orphan" => source with { PhysicalDisks = source.PhysicalDisks.Skip(1).ToArray() },
+            "no-mapping" => source with { OsDisks = source.OsDisks.Select(disk => disk.Number == 0
+                ? disk with { PhysicalDiskStableId = null } : disk).ToArray() },
+            "unreliable-physical" => source with { PhysicalDisks = source.PhysicalDisks.Select(disk =>
+                disk.StableId == "native-wdc-physical" ? disk with { IsStable = false } : disk).ToArray() },
+            "duplicate-physical" => source with { PhysicalDisks = source.PhysicalDisks.Append(source.PhysicalDisks[0]).ToArray() },
+            "duplicate-os-view" => source with { OsDisks = source.OsDisks.Append(source.OsDisks[0] with
+                { StableId = "unproven-second-os-view" }).ToArray() },
+            _ => throw new ArgumentOutOfRangeException(nameof(missing))
+        };
+        var nodes = EditWorkspace.ProjectPartitionWorkspace(snapshot);
+        Assert.Equal(new[] { "samsung-os-a", "samsung-os-b" }, nodes.Select(node => node.Unit.StableId));
+    }
+
+    private static StorageSnapshot PostDissolveScopedDisplaySnapshot()
+    {
+        var source = TwoGapDiskSnapshot();
+        var physical = source.PhysicalDisks[0] with { StableId = "native-wdc-physical", PoolStableId = null,
+            FriendlyName = "WDC", Size = 4000787030016 };
+        var osDisk = source.OsDisks[0] with { StableId = "native-wdc-os", PhysicalDiskStableId = physical.StableId,
+            Number = 0, FriendlyName = "WDC", Size = physical.Size };
+        var siblings = new[] { "a", "b" }.Select(suffix => physical with
+        {
+            StableId = "samsung-physical-" + suffix, FriendlyName = "Samsung " + suffix,
+            PoolStableId = source.StoragePools[0].StableId
+        }).ToArray();
+        return source with
+        {
+            PhysicalDisks = new[] { physical }.Concat(siblings).ToArray(),
+            OsDisks = new[] { osDisk }.Concat(siblings.Select((sibling, index) => osDisk with
+            {
+                StableId = "samsung-os-" + (index == 0 ? "a" : "b"), Number = index + 1,
+                PhysicalDiskStableId = sibling.StableId, FriendlyName = sibling.FriendlyName
+            })).ToArray(),
+            StoragePools = [source.StoragePools[0] with { MemberPhysicalDiskIds = siblings.Select(disk => disk.StableId).ToArray() }],
+            Partitions = [source.Partitions[0] with { StableId = "native-provider-msr", OsDiskStableId = osDisk.StableId,
+                DiskNumber = 0, Type = "MicrosoftReserved", Offset = 17408, Size = 16759808 }],
+            Volumes = []
+        };
+    }
+
+    [Fact]
     public void PoolWorkspaceShowsInternalPoolsPlusNodeAndHidesNetwork()
     {
         var snapshot = TestSnapshotFactory.Create() with

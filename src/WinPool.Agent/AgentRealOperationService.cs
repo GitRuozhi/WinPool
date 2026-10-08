@@ -31,6 +31,17 @@ public sealed class AgentRealOperationService : IRealOperationService
     private readonly ConcurrentDictionary<OperationId, Task> reconciliationTasks = new();
     private int recoveryReady;
     private int admissionClosed;
+    private IRealStorageEditObserver? editObserver;
+
+    public void AttachEditObserver(IRealStorageEditObserver observer) =>
+        editObserver = observer ?? throw new ArgumentNullException(nameof(observer));
+
+    public async Task PublishRecoveredEditStatesAsync()
+    {
+        foreach (var operation in await plans.ListUnfinishedAsync(CancellationToken.None).ConfigureAwait(false))
+            if (operation.Plan.RealOperation is not null)
+                await NotifyEditObserverAsync(operation.Plan.OperationId).ConfigureAwait(false);
+    }
 
     public AgentRealOperationService(
         OperationPlanRepository plans,
@@ -202,6 +213,74 @@ public sealed class AgentRealOperationService : IRealOperationService
         }
     }
 
+    public async Task<ApplicationResult<AgentResponse>> QueryStructureCreationSupportAsync(
+        QueryAgentRealStructureCreationSupportRequest request, TrustedRealSession session,
+        CancellationToken cancellationToken)
+    {
+        if (request.PhysicalTarget.Kind != StorageObjectKind.PhysicalDisk
+            || request.PhysicalTarget.System.Value == Guid.Empty || string.IsNullOrWhiteSpace(request.PhysicalTarget.ProviderKey))
+            return Reject(request.CorrelationId, "agent.real_creation.invalid_target");
+        if (!CanEnter(session) || !isSessionStillArmed(session) || request.ProductSessionId != session.ProductSessionId)
+            return Reject(request.CorrelationId, "agent.real_mode.administrator_required");
+        try
+        {
+            var support = await backend!.ReadStructureCreationSupportAsync(request.PhysicalTarget,
+                request.Tiered, session, cancellationToken);
+            if (support.PhysicalTarget != request.PhysicalTarget || support.Tiered != request.Tiered
+                || string.IsNullOrWhiteSpace(support.TargetFingerprint) || support.CapturedAtUtc == default)
+                return Reject(request.CorrelationId, "agent.real_creation.invalid_support");
+            return ApplicationResult<AgentResponse>.Succeeded(new AgentRealStructureCreationSupportResponse(support), request.CorrelationId);
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            return Reject(request.CorrelationId, "agent.real_creation.unsupported_layout", exception.Message);
+        }
+    }
+
+    public async Task<ApplicationResult<AgentResponse>> QueryVirtualDiskCreationRangeAsync(
+        QueryAgentRealVirtualDiskCreationRangeRequest request,
+        TrustedRealSession session, CancellationToken cancellationToken)
+    {
+        if (request.Target.System.Value == Guid.Empty
+            || string.IsNullOrWhiteSpace(request.Target.ProviderKey)
+            || request.Target.Kind is not (StorageObjectKind.StoragePool or StorageObjectKind.StorageTier))
+            return Reject(request.CorrelationId, "agent.real_creation.invalid_target");
+        if (!CanEnter(session) || !isSessionStillArmed(session)
+            || request.ProductSessionId != session.ProductSessionId)
+            return Reject(request.CorrelationId, "agent.real_mode.administrator_required");
+        try
+        {
+            var range = await backend!.ReadVirtualDiskCreationRangeAsync(
+                request.Target, session, cancellationToken);
+            if (range.Target != request.Target || string.IsNullOrWhiteSpace(range.TargetFingerprint)
+                || range.CapturedAtUtc == default || !range.Supports(range.ResolveMaximum()))
+                return Reject(request.CorrelationId, "agent.real_creation.invalid_range");
+            return ApplicationResult<AgentResponse>.Succeeded(
+                new AgentRealVirtualDiskCreationRangeResponse(range), request.CorrelationId);
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            return Reject(request.CorrelationId, "agent.real_creation.range_unavailable", exception.Message);
+        }
+    }
+
+    public async Task<ApplicationResult<AgentResponse>> ListRecoverableAsync(
+        ListAgentRecoverableRealOperationsRequest request,
+        TrustedRealSession session, CancellationToken cancellationToken)
+    {
+        var responses = new List<AgentRealOperationResponse>();
+        foreach (var operation in await plans.ListUnfinishedAsync(cancellationToken))
+        {
+            if (operation.Plan.RealOperation is null) continue;
+            if (operation.State == PersistedOperationState.OutcomeUnknown && backend is not null)
+                ScheduleReconciliation(operation);
+            var result = await StatusAsync(operation, request.CorrelationId, cancellationToken);
+            if (result.Value is AgentRealOperationResponse status) responses.Add(status);
+        }
+        return ApplicationResult<AgentResponse>.Succeeded(
+            new AgentRecoverableRealOperationsResponse(responses), request.CorrelationId);
+    }
+
     public async Task<ApplicationResult<AgentResponse>> QueryPartitionResizeRangeAsync(
         QueryAgentRealPartitionResizeRangeRequest request,
         TrustedRealSession session,
@@ -286,8 +365,8 @@ public sealed class AgentRealOperationService : IRealOperationService
             }
 
             var operationId = OperationId.New();
-            var plan = await backend.PrepareAsync(
-                request.Intent, session, operationId, cancellationToken);
+            var plan = await StorageOperationTiming.MeasureAsync("real.prepare", () => backend.PrepareAsync(
+                request.Intent, session, operationId, cancellationToken), operationId);
             if (plan.OperationId != operationId
                 || plan.RealOperation is null
                 || !StringComparer.Ordinal.Equals(
@@ -396,9 +475,9 @@ public sealed class AgentRealOperationService : IRealOperationService
             {
                 return Reject(request.CorrelationId, "agent.real_operation.empty_plan");
             }
-            var preflight = await backend.PreflightStepAsync(
+            var preflight = await StorageOperationTiming.MeasureAsync("real.accept.preflight", () => backend.PreflightStepAsync(
                 prior.Plan, firstStep,
-                new Dictionary<string, string>(), cancellationToken);
+                new Dictionary<string, string>(), cancellationToken), prior.Plan.OperationId, firstStep.Id);
             var machineBinding = await machineIdentity.ReadBindingAsync(cancellationToken);
             var context = CreateExecutionContext(
                 prior.Plan, session, machineBinding, preflight);
@@ -433,6 +512,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                     Encoding.UTF8.GetBytes(issued.Token.TokenId))).ToLowerInvariant(),
                 timeProvider.GetUtcNow(), CancellationToken.None);
             handedToBackground = true;
+            await NotifyEditObserverAsync(accepted.Plan.OperationId);
             var worker = Task.Run(() => RunAcceptedAsync(accepted.Plan));
             runningTasks[request.OperationId] = worker;
             // The accepted job and its status read no longer depend on the
@@ -615,6 +695,7 @@ public sealed class AgentRealOperationService : IRealOperationService
         exception is ArgumentException
             or InvalidOperationException
             or InvalidDataException
+            or NotSupportedException
             or IOException
             or UnauthorizedAccessException
             or System.Security.SecurityException
@@ -674,7 +755,32 @@ public sealed class AgentRealOperationService : IRealOperationService
                 step.EvidenceJson)).ToArray(),
             history.LastOrDefault()?.Event.Code,
             operation.State == PersistedOperationState.OutcomeUnknown);
+        if (editObserver is { } observer)
+        {
+            try { await observer.ObserveAsync(response, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot,
+                    "monitor-edit.jsonl", "monitor.edit.observer_failed", exception);
+            }
+        }
         return ApplicationResult<AgentResponse>.Succeeded(response, correlationId);
+    }
+
+    private async Task NotifyEditObserverAsync(OperationId operationId)
+    {
+        if (editObserver is null) return;
+        try
+        {
+            var durable = await plans.GetAsync(operationId, CancellationToken.None).ConfigureAwait(false);
+            if (durable is not null)
+                _ = await StatusAsync(durable, CorrelationId.New(), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot,
+                "monitor-edit.jsonl", "monitor.edit.durable_status_unavailable", exception);
+        }
     }
 
     private static IReadOnlyDictionary<string, string> LatestStepCodes(
@@ -729,6 +835,7 @@ public sealed class AgentRealOperationService : IRealOperationService
         }
         finally
         {
+            await NotifyEditObserverAsync(plan.OperationId);
             runningTasks.TryRemove(plan.OperationId, out _);
             mutationGate.Release();
         }
@@ -736,15 +843,21 @@ public sealed class AgentRealOperationService : IRealOperationService
 
     private void ScheduleReconciliation(PersistedOperation operation)
     {
-        var task = reconciliationTasks.GetOrAdd(
-            operation.Plan.OperationId,
-            operationId => Task.Run(() => ReconcilePersistedAsync(operation.Plan)));
-        _ = task.ContinueWith(
-            completedTask => reconciliationTasks.TryRemove(
-                operation.Plan.OperationId, out _),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        // GetOrAdd's factory may run more than once. Start exactly one read-only
+        // reconciler so concurrent queries cannot race durable step transitions.
+        lock (reconciliationTasks)
+        {
+            var operationId = operation.Plan.OperationId;
+            if (reconciliationTasks.ContainsKey(operationId))
+                return;
+            var task = Task.Run(() => ReconcilePersistedAsync(operation.Plan));
+            reconciliationTasks[operationId] = task;
+            _ = task.ContinueWith(completedTask =>
+            {
+                lock (reconciliationTasks)
+                    reconciliationTasks.TryRemove(operationId, out _);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
     }
 
     private async Task ReconcilePersistedAsync(OperationPlan plan)
@@ -765,83 +878,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                 return;
             }
 
-            var byId = result.Steps.ToDictionary(
-                step => step.StepId, StringComparer.Ordinal);
-            if (byId.Count != stored.Count)
-            {
-                return;
-            }
-
-            foreach (var step in stored)
-            {
-                if (!byId.TryGetValue(step.StepId, out var observed))
-                {
-                    return;
-                }
-
-                if (step.State is PersistedOperationStepState.Verified
-                    or PersistedOperationStepState.Failed
-                    or PersistedOperationStepState.Skipped)
-                {
-                    continue;
-                }
-
-                var next = observed.State switch
-                {
-                    RealOperationStepState.Verified =>
-                        PersistedOperationStepState.Verified,
-                    RealOperationStepState.Failed =>
-                        PersistedOperationStepState.Failed,
-                    RealOperationStepState.StoppedBeforeCall
-                        when step.State == PersistedOperationStepState.NotStarted =>
-                        PersistedOperationStepState.Skipped,
-                    _ => PersistedOperationStepState.OutcomeUnknown
-                };
-                if (next == PersistedOperationStepState.OutcomeUnknown
-                    || (next != PersistedOperationStepState.Skipped
-                        && string.IsNullOrWhiteSpace(observed.ResultEvidence)))
-                {
-                    return;
-                }
-
-                if (!await plans.TransitionStepAsync(
-                        plan.OperationId, step.StepId,
-                        step.State, next,
-                        observed.TargetEvidence ?? step.TargetJson,
-                        observed.ResultEvidence,
-                        Event(plan.OperationId, ExecutionEventKind.Progress,
-                            string.IsNullOrWhiteSpace(observed.Code)
-                                ? "operation.reconciled_step"
-                                : observed.Code, step.StepId)))
-                {
-                    return;
-                }
-            }
-
-            var finalSteps = await plans.GetStepsAsync(plan.OperationId);
-            if (finalSteps.Any(step => step.State is not (
-                    PersistedOperationStepState.Verified
-                    or PersistedOperationStepState.Failed
-                    or PersistedOperationStepState.Skipped)))
-            {
-                return;
-            }
-
-            var verified = finalSteps.Count(step =>
-                step.State == PersistedOperationStepState.Verified);
-            var terminal = result.State switch
-            {
-                RealOperationState.Succeeded when verified == finalSteps.Count =>
-                    PersistedOperationState.Completed,
-                RealOperationState.PartiallyCompleted when verified > 0 =>
-                    PersistedOperationState.PartiallyCompleted,
-                RealOperationState.Failed when verified == 0 =>
-                    PersistedOperationState.Failed,
-                RealOperationState.Cancelled when verified == 0
-                    && finalSteps.All(step => step.State == PersistedOperationStepState.Skipped) =>
-                    PersistedOperationState.Cancelled,
-                _ => PersistedOperationState.OutcomeUnknown
-            };
+            var terminal = await PersistReconciledStepsAsync(plan, stored, result);
             if (terminal != PersistedOperationState.OutcomeUnknown)
             {
                 await plans.TransitionAsync(
@@ -863,6 +900,86 @@ public sealed class AgentRealOperationService : IRealOperationService
             // Keep the durable barrier. The next explicit query can retry a
             // read-only reconciliation against current facts.
         }
+        finally
+        {
+            await NotifyEditObserverAsync(plan.OperationId).ConfigureAwait(false);
+        }
+    }
+
+    // A reconciled operation may finish only after its observed step states and
+    // evidence are durable. Both live execution and restart recovery use this
+    // path; the repository remains the authority for legal/CAS transitions.
+    private async Task<PersistedOperationState> PersistReconciledStepsAsync(
+        OperationPlan plan,
+        IReadOnlyList<PersistedOperationStep> stored,
+        RealReconciliationResult result)
+    {
+        if (!result.CanReleaseWriteBarrier
+            || result.Steps.Count != stored.Count
+            || result.Steps.Select(step => step.StepId).Distinct(StringComparer.Ordinal).Count() != stored.Count)
+            return PersistedOperationState.OutcomeUnknown;
+
+        var byId = result.Steps.ToDictionary(step => step.StepId, StringComparer.Ordinal);
+        foreach (var step in stored)
+        {
+            if (!byId.TryGetValue(step.StepId, out var observed))
+                return PersistedOperationState.OutcomeUnknown;
+
+            var next = observed.State switch
+            {
+                RealOperationStepState.Verified => PersistedOperationStepState.Verified,
+                RealOperationStepState.Failed => PersistedOperationStepState.Failed,
+                RealOperationStepState.StoppedBeforeCall => PersistedOperationStepState.Skipped,
+                _ => PersistedOperationStepState.OutcomeUnknown
+            };
+            if (next == PersistedOperationStepState.OutcomeUnknown)
+                return PersistedOperationState.OutcomeUnknown;
+
+            if (step.State is PersistedOperationStepState.Verified
+                or PersistedOperationStepState.Failed or PersistedOperationStepState.Skipped)
+            {
+                // Reconciliation cannot rewrite or contradict a durable terminal step.
+                if (next != step.State || (next != PersistedOperationStepState.Skipped
+                    && string.IsNullOrWhiteSpace(step.EvidenceJson)))
+                    return PersistedOperationState.OutcomeUnknown;
+                continue;
+            }
+
+            if ((next == PersistedOperationStepState.Skipped
+                    && step.State != PersistedOperationStepState.NotStarted)
+                || (next == PersistedOperationStepState.Verified
+                    && step.State == PersistedOperationStepState.NotStarted)
+                || (next != PersistedOperationStepState.Skipped
+                    && string.IsNullOrWhiteSpace(observed.ResultEvidence)))
+                return PersistedOperationState.OutcomeUnknown;
+
+            if (!await plans.TransitionStepAsync(
+                    plan.OperationId, step.StepId, step.State, next,
+                    observed.TargetEvidence ?? step.TargetJson, observed.ResultEvidence,
+                    Event(plan.OperationId, ExecutionEventKind.Progress,
+                        string.IsNullOrWhiteSpace(observed.Code)
+                            ? "operation.reconciled_step" : observed.Code, step.StepId)))
+                return PersistedOperationState.OutcomeUnknown;
+        }
+
+        var finalSteps = await plans.GetStepsAsync(plan.OperationId);
+        if (finalSteps.Count != stored.Count || finalSteps.Any(step => step.State is not (
+                PersistedOperationStepState.Verified or PersistedOperationStepState.Failed
+                or PersistedOperationStepState.Skipped)))
+            return PersistedOperationState.OutcomeUnknown;
+
+        var verified = finalSteps.Count(step => step.State == PersistedOperationStepState.Verified);
+        var stopped = finalSteps.All(step => step.State == PersistedOperationStepState.Skipped);
+        return result.State switch
+        {
+            RealOperationState.Succeeded when verified == finalSteps.Count => PersistedOperationState.Completed,
+            RealOperationState.PartiallyCompleted when verified > 0 => PersistedOperationState.PartiallyCompleted,
+            RealOperationState.Failed when verified == 0 && stopped
+                && stopAfterCurrentStep.ContainsKey(plan.OperationId) => PersistedOperationState.Cancelled,
+            RealOperationState.Failed when verified == 0 => PersistedOperationState.Failed,
+            RealOperationState.Cancelled when verified == 0 && stopped => PersistedOperationState.Cancelled,
+            _ => PersistedOperationState.OutcomeUnknown
+        };
     }
 
     private async Task RunStepsAsync(OperationPlan plan)
@@ -884,21 +1001,18 @@ public sealed class AgentRealOperationService : IRealOperationService
         }
 
         var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
-        var verifiedCount = 0;
-        var interrupted = false;
         foreach (var step in plan.RealOperation!.Steps)
         {
             if (stopAfterCurrentStep.ContainsKey(operationId))
             {
-                interrupted = true;
                 break;
             }
 
             RealStepPreflight preflight;
             try
             {
-                preflight = await backend!.PreflightStepAsync(
-                    plan, step, outputs, CancellationToken.None);
+                preflight = await StorageOperationTiming.MeasureAsync("real.step.preflight", () => backend!.PreflightStepAsync(
+                    plan, step, outputs, CancellationToken.None), operationId, step.Id);
                 if (!StringComparer.Ordinal.Equals(
                         preflight.PhysicalMemberFingerprint,
                         plan.RealOperation.PhysicalMemberFingerprint))
@@ -927,13 +1041,11 @@ public sealed class AgentRealOperationService : IRealOperationService
                     null, noEffectEvidence,
                     Event(operationId, ExecutionEventKind.Failed,
                         "operation.preflight_failed", step.Id));
-                interrupted = true;
                 break;
             }
 
             if (stopAfterCurrentStep.ContainsKey(operationId))
             {
-                interrupted = true;
                 break;
             }
 
@@ -945,7 +1057,6 @@ public sealed class AgentRealOperationService : IRealOperationService
                     Event(operationId, ExecutionEventKind.Progress,
                         "operation.step.preparing_call", step.Id)))
             {
-                interrupted = true;
                 break;
             }
             if (stopAfterCurrentStep.ContainsKey(operationId))
@@ -957,7 +1068,6 @@ public sealed class AgentRealOperationService : IRealOperationService
                     null, "stopped_before_call",
                     Event(operationId, ExecutionEventKind.Cancelled,
                         "operation.step.skipped", step.Id));
-                interrupted = true;
                 break;
             }
             if (!await plans.TransitionStepAsync(
@@ -968,15 +1078,15 @@ public sealed class AgentRealOperationService : IRealOperationService
                     Event(operationId, ExecutionEventKind.Progress,
                         "operation.step.call_issued", step.Id)))
             {
-                interrupted = true;
                 break;
             }
 
             RealStepResult result;
+            await NotifyEditObserverAsync(operationId);
             try
             {
-                result = await backend!.ExecuteStepAsync(
-                    plan, step, preflight, CancellationToken.None);
+                result = await StorageOperationTiming.MeasureAsync("real.step.execute", () => backend!.ExecuteStepAsync(
+                    plan, step, preflight, CancellationToken.None), operationId, step.Id);
             }
             catch
             {
@@ -987,7 +1097,6 @@ public sealed class AgentRealOperationService : IRealOperationService
                     null, "adapter_exception",
                     Event(operationId, ExecutionEventKind.Failed,
                         "operation.step.outcome_unknown", step.Id));
-                interrupted = true;
                 break;
             }
 
@@ -999,7 +1108,6 @@ public sealed class AgentRealOperationService : IRealOperationService
                     PersistedOperationStepState.OutcomeUnknown,
                     null, result.ResultEvidenceJson,
                     Event(operationId, ExecutionEventKind.Failed, result.Code, step.Id));
-                interrupted = true;
                 break;
             }
 
@@ -1011,7 +1119,6 @@ public sealed class AgentRealOperationService : IRealOperationService
                     Event(operationId, ExecutionEventKind.Progress,
                         "operation.step.verifying", step.Id)))
             {
-                interrupted = true;
                 break;
             }
             var next = result.Outcome == RealStepOutcome.Verified
@@ -1028,18 +1135,16 @@ public sealed class AgentRealOperationService : IRealOperationService
                             : ExecutionEventKind.Failed,
                         result.Code, step.Id)))
             {
-                interrupted = true;
                 break;
             }
 
             if (next == PersistedOperationStepState.Failed)
             {
-                interrupted = true;
                 break;
             }
 
-            verifiedCount++;
             outputs[step.Id] = result.ResultEvidenceJson;
+            await NotifyEditObserverAsync(operationId);
         }
 
         var persistedSteps = await plans.GetStepsAsync(operationId);
@@ -1076,34 +1181,36 @@ public sealed class AgentRealOperationService : IRealOperationService
                 "operation.reconciliation_failed", false);
         }
 
-        var terminal = reconciled.CanReleaseWriteBarrier
-            ? reconciled.State switch
-            {
-                RealOperationState.Succeeded when !interrupted =>
-                    PersistedOperationState.Completed,
-                RealOperationState.PartiallyCompleted =>
-                    PersistedOperationState.PartiallyCompleted,
-                RealOperationState.Failed when verifiedCount == 0
-                    && stopAfterCurrentStep.ContainsKey(operationId)
-                    && progress.All(step => step.State == RealOperationStepState.StoppedBeforeCall) =>
-                    PersistedOperationState.Cancelled,
-                RealOperationState.Cancelled when verifiedCount == 0
-                    && progress.All(step => step.State == RealOperationStepState.StoppedBeforeCall) =>
-                    PersistedOperationState.Cancelled,
-                RealOperationState.Failed when verifiedCount == 0 =>
-                    PersistedOperationState.Failed,
-                _ => PersistedOperationState.OutcomeUnknown
-            }
-            : PersistedOperationState.OutcomeUnknown;
-        await plans.TransitionAsync(
-            operationId, PersistedOperationState.Running, terminal,
-            Event(operationId,
-                terminal switch
-                {
-                    PersistedOperationState.Completed => ExecutionEventKind.Completed,
-                    PersistedOperationState.Cancelled => ExecutionEventKind.Cancelled,
-                    _ => ExecutionEventKind.Failed
-                },
-                reconciled.Code));
+        PersistedOperationState terminal;
+        try
+        {
+            terminal = await PersistReconciledStepsAsync(plan, finalStepRecords, reconciled);
+            if (terminal == PersistedOperationState.OutcomeUnknown && reconciled.CanReleaseWriteBarrier)
+                reconciled = reconciled with { Code = "operation.reconciled_steps_persistence_conflict" };
+        }
+        catch
+        {
+            terminal = PersistedOperationState.OutcomeUnknown;
+            reconciled = reconciled with { Code = "operation.reconciled_steps_persistence_failed" };
+        }
+        if (!await plans.TransitionAsync(
+                operationId, PersistedOperationState.Running, terminal,
+                Event(operationId,
+                    terminal switch
+                    {
+                        PersistedOperationState.Completed => ExecutionEventKind.Completed,
+                        PersistedOperationState.Cancelled => ExecutionEventKind.Cancelled,
+                        _ => ExecutionEventKind.Failed
+                    },
+                    reconciled.Code)))
+        {
+            // A stale/failed terminal CAS is not success. Leave an explicit,
+            // query-recoverable barrier; never replay an issued Windows call.
+            await plans.TransitionAsync(
+                operationId, PersistedOperationState.Running,
+                PersistedOperationState.OutcomeUnknown,
+                Event(operationId, ExecutionEventKind.Failed,
+                    "operation.reconciled_transition_conflict"));
+        }
     }
 }

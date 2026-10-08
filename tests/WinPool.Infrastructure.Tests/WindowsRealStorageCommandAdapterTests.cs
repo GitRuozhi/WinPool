@@ -568,6 +568,11 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [InlineData("size-outside-range", false, "tier-creation-size-not-supported")]
     [InlineData("method-failed", false, "tier-creation-size-method-failed")]
     [InlineData("capability-false", false, "single-hdd-tier-capability-not-verified")]
+    [InlineData("pool-method-failed", false, "pool-creation-size-method-failed")]
+    [InlineData("pool-size-outside-range", false, "pool-creation-size-not-supported")]
+    [InlineData("tier-only-max", false, "pool-creation-size-not-supported")]
+    [InlineData("intersection-max", true, null)]
+    [InlineData("pool-grid-mismatch", false, "pool-creation-size-not-supported")]
     public async Task CompressedFixedTieredCreationRetainsLiveEvidenceAcrossChildScope(
         string shape, bool invoked, string? diagnostic)
     {
@@ -576,6 +581,12 @@ public sealed class WindowsRealStorageCommandAdapterTests
         // local fakes, including Import-Module; no Windows storage API is loaded.
         var fakeCommands = """
             $script:fixtureShape = '__SHAPE__'
+            $script:expectedSize = switch ($script:fixtureShape) {
+                'tier-only-max' { [long]3999956729856 }
+                'intersection-max' { [long]3999688294400 }
+                'pool-grid-mismatch' { [long]17448304640 }
+                default { [long]17179869184 }
+            }
             $script:fakeWriteCalls = 0
             $script:fakeSubsystem = [pscustomobject]@{
                 UniqueId='subsystem-unique'; ObjectId='subsystem-object';
@@ -596,8 +607,16 @@ public sealed class WindowsRealStorageCommandAdapterTests
             function Get-VirtualDisk { param($StoragePool, $StorageTier, $ErrorAction) return @() }
             function Invoke-CimMethod {
                 param($InputObject, $MethodName, $Arguments, $ErrorAction)
-                if ($InputObject.UniqueId -ne 'template-unique' -or $MethodName -ne 'GetSupportedSize' -or
+                if ($InputObject.UniqueId -notin @('template-unique','pool-unique') -or $MethodName -ne 'GetSupportedSize' -or
                     $Arguments.ResiliencySettingName -ne 'Simple') { throw 'unexpected-fake-method' }
+                if ($InputObject.UniqueId -eq 'pool-unique') {
+                    return [pscustomobject]@{
+                        ReturnValue=[uint32]$(if ($script:fixtureShape -eq 'pool-method-failed') { 1 } else { 0 });
+                        SupportedSizes=[uint64[]]@(); VirtualDiskSizeMin=[uint64]1073741824;
+                        VirtualDiskSizeMax=[uint64]$(if ($script:fixtureShape -eq 'pool-size-outside-range') { 8589934592 } else { 3999688294400 });
+                        VirtualDiskSizeDivisor=[uint64]1073741824
+                    }
+                }
                 [uint64[]]$supportedSizes = @()
                 if ($script:fixtureShape -eq 'list') { $supportedSizes = [uint64[]]@(17179869184) }
                 return [pscustomobject]@{
@@ -612,7 +631,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
                     $ProvisioningType, $NumberOfColumns, $Interleave, $ErrorAction)
                 if ($InputObject.UniqueId -ne 'pool-unique' -or $StorageTiers.Count -ne 1 -or
                     $StorageTiers[0].UniqueId -ne 'template-unique' -or $StorageTierSizes.Count -ne 1 -or
-                    $StorageTierSizes[0] -ne 17179869184 -or $ResiliencySettingName -ne 'Simple' -or
+                    $StorageTierSizes[0] -ne $script:expectedSize -or $ResiliencySettingName -ne 'Simple' -or
                     $ProvisioningType -ne 'Fixed' -or $NumberOfColumns -ne 1 -or $Interleave -ne 65536) {
                     throw 'unexpected-fake-create-parameters'
                 }
@@ -629,7 +648,13 @@ public sealed class WindowsRealStorageCommandAdapterTests
         var payload = JsonSerializer.Serialize(new
         {
             CommandKind = "CreateTieredVirtualDisk", Target = target,
-            Command = new { Name = "Tiered VD", SizeBytes = 16L << 30 }
+            Command = new { Name = "Tiered VD", SizeBytes = shape switch
+            {
+                "tier-only-max" => 3999956729856L,
+                "intersection-max" => 3999688294400L,
+                "pool-grid-mismatch" => 17448304640L,
+                _ => 16L << 30
+            } }
         });
         var output = await RunCompressedFixedScriptWithFakesAsync(WindowsRealStoragePowerShellScript.Source,
             fakeCommands, payload, "[Console]::Out.WriteLine($script:fakeWriteCalls)");
@@ -653,6 +678,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         }
         if (invoked)
         {
+            Assert.Equal(3999688294400L, evidence.GetProperty("PoolCreationSize").GetProperty("VirtualDiskSizeMax").GetInt64());
             Assert.Equal("returned-vd-unique", result.GetProperty("UniqueId").GetString());
             Assert.Equal("template-unique", result.GetProperty("TieredCreationInput").GetProperty("TemplateUniqueId").GetString());
         }

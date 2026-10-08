@@ -85,7 +85,11 @@ public sealed record WinPoolSourceField(
 public sealed record WinPoolSource(
     string Id, FactOrigin Origin, string Namespace, string ClassName,
     DateTimeOffset CapturedAt, CollectionPurpose Purpose,
-    FieldReadState ReadState = FieldReadState.Returned, string? ReasonCode = null);
+    FieldReadState ReadState = FieldReadState.Returned, string? ReasonCode = null)
+{
+    public InventorySourceCoverage? Coverage { get; init; }
+    public long CaptureGeneration { get; init; }
+}
 
 /// <summary>Identity contains only an opaque source key; display names and disk numbers are never identity inputs.</summary>
 public sealed record WinPoolSourceObject(
@@ -116,6 +120,8 @@ public sealed record WinPoolFacts(
     public bool IsSimulation { get; init; }
     public string InventoryVersion { get; init; } = string.Empty;
     public DateTimeOffset InventoryCapturedAt { get; init; }
+    public ScopedInventoryCollection? ScopedCollection { get; init; }
+    public bool IsMerged { get; init; }
 
     public static WinPoolFacts Empty(SystemId systemId) =>
         new(CurrentFormatVersion, systemId, 0, [], [], [], [], []);
@@ -125,13 +131,23 @@ public sealed record WinPoolFacts(
         if (FormatVersion != CurrentFormatVersion || SystemId.Value == Guid.Empty || Revision < 0
             || Sources.IsDefault || Objects.IsDefault || Relationships.IsDefault || Identities.IsDefault || Collections.IsDefault)
             throw new InvalidDataException("Unsupported or incomplete facts document.");
+        if (ScopedCollection is { } scoped)
+        {
+            scoped.Scope.Validate();
+            if (scoped.Scope.SystemId != SystemId || scoped.CompletedAt < scoped.StartedAt
+                || (!scoped.Complete && string.IsNullOrWhiteSpace(scoped.ReasonCode)))
+                throw new InvalidDataException("Invalid scoped collection metadata.");
+        }
         var sourceIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in Sources)
         {
             if (string.IsNullOrWhiteSpace(source.Id) || string.IsNullOrWhiteSpace(source.ClassName)
                 || !Enum.IsDefined(source.Origin) || !Enum.IsDefined(source.Purpose)
-                || !Enum.IsDefined(source.ReadState) || !sourceIds.Add(source.Id))
+                || !Enum.IsDefined(source.ReadState) || source.CaptureGeneration < 0 || !sourceIds.Add(source.Id))
                 throw new InvalidDataException("Invalid or duplicate source.");
+            if (source.Coverage is { } coverage && (string.IsNullOrWhiteSpace(coverage.ScopeKey)
+                || coverage.ObjectIds.IsDefault || coverage.ObjectIds.Any(string.IsNullOrWhiteSpace) || coverage.Generation < 0))
+                throw new InvalidDataException("Invalid scoped source coverage.");
         }
         var objectIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in Objects)

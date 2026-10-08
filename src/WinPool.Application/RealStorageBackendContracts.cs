@@ -9,6 +9,12 @@ namespace WinPool.Application;
 /// </summary>
 public interface IRealStorageBackend
 {
+    Task<RealStructureCreationSupport> ReadStructureCreationSupportAsync(StorageObjectId physicalTarget,
+        bool tiered, TrustedRealSession session, CancellationToken cancellationToken) =>
+        Task.FromException<RealStructureCreationSupport>(new NotSupportedException("Creation support queries are unavailable."));
+    Task<RealVirtualDiskCreationRange> ReadVirtualDiskCreationRangeAsync(
+        StorageObjectId target, TrustedRealSession session, CancellationToken cancellationToken) =>
+        Task.FromException<RealVirtualDiskCreationRange>(new NotSupportedException("Creation size queries are unavailable."));
     Task<OperationPlan> PrepareAsync(
         RealOperationIntentRequest proposal,
         TrustedRealSession session,
@@ -36,6 +42,31 @@ public interface IRealStorageBackend
         OperationPlan plan,
         IReadOnlyList<RealOperationStepProgress> persistedSteps,
         CancellationToken cancellationToken);
+}
+
+/// <summary>Fresh creation bounds for one exact pool or unused HDD template; never resize permission.</summary>
+public sealed record RealVirtualDiskCreationRange(
+    StorageObjectId Target, long MinimumBytes, long MaximumBytes, long DivisorBytes,
+    long RangeOriginBytes, IReadOnlyList<long> EnumeratedSizes,
+    string TargetFingerprint, DateTimeOffset CapturedAtUtc)
+{
+    public bool Supports(long bytes) => bytes > 0 && (EnumeratedSizes.Count > 0
+        ? EnumeratedSizes.All(size => size > 0) && EnumeratedSizes.Contains(bytes)
+        : MinimumBytes > 0 && MaximumBytes >= MinimumBytes && DivisorBytes > 0
+          && RangeOriginBytes >= 0 && bytes >= MinimumBytes && bytes <= MaximumBytes
+          && bytes >= RangeOriginBytes && (bytes - RangeOriginBytes) % DivisorBytes == 0);
+
+    public long ResolveMaximum()
+    {
+        if (EnumeratedSizes.Count > 0)
+            return EnumeratedSizes.All(size => size > 0) ? EnumeratedSizes.Max()
+                : throw new InvalidDataException("The provider enumerated creation sizes are invalid.");
+        if (MinimumBytes <= 0 || MaximumBytes < MinimumBytes || DivisorBytes <= 0
+            || RangeOriginBytes < 0 || MaximumBytes < RangeOriginBytes)
+            throw new InvalidDataException("The provider creation range is incomplete.");
+        var result = MaximumBytes - ((MaximumBytes - RangeOriginBytes) % DivisorBytes);
+        return Supports(result) ? result : throw new InvalidDataException("The provider range has no legal size.");
+    }
 }
 
 /// <summary>Fresh provider limits and the narrower supported geometric intersection.</summary>

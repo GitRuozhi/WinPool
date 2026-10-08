@@ -1,4 +1,15 @@
+using WinPool.Application;
+
 namespace WinPool.App.Services;
+
+internal static class MonitorEditAlertPresentation
+{
+    // A retained historical interval is not a current sampling failure while
+    // monitoring is off. Keep its target and unknown endpoint in diagnostics.
+    internal static bool ShouldReportCurrentIssue(bool isRunning, MonitorEditTargetState state) =>
+        isRunning || state.Status != MonitorEditTargetStatus.PendingVerification
+        || state.ReasonCode != "monitor.edit.recovered_endpoint_unknown";
+}
 
 /// <summary>
 /// A page-independent monitoring fact. Permanent gaps never emit an automatic
@@ -7,7 +18,10 @@ namespace WinPool.App.Services;
 public sealed record MonitorIssueState(
     string Key,
     string Text,
-    bool IsPermanentGap = false);
+    bool IsPermanentGap = false)
+{
+    public bool IsInformation { get; init; }
+}
 
 public enum MonitorIssueTransitionKind
 {
@@ -60,7 +74,7 @@ public sealed class MonitorIssueStateTracker : IDisposable
                 continue;
             }
 
-            observed[key] = new MonitorIssueState(key, text, candidate.IsPermanentGap);
+            observed[key] = candidate with { Key = key, Text = text };
         }
 
         lock (_sync)

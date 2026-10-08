@@ -365,7 +365,17 @@ public partial class App : Application
             () =>
             {
                 s_exitSignal.WaitOne();
-                DispatcherQueue.TryEnqueue(() => Window?.Close());
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (Window is MainWindow mainWindow)
+                    {
+                        mainWindow.RequestClose();
+                    }
+                    else
+                    {
+                        Window?.Close();
+                    }
+                });
             });
     }
 
@@ -381,6 +391,11 @@ public partial class App : Application
         s_activationTarget = null;
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (Window is MainWindow closingWindow && closingWindow.IsCloseInProgress)
+            {
+                return;
+            }
+
             if (target is not null && Window is MainWindow mainWindow)
             {
                 if (target == ApplicationStartupTarget.Welcome)

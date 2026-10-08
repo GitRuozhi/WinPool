@@ -195,6 +195,25 @@ internal sealed class MonitorAlertObserver : IDisposable
         var diagnostics = monitoring.GetDiagnostics();
         var runtime = monitoring.GetRuntimeDiagnostics();
         var issues = new List<MonitorIssueState>();
+        foreach (var edit in runtime.EditTargets)
+        {
+            if (!MonitorEditAlertPresentation.ShouldReportCurrentIssue(monitoring.IsRunning, edit))
+            {
+                continue;
+            }
+
+            var label = edit.Status switch
+            {
+                MonitorEditTargetStatus.Editing => zh ? "正在编辑，等待采样确认" : "Editing; waiting for sampling confirmation",
+                MonitorEditTargetStatus.PendingVerification => zh ? "编辑结果或采样恢复待确认" : "Edit outcome or sampling recovery pending",
+                MonitorEditTargetStatus.RemovedByEdit => zh ? "对象已由编辑删除；历史保留" : "Object removed by edit; history retained",
+                MonitorEditTargetStatus.NeedsSelection => zh ? "采样身份无法唯一核实，需要重新选择" : "Sampling identity cannot be uniquely verified; selection required",
+                _ => zh ? "实际采样已恢复" : "Actual sampling restored"
+            };
+            issues.Add(new($"edit:{edit.OperationId.Value:N}:{edit.StepId}:{edit.TargetId.ProviderKey}:{edit.Status}",
+                $"{edit.TargetId.ProviderKey} · {label} · {edit.ReasonCode}")
+            { IsInformation = edit.Status is MonitorEditTargetStatus.Editing or MonitorEditTargetStatus.RemovedByEdit or MonitorEditTargetStatus.Restored });
+        }
 
         if (runtime.PersistencePaused)
         {
@@ -332,8 +351,8 @@ internal sealed class MonitorAlertObserver : IDisposable
             if (transition.Kind == MonitorIssueTransitionKind.Appeared)
             {
                 _viewModel.NotificationService.Publish(
-                    GlobalNotificationSeverity.Warning,
-                    zh ? "监控异常" : "Monitoring issue",
+                    issue.IsInformation ? GlobalNotificationSeverity.Info : GlobalNotificationSeverity.Warning,
+                    issue.IsInformation ? (zh ? "监控编辑状态" : "Monitoring edit status") : (zh ? "监控异常" : "Monitoring issue"),
                     $"{MonitorTarget(zh)}{Environment.NewLine}{issue.Text}",
                     "monitor",
                     new GlobalNotificationOptions
@@ -348,6 +367,7 @@ internal sealed class MonitorAlertObserver : IDisposable
             }
 
             _viewModel.NotificationService.ResolveByKey(occurrenceKey);
+            if (issue.IsInformation || issue.Key.StartsWith("edit:", StringComparison.Ordinal)) continue;
             _viewModel.NotificationService.Publish(
                 GlobalNotificationSeverity.Info,
                 zh ? "监控异常已恢复" : "Monitoring issue recovered",

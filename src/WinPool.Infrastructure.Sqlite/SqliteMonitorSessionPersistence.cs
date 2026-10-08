@@ -53,7 +53,7 @@ public sealed class SqliteMonitorSessionPersistenceFactory
 }
 
 internal sealed class SqliteMonitorSessionPersistence
-    : IMonitorSessionPersistence, IMonitorSessionPersistenceDiagnostics
+    : IMonitorSessionPersistence, IMonitorSessionPersistenceDiagnostics, IMonitorEditGapPersistence
 {
     /// <summary>
     /// Normal batching waits at most 250 ms. Two seconds requires at least
@@ -203,6 +203,13 @@ internal sealed class SqliteMonitorSessionPersistence
                    && writer is not null
                    && writer.TryEnqueue(sample);
         }
+    }
+
+    public Task SaveEditGapAsync(MonitorEditGap gap, CancellationToken cancellationToken)
+    {
+        EnsureActive();
+        if (gap.SessionId != expectedSessionId) throw new InvalidDataException("The edit gap belongs to another monitoring session.");
+        return new MonitorEditGapRepository(store, writeOwner).SaveAsync(gap, cancellationToken);
     }
 
     public Task AddDroppedSamplesAsync(

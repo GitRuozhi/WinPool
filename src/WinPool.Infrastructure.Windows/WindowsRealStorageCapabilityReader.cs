@@ -43,7 +43,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
     private const string StorageNamespace = @"root\Microsoft\Windows\Storage";
     private static readonly string[] TierBooleanFields =
     [
-        "SupportsStorageTierCreation", "SupportsStorageTieredVirtualDiskCreation",
+        "SupportsStoragePoolCreation", "SupportsStorageTierCreation", "SupportsStorageTieredVirtualDiskCreation",
         "SupportsStorageTierDeletion", "SupportsStorageTierFriendlyNameModification"
     ];
 

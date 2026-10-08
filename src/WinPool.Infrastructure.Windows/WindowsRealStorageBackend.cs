@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -41,6 +42,12 @@ public sealed record WindowsNoEffectStepEvidence(
     string PhysicalMemberFingerprint,
     string? Diagnostic = null);
 
+public sealed record WindowsObservedNoEffectStepEvidence(
+    bool WindowsCallIssued, string Code, string PhysicalMemberFingerprint,
+    string BeforeFingerprint, string FirstObservedFingerprint, string SecondObservedFingerprint,
+    WindowsStorageCommandResult ProviderResult,
+    IReadOnlyList<WindowsStorageJobAbsenceEvidence> StorageJobQueries);
+
 /// <summary>
 /// The only Windows implementation of the Agent's real storage boundary.
 /// An IPC reply, a provider return, and a verified postcondition are distinct.
@@ -53,17 +60,22 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
     private readonly WindowsRealStorageTopologyReader topologyReader;
     private readonly IWindowsRealStorageCommandAdapter adapter;
     private readonly TimeProvider timeProvider;
+    private readonly IWindowsStorageJobReader storageJobReader;
+    // Only provider selectors are retained. Every use collects new unmerged facts.
+    private readonly ConcurrentDictionary<OperationId, StorageInventoryScope> operationScopes = new();
 
     public WindowsRealStorageBackend(
         IWindowsRealStorageCommandAdapter adapter,
         WindowsRealOperationPlanner? planner = null,
         WindowsRealStorageTopologyReader? topologyReader = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IWindowsStorageJobReader? storageJobReader = null)
     {
         this.adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
         this.topologyReader = topologyReader ?? new WindowsRealStorageTopologyReader();
         this.planner = planner ?? new WindowsRealOperationPlanner(this.topologyReader);
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.storageJobReader = storageJobReader ?? new WindowsStorageJobReader();
     }
 
     public Task<OperationPlan> PrepareAsync(
@@ -79,6 +91,14 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         CancellationToken cancellationToken) =>
         planner.ReadPartitionResizeRangeAsync(partition, session, cancellationToken);
 
+    public Task<RealVirtualDiskCreationRange> ReadVirtualDiskCreationRangeAsync(
+        StorageObjectId target, TrustedRealSession session, CancellationToken cancellationToken) =>
+        planner.ReadVirtualDiskCreationRangeAsync(target, session, cancellationToken);
+
+    public Task<RealStructureCreationSupport> ReadStructureCreationSupportAsync(StorageObjectId physicalTarget,
+        bool tiered, TrustedRealSession session, CancellationToken cancellationToken) =>
+        planner.ReadStructureCreationSupportAsync(physicalTarget, tiered, session, cancellationToken);
+
     public async Task<RealStepPreflight> PreflightStepAsync(
         OperationPlan plan,
         RealOperationStep step,
@@ -86,7 +106,7 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         CancellationToken cancellationToken)
     {
         var stored = RequireFrozenStep(plan, step);
-        var topology = await topologyReader.CaptureAsync(cancellationToken)
+        var topology = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken)
             .ConfigureAwait(false);
         if (!StringComparer.Ordinal.Equals(topology.MachineBinding,
                 plan.RealOperation!.MachineBinding))
@@ -96,6 +116,8 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         if (physicalId.Kind != StorageObjectKind.PhysicalDisk)
             throw new InvalidDataException("The real plan lacks its frozen physical member.");
         var closure = topology.RequireSinglePhysicalClosure([physicalId]);
+        operationScopes[plan.OperationId] = StorageInventoryScopeFactory.Create(
+            topology.Facts, plan.OperationId, step.Id, [physicalId]);
         if (!StringComparer.Ordinal.Equals(
                 closure.PhysicalMemberFingerprint,
                 plan.RealOperation.PhysicalMemberFingerprint))
@@ -189,7 +211,7 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(
             preflight.TargetEvidenceJson)
             ?? throw new InvalidDataException("The persisted exact target is unreadable.");
-        var before = await topologyReader.CaptureAsync(cancellationToken)
+        var before = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken)
             .ConfigureAwait(false);
         var physical = plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk);
         var beforeClosure = before.RequireSinglePhysicalClosure([physical]);
@@ -250,8 +272,8 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         {
             // The caller has already persisted CallIssued. Once this call starts,
             // transport cancellation may not terminate the storage provider.
-            provider = await adapter.ExecuteAsync(
-                stored.Command, target, CancellationToken.None)
+            provider = await StorageOperationTiming.MeasureAsync("real.provider", () => adapter.ExecuteAsync(
+                stored.Command, target, CancellationToken.None), plan.OperationId, step.Id, "exact-provider")
                 .ConfigureAwait(false);
             provider = provider with
             {
@@ -289,7 +311,7 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         {
             try
             {
-                var after = await topologyReader.CaptureAsync(cancellationToken)
+                var after = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken)
                     .ConfigureAwait(false);
                 var afterClosure = after.RequireSinglePhysicalClosure([physical]);
                 if (!StringComparer.Ordinal.Equals(afterClosure.PhysicalMemberFingerprint,
@@ -397,7 +419,19 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         RealTargetClosure closure;
         try
         {
-            topology = await topologyReader.CaptureAsync(cancellationToken)
+            if (!operationScopes.ContainsKey(plan.OperationId))
+            {
+                var evidence = persistedSteps.FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.TargetEvidence))?.TargetEvidence;
+                var exact = evidence is null ? null : JsonSerializer.Deserialize<WindowsStorageCommandTarget>(evidence);
+                if (exact is not null && !string.IsNullOrWhiteSpace(exact.PhysicalMemberUniqueId))
+                {
+                    var anchor = plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk);
+                    operationScopes[plan.OperationId] = new(plan.SystemId, plan.OperationId, "reconcile", [anchor],
+                        plan.Targets.Select(item => item.ProviderKey).ToArray(),
+                        [new(anchor, "MSFT_PhysicalDisk", "UniqueId", exact.PhysicalMemberUniqueId)]);
+                }
+            }
+            topology = await CaptureOperationTopologyAsync(plan, "reconcile", cancellationToken)
                 .ConfigureAwait(false);
             if (!StringComparer.Ordinal.Equals(topology.MachineBinding, frozen.MachineBinding))
                 return Unknown(persistedSteps, "real.reconciliation_machine_changed");
@@ -406,7 +440,7 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
             closure = topology.RequireSinglePhysicalClosure([physical]);
         }
         catch (Exception exception) when (exception is InvalidDataException
-            or IOException or UnauthorizedAccessException or InvalidOperationException)
+            or IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
         {
             return Unknown(persistedSteps, "real.reconciliation_capture_failed");
         }
@@ -584,6 +618,9 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
             var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(progress.TargetEvidence);
             var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence);
+            if (target is not null && provider is { ProviderReturned: true, Code: "provider.error-outcome-unknown" })
+                return await ReconcileFailedTieredCreationAsync(plan, persistedSteps, topology, closure,
+                    target, provider, cancellationToken).ConfigureAwait(false);
             if (target is not { Kind: StorageObjectKind.StoragePool, CreatedInThisPlan: false }
                 || provider is not { ProviderReturned: true, Code: "provider.returned" }
                 || provider.ProviderError is not null || provider.ProviderJobId is not null
@@ -636,24 +673,95 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         }
     }
 
+    private async Task<RealReconciliationResult> ReconcileFailedTieredCreationAsync(
+        OperationPlan plan, IReadOnlyList<RealOperationStepProgress> persistedSteps,
+        WindowsRealStorageTopology topology, RealTargetClosure closure,
+        WindowsStorageCommandTarget target, WindowsStorageCommandResult provider,
+        CancellationToken cancellationToken)
+    {
+        var frozen = plan.RealOperation!;
+        var step = frozen.Steps[0];
+        var command = (CreateTieredVirtualDiskCommand)step.Command;
+        // A transport failure, timeout, missing error, returned identity or job
+        // cannot prove absence. Keep the original Windows-call evidence intact.
+        if (target is not { Kind: StorageObjectKind.StoragePool, CreatedInThisPlan: false }
+            || string.IsNullOrWhiteSpace(provider.ProviderError) || provider.ProviderJobId is not null
+            || !string.IsNullOrEmpty(provider.UniqueId) || !string.IsNullOrEmpty(provider.ObjectId)
+            || !string.IsNullOrEmpty(provider.PartitionGuid) || provider.DiskNumber is not null
+            || provider.PartitionNumber is not null || target.ExpectedFingerprint != frozen.TargetFingerprint)
+            return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+
+        bool Unchanged(WindowsRealStorageTopology current, RealTargetClosure currentClosure)
+        {
+            if (current.MachineBinding != frozen.MachineBinding
+                || currentClosure.PhysicalMemberFingerprint != frozen.PhysicalMemberFingerprint
+                || currentClosure.Fingerprint != frozen.TargetFingerprint
+                || currentClosure.Objects.Any(item => item.ObjectType is FactObjectType.VirtualDisk
+                    or FactObjectType.Disk or FactObjectType.Partition or FactObjectType.Volume)
+                || currentClosure.Objects.Count(item => item.ObjectType == FactObjectType.StorageTier) != 1)
+                return false;
+            var currentTier = current.RequireObject(command.Tier.Existing!.Value);
+            var currentTarget = WindowsRealStorageTargetBuilder.Build(current, command.Pool, new Dictionary<string, string>())
+                with { ExpectedFingerprint = target.ExpectedFingerprint,
+                    RelatedUniqueId = Text(currentTier, "UniqueId"), RelatedObjectId = Text(currentTier, "ObjectId") };
+            return currentTarget == target;
+        }
+        var expectedInput = new WindowsTieredCreationInput(target.RelatedUniqueId, target.RelatedObjectId,
+            target.UniqueId, target.PhysicalMemberUniqueId, "HDD", "Simple", "Fixed", 1, 65536, command.SizeBytes);
+        if (!Unchanged(topology, closure)
+            || !TieredCreationCapabilityMatches(step, target, provider, closure.PhysicalDiskId, expectedInput))
+            return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+        var jobsBefore = await storageJobReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        bool EmptyFresh(WindowsStorageJobAbsenceEvidence value) => value.Jobs is not null
+            && value.Jobs.All(job => !string.IsNullOrWhiteSpace(job.UniqueId) && !string.IsNullOrWhiteSpace(job.ObjectId)
+                && job.JobState is 7 or 8 or 9 or 10)
+            && value.Jobs.Select(job => job.UniqueId).Distinct(StringComparer.Ordinal).Count() == value.Jobs.Count
+            && value.Jobs.Select(job => job.ObjectId).Distinct(StringComparer.Ordinal).Count() == value.Jobs.Count
+            && value.ObservedAtUtc != default && value.ObservedAtUtc <= timeProvider.GetUtcNow().AddSeconds(10)
+            && timeProvider.GetUtcNow() - value.ObservedAtUtc <= TimeSpan.FromMinutes(2);
+        if (!EmptyFresh(jobsBefore)) return Unknown(persistedSteps, "real.reconciliation_storage_job_uncertain");
+        await Task.Delay(TimeSpan.FromSeconds(2), timeProvider, cancellationToken).ConfigureAwait(false);
+        var second = await CaptureOperationTopologyAsync(plan, "reconcile-no-effect", cancellationToken).ConfigureAwait(false);
+        var secondClosure = second.RequireSinglePhysicalClosure([plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk)]);
+        var jobsAfter = await storageJobReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        if (!Unchanged(second, secondClosure) || !EmptyFresh(jobsAfter))
+            return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+        var safety = await planner.ValidatePartitionSafetyWithEvidenceAsync(second, secondClosure, command, cancellationToken).ConfigureAwait(false);
+        RequirePoolMemberRoleProof(second, secondClosure, safety);
+        var evidence = new WindowsObservedNoEffectStepEvidence(true,
+            "real.reconciliation_observed_tiered_creation_no_effect", frozen.PhysicalMemberFingerprint,
+            frozen.TargetFingerprint, closure.Fingerprint, secondClosure.Fingerprint, provider, [jobsBefore, jobsAfter]);
+        return new RealReconciliationResult(RealOperationState.Failed,
+            [persistedSteps[0] with { State = RealOperationStepState.Failed, Code = evidence.Code,
+                ResultEvidence = JsonSerializer.Serialize(evidence) }], evidence.Code, true);
+    }
+
     private static bool TieredCreationCapabilityMatches(RealOperationStep step,
-        WindowsStorageCommandTarget target, WindowsStorageCommandResult provider, string physicalId)
+        WindowsStorageCommandTarget target, WindowsStorageCommandResult provider, string physicalId,
+        WindowsTieredCreationInput? expectedInput = null)
     {
         const string prefix = "live-tier-capability:";
         const string separator = "; exact-template-new-size:";
+        const string poolSeparator = "; exact-pool-new-size:";
         var offset = step.SupportEvidence.IndexOf(separator, StringComparison.Ordinal);
         if (!step.SupportEvidence.StartsWith(prefix, StringComparison.Ordinal) || offset <= prefix.Length
             || provider.LiveCapabilityEvidence is not { ValueKind: JsonValueKind.Object } live)
             return false;
         var frozenCapability = JsonSerializer.Deserialize<WindowsTierCapability>(
             step.SupportEvidence[prefix.Length..offset]);
-        var frozenRange = JsonSerializer.Deserialize<VirtualDiskCreationSize>(step.SupportEvidence[(offset + separator.Length)..]);
+        var poolOffset = step.SupportEvidence.IndexOf(poolSeparator, offset + separator.Length, StringComparison.Ordinal);
+        var tierRangeJson = poolOffset < 0 ? step.SupportEvidence[(offset + separator.Length)..]
+            : step.SupportEvidence[(offset + separator.Length)..poolOffset];
+        var frozenRange = JsonSerializer.Deserialize<VirtualDiskCreationSize>(tierRangeJson);
+        var frozenPoolRange = poolOffset < 0 ? null : JsonSerializer.Deserialize<VirtualDiskCreationSize>(
+            step.SupportEvidence[(poolOffset + poolSeparator.Length)..]);
         if (frozenCapability is not { Status: "queried", Error: null }
             || frozenCapability.PhysicalDiskStableId != physicalId
             || frozenCapability.UniqueId != target.StorageSubsystemUniqueId
             || frozenCapability.ObjectId != target.StorageSubsystemObjectId
             || frozenCapability.Fields is null || frozenCapability.Associations is null
-            || frozenRange?.EnumeratedSizes is null || provider.TieredCreationInput is not { } input
+            || frozenRange?.EnumeratedSizes is null || (expectedInput ?? provider.TieredCreationInput) is not { } input
+            || (expectedInput is not null && provider.TieredCreationInput is not null && provider.TieredCreationInput != expectedInput)
             || !frozenRange.Supports(input.SizeBytes)) return false;
         var support = frozenCapability.Fields.SingleOrDefault(item => item.Name == "SupportsStorageTieredVirtualDiskCreation");
         var minimum = frozenCapability.Fields.SingleOrDefault(item => item.Name == "PhysicalDisksPerStoragePoolMin");
@@ -678,8 +786,30 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                 ? number : throw new InvalidDataException("Missing or malformed tier creation range output.");
         var values = sizes.ValueKind == JsonValueKind.Null ? null : sizes.EnumerateArray().Select(value =>
             value.TryGetUInt64(out var number) ? number : throw new InvalidDataException("Malformed tier size enumeration.")).ToArray();
-        return WindowsRealStorageCapabilityReader.ParseTierCreationSize(code, values,
-            UInt64Value("TierSizeMin"), UInt64Value("TierSizeMax"), UInt64Value("TierSizeDivisor")).Supports(input.SizeBytes);
+        if (!WindowsRealStorageCapabilityReader.ParseTierCreationSize(code, values,
+            UInt64Value("TierSizeMin"), UInt64Value("TierSizeMax"), UInt64Value("TierSizeDivisor")).Supports(input.SizeBytes))
+            return false;
+        // Historical frozen records retain their original template-only proof
+        // for read-only recovery. New plans require both frozen/live constraints.
+        if (poolOffset < 0) return true;
+        if (frozenPoolRange?.EnumeratedSizes is null || !frozenPoolRange.Supports(input.SizeBytes)
+            || !live.TryGetProperty("PoolCreationSize", out var poolSize) || poolSize.ValueKind != JsonValueKind.Object
+            || !poolSize.TryGetProperty("ReturnValue", out var poolReturned) || !poolReturned.TryGetUInt32(out var poolCode) || poolCode != 0
+            || !poolSize.TryGetProperty("SupportedSizes", out var poolSizes) || poolSizes.ValueKind is not (JsonValueKind.Null or JsonValueKind.Array))
+            return false;
+        long PoolNumber(string name) => poolSize.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Null
+            ? 0 : poolSize.TryGetProperty(name, out value) && value.TryGetInt64(out var number) && number >= 0
+                ? number : throw new InvalidDataException("Missing or malformed pool creation range output.");
+        var poolValues = poolSizes.ValueKind == JsonValueKind.Null ? [] : poolSizes.EnumerateArray().Select(value =>
+            value.TryGetInt64(out var number) && number > 0 ? number
+                : throw new InvalidDataException("Malformed pool size enumeration.")).ToArray();
+        var livePoolRange = new VirtualDiskCreationSize(PoolNumber("VirtualDiskSizeMin"), PoolNumber("VirtualDiskSizeMax"),
+            PoolNumber("VirtualDiskSizeDivisor"), poolValues);
+        if (poolValues.Length > 0 && (livePoolRange.DivisorBytes <= 0
+            || poolValues.Distinct().Count() != poolValues.Length
+            || poolValues.Any(value => value % livePoolRange.DivisorBytes != 0))) return false;
+        return VirtualDiskCreationSize.Intersect(frozenRange, frozenPoolRange).Supports(input.SizeBytes)
+            && livePoolRange.Supports(input.SizeBytes);
     }
 
     private async Task<RealReconciliationResult> ReconcileSinglePoolCreationAsync(
@@ -1063,6 +1193,21 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
                 JsonSerializer.Serialize(matches[0]), JsonSerializer.Serialize(step)))
             throw new InvalidDataException("The requested real step differs from the frozen plan.");
         return matches[0];
+    }
+
+    private Task<WindowsRealStorageTopology> CaptureOperationTopologyAsync(
+        OperationPlan plan, string stepId, CancellationToken cancellationToken)
+    {
+        if (topologyReader.SupportsScopedCapture && operationScopes.TryGetValue(plan.OperationId, out var scope))
+        {
+            var currentScope = scope with { StepId = stepId };
+            return StorageOperationTiming.MeasureAsync("real.capture.scoped",
+                () => topologyReader.CaptureScopedAsync(currentScope, cancellationToken),
+                plan.OperationId, stepId, currentScope.Key, 1);
+        }
+        return StorageOperationTiming.MeasureAsync("real.capture.full",
+            () => topologyReader.CaptureAsync(cancellationToken), plan.OperationId, stepId,
+            topologyReader.SupportsScopedCapture ? "initial-safe-locator" : "source-scoped-unavailable", 1);
     }
 
     private static readonly string[] TieredLayoutFieldNames =

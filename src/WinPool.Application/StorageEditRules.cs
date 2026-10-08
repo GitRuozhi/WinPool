@@ -54,6 +54,7 @@ public static class StorageEditRules
             SimulationEditKind.ChangeDriveLetter => EvaluateDriveLetter(snapshot, request),
             SimulationEditKind.FormatPartition => EvaluateFormat(snapshot, request),
             SimulationEditKind.DeletePartition => EvaluateDeletePartition(snapshot, request),
+            SimulationEditKind.ClearDisk => EvaluateClearDisk(snapshot, request),
             SimulationEditKind.SetDiskOffline => EvaluateOffline(snapshot, request),
             SimulationEditKind.InitializeDisk => EvaluateInitialize(snapshot, request),
             SimulationEditKind.ConvertDisk => EvaluateConvert(snapshot, request),
@@ -164,7 +165,7 @@ public static class StorageEditRules
         var disk = snapshot.OsDisks.FirstOrDefault(x => x.StableId == (partition?.OsDiskStableId ?? target));
         var partitionAction = request.Kind is SimulationEditKind.FormatPartition or SimulationEditKind.DeletePartition
             or SimulationEditKind.ChangeDriveLetter or SimulationEditKind.CreatePartition or SimulationEditKind.InitializeDisk
-            or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline or SimulationEditKind.ExtendPartition
+            or SimulationEditKind.ConvertDisk or SimulationEditKind.ClearDisk or SimulationEditKind.SetDiskOffline or SimulationEditKind.ExtendPartition
             or SimulationEditKind.ShrinkPartition;
         if (partitionAction)
         {
@@ -172,9 +173,11 @@ public static class StorageEditRules
             if (request.Kind is SimulationEditKind.FormatPartition or SimulationEditKind.DeletePartition)
                 Need(target, "IsBoot", "IsSystem");
             if (request.Kind == SimulationEditKind.FormatPartition) Need(target, "Type");
-            if (request.Kind is SimulationEditKind.InitializeDisk or SimulationEditKind.ConvertDisk or SimulationEditKind.SetDiskOffline)
+            if (request.Kind is SimulationEditKind.InitializeDisk or SimulationEditKind.ConvertDisk or SimulationEditKind.ClearDisk or SimulationEditKind.SetDiskOffline)
                 Need(disk?.StableId, "IsBoot", "IsSystem", "PartitionStyle");
             if (request.Kind == SimulationEditKind.SetDiskOffline && request.Offline == true)
+                Need(disk?.PhysicalDiskStableId, "IsPageFile", "IsCrashDump");
+            if (request.Kind == SimulationEditKind.ClearDisk)
                 Need(disk?.PhysicalDiskStableId, "IsPageFile", "IsCrashDump");
             if (request.Kind == SimulationEditKind.CreatePartition)
             {
@@ -250,6 +253,7 @@ public static class StorageEditRules
         (SimulationEditKind.FormatPartition, "supported: NTFS, ReFS, exFAT"),
         (SimulationEditKind.DeletePartition, "supported: existing non-boot/system partition"),
         (SimulationEditKind.SetDiskOffline, "supported: persisted simulation disk state"),
+        (SimulationEditKind.ClearDisk, "supported: exact simulated GPT/MBR disk to RAW; removes only related partitions and volumes; no Windows command is bound"),
         (SimulationEditKind.InitializeDisk, "supported: GPT only; MBR initialize denied"),
         (SimulationEditKind.ConvertDisk, "supported: destructive MBR data disk to GPT"),
         (SimulationEditKind.CreatePartition, "supported: four fixed GPT partition kinds; new starts and lengths use the simulated 1 MiB grid"),
@@ -413,6 +417,48 @@ public static class StorageEditRules
         }
 
         return Allow("storage.rule.offline");
+    }
+
+    private static StorageRuleDecision EvaluateClearDisk(
+        StorageSnapshot snapshot,
+        SimulationEditRequest request)
+    {
+        var disk = snapshot.OsDisks.FirstOrDefault(item => item.StableId == request.TargetProviderKey);
+        if (disk is null)
+        {
+            return Deny("storage.rule.clear-disk.missing", "The selected disk was not found.");
+        }
+
+        if (disk.IsBoot || disk.IsSystem)
+        {
+            return Deny("storage.rule.clear-disk.system", "The boot or system disk cannot be cleared.");
+        }
+
+        if (disk.IsOffline)
+        {
+            return Deny("storage.rule.clear-disk.offline", "An offline disk cannot be cleared.");
+        }
+
+        var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == disk.PhysicalDiskStableId);
+        if (physical?.IsPageFile == true || physical?.IsCrashDump == true)
+        {
+            return Deny("storage.rule.clear-disk.runtime-role",
+                "A disk hosting the page file or crash dump cannot be cleared.");
+        }
+
+        var style = disk.PartitionStyle?.Trim();
+        if (string.Equals(style, "RAW", StringComparison.OrdinalIgnoreCase))
+        {
+            return Deny("storage.rule.clear-disk.already-raw", "The disk is already RAW and does not need clearing.");
+        }
+
+        if (!string.Equals(style, "GPT", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(style, "MBR", StringComparison.OrdinalIgnoreCase))
+        {
+            return Deny("storage.rule.clear-disk.unknown-style", "The disk partition style is unknown or unsupported.");
+        }
+
+        return Allow("storage.rule.clear-disk", WindowsPartition);
     }
 
     private static StorageRuleDecision EvaluateInitialize(

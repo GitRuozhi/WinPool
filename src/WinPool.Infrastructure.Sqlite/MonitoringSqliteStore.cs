@@ -5,12 +5,12 @@ namespace WinPool.Infrastructure.Sqlite;
 /// <summary>
 /// Owns the short-lived active monitoring database. It intentionally has an
 /// independent format number: a monitoring database is never a migration of
-/// the core <c>winpool.db</c>, and an existing non-current database is refused
-/// rather than modified in place.
+/// the core <c>winpool.db</c>. Only the verified preceding schema migrates;
+/// unknown or damaged schemas are refused without mutation.
 /// </summary>
 public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     private readonly string connectionString;
 
@@ -32,6 +32,24 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
         var inspection = await InspectExistingAsync(cancellationToken);
         if (inspection.HasUserTables)
         {
+            if (inspection.SchemaVersion == 1)
+            {
+                // Only the exact former schema may migrate. Unknown or damaged databases remain untouched.
+                await VerifyCurrentSchemaAsync(cancellationToken, LegacySchemaDefinition);
+                await using var migrationConnection = await OpenConnectionAsync(cancellationToken);
+                await using var migration = (SqliteTransaction)await migrationConnection.BeginTransactionAsync(cancellationToken);
+                await using var upgrade = migrationConnection.CreateCommand();
+                upgrade.Transaction = migration;
+                upgrade.CommandText = EditGapSchemaDefinition;
+                await upgrade.ExecuteNonQueryAsync(cancellationToken);
+                upgrade.CommandText = "UPDATE monitoring_schema_info SET schema_version=2, applied_at_utc_ms=$at WHERE singleton=1 AND schema_version=1;";
+                upgrade.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                if (await upgrade.ExecuteNonQueryAsync(cancellationToken) != 1)
+                    throw new CurrentMonitoringSchemaCorruptException("migration_version_changed");
+                await migration.CommitAsync(cancellationToken);
+                await VerifyCurrentSchemaAsync(cancellationToken);
+                return;
+            }
             if (inspection.SchemaVersion is null
                 || inspection.SchemaVersion < CurrentSchemaVersion)
             {
@@ -209,7 +227,7 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
         }
     }
 
-    private async Task VerifyCurrentSchemaAsync(CancellationToken cancellationToken)
+    private async Task VerifyCurrentSchemaAsync(CancellationToken cancellationToken, string? expectedDefinition = null)
     {
         await using var actualReadOnly = await OpenReadOnlyDatabaseAsync(cancellationToken);
         var actualConnection = actualReadOnly.Connection;
@@ -225,7 +243,7 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
         await expectedConnection.OpenAsync(cancellationToken);
         await using (var create = expectedConnection.CreateCommand())
         {
-            create.CommandText = CurrentSchemaDefinition;
+            create.CommandText = expectedDefinition ?? CurrentSchemaDefinition;
             await create.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -592,7 +610,27 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
         IReadOnlyList<string> Checks,
         string Definition);
 
-    private const string CurrentSchemaDefinition = """
+    private static string CurrentSchemaDefinition => LegacySchemaDefinition + EditGapSchemaDefinition;
+
+    internal const string EditGapSchemaDefinition = """
+        CREATE TABLE IF NOT EXISTS monitor_edit_gaps(
+            gap_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES monitor_sessions(session_id) ON DELETE CASCADE,
+            system_id TEXT NOT NULL,
+            target_kind INTEGER NOT NULL,
+            target_provider_key TEXT NOT NULL,
+            counter_identity TEXT NOT NULL,
+            operation_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            started_at_utc_ms INTEGER NOT NULL,
+            ended_at_utc_ms INTEGER CHECK(ended_at_utc_ms IS NULL OR ended_at_utc_ms >= started_at_utc_ms),
+            status INTEGER NOT NULL,
+            reason_code TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_monitor_edit_gaps_open ON monitor_edit_gaps(session_id, ended_at_utc_ms);
+        """;
+
+    internal const string LegacySchemaDefinition = """
         CREATE TABLE IF NOT EXISTS monitoring_schema_info(
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
             schema_version INTEGER NOT NULL,

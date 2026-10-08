@@ -26,5 +26,8 @@
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationConfirmationFormatter.cs" Link="RealOperationConfirmationFormatter.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealPartitionResizeUiRange.cs" Link="RealPartitionResizeUiRange.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationProposalFactory.cs" Link="RealOperationProposalFactory.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealStructureDraftPlanner.cs" Link="RealStructureDraftPlanner.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealAutomaticLayoutProgress.cs" Link="RealAutomaticLayoutProgress.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealScopedInventoryRefreshPolicy.cs" Link="RealScopedInventoryRefreshPolicy.cs" />
   </ItemGroup>
 </Project>

@@ -64,9 +64,9 @@ public static class RealOperationProposalFactory
         const long mib = 1024L * 1024;
         const long msrOffset = mib;
         const long msrSize = 16 * mib;
-        if (virtualDiskSizeBytes is <= 0 ||
-            (virtualDiskSizeBytes is long requestedSize && requestedSize % mib != 0) ||
-            (formatNtfs && virtualDiskSizeBytes is null) ||
+        (long OffsetBytes, long SizeBytes)? dataGeometry = virtualDiskSizeBytes is long requestedSize
+            ? GetAutomaticDataGeometry(requestedSize, createMsr) : null;
+        if ((formatNtfs && virtualDiskSizeBytes is null) ||
             ((formatNtfs || letter is not null) && virtualDiskSizeBytes is null) ||
             (letter is { } driveLetter && (driveLetter < 'D' || driveLetter > 'Z')))
         {
@@ -109,14 +109,9 @@ public static class RealOperationProposalFactory
             previous = "create-msr";
         }
 
-        if (virtualDiskSizeBytes is long sizeBytes)
+        if (dataGeometry is { } data)
         {
-            var dataOffset = createMsr ? 17 * mib : mib;
-            var geometry = EditWorkspace.GetRealPartitionCreateGeometry(sizeBytes,
-                dataOffset, sizeBytes - dataOffset);
-            if (geometry is not { CanCreate: true, StartOffsetBytes: long start, MaximumSizeBytes: long dataSize }
-                || start != dataOffset)
-                throw new ArgumentException("The requested virtual-disk size cannot hold the selected MSR layout and a BasicData partition.", nameof(virtualDiskSizeBytes));
+            var (dataOffset, dataSize) = data;
             steps.Add(new RealOperationStep("create-data",
                 new CreatePartitionCommand(RealTargetReference.ForExisting(osDisk),
                     RealPartitionRole.BasicData, dataOffset, dataSize),
@@ -157,6 +152,35 @@ public static class RealOperationProposalFactory
             systemId, targets, steps, expected);
         RealOperationValidator.Validate(request);
         return request;
+    }
+
+    /// <summary>Preserves exact provider bytes/MAX and rejects impossible automatic layout before VD creation.</summary>
+    public static long ResolveVirtualDiskCreationSize(
+        RealVirtualDiskCreationRange range, bool useMaximum, long? requestedSizeBytes,
+        bool autoCreatePartition, bool createMsr)
+    {
+        var bytes = useMaximum ? range.ResolveMaximum()
+            : requestedSizeBytes ?? throw new InvalidDataException("The exact requested capacity is missing.");
+        if (!range.Supports(bytes))
+            throw new InvalidDataException("The requested capacity is outside the exact provider creation range.");
+        if (autoCreatePartition) ValidateAutomaticLayoutCapacity(bytes, createMsr);
+        return bytes;
+    }
+
+    public static void ValidateAutomaticLayoutCapacity(long sizeBytes, bool createMsr) =>
+        _ = GetAutomaticDataGeometry(sizeBytes, createMsr);
+
+    private static (long OffsetBytes, long SizeBytes) GetAutomaticDataGeometry(long sizeBytes, bool createMsr)
+    {
+        const long mib = 1024L * 1024;
+        if (sizeBytes <= 0 || sizeBytes % mib != 0)
+            throw new ArgumentException("Automatic partition layout needs a positive whole-MiB virtual-disk size.", nameof(sizeBytes));
+        var offset = createMsr ? 17 * mib : mib;
+        var geometry = EditWorkspace.GetRealPartitionCreateGeometry(sizeBytes, offset, sizeBytes - offset);
+        if (geometry is not { CanCreate: true, StartOffsetBytes: long start, MaximumSizeBytes: long size }
+            || start != offset)
+            throw new ArgumentException("The requested virtual-disk size cannot hold the selected MSR layout and a BasicData partition.", nameof(sizeBytes));
+        return (offset, size);
     }
 
     public static RealOperationIntentRequest? TryFormatExistingData(

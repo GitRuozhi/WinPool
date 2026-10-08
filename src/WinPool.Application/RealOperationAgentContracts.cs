@@ -41,6 +41,24 @@ public sealed record QueryAgentRealPartitionResizeRangeRequest(
     string ProductSessionId,
     CorrelationId CorrelationId) : AgentRequest(CorrelationId);
 
+public sealed record QueryAgentRealVirtualDiskCreationRangeRequest(
+    StorageObjectId Target, string ProductSessionId,
+    CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+
+public sealed record ListAgentRecoverableRealOperationsRequest(
+    CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+
+public sealed record AgentRecoverableRealOperationsResponse(
+    IReadOnlyList<AgentRealOperationResponse> Operations) : AgentResponse;
+
+public sealed record AgentRealVirtualDiskCreationRangeResponse(
+    RealVirtualDiskCreationRange Range) : AgentResponse;
+
+public sealed record QueryAgentRealStructureCreationSupportRequest(StorageObjectId PhysicalTarget,
+    bool Tiered, string ProductSessionId, CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+
+public sealed record AgentRealStructureCreationSupportResponse(RealStructureCreationSupport Support) : AgentResponse;
+
 public sealed record StopAgentRealOperationFollowingStepsRequest(
     OperationId OperationId,
     string PlanHash,
@@ -100,6 +118,19 @@ public sealed record AgentRealOperationResponse(
 
 public interface IRealOperationService
 {
+    Task<ApplicationResult<AgentResponse>> QueryStructureCreationSupportAsync(
+        QueryAgentRealStructureCreationSupportRequest request, TrustedRealSession session,
+        CancellationToken cancellationToken) => Task.FromException<ApplicationResult<AgentResponse>>(
+            new NotSupportedException("Creation support queries are unavailable."));
+    Task<ApplicationResult<AgentResponse>> QueryVirtualDiskCreationRangeAsync(
+        QueryAgentRealVirtualDiskCreationRangeRequest request, TrustedRealSession session,
+        CancellationToken cancellationToken) => Task.FromException<ApplicationResult<AgentResponse>>(
+            new NotSupportedException("Creation size queries are unavailable."));
+
+    Task<ApplicationResult<AgentResponse>> ListRecoverableAsync(
+        ListAgentRecoverableRealOperationsRequest request, TrustedRealSession session,
+        CancellationToken cancellationToken) => Task.FromException<ApplicationResult<AgentResponse>>(
+            new NotSupportedException("Recovery enumeration is unavailable."));
     Task<ApplicationResult<AgentResponse>> EnterModeAsync(
         EnterAgentRealModeRequest request,
         TrustedRealSession session,

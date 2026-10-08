@@ -597,6 +597,54 @@ public sealed class RealOperationUiFlowTests
             refsRange, true, out _, out _));
     }
 
+    [Theory]
+    [InlineData(true, true, 1024, 32, 1056, 32)]
+    [InlineData(true, false, 1024, 1056, 1056, 32)]
+    [InlineData(false, true, 1024, 32, 992, 32)]
+    [InlineData(false, false, 1024, 992, 992, 32)]
+    public void ResizeFormulaKeepsDeltaAndTargetInputsLinked(
+        bool extend,
+        bool inputIsDelta,
+        long currentMib,
+        long inputMib,
+        long expectedTargetMib,
+        long expectedDeltaMib)
+    {
+        const long mib = 1024L * 1024;
+
+        Assert.True(RealPartitionResizeUiRange.TryGetResizeFormula(
+            currentMib * mib,
+            inputMib,
+            inputIsDelta,
+            extend,
+            out var targetBytes,
+            out var deltaBytes));
+
+        Assert.Equal(expectedTargetMib * mib, targetBytes);
+        Assert.Equal(expectedDeltaMib * mib, deltaBytes);
+    }
+
+    [Fact]
+    public void ResizeFormulaRejectsFractionalCurrentOverflowZeroAndWrongDirection()
+    {
+        const long mib = 1024L * 1024;
+
+        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
+            100 * mib + 1, 1, true, true, out _, out _));
+        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
+            100 * mib, 0, true, true, out _, out _));
+        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
+            100 * mib, 100, true, false, out _, out _));
+        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
+            100 * mib, 100, false, true, out _, out _));
+        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
+            100 * mib, 101, false, false, out _, out _));
+        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
+            long.MaxValue - mib + 1, long.MaxValue / mib, true, true, out _, out _));
+        Assert.False(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            100 * mib + 1, 1, 200 * mib, true, out _, out _));
+    }
+
     [Fact]
     public void RebuildDeletionStageListsOnlyExactRemovalAndKeepsOnePhysicalMember()
     {

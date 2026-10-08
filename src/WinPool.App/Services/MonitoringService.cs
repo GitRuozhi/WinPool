@@ -39,6 +39,18 @@ public sealed class MonitoringService : IDisposable
     private readonly object _sync = new();
     private readonly IAgentConnection? _agentConnection;
     private readonly Dictionary<string, List<MonitorSamplePoint>> _windows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, StorageObjectId> _seriesTargets = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<StorageObjectId, string> _targetNames = new();
+
+    public StorageObjectId? GetSeriesTarget(string series)
+    {
+        lock (_sync) return _seriesTargets.TryGetValue(series, out var id) ? id : null;
+    }
+
+    public string GetSeriesDisplayName(string series)
+    {
+        lock (_sync) return _seriesTargets.TryGetValue(series, out var id) && _targetNames.TryGetValue(id, out var name) ? name : series;
+    }
     private CancellationTokenSource? _loopCts;
     private DiskPerformanceSampler? _sampler;
     private StreamWriter? _csvWriter;
@@ -277,6 +289,8 @@ public sealed class MonitoringService : IDisposable
             lock (_sync)
             {
                 _windows.Clear();
+                _seriesTargets.Clear();
+                _targetNames.Clear();
                 _remoteLastTimestamps.Clear();
             }
             return;
@@ -301,6 +315,8 @@ public sealed class MonitoringService : IDisposable
             _csvWriter?.Dispose();
             _csvWriter = null;
             _windows.Clear();
+            _seriesTargets.Clear();
+            _targetNames.Clear();
         }
     }
 
@@ -751,6 +767,8 @@ public sealed class MonitoringService : IDisposable
         lock (_sync)
         {
             _lastExportSessionId = session.SessionId;
+            foreach (var target in session.Request.Targets)
+                if (!string.IsNullOrWhiteSpace(target.DisplayName)) _targetNames[target.ObjectId] = target.DisplayName;
             foreach (var sample in latestSamples)
             {
                 var instance = sample.TargetId.ProviderKey.StartsWith(
@@ -761,7 +779,10 @@ public sealed class MonitoringService : IDisposable
                         "pdh:",
                         StringComparison.OrdinalIgnoreCase)
                         ? sample.TargetId.ProviderKey[4..]
-                        : sample.TargetId.ProviderKey;
+                        : sample.CounterSource == MonitorCounterSource.StorageSpacesVirtualDisk
+                            ? "Storage Space: " + sample.TargetId.ProviderKey
+                            : sample.TargetId.ProviderKey;
+                _seriesTargets[instance] = sample.TargetId;
                 if (_remoteLastTimestamps.TryGetValue(instance, out var previous)
                     && sample.SampledAtUtc <= previous)
                 {

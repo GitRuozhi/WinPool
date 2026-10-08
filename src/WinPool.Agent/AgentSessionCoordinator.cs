@@ -69,6 +69,10 @@ public interface IAgentRequestOperations
         CaptureAgentManageInventoryRequest request,
         CancellationToken cancellationToken);
 
+    Task<ApplicationResult<AgentResponse>> CaptureManageScopedInventoryAsync(
+        CaptureAgentManageScopedInventoryRequest request, CancellationToken cancellationToken) =>
+        Task.FromException<ApplicationResult<AgentResponse>>(new NotSupportedException("Scoped inventory is unavailable."));
+
     Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
         LoadAgentManageInventoryRequest request,
         CancellationToken cancellationToken);
@@ -176,6 +180,9 @@ public sealed class AgentSessionCoordinator
             or PrepareAgentRealOperationRequest
             or AcceptAgentRealOperationRequest
             or QueryAgentRealOperationRequest
+            or QueryAgentRealVirtualDiskCreationRangeRequest
+            or QueryAgentRealStructureCreationSupportRequest
+            or ListAgentRecoverableRealOperationsRequest
             or QueryAgentRealPartitionResizeRangeRequest
             or StopAgentRealOperationFollowingStepsRequest)
         {
@@ -231,6 +238,8 @@ public sealed class AgentSessionCoordinator
                 operations.CaptureInventoryAsync(typed, cancellationToken),
             CaptureAgentManageInventoryRequest typed =>
                 operations.CaptureManageInventoryAsync(typed, cancellationToken),
+            CaptureAgentManageScopedInventoryRequest typed =>
+                operations.CaptureManageScopedInventoryAsync(typed, cancellationToken),
             LoadAgentManageInventoryRequest typed =>
                 operations.LoadManageInventoryAsync(typed, cancellationToken),
             ExportAgentMonitorCsvRequest typed =>
@@ -313,6 +322,10 @@ public sealed class AgentSessionCoordinator
                 exit, TrustedSession(peer, exit.ProductSessionId, wasArmed), cancellationToken);
         }
 
+        if (request is ListAgentRecoverableRealOperationsRequest list)
+            return await service.ListRecoverableAsync(list,
+                TrustedSession(peer, string.Empty, false), cancellationToken);
+
         if (request is QueryAgentRealOperationRequest query)
         {
             // Read-only reconciliation remains possible after mode exit or App replacement.
@@ -344,6 +357,8 @@ public sealed class AgentSessionCoordinator
         var productSessionId = request switch
         {
             PrepareAgentRealOperationRequest typed => typed.ProductSessionId,
+            QueryAgentRealVirtualDiskCreationRangeRequest typed => typed.ProductSessionId,
+            QueryAgentRealStructureCreationSupportRequest typed => typed.ProductSessionId,
             QueryAgentRealPartitionResizeRangeRequest typed => typed.ProductSessionId,
             _ => string.Empty
         };
@@ -357,6 +372,10 @@ public sealed class AgentSessionCoordinator
         {
             PrepareAgentRealOperationRequest typed =>
                 await service.PrepareAsync(typed, session, cancellationToken),
+            QueryAgentRealVirtualDiskCreationRangeRequest typed =>
+                await service.QueryVirtualDiskCreationRangeAsync(typed, session, cancellationToken),
+            QueryAgentRealStructureCreationSupportRequest typed =>
+                await service.QueryStructureCreationSupportAsync(typed, session, cancellationToken),
             QueryAgentRealPartitionResizeRangeRequest typed =>
                 await service.QueryPartitionResizeRangeAsync(
                     typed, session, cancellationToken),

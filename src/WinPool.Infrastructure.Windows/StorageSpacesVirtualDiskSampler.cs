@@ -66,7 +66,9 @@ public sealed class StorageSpacesVirtualDiskSampler : IDisposable
         var regenerating = ReadCounter(_regenerating);
         var pendingDeletion = ReadCounter(_pendingDeletion);
         return active.Keys
-            .Where(name => !name.Equals("_Total", StringComparison.OrdinalIgnoreCase))
+            .Where(name => !name.Equals("_Total", StringComparison.OrdinalIgnoreCase)
+                && missing.ContainsKey(name) && stale.ContainsKey(name) && needRegeneration.ContainsKey(name)
+                && regenerating.ContainsKey(name) && pendingDeletion.ContainsKey(name))
             .Select(name => new StorageSpacesVirtualDiskSample(
                 name,
                 NonNegative(active.GetValueOrDefault(name)),
@@ -127,7 +129,7 @@ public sealed class StorageSpacesVirtualDiskSampler : IDisposable
                 var item = Marshal.PtrToStructure<PdhFmtCounterValueItem>(
                     nint.Add(buffer, index * itemSize));
                 var name = Marshal.PtrToStringUni(item.Name);
-                if (!string.IsNullOrWhiteSpace(name) && item.Value.Status == 0)
+                if (!string.IsNullOrWhiteSpace(name) && item.Value.Status is 0 or 1 && double.IsFinite(item.Value.DoubleValue))
                 {
                     result[name] = item.Value.DoubleValue;
                 }

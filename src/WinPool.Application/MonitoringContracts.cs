@@ -22,7 +22,13 @@ public enum MonitorMetricKind
 
 public sealed record MonitorTarget(
     StorageObjectId ObjectId,
-    string CounterIdentity);
+    string CounterIdentity)
+{
+    public MonitorCounterSource? CounterSource { get; init; }
+    public string? ProviderIdentity { get; init; }
+    public string? DisplayName { get; init; }
+    public bool SuspendedForEdit { get; init; }
+}
 
 public sealed record MonitorRequest(
     SessionId SessionId,
@@ -40,7 +46,10 @@ public sealed record MonitorSample(
     SessionId SessionId,
     StorageObjectId TargetId,
     DateTimeOffset SampledAtUtc,
-    IReadOnlyList<MonitorMetricValue> Values);
+    IReadOnlyList<MonitorMetricValue> Values)
+{
+    public MonitorCounterSource? CounterSource { get; init; }
+}
 
 public enum MonitoringSessionState
 {
@@ -88,7 +97,10 @@ public sealed record MonitorRuntimeDiagnostics(
     string? PersistenceFailureOccurrenceId = null,
     string? ArchiveFailureOccurrenceId = null,
     bool HasRecoveredInterruptedSession = false,
-    string? RecoveredInterruptedSessionOccurrenceId = null);
+    string? RecoveredInterruptedSessionOccurrenceId = null)
+{
+    public IReadOnlyList<MonitorEditTargetState> EditTargets { get; init; } = [];
+}
 
 /// <summary>
 /// Persistence-specific facts supplied by an optional monitoring writer.

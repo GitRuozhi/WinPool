@@ -36,6 +36,11 @@ public sealed class RotatingMonitorSessionPersistenceTests
         var session = CreateTwoTargetSession();
         await using var persistence = factory.Create(session.SessionId);
         await persistence.StartAsync(session, CancellationToken.None);
+        var editGap = new MonitorEditGap(Guid.NewGuid().ToString("N"), session.SessionId, session.Request.SystemId,
+            session.Request.Targets[0].ObjectId, "disk-number:7", OperationId.New(), "edit-step",
+            DateTimeOffset.FromUnixTimeMilliseconds(session.CreatedAtUtc.ToUnixTimeMilliseconds()),
+            null, MonitorEditTargetStatus.PendingVerification, "monitor.edit.outcome_needs_reconciliation");
+        await ((IMonitorEditGapPersistence)persistence).SaveEditGapAsync(editGap, CancellationToken.None);
         var accepted = new List<MonitorSample>();
         var producedFrames = 0;
         var producer = Task.Run(async () =>
@@ -77,6 +82,8 @@ public sealed class RotatingMonitorSessionPersistenceTests
         }
 
         await producer;
+        var carriedGap = Assert.Single(await factory.LoadOpenEditGapsAsync(CancellationToken.None));
+        Assert.Equal(editGap, carriedGap);
         await persistence.FlushAsync(CancellationToken.None);
         await persistence.CompleteAsync(
             MonitoringSessionState.Stopped,

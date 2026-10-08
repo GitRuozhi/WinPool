@@ -85,7 +85,7 @@ public sealed class NullMonitorSessionPersistenceFactory
     }
 }
 
-public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
+public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinator, IRealStorageEditObserver
 {
     private static readonly TimeSpan MinimumInterval = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan MaximumInterval = TimeSpan.FromSeconds(5);
@@ -103,7 +103,8 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
         IMonitorSessionPersistenceFactory? persistenceFactory = null,
         int latestWindowCapacity = 1_200,
         int subscriberCapacity = 1_200,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IMonitorTargetIdentityResolver? targetIdentityResolver = null)
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         this.persistenceFactory = persistenceFactory
@@ -121,6 +122,8 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
         this.latestWindowCapacity = latestWindowCapacity;
         this.subscriberCapacity = subscriberCapacity;
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.targetIdentityResolver = targetIdentityResolver;
+        if (source is IRebindableMonitorSource rebindable) rebindable.SetAvailabilityObserver(ObserveAvailabilityAsync);
     }
 
     public MonitoringSession? CurrentSession =>
@@ -146,7 +149,7 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
                     MonitoringSessionState.Starting or MonitoringSessionState.Running);
             if (active is null)
             {
-                var terminal = Volatile.Read(ref lastDiagnostics);
+                var terminal = Volatile.Read(ref lastDiagnostics) with { EditTargets = SnapshotEditTargets() };
                 var background = (persistenceFactory as IMonitoringPersistenceBackgroundDiagnostics)
                     ?.GetBackgroundDiagnostics();
                 return background is null
@@ -163,7 +166,7 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
                     };
             }
 
-            var diagnostics = active.Diagnostics();
+            var diagnostics = active.Diagnostics() with { EditTargets = SnapshotEditTargets() };
             Volatile.Write(ref lastDiagnostics, diagnostics);
             return diagnostics;
         }
@@ -193,6 +196,42 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
                 Message("monitor.session.already_running"));
         }
 
+        if (targetIdentityResolver is not null)
+        {
+            try
+            {
+                var resolution = await targetIdentityResolver.ResolveAsync(request, null, cancellationToken);
+                identityFacts = resolution.Facts;
+                request = request with { SystemId = resolution.SystemId, Targets = resolution.Targets
+                    .Where(x => !editTargets.TryGetValue(x.ObjectId, out var state) || state.Status != MonitorEditTargetStatus.RemovedByEdit)
+                    .Select(x => editTargets.TryGetValue(x.ObjectId, out var state) && state.OperationId.Value != Guid.Empty
+                        && (state.Status is MonitorEditTargetStatus.PendingVerification or MonitorEditTargetStatus.NeedsSelection
+                            || state.Status == MonitorEditTargetStatus.Editing && state.ReasonCode == "monitor.edit.expected_change_sampling_paused")
+                        && !CanSampleVerifiedTarget(resolution, x, state)
+                        ? x with { SuspendedForEdit = true } : x).ToArray() };
+                foreach (var state in editTargets.Values.Where(x => x.SystemId == resolution.SystemId
+                    && HasResumableSamplingEvidence(x)
+                    && !request.Targets.Any(target => target.ObjectId == x.TargetId && !target.SuspendedForEdit)))
+                    editTargets.TryUpdate(state.TargetId, state with { Status = MonitorEditTargetStatus.NeedsSelection }, state);
+                foreach (var state in resolution.UnresolvedTargets)
+                {
+                    // A missing binding must not erase the operation identity of
+                    // an outstanding call, nor rewrite a historical gap endpoint.
+                    if (editTargets.TryGetValue(state.TargetId, out var prior) && prior.OperationId.Value != Guid.Empty)
+                    {
+                        if (HasResumableSamplingEvidence(prior))
+                            editTargets.TryUpdate(state.TargetId, prior with { Status = MonitorEditTargetStatus.NeedsSelection }, prior);
+                    }
+                    else editTargets[state.TargetId] = state;
+                }
+                if (source is IRebindableMonitorSource rebindable) rebindable.SetTargets(request.SessionId, request.Targets);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                return ApplicationResult<MonitoringSession>.FromStatus(ApplicationStatus.Failed, correlationId,
+                    new ApplicationMessage("monitor.identity.failed", "monitor.identity.failed", exception.Message, ApplicationMessageSeverity.Error, []));
+            }
+        }
         var createdAt = timeProvider.GetUtcNow();
         var initial = new MonitoringSession(
             request.SessionId,
@@ -392,6 +431,7 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             var dropped = active.PersistenceDroppedSamples;
             try
             {
+                await FlushAvailabilityAsync();
                 if (dropped > 0)
                 {
                     await active.Persistence.AddDroppedSamplesAsync(
@@ -423,6 +463,8 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             active.SetState(finalState, endedAt);
             Volatile.Write(ref lastDiagnostics, active.Diagnostics());
             active.CompleteSubscribers();
+            if (source is IRebindableMonitorSource rebindable) rebindable.ReleaseTargets(active.Request.SessionId);
+            foreach (var key in counterAvailability.Keys.Where(x => x.Item1 == active.Request.SessionId)) counterAvailability.TryRemove(key, out _);
             sessions.TryRemove(active.Request.SessionId, out _);
         }
     }
@@ -690,13 +732,24 @@ public sealed class MonitoringSessionCoordinator : IMonitoringCoordinator
             }
         }
 
-        public bool Accepts(MonitorSample sample) =>
-            sample.SessionId == Request.SessionId
-            && sample.TargetId.System == Request.SystemId
-            && (Targets.Contains(sample.TargetId)
-                || Request.Targets.Any(target =>
-                    target.CounterIdentity == "*"
-                    && target.ObjectId.Kind == sample.TargetId.Kind));
+        public void ReplaceTargets(IReadOnlyList<MonitorTarget> targets)
+        {
+            lock (gate)
+            {
+                session = session with { Request = session.Request with { Targets = targets.ToArray() } };
+                Targets.Clear();
+                foreach (var target in targets) Targets.Add(target.ObjectId);
+            }
+        }
+
+        public bool Accepts(MonitorSample sample)
+        {
+            lock (gate)
+                return sample.SessionId == Request.SessionId
+                    && sample.TargetId.System == Request.SystemId
+                    && (Targets.Contains(sample.TargetId)
+                        || Request.Targets.Any(target => target.CounterIdentity == "*" && target.ObjectId.Kind == sample.TargetId.Kind));
+        }
 
         public sealed class Subscriber(Channel<MonitorSample> channel)
         {

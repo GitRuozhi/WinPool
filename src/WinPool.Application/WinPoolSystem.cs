@@ -171,39 +171,50 @@ public static class WinPoolFactRefresh
         if (current.SystemId != incoming.SystemId) throw new InvalidOperationException("Collection belongs to another system.");
         if (current.IsSimulation || current.Sources.Any(x => x.Origin == FactOrigin.Simulation))
             throw new InvalidOperationException("A live collection cannot refresh a simulation or imported system.");
-        static (string, string) Key(WinPoolSource source) => (source.Namespace, source.ClassName);
-        var oldByKey = current.Sources.GroupBy(Key).ToDictionary(x => x.Key, x => x.Max(s => s.CapturedAt));
-        var accepted = incoming.Sources.Where(x => !oldByKey.TryGetValue(Key(x), out var time) || x.CapturedAt > time).ToArray();
+        static (string, string) Key(WinPoolSource source) => (source.Namespace.ToLowerInvariant(), source.ClassName);
+        static bool Covers(WinPoolSource source, string id) => source.Coverage is null || source.Coverage.ObjectIds.Contains(id);
+        static bool Complete(WinPoolSource source) => source.ReadState == FieldReadState.Returned && (source.Coverage?.Complete ?? true);
+        static bool Newer(WinPoolSource source, WinPoolSource previous) => source.CapturedAt > previous.CapturedAt
+            && (source.CaptureGeneration == 0 || previous.CaptureGeneration == 0 || source.CaptureGeneration > previous.CaptureGeneration);
+        var oldByKey = current.Sources.GroupBy(Key).ToDictionary(x => x.Key, x => x.ToArray());
+        bool CanApply(WinPoolSource source, string id) => !oldByKey.TryGetValue(Key(source), out var old)
+            || old.Where(x => Covers(x, id)).All(x => Newer(source, x));
+        // Keep independent scope markers (including successful empty sets) so a late full result
+        // cannot resurrect objects deleted by a newer local capture.
+        var accepted = incoming.Sources.Where(source => !oldByKey.TryGetValue(Key(source), out var old)
+            || old.Where(x => x.Coverage is null || x.Coverage.ScopeKey == source.Coverage?.ScopeKey)
+                .All(x => Newer(source, x))).ToArray();
         if (accepted.Length == 0) return current;
-        var replaceKeys = accepted.Where(x => x.ReadState == FieldReadState.Returned).Select(Key).ToHashSet();
-        var removedSourceIds = current.Sources.Where(x => replaceKeys.Contains(Key(x))).Select(x => x.Id).ToHashSet();
-        var acceptedSourceIds = accepted.Where(x => x.ReadState == FieldReadState.Returned).Select(x => x.Id).ToHashSet();
-        var replacedObjectIds = current.Objects.Where(x => removedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
-        var acceptedObjectIds = incoming.Objects.Where(x => acceptedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
-        var staleObjectIds = incoming.Objects.Where(x => !acceptedSourceIds.Contains(x.SourceRef)).Select(x => x.Id).ToHashSet();
-        var objects = current.Objects.Where(x => !removedSourceIds.Contains(x.SourceRef))
-            .Concat(incoming.Objects.Where(x => acceptedSourceIds.Contains(x.SourceRef))).ToImmutableArray();
-        var objectIds = objects.Select(x => x.Id).ToHashSet();
-        var sources = current.Sources.Where(x => !removedSourceIds.Contains(x.Id)).Concat(accepted)
-            .DistinctBy(x => x.Id).ToImmutableArray();
-        var acceptedRelations = incoming.Relationships.Where(x =>
-            (acceptedObjectIds.Contains(x.FromId) || acceptedObjectIds.Contains(x.ToId))
-            && !staleObjectIds.Contains(x.FromId) && !staleObjectIds.Contains(x.ToId)).ToArray();
+        var acceptedById = accepted.ToDictionary(x => x.Id);
         var oldObjects = current.Objects.ToDictionary(x => x.Id);
         var oldSources = current.Sources.ToDictionary(x => x.Id);
+        var removedObjectIds = current.Objects.Where(item => accepted.Any(source => Key(source) == Key(oldSources[item.SourceRef])
+            && Complete(source) && Covers(source, item.Id) && CanApply(source, item.Id))).Select(x => x.Id).ToHashSet();
+        var returned = incoming.Objects.Where(item => acceptedById.TryGetValue(item.SourceRef, out var source)
+            && source.ReadState == FieldReadState.Returned && Covers(source, item.Id) && CanApply(source, item.Id)).ToArray();
+        var acceptedObjectIds = returned.Select(x => x.Id).ToHashSet();
+        var replacedObjectIds = removedObjectIds.Concat(acceptedObjectIds).ToHashSet();
+        var objects = current.Objects.Where(x => !replacedObjectIds.Contains(x.Id)).Concat(returned).ToImmutableArray();
+        var objectIds = objects.Select(x => x.Id).ToHashSet();
+        var sources = current.Sources.Concat(accepted)
+            .DistinctBy(x => x.Id).ToImmutableArray();
+        var acceptedRelations = incoming.Relationships.Where(x =>
+            acceptedObjectIds.Contains(x.FromId) && acceptedObjectIds.Contains(x.ToId)).ToArray();
+        var fullyRefreshed = removedObjectIds;
         var retainedRelations = current.Relationships
-            .Where(x => !(replacedObjectIds.Contains(x.FromId) && replacedObjectIds.Contains(x.ToId)))
+            .Where(x => !(fullyRefreshed.Contains(x.FromId) && fullyRefreshed.Contains(x.ToId)))
             .Where(x => !acceptedRelations.Any(y => y.FromId == x.FromId && y.ToId == x.ToId && y.Kind == x.Kind))
             .Select(x => replacedObjectIds.Contains(x.FromId) || replacedObjectIds.Contains(x.ToId)
                 ? x with { IsRetained = true, ReasonCode = "PartialCollection",
                     ObservedAt = x.ObservedAt ?? oldSources[oldObjects[x.ToId].SourceRef].CapturedAt }
                 : x);
         var usedSources = objects.Select(x => x.SourceRef).Concat(objects.SelectMany(x => x.Fields.Select(f => f.SourceRef))).ToHashSet();
-        var latestSources = sources.GroupBy(Key).Select(x => x.MaxBy(s => s.CapturedAt)!.Id).ToHashSet();
+        var latestSources = sources.GroupBy(x => (Key(x), x.Coverage?.ScopeKey))
+            .Select(x => x.OrderByDescending(s => s.CaptureGeneration).ThenByDescending(s => s.CapturedAt).First().Id).ToHashSet();
         sources = sources.Where(x => usedSources.Contains(x.Id) || latestSources.Contains(x.Id)).ToImmutableArray();
         var merged = current with
         {
-            Revision = checked(current.Revision + 1), Sources = sources, Objects = objects,
+            Revision = checked(current.Revision + 1), Sources = sources, Objects = objects, IsMerged = true,
             InventoryVersion = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryVersion : current.InventoryVersion,
             InventoryCapturedAt = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryCapturedAt : current.InventoryCapturedAt,
             Relationships = retainedRelations.Concat(acceptedRelations)
@@ -212,7 +223,11 @@ public static class WinPoolFactRefresh
             Identities = current.Identities.Concat(incoming.Identities)
                 .DistinctBy(x => (x.ObjectType, x.SourceIdentity)).ToImmutableArray(),
             Collections = current.Collections.Concat(incoming.Collections).GroupBy(x => x.Purpose)
-                .Select(x => x.MaxBy(y => y.StartedAt)!).ToImmutableArray()
+                .Select(x => x.MaxBy(y => y.StartedAt)!).ToImmutableArray(),
+            ScopedCollection = incoming.ScopedCollection is { } scoped
+                && (current.ScopedCollection is not { } previousScope || scoped.Scope.Generation > previousScope.Scope.Generation
+                    || (scoped.Scope.Generation == previousScope.Scope.Generation && scoped.StartedAt > previousScope.StartedAt))
+                ? scoped : current.ScopedCollection
         };
         merged.Validate();
         return merged;

@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
 using WinPool.Application;
@@ -17,6 +17,15 @@ public sealed partial class TopologyNodeControl : UserControl
     private bool _wasSelected;
     private bool _isPointerOver;
     private bool _hasKeyboardFocus;
+    private static TopologyNodeControl? s_activeDrag;
+    private static TopologyNodeControl? s_highlightedDropTarget;
+    private static long s_suppressTapUntil;
+    private Pointer? _dragPointer;
+    private Point _dragStart;
+    private UIElement? _dragRoot;
+    private TopologyEditInteraction? _dragInteraction;
+    private bool _isDragging;
+    private bool _suppressNextTap;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -31,10 +40,12 @@ public sealed partial class TopologyNodeControl : UserControl
         ContextHelp.SetDisabledReason(ExpandButton, "当前节点没有可展开的子项。 / This node has no child items to expand.");
         Loaded += (_, _) => UpdateSelectionVisual();
         ActualThemeChanged += (_, _) => UpdateSelectionVisual();
-        DragStarting += TopologyNodeControl_DragStarting;
-        DragOver += TopologyNodeControl_DragOver;
-        DragLeave += TopologyNodeControl_DragLeave;
-        Drop += TopologyNodeControl_Drop;
+        PointerPressed += TopologyNodeControl_PointerPressed;
+        PointerMoved += TopologyNodeControl_PointerMoved;
+        PointerReleased += TopologyNodeControl_PointerReleased;
+        PointerCanceled += (_, _) => CancelInternalDrag();
+        PointerCaptureLost += (_, _) => CancelInternalDrag();
+        Unloaded += (_, _) => CancelInternalDrag();
     }
 
     public TopologyNodeViewModel ViewModel
@@ -46,6 +57,7 @@ public sealed partial class TopologyNodeControl : UserControl
     private static void OnViewModelChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
     {
         var control = (TopologyNodeControl)dependencyObject;
+        control.CancelInternalDrag();
         if (args.OldValue is TopologyNodeViewModel oldValue)
         {
             oldValue.PropertyChanged -= control.ViewModel_PropertyChanged;
@@ -55,8 +67,10 @@ public sealed partial class TopologyNodeControl : UserControl
             newValue.PropertyChanged += control.ViewModel_PropertyChanged;
         }
         control.Bindings.Update();
-        control.CanDrag = args.NewValue is TopologyNodeViewModel drag && drag.IsDragSource;
-        control.AllowDrop = true;
+        // This editor transfers a relationship inside this XamlRoot, never
+        // data to the shell. Native data-transfer dragging fails elevated.
+        control.CanDrag = false;
+        control.AllowDrop = false;
         control.UpdateSelectionVisual();
     }
 
@@ -287,6 +301,12 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void NodeBorder_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
+        if (_suppressNextTap || Environment.TickCount64 < s_suppressTapUntil)
+        {
+            _suppressNextTap = false;
+            e.Handled = true;
+            return;
+        }
         if (ViewModel?.IsSelectable == true)
         {
             ViewModel.SelectCommand.Execute(null);
@@ -296,6 +316,11 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void NodeBorder_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
     {
+        if (s_activeDrag is not null || Environment.TickCount64 < s_suppressTapUntil)
+        {
+            e.Handled = true;
+            return;
+        }
         if (ViewModel?.IsSelectable == true && sender is FrameworkElement element)
         {
             ViewModel.RequestContextMenu(element, e.GetPosition(element));
@@ -318,50 +343,126 @@ public sealed partial class TopologyNodeControl : UserControl
         UpdateSelectionVisual();
     }
 
-    private void TopologyNodeControl_DragStarting(UIElement sender, DragStartingEventArgs e)
-    {
-        if (ViewModel?.IsDragSource != true)
-        {
-            e.Cancel = true;
-            return;
-        }
+    private bool CanStartInternalDrag => IsLoaded && IsEnabled
+        && ViewModel?.IsDragSource == true
+        && ViewModel.EditInteraction is { OnDiskDropped: not null } interaction
+        && (interaction.CanEditNow?.Invoke() ?? true);
 
-        e.Data.SetText(ViewModel.Unit.StableId);
-        e.Data.RequestedOperation = DataPackageOperation.Move;
+    private static TopologyNodeControl? NearestTopologyNode(DependencyObject? element)
+    {
+        while (element is not null && element is not TopologyNodeControl)
+            element = VisualTreeHelper.GetParent(element);
+        return element as TopologyNodeControl;
     }
 
-    private static TopologyNodeControl? s_highlightedDropTarget;
-
-    private void TopologyNodeControl_DragOver(object sender, DragEventArgs e)
+    private void TopologyNodeControl_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (!e.DataView.Contains(StandardDataFormats.Text))
+        if (_dragPointer is not null) return;
+        _suppressNextTap = false;
+        var buttons = e.GetCurrentPoint(this).Properties;
+        if (!CanStartInternalDrag || ViewModel is not { } viewModel || XamlRoot?.Content is not UIElement root
+            || !buttons.IsLeftButtonPressed || buttons.IsRightButtonPressed || buttons.IsMiddleButtonPressed
+            || !ReferenceEquals(NearestTopologyNode(e.OriginalSource as DependencyObject), this)) return;
+        // Expander/buttons keep their existing click behavior.
+        for (var element = e.OriginalSource as DependencyObject; element is not null && !ReferenceEquals(element, this);
+             element = VisualTreeHelper.GetParent(element))
+            if (element is Button) return;
+        s_activeDrag?.CancelInternalDrag();
+        if (!CapturePointer(e.Pointer)) return;
+        _dragPointer = e.Pointer;
+        _dragStart = e.GetCurrentPoint(root).Position;
+        _dragRoot = root;
+        root.KeyDown += DragRoot_KeyDown;
+        _dragInteraction = viewModel.EditInteraction;
+        s_activeDrag = this;
+    }
+
+    private void TopologyNodeControl_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragPointer is null || e.Pointer.PointerId != _dragPointer.PointerId || _dragRoot is null) return;
+        if (!CanStartInternalDrag || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
+            CancelInternalDrag();
             return;
         }
-
-        var target = FindPoolDropTargetControl();
-        if (target is null)
+        var point = e.GetCurrentPoint(_dragRoot).Position;
+        if (!_isDragging)
         {
-            return;
+            var dx = point.X - _dragStart.X;
+            var dy = point.Y - _dragStart.Y;
+            if (dx * dx + dy * dy < 64) return; // Eight DIPs; clicks remain clicks.
+            _isDragging = true;
+            _suppressNextTap = true;
+            Focus(FocusState.Programmatic); // Escape now belongs to this drag.
         }
-
-        e.AcceptedOperation = DataPackageOperation.Move;
         e.Handled = true;
+        var target = HitTestDropTarget(point);
         if (!ReferenceEquals(s_highlightedDropTarget, target))
         {
             s_highlightedDropTarget?.ShowDropTargetVisual(false);
-            target.ShowDropTargetVisual(true);
+            target?.ShowDropTargetVisual(true);
             s_highlightedDropTarget = target;
         }
     }
 
-    private void TopologyNodeControl_DragLeave(object sender, DragEventArgs e)
+    private TopologyNodeControl? HitTestDropTarget(Point point)
     {
-        if (ReferenceEquals(s_highlightedDropTarget, this))
+        if (_dragRoot is null || !ReferenceEquals(XamlRoot?.Content, _dragRoot)) return null;
+        // Topmost hit only: never drop through overlays, panels or scrollbars.
+        var hit = VisualTreeHelper.FindElementsInHostCoordinates(point, _dragRoot).FirstOrDefault();
+        var target = NearestTopologyNode(hit)?.FindPoolDropTargetControl();
+        return target is { IsLoaded: true, IsEnabled: true }
+            && ReferenceEquals(target.XamlRoot, XamlRoot)
+            && ReferenceEquals(target.ViewModel?.EditInteraction, _dragInteraction)
+            && (target.ViewModel?.EditInteraction?.CanEditNow?.Invoke() ?? true) ? target : null;
+    }
+
+    private void TopologyNodeControl_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragPointer is null || e.Pointer.PointerId != _dragPointer.PointerId) return;
+        // Another mouse button can release while the captured left button is held.
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        var dragging = _isDragging;
+        var target = dragging && CanStartInternalDrag && _dragRoot is not null
+            ? HitTestDropTarget(e.GetCurrentPoint(_dragRoot).Position) : null;
+        var diskId = ViewModel.Unit.StableId;
+        var targetId = target?.ViewModel?.Unit.StableId;
+        var callback = _dragInteraction?.OnDiskDropped;
+        if (dragging)
         {
-            ShowDropTargetVisual(false);
-            s_highlightedDropTarget = null;
+            e.Handled = true;
+            s_suppressTapUntil = Environment.TickCount64 + 250;
         }
+        // Clear capture/state before the callback can rebuild/unload this card.
+        CancelInternalDrag();
+        if (dragging && targetId is not null) callback?.Invoke(diskId, targetId);
+    }
+
+    private void CancelInternalDrag()
+    {
+        if (_dragPointer is null) return;
+        var pointer = _dragPointer;
+        _dragPointer = null;
+        if (_isDragging)
+        {
+            _suppressNextTap = true;
+            s_suppressTapUntil = Environment.TickCount64 + 250;
+        }
+        _isDragging = false;
+        if (_dragRoot is not null) _dragRoot.KeyDown -= DragRoot_KeyDown;
+        _dragRoot = null;
+        _dragInteraction = null;
+        if (ReferenceEquals(s_activeDrag, this)) s_activeDrag = null;
+        s_highlightedDropTarget?.ShowDropTargetVisual(false);
+        s_highlightedDropTarget = null;
+        ReleasePointerCapture(pointer);
+    }
+
+    private void DragRoot_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Escape || _dragPointer is null) return;
+        CancelInternalDrag();
+        e.Handled = true;
     }
 
     private void ShowDropTargetVisual(bool on)
@@ -372,35 +473,9 @@ public sealed partial class TopologyNodeControl : UserControl
         }
     }
 
-    private async void TopologyNodeControl_Drop(object sender, DragEventArgs e)
-    {
-        var poolId = FindPoolDropTarget();
-        if (poolId is null || !e.DataView.Contains(StandardDataFormats.Text))
-        {
-            return;
-        }
-
-        var diskId = await e.DataView.GetTextAsync();
-        if (!string.IsNullOrWhiteSpace(diskId))
-        {
-            ViewModel.EditInteraction?.OnDiskDropped?.Invoke(diskId, poolId);
-        }
-
-        s_highlightedDropTarget?.ShowDropTargetVisual(false);
-        s_highlightedDropTarget = null;
-        e.Handled = true;
-    }
-
-    private string? FindPoolDropTarget()
-    {
-        var target = FindPoolDropTargetControl();
-        return target?.ViewModel?.Unit.StableId;
-    }
-
     /// <summary>
-    /// Resolves the pool card under the pointer. Only pool-kind nodes are
-    /// drop targets — never the source pool via a fallback, and never a
-    /// tier card (which previously lit up as a false target).
+    /// Resolves an explicit editor drop target under the pointer or its parent.
+    /// Pool and simulation retired/hot-spare roles retain their existing gates.
     /// </summary>
     private TopologyNodeControl? FindPoolDropTargetControl()
     {
@@ -424,6 +499,17 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void TopologyNodeControl_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == Windows.System.VirtualKey.Escape && _dragPointer is not null)
+        {
+            CancelInternalDrag();
+            e.Handled = true;
+            return;
+        }
+        if (_isDragging)
+        {
+            e.Handled = true;
+            return;
+        }
         if (ViewModel?.IsSelectable != true
             || e.Key is not (Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space))
         {

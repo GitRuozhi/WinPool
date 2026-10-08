@@ -4,11 +4,50 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using WinPool.Ipc;
+using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.Ipc.Tests;
 
 public sealed class IpcProtocolTests
 {
+    [Fact]
+    public async Task ScopedInventoryFramePreservesExactIdentityClosureAndGeneration()
+    {
+        var system = SystemId.New();
+        var target = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "physical:unique-id");
+        var scope = new StorageInventoryScope(system, OperationId.New(), "verified-step", [target],
+            [target.ProviderKey, "partition:removed"], [new(target, "MSFT_PhysicalDisk", "UniqueId", "50014E2E14568901")], 42);
+        var request = new CaptureAgentManageScopedInventoryRequest(scope, CorrelationId.New());
+        var envelope = new IpcEnvelope(IpcProtocol.CurrentVersion, Guid.NewGuid(), Guid.NewGuid(),
+            AgentControlMessageTypes.CaptureManageScopedInventory, DateTimeOffset.UtcNow,
+            JsonSerializer.SerializeToElement(request));
+        await using var stream = new MemoryStream();
+        await IpcFrameCodec.WriteAsync(stream, envelope);
+        stream.Position = 0;
+        var recovered = (await IpcFrameCodec.ReadAsync(stream)).Payload.Deserialize<CaptureAgentManageScopedInventoryRequest>()!;
+        recovered.Scope.Validate();
+        Assert.Equal(scope.SystemId, recovered.Scope.SystemId);
+        Assert.Equal(scope.OperationId, recovered.Scope.OperationId);
+        Assert.Equal(scope.StepId, recovered.Scope.StepId);
+        Assert.Equal(42, recovered.Scope.Generation);
+        Assert.Equal(scope.BeforeObjectIds, recovered.Scope.BeforeObjectIds);
+        Assert.Equal(scope.BeforeLocators, recovered.Scope.BeforeLocators);
+        Assert.Equal(request.CorrelationId, recovered.CorrelationId);
+    }
+
+    [Fact]
+    public void CreationRangeResponsePreservesExactBytesInsteadOfRoundedDisplayUnits()
+    {
+        var target = new StorageObjectId(SystemId.New(), StorageObjectKind.StorageTier, "tier:exact");
+        var range = new RealVirtualDiskCreationRange(target, 1073741824, 4000317439744, 268435456,
+            33554432, [], "target-fingerprint", DateTimeOffset.UtcNow);
+        var recovered = JsonSerializer.Deserialize<AgentRealVirtualDiskCreationRangeResponse>(
+            JsonSerializer.Serialize(new AgentRealVirtualDiskCreationRangeResponse(range)))!;
+        Assert.Equal(range, recovered.Range with { EnumeratedSizes = range.EnumeratedSizes });
+        Assert.Equal(range.ResolveMaximum(), recovered.Range.ResolveMaximum());
+    }
+
     [Fact]
     public async Task FrameCodecRoundTripsOneEnvelope()
     {

@@ -42,6 +42,10 @@ public static class AgentControlMessageTypes
         "agent.request.query_real_partition_resize_range";
     public const string StopRealOperationFollowingSteps =
         "agent.request.stop_real_operation_following_steps";
+    public const string QueryRealVirtualDiskCreationRange = "agent.request.query_real_virtual_disk_creation_range";
+    public const string QueryRealStructureCreationSupport = "agent.request.query_real_structure_creation_support";
+    public const string ListRecoverableRealOperations = "agent.request.list_recoverable_real_operations";
+    public const string CaptureManageScopedInventory = "agent.request.capture_manage_scoped_inventory";
     public const string Shutdown = "agent.request.shutdown";
     public const string Response = "agent.response";
 }

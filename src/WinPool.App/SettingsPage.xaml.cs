@@ -274,7 +274,7 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        App.Window.Close();
+        ((MainWindow)App.Window).RequestClose();
     }
 
     private async Task RestartAgentAfterAbortedSwitchAsync()

@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
+using System.Text.Json;
 using WinPool.App.ViewModels;
 using WinPool.App.Services;
 using WinPool.Application;
@@ -22,8 +23,6 @@ namespace WinPool_App;
 public sealed partial class DiskPartitionPage : EditorPageBase
 {
     private const string NoneLetterValue = "";
-    private sealed record InitializedDiskLayoutOptions(
-        bool CreateMsr, long? DiskSizeBytes, bool FormatNtfs, string? Label, char? Letter);
 
     private string? _selectedDiskId;
     private string? _selectedPartitionId;
@@ -68,6 +67,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     }
 
     internal void RefreshExecutionMode() => UpdateButtonState();
+
+    protected override void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase)
+    {
+        RealTopologyOverlay.Visibility = showOverlay ? Visibility.Visible : Visibility.Collapsed;
+        RealTopologyProgress.IsActive = showOverlay;
+        RealTopologyPhase.Text = phase;
+        UpdateButtonState();
+    }
 
     protected override void OnRealInventoryRefreshed()
     {
@@ -124,11 +131,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
         StopRealOperationButton.Content = Text("按 ID 停止后续真实步骤", "Stop following real steps by ID");
         StopRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
-        OnlineButtonLabel.Text = Text("联机", "Online");
-        OfflineButtonLabel.Text = Text("脱机", "Offline");
-        InitializeButtonLabel.Text = ViewModel.Localization["InitializeDisk"];
-        ConvertGptButtonLabel.Text = Text("转换为 GPT", "Convert to GPT");
-        ClearDiskForPoolButtonLabel.Text = Text("清空至 RAW（独立操作）", "Clear to RAW (separate operation)");
+        DiskOnlineStateButtonLabel.Text = Text("联机/脱机", "Online/offline");
+        DiskPartitionStyleButtonLabel.Text = Text("分区表状态", "Partition style");
+        ClearDiskButtonLabel.Text = Text("清空至 RAW", "Clear to RAW");
         DeletePartitionButtonLabel.Text = Text("删除分区", "Delete partition");
         ExtendButtonLabel.Text = Text("扩展分区", "Extend partition");
         ShrinkButtonLabel.Text = Text("压缩分区", "Shrink partition");
@@ -153,24 +158,25 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         AutomationProperties.SetName(MaximumSizeButton, Text("使用最大容量", "Use maximum capacity"));
         AutomationProperties.SetName(SizeBox, Text("容量", "Capacity"));
         AutomationProperties.SetName(SizeAdaptiveValue, Text("自适应容量单位", "Adaptive capacity unit"));
-        ContextHelp.Set(OnlineButton,
-            Text("将符合条件的磁盘联机；本机真实操作需单独预览和确认。", "Bring an eligible disk online; a real local operation requires its own preview and confirmation."));
-        ContextHelp.Set(OfflineButton,
-            Text("将符合条件的非系统磁盘脱机；本机真实操作需单独预览和确认。", "Take an eligible non-system disk offline; a real local operation requires its own preview and confirmation."));
-        ContextHelp.Set(InitializeButton,
-            Text("初始化符合条件的 RAW 磁盘；本机真实操作会修改磁盘结构。", "Initialize an eligible RAW disk; a real local operation changes its disk structure."));
-        ContextHelp.Set(ConvertGptButton,
-            Text("将符合条件的模拟 MBR 磁盘转换为 GPT。", "Convert an eligible simulated MBR disk to GPT."));
+        ContextHelp.Set(DiskOnlineStateButton,
+            Text("根据磁盘当前采集到的联机状态提供相反动作；真实操作在计划核对成功后才更新显示。",
+                "Offers the opposite of the collected disk online state; the displayed state changes only after a real operation is verified."));
+        ContextHelp.Set(DiskPartitionStyleButton,
+            Text("RAW 可初始化为 GPT；模拟 MBR 可转换为 GPT；GPT 已初始化后此按钮禁用。真实 MBR 转换尚未支持。",
+                "Initialize RAW as GPT, or convert a simulated MBR disk to GPT. GPT is already initialized and disables this button. Real MBR conversion is not supported."));
+        ContextHelp.Set(ClearDiskButton,
+            Text("独立清除所选磁盘的分区和卷结构至 RAW；不全盘写零、不初始化、不格式化，也不创建池。",
+                "Independently clear the selected disk's partition and volume structure to RAW. This does not zero the whole disk, initialize, format, or create a pool."));
         ContextHelp.Set(DeletePartitionButton,
             Text("删除符合条件的非系统、非启动分区；真实删除会使该分区的数据丢失。", "Delete an eligible non-system, non-boot partition; real deletion loses its data."));
         ContextHelp.Set(ExtendButton,
             Text(
-                "选择“扩展分区”后，输入更大的目标总容量（MiB 整数，按 1 MiB 对齐）；真实操作由 Agent 查询 Windows 实时支持范围。",
-                "Select Extend partition, then enter a larger total target capacity as a whole number of MiB (1 MiB-aligned); for real operations, the Agent queries the live Windows supported range."));
+                "公式为 A MiB + B MiB = C MiB。A 只读；B 扩展量与 C 目标总容量可双向编辑。第二行显示同一容量的自适应单位；真实范围由 Agent 实时查询。",
+                "The formula is A MiB + B MiB = C MiB. A is read-only; B (the amount added) and C (the total target) update each other. The second row shows adaptive units; the Agent reads the live real-operation range."));
         ContextHelp.Set(ShrinkButton,
             Text(
-                "选择“压缩分区”后，输入更小的目标总容量（MiB 整数，按 1 MiB 对齐）；真实操作由 Agent 查询 Windows 实时支持范围。",
-                "Select Shrink partition, then enter a smaller total target capacity as a whole number of MiB (1 MiB-aligned); for real operations, the Agent queries the live Windows supported range."));
+                "公式为 A MiB − B MiB = C MiB。A 只读；B 压缩量与 C 目标总容量可双向编辑。第二行显示同一容量的自适应单位；真实范围由 Agent 实时查询。",
+                "The formula is A MiB − B MiB = C MiB. A is read-only; B (the amount removed) and C (the total target) update each other. The second row shows adaptive units; the Agent reads the live real-operation range."));
         ContextHelp.Set(OpenExplorerButton,
             Text("仅打开有本机盘符的现有本机卷。", "Open only an existing local volume with a local drive letter."));
         ContextHelp.Set(PartitionTypeBox,
@@ -653,6 +659,63 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private OsDiskInfo? SelectedDisk() =>
         _working.OsDisks.FirstOrDefault(item => item.StableId == _selectedDiskId);
 
+    private bool TryGetDiskOfflineState(OsDiskInfo disk, out bool offline)
+    {
+        offline = false;
+        var facts = ViewModel.ActiveDocument.SourceFacts;
+        if (facts is null || facts.SystemId != ViewModel.ActiveDocument.SystemId)
+            return false;
+
+        var sources = facts.Objects.Where(item => item.ObjectType == FactObjectType.Disk
+            && string.Equals(item.Id, disk.StableId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (sources.Length != 1)
+            return false;
+
+        if (sources[0].Field("IsOffline") is not
+                { ReadState: FieldReadState.Returned, Value: { } value }
+            || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return false;
+
+        offline = value.GetBoolean();
+        return true;
+    }
+
+    private bool IsProtectedDiskTarget(OsDiskInfo disk)
+    {
+        var physical = _working.PhysicalDisks.FirstOrDefault(item =>
+            string.Equals(item.StableId, disk.PhysicalDiskStableId, StringComparison.OrdinalIgnoreCase));
+        return disk.IsBoot || disk.IsSystem || physical?.IsPageFile == true || physical?.IsCrashDump == true;
+    }
+
+    private string? ResolveDiskActionDisabledReason(
+        bool simulated,
+        bool real,
+        OsDiskInfo? disk,
+        bool isDiskSelection,
+        bool? offlineState,
+        bool protectedDisk,
+        bool operationBusy,
+        bool requireOnline)
+    {
+        if (operationBusy)
+            return Text("另一项磁盘操作仍在执行或等待核对。", "Another disk operation is running or awaiting reconciliation.");
+        if (!simulated && !real)
+            return LocalReadOnlyReason();
+        if (disk is null)
+            return Text("请选择一个准确的磁盘。", "Select an exact disk.");
+        if (!isDiskSelection)
+            return Text("请先选择磁盘本身，而不是分区或未分配空间。",
+                "Select the disk itself, not a partition or unallocated space.");
+        if (offlineState is null)
+            return Text("无法从该磁盘的准确来源读取联机状态。", "The online state is unavailable from this disk's exact source.");
+        if (protectedDisk)
+            return Text("系统、启动、分页文件或转储磁盘不能在此入口修改联机状态或结构。",
+                "System, boot, page-file, and crash-dump disks cannot change online state or structure here.");
+        if (requireOnline && offlineState.Value)
+            return Text("该磁盘当前脱机；请先联机后执行结构操作。", "The disk is offline; bring it online before changing its structure.");
+        return null;
+    }
+
     /// <summary>
     /// Projects the application deletion policy only. The page keeps its
     /// separate simulation-mode and online-disk gates around this result.
@@ -687,6 +750,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private void UpdateButtonState()
     {
         var simulated = ViewModel.IsUsingSimulatedInventory;
+        var real = ViewModel.CanSubmitRealOperation;
+        var operationBusy = ViewModel.IsRealOperationBusy
+            || ViewModel.RealOperationSubmission.IsBlocked;
         var partition = SelectedPartition();
         var disk = SelectedDisk();
         var isPartitionSelection = partition is not null;
@@ -702,7 +768,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var mbr = disk?.PartitionStyle.Equals("MBR", StringComparison.OrdinalIgnoreCase) == true;
         var letter = volume?.DriveLetter ?? (partition is null ? string.Empty : _working.DriveLetterOf(partition));
         var explorerPath = letter.Length == 1 ? $"{letter}:\\" : string.Empty;
-        var diskOffline = disk?.IsOffline == true;
+        var offlineState = disk is not null && TryGetDiskOfflineState(disk, out var collectedOffline)
+            ? collectedOffline
+            : (bool?)null;
+        var diskOffline = offlineState != false;
+        var protectedDisk = disk is not null && IsProtectedDiskTarget(disk);
         var createMode = isGapSelection && alreadyGpt;
         var realEditablePartition = ViewModel.CanSubmitRealOperation
             && partition is { IsBoot: false, IsSystem: false, Type: "Primary" or "BasicData" };
@@ -711,7 +781,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 Type: "Primary" or "BasicData" or "EfiSystem" or "MicrosoftReserved" or "WindowsRecovery" };
         var propertyEnabled = (simulated || (ViewModel.CanSubmitRealOperation && createMode)
             || realEditablePartition)
-            && !diskOffline && (isPartitionSelection || isGapSelection);
+            && !operationBusy && !diskOffline && (isPartitionSelection || isGapSelection);
         var createGeometry = SelectedCreateGeometry();
         var hasIntegerSize = TryGetSizeBytes(out var requestedSizeBytes);
         var maximumCreateSizeBytes = createGeometry?.MaximumSizeBytes;
@@ -719,7 +789,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && createGeometry is { CanCreate: true }
             && maximumCreateSizeBytes is long maximumSizeBytes
             && requestedSizeBytes <= maximumSizeBytes;
-        var contextReason = ResolveContextDisabledReason(simulated, disk, diskOffline);
+        var contextReason = ResolveContextDisabledReason(simulated, disk, offlineState, operationBusy);
         var createReason = contextReason
             ?? (!alreadyGpt
                 ? Text("新建分区需要已初始化的 GPT 模拟磁盘。", "Creating a partition requires an initialized simulated GPT disk.")
@@ -746,7 +816,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 partition.StableId,
                 SimulationEditKind.ShrinkPartition);
         var realResizeCandidate = realEditablePartition && alreadyGpt &&
-            disk is { IsBoot: false, IsSystem: false } && !diskOffline &&
+            disk is { IsBoot: false, IsSystem: false } && !diskOffline && !operationBusy &&
             RealPartitionResizeUiRange.IsSupportedFileSystem(
                 volume?.FileSystem ?? partition?.FileSystem);
         var realRefsResize = realResizeCandidate && string.Equals(
@@ -756,37 +826,67 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var canShrink = (realResizeCandidate && !realRefsResize) || (simulated && propertyEnabled
             && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
 
-        var real = ViewModel.CanSubmitRealOperation;
-        var diskPartitions = disk is null ? Array.Empty<PartitionInfo>()
-            : _working.Partitions.Where(item =>
-                string.Equals(item.OsDiskStableId, disk.StableId,
-                    StringComparison.OrdinalIgnoreCase)).ToArray();
-        var canResumeRealLayout = real && isDiskSelection && alreadyGpt
-            && disk is { IsBoot: false, IsSystem: false, IsOffline: false }
-            && diskPartitions.Length <= 1
-            && diskPartitions.All(IsExactProviderMsr);
         var realRefsUnsupported = real && createMode &&
             SelectedFileSystemToken().Equals("ReFS", StringComparison.OrdinalIgnoreCase);
-        OnlineButton.IsEnabled = (simulated || real) && isDiskSelection && disk is { IsOffline: true };
-        OfflineButton.IsEnabled = (simulated || real)
-            && isDiskSelection
-            && disk is { IsOffline: false, IsBoot: false, IsSystem: false };
-        InitializeButtonLabel.Text = real && alreadyGpt
-            ? Text("完成布局", "Complete layout")
-            : ViewModel.Localization["InitializeDisk"];
-        InitializeButton.IsEnabled = (simulated || real) && isDiskSelection && !diskOffline
-            && disk is { IsBoot: false, IsSystem: false } && raw
-            || canResumeRealLayout;
-        ConvertGptButton.IsEnabled = simulated && isDiskSelection && !diskOffline
-            && disk is { IsBoot: false, IsSystem: false } && mbr;
-        ClearDiskForPoolButton.Visibility = real ? Visibility.Visible : Visibility.Collapsed;
-        ClearDiskForPoolButton.IsEnabled = real && isDiskSelection && !diskOffline
-            && disk is { IsBoot: false, IsSystem: false } && !raw;
+        DiskOnlineStateButtonLabel.Text = disk is null
+            ? Text("联机/脱机", "Online/offline")
+            : offlineState switch
+            {
+                true => Text("联机", "Online"),
+                false => Text("脱机", "Offline"),
+                _ => Text("状态未知", "State unknown")
+            };
+        DiskOnlineStateButtonIcon.Glyph = offlineState == true ? "\uE8FB" : "\uE8AE";
+        DiskPartitionStyleButtonLabel.Text = raw
+            ? ViewModel.Localization["InitializeDisk"]
+            : mbr
+                ? Text("转换为 GPT", "Convert to GPT")
+                : alreadyGpt
+                    ? Text("已初始化", "Already initialized")
+                    : Text("分区表未知", "Partition style unknown");
+        DiskPartitionStyleButtonIcon.Glyph = raw ? "\uE9CE" : "\uE8AB";
+        ClearDiskButtonLabel.Text = Text("清空至 RAW", "Clear to RAW");
+
+        var stateReason = ResolveDiskActionDisabledReason(
+            simulated, real, disk, isDiskSelection, offlineState, protectedDisk, operationBusy,
+            requireOnline: false);
+        DiskOnlineStateButton.IsEnabled = stateReason is null;
+        SetDisabledReason(DiskOnlineStateButton, stateReason);
+
+        var onlineDiskReason = ResolveDiskActionDisabledReason(
+            simulated, real, disk, isDiskSelection, offlineState, protectedDisk, operationBusy,
+            requireOnline: true);
+        var styleActionReason = onlineDiskReason
+            ?? (alreadyGpt
+                ? Text("该磁盘已经初始化为 GPT；此入口只负责初始化 RAW 或转换模拟 MBR。",
+                    "This disk is already initialized as GPT. This button only initializes RAW or converts a simulated MBR disk.")
+                : !raw && !mbr
+                    ? Text("磁盘分区表状态未知或不受支持。", "The disk partition style is unknown or unsupported.")
+                    : mbr && !simulated
+                        ? Text("真实 MBR→GPT 转换 C03 尚未支持；不会通过先清盘绕过。",
+                            "Real MBR-to-GPT conversion C03 is not supported; clearing the disk is not used as a workaround.")
+                        : null);
+        DiskPartitionStyleButton.IsEnabled = styleActionReason is null && (raw || (mbr && simulated));
+        SetDisabledReason(DiskPartitionStyleButton, styleActionReason);
+
+        var clearDiskReason = onlineDiskReason
+            ?? (raw
+                ? Text("该磁盘已经是 RAW，无需重复清空。", "This disk is already RAW and does not need clearing.")
+                : mbr && real && !simulated
+                    ? Text(
+                        "真实清空当前仅支持 GPT 普通数据/MSR 分区，或来源事实完整证明分区数为零的 GPT；真实 MBR 清空尚未支持。",
+                        "Real clear currently supports GPT disks with ordinary data/MSR partitions, or GPT disks whose complete source facts prove zero partitions; clearing a real MBR disk is not supported.")
+                : !alreadyGpt && !mbr
+                    ? Text("磁盘分区表状态未知或不受支持。", "The disk partition style is unknown or unsupported.")
+                    : null);
+        ClearDiskButton.IsEnabled = clearDiskReason is null;
+        SetDisabledReason(ClearDiskButton, clearDiskReason);
         DeletePartitionButton.IsEnabled = (simulated || realDeletablePartition)
-            && !diskOffline && destructivePartition;
+            && !operationBusy && !diskOffline && destructivePartition;
         ExtendButton.IsEnabled = canExtend;
         ShrinkButton.IsEnabled = canShrink;
         OpenExplorerButton.IsEnabled = !simulated
+            && !operationBusy
             && isPartitionSelection
             && !diskOffline
             && letter.Length == 1
@@ -847,72 +947,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var shrinkReason = canShrink ? null : ViewModel.CanSubmitRealOperation
             ? realRangeReason : shrinkEligibilityReason;
 
-        SetDisabledReason(OnlineButton,
-            !simulated && !real
-                ? LocalReadOnlyReason()
-                : disk is null
-                    ? Text("请选择一个模拟磁盘。", "Select a simulated disk.")
-                    : !isDiskSelection
-                        ? Text("请先选择磁盘本身，而不是分区或未分配空间。", "Select the disk itself, not a partition or unallocated space.")
-                        : !disk.IsOffline
-                            ? Text("该模拟磁盘已经联机；无需再次联机。", "This simulated disk is already online.")
-                            : Text("只有脱机的模拟磁盘可以联机。", "Only an offline simulated disk can be brought online."));
-        SetDisabledReason(OfflineButton,
-            !simulated && !real
-                ? LocalReadOnlyReason()
-                : disk is null || !isDiskSelection
-                    ? Text("请选择一个联机的模拟磁盘。", "Select an online simulated disk.")
-                    : disk.IsBoot || disk.IsSystem
-                        ? Text("系统或启动磁盘不能脱机。", "A system or boot disk cannot be taken offline.")
-                        : disk.IsOffline
-                            ? Text("该模拟磁盘已经脱机。", "This simulated disk is already offline.")
-                            : Text("只有联机的模拟磁盘可以脱机。", "Only an online simulated disk can be taken offline."));
-        SetDisabledReason(InitializeButton,
-            !simulated && !real
-                ? LocalReadOnlyReason()
-                : disk is null || !isDiskSelection
-                    ? Text("请选择一个未初始化的模拟磁盘。", "Select an uninitialized simulated disk.")
-                    : disk.IsBoot || disk.IsSystem
-                        ? Text("系统或启动磁盘不能初始化。", "A system or boot disk cannot be initialized.")
-                        : diskOffline
-                            ? Text("请先将模拟磁盘联机。", "Bring the simulated disk online first.")
-                            : raw
-                                ? Text("当前磁盘已满足初始化条件。", "The current disk already meets the initialization conditions.")
-                                : Text("只有 RAW 模拟磁盘可以初始化。", "Only a RAW simulated disk can be initialized."));
-        if (real && alreadyGpt)
-        {
-            SetDisabledReason(InitializeButton,
-                canResumeRealLayout
-                    ? Text("新扫描显示 GPT 且仅有零个或一个精确 provider MSR；可显式重新准备 MSR 和数据布局。",
-                        "The fresh scan shows GPT and zero or one exact provider MSR. You can explicitly prepare the MSR and data layout.")
-                    : Text("只有未启动且仅含精确 provider MSR 的 GPT 磁盘可继续布局。",
-                        "Only a non-system GPT disk containing no partition other than the exact provider MSR can continue layout."));
-        }
-        SetDisabledReason(ConvertGptButton,
-            !simulated
-                ? LocalReadOnlyReason()
-                : disk is null || !isDiskSelection
-                    ? Text("请选择一个 MBR 模拟磁盘。", "Select an MBR simulated disk.")
-                    : disk.IsBoot || disk.IsSystem
-                        ? Text("系统或启动磁盘不能转换分区表。", "A system or boot disk cannot have its partition table converted.")
-                        : diskOffline
-                            ? Text("请先将模拟磁盘联机。", "Bring the simulated disk online first.")
-                            : mbr
-                                ? Text("当前磁盘已满足转换条件。", "The current disk already meets the conversion conditions.")
-                                : Text("只有 MBR 模拟磁盘可以转换为 GPT。", "Only an MBR simulated disk can be converted to GPT."));
-        SetDisabledReason(ClearDiskForPoolButton,
-            !real ? LocalReadOnlyReason()
-                : disk is null || !isDiskSelection
-                    ? Text("请选择精确的本机磁盘。", "Select the exact local disk.")
-                    : disk.IsBoot || disk.IsSystem
-                        ? Text("系统或启动磁盘禁止清盘。", "A system or boot disk cannot be cleared.")
-                        : raw ? Text("RAW 磁盘无需清盘。", "A RAW disk does not need clearing.")
-                            : Text("该目标的实时安全预检尚未完成。", "Live safety preflight is required for this target."));
         SetDisabledReason(DeletePartitionButton, destructiveReason);
         SetDisabledReason(ExtendButton, extendReason);
         SetDisabledReason(ShrinkButton, shrinkReason);
         SetDisabledReason(OpenExplorerButton,
-            simulated
+            contextReason
+                ?? (simulated
                 ? Text("资源管理器只打开本机卷；模拟系统没有本机路径。", "File Explorer opens local volumes only; simulated systems have no local path.")
                 : !isPartitionSelection
                     ? Text("请选择一个本机分区。", "Select a local partition.")
@@ -920,7 +960,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                         ? Text("该磁盘当前脱机。", "The disk is currently offline.")
                         : letter.Length != 1
                             ? Text("当前卷没有可打开的盘符。", "The current volume has no drive letter to open.")
-                            : Text("当前本机路径不可用。", "The current local path is unavailable."));
+                            : Text("当前本机路径不可用。", "The current local path is unavailable.")));
 
         SetDisabledReason(PartitionTypeBox, createReason);
         SetDisabledReason(DriveLetterBox,
@@ -943,8 +983,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     : createReason
                 : partition is not null
                     ? Text(
-                        "这里仅显示四舍五入后的当前容量。请使用扩展或压缩按钮输入精确的 MiB 整数目标容量。",
-                        "This only shows the rounded current capacity. Use Extend or Shrink to enter an exact whole-MiB target capacity.")
+                        "这里仅供属性查看。扩展/压缩公式保留当前原始 bytes；当前容量不是整 MiB 时不会使用舍入值。",
+                        "This field is for property display. Resize formulas preserve the original current bytes and never use a rounded value when it is not a whole MiB.")
                     : Text("请选择未分配空间以设置新分区容量。", "Select unallocated space to set a new partition capacity.")));
         SetDisabledReason(MaximumSizeButton, createReason);
         var formatOptionsReason = contextReason
@@ -1018,8 +1058,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             SelectedPartition() is null
                 ? Text("以 MiB 正整数输入新分区大小；下一行显示自适应单位。", "Enter the new partition size as a whole number of MiB; the next line shows an adaptive unit.")
                 : Text(
-                    "这里只显示四舍五入后的当前容量。扩展或压缩请点击相应按钮，在对话框中输入精确的 MiB 整数目标总容量；真实操作由 Agent 查询实时支持范围。",
-                    "This only shows the rounded current capacity. Click Extend or Shrink and enter an exact whole-MiB total target in the dialog; for real operations, the Agent queries the live supported range."));
+                    "这里仅供属性查看；扩展/压缩对话框会保留当前原始 bytes，展示 A±B=C 两行公式并校验精确目标。当前容量不是整 MiB 时会停止公式操作，不用舍入值代替。",
+                    "This field is for property display. The resize dialog preserves the original current bytes and validates the exact A±B=C formula; a current size that is not a whole MiB stops the formula operation instead of using a rounded value."));
         ContextHelp.Set(MaximumSizeButton,
             Text("将容量填为选中空隙中的最大 1 MiB 对齐容量。", "Fill the largest 1 MiB-aligned capacity available in the selected gap."));
         ContextHelp.Set(FileSystemBox,
@@ -1056,90 +1096,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return false;
         }
 
-        var alignment = StorageEditRules.PartitionResizeAlignmentBytes;
-        var minimumAllowedMib = minimumBytes / alignment
-            + (minimumBytes % alignment == 0 ? 0 : 1);
-        var maximumAllowedMib = maximumBytes / alignment;
-        if (extend)
-        {
-            minimumMib = Math.Max(minimumAllowedMib, partition.Size / alignment + 1);
-            maximumMib = maximumAllowedMib;
-            suggestedMib = minimumMib;
-        }
-        else
-        {
-            if (partition.Size <= 1)
-            {
-                return false;
-            }
-
-            minimumMib = minimumAllowedMib;
-            maximumMib = Math.Min(maximumAllowedMib, (partition.Size - 1) / alignment);
-            suggestedMib = maximumMib;
-        }
-
-        return minimumMib > 0 && minimumMib <= maximumMib;
-    }
-
-    private static bool TryParseResizeTargetMib(string? value, out long targetMib) =>
-        long.TryParse(
-            value?.Trim(),
-            System.Globalization.NumberStyles.Integer,
-            System.Globalization.CultureInfo.InvariantCulture,
-            out targetMib)
-        && targetMib > 0;
-
-    private static bool TryConvertMibToBytes(long targetMib, out long targetSize)
-    {
-        targetSize = 0;
-        var alignment = StorageEditRules.PartitionResizeAlignmentBytes;
-        if (targetMib <= 0 || targetMib > long.MaxValue / alignment)
-        {
+        if (!RealPartitionResizeUiRange.TryGetWholeMibTargets(
+                partition.Size,
+                minimumBytes,
+                maximumBytes,
+                extend,
+                out minimumMib,
+                out maximumMib))
             return false;
-        }
 
-        targetSize = targetMib * alignment;
+        suggestedMib = extend ? minimumMib : maximumMib;
         return true;
-    }
-
-    private string? ValidateResizeTarget(
-        PartitionInfo partition,
-        SimulationEditKind action,
-        long minimumMib,
-        long maximumMib,
-        string? input,
-        out long targetSize)
-    {
-        targetSize = 0;
-        if (!TryParseResizeTargetMib(input, out var targetMib))
-        {
-            return Text(
-                "请输入正整数 MiB；目标是总容量，不是增量。",
-                "Enter a positive whole number of MiB; the target is a total capacity, not an increment.");
-        }
-
-        if (targetMib < minimumMib || targetMib > maximumMib)
-        {
-            return Text(
-                $"目标容量必须在 {minimumMib} 到 {maximumMib} MiB 之间。",
-                $"The target capacity must be between {minimumMib} and {maximumMib} MiB.");
-        }
-
-        if (!TryConvertMibToBytes(targetMib, out targetSize))
-        {
-            return Text(
-                "目标容量超出可安全表示的范围。",
-                "The target capacity is outside the safely representable range.");
-        }
-
-        var decision = StorageEditRules.Evaluate(
-            _working,
-            new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize));
-        return decision.Verdict == StorageRuleVerdict.Allow
-            ? null
-            : ResizeDecisionReason(
-                decision,
-                action == SimulationEditKind.ExtendPartition);
     }
 
     private string ResizeCapabilityReason(PartitionResizeCapability capability, bool? extend) =>
@@ -1228,8 +1195,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private string? ResolveContextDisabledReason(
         bool simulated,
         OsDiskInfo? disk,
-        bool diskOffline)
+        bool? offlineState,
+        bool operationBusy)
     {
+        if (operationBusy)
+        {
+            return Text("另一项磁盘操作仍在执行或等待核对。", "Another disk operation is running or awaiting reconciliation.");
+        }
+
         if (!simulated && !(ViewModel.CanSubmitRealOperation
             && (_selectedUnallocatedOffset is not null
                 || SelectedPartition() is { IsBoot: false, IsSystem: false,
@@ -1244,10 +1217,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "Select a simulated disk, partition, or unallocated space.");
         }
 
-        if (diskOffline)
+        if (offlineState is null)
         {
-            return Text("模拟磁盘已脱机；请先联机后编辑分区。",
-                "The simulated disk is offline; bring it online before editing partitions.");
+            return Text("无法从该磁盘的准确来源读取联机状态。", "The online state is unavailable from this disk's exact source.");
+        }
+
+        if (offlineState.Value)
+        {
+            return Text("磁盘已脱机；请先联机后编辑分区。",
+                "The disk is offline; bring it online before editing partitions.");
         }
 
         return null;
@@ -1577,32 +1555,24 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         SetOffsetValue(
             startBytes,
             StartOffsetValue,
-            StartOffsetMibPrefixValue,
             StartOffsetAdaptiveValue,
-            StartOffsetUnitValue,
             StartOffsetUnavailableValue);
         SetOffsetValue(
             endBytes,
             EndOffsetValue,
-            EndOffsetMibPrefixValue,
             EndOffsetAdaptiveValue,
-            EndOffsetUnitValue,
             EndOffsetUnavailableValue);
     }
 
     private void SetOffsetValue(
         long? bytes,
         TextBlock mibValue,
-        TextBlock mibPrefix,
         TextBlock adaptiveValue,
-        TextBlock adaptiveUnit,
         TextBlock unavailableValue)
     {
         var hasValue = bytes is long;
         mibValue.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
-        mibPrefix.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
         adaptiveValue.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
-        adaptiveUnit.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
         unavailableValue.Visibility = hasValue ? Visibility.Collapsed : Visibility.Visible;
         if (bytes is not long value)
         {
@@ -1612,18 +1582,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var cultureName = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
             ? "zh-CN"
             : "en-US";
-        mibValue.Text = ((decimal)value / BytesPerMiB).ToString(
-            "#,0.########",
+        mibValue.Text = "MiB " + ((decimal)value / BytesPerMiB).ToString(
+            "#,0.################",
             System.Globalization.CultureInfo.GetCultureInfo(cultureName));
-
-        var adaptiveText = TopologyProjector.FormatBytes(value);
-        var unitSeparator = adaptiveText.LastIndexOf(' ');
-        adaptiveValue.Text = unitSeparator > 0
-            ? adaptiveText[..unitSeparator]
-            : adaptiveText;
-        adaptiveUnit.Text = unitSeparator > 0
-            ? $" {adaptiveText[(unitSeparator + 1)..]})"
-            : ")";
+        adaptiveValue.Text = TopologyProjector.FormatBytes(value);
     }
 
     private static bool TryGetExclusiveRangeEnd(long startBytes, long sizeBytes, out long endBytes)
@@ -1755,315 +1717,214 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
     }
 
-    private async void Online_Click(object sender, RoutedEventArgs e)
-    {
-        var disk = SelectedDisk();
-        if (disk is null)
-        {
-            return;
-        }
-
-        if (ViewModel.CanSubmitRealOperation)
-        {
-            await SubmitRealAsync(RealDiskIntent(OperationIntent.SetDiskOnlineState,
-                disk, new SetDiskOnlineCommand(DiskReference(disk), true),
-                "Disk online", "No partition data loss expected"));
-            return;
-        }
-
-        await SubmitAsync(
-            new SimulationEditRequest(
-                SimulationEditKind.SetDiskOffline,
-                disk.StableId,
-                Offline: false),
-            Text("已联机", "Disk online"),
-            Text("磁盘联机状态已写入模拟文档。", "The disk online state was saved to the simulation."));
-    }
-
     private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
         await QueryRealOperationByIdAsync();
 
     private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
         await StopRealOperationFollowingStepsByIdAsync();
 
-    private async void Offline_Click(object sender, RoutedEventArgs e)
+    private async void DiskOnlineState_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
-        if (disk is null)
+        if (disk is null
+            || _selectedPartitionId is not null
+            || _selectedUnallocatedOffset is not null
+            || ViewModel.IsRealOperationBusy
+            || ViewModel.RealOperationSubmission.IsBlocked
+            || IsProtectedDiskTarget(disk)
+            || !TryGetDiskOfflineState(disk, out var offline))
         {
             return;
         }
 
+        var online = offline;
         if (ViewModel.CanSubmitRealOperation)
         {
             await SubmitRealAsync(RealDiskIntent(OperationIntent.SetDiskOnlineState,
-                disk, new SetDiskOnlineCommand(DiskReference(disk), false),
-                "Disk offline", "Running access to this disk stops"));
+                disk, new SetDiskOnlineCommand(DiskReference(disk), online),
+                online ? "Disk online" : "Disk offline",
+                online ? "No partition data loss expected" : "Running access to this disk stops"));
             return;
         }
+
+        if (!ViewModel.IsUsingSimulatedInventory)
+            return;
 
         await SubmitAsync(
             new SimulationEditRequest(
                 SimulationEditKind.SetDiskOffline,
                 disk.StableId,
-                Offline: true),
-            Text("已脱机", "Disk offline"),
-            Text("磁盘脱机状态已写入模拟文档，所有修改入口已锁定。", "The disk offline state was saved to the simulation and all edit actions are locked."));
+                Offline: !online),
+            online ? Text("已联机", "Disk online") : Text("已脱机", "Disk offline"),
+            online
+                ? Text("磁盘联机状态已写入模拟文档。", "The disk online state was saved to the simulation.")
+                : Text("磁盘脱机状态已写入模拟文档，所有修改入口已锁定。", "The disk offline state was saved to the simulation and all edit actions are locked."));
     }
 
-    private async void Initialize_Click(object sender, RoutedEventArgs e)
+    private async void DiskPartitionStyleButton_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
-        if (disk is null)
+        if (disk is null
+            || _selectedPartitionId is not null
+            || _selectedUnallocatedOffset is not null
+            || ViewModel.IsRealOperationBusy
+            || ViewModel.RealOperationSubmission.IsBlocked
+            || IsProtectedDiskTarget(disk)
+            || !TryGetDiskOfflineState(disk, out var offline)
+            || offline)
+            return;
+
+        var system = ViewModel.ActiveDocument.SystemId;
+        if (string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase))
         {
+            if (ViewModel.CanSubmitRealOperation)
+            {
+                var target = new StorageObjectId(system, StorageObjectKind.OsDisk, disk.StableId);
+                if (!await SubmitRealAsync(RealOperationProposalFactory.InitializeGpt(system, target))
+                    || !LastRealInventoryRefreshSucceeded)
+                    return;
+
+                var refreshedDisk = _working.OsDisks.FirstOrDefault(item =>
+                    item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
+                if (refreshedDisk is null)
+                {
+                    await ShowMessageAsync(Text("磁盘初始化后无法继续", "Cannot continue after disk initialization"),
+                        Text("新扫描中找不到原目标磁盘；未提交后续布局计划。",
+                            "The fresh scan no longer contains the target disk. No follow-up layout plan was submitted."));
+                    return;
+                }
+
+                await SubmitInitializedDiskLayoutAsync(refreshedDisk,
+                    ViewModel.CurrentPreferences.CreateMsrOnInitialize);
+                return;
+            }
+
+            if (!ViewModel.IsUsingSimulatedInventory)
+                return;
+
+            await SubmitAsync(
+                new SimulationEditRequest(
+                    SimulationEditKind.InitializeDisk,
+                    disk.StableId,
+                    PartitionStyle: "GPT",
+                    CreateMsr: ViewModel.CurrentPreferences.CreateMsrOnInitialize),
+                Text("初始化成功", "Initialization succeeded"),
+                Text("磁盘已初始化为 GPT。", "The disk was initialized as GPT."));
             return;
         }
+
+        if (!string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase))
+            return;
 
         if (ViewModel.CanSubmitRealOperation)
         {
-            var system = ViewModel.ActiveDocument.SystemId;
-            if (string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase))
-            {
-                var options = await PromptInitializedDiskLayoutAsync(disk);
-                if (options is not null)
-                    await SubmitInitializedDiskLayoutAsync(disk, options.CreateMsr,
-                        options.DiskSizeBytes, options.FormatNtfs, options.Label, options.Letter);
-                return;
-            }
-
-            if (!string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase))
-                return;
-            var target = new StorageObjectId(system, StorageObjectKind.OsDisk, disk.StableId);
-            if (!await SubmitRealAsync(RealOperationProposalFactory.InitializeGpt(system, target))
-                || !LastRealInventoryRefreshSucceeded)
-                return;
-
-            var refreshedDisk = _working.OsDisks.FirstOrDefault(item =>
-                item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
-            if (refreshedDisk is null)
-            {
-                await ShowMessageAsync(Text("磁盘初始化后无法继续", "Cannot continue after disk initialization"),
-                    Text("新扫描中找不到原目标磁盘；未提交后续布局计划。",
-                        "The fresh scan no longer contains the target disk. No follow-up layout plan was submitted."));
-                return;
-            }
-
-            await SubmitInitializedDiskLayoutAsync(refreshedDisk,
-                ViewModel.CurrentPreferences.CreateMsrOnInitialize);
+            await ShowMessageAsync(Text("真实 MBR 转换尚未支持", "Real MBR conversion is not supported"),
+                Text("真实 MBR→GPT 转换 C03 尚未开放；不会通过先清空磁盘绕过此限制。",
+                    "Real MBR-to-GPT conversion C03 is not supported. Clearing the disk is not used to bypass this restriction."));
             return;
         }
 
-        if (DiskHoldsStoredData(disk)
-            && !await ConfirmAsync(
-                Text("初始化含数据的磁盘", "Initialize disk with data"),
-                Text("初始化将清除该磁盘上的分区和已用数据。确定继续？",
-                    "Initialization clears the partitions and used data on this disk. Continue?")))
-        {
-            return;
-        }
-
-        await SubmitAsync(
-            new SimulationEditRequest(
-                SimulationEditKind.InitializeDisk,
-                disk.StableId,
-                PartitionStyle: "GPT",
-                CreateMsr: ViewModel.CurrentPreferences.CreateMsrOnInitialize),
-            Text("初始化成功", "Initialization succeeded"),
-            Text("磁盘已初始化为 GPT。", "The disk was initialized as GPT."));
+        if (ViewModel.IsUsingSimulatedInventory)
+            await ConvertMbrToGptSimulationAsync(disk);
     }
 
-    private async Task<InitializedDiskLayoutOptions?> PromptInitializedDiskLayoutAsync(
-        OsDiskInfo disk)
+    private async Task ConvertMbrToGptSimulationAsync(OsDiskInfo disk)
     {
-        var partitions = _working.Partitions.Where(partition =>
-            string.Equals(partition.OsDiskStableId, disk.StableId,
-                StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (partitions.Length > 1 || partitions.Any(partition => !IsExactProviderMsr(partition)))
-        {
-            await ShowMessageAsync(Text("布局计划被阻止", "Layout plan blocked"),
-                Text("新扫描中的分区不符合 GPT 空盘或唯一精确 provider MSR 条件。",
-                    "The fresh scan does not show an empty GPT disk or one exact provider MSR."));
-            return null;
-        }
-
-        var msr = partitions.SingleOrDefault();
-        var targetSummary = Text(
-            $"OS Disk: {disk.StableId}; size={disk.Size}; partition style={disk.PartitionStyle}\n" +
-            (msr is null
-                ? "Provider MSR: none"
-                : $"Provider MSR: {msr.StableId}; type={msr.PartitionTypeId}; offset={msr.Offset}; size={msr.Size}"),
-            $"OS disk: {disk.StableId}; size={disk.Size}; partition style={disk.PartitionStyle}\n" +
-            (msr is null
-                ? "Provider MSR: none"
-                : $"Provider MSR: {msr.StableId}; type={msr.PartitionTypeId}; offset={msr.Offset}; size={msr.Size}"));
-        var msrBox = new CheckBox
-        {
-            Content = Text("保留一个 16 MiB MSR（位于 1 MiB）", "Create one 16 MiB MSR at 1 MiB"),
-            IsChecked = ViewModel.CurrentPreferences.CreateMsrOnInitialize
-        };
-        var dataBox = new CheckBox
-        {
-            Content = Text("使用剩余空间建立 BasicData 分区", "Create a BasicData partition from the remaining space"),
-            IsChecked = false
-        };
-        var formatBox = new CheckBox
-        {
-            Content = Text("快速格式化为 NTFS / 64 KiB", "Quick-format as NTFS / 64 KiB"),
-            IsChecked = true
-        };
-        var labelBox = new TextBox
-        {
-            Header = Text("卷标（可选）", "Volume label (optional)"),
-            Text = "WinPool_Test"
-        };
-        var letterBox = new TextBox
-        {
-            Header = Text("盘符 D–Z（可留空）", "Drive letter D–Z (optional)"),
-            MaxLength = 1
-        };
-        var layoutPreview = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        void RefreshPreview()
-        {
-            var total = disk.Size / BytesPerMiB * BytesPerMiB;
-            var dataOffset = msrBox.IsChecked == true ? 17 * BytesPerMiB : BytesPerMiB;
-            var dataSize = total - dataOffset - BytesPerMiB;
-            layoutPreview.Text = dataBox.IsChecked == true
-                ? Text($"新数据分区起点：{dataOffset}；大小：{dataSize} bytes（已保留末尾 1 MiB）。",
-                    $"New BasicData offset: {dataOffset}; size: {dataSize} bytes (1 MiB tail reserve).")
-                : Text("不会创建 BasicData 分区。", "No BasicData partition will be created.");
-            formatBox.IsEnabled = dataBox.IsChecked == true;
-            labelBox.IsEnabled = dataBox.IsChecked == true && formatBox.IsChecked == true;
-            letterBox.IsEnabled = dataBox.IsChecked == true;
-        }
-        msrBox.Checked += (_, _) => RefreshPreview();
-        msrBox.Unchecked += (_, _) => RefreshPreview();
-        dataBox.Checked += (_, _) => RefreshPreview();
-        dataBox.Unchecked += (_, _) => RefreshPreview();
-        formatBox.Checked += (_, _) => RefreshPreview();
-        formatBox.Unchecked += (_, _) => RefreshPreview();
-        RefreshPreview();
-
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock
-        {
-            Text = targetSummary,
-            TextWrapping = TextWrapping.Wrap
-        });
-        panel.Children.Add(msrBox);
-        panel.Children.Add(dataBox);
-        panel.Children.Add(formatBox);
-        panel.Children.Add(labelBox);
-        panel.Children.Add(letterBox);
-        panel.Children.Add(layoutPreview);
-        panel.Children.Add(validation);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = Text("完成 GPT 磁盘布局", "Complete GPT disk layout"),
-            Content = new ScrollViewer { MaxHeight = 520, Content = panel },
-            PrimaryButtonText = Text("准备第二阶段计划", "Prepare second-phase plan"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        dialog.PrimaryButtonClick += (_, args) =>
-        {
-            if (dataBox.IsChecked == true && disk.Size / BytesPerMiB * BytesPerMiB
-                    - (msrBox.IsChecked == true ? 17 * BytesPerMiB : BytesPerMiB)
-                    - BytesPerMiB <= 0)
-            {
-                validation.Text = Text("磁盘容量不足以建立所选布局。", "The disk is too small for the selected layout.");
-                args.Cancel = true;
-                return;
-            }
-            var letter = letterBox.Text.Trim().ToUpperInvariant();
-            if (dataBox.IsChecked == true && letter.Length > 0
-                && (letter.Length != 1 || letter[0] is < 'D' or > 'Z'))
-            {
-                validation.Text = Text("盘符只能为 D–Z，或留空。", "The drive letter must be D–Z or blank.");
-                args.Cancel = true;
-                return;
-            }
-        };
-        if (await DialogCoordinator.ShowAsync(dialog) != ContentDialogResult.Primary)
-            return null;
-
-        var createData = dataBox.IsChecked == true;
-        var diskSizeBytes = createData
-            ? disk.Size / BytesPerMiB * BytesPerMiB
-            : (long?)null;
-        var selectedLetter = letterBox.Text.Trim().ToUpperInvariant();
-        return new InitializedDiskLayoutOptions(
-            msrBox.IsChecked == true,
-            diskSizeBytes,
-            createData && formatBox.IsChecked == true,
-            createData && formatBox.IsChecked == true ? labelBox.Text.Trim() : null,
-            createData && selectedLetter.Length == 1 ? selectedLetter[0] : null);
-    }
-
-    private async void ConvertGpt_Click(object sender, RoutedEventArgs e)
-    {
-        var disk = SelectedDisk();
-        if (disk is null)
-        {
-            return;
-        }
-
-        if (DiskHoldsStoredData(disk)
+        var partitions = _working.Partitions.Where(item =>
+            string.Equals(item.OsDiskStableId, disk.StableId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if ((partitions.Length > 0 || DiskHoldsStoredData(disk))
             && !await ConfirmAsync(
-                Text("转换含数据的磁盘", "Convert disk with data"),
-                Text("转换为 GPT 将清除该 MBR 磁盘上的分区和已用数据。确定继续？",
-                    "Converting to GPT clears the partitions and used data on this MBR disk. Continue?")))
-        {
+                Text("转换含分区的模拟磁盘", "Convert simulated disk with partitions"),
+                SimulatedDiskDataLossDetails(disk)
+                    + Environment.NewLine
+                    + Text("转换会清除分区和已用数据。", "Conversion removes the partitions and stored data.")))
             return;
-        }
 
         await SubmitAsync(
             new SimulationEditRequest(SimulationEditKind.ConvertDisk, disk.StableId, PartitionStyle: "GPT"),
             Text("转换成功", "Conversion succeeded"),
-            Text("磁盘已转换为 GPT。", "The disk was converted to GPT."));
+            Text("模拟磁盘已转换为 GPT。", "The simulated disk was converted to GPT."));
     }
 
-    private async void ClearDiskForPool_Click(object sender, RoutedEventArgs e)
+    private async void ClearDisk_Click(object sender, RoutedEventArgs e)
     {
         var disk = SelectedDisk();
-        if (!ViewModel.CanSubmitRealOperation || disk is null ||
-            disk.IsBoot || disk.IsSystem || disk.IsOffline ||
-            _selectedPartitionId is not null || _selectedUnallocatedOffset is not null)
+        if (disk is null
+            || _selectedPartitionId is not null
+            || _selectedUnallocatedOffset is not null
+            || ViewModel.IsRealOperationBusy
+            || ViewModel.RealOperationSubmission.IsBlocked
+            || IsProtectedDiskTarget(disk)
+            || !TryGetDiskOfflineState(disk, out var offline)
+            || offline
+            || string.Equals(disk.PartitionStyle, "RAW", StringComparison.OrdinalIgnoreCase)
+            || (ViewModel.CanSubmitRealOperation
+                && !ViewModel.IsUsingSimulatedInventory
+                && string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase))
+            || (!string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(disk.PartitionStyle, "MBR", StringComparison.OrdinalIgnoreCase)))
             return;
 
-        var physical = _working.PhysicalDisks.SingleOrDefault(item =>
-            item.StableId == disk.PhysicalDiskStableId);
-        var partitions = _working.Partitions.Where(item =>
-            item.OsDiskStableId == disk.StableId).OrderBy(item => item.Offset).ToArray();
-        var partitionList = partitions.Length == 0
-            ? Text("（未发现分区）", "(no partitions reported)")
-            : string.Join(Environment.NewLine, partitions.Select(item =>
-                $"#{item.PartitionNumber} {item.Type} " +
-                $"offset={item.Offset} size={item.Size} " +
-                $"{item.DriveLetter}: {item.FileSystem} {item.FileSystemLabel} " +
-                $"id={item.StableId}"));
-        var preliminary = string.Join(Environment.NewLine,
-            $"OS disk: {disk.StableId}",
-            $"Physical member: {physical?.StableId ?? "unresolved"}",
-            $"Model: {physical?.Model ?? "unresolved"}",
-            $"Serial: {physical?.SerialNumber ?? "unresolved"}",
-            $"Size: {disk.Size} bytes",
-            Text("所有下列分区、卷、文件和盘符将丢失：",
-                "All partitions, volumes, files and drive letters below will be lost:"),
-            partitionList,
-            Text("此操作只清空至 RAW。建池或初始化 GPT 需要另建计划并再次确认。",
-                "This operation only clears to RAW. Pool creation or GPT initialization needs a separate plan and confirmation."));
-        if (!await ConfirmAsync(Text("独立清盘确认", "Separate disk-clear confirmation"),
-                preliminary))
+        if (ViewModel.CanSubmitRealOperation)
+        {
+            var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
+                StorageObjectKind.OsDisk, disk.StableId);
+            await SubmitRealAsync(RealOperationProposalFactory.ClearToRaw(
+                ViewModel.ActiveDocument.SystemId, target));
+            return;
+        }
+
+        if (!ViewModel.IsUsingSimulatedInventory)
             return;
 
-        var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
-            StorageObjectKind.OsDisk, disk.StableId);
-        await SubmitRealAsync(RealOperationProposalFactory.ClearToRaw(
-            ViewModel.ActiveDocument.SystemId, target));
+        var details = SimulatedDiskDataLossDetails(disk)
+            + Environment.NewLine
+            + Text("此操作只更新模拟事实，清除该模拟磁盘的分区和关联卷并将分区表置为 RAW；不会修改真实磁盘。",
+                "This updates simulated facts only. It removes this simulated disk's partitions and related volumes and sets its style to RAW; no real disk is changed.");
+        if (!await ConfirmAsync(Text("清空模拟磁盘至 RAW", "Clear simulated disk to RAW"), details))
+            return;
+
+        await SubmitAsync(
+            new SimulationEditRequest(SimulationEditKind.ClearDisk, disk.StableId),
+            Text("模拟磁盘已清空", "Simulated disk cleared"),
+            Text("模拟磁盘已变为 RAW；未执行初始化、格式化或建池。",
+                "The simulated disk is now RAW. No initialization, formatting, or pool creation was performed."));
     }
 
+    private string SimulatedDiskDataLossDetails(OsDiskInfo disk)
+    {
+        var partitions = _working.Partitions.Where(item =>
+            string.Equals(item.OsDiskStableId, disk.StableId, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(item => item.Offset)
+            .ToArray();
+        var partitionIds = partitions.Select(item => item.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var volumes = _working.Volumes.Where(item =>
+            item.PartitionStableId is not null && partitionIds.Contains(item.PartitionStableId))
+            .OrderBy(item => item.StableId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var partitionText = partitions.Length == 0
+            ? Text("(none reported)", "（未发现分区）")
+            : string.Join(Environment.NewLine, partitions.Select(item =>
+                $"#{item.PartitionNumber} {item.Type} offset={item.Offset} size={item.Size} " +
+                $"letter={(string.IsNullOrWhiteSpace(item.DriveLetter) ? "none" : item.DriveLetter + ":")} " +
+                $"fileSystem={item.FileSystem} label={item.FileSystemLabel} id={item.StableId}"));
+        var volumeText = volumes.Length == 0
+            ? Text("(none reported)", "（未发现关联卷）")
+            : string.Join(Environment.NewLine, volumes.Select(item =>
+                $"id={item.StableId} partition={item.PartitionStableId} fileSystem={item.FileSystem} " +
+                $"label={item.FileSystemLabel} size={item.Size} free={item.SizeRemaining} " +
+                $"allocationUnit={item.AllocationUnitSize?.ToString() ?? "unknown"} " +
+                $"accessPaths={string.Join(", ", item.AccessPaths)}"));
+        return string.Join(Environment.NewLine,
+            $"OS disk: id={disk.StableId}; number={disk.Number}; style={disk.PartitionStyle}; size={disk.Size} bytes",
+            $"Physical disk: {disk.PhysicalDiskStableId ?? "unresolved"}",
+            Text("分区及盘符：", "Partitions and drive letters:"),
+            partitionText,
+            Text("关联卷及访问路径：", "Related volumes and access paths:"),
+            volumeText,
+            Text("上述分区、卷、文件和盘符将从模拟结构中移除。", "The listed partitions, volumes, files, and drive letters will be removed from the simulated structure."));
+    }
     private bool DiskHoldsStoredData(OsDiskInfo disk) =>
         _working.Partitions.Any(item =>
             item.OsDiskStableId == disk.StableId
@@ -2247,89 +2108,281 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 out var maximumMib,
                 out var suggestedMib))
         {
-            await ShowMessageAsync(
-                extend
-                    ? Text("无法扩展分区", "Cannot extend partition")
-                    : Text("无法压缩分区", "Cannot shrink partition"),
-                extend
+            var reason = !RealPartitionResizeUiRange.IsWholeMib(partition.Size)
+                ? Text(
+                    $"当前容量为 {partition.Size} bytes，不是整 MiB。保留该原始容量；不能用舍入值计算扩缩公式。",
+                    $"The current size is {partition.Size} bytes, not a whole MiB. The exact size is preserved; a rounded value cannot be used in the resize formula.")
+                : extend
                     ? Text(
                         "分区右侧没有足够的连续未分配空间，无法形成更大的 1 MiB 对齐目标容量。",
                         "There is not enough contiguous unallocated space immediately after the partition for a larger 1 MiB-aligned target capacity.")
                     : Text(
                         "当前已用数据和几何没有可用的更小 1 MiB 对齐目标容量。",
-                        "The modeled used data and geometry have no smaller 1 MiB-aligned target capacity."));
+                        "The modeled used data and geometry have no smaller 1 MiB-aligned target capacity.");
+            await ShowMessageAsync(
+                extend
+                    ? Text("无法扩展分区", "Cannot extend partition")
+                    : Text("无法压缩分区", "Cannot shrink partition"),
+                reason);
             return null;
         }
 
-        var action = extend ? SimulationEditKind.ExtendPartition : SimulationEditKind.ShrinkPartition;
-        var input = new TextBox
+        return await PromptResizeFormulaAsync(
+            partition.Size,
+            minimumMib,
+            maximumMib,
+            suggestedMib,
+            extend,
+            Text(
+                $"可用目标总容量：{minimumMib}–{maximumMib} MiB。确认后只提交精确目标 bytes。",
+                $"Allowed total target size: {minimumMib}–{maximumMib} MiB. Confirmation submits only the exact target bytes."),
+            extend ? Text("模拟扩展分区", "Extend simulated partition")
+                : Text("模拟压缩分区", "Shrink simulated partition"),
+            extend ? Text("确认扩展", "Confirm extend") : Text("确认压缩", "Confirm shrink"));
+    }
+
+    private async Task<long?> PromptResizeFormulaAsync(
+        long currentSizeBytes,
+        long minimumTargetMib,
+        long maximumTargetMib,
+        long suggestedTargetMib,
+        bool extend,
+        string rangeDetails,
+        string title,
+        string confirmLabel)
+    {
+        if (!RealPartitionResizeUiRange.IsWholeMib(currentSizeBytes))
         {
-            Header = Text("目标容量（MiB，整数）", "Target capacity (MiB, whole number)"),
-            Text = suggestedMib.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            MinWidth = 320
+            await ShowMessageAsync(
+                extend ? Text("无法扩展分区", "Cannot extend partition")
+                    : Text("无法压缩分区", "Cannot shrink partition"),
+                Text(
+                    $"当前容量为 {currentSizeBytes} bytes，不是整 MiB。保留该原始容量；不能用舍入值计算扩缩公式。",
+                    $"The current size is {currentSizeBytes} bytes, not a whole MiB. The exact size is preserved; a rounded value cannot be used in the resize formula."));
+            return null;
+        }
+
+        var targetSizeBytes = suggestedTargetMib * BytesPerMiB;
+        if (!RealPartitionResizeUiRange.TryGetResizeFormula(
+                currentSizeBytes,
+                suggestedTargetMib,
+                false,
+                extend,
+                out targetSizeBytes,
+                out var initialDeltaBytes))
+            return null;
+
+        var currentValue = new TextBlock
+        {
+            Text = $"{currentSizeBytes / BytesPerMiB} MiB",
+            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
         };
+        var deltaInput = new TextBox
+        {
+            Text = (initialDeltaBytes / BytesPerMiB).ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            MinWidth = 72,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var targetInput = new TextBox
+        {
+            Text = (targetSizeBytes / BytesPerMiB).ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            MinWidth = 72,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        AutomationProperties.SetName(deltaInput, Text("扩缩量（MiB）", "Resize amount (MiB)"));
+        AutomationProperties.SetName(targetInput, Text("目标总容量（MiB）", "Total target size (MiB)"));
+
+        var currentAdaptive = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var deltaAdaptive = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var targetAdaptive = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var formula = new Grid { ColumnSpacing = 8, RowSpacing = 4, HorizontalAlignment = HorizontalAlignment.Stretch };
+        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
+        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
+        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
+        formula.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        formula.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var deltaGroup = CreateResizeInputGroup(deltaInput);
+        var targetGroup = CreateResizeInputGroup(targetInput);
+        AddResizeFormulaCell(formula, currentValue, 0, 0);
+        AddResizeFormulaCell(formula, CreateFormulaOperator(extend ? "+" : "−"), 1, 0);
+        AddResizeFormulaCell(formula, deltaGroup, 2, 0);
+        AddResizeFormulaCell(formula, CreateFormulaOperator("="), 3, 0);
+        AddResizeFormulaCell(formula, targetGroup, 4, 0);
+        AddResizeFormulaCell(formula, currentAdaptive, 0, 1);
+        AddResizeFormulaCell(formula, CreateFormulaOperator(extend ? "+" : "−"), 1, 1);
+        AddResizeFormulaCell(formula, deltaAdaptive, 2, 1);
+        AddResizeFormulaCell(formula, CreateFormulaOperator("="), 3, 1);
+        AddResizeFormulaCell(formula, targetAdaptive, 4, 1);
+
         var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var content = new StackPanel { Spacing = 10 };
+        var content = new StackPanel { Spacing = 10, MaxWidth = 680 };
         content.Children.Add(new TextBlock
         {
             Text = Text(
-                "请输入目标总容量，而不是要增加或减少的容量。只有选择确认后才会写入模拟修改。",
-                "Enter the total target capacity, not the amount to add or remove. The simulation changes only after you confirm."),
+                "第一行为精确 MiB 整数，第二行为自适应单位。当前容量只读；扩缩量与目标总容量双向联动。",
+                "The first row uses exact whole MiB. The second row shows adaptive units. Current size is read-only; the amount and total target update each other."),
             TextWrapping = TextWrapping.Wrap
         });
-        content.Children.Add(new TextBlock
-        {
-            Text = extend
-                ? Text(
-                    $"可用目标范围：{minimumMib} 到 {maximumMib} MiB。已预填最小可扩展目标 {suggestedMib} MiB。",
-                    $"Available target range: {minimumMib} to {maximumMib} MiB. The smallest expandable target, {suggestedMib} MiB, is prefilled.")
-                : Text(
-                    $"可用目标范围：{minimumMib} 到 {maximumMib} MiB。已预填最接近当前容量的可压缩目标 {suggestedMib} MiB。",
-                    $"Available target range: {minimumMib} to {maximumMib} MiB. The shrink target closest to the current capacity, {suggestedMib} MiB, is prefilled."),
-            TextWrapping = TextWrapping.Wrap
-        });
-        content.Children.Add(input);
+        content.Children.Add(new TextBlock { Text = rangeDetails, TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(formula);
         content.Children.Add(validation);
 
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = extend
-                ? Text("扩展分区", "Extend partition")
-                : Text("压缩分区", "Shrink partition"),
-            Content = content,
-            PrimaryButtonText = extend
-                ? Text("确认扩展", "Confirm extend")
-                : Text("确认压缩", "Confirm shrink"),
+            Title = title,
+            Content = new ScrollViewer { MaxHeight = 560, Content = content },
+            PrimaryButtonText = confirmLabel,
             CloseButtonText = Text("取消", "Cancel"),
             DefaultButton = ContentDialogButton.Primary
         };
 
-        long? targetSize = null;
-        void Validate()
+        long? authoritativeTargetBytes = null;
+        var updatingInputs = false;
+        var lastEditedIsDelta = true;
+        currentAdaptive.Text = TopologyProjector.FormatBytes(currentSizeBytes);
+
+        void UpdateAdaptiveValues()
         {
-            var error = ValidateResizeTarget(
-                partition,
-                action,
-                minimumMib,
-                maximumMib,
-                input.Text,
-                out var candidateSize);
-            targetSize = error is null ? candidateSize : null;
-            validation.Text = error ?? string.Empty;
-            dialog.IsPrimaryButtonEnabled = error is null;
+            if (authoritativeTargetBytes is not long targetBytes)
+            {
+                deltaAdaptive.Text = "—";
+                targetAdaptive.Text = "—";
+                return;
+            }
+
+            var deltaBytes = extend
+                ? targetBytes - currentSizeBytes
+                : currentSizeBytes - targetBytes;
+            deltaAdaptive.Text = TopologyProjector.FormatBytes(deltaBytes);
+            targetAdaptive.Text = TopologyProjector.FormatBytes(targetBytes);
         }
 
-        input.TextChanged += (_, _) => Validate();
+        void Validate(bool editedDelta)
+        {
+            if (updatingInputs)
+                return;
+
+            lastEditedIsDelta = editedDelta;
+            authoritativeTargetBytes = null;
+            var editedInput = editedDelta ? deltaInput : targetInput;
+            var derivedInput = editedDelta ? targetInput : deltaInput;
+            string? error;
+            long candidateTargetBytes = 0;
+            long deltaBytes = 0;
+
+            if (!long.TryParse(
+                    editedInput.Text.Trim(),
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var inputMib))
+            {
+                error = Text("请输入正整数 MiB；不接受小数。", "Enter a positive whole number of MiB; fractions are not accepted.");
+            }
+            else if (inputMib <= 0)
+            {
+                error = Text("数值必须大于零。", "The value must be greater than zero.");
+            }
+            else if (inputMib > long.MaxValue / BytesPerMiB)
+            {
+                error = Text("容量超出可安全表示的范围。", "The size exceeds the safely representable range.");
+            }
+            else if (!RealPartitionResizeUiRange.TryGetResizeFormula(
+                         currentSizeBytes,
+                         inputMib,
+                         editedDelta,
+                         extend,
+                         out candidateTargetBytes,
+                         out deltaBytes))
+            {
+                var inputBytes = inputMib * BytesPerMiB;
+                error = editedDelta
+                    ? extend && currentSizeBytes > long.MaxValue - inputBytes
+                        ? Text("扩展结果超出可安全表示的范围。", "The extended size exceeds the safely representable range.")
+                        : Text("扩缩量必须小于当前容量，并产生正的目标容量。", "The change amount must be smaller than the current size and leave a positive target size.")
+                    : extend
+                        ? Text("扩展目标必须大于当前容量。", "An extension target must be larger than the current size.")
+                        : Text("压缩目标必须小于当前容量。", "A shrink target must be smaller than the current size.");
+            }
+            else
+            {
+                var candidateTargetMib = candidateTargetBytes / BytesPerMiB;
+                if (candidateTargetMib < minimumTargetMib || candidateTargetMib > maximumTargetMib)
+                {
+                    error = Text(
+                        $"目标容量必须在 {minimumTargetMib} 到 {maximumTargetMib} MiB 之间。",
+                        $"The total target must be between {minimumTargetMib} and {maximumTargetMib} MiB.");
+                }
+                else
+                {
+                    error = null;
+                    authoritativeTargetBytes = candidateTargetBytes;
+                    var derivedMib = editedDelta
+                        ? candidateTargetMib
+                        : deltaBytes / BytesPerMiB;
+                    updatingInputs = true;
+                    derivedInput.Text = derivedMib.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    updatingInputs = false;
+                }
+            }
+
+            if (error is not null)
+            {
+                updatingInputs = true;
+                derivedInput.Text = string.Empty;
+                updatingInputs = false;
+            }
+
+            validation.Text = error ?? string.Empty;
+            dialog.IsPrimaryButtonEnabled = authoritativeTargetBytes is not null;
+            UpdateAdaptiveValues();
+        }
+
+        deltaInput.TextChanged += (_, _) => Validate(editedDelta: true);
+        targetInput.TextChanged += (_, _) => Validate(editedDelta: false);
         dialog.PrimaryButtonClick += (_, args) =>
         {
-            Validate();
-            args.Cancel = targetSize is null;
+            Validate(lastEditedIsDelta);
+            args.Cancel = authoritativeTargetBytes is null;
         };
-        Validate();
+        Validate(editedDelta: true);
         return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary
-            ? targetSize
+            ? authoritativeTargetBytes
             : null;
+    }
+
+    private static FrameworkElement CreateResizeInputGroup(TextBox input)
+    {
+        var group = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        group.Children.Add(input);
+        group.Children.Add(new TextBlock { Text = "MiB", VerticalAlignment = VerticalAlignment.Center });
+        return group;
+    }
+
+    private static TextBlock CreateFormulaOperator(string value) => new()
+    {
+        Text = value,
+        VerticalAlignment = VerticalAlignment.Center,
+        HorizontalAlignment = HorizontalAlignment.Center
+    };
+
+    private static void AddResizeFormulaCell(Grid grid, FrameworkElement element, int column, int row)
+    {
+        Grid.SetColumn(element, column);
+        Grid.SetRow(element, row);
+        grid.Children.Add(element);
     }
 
     private async Task ResizeRealAsync(PartitionInfo partition, bool extend)
@@ -2371,13 +2424,39 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (!RealPartitionResizeUiRange.TryGetWholeMibTargets(
                 range, extend, out var minimumMib, out var maximumMib))
         {
+            var explanation = !RealPartitionResizeUiRange.IsWholeMib(range.CurrentSizeBytes)
+                ? Text(
+                    $"当前容量为 {range.CurrentSizeBytes} bytes，不是整 MiB。保留该原始容量；不能用舍入值计算扩缩公式。",
+                    $"The current size is {range.CurrentSizeBytes} bytes, not a whole MiB. The exact size is preserved; a rounded value cannot be used in the resize formula.")
+                : Text(
+                    "Agent 已读取 Windows 支持范围与当前几何交集，但所选方向没有 1 MiB 整数目标。",
+                    "The Agent read the Windows supported range and current geometry intersection, but there is no whole-MiB target in this direction.");
             await ShowMessageAsync(Text("当前没有可用目标", "No supported target"),
-                Text("Agent 已读取 Windows 支持范围与当前几何交集，但所选方向没有 1 MiB 整数目标。",
-                    "The Agent read the Windows supported range and current geometry intersection, but there is no whole-MiB target in this direction."));
+                explanation);
             return;
         }
-        var targetSize = await PromptRealResizeTargetAsync(
-            range, extend, minimumMib, maximumMib);
+        var suggestedMib = extend ? minimumMib : maximumMib;
+        var rangeDetails =
+            $"{Text("准确目标", "Exact target")}: {range.Partition.ProviderKey}\n" +
+            $"{Text("当前容量", "Current size")}: {range.CurrentSizeBytes} bytes\n" +
+            $"{Text("Windows 支持范围", "Windows provider range")}: " +
+            $"{range.ProviderMinBytes}–{range.ProviderMaxBytes} bytes\n" +
+            $"{Text("几何交集", "Geometry intersection")}: " +
+            $"{range.AllowedMinBytes}–{range.AllowedMaxBytes} bytes\n" +
+            $"{Text("本方向 1 MiB 目标范围", "Whole-MiB targets in this direction")}: " +
+            $"{minimumMib}–{maximumMib} MiB\n" +
+            $"{Text("采集时间", "Captured")}: {range.CapturedAtUtc.LocalDateTime:G}\n" +
+            $"Target fingerprint: {range.TargetFingerprint}";
+        var targetSize = await PromptResizeFormulaAsync(
+            range.CurrentSizeBytes,
+            minimumMib,
+            maximumMib,
+            suggestedMib,
+            extend,
+            rangeDetails,
+            extend ? Text("真实扩展分区", "Extend real partition")
+                : Text("真实压缩分区", "Shrink real partition"),
+            Text("准备 Agent 计划", "Prepare Agent plan"));
         if (targetSize is null)
             return;
         await SubmitRealAsync(RealPartitionIntent(OperationIntent.ResizePartition,
@@ -2388,76 +2467,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 : "Shrinking may make data beyond the new boundary inaccessible"));
     }
 
-    private async Task<long?> PromptRealResizeTargetAsync(
-        RealPartitionResizeRange range, bool extend,
-        long minimumMib, long maximumMib)
-    {
-        var input = new TextBox
-        {
-            Header = Text("目标总容量（MiB，整数）", "Target total capacity (whole MiB)"),
-            Text = (extend ? minimumMib : maximumMib).ToString(
-                System.Globalization.CultureInfo.InvariantCulture),
-            MinWidth = 320
-        };
-        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var content = new StackPanel { Spacing = 10 };
-        content.Children.Add(new TextBlock
-        {
-            Text = $"{Text("准确目标", "Exact target")}: {range.Partition.ProviderKey}\n" +
-                $"{Text("当前容量", "Current size")}: {range.CurrentSizeBytes} bytes\n" +
-                $"{Text("Windows 支持范围", "Windows provider range")}: " +
-                $"{range.ProviderMinBytes}–{range.ProviderMaxBytes} bytes\n" +
-                $"{Text("几何交集", "Geometry intersection")}: " +
-                $"{range.AllowedMinBytes}–{range.AllowedMaxBytes} bytes\n" +
-                $"{Text("本方向 1 MiB 目标范围", "Whole-MiB targets in this direction")}: " +
-                $"{minimumMib}–{maximumMib} MiB\n" +
-                $"{Text("采集时间", "Captured")}: {range.CapturedAtUtc.LocalDateTime:G}\n" +
-                $"Target fingerprint: {range.TargetFingerprint}",
-            TextWrapping = TextWrapping.Wrap
-        });
-        content.Children.Add(input);
-        content.Children.Add(validation);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = extend ? Text("真实扩展分区", "Extend real partition")
-                : Text("真实压缩分区", "Shrink real partition"),
-            Content = new ScrollViewer { MaxHeight = 500, Content = content },
-            PrimaryButtonText = Text("准备 Agent 计划", "Prepare Agent plan"),
-            CloseButtonText = Text("取消", "Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-        long? targetSize = null;
-        void Validate()
-        {
-            if (!long.TryParse(input.Text.Trim(), out var mib) ||
-                mib < minimumMib || mib > maximumMib ||
-                mib > long.MaxValue / BytesPerMiB)
-            {
-                targetSize = null;
-                validation.Text = Text("目标须在实时 1 MiB 范围内。",
-                    "The target must be within the live whole-MiB range.");
-            }
-            else
-            {
-                targetSize = mib * BytesPerMiB;
-                validation.Text = string.Empty;
-            }
-            dialog.IsPrimaryButtonEnabled = targetSize is not null;
-        }
-        input.TextChanged += (_, _) => Validate();
-        dialog.PrimaryButtonClick += (_, args) =>
-        {
-            Validate();
-            args.Cancel = targetSize is null;
-        };
-        Validate();
-        return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary
-            ? targetSize : null;
-    }
-
     private async Task ResizeAsync(bool extend)
     {
+        if (ViewModel.IsRealOperationBusy || ViewModel.RealOperationSubmission.IsBlocked)
+            return;
+
         var partition = SelectedPartition();
         if (partition is null)
         {
@@ -2522,6 +2536,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async void DeletePartition_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.IsRealOperationBusy || ViewModel.RealOperationSubmission.IsBlocked)
+            return;
+
         var partition = SelectedPartition();
         if (partition is null)
         {

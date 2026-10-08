@@ -181,19 +181,42 @@ public static class EditWorkspace
         ArgumentNullException.ThrowIfNull(snapshot);
         var ignore = Math.Max(0, minUnallocatedBytes);
 
-        // One rule drives this page: the OS-disk view of every physical disk
-        // that is free in the primordial pool, plus the OS-disk view of every
-        // virtual disk in any pool. Pooled physical disks, network disks, and
-        // other external groups do not appear here.
-        var primordialMembers = snapshot.StoragePools
-            .FirstOrDefault(pool => pool.IsPrimordial)
-            ?.MemberPhysicalDiskIds
-            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        // This is a display projection, not proof that a disk can be edited.
+        // Scoped collection deliberately does not enumerate the shared primordial
+        // container, so its retained member list can omit a newly freed disk.
+        var primordialPools = snapshot.StoragePools.Where(pool => pool.IsPrimordial).ToArray();
+        var primordialPoolIds = primordialPools.Select(pool => pool.StableId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var primordialMembers = primordialPools.SelectMany(pool => pool.MemberPhysicalDiskIds)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var concreteMembers = snapshot.StoragePools.Where(pool => !pool.IsPrimordial)
+            .SelectMany(pool => pool.MemberPhysicalDiskIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var physicalById = snapshot.PhysicalDisks.GroupBy(disk => disk.StableId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
 
-        var disks = snapshot.OsDisks
-            .Where(disk => !string.IsNullOrWhiteSpace(disk.VirtualDiskStableId)
-                || (!string.IsNullOrWhiteSpace(disk.PhysicalDiskStableId)
-                    && primordialMembers.Contains(disk.PhysicalDiskStableId)))
+        bool ShowDisk(OsDiskInfo disk)
+        {
+            if (!string.IsNullOrWhiteSpace(disk.VirtualDiskStableId)) return true;
+            if (string.IsNullOrWhiteSpace(disk.PhysicalDiskStableId)
+                || concreteMembers.Contains(disk.PhysicalDiskStableId)
+                || !physicalById.TryGetValue(disk.PhysicalDiskStableId, out var physical)
+                || physical.Length != 1)
+                return false;
+            var member = physical[0];
+            // Confirmed concrete membership wins even over an old primordial edge.
+            // An unresolved pool reference is not a standalone physical-disk view.
+            if (!string.IsNullOrWhiteSpace(member.PoolStableId)
+                && !primordialPoolIds.Contains(member.PoolStableId)) return false;
+            if (primordialMembers.Contains(member.StableId)) return true;
+
+            // The direct mapping already came from same-device projection. Never
+            // synthesize one from a name, disk number, or stable-ID string shape.
+            return member.IsStable && !string.IsNullOrWhiteSpace(disk.StableId)
+                && snapshot.OsDisks.Count(other => string.IsNullOrWhiteSpace(other.VirtualDiskStableId)
+                    && StringComparer.OrdinalIgnoreCase.Equals(other.PhysicalDiskStableId, member.StableId)) == 1;
+        }
+
+        var disks = snapshot.OsDisks.Where(ShowDisk)
             .OrderBy(disk => disk.Number)
             .ToArray();
 

@@ -132,6 +132,173 @@ public sealed class WindowsRealOperationPlanner
             now, now.Add(InMemoryOperationAuthority.DefaultLifetime));
     }
 
+    public async Task<RealVirtualDiskCreationRange> ReadVirtualDiskCreationRangeAsync(
+        StorageObjectId targetId, TrustedRealSession session, CancellationToken cancellationToken)
+    {
+        if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
+            throw new UnauthorizedAccessException("An armed elevated Agent is required.");
+        if (targetId.Kind is not (StorageObjectKind.StoragePool or StorageObjectKind.StorageTier))
+            throw new InvalidDataException("An exact pool or unused HDD template is required.");
+        var topology = await topologyReader.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        var closure = topology.RequireSinglePhysicalClosure([targetId]);
+        var target = WindowsRealStorageTargetBuilder.Build(topology,
+            RealTargetReference.ForExisting(targetId), new Dictionary<string, string>());
+        VirtualDiskCreationSize range;
+        if (targetId.Kind == StorageObjectKind.StoragePool)
+        {
+            var pool = ExistingPool(topology.Snapshot, RealTargetReference.ForExisting(targetId));
+            if (pool.IsPrimordial || pool.MemberPhysicalDiskIds.Count != 1
+                || pool.MemberPhysicalDiskIds[0] != closure.PhysicalDiskId
+                || topology.Snapshot.VirtualDisks.Any(item => item.PoolStableId == pool.StableId)
+                || topology.Snapshot.StorageTiers.Any(item => item.PoolStableId == pool.StableId))
+                throw new InvalidDataException("Ordinary creation requires an empty exact single-member pool.");
+            range = await virtualDiskSizes.ReadAsync(target, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var tier = topology.Snapshot.StorageTiers.Single(item => item.StableId == targetId.ProviderKey);
+            var pool = RequireTierPool(topology.Snapshot, closure, tier.PoolStableId);
+            _ = RequireHddTier(topology.Snapshot, pool, tier.StableId);
+            if (tier.VirtualDiskStableId is not null
+                || topology.Snapshot.VirtualDisks.Any(item => item.PoolStableId == pool.StableId)
+                || topology.Snapshot.StorageTiers.Count(item => item.PoolStableId == pool.StableId) != 1)
+                throw new InvalidDataException("The sole unused HDD template is required.");
+            await RequireTierCapabilityAsync(topology, closure,
+                "SupportsStorageTieredVirtualDiskCreation", cancellationToken).ConfigureAwait(false);
+            var tierRange = await capabilities.ReadTierCreationSizeAsync(topology, targetId,
+                cancellationToken).ConfigureAwait(false);
+            var poolTarget = WindowsRealStorageTargetBuilder.Build(topology,
+                RealTargetReference.ForExisting(new StorageObjectId(topology.SystemId,
+                    StorageObjectKind.StoragePool, pool.StableId)), new Dictionary<string, string>());
+            var poolRange = await virtualDiskSizes.ReadAsync(poolTarget, cancellationToken).ConfigureAwait(false);
+            range = VirtualDiskCreationSize.Intersect(poolRange, tierRange);
+        }
+        var result = new RealVirtualDiskCreationRange(targetId, range.MinimumBytes,
+            range.MaximumBytes, range.DivisorBytes, range.RangeOriginBytes, range.EnumeratedSizes,
+            closure.Fingerprint, timeProvider.GetUtcNow());
+        _ = result.ResolveMaximum();
+        return result;
+    }
+
+    public async Task<RealStructureCreationSupport> ReadStructureCreationSupportAsync(
+        StorageObjectId physicalTarget,
+        bool tiered,
+        TrustedRealSession session,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
+            throw new UnauthorizedAccessException("An armed elevated Agent is required.");
+        if (physicalTarget.Kind != StorageObjectKind.PhysicalDisk)
+            throw new InvalidDataException("Creation support requires one exact physical disk.");
+
+        var topology = await topologyReader.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        if (physicalTarget.System != topology.SystemId)
+            throw new InvalidDataException("The physical disk does not belong to the current local system.");
+        var physicalSource = topology.RequireObject(physicalTarget);
+        var closure = topology.RequireSinglePhysicalClosure([physicalTarget]);
+        var physical = topology.Snapshot.PhysicalDisks.SingleOrDefault(item =>
+            item.StableId == closure.PhysicalDiskId)
+            ?? throw new InvalidDataException("The exact physical member is absent from the fresh snapshot.");
+        if (!StringComparer.Ordinal.Equals(physicalTarget.ProviderKey, closure.PhysicalDiskId))
+            throw new InvalidDataException("The selected identity is not the exact physical member in its closure.");
+
+        var subsystem = RequireCreationSubsystem(topology, physicalSource, physical);
+        var currentPool = RequireCurrentCreationPool(topology, physical);
+        if (tiered && (!physical.MediaType.Equals("HDD", StringComparison.OrdinalIgnoreCase)
+            || RequireFactUInt64(physicalSource, "MediaType") != 3))
+            throw new NotSupportedException("Tiered creation is enabled only for one exact HDD member.");
+
+        VirtualDiskCreationSupportProbe? ordinaryProbe = null;
+        WindowsTierCapability capabilityEvidence;
+        if (tiered)
+        {
+            capabilityEvidence = await RequireTierCapabilitiesAsync(topology, closure,
+                ["SupportsStoragePoolCreation", "SupportsStorageTierCreation",
+                    "SupportsStorageTieredVirtualDiskCreation"],
+                cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            capabilityEvidence = await RequireTierCapabilitiesAsync(topology, closure,
+                ["SupportsStoragePoolCreation"], cancellationToken).ConfigureAwait(false);
+            if (currentPool is not null)
+            {
+                var poolId = new StorageObjectId(topology.SystemId,
+                    StorageObjectKind.StoragePool, currentPool.Id);
+                var target = WindowsRealStorageTargetBuilder.Build(topology,
+                    RealTargetReference.ForExisting(poolId), new Dictionary<string, string>());
+                if (target.Kind != StorageObjectKind.StoragePool
+                    || target.UniqueId != currentPool.UniqueId
+                    || target.ObjectId != currentPool.ObjectId
+                    || target.PhysicalMemberUniqueId != subsystem.PhysicalUniqueId
+                    || target.PhysicalMemberObjectId != subsystem.PhysicalObjectId
+                    || target.StorageSubsystemUniqueId != subsystem.UniqueId
+                    || target.StorageSubsystemObjectId != subsystem.ObjectId)
+                    throw new InvalidDataException("The current pool target does not preserve the exact physical/subsystem identities.");
+                ordinaryProbe = await virtualDiskSizes.ProbeAsync(target, cancellationToken)
+                    .ConfigureAwait(false);
+                if (ordinaryProbe.ReturnValue != 0
+                    || ordinaryProbe.ObservedAtUtc == default
+                    || ordinaryProbe.ResiliencySettingName != "Simple"
+                    || ordinaryProbe.PoolUniqueId != currentPool.UniqueId
+                    || ordinaryProbe.PoolObjectId != currentPool.ObjectId)
+                    throw new NotSupportedException("The exact current pool did not verify Simple virtual-disk creation support.");
+            }
+        }
+
+        var after = await topologyReader.CaptureAsync(cancellationToken).ConfigureAwait(false);
+        if (!StringComparer.Ordinal.Equals(after.MachineBinding, topology.MachineBinding))
+            throw new InvalidDataException("The local machine binding changed while creation support was being checked.");
+        var afterClosure = after.RequireSinglePhysicalClosure([physicalTarget]);
+        var afterPhysical = after.RequireObject(physicalTarget);
+        var afterSubsystem = RequireCreationSubsystem(after, afterPhysical,
+            after.Snapshot.PhysicalDisks.Single(item => item.StableId == afterClosure.PhysicalDiskId));
+        var afterPool = RequireCurrentCreationPool(after,
+            after.Snapshot.PhysicalDisks.Single(item => item.StableId == afterClosure.PhysicalDiskId));
+        if (!StringComparer.Ordinal.Equals(afterClosure.Fingerprint, closure.Fingerprint)
+            || afterClosure.PhysicalDiskId != closure.PhysicalDiskId
+            || afterSubsystem.StableId != subsystem.StableId
+            || afterSubsystem.UniqueId != subsystem.UniqueId
+            || afterSubsystem.ObjectId != subsystem.ObjectId
+            || afterPool?.Id != currentPool?.Id
+            || afterPool?.UniqueId != currentPool?.UniqueId
+            || afterPool?.ObjectId != currentPool?.ObjectId)
+            throw new InvalidDataException("The physical member, pool or subsystem changed while creation support was being checked.");
+
+        var providerEvidence = JsonSerializer.Serialize(new
+        {
+            topology.InventoryVersion,
+            PhysicalTarget = physicalTarget,
+            PhysicalMemberFingerprint = closure.PhysicalMemberFingerprint,
+            Subsystem = new { subsystem.StableId, subsystem.UniqueId, subsystem.ObjectId },
+            CurrentPool = currentPool is null ? null : new
+            {
+                currentPool.Id, currentPool.UniqueId, currentPool.ObjectId
+            },
+            OrdinaryProviderMethodProbe = ordinaryProbe,
+            Capabilities = capabilityEvidence,
+            closure.PoolMemberRoleEvidence
+        });
+        ulong? minimum = null;
+        bool? supportsTierCreation = null;
+        bool? supportsTieredVirtualDiskCreation = null;
+        if (tiered)
+        {
+            var minimumField = capabilityEvidence.Fields.Single(item =>
+                item.Name == "PhysicalDisksPerStoragePoolMin");
+            minimum = minimumField.Value!.Value.GetUInt64();
+            supportsTierCreation = true;
+            supportsTieredVirtualDiskCreation = true;
+        }
+        return new RealStructureCreationSupport(physicalTarget, tiered,
+            closure.Fingerprint, timeProvider.GetUtcNow(), closure.PhysicalMemberFingerprint,
+            subsystem.StableId, subsystem.UniqueId, subsystem.ObjectId,
+            currentPool?.Id, currentPool?.UniqueId, currentPool?.ObjectId,
+            ordinaryProbe is not null, true, supportsTierCreation,
+            supportsTieredVirtualDiskCreation, minimum, providerEvidence);
+    }
+
     public async Task<RealPartitionResizeRange> ReadPartitionResizeRangeAsync(
         StorageObjectId partitionId,
         TrustedRealSession session,
@@ -290,7 +457,14 @@ public sealed class WindowsRealOperationPlanner
                     Guid.Parse("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"),
                     msrRole
                 };
-                if (partitions.Length == 0 || partitions.Any(item =>
+                var diskSource = topology.RequireObject(new StorageObjectId(topology.SystemId,
+                    StorageObjectKind.OsDisk, disk.StableId));
+                if (diskSource.Field("NumberOfPartitions") is not { } partitionCount
+                    || !partitionCount.TryGetInt64(out var observedCount)
+                    || observedCount != partitions.Length
+                    || !disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
+                    || snapshot.UnattachedPartitions.Any(item => item.OsDiskId == disk.StableId)
+                    || partitions.Any(item =>
                         item.IsBoot || item.IsSystem
                         || !disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
                         || !Guid.TryParse(item.PartitionTypeId, out var kind)
@@ -534,9 +708,12 @@ public sealed class WindowsRealOperationPlanner
                 supportEvidence = await RequireTierCapabilityAsync(topology, closure, "SupportsStorageTieredVirtualDiskCreation", cancellationToken).ConfigureAwait(false);
                 var range = await capabilities.ReadTierCreationSizeAsync(topology,
                     value.Tier.Existing.Value, cancellationToken).ConfigureAwait(false);
-                if (!range.Supports(value.SizeBytes))
-                    throw new InvalidDataException("The frozen size is outside the exact HDD template's Simple creation range.");
-                supportEvidence += "; exact-template-new-size:" + System.Text.Json.JsonSerializer.Serialize(range);
+                var poolTarget = WindowsRealStorageTargetBuilder.Build(topology, value.Pool, verifiedStepOutputs);
+                var poolRange = await virtualDiskSizes.ReadAsync(poolTarget, cancellationToken).ConfigureAwait(false);
+                if (!VirtualDiskCreationSize.Intersect(poolRange, range).Supports(value.SizeBytes))
+                    throw new InvalidDataException("The frozen size is outside the intersection of the exact pool and HDD template Simple creation ranges.");
+                supportEvidence += "; exact-template-new-size:" + System.Text.Json.JsonSerializer.Serialize(range)
+                    + "; exact-pool-new-size:" + System.Text.Json.JsonSerializer.Serialize(poolRange);
                 break;
             }
             case DeleteTierCommand value:
@@ -624,6 +801,200 @@ public sealed class WindowsRealOperationPlanner
             throw new NotSupportedException("The exact subsystem has not verified the single-HDD capability " + field + ": " + evidence.Error);
         return "live-tier-capability:" + System.Text.Json.JsonSerializer.Serialize(evidence);
     }
+
+    private async Task<WindowsTierCapability> RequireTierCapabilitiesAsync(
+        WindowsRealStorageTopology topology,
+        RealTargetClosure closure,
+        IReadOnlyList<string> requiredFields,
+        CancellationToken token)
+    {
+        var physicalTarget = new StorageObjectId(topology.SystemId,
+            StorageObjectKind.PhysicalDisk, closure.PhysicalDiskId);
+        var physicalSource = topology.RequireObject(physicalTarget);
+        var physical = topology.Snapshot.PhysicalDisks.Single(item =>
+            item.StableId == closure.PhysicalDiskId);
+        var subsystem = RequireCreationSubsystem(topology, physicalSource, physical);
+        var evidence = await capabilities.ReadTierAsync(topology, physicalTarget, token)
+            .ConfigureAwait(false);
+        var associationKeys = evidence.Associations.Select(RelationshipKey)
+            .Order(StringComparer.Ordinal).ToArray();
+        var expectedAssociationKeys = subsystem.Associations.Select(RelationshipKey)
+            .Order(StringComparer.Ordinal).ToArray();
+        if (evidence.Status != "queried"
+            || evidence.PhysicalDiskStableId != closure.PhysicalDiskId
+            || evidence.SubsystemStableId != subsystem.StableId
+            || evidence.UniqueId != subsystem.UniqueId
+            || evidence.ObjectId != subsystem.ObjectId
+            || evidence.ObservedAtUtc == default
+            || associationKeys.Length != associationKeys.Distinct(StringComparer.Ordinal).Count()
+            || !associationKeys.SequenceEqual(expectedAssociationKeys, StringComparer.Ordinal))
+            throw new NotSupportedException("The current physical disk and subsystem capability identity is not exact: " + evidence.Error);
+
+        foreach (var fieldName in requiredFields)
+        {
+            var fields = evidence.Fields.Where(item => item.Name == fieldName).ToArray();
+            if (fields.Length != 1 || fields[0] is not
+                { ValueType: FactValueType.Boolean, ReadState: FieldReadState.Returned,
+                    Value: { ValueKind: JsonValueKind.True } }
+                || fields[0].SourceRef != subsystem.StableId)
+                throw new NotSupportedException("The exact subsystem has not verified the single-HDD capability "
+                    + fieldName + ": " + evidence.Error);
+        }
+
+        var minimumFields = evidence.Fields.Where(item =>
+            item.Name == "PhysicalDisksPerStoragePoolMin").ToArray();
+        if (minimumFields.Length != 1
+            || minimumFields[0] is not
+                { ValueType: FactValueType.UInt64, ReadState: FieldReadState.Returned,
+                    Value: { } minimumValue }
+            || minimumFields[0].SourceRef != subsystem.StableId
+            || !minimumValue.TryGetUInt64(out var minimum) || minimum != 1)
+            throw new NotSupportedException("The exact subsystem has not verified one physical disk per storage pool: "
+                + evidence.Error);
+        return evidence;
+    }
+
+    private static CreationSubsystemEvidence RequireCreationSubsystem(
+        WindowsRealStorageTopology topology,
+        WinPoolSourceObject physicalSource,
+        PhysicalDiskInfo physical)
+    {
+        if (physicalSource.ObjectType != FactObjectType.PhysicalDisk
+            || physicalSource.Id != physical.StableId
+            || !StringComparer.Ordinal.Equals(RequireFactText(physicalSource, "SerialNumber"),
+                physical.SerialNumber.Trim()))
+            throw new InvalidDataException("The physical target has no exact current provider identity.");
+        var physicalUniqueId = RequireFactText(physicalSource, "UniqueId");
+        var physicalObjectId = RequireFactText(physicalSource, "ObjectId");
+        if (RequireFactBoolean(physicalSource, "CanPool") != physical.CanPool)
+            throw new InvalidDataException("The physical member's current poolability fact disagrees with its projection.");
+
+        var relations = topology.Facts.Relationships.Where(item => !item.IsRetained).ToArray();
+        var memberships = relations.Where(item => item.Kind == "pool-member"
+            && item.ToId == physicalSource.Id).ToArray();
+        if (memberships.Length == 0
+            || memberships.Select(item => item.FromId).Distinct(StringComparer.Ordinal).Count() != memberships.Length)
+            throw new InvalidDataException("The physical member has no unique current pool association for its subsystem.");
+
+        var subsystemIds = new HashSet<string>(StringComparer.Ordinal);
+        var associationEvidence = new List<WinPoolFactRelationship>();
+        var factConcretePools = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var membership in memberships)
+        {
+            var poolSource = topology.Facts.Objects.SingleOrDefault(item =>
+                item.Id == membership.FromId && item.ObjectType == FactObjectType.StoragePool
+                && item.HasReliableIdentity)
+                ?? throw new InvalidDataException("A physical pool association has no exact current pool object.");
+            var poolSourceState = topology.Facts.Sources.Single(item => item.Id == poolSource.SourceRef);
+            if (poolSourceState.ClassName != "MSFT_StoragePool"
+                || poolSourceState.ReadState != FieldReadState.Returned)
+                throw new InvalidDataException("The physical pool association is not from a complete current provider query.");
+            var primordial = RequireFactBoolean(poolSource, "IsPrimordial");
+            _ = RequireFactText(poolSource, "UniqueId");
+            _ = RequireFactText(poolSource, "ObjectId");
+            var projectedPool = topology.Snapshot.StoragePools.SingleOrDefault(item =>
+                item.StableId == poolSource.Id)
+                ?? throw new InvalidDataException("A current pool association has no unique projected pool.");
+            if (projectedPool.IsPrimordial != primordial
+                || !projectedPool.MemberPhysicalDiskIds.Contains(physical.StableId))
+                throw new InvalidDataException("The exact pool association disagrees with the current storage projection.");
+            if (!primordial)
+            {
+                factConcretePools.Add(poolSource.Id);
+                if (projectedPool.MemberPhysicalDiskIds.Count != 1
+                    || projectedPool.MemberPhysicalDiskIds[0] != physical.StableId)
+                    throw new NotSupportedException("Creation support requires a single-member concrete pool.");
+            }
+
+            var subsystemParents = relations.Where(item => item.Kind == "subsystem-pool"
+                && item.ToId == poolSource.Id).ToArray();
+            if (subsystemParents.Length != 1)
+                throw new InvalidDataException("A current pool lacks one exact storage subsystem association.");
+            var subsystemSource = topology.Facts.Objects.SingleOrDefault(item =>
+                item.Id == subsystemParents[0].FromId
+                && item.ObjectType == FactObjectType.StorageSubsystem
+                && item.HasReliableIdentity)
+                ?? throw new InvalidDataException("The pool subsystem has no exact current provider identity.");
+            var subsystemSourceState = topology.Facts.Sources.Single(item =>
+                item.Id == subsystemSource.SourceRef);
+            if (subsystemSourceState.ClassName != "MSFT_StorageSubSystem"
+                || subsystemSourceState.ReadState != FieldReadState.Returned)
+                throw new InvalidDataException("The exact storage subsystem query is incomplete.");
+            _ = RequireFactText(subsystemSource, "UniqueId");
+            _ = RequireFactText(subsystemSource, "ObjectId");
+            if (projectedPool.SubsystemStableId != subsystemSource.Id)
+                throw new InvalidDataException("The pool's projected subsystem differs from its exact current association.");
+            subsystemIds.Add(subsystemSource.Id);
+            associationEvidence.Add(membership);
+            associationEvidence.Add(subsystemParents[0]);
+        }
+
+        var projectedConcretePools = topology.Snapshot.StoragePools
+            .Where(item => !item.IsPrimordial
+                && item.MemberPhysicalDiskIds.Contains(physical.StableId))
+            .Select(item => item.StableId).Order(StringComparer.Ordinal).ToArray();
+        if (!projectedConcretePools.SequenceEqual(factConcretePools.Order(StringComparer.Ordinal),
+                StringComparer.Ordinal))
+            throw new InvalidDataException("The projected and fact-level concrete pool memberships disagree.");
+        if (subsystemIds.Count != 1)
+            throw new InvalidDataException("The physical member is associated with more than one storage subsystem.");
+
+        var subsystem = topology.Facts.Objects.Single(item => item.Id == subsystemIds.Single());
+        var subsystemUnique = RequireFactText(subsystem, "UniqueId");
+        var subsystemObject = RequireFactText(subsystem, "ObjectId");
+        if (!topology.Snapshot.StorageSubsystems.Any(item => item.StableId == subsystem.Id))
+            throw new InvalidDataException("The exact current subsystem is absent from the projected snapshot.");
+        return new CreationSubsystemEvidence(subsystem.Id, subsystemUnique,
+            subsystemObject, physicalUniqueId, physicalObjectId,
+            associationEvidence.ToArray());
+    }
+
+    private static CreationPoolEvidence? RequireCurrentCreationPool(
+        WindowsRealStorageTopology topology,
+        PhysicalDiskInfo physical)
+    {
+        var pools = topology.Snapshot.StoragePools.Where(item =>
+            !item.IsPrimordial && item.MemberPhysicalDiskIds.Contains(physical.StableId)).ToArray();
+        if (pools.Length > 1)
+            throw new NotSupportedException("Creation support requires at most one current concrete pool.");
+        if (pools.Length == 0)
+            return null;
+
+        var pool = pools[0];
+        var target = new StorageObjectId(topology.SystemId,
+            StorageObjectKind.StoragePool, pool.StableId);
+        var source = topology.RequireObject(target);
+        var uniqueId = RequireFactText(source, "UniqueId");
+        var objectId = RequireFactText(source, "ObjectId");
+        if (RequireFactBoolean(source, "IsPrimordial")
+            || pool.MemberPhysicalDiskIds.Count != 1
+            || pool.MemberPhysicalDiskIds[0] != physical.StableId)
+            throw new InvalidDataException("The exact current concrete pool identity or physical member is incomplete.");
+        return new CreationPoolEvidence(pool.StableId, uniqueId, objectId);
+    }
+
+    private static string RequireFactText(WinPoolSourceObject source, string name) =>
+        source.Field(name) is { ReadState: FieldReadState.Returned,
+            Value: { ValueKind: JsonValueKind.String } value }
+        && value.GetString() is { Length: > 0 } result && !string.IsNullOrWhiteSpace(result)
+            ? result
+            : throw new InvalidDataException("The exact current storage identity field is unavailable: " + name);
+
+    private static bool RequireFactBoolean(WinPoolSourceObject source, string name) =>
+        source.Field(name) is { ReadState: FieldReadState.Returned,
+            Value: { ValueKind: JsonValueKind.True or JsonValueKind.False } value }
+            ? value.GetBoolean()
+            : throw new InvalidDataException("The exact current storage safety field is unavailable: " + name);
+
+    private static ulong RequireFactUInt64(WinPoolSourceObject source, string name) =>
+        source.Field(name) is { ValueType: FactValueType.UInt64,
+            ReadState: FieldReadState.Returned, Value: { } value }
+        && value.TryGetUInt64(out var result)
+            ? result
+            : throw new InvalidDataException("The exact current storage field is unavailable: " + name);
+
+    private static string RelationshipKey(WinPoolFactRelationship relation) =>
+        relation.FromId + "\0" + relation.Kind + "\0" + relation.ToId;
 
     private static StoragePoolInfo RequireTierPool(StorageSnapshot snapshot,
         RealTargetClosure closure, string? poolId)
@@ -1082,8 +1453,19 @@ public sealed class WindowsRealOperationPlanner
                     + " bytes, " + partition.FileSystem + ", letter "
                     + (partition.DriveLetter.Length == 0 ? "none" : partition.DriveLetter)
                     + ", label " + partition.FileSystemLabel
-                    + ", volume " + (volume?.StableId ?? "none");
+                    + ", volume " + (volume?.StableId ?? "none")
+                    + ", access paths " + (volume is null ? "none" : string.Join(", ", volume.AccessPaths));
             }).ToArray();
         return items.Length == 0 ? "no existing partitions" : string.Join(" | ", items);
     }
+
+    private sealed record CreationSubsystemEvidence(
+        string StableId,
+        string UniqueId,
+        string ObjectId,
+        string PhysicalUniqueId,
+        string PhysicalObjectId,
+        IReadOnlyList<WinPoolFactRelationship> Associations);
+
+    private sealed record CreationPoolEvidence(string Id, string UniqueId, string ObjectId);
 }

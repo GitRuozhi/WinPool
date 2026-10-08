@@ -994,6 +994,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.AcceptRealOperation,
             QueryAgentRealOperationRequest =>
                 AgentControlMessageTypes.QueryRealOperation,
+            QueryAgentRealVirtualDiskCreationRangeRequest => AgentControlMessageTypes.QueryRealVirtualDiskCreationRange,
+            QueryAgentRealStructureCreationSupportRequest => AgentControlMessageTypes.QueryRealStructureCreationSupport,
+            ListAgentRecoverableRealOperationsRequest => AgentControlMessageTypes.ListRecoverableRealOperations,
+            CaptureAgentManageScopedInventoryRequest => AgentControlMessageTypes.CaptureManageScopedInventory,
             QueryAgentRealPartitionResizeRangeRequest =>
                 AgentControlMessageTypes.QueryRealPartitionResizeRange,
             StopAgentRealOperationFollowingStepsRequest =>
@@ -1048,6 +1052,9 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<AgentRealModeResponse>(JsonOptions),
             nameof(AgentRealOperationResponse) =>
                 response.Deserialize<AgentRealOperationResponse>(JsonOptions),
+            nameof(AgentRealVirtualDiskCreationRangeResponse) => response.Deserialize<AgentRealVirtualDiskCreationRangeResponse>(JsonOptions),
+            nameof(AgentRealStructureCreationSupportResponse) => response.Deserialize<AgentRealStructureCreationSupportResponse>(JsonOptions),
+            nameof(AgentRecoverableRealOperationsResponse) => response.Deserialize<AgentRecoverableRealOperationsResponse>(JsonOptions),
             nameof(AgentRealPartitionResizeRangeResponse) =>
                 response.Deserialize<AgentRealPartitionResizeRangeResponse>(JsonOptions),
             nameof(ShutdownResponse) =>

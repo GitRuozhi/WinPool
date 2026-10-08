@@ -397,6 +397,10 @@ internal sealed class DesktopAgentRuntime :
         CancellationToken cancellationToken) =>
         inventoryCoordinator.CaptureManageAsync(request, cancellationToken);
 
+    public Task<ApplicationResult<AgentResponse>> CaptureManageScopedInventoryAsync(
+        CaptureAgentManageScopedInventoryRequest request, CancellationToken cancellationToken) =>
+        inventoryCoordinator.CaptureManageScopedAsync(request.Scope, request.CorrelationId, cancellationToken);
+
     public Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
         LoadAgentManageInventoryRequest request,
         CancellationToken cancellationToken) =>

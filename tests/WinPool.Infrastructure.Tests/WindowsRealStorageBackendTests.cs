@@ -16,6 +16,132 @@ public sealed class WindowsRealStorageBackendTests
     private const string MachineBinding = "synthetic-machine-binding";
 
     [Fact]
+    public async Task ScopedSafetyChecksCollectEveryTimeAndKeepTheFullComponentFingerprint()
+    {
+        var fixture = new Fixture(secondDisk: true, scopedCaptures: true);
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        var first = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        Assert.Equal(2, fixture.Source.FullCalls); // Preparation and the initial exact selector proof.
+        Assert.Empty(fixture.Source.Scopes);
+        var second = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        Assert.Equal(first.TargetFingerprint, second.TargetFingerprint);
+        Assert.Equal(plan.RealOperation.TargetFingerprint, second.TargetFingerprint);
+        var requested = Assert.Single(fixture.Source.Scopes);
+        Assert.Equal(fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId), Assert.Single(requested.Targets));
+        Assert.DoesNotContain(OtherPhysicalId, requested.BeforeObjectIds);
+        Assert.DoesNotContain(OtherDiskId, requested.BeforeObjectIds);
+        fixture.Adapter.OnExecute = () => fixture.SetOffline(true);
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step, second, default);
+        Assert.Equal(RealStepOutcome.Verified, result.Outcome);
+        Assert.Equal(3, fixture.Source.Scopes.Count); // Re-preflight, immediately before call, after call.
+        Assert.Equal(2, fixture.Source.FullCalls);
+        Assert.Equal(1, fixture.Adapter.CallCount);
+        var reconciled = await fixture.Backend.ReconcileAsync(plan,
+            [new(step.Id, RealOperationStepState.Verified, result.Code, second.TargetEvidenceJson, result.ResultEvidenceJson)], default);
+        Assert.True(reconciled.CanReleaseWriteBarrier);
+        Assert.Equal(4, fixture.Source.Scopes.Count);
+        Assert.Equal("reconcile", fixture.Source.Scopes[^1].StepId);
+        Assert.Equal(2, fixture.Source.FullCalls);
+    }
+
+    [Fact]
+    public async Task ScopedCaptureFailureNeverFallsBackToFullOrReusesPriorFacts()
+    {
+        var fixture = new Fixture(scopedCaptures: true);
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        fixture.Source.ScopedFailure = new IOException("exact target collection failed");
+        await Assert.ThrowsAsync<IOException>(() => fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default));
+        Assert.Equal(2, fixture.Source.FullCalls);
+        Assert.Single(fixture.Source.Scopes);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        fixture.Source.ScopedFailure = null;
+        fixture.ChangeSerial("replacement-provider-identity");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default));
+        Assert.Equal(2, fixture.Source.FullCalls);
+        Assert.Equal(2, fixture.Source.Scopes.Count);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task ScopedCaptureIncompleteEvidenceCannotBecomeFreshSafetyFacts()
+    {
+        var fixture = new Fixture(scopedCaptures: true);
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        fixture.Source.CompleteScopedCapture = false;
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default));
+        Assert.Equal(2, fixture.Source.FullCalls);
+        Assert.Single(fixture.Source.Scopes);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task RestartedBackendReconciliationUsesDurablePhysicalSelectorAndFreshScopedEvidence()
+    {
+        var fixture = new Fixture(scopedCaptures: true);
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        fixture.Adapter.OnExecute = () => fixture.SetOffline(true);
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, default);
+        Assert.Equal(RealStepOutcome.Verified, result.Outcome);
+        var fullBeforeRestart = fixture.Source.FullCalls;
+        var scopedBeforeRestart = fixture.Source.Scopes.Count;
+        var restartedBackend = new WindowsRealStorageBackend(fixture.Adapter, topologyReader: fixture.Reader);
+        var progress = new RealOperationStepProgress(step.Id, RealOperationStepState.Verified,
+            result.Code, preflight.TargetEvidenceJson, result.ResultEvidenceJson);
+        var reconciled = await restartedBackend.ReconcileAsync(plan, [progress], default);
+        Assert.Equal(RealOperationState.Succeeded, reconciled.State);
+        Assert.True(reconciled.CanReleaseWriteBarrier);
+        Assert.Equal(fullBeforeRestart, fixture.Source.FullCalls);
+        Assert.Equal(scopedBeforeRestart + 1, fixture.Source.Scopes.Count);
+        var locator = Assert.Single(fixture.Source.Scopes[^1].BeforeLocators);
+        var durableTarget = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        Assert.Equal("UniqueId", locator.IdentityProperty);
+        Assert.Equal(durableTarget.PhysicalMemberUniqueId, locator.IdentityValue);
+        Assert.Equal(1, fixture.Adapter.CallCount); // Reconciliation never replays the write.
+        fixture.Source.ScopedFailure = new IOException("provider unavailable after restart");
+        var failed = await restartedBackend.ReconcileAsync(plan, [progress], default);
+        Assert.False(failed.CanReleaseWriteBarrier);
+        Assert.Equal(RealOperationState.OutcomeUnknown, failed.State);
+        Assert.Equal(fullBeforeRestart, fixture.Source.FullCalls);
+        Assert.Equal(1, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task MalformedDurableScopedSelectorKeepsUnknownBarrierWithoutAnyCaptureFallback()
+    {
+        var fixture = new Fixture(scopedCaptures: true);
+        var plan = await fixture.PrepareAsync();
+        var progress = new RealOperationStepProgress(plan.RealOperation!.Steps[0].Id,
+            RealOperationStepState.OutcomeUnknown, "provider.unknown", "{invalid-json", "{}");
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], default);
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal("real.reconciliation_capture_failed", result.Code);
+        Assert.Equal(1, fixture.Source.FullCalls); // Preparation only; the corrupt locator cannot authorize a fallback.
+        Assert.Empty(fixture.Source.Scopes);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task SourceWithoutScopedCapabilityContinuesFreshFullChecks()
+    {
+        var fixture = new Fixture();
+        Assert.False(fixture.Reader.SupportsScopedCapture);
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        Assert.Equal(3, fixture.Source.FullCalls);
+        Assert.Empty(fixture.Source.Scopes);
+    }
+
+    [Fact]
     public async Task PrimordialMembershipDoesNotJoinIndependentPhysicalDisks()
     {
         var fixture = new Fixture(secondDisk: true);
@@ -1763,6 +1889,120 @@ public sealed class WindowsRealStorageBackendTests
     }
 
     [Theory]
+    [InlineData("valid")]
+    [InlineData("missing-live")]
+    [InlineData("live-return")]
+    [InlineData("live-size")]
+    [InlineData("frozen-size")]
+    public async Task NewTieredCreationRecoveryRequiresBothPoolAndTemplateCapacityProofs(string change)
+    {
+        var fixture = new Fixture();
+        var (plan, progress) = await PrepareReturnedTieredCreationAsync(fixture);
+        var range = new VirtualDiskCreationSize(1L << 30, change == "frozen-size" ? 1L << 30 : 64L << 30, 1L << 30, []);
+        var step = plan.RealOperation!.Steps[0];
+        step = step with { SupportEvidence = step.SupportEvidence + "; exact-pool-new-size:" + JsonSerializer.Serialize(range) };
+        plan = plan with { RealOperation = plan.RealOperation with { Steps = [step] } };
+        plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) };
+        var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
+        var live = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(provider.LiveCapabilityEvidence!.Value.GetRawText())!;
+        if (change != "missing-live") live["PoolCreationSize"] = JsonSerializer.SerializeToElement(new
+        {
+            ReturnValue = change == "live-return" ? 1u : 0u, SupportedSizes = Array.Empty<ulong>(),
+            VirtualDiskSizeMin = 1UL << 30, VirtualDiskSizeMax = change == "live-size" ? 1UL << 30 : 64UL << 30,
+            VirtualDiskSizeDivisor = 1UL << 30
+        });
+        provider = provider with { LiveCapabilityEvidence = JsonSerializer.SerializeToElement(live) };
+        progress = progress with { ResultEvidence = JsonSerializer.Serialize(provider) };
+        fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true);
+
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
+
+        Assert.Equal(change == "valid" ? RealOperationState.Succeeded : RealOperationState.OutcomeUnknown, result.State);
+        Assert.Equal(change == "valid", result.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SynchronouslyFailedTieredCreationReconcilesUnchangedBaselineWithoutReplaying(bool historicalJobs)
+    {
+        var jobs = new SyntheticStorageJobReader { HistoricalJobs = historicalJobs };
+        var fixture = new Fixture(storageJobs: jobs);
+        var (plan, progress) = await PrepareReturnedTieredCreationAsync(fixture);
+        var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
+        provider = provider with { Code = "provider.error-outcome-unknown", ProviderError = "Insufficient eligible resources",
+            UniqueId = null, ObjectId = null, TieredCreationInput = null };
+        progress = progress with { ResultEvidence = JsonSerializer.Serialize(provider) };
+
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.Failed, result.State);
+        Assert.True(result.CanReleaseWriteBarrier);
+        Assert.Equal(RealOperationStepState.Failed, Assert.Single(result.Steps).State);
+        var evidence = JsonSerializer.Deserialize<WindowsObservedNoEffectStepEvidence>(result.Steps[0].ResultEvidence!)!;
+        Assert.True(evidence.WindowsCallIssued);
+        Assert.Equal(JsonSerializer.Serialize(provider), JsonSerializer.Serialize(evidence.ProviderResult));
+        Assert.Equal(plan.RealOperation!.TargetFingerprint, evidence.FirstObservedFingerprint);
+        Assert.Equal(evidence.FirstObservedFingerprint, evidence.SecondObservedFingerprint);
+        Assert.Equal(2, evidence.StorageJobQueries.Count);
+        Assert.Equal(2, jobs.Calls);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        Assert.Equal(1, fixture.Safety.CallCount);
+    }
+
+    [Theory]
+    [InlineData("transport")]
+    [InlineData("no-error")]
+    [InlineData("returned-id")]
+    [InlineData("returned-job")]
+    [InlineData("missing-capability")]
+    [InlineData("changed-baseline")]
+    [InlineData("created-object")]
+    [InlineData("later-object")]
+    [InlineData("active-job")]
+    [InlineData("unknown-job")]
+    [InlineData("later-job")]
+    [InlineData("job-query-failed")]
+    [InlineData("stale-jobs")]
+    [InlineData("job-identity")]
+    [InlineData("safety")]
+    public async Task FailedTieredCreationKeepsBarrierWhenNoEffectCannotBeProven(string change)
+    {
+        var jobs = new SyntheticStorageJobReader();
+        var fixture = new Fixture(storageJobs: jobs);
+        var (plan, progress) = await PrepareReturnedTieredCreationAsync(fixture);
+        var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)! with
+        { Code = "provider.error-outcome-unknown", ProviderError = "Insufficient eligible resources",
+            UniqueId = null, ObjectId = null, TieredCreationInput = null };
+        switch (change)
+        {
+            case "transport": provider = provider with { Code = "adapter.process-outcome-unknown" }; break;
+            case "no-error": provider = provider with { ProviderError = null }; break;
+            case "returned-id": provider = provider with { UniqueId = "returned" }; break;
+            case "returned-job": provider = provider with { ProviderJobId = 1 }; break;
+            case "missing-capability": provider = provider with { LiveCapabilityEvidence = null }; break;
+            case "changed-baseline": fixture.ChangeSerial("replacement"); break;
+            case "created-object": fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true); break;
+            case "later-object": jobs.OnRead = count => { if (count == 1) fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true); }; break;
+            case "active-job": jobs.State = 4; break;
+            case "unknown-job": jobs.State = 0; break;
+            case "later-job": jobs.OnRead = count => { if (count == 2) jobs.State = 4; }; break;
+            case "job-query-failed": jobs.Fail = true; break;
+            case "stale-jobs": jobs.Stale = true; break;
+            case "job-identity": jobs.MissingIdentity = true; break;
+            case "safety": fixture.Safety.Reject = true; break;
+        }
+        progress = progress with { ResultEvidence = JsonSerializer.Serialize(provider) };
+
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
+
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
     [InlineData("hash")]
     [InlineData("not-issued")]
     [InlineData("missing-target")]
@@ -1965,11 +2205,13 @@ public sealed class WindowsRealStorageBackendTests
         private bool hasVolume;
 
         public Fixture(bool secondDisk = false, bool sharedOrdinaryPool = false, bool expirePostCallWindow = false,
-            IWindowsRealStorageCapabilityReader? tierCapabilities = null)
+            IWindowsRealStorageCapabilityReader? tierCapabilities = null, bool scopedCaptures = false,
+            IWindowsStorageJobReader? storageJobs = null)
         {
             this.secondDisk = secondDisk;
             this.sharedOrdinaryPool = sharedOrdinaryPool;
             Source = new SyntheticFactSource(() => CreateDocument());
+            Source.SupportsScopedCapture = scopedCaptures;
             Reader = new WindowsRealStorageTopologyReader(
                 Source, new SyntheticMachineIdentity(), new FixedTimeProvider(Now));
             Adapter = new SyntheticAdapter();
@@ -1978,7 +2220,7 @@ public sealed class WindowsRealStorageBackendTests
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
                 new FixedTimeProvider(Now), Safety, capabilities: tierCapabilities);
             Backend = new WindowsRealStorageBackend(Adapter, planner, Reader,
-                expirePostCallWindow ? new ExpiringPostCallTimeProvider(Now) : new FixedTimeProvider(Now));
+                expirePostCallWindow ? new ExpiringPostCallTimeProvider(Now) : new FixedTimeProvider(Now), storageJobs);
         }
 
         public SyntheticFactSource Source { get; }
@@ -2198,14 +2440,63 @@ public sealed class WindowsRealStorageBackendTests
 
     private sealed class SyntheticFactSource(Func<StorageSystemDocument> capture) : IWindowsRealStorageFactSource
     {
-        public Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(capture());
+        public bool SupportsScopedCapture { get; set; }
+        public int FullCalls { get; private set; }
+        public List<StorageInventoryScope> Scopes { get; } = [];
+        public Exception? ScopedFailure { get; set; }
+        public bool CompleteScopedCapture { get; set; } = true;
+        public Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken)
+        {
+            FullCalls++;
+            return Task.FromResult(capture());
+        }
+        public Task<StorageSystemDocument> CaptureFreshAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
+        {
+            if (!SupportsScopedCapture) throw new NotSupportedException("Synthetic source has no scoped capture capability.");
+            Scopes.Add(scope);
+            if (ScopedFailure is not null) throw ScopedFailure;
+            var document = capture();
+            var facts = document.SourceFacts!;
+            var ids = StorageInventoryScopeFactory.Create(facts, scope.OperationId, scope.StepId, scope.Targets).BeforeObjectIds.ToHashSet(StringComparer.Ordinal);
+            // This fixture simulates a scoped source response. Production source-level traversal has separate provider tests.
+            var selected = facts.Objects.Where(x => ids.Contains(x.Id) || x.ObjectType is not
+                (FactObjectType.StorageSubsystem or FactObjectType.StoragePool or FactObjectType.StorageTier or FactObjectType.PhysicalDisk
+                or FactObjectType.VirtualDisk or FactObjectType.Disk or FactObjectType.Partition or FactObjectType.Volume)).ToImmutableArray();
+            var selectedIds = selected.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
+            facts = facts with { Objects = selected,
+                Relationships = facts.Relationships.Where(x => selectedIds.Contains(x.FromId) && selectedIds.Contains(x.ToId)).ToImmutableArray(),
+                Collections = [], ScopedCollection = new(scope, facts.InventoryCapturedAt, facts.InventoryCapturedAt,
+                    CompleteScopedCapture, CompleteScopedCapture ? null : "synthetic.scope.incomplete") };
+            return Task.FromResult(document with { SourceFacts = facts });
+        }
     }
 
     private sealed class SyntheticMachineIdentity : IRealMachineIdentityProvider
     {
         public Task<string> ReadBindingAsync(CancellationToken cancellationToken) =>
             Task.FromResult(MachineBinding);
+    }
+
+    private sealed class SyntheticStorageJobReader : IWindowsStorageJobReader
+    {
+        public int Calls { get; private set; }
+        public bool HistoricalJobs { get; set; }
+        public bool Fail { get; set; }
+        public bool Stale { get; set; }
+        public bool MissingIdentity { get; set; }
+        public ushort? State { get; set; }
+        public Action<int>? OnRead { get; set; }
+        public Task<WindowsStorageJobAbsenceEvidence> ReadAsync(CancellationToken cancellationToken)
+        {
+            Calls++;
+            OnRead?.Invoke(Calls);
+            if (Fail) throw new IOException("Storage jobs unavailable");
+            var now = DateTimeOffset.Parse("2026-09-27T08:00:00Z");
+            IReadOnlyList<WindowsStorageJobObservation> jobs = State.HasValue || MissingIdentity
+                ? [new(MissingIdentity ? "" : "job", "job-object", State ?? 7)]
+                : HistoricalJobs ? [new("old-complete", "old-complete-object", 7), new("old-failed", "old-failed-object", 10)] : [];
+            return Task.FromResult(new WindowsStorageJobAbsenceEvidence(Stale ? now.AddMinutes(-3) : now, jobs));
+        }
     }
 
     private sealed class SyntheticAdapter : IWindowsRealStorageCommandAdapter

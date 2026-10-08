@@ -428,6 +428,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
         _notificationService.DismissByKey(WorkspacePrepareNotificationKey);
         _workspaceReady.TrySetResult();
+        _ = RecoverRealOperationsAsync();
     }
 
     private void ReplacePersistentInfo(string title, string occurrenceKey)

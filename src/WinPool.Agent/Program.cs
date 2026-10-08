@@ -199,7 +199,14 @@ internal static class Program
                 () => monitoringPersistence.InitializeAsync());
             var monitoring = new MonitoringSessionCoordinator(
                 new PdhDiskMonitorSource(),
-                monitoringPersistence);
+                monitoringPersistence,
+                targetIdentityResolver: new WindowsMonitorTargetIdentityResolver(
+                    localSystemIdentity: async cancellationToken =>
+                        (await new AgentLocalSystemIdentity(localDocument, localIdentity)
+                            .ResolveAsync(cancellationToken).ConfigureAwait(false)).SystemId));
+            AgentStartupTaskRunner.Complete(() => monitoring.InitializeEditRecoveryAsync(CancellationToken.None));
+            realOperations.AttachEditObserver(monitoring);
+            AgentStartupTaskRunner.Complete(() => realOperations.PublishRecoveredEditStatesAsync());
             workerProcesses = new WorkerProcessRepository(store, writeOwner);
             var storageHealthEvents = new StorageHealthEventRepository(store, writeOwner);
             var initialStorageHealthEvents = AgentStartupTaskRunner.Complete(
