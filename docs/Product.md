@@ -1,6 +1,6 @@
 # WinPool 产品方向
 
-本文件是当前产品行为、边界和路线的中文权威。2026-09-10 用户决定已覆盖相冲突的历史设计。当前实现为 V0.58；统一事实、硬件页与模拟编辑升级见 [V0.52 归档](Archive/V0.52/README.md)，十段硬件报告与 KS 能力接线见[硬件报告执行归档](Archive/20260915-hardware-report/README.md)。本机单盘真实修改第一阶段已完成，验收记录见 [Plan](Plan.md) 与 [Quality](Quality.md)；后续能力边界见 [CHANGELOG](CHANGELOG.md)。
+本文件是当前产品行为、边界和路线的中文权威。2026-09-10 用户决定已覆盖相冲突的历史设计。当前实现为 V0.58；统一事实、硬件页与模拟编辑升级见 [V0.52 归档](Archive/V0.52/README.md)，十段硬件报告与 KS 能力接线见[硬件报告执行归档](Archive/20260915-hardware-report/README.md)。本机单盘真实修改第一阶段已完成，验收记录见[第一阶段归档](Archive/20261007-real-edit-stage1/Plan.md)与 [Quality](Quality.md)；后续能力边界见 [CHANGELOG](CHANGELOG.md)。待执行的真实编辑产品流程对齐范围见 [V0.59 Plan](Plan.md)，尚未激活实施，不代表新增能力已经实现。
 
 已有对象在名称输入框按 Enter 独立提交改名，模拟提交后即时生效；真实实现按本阶段约定确认准确目标与新值后执行。普通失焦不提交，不增加保存名称按钮。改名不参与结构撤销或放弃；名称只用于显示，身份与关联使用可靠 ID。尚未创建对象的名称属于创建参数。历史修复与验证范围见 [CHANGELOG](CHANGELOG.md) 的 2026-09-11 记录。
 
