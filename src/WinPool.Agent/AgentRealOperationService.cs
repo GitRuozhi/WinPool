@@ -848,6 +848,10 @@ public sealed class AgentRealOperationService : IRealOperationService
         lock (reconciliationTasks)
         {
             var operationId = operation.Plan.OperationId;
+            // An Unknown durable state can be visible before its original
+            // worker finishes. Never reconcile concurrently with that worker.
+            if (runningTasks.TryGetValue(operationId, out var worker) && !worker.IsCompleted)
+                return;
             if (reconciliationTasks.ContainsKey(operationId))
                 return;
             var task = Task.Run(() => ReconcilePersistedAsync(operation.Plan));

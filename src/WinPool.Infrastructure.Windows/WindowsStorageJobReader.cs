@@ -12,9 +12,10 @@ public interface IWindowsStorageJobReader
 }
 
 /// <summary>
-/// Fixed, read-only enumeration used only to reconcile a synchronously returned
-/// creation error. Require every global job to be terminal. Historical failed
-/// jobs are recorded without attributing them to this operation by their name.
+/// Fixed, read-only enumeration for strict creation-error and unchanged-delete
+/// observations. Require every global job to be terminal. This does not itself
+/// prove a provider return, an unissued call, or no effect. Historical failed
+/// jobs are recorded without attributing them to an operation by their name.
 /// </summary>
 public sealed class WindowsStorageJobReader : IWindowsStorageJobReader
 {

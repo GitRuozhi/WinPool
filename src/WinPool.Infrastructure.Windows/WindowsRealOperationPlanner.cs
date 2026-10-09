@@ -165,13 +165,8 @@ public sealed class WindowsRealOperationPlanner
                 throw new InvalidDataException("The sole unused HDD template is required.");
             await RequireTierCapabilityAsync(topology, closure,
                 "SupportsStorageTieredVirtualDiskCreation", cancellationToken).ConfigureAwait(false);
-            var tierRange = await capabilities.ReadTierCreationSizeAsync(topology, targetId,
+            range = await capabilities.ReadTierCreationSizeAsync(topology, targetId,
                 cancellationToken).ConfigureAwait(false);
-            var poolTarget = WindowsRealStorageTargetBuilder.Build(topology,
-                RealTargetReference.ForExisting(new StorageObjectId(topology.SystemId,
-                    StorageObjectKind.StoragePool, pool.StableId)), new Dictionary<string, string>());
-            var poolRange = await virtualDiskSizes.ReadAsync(poolTarget, cancellationToken).ConfigureAwait(false);
-            range = VirtualDiskCreationSize.Intersect(poolRange, tierRange);
         }
         var result = new RealVirtualDiskCreationRange(targetId, range.MinimumBytes,
             range.MaximumBytes, range.DivisorBytes, range.RangeOriginBytes, range.EnumeratedSizes,
@@ -722,12 +717,11 @@ public sealed class WindowsRealOperationPlanner
                 }
                 var range = await capabilities.ReadTierCreationSizeAsync(topology,
                     value.Tier.Existing.Value, cancellationToken).ConfigureAwait(false);
-                var poolTarget = WindowsRealStorageTargetBuilder.Build(topology, value.Pool, verifiedStepOutputs);
-                var poolRange = await virtualDiskSizes.ReadAsync(poolTarget, cancellationToken).ConfigureAwait(false);
-                if (!VirtualDiskCreationSize.Intersect(poolRange, range).Supports(value.SizeBytes))
-                    throw new InvalidDataException("The frozen size is outside the intersection of the exact pool and HDD template Simple creation ranges.");
-                supportEvidence += "; exact-template-new-size:" + System.Text.Json.JsonSerializer.Serialize(range)
-                    + "; exact-pool-new-size:" + System.Text.Json.JsonSerializer.Serialize(poolRange);
+                // StorageTierSizes follows the exact template's supported sequence,
+                // not the generic pool virtual-disk size grid. Neither query is a dry run.
+                if (!range.Supports(value.SizeBytes))
+                    throw new InvalidDataException("The frozen size is outside the exact HDD template Simple creation range.");
+                supportEvidence += "; exact-template-new-size:" + System.Text.Json.JsonSerializer.Serialize(range);
                 break;
             }
             case DeleteTierCommand value:

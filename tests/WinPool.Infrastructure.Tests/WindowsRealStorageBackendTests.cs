@@ -65,6 +65,145 @@ public sealed class WindowsRealStorageBackendTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("incomplete")]
+    public async Task FreshCaptureFailureBeforeAdapterPersistsProvenNoCall(string failure)
+    {
+        var fixture = new Fixture(scopedCaptures: true);
+        var plan = await fixture.PrepareAsync();
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        if (failure == "timeout") fixture.Source.ScopedFailure = new TimeoutException("fixed inventory exceeded 60 seconds");
+        else fixture.Source.CompleteScopedCapture = false;
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, default);
+        Assert.Equal(RealStepOutcome.FailedWithoutEffect, result.Outcome);
+        Assert.Equal("real.pre_call_capture_failed", result.Code);
+        var evidence = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(result.ResultEvidenceJson)!;
+        Assert.True(evidence.NoWindowsCall);
+        Assert.Equal(plan.RealOperation.PhysicalMemberFingerprint, evidence.PhysicalMemberFingerprint);
+        Assert.NotEmpty(evidence.Diagnostic!);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        fixture.Source.ScopedFailure = null;
+        fixture.Source.CompleteScopedCapture = true;
+        var reconciled = await fixture.Backend.ReconcileAsync(plan,
+            [new(step.Id, RealOperationStepState.Verifying, result.Code, preflight.TargetEvidenceJson, result.ResultEvidenceJson)], default);
+        Assert.Equal(RealOperationState.Failed, reconciled.State);
+        Assert.True(reconciled.CanReleaseWriteBarrier);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UncertainTieredDeleteObservesUnchangedTargetAsFailedWithoutClaimingNoCallOrNoEffect(bool historicalJobs)
+    {
+        var jobs = new SyntheticStorageJobReader { HistoricalJobs = historicalJobs };
+        var fixture = new Fixture(storageJobs: jobs);
+        var (plan, progress) = await PrepareUncertainTieredDeletionAsync(fixture);
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], default);
+        Assert.Equal(RealOperationState.Failed, result.State);
+        Assert.True(result.CanReleaseWriteBarrier);
+        Assert.Equal(RealOperationStepState.Failed, Assert.Single(result.Steps).State);
+        var evidence = JsonSerializer.Deserialize<WindowsObservedUnchangedDeleteStepEvidence>(result.Steps[0].ResultEvidence!)!;
+        Assert.True(evidence.WindowsCallIssued);
+        Assert.True(evidence.NotVerified);
+        Assert.True(evidence.TargetStillPresent);
+        Assert.False(evidence.NoWindowsCall);
+        Assert.False(evidence.NoEffect);
+        Assert.Equal("adapter_exception", evidence.OriginalResultEvidence);
+        Assert.Equal(plan.RealOperation!.TargetFingerprint, evidence.FirstObservedFingerprint);
+        Assert.Equal(evidence.FirstObservedFingerprint, evidence.SecondObservedFingerprint);
+        Assert.Equal(JsonSerializer.Deserialize<WindowsStorageCommandTarget>(progress.TargetEvidence!), evidence.Target);
+        Assert.Equal(2, evidence.StorageJobQueries.Count);
+        Assert.Single(evidence.ObservedObjects, item => item.ObjectType == FactObjectType.VirtualDisk);
+        Assert.Contains(evidence.Associations, relation => relation.Kind == "virtual-disk-tier");
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData("hash")]
+    [InlineData("target-uid")]
+    [InlineData("target-oid")]
+    [InlineData("receipt")]
+    [InlineData("not-unknown")]
+    [InlineData("physical")]
+    [InlineData("second-change")]
+    [InlineData("active-job")]
+    [InlineData("second-active-job")]
+    [InlineData("missing-job-identity")]
+    [InlineData("stale-jobs")]
+    [InlineData("unreadable-jobs")]
+    [InlineData("missing-role")]
+    [InlineData("safety")]
+    [InlineData("partitioned-baseline")]
+    [InlineData("no-actual-tier-baseline")]
+    public async Task UncertainTieredDeleteKeepsBarrierWhenObservationIsIncompleteOrTargetChanged(string change)
+    {
+        var jobs = new SyntheticStorageJobReader();
+        var fixture = new Fixture(storageJobs: jobs);
+        var (plan, progress) = await PrepareUncertainTieredDeletionAsync(fixture, raw: change != "partitioned-baseline",
+            attachedTier: change != "no-actual-tier-baseline");
+        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(progress.TargetEvidence!)!;
+        switch (change)
+        {
+            case "hash": plan = plan with { PlanHash = "changed" }; break;
+            case "target-uid": progress = progress with { TargetEvidence = JsonSerializer.Serialize(target with { UniqueId = "replacement" }) }; break;
+            case "target-oid": progress = progress with { TargetEvidence = JsonSerializer.Serialize(target with { ObjectId = "replacement" }) }; break;
+            case "receipt": progress = progress with { ResultEvidence = "provider_return_unknown" }; break;
+            case "not-unknown": progress = progress with { State = RealOperationStepState.CallIssued }; break;
+            case "physical": fixture.ChangeSerial("replacement"); break;
+            case "second-change": jobs.OnRead = count => { if (count == 1) fixture.ChangeSerial("replacement"); }; break;
+            case "active-job": jobs.State = 4; break;
+            case "second-active-job": jobs.OnRead = count => { if (count == 2) jobs.State = 4; }; break;
+            case "missing-job-identity": jobs.MissingIdentity = true; break;
+            case "stale-jobs": jobs.Stale = true; break;
+            case "unreadable-jobs": jobs.Fail = true; break;
+            case "missing-role":
+                var original = fixture.FactsTransform!;
+                fixture.FactsTransform = item =>
+                {
+                    item = original(item);
+                    return item.Id != "disk:tiered" ? item : item with { Fields = item.Fields.Where(field => field.Name != "IsReadOnly").ToImmutableArray() };
+                };
+                break;
+            case "safety": fixture.Safety.Reject = true; break;
+        }
+        var result = await fixture.Backend.ReconcileAsync(plan, [progress], default);
+        Assert.Equal(RealOperationState.OutcomeUnknown, result.State);
+        Assert.False(result.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    private static async Task<(OperationPlan Plan, RealOperationStepProgress Progress)> PrepareUncertainTieredDeletionAsync(
+        Fixture fixture, bool raw = true, bool attachedTier = true)
+    {
+        fixture.SnapshotTransform = snapshot =>
+        {
+            var created = TieredCreationSnapshot(snapshot, true, 3997809246208);
+            if (!attachedTier) created = created with
+            {
+                StorageTiers = created.StorageTiers.Where(tier => tier.VirtualDiskStableId is null).ToArray(),
+                VirtualDisks = created.VirtualDisks.Select(vd => vd with { TierStableIds = [] }).ToArray()
+            };
+            return raw ? created : created with { OsDisks = created.OsDisks.Select(disk => disk with { PartitionStyle = "GPT" }).ToArray() };
+        };
+        fixture.FactsTransform = item =>
+        {
+            if (attachedTier || item.ObjectType != FactObjectType.VirtualDisk) item = TieredCreationFacts(item);
+            return item.ObjectType != FactObjectType.StoragePool ? item : item with
+            {
+                Fields = item.Fields.Add(WinPoolSourceField.Returned("IsReadOnly", false, FactValueType.Boolean, item.SourceRef))
+            };
+        };
+        var vd = fixture.Id(StorageObjectKind.VirtualDisk, "vd:tiered");
+        var step = new RealOperationStep("delete-vd", new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(vd)),
+            [], "Exact tiered VD", "VD absent", "VD removed", "fixed capability");
+        var plan = await fixture.Backend.PrepareAsync(new RealOperationIntentRequest(OperationIntent.DeleteVirtualDisk,
+            vd.System, [vd], [step], "VD absent"), fixture.Session, OperationId.New(), default);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0], new Dictionary<string, string>(), default);
+        return (plan, new(step.Id, RealOperationStepState.OutcomeUnknown, "operation.step.outcome_unknown", preflight.TargetEvidenceJson, "adapter_exception"));
+    }
+
     [Fact]
     public async Task ScopedCaptureIncompleteEvidenceCannotBecomeFreshSafetyFacts()
     {
@@ -2040,37 +2179,67 @@ public sealed class WindowsRealStorageBackendTests
     }
 
     [Theory]
-    [InlineData("valid")]
-    [InlineData("missing-live")]
-    [InlineData("live-return")]
-    [InlineData("live-size")]
-    [InlineData("frozen-size")]
-    public async Task NewTieredCreationRecoveryRequiresBothPoolAndTemplateCapacityProofs(string change)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExactTieredCapacityOffGenericPoolGridVerifiesAndRecoversWithHistoricalReceiptCompatibility(
+        bool reconcile, bool historicalPoolEvidence)
     {
+        // Real single-HDD success: supported by the template's 256-MiB
+        // sequence, but not by the generic pool virtual-disk 1-GiB grid.
+        const long bytes = 3997809246208;
         var fixture = new Fixture();
-        var (plan, progress) = await PrepareReturnedTieredCreationAsync(fixture);
-        var range = new VirtualDiskCreationSize(1L << 30, change == "frozen-size" ? 1L << 30 : 64L << 30, 1L << 30, []);
-        var step = plan.RealOperation!.Steps[0];
-        step = step with { SupportEvidence = step.SupportEvidence + "; exact-pool-new-size:" + JsonSerializer.Serialize(range) };
-        plan = plan with { RealOperation = plan.RealOperation with { Steps = [step] } };
-        plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) };
-        var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
-        var live = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(provider.LiveCapabilityEvidence!.Value.GetRawText())!;
-        if (change != "missing-live") live["PoolCreationSize"] = JsonSerializer.SerializeToElement(new
+        var (plan, progress) = await PrepareReturnedTieredCreationAsync(fixture, sizeBytes: bytes);
+        var poolRange = new VirtualDiskCreationSize(1073741824, 3999688294400, 1073741824, []);
+        Assert.False(poolRange.Supports(bytes));
+        if (historicalPoolEvidence)
         {
-            ReturnValue = change == "live-return" ? 1u : 0u, SupportedSizes = Array.Empty<ulong>(),
-            VirtualDiskSizeMin = 1UL << 30, VirtualDiskSizeMax = change == "live-size" ? 1UL << 30 : 64UL << 30,
-            VirtualDiskSizeDivisor = 1UL << 30
-        });
-        provider = provider with { LiveCapabilityEvidence = JsonSerializer.SerializeToElement(live) };
-        progress = progress with { ResultEvidence = JsonSerializer.Serialize(provider) };
-        fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true);
-
-        var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
-
-        Assert.Equal(change == "valid" ? RealOperationState.Succeeded : RealOperationState.OutcomeUnknown, result.State);
-        Assert.Equal(change == "valid", result.CanReleaseWriteBarrier);
-        Assert.Equal(0, fixture.Adapter.CallCount);
+            var stored = plan.RealOperation!.Steps[0];
+            stored = stored with { SupportEvidence = stored.SupportEvidence + "; exact-pool-new-size:" + JsonSerializer.Serialize(poolRange) };
+            plan = plan with { RealOperation = plan.RealOperation with { Steps = [stored] } };
+            plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) };
+            var provider = JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
+            var live = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(provider.LiveCapabilityEvidence!.Value.GetRawText())!;
+            live["PoolCreationSize"] = JsonSerializer.SerializeToElement(new
+            {
+                ReturnValue = 0u, SupportedSizes = Array.Empty<ulong>(),
+                VirtualDiskSizeMin = 1073741824UL, VirtualDiskSizeMax = 3999688294400UL,
+                VirtualDiskSizeDivisor = 1073741824UL
+            });
+            progress = progress with { ResultEvidence = JsonSerializer.Serialize(provider with { LiveCapabilityEvidence = JsonSerializer.SerializeToElement(live) }) };
+        }
+        WindowsVerifiedStepEvidence evidence;
+        if (reconcile)
+        {
+            fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true, bytes);
+            var result = await fixture.Backend.ReconcileAsync(plan, [progress], CancellationToken.None);
+            Assert.Equal(RealOperationState.Succeeded, result.State);
+            Assert.True(result.CanReleaseWriteBarrier);
+            Assert.Equal(RealOperationStepState.Verified, Assert.Single(result.Steps).State);
+            evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.Steps[0].ResultEvidence!)!;
+            Assert.Equal(0, fixture.Adapter.CallCount);
+        }
+        else
+        {
+            var before = await fixture.Reader.CaptureAsync(CancellationToken.None);
+            var closure = before.RequireSinglePhysicalClosure([fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
+            var preflight = new RealStepPreflight(progress.TargetEvidence!, closure.Fingerprint,
+                closure.Fingerprint, closure.PhysicalMemberFingerprint);
+            fixture.Adapter.ResultTransform = _ => JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
+            fixture.Adapter.OnExecute = () => fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true, bytes);
+            var result = await fixture.Backend.ExecuteStepAsync(plan, plan.RealOperation!.Steps[0], preflight, CancellationToken.None);
+            Assert.Equal(RealStepOutcome.Verified, result.Outcome);
+            evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson)!;
+            Assert.Equal(1, fixture.Adapter.CallCount);
+        }
+        Assert.Equal("vd:tiered", evidence.CreatedObjectId);
+        Assert.Equal("disk:tiered", evidence.CreatedOsDiskId);
+        Assert.Equal("tier:instance", evidence.TieredCreation!.TierInstanceStableId);
+        var after = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        Assert.Equal(bytes, Assert.Single(after.Snapshot.VirtualDisks).Size);
+        Assert.Equal(bytes, Assert.Single(after.Snapshot.OsDisks).Size);
+        Assert.Equal(bytes, Assert.Single(after.Snapshot.StorageTiers, tier => tier.VirtualDiskStableId is not null).Size);
     }
 
     [Theory]
@@ -2464,7 +2633,8 @@ public sealed class WindowsRealStorageBackendTests
             TierSizeMin = 268435456UL, TierSizeMax = (ulong)maximum, TierSizeDivisor = 268435456UL }
     });
 
-    private static async Task<(OperationPlan Plan, RealOperationStepProgress Progress)> PrepareReturnedTieredCreationAsync(Fixture fixture, bool useMaximumSize = false, bool automaticHdd = false)
+    private static async Task<(OperationPlan Plan, RealOperationStepProgress Progress)> PrepareReturnedTieredCreationAsync(Fixture fixture, bool useMaximumSize = false, bool automaticHdd = false,
+        long sizeBytes = 16L << 30)
     {
         fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, false);
         fixture.FactsTransform = TieredCreationFacts;
@@ -2481,7 +2651,7 @@ public sealed class WindowsRealStorageBackendTests
                 WinPoolSourceField.Returned("PhysicalDisksPerStoragePoolMin", 1, FactValueType.UInt64, "subsystem:synthetic")], null);
         var range = new VirtualDiskCreationSize(268435456, 3999956729856, 268435456, []) { RangeOriginBytes = 268435456 };
         var step = new RealOperationStep("create-tiered", new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool),
-            RealTargetReference.ForExisting(tier), "Tiered VD", useMaximumSize ? 0 : 16L << 30, useMaximumSize,
+            RealTargetReference.ForExisting(tier), "Tiered VD", useMaximumSize ? 0 : sizeBytes, useMaximumSize,
                 automaticHdd ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate), [], "Exact unused template", "Exact allocated instance",
             "Requested capacity mode", "live-tier-capability:" + JsonSerializer.Serialize(capability)
                 + (useMaximumSize ? "; native-maximum:true" + (automaticHdd ? "; creation-mechanism:WindowsAutomaticHdd" : string.Empty)
@@ -2494,7 +2664,7 @@ public sealed class WindowsRealStorageBackendTests
             topology.Facts.InventoryCapturedAt, topology.Facts.InventoryCapturedAt.AddMinutes(5));
         var provider = new WindowsStorageCommandResult(true, "provider.returned", "vd:tiered", "vd:tiered", "", null, null, null, null,
             new(automaticHdd ? null : tier.ProviderKey, automaticHdd ? null : tier.ProviderKey, pool.ProviderKey, PhysicalId, "HDD", "Simple", "Fixed", 1, 65536,
-                useMaximumSize ? 0 : 16L << 30, useMaximumSize,
+                useMaximumSize ? 0 : sizeBytes, useMaximumSize,
                 automaticHdd ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate,
                 automaticHdd ? tier.ProviderKey : null, automaticHdd ? tier.ProviderKey : null),
             useMaximumSize ? NativeMaximumLiveCapability(target, automaticHdd) : TieredLiveCapability(target));

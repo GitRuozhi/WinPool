@@ -568,11 +568,11 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [InlineData("size-outside-range", false, "tier-creation-size-not-supported")]
     [InlineData("method-failed", false, "tier-creation-size-method-failed")]
     [InlineData("capability-false", false, "single-hdd-tier-capability-not-verified")]
-    [InlineData("pool-method-failed", false, "pool-creation-size-method-failed")]
-    [InlineData("pool-size-outside-range", false, "pool-creation-size-not-supported")]
-    [InlineData("tier-only-max", false, "pool-creation-size-not-supported")]
-    [InlineData("intersection-max", true, null)]
-    [InlineData("pool-grid-mismatch", false, "pool-creation-size-not-supported")]
+    [InlineData("tier-only-max", true, null)]
+    [InlineData("pool-grid-mismatch", true, null)]
+    [InlineData("pool-grid-mismatch-four-units", true, null)]
+    [InlineData("offset-range", true, null)]
+    [InlineData("offset-range-wrong-grid", false, "tier-creation-size-not-supported")]
     [InlineData("native-max", false, "tiered-native-maximum-pending")]
     [InlineData("native-ordinary", true, null)]
     [InlineData("native-max-error", false, "tiered-native-maximum-pending")]
@@ -590,8 +590,10 @@ public sealed class WindowsRealStorageCommandAdapterTests
             $script:nativeMaximum = $script:fixtureShape -like 'native-*'
             $script:expectedSize = switch ($script:fixtureShape) {
                 'tier-only-max' { [long]3999956729856 }
-                'intersection-max' { [long]3999688294400 }
-                'pool-grid-mismatch' { [long]17448304640 }
+                'pool-grid-mismatch' { [long]3997809246208 }
+                'pool-grid-mismatch-four-units' { [long]3998882988032 }
+                'offset-range' { [long]167772160 }
+                'offset-range-wrong-grid' { [long]134217728 }
                 default { [long]17179869184 }
             }
             $script:fakeWriteCalls = 0
@@ -617,21 +619,15 @@ public sealed class WindowsRealStorageCommandAdapterTests
                 if ($script:nativeMaximum) { throw 'native-max-must-not-query-reported-size' }
                 if ($InputObject.UniqueId -notin @('template-unique','pool-unique') -or $MethodName -ne 'GetSupportedSize' -or
                     $Arguments.ResiliencySettingName -ne 'Simple') { throw 'unexpected-fake-method' }
-                if ($InputObject.UniqueId -eq 'pool-unique') {
-                    return [pscustomobject]@{
-                        ReturnValue=[uint32]$(if ($script:fixtureShape -eq 'pool-method-failed') { 1 } else { 0 });
-                        SupportedSizes=[uint64[]]@(); VirtualDiskSizeMin=[uint64]1073741824;
-                        VirtualDiskSizeMax=[uint64]$(if ($script:fixtureShape -eq 'pool-size-outside-range') { 8589934592 } else { 3999688294400 });
-                        VirtualDiskSizeDivisor=[uint64]1073741824
-                    }
-                }
+                if ($InputObject.UniqueId -eq 'pool-unique') { throw 'tiered-must-not-query-generic-pool-range' }
                 [uint64[]]$supportedSizes = @()
                 if ($script:fixtureShape -eq 'list') { $supportedSizes = [uint64[]]@(17179869184) }
                 return [pscustomobject]@{
                     ReturnValue=[uint32]$(if ($script:fixtureShape -eq 'method-failed') { 1 } else { 0 });
                     SupportedSizes=$supportedSizes;
-                    TierSizeDivisor=[uint64]268435456; TierSizeMin=[uint64]268435456;
-                    TierSizeMax=[uint64]$(if ($script:fixtureShape -eq 'size-outside-range') { 8589934592 } else { 3999956729856 })
+                    TierSizeDivisor=[uint64]$(if ($script:fixtureShape -like 'offset-range*') { 67108864 } else { 268435456 });
+                    TierSizeMin=[uint64]$(if ($script:fixtureShape -like 'offset-range*') { 100663296 } else { 268435456 });
+                    TierSizeMax=[uint64]$(if ($script:fixtureShape -like 'offset-range*') { 234881024 } elseif ($script:fixtureShape -eq 'size-outside-range') { 8589934592 } else { 3999956729856 })
                 }
             }
             function New-VirtualDisk {
@@ -672,8 +668,10 @@ public sealed class WindowsRealStorageCommandAdapterTests
         var bytes = shape switch
         {
             "tier-only-max" => 3999956729856L,
-            "intersection-max" => 3999688294400L,
-            "pool-grid-mismatch" => 17448304640L,
+            "pool-grid-mismatch" => 3997809246208L,
+            "pool-grid-mismatch-four-units" => 3998882988032L,
+            "offset-range" => 167772160L,
+            "offset-range-wrong-grid" => 134217728L,
             _ => nativeMaximum ? 0L : 16L << 30
         };
         RealStorageCommand command = shape == "native-ordinary"
@@ -760,7 +758,8 @@ public sealed class WindowsRealStorageCommandAdapterTests
         }
         if (invoked)
         {
-            Assert.Equal(3999688294400L, evidence.GetProperty("PoolCreationSize").GetProperty("VirtualDiskSizeMax").GetInt64());
+            Assert.False(evidence.TryGetProperty("PoolCreationSize", out _));
+            Assert.Equal(bytes, result.GetProperty("TieredCreationInput").GetProperty("SizeBytes").GetInt64());
             Assert.Equal("returned-vd-unique", result.GetProperty("UniqueId").GetString());
             Assert.Equal("template-unique", result.GetProperty("TieredCreationInput").GetProperty("TemplateUniqueId").GetString());
         }

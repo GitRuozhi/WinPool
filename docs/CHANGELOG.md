@@ -1,10 +1,18 @@
 # WinPool 变更记录
 
+## 2026-10-09：单 HDD 分层容量与大层采集修正（V0.59 仍实施中）
+
+对照仓库研究、微软cmdlet/API、网络原作者实验和本机双PowerShell宿主，证实单HDD可创建真实HDD容量层。独立pwsh与修正后原界面均创建明确3,997,809,246,208-byte（3723.25 GiB）实际层；该值不是MAX。修正把普通VD池范围及1GiB步长强加给层容量的错误，分层明确容量改用准确未用HDD模板范围。查询上界附近的资源拒绝在Windows PowerShell5.1与pwsh7均复现，仍不能推导最大容量算法或断言微软已确认缺陷。
+
+大实际层14,893条GetPhysicalExtent查询约42.6秒，导致重复安全采集超时。新增严格fresh单HDD唯一实际层关联快路径，证据不足或复杂布局仍回原核验；生产采集相关测试10.53秒、另一双采集测试12.96秒，不能外推全部编辑延迟。写前采集失败现在保存明确NoCall；旧08未知删除经严格只读Query记Failed／NotVerified、保留原CallIssued，另建准确UI计划清理，没有重放。
+
+完整工程门1900项／1897通过／0失败／3既有测量未执行，构建零警告／错误、源码哈希稳定。原UI同值创建及清理Verified，WDC恢复在线GPT、规范16MiB MSR、最大整MiB NTFS／64KiB／WinPool_Test／E:；新原生末态11项与操作终审29项通过，Samsung限定结构0变化／0缺口。B0偏好恢复、普通重启RealOff／MonitorOff及App／Agent正常退出通过，重启无新增写调用、无未终结操作。详见[调查报告](Review/Single-Hdd-Tier-Capacity-20261009.md)与[Quality](Quality.md)。分层原生MAX仍技术未解决，版本维持V0.58／迭代8，不把明确容量正例当作MAX交付。
+
 ## 2026-10-09：纠正真实 MAX 执行语义（V0.59 实施中）
 
 真实普通 MAX 已改为保留 `UseMaximumSize` 请求，由 Windows 决定实际容量；模拟估算不再转成真实创建时的明确 `Size`。类型化命令、冻结确认、固定适配器和实际容量后态核验已落地，明确容量仍校验 provider 范围。此前两次分层“MAX”失败实际使用明确 `StorageTierSizes`，不足以证明 Windows 原生 MAX 不支持；旧归因和验收豁免请求已撤回。新增分层原生试验遇到实际API互斥或错误布局，当前已在生成删除/创建计划和写入前阻断这两条失败路线，保留普通原生 MAX、明确容量分层及历史只读恢复。历史失败和性能证据保留。
 
-普通原生 MAX 已经原界面实际通过，Windows 返回 VD／OS 磁盘容量均为3,999,688,294,400bytes，随后16MiB MSR、MAX数据分区、NTFS/64KiB及盘符布局独立核验通过，App／Agent原托盘退出均0。单HDD分层的准确模板组合返回48010；MediaType候选仅生成普通VD，严格核验拒绝续写。该残留经生产只读对账记为Failed/ObservedUnexpectedEffect，再由原界面准确清理；不冒充NoEffect或分层成功。最终分层MAX处理方式尚待答复，V0.58版本不变，活动[Plan](Plan.md#103-唯一剩余边界与继续入口)保留准确继续入口。
+普通原生 MAX 已经原界面实际通过，Windows 返回 VD／OS 磁盘容量均为3,999,688,294,400bytes，随后16MiB MSR、MAX数据分区、NTFS/64KiB及盘符布局独立核验通过，App／Agent原托盘退出均0。单HDD分层的准确模板组合返回48010；MediaType候选仅生成普通VD，严格核验拒绝续写。该残留经生产只读对账记为Failed/ObservedUnexpectedEffect，再由原界面准确清理；不冒充NoEffect或分层成功。用户随后要求继续网络、仓库和本机技术调查，不再等待产品选择；V0.58版本不变，活动[Plan](Plan.md#103-分层容量调查及确定执行步骤)保留继续入口。
 
 本轮最终完整门为1,866项／1,863通过／0失败／3既有测量未执行，源码哈希稳定，构建零警告、零错误。结构页解散后的准确Primordial成员返回缺陷已修复并通过原界面复验，不扩采共享池兄弟成员，也不由CanPool推断关系。WDC已恢复在线GPT、16MiB规范MSR、MAX整MiB NTFS/64KiB／WinPool_Test／E:；独立末态13项断言全通过，Samsung限定结构0变化／0证据缺口、4项明确共享Primordial调整。偏好恢复及普通重启RealOff／MonitorOff、App／Agent正常退出通过，Accepted214／CallIssued271未增长，0未终结操作。代码和回归提交`cf3d3a8`；本轮16.43%延迟改善仍引用2026-10-08的有效测量，未冒称新MAX构建重测。证据与限制见[Quality](Quality.md)。
 

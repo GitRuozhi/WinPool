@@ -612,8 +612,10 @@ public sealed class WindowsRealPlanSafetyTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
-    [Fact]
-    public async Task ExplicitHddCreationReadsExactPoolIntersectionAndRechecksBothConstraintsBeforeDispatch()
+    [Theory]
+    [InlineData(3997809246208L)]
+    [InlineData(3998882988032L)]
+    public async Task ExplicitHddCreationUsesTemplateSequenceWithoutGenericPoolGrid(long bytes)
     {
         var fixture = new Fixture();
         fixture.SetHddTemplate();
@@ -621,21 +623,26 @@ public sealed class WindowsRealPlanSafetyTests
         fixture.Sizes.Size = new(1073741824, 3999688294400, 1073741824, []);
         fixture.Capabilities.TierCreationSize = new(268435456, 3999956729856, 268435456, [])
             { RangeOriginBytes = 268435456 };
+        Assert.False(fixture.Sizes.Size.Supports(bytes));
         var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
         var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
         var range = await fixture.ReadCreationRange(tier);
-        Assert.Equal(3999688294400, range.ResolveMaximum());
-        Assert.False(range.Supports(3999956729856));
-        Assert.Equal(StorageObjectKind.StoragePool, fixture.Sizes.LastTarget!.Kind);
-        Assert.Equal(PoolId, fixture.Sizes.LastTarget.UniqueId);
-        Assert.Equal(PoolId, fixture.Sizes.LastTarget.ObjectId);
+        Assert.Equal(3999956729856, range.ResolveMaximum());
+        Assert.True(range.Supports(bytes));
+        Assert.Equal(0, fixture.Sizes.ReadCount);
         RealOperationIntentRequest Proposal(long size) => fixture.Proposal(OperationIntent.CreateVirtualDisk,
             [pool, tier], [Step("vd", new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool),
-                RealTargetReference.ForExisting(tier), "HDD MAX", size))], "HDD MAX");
-        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(Proposal(3999956729856)));
-        var plan = await fixture.Prepare(Proposal(range.ResolveMaximum()));
-        Assert.Contains("exact-pool-new-size:", plan.RealOperation!.Steps[0].SupportEvidence);
-        fixture.Sizes.Size = fixture.Sizes.Size with { MaximumBytes = 3998614552576 };
+                RealTargetReference.ForExisting(tier), "Explicit HDD capacity", size))], "Explicit HDD capacity");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(Proposal(bytes + 1)));
+        var plan = await fixture.Prepare(Proposal(bytes));
+        Assert.Contains("exact-template-new-size:", plan.RealOperation!.Steps[0].SupportEvidence);
+        Assert.DoesNotContain("exact-pool-new-size:", plan.RealOperation.Steps[0].SupportEvidence);
+        // Even an unavailable generic pool range cannot veto StorageTierSizes.
+        fixture.Sizes.Size = new(0, 0, 0, []);
+        _ = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation.Steps[0],
+            new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+        fixture.Capabilities.TierCreationSize = fixture.Capabilities.TierCreationSize! with { MaximumBytes = bytes - 268435456 };
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan,
             plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
         Assert.Equal(0, fixture.Adapter.CallCount);

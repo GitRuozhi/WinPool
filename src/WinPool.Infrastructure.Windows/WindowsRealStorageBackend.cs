@@ -64,6 +64,16 @@ public sealed record WindowsObservedUnexpectedEffectStepEvidence(
     WinPoolSourceObject ResidualOsDiskFacts,
     WinPoolSourceObject ConstraintTemplateFacts);
 
+public sealed record WindowsObservedUnchangedDeleteStepEvidence(
+    bool WindowsCallIssued, bool NotVerified, bool TargetStillPresent,
+    bool NoWindowsCall, bool NoEffect, string Code, string OriginalResultEvidence,
+    WindowsStorageCommandTarget Target, string PhysicalMemberFingerprint,
+    string BeforeFingerprint, string FirstObservedFingerprint, string SecondObservedFingerprint,
+    IReadOnlyList<WindowsStorageJobAbsenceEvidence> StorageJobQueries,
+    IReadOnlyList<WinPoolSourceObject> ObservedObjects,
+    IReadOnlyList<WinPoolFactRelationship> Associations,
+    WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence);
+
 /// <summary>
 /// The only Windows implementation of the Agent's real storage boundary.
 /// An IPC reply, a provider return, and a verified postcondition are distinct.
@@ -227,10 +237,24 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(
             preflight.TargetEvidenceJson)
             ?? throw new InvalidDataException("The persisted exact target is unreadable.");
-        var before = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken)
-            .ConfigureAwait(false);
         var physical = plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk);
-        var beforeClosure = before.RequireSinglePhysicalClosure([physical]);
+        WindowsRealStorageTopology before;
+        RealTargetClosure beforeClosure;
+        try
+        {
+            before = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken).ConfigureAwait(false);
+            beforeClosure = before.RequireSinglePhysicalClosure([physical]);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // This boundary is strictly before invoking the adapter. A failed
+            // read-only capture must not become an ambiguous adapter exception.
+            return new RealStepResult(RealStepOutcome.FailedWithoutEffect,
+                "real.pre_call_capture_failed",
+                JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true,
+                    "real.pre_call_capture_failed", plan.RealOperation!.PhysicalMemberFingerprint,
+                    BoundedDiagnostic(exception.GetType().Name + ": " + exception.Message))));
+        }
         if (!StringComparer.Ordinal.Equals(beforeClosure.Fingerprint, preflight.TargetFingerprint)
             || !StringComparer.Ordinal.Equals(beforeClosure.PhysicalMemberFingerprint,
                 preflight.PhysicalMemberFingerprint)
@@ -482,6 +506,13 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
             && frozen.Steps[0].Command is RenameVolumeCommand
             && persistedSteps[0].State == RealOperationStepState.OutcomeUnknown)
             return await ReconcileSingleRenameAsync(plan, persistedSteps,
+                topology, closure, cancellationToken).ConfigureAwait(false);
+
+        if (frozen.Steps.Count == 1
+            && frozen.Steps[0].Command is DeleteVirtualDiskCommand
+            && persistedSteps[0].State == RealOperationStepState.OutcomeUnknown
+            && persistedSteps[0].ResultEvidence == "adapter_exception")
+            return await ReconcileUnchangedTieredDeletionAsync(plan, persistedSteps,
                 topology, closure, cancellationToken).ConfigureAwait(false);
 
         if (plan.Intent == OperationIntent.SetDiskOnlineState
@@ -912,8 +943,9 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         var frozenRange = nativeMaximum ? null : JsonSerializer.Deserialize<VirtualDiskCreationSize>(poolOffset < 0
             ? step.SupportEvidence[(offset + separator.Length)..]
             : step.SupportEvidence[(offset + separator.Length)..poolOffset]);
-        var frozenPoolRange = poolOffset < 0 ? null : JsonSerializer.Deserialize<VirtualDiskCreationSize>(
-            step.SupportEvidence[(poolOffset + poolSeparator.Length)..]);
+        // Older frozen plans may also contain a generic pool range. Preserve the
+        // delimiter when reading their exact template proof; the pool grid does
+        // not constrain StorageTierSizes and is not creation-success evidence.
         if (frozenCapability is not { Status: "queried", Error: null }
             || frozenCapability.PhysicalDiskStableId != physicalId
             || frozenCapability.UniqueId != target.StorageSubsystemUniqueId
@@ -957,27 +989,10 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         if (!WindowsRealStorageCapabilityReader.ParseTierCreationSize(code, values,
             UInt64Value("TierSizeMin"), UInt64Value("TierSizeMax"), UInt64Value("TierSizeDivisor")).Supports(input.SizeBytes))
             return false;
-        // Historical frozen records retain their original template-only proof
-        // for read-only recovery. New plans require both frozen/live constraints.
-        if (poolOffset < 0) return true;
-        if (frozenPoolRange?.EnumeratedSizes is null || !frozenPoolRange.Supports(input.SizeBytes)
-            || !live.TryGetProperty("PoolCreationSize", out var poolSize) || poolSize.ValueKind != JsonValueKind.Object
-            || !poolSize.TryGetProperty("ReturnValue", out var poolReturned) || !poolReturned.TryGetUInt32(out var poolCode) || poolCode != 0
-            || !poolSize.TryGetProperty("SupportedSizes", out var poolSizes) || poolSizes.ValueKind is not (JsonValueKind.Null or JsonValueKind.Array))
-            return false;
-        long PoolNumber(string name) => poolSize.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Null
-            ? 0 : poolSize.TryGetProperty(name, out value) && value.TryGetInt64(out var number) && number >= 0
-                ? number : throw new InvalidDataException("Missing or malformed pool creation range output.");
-        var poolValues = poolSizes.ValueKind == JsonValueKind.Null ? [] : poolSizes.EnumerateArray().Select(value =>
-            value.TryGetInt64(out var number) && number > 0 ? number
-                : throw new InvalidDataException("Malformed pool size enumeration.")).ToArray();
-        var livePoolRange = new VirtualDiskCreationSize(PoolNumber("VirtualDiskSizeMin"), PoolNumber("VirtualDiskSizeMax"),
-            PoolNumber("VirtualDiskSizeDivisor"), poolValues);
-        if (poolValues.Length > 0 && (livePoolRange.DivisorBytes <= 0
-            || poolValues.Distinct().Count() != poolValues.Length
-            || poolValues.Any(value => value % livePoolRange.DivisorBytes != 0))) return false;
-        return VirtualDiskCreationSize.Intersect(frozenRange!, frozenPoolRange).Supports(input.SizeBytes)
-            && livePoolRange.Supports(input.SizeBytes);
+        // PoolCreationSize in historical provider receipts is diagnostic only.
+        // The exact template range and the fresh actual object closure are the
+        // evidence for this tiered route, including sizes off the pool's grid.
+        return true;
     }
 
     private async Task<RealReconciliationResult> ReconcileSinglePoolCreationAsync(
@@ -1147,6 +1162,132 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
             or NotSupportedException or ArgumentException)
         {
             return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
+        }
+    }
+
+    private async Task<RealReconciliationResult> ReconcileUnchangedTieredDeletionAsync(
+        OperationPlan plan, IReadOnlyList<RealOperationStepProgress> steps,
+        WindowsRealStorageTopology first, RealTargetClosure firstClosure,
+        CancellationToken cancellationToken)
+    {
+        var frozen = plan.RealOperation!;
+        var command = (DeleteVirtualDiskCommand)frozen.Steps[0].Command;
+        try
+        {
+            if (plan.PlanHash != OperationPlanHasher.Compute(plan)
+                || command.VirtualDisk.Existing is not { } existing || command.VirtualDisk.CreatedByStep is not null
+                || string.IsNullOrWhiteSpace(steps[0].TargetEvidence))
+                return Unknown(steps, "real.reconciliation_step_outcome_unknown");
+            var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(steps[0].TargetEvidence!);
+            if (target is not { Kind: StorageObjectKind.VirtualDisk, CreatedInThisPlan: false }
+                || target.ExpectedFingerprint != frozen.TargetFingerprint)
+                return Unknown(steps, "real.reconciliation_step_outcome_unknown");
+
+            bool Unchanged(WindowsRealStorageTopology current, RealTargetClosure closure)
+            {
+                if (current.MachineBinding != frozen.MachineBinding
+                    || closure.Fingerprint != frozen.TargetFingerprint
+                    || closure.PhysicalMemberFingerprint != frozen.PhysicalMemberFingerprint
+                    || closure.Objects.Count(item => item.ObjectType == FactObjectType.VirtualDisk) != 1
+                    || closure.Objects.Count(item => item.ObjectType == FactObjectType.Disk) != 1
+                    || closure.Objects.Count(item => item.ObjectType == FactObjectType.StorageTier) != 2
+                    || closure.Objects.Any(item => item.ObjectType is FactObjectType.Partition or FactObjectType.Volume)) return false;
+                var vdObject = FindExact(current, StorageObjectKind.VirtualDisk, target.UniqueId, target.ObjectId, string.Empty);
+                if (vdObject is null || vdObject.Id != existing.ProviderKey
+                    || WindowsRealStorageTargetBuilder.Build(current, command.VirtualDisk, new Dictionary<string, string>()) != target) return false;
+                var vd = current.Snapshot.VirtualDisks.Single(item => item.StableId == vdObject.Id);
+                var pool = current.Snapshot.StoragePools.Single(item => item.StableId == vd.PoolStableId);
+                var tiers = current.Snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId).ToArray();
+                var instances = tiers.Where(item => item.VirtualDiskStableId == vd.StableId).ToArray();
+                var templates = tiers.Where(item => item.VirtualDiskStableId is null).ToArray();
+                var disks = current.Snapshot.OsDisks.Where(item => item.VirtualDiskStableId == vd.StableId).ToArray();
+                if (pool.IsPrimordial || pool.HealthStatus != "Healthy" || pool.OperationalStatus != "OK"
+                    || pool.MemberPhysicalDiskIds.Count != 1 || pool.MemberPhysicalDiskIds[0] != closure.PhysicalDiskId
+                    || current.Snapshot.VirtualDisks.Count(item => item.PoolStableId == pool.StableId) != 1
+                    || vd.HealthStatus != "Healthy" || vd.OperationalStatus != "OK" || vd.Size <= 0
+                    || vd.TierStableIds.Count != 1 || tiers.Length != 2 || instances.Length != 1 || templates.Length != 1
+                    || vd.TierStableIds[0] != instances[0].StableId || disks.Length != 1
+                    || disks[0].PartitionStyle != "RAW" || disks[0].Size != vd.Size
+                    || disks[0].IsOffline || disks[0].IsBoot || disks[0].IsSystem) return false;
+                var instance = instances[0];
+                var template = templates[0];
+                var tierObject = current.RequireObject(new(current.SystemId, StorageObjectKind.StorageTier, instance.StableId));
+                var templateObject = current.RequireObject(new(current.SystemId, StorageObjectKind.StorageTier, template.StableId));
+                var osObject = current.RequireObject(new(current.SystemId, StorageObjectKind.OsDisk, disks[0].StableId));
+                var poolObject = current.RequireObject(new(current.SystemId, StorageObjectKind.StoragePool, pool.StableId));
+                bool ExactIdentity(WinPoolSourceObject source, StorageObjectKind kind) =>
+                    !string.IsNullOrWhiteSpace(Text(source, "UniqueId")) && !string.IsNullOrWhiteSpace(Text(source, "ObjectId"))
+                    && FindExact(current, kind, Text(source, "UniqueId"), Text(source, "ObjectId"), string.Empty)?.Id == source.Id;
+                if (!ExactIdentity(poolObject, StorageObjectKind.StoragePool) || !ExactIdentity(tierObject, StorageObjectKind.StorageTier)
+                    || !ExactIdentity(templateObject, StorageObjectKind.StorageTier) || !ExactIdentity(osObject, StorageObjectKind.OsDisk)
+                    || instance.Size != vd.Size || instance.MediaType != "HDD"
+                    || instance.MemberPhysicalDiskIds.Count != 1 || instance.MemberPhysicalDiskIds[0] != closure.PhysicalDiskId
+                    || !TieredLayoutMatches(vdObject, tierObject, vd, instance, vd.Size)
+                    || template.Size != 0 || template.FootprintOnPool != 0 || template.MemberPhysicalDiskIds.Count != 0
+                    || template.MediaType != "HDD" || template.ResiliencySettingName != "Simple"
+                    || !ReturnedZero(templateObject, "Size") || !ReturnedZero(templateObject, "AllocatedSize")
+                    || !ReturnedZero(templateObject, "FootprintOnPool")
+                    || !Number(templateObject, "ProvisioningType", 2) || !Number(templateObject, "NumberOfColumns", 1)
+                    || !Number(templateObject, "Interleave", 65536) || !Number(templateObject, "NumberOfDataCopies", 1)
+                    || !ReturnedZero(templateObject, "PhysicalDiskRedundancy")
+                    || !ReturnedFalse(poolObject, "IsReadOnly")
+                    || !ReturnedFalse(osObject, "IsReadOnly") || !ReturnedFalse(osObject, "IsClustered")
+                    || !ReturnedFalse(osObject, "IsOffline") || !ReturnedFalse(osObject, "IsBoot") || !ReturnedFalse(osObject, "IsSystem")
+                    || !Number(osObject, "PartitionStyle", 0) || !Number(osObject, "NumberOfPartitions", 0)) return false;
+                bool Link(string kind, string from, string to) => current.Facts.Relationships.Count(item => !item.IsRetained
+                    && item.Kind == kind && item.FromId == from && item.ToId == to) == 1;
+                return Link("pool-member", pool.StableId, closure.PhysicalDiskId)
+                    && Link("pool-virtual-disk", pool.StableId, vd.StableId)
+                    && Link("pool-tier", pool.StableId, template.StableId) && Link("pool-tier", pool.StableId, instance.StableId)
+                    && Link("virtual-disk-tier", vd.StableId, instance.StableId)
+                    && Link("tier-member", instance.StableId, closure.PhysicalDiskId)
+                    && Link("template-pool-member", template.StableId, closure.PhysicalDiskId)
+                    && Link("same-device", vd.StableId, disks[0].StableId)
+                    && current.Facts.Relationships.Count(item => !item.IsRetained && item.Kind == "template-pool-member"
+                        && item.FromId == template.StableId) == 1
+                    && !current.Facts.Relationships.Any(item => !item.IsRetained
+                        && (item.Kind == "tier-member" && item.FromId == template.StableId
+                            || item.Kind == "virtual-disk-tier" && item.ToId == template.StableId));
+            }
+            static bool Number(WinPoolSourceObject source, string name, long expected) => source.Field(name) is
+                { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.Number } value }
+                && value.TryGetInt64(out var actual) && actual == expected;
+            bool TerminalFresh(WindowsStorageJobAbsenceEvidence value) => value.Jobs is not null
+                && value.Jobs.All(job => !string.IsNullOrWhiteSpace(job.UniqueId) && !string.IsNullOrWhiteSpace(job.ObjectId)
+                    && job.JobState is 7 or 8 or 9 or 10)
+                && value.Jobs.Select(job => job.UniqueId).Distinct(StringComparer.Ordinal).Count() == value.Jobs.Count
+                && value.Jobs.Select(job => job.ObjectId).Distinct(StringComparer.Ordinal).Count() == value.Jobs.Count
+                && value.ObservedAtUtc != default && value.ObservedAtUtc <= timeProvider.GetUtcNow().AddSeconds(10)
+                && timeProvider.GetUtcNow() - value.ObservedAtUtc <= TimeSpan.FromMinutes(2);
+            if (!Unchanged(first, firstClosure)) return Unknown(steps, "real.reconciliation_step_outcome_unknown");
+            // Terminal jobs bound this observation; they do not prove a provider
+            // return, an unissued Windows call, or the absence of all side effects.
+            var jobsBefore = await storageJobReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            if (!TerminalFresh(jobsBefore)) return Unknown(steps, "real.reconciliation_storage_job_uncertain");
+            await Task.Delay(TimeSpan.FromSeconds(2), timeProvider, cancellationToken).ConfigureAwait(false);
+            var second = await CaptureOperationTopologyAsync(plan, "reconcile-unchanged-delete", cancellationToken).ConfigureAwait(false);
+            var secondClosure = second.RequireSinglePhysicalClosure([plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk)]);
+            var jobsAfter = await storageJobReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            if (!Unchanged(second, secondClosure) || !TerminalFresh(jobsAfter))
+                return Unknown(steps, "real.reconciliation_step_outcome_unknown");
+            var safety = await planner.ValidatePartitionSafetyWithEvidenceAsync(second, secondClosure, command, cancellationToken).ConfigureAwait(false);
+            RequirePoolMemberRoleProof(second, secondClosure, safety);
+            var ids = secondClosure.Objects.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+            var evidence = new WindowsObservedUnchangedDeleteStepEvidence(true, true, true, false, false,
+                "real.reconciliation_observed_unchanged_delete_not_verified", steps[0].ResultEvidence!, target,
+                frozen.PhysicalMemberFingerprint, frozen.TargetFingerprint, firstClosure.Fingerprint, secondClosure.Fingerprint,
+                [jobsBefore, jobsAfter], secondClosure.Objects,
+                second.Facts.Relationships.Where(item => !item.IsRetained && ids.Contains(item.FromId) && ids.Contains(item.ToId)).ToArray(),
+                secondClosure.PoolMemberRoleEvidence);
+            return new RealReconciliationResult(RealOperationState.Failed,
+                [steps[0] with { State = RealOperationStepState.Failed, Code = evidence.Code, ResultEvidence = JsonSerializer.Serialize(evidence) }],
+                evidence.Code, true);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException
+            or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException
+            or TimeoutException or System.Management.ManagementException or System.Runtime.InteropServices.COMException)
+        {
+            return Unknown(steps, "real.reconciliation_step_outcome_unknown");
         }
     }
 

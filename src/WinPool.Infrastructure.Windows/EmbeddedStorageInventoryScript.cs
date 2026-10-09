@@ -145,35 +145,8 @@ $physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' {
     {
         const string memberPlaceholder = "MemberPhysicalDiskKeys = @() # No provider association; media equality does not establish membership.";
         const string collectionAnchor = "$physicalDisks = foreach ($physical in $physicalObjects) {";
-        const string helpers = """
-function Get-ExactTierMemberKeys($tier, $virtual) {
-    try {
-    $result = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
-    if ($null -eq $result.ReturnValue -or [uint32]$result.ReturnValue -ne 0) { throw 'tier-extent-method-failed' }
-    $keys = @()
-    foreach ($extent in @($result.PhysicalExtents)) {
-        if ($null -eq $extent -or
-            -not [string]::Equals([string]$extent.StorageTierUniqueId, [string]$tier.UniqueId, [StringComparison]::Ordinal) -or
-            -not [string]::Equals([string]$extent.VirtualDiskUniqueId, [string]$virtual.UniqueId, [StringComparison]::Ordinal)) {
-            throw 'tier-extent-owner-not-exact'
-        }
-        $matches = @($physicalObjects | Where-Object {
-            [string]::Equals([string]$_.UniqueId, [string]$extent.PhysicalDiskUniqueId, [StringComparison]::Ordinal)
-        })
-        if ($matches.Count -ne 1) { throw 'tier-extent-physical-not-unique' }
-        $keys += Get-AssociationKey $matches[0] ''
-    }
-    return @($keys | Select-Object -Unique)
-    } catch {
-        [void]$sourceQueryFailures.Add([ordered]@{
-            ClassName = 'MSFT_StorageTier'; Namespace = 'root/Microsoft/Windows/Storage';
-            ReasonCode = 'ExactTierExtentFailed:' + [string]$_.Exception.Message
-        })
-        throw
-    }
-}
-
-""";
+        const string collectionQuery = "foreach ($tier in @(Get-SourceSet 'MSFT_StorageTier' { Get-StorageTier -VirtualDisk $virtual -ErrorAction Stop })) {";
+        const string helpers = TierMemberAssociationHelpers;
         const string templates = """
 # Pool-level tiers have no allocation or Size. Read their exact provider pool
 # association and eligible pool members separately from instance allocations.
@@ -222,12 +195,169 @@ foreach ($pool in $nonPrimordialPoolObjects) {
 
 """;
         if (!source.Contains(memberPlaceholder, StringComparison.Ordinal)
-            || !source.Contains(collectionAnchor, StringComparison.Ordinal))
+            || !source.Contains(collectionAnchor, StringComparison.Ordinal)
+            || !source.Contains(collectionQuery, StringComparison.Ordinal))
             throw new InvalidDataException("The embedded tier association anchors were not found.");
         return source.Replace("$virtualDiskKeyByOsDisk = @{}", helpers + "$virtualDiskKeyByOsDisk = @{}", StringComparison.Ordinal)
-            .Replace(memberPlaceholder, "MemberPhysicalDiskKeys = @(Get-ExactTierMemberKeys $tier $virtual)", StringComparison.Ordinal)
+            .Replace(memberPlaceholder, "MemberPhysicalDiskKeys = @(Get-ExactTierMemberKeys $tier $virtual $pool $virtualTiers)", StringComparison.Ordinal)
+            .Replace(collectionQuery,
+                "$virtualTiers = @(Get-SourceSet 'MSFT_StorageTier' { Get-StorageTier -VirtualDisk $virtual -ErrorAction Stop })\n            foreach ($tier in $virtualTiers) {",
+                StringComparison.Ordinal)
             .Replace(collectionAnchor, templates + collectionAnchor, StringComparison.Ordinal);
     }
+
+    internal const string TierMemberAssociationHelpers = """
+function Test-EqualPositiveUInt64([object[]]$Values) {
+    if ($null -eq $Values -or $Values.Count -lt 2) { return $false }
+    $first = $Values[0]
+    if ($first -isnot [uint64] -or $first -eq 0) { return $false }
+    foreach ($value in $Values) {
+        if ($value -isnot [uint64] -or $value -ne $first) { return $false }
+    }
+    return $true
+}
+
+function Test-ExactLayoutValue($Item, [string]$Name, [uint64]$Expected) {
+    $value = $Item.$Name
+    if ($null -eq $value -or
+        ($value -isnot [byte] -and $value -isnot [sbyte] -and
+         $value -isnot [int16] -and $value -isnot [uint16] -and
+         $value -isnot [int32] -and $value -isnot [uint32] -and
+         $value -isnot [int64] -and $value -isnot [uint64])) { return $false }
+    try { return ([decimal]$value -eq [decimal]$Expected) } catch { return $false }
+}
+
+function Test-ExactNullableLayoutString($Item, [string]$Name, [string]$Expected) {
+    $property = $Item.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $false }
+    $value = $property.Value
+    if ($null -eq $value) { return $true }
+    return $value -is [string] -and
+        [string]::Equals([string]$value, $Expected, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-ExactNullableLayoutValue($Item, [string]$Name, [uint64]$Expected) {
+    $property = $Item.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $false }
+    if ($null -eq $property.Value) { return $true }
+    return Test-ExactLayoutValue $Item $Name $Expected
+}
+
+function Test-ExactNullableProvisioningType($Item) {
+    $property = $Item.PSObject.Properties['ProvisioningType']
+    if ($null -eq $property) { return $false }
+    $value = $property.Value
+    if ($null -eq $value) { return $true }
+    if ($value -is [string]) {
+        return [string]::Equals($value, 'Fixed', [StringComparison]::OrdinalIgnoreCase)
+    }
+    return Test-ExactLayoutValue $Item 'ProvisioningType' 2
+}
+
+function Test-SupportedSingleHddTierLayout($tier, $virtual) {
+    if (-not [string]::Equals([string]$tier.MediaType, 'HDD', [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([string]$tier.ResiliencySettingName, 'Simple', [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([string]$tier.ProvisioningType, 'Fixed', [StringComparison]::OrdinalIgnoreCase) -or
+        $virtual.WriteCacheSize -isnot [uint64] -or $virtual.WriteCacheSize -ne 0) { return $false }
+    return (Test-ExactNullableLayoutString $virtual 'ResiliencySettingName' 'Simple') -and
+        (Test-ExactNullableProvisioningType $virtual) -and
+        (Test-ExactNullableLayoutValue $virtual 'NumberOfColumns' 1) -and
+        (Test-ExactNullableLayoutValue $virtual 'Interleave' 65536) -and
+        (Test-ExactNullableLayoutValue $virtual 'NumberOfDataCopies' 1) -and
+        (Test-ExactNullableLayoutValue $virtual 'PhysicalDiskRedundancy' 0) -and
+        (Test-ExactLayoutValue $tier 'NumberOfColumns' 1) -and
+        (Test-ExactLayoutValue $tier 'Interleave' 65536) -and
+        (Test-ExactLayoutValue $tier 'NumberOfDataCopies' 1) -and
+        (Test-ExactLayoutValue $tier 'PhysicalDiskRedundancy' 0)
+}
+
+function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) {
+    try {
+        $tierUniqueId = [string]$tier.UniqueId
+        $tierObjectId = [string]$tier.ObjectId
+        $virtualUniqueId = [string]$virtual.UniqueId
+        $virtualObjectId = [string]$virtual.ObjectId
+        $poolUniqueId = [string]$pool.UniqueId
+        $poolObjectId = [string]$pool.ObjectId
+        if ([string]::IsNullOrWhiteSpace($tierUniqueId) -or [string]::IsNullOrWhiteSpace($tierObjectId) -or
+            [string]::IsNullOrWhiteSpace($virtualUniqueId) -or [string]::IsNullOrWhiteSpace($virtualObjectId) -or
+            [string]::IsNullOrWhiteSpace($poolUniqueId) -or [string]::IsNullOrWhiteSpace($poolObjectId) -or
+            $pool.IsPrimordial -isnot [bool] -or $pool.IsPrimordial) { return $null }
+
+        $actualTiers = @($virtualTiers)
+        if ($actualTiers.Count -ne 1 -or
+            -not [string]::Equals([string]$actualTiers[0].UniqueId, $tierUniqueId, [StringComparison]::Ordinal) -or
+            -not [string]::Equals([string]$actualTiers[0].ObjectId, $tierObjectId, [StringComparison]::Ordinal)) { return $null }
+
+        $parents = @(Get-StoragePool -VirtualDisk $virtual -ErrorAction Stop)
+        if ($parents.Count -ne 1 -or $parents[0].IsPrimordial -isnot [bool] -or $parents[0].IsPrimordial -or
+            -not [string]::Equals([string]$parents[0].UniqueId, $poolUniqueId, [StringComparison]::Ordinal) -or
+            -not [string]::Equals([string]$parents[0].ObjectId, $poolObjectId, [StringComparison]::Ordinal)) { return $null }
+
+        $poolMembers = @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop)
+        if ($poolMembers.Count -ne 1) { return $null }
+        $member = $poolMembers[0]
+        $memberUniqueId = [string]$member.UniqueId
+        $memberObjectId = [string]$member.ObjectId
+        if ([string]::IsNullOrWhiteSpace($memberUniqueId) -or [string]::IsNullOrWhiteSpace($memberObjectId) -or
+            -not [string]::Equals([string]$member.MediaType, 'HDD', [StringComparison]::OrdinalIgnoreCase)) { return $null }
+
+        $allocatedMembers = @(Get-PhysicalDisk -VirtualDisk $virtual -HasAllocations $true -ErrorAction Stop)
+        if ($allocatedMembers.Count -ne 1 -or
+            -not [string]::Equals([string]$allocatedMembers[0].UniqueId, $memberUniqueId, [StringComparison]::Ordinal) -or
+            -not [string]::Equals([string]$allocatedMembers[0].ObjectId, $memberObjectId, [StringComparison]::Ordinal)) { return $null }
+
+        $physicalMatches = @($physicalObjects | Where-Object {
+            [string]::Equals([string]$_.UniqueId, $memberUniqueId, [StringComparison]::Ordinal) -and
+            [string]::Equals([string]$_.ObjectId, $memberObjectId, [StringComparison]::Ordinal) -and
+            [string]::Equals([string]$_.MediaType, 'HDD', [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($physicalMatches.Count -ne 1 -or -not (Test-SupportedSingleHddTierLayout $tier $virtual)) { return $null }
+        if (-not (Test-EqualPositiveUInt64 @(
+            $tier.Size, $tier.AllocatedSize, $tier.FootprintOnPool,
+            $virtual.Size, $virtual.AllocatedSize, $virtual.FootprintOnPool))) { return $null }
+
+        $key = [string](Get-AssociationKey $physicalMatches[0] '')
+        if ([string]::IsNullOrWhiteSpace($key) -or $key.StartsWith('fallback:', [StringComparison]::Ordinal)) { return $null }
+        return $key
+    } catch {
+        return $null
+    }
+}
+
+function Get-ExactTierMemberKeysByExtent($tier, $virtual) {
+    try {
+    $result = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
+    if ($null -eq $result.ReturnValue -or [uint32]$result.ReturnValue -ne 0) { throw 'tier-extent-method-failed' }
+    $keys = @()
+    foreach ($extent in @($result.PhysicalExtents)) {
+        if ($null -eq $extent -or
+            -not [string]::Equals([string]$extent.StorageTierUniqueId, [string]$tier.UniqueId, [StringComparison]::Ordinal) -or
+            -not [string]::Equals([string]$extent.VirtualDiskUniqueId, [string]$virtual.UniqueId, [StringComparison]::Ordinal)) {
+            throw 'tier-extent-owner-not-exact'
+        }
+        $matches = @($physicalObjects | Where-Object {
+            [string]::Equals([string]$_.UniqueId, [string]$extent.PhysicalDiskUniqueId, [StringComparison]::Ordinal)
+        })
+        if ($matches.Count -ne 1) { throw 'tier-extent-physical-not-unique' }
+        $keys += Get-AssociationKey $matches[0] ''
+    }
+    return @($keys | Select-Object -Unique)
+    } catch {
+        [void]$sourceQueryFailures.Add([ordered]@{
+            ClassName = 'MSFT_StorageTier'; Namespace = 'root/Microsoft/Windows/Storage';
+            ReasonCode = 'ExactTierExtentFailed:' + [string]$_.Exception.Message
+        })
+        throw
+    }
+}
+
+function Get-ExactTierMemberKeys($tier, $virtual, $pool, $virtualTiers) {
+    $fastMemberKey = Get-ExactSingleHddTierMemberKey $tier $virtual $pool $virtualTiers
+    if ($null -ne $fastMemberKey) { return $fastMemberKey }
+    return Get-ExactTierMemberKeysByExtent $tier $virtual
+}
+""";
 
     private static string AddPhysicalDiskAssociationFallback(string source)
     {

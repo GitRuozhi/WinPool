@@ -81,28 +81,6 @@ internal static class WindowsRealStoragePowerShellScript
             if ($minimum -le 0 -or $maximum -lt $minimum -or $increment -le 0) { throw 'tier-creation-size-range-invalid' }
             return $size -ge $minimum -and $size -le $maximum -and ($size - $minimum) % $increment -eq 0
         }
-        function Test-PoolCreationSize($range, [long]$size) {
-            if ($null -eq $range -or $size -le 0) { throw 'pool-creation-size-method-failed' }
-            $code = Read-Property $range 'ReturnValue'
-            if ($code -isnot [uint32] -or $code -ne 0) { throw 'pool-creation-size-method-failed' }
-            $rawSizes = Read-Property $range 'SupportedSizes'
-            if ($null -ne $rawSizes -and $rawSizes.GetType() -ne [uint64[]]) { throw 'pool-creation-size-enumeration-invalid' }
-            $minimum = Read-Property $range 'VirtualDiskSizeMin'
-            $maximum = Read-Property $range 'VirtualDiskSizeMax'
-            $divisor = Read-Property $range 'VirtualDiskSizeDivisor'
-            if ($divisor -isnot [uint64] -or $divisor -eq 0 -or $divisor -gt [long]::MaxValue) {
-                throw 'pool-creation-size-range-invalid'
-            }
-            $sizes = New-Object 'System.Collections.Generic.HashSet[long]'
-            foreach ($value in $rawSizes) {
-                if ($value -eq 0 -or $value -gt [long]::MaxValue -or $value % $divisor -ne 0 -or
-                    -not $sizes.Add([long]$value)) { throw 'pool-creation-size-enumeration-invalid' }
-            }
-            if ($sizes.Count -gt 0) { return $sizes.Contains($size) }
-            if ($minimum -isnot [uint64] -or $maximum -isnot [uint64] -or $minimum -eq 0 -or
-                $maximum -lt $minimum -or $maximum -gt [long]::MaxValue) { throw 'pool-creation-size-range-invalid' }
-            return $size -ge $minimum -and $size -le $maximum -and $size % $divisor -eq 0
-        }
         function Exact-Disk($t) {
             if ($null -eq $t.DiskNumber -or [int]$t.DiskNumber -lt 0) { throw 'disk-number-missing' }
             $disk = Assert-One @(Get-Disk -Number ([uint32]$t.DiskNumber) -ErrorAction Stop) 'disk-not-unique'
@@ -517,9 +495,6 @@ internal static class WindowsRealStoragePowerShellScript
                     $range = Invoke-CimMethod -InputObject $tier -MethodName GetSupportedSize -Arguments @{ ResiliencySettingName = 'Simple' } -ErrorAction Stop
                     $capabilityEvidence['CreationSize'] = $range
                     if (-not (Test-TierCreationSize $range ([long]$c.SizeBytes))) { throw 'tier-creation-size-not-supported' }
-                    $poolRange = Invoke-CimMethod -InputObject $pool -MethodName GetSupportedSize -Arguments @{ ResiliencySettingName = 'Simple' } -ErrorAction Stop
-                    $capabilityEvidence['PoolCreationSize'] = $poolRange
-                    if (-not (Test-PoolCreationSize $poolRange ([long]$c.SizeBytes))) { throw 'pool-creation-size-not-supported' }
                     $tieredCreationInput = [ordered]@{
                         TemplateUniqueId = [string]$tier.UniqueId;
                         TemplateObjectId = [string]$tier.ObjectId;

@@ -136,13 +136,119 @@ public sealed class AgentRealOperationServiceTests
         var pending = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
             new(plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None)).Value);
         Assert.Equal(RealOperationState.OutcomeUnknown, pending.State);
-        await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.Failed);
+        // A query can observe Unknown while the original worker is finishing;
+        // polling may schedule recovery only after that worker has stopped.
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while ((await fixture.Plans.GetAsync(plan.OperationId, timeout.Token))!.State != PersistedOperationState.Failed)
+            {
+                await fixture.Service.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
+                await Task.Delay(10, timeout.Token);
+            }
         var step = Assert.Single(await fixture.Plans.GetStepsAsync(plan.OperationId));
         Assert.Equal(PersistedOperationStepState.Failed, step.State);
         Assert.True(JsonSerializer.Deserialize<WindowsObservedNoEffectStepEvidence>(step.EvidenceJson!)!.WindowsCallIssued);
         Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
         Assert.Equal(2, Volatile.Read(ref reconcileCalls));
         Assert.Equal(1, backend.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task AdapterExceptionDeletePersistsObservedUnchangedFailureWithoutClaimingVerifiedOrNoCall()
+    {
+        var backend = new RecordingBackend
+        {
+            ExecutionException = new TimeoutException("read-only capture timed out before adapter"),
+            Reconciliation = (plan, steps) =>
+            {
+                Assert.IsType<DeleteVirtualDiskCommand>(Assert.Single(plan.RealOperation!.Steps).Command);
+                Assert.Equal("adapter_exception", Assert.Single(steps).ResultEvidence);
+                // This fake supplies the backend's typed conclusion. The exact
+                // two-capture/storage proof is tested at the Windows boundary.
+                var target = new WindowsStorageCommandTarget(StorageObjectKind.VirtualDisk, "vd-uid", "vd-oid",
+                    "serial", "os-uid", "os-path", null, null, "", null, null, "pool-uid", "physical-uid",
+                    "subsystem-uid", plan.RealOperation.TargetFingerprint);
+                var evidence = new WindowsObservedUnchangedDeleteStepEvidence(true, true, true, false, false,
+                    "real.reconciliation_observed_unchanged_delete_not_verified", steps[0].ResultEvidence!, target,
+                    plan.RealOperation.PhysicalMemberFingerprint, plan.RealOperation.TargetFingerprint,
+                    plan.RealOperation.TargetFingerprint, plan.RealOperation.TargetFingerprint, [], [], [], null);
+                return Task.FromResult(new RealReconciliationResult(RealOperationState.Failed,
+                    [steps[0] with { State = RealOperationStepState.Failed, Code = evidence.Code,
+                        ResultEvidence = JsonSerializer.Serialize(evidence) }], evidence.Code, true));
+            }
+        };
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var physical = Assert.Single(fixture.Proposal.Targets, target => target.Kind == StorageObjectKind.PhysicalDisk);
+        var vd = new StorageObjectId(physical.System, StorageObjectKind.VirtualDisk, "vd-uid");
+        var proposal = new RealOperationIntentRequest(OperationIntent.DeleteVirtualDisk, physical.System, [physical, vd],
+            [new RealOperationStep("delete-vd", new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(vd)),
+                [], "VD present", "VD absent", "VD deletion", "fake capability")], "VD absent");
+        var plan = await PrepareAndAcceptAsync(fixture.Service, proposal, fixture.Session);
+        await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.Failed);
+        var step = Assert.Single(await fixture.Plans.GetStepsAsync(plan.OperationId));
+        Assert.Equal(PersistedOperationStepState.Failed, step.State);
+        var observed = JsonSerializer.Deserialize<WindowsObservedUnchangedDeleteStepEvidence>(step.EvidenceJson!)!;
+        Assert.True(observed.WindowsCallIssued);
+        Assert.True(observed.NotVerified);
+        Assert.True(observed.TargetStillPresent);
+        Assert.False(observed.NoWindowsCall);
+        Assert.False(observed.NoEffect);
+        Assert.Equal("adapter_exception", observed.OriginalResultEvidence);
+        Assert.Single(await fixture.Events.ListAsync(plan.OperationId), item => item.Event.Code == "operation.step.call_issued");
+        Assert.DoesNotContain(await fixture.Events.ListAsync(plan.OperationId), item => item.Event.Kind == ExecutionEventKind.Completed);
+        Assert.Equal(1, backend.ExecuteCalls);
+        Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
+    }
+
+    [Fact]
+    public async Task UnknownQueryCannotReconcileWhileTheOriginalWorkerIsStillRunning()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        OperationPlanRepository? repository = null;
+        var reconcileCalls = 0;
+        var backend = new RecordingBackend
+        {
+            UnknownStepId = "initialize-gpt",
+            Reconciliation = async (plan, steps) =>
+            {
+                if (Interlocked.Increment(ref reconcileCalls) > 1) return ObservedNoEffect(plan, steps);
+                Assert.True(await repository!.TransitionAsync(plan.OperationId, PersistedOperationState.Running,
+                    PersistedOperationState.OutcomeUnknown, new ExecutionEvent(plan.OperationId,
+                        ExecutionEventKind.Failed, DateTimeOffset.UtcNow, "test.unknown_while_worker_active", "worker still running")));
+                entered.TrySetResult();
+                await release.Task;
+                return new(RealOperationState.OutcomeUnknown, steps, "fake.unknown", false);
+            }
+        };
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        repository = fixture.Plans;
+        try
+        {
+            var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
+                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
+                    new(plan.OperationId, CorrelationId.New()), fixture.Session, default)).Value)));
+            Assert.All(responses, response => Assert.Equal(RealOperationState.OutcomeUnknown, response.State));
+            await Task.Delay(50); // Let a mistakenly scheduled background query enter the fake backend.
+            Assert.Equal(1, Volatile.Read(ref reconcileCalls));
+            Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+            release.TrySetResult();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while ((await fixture.Plans.GetAsync(plan.OperationId, timeout.Token))!.State != PersistedOperationState.Failed)
+            {
+                await fixture.Service.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
+                await Task.Delay(10, timeout.Token);
+            }
+            Assert.Equal(2, Volatile.Read(ref reconcileCalls));
+            Assert.Equal(1, backend.ExecuteCalls);
+            Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
+        }
+        finally { release.TrySetResult(); }
     }
 
     [Theory]
@@ -246,7 +352,12 @@ public sealed class AgentRealOperationServiceTests
             var unknown = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
                 Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
                     new(plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None)).Value)));
-            await recoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                while (!recoveryEntered.Task.IsCompleted)
+                {
+                    await fixture.Service.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
+                    await Task.Delay(10, timeout.Token);
+                }
             Assert.All(unknown, status => Assert.Equal(RealOperationState.OutcomeUnknown, status.State));
             Assert.Equal(2, Volatile.Read(ref reconciliationCalls));
             Assert.True(await repository.HasRealWriteBarrierAsync());
@@ -1107,6 +1218,7 @@ public sealed class AgentRealOperationServiceTests
         public int RangeReadCalls => Volatile.Read(ref rangeReadCalls);
         public string? UnknownStepId { get; init; }
         public string UnknownCode { get; init; } = "fake.unknown";
+        public Exception? ExecutionException { get; init; }
         public Func<OperationPlan, IReadOnlyList<RealOperationStepProgress>, Task<RealReconciliationResult>>?
             Reconciliation { get; init; }
         public string? PreflightFailureStepId { get; init; }
@@ -1196,6 +1308,7 @@ public sealed class AgentRealOperationServiceTests
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref executeCalls);
+            if (ExecutionException is { } failure) throw failure;
             if (PauseExecution)
             {
                 ExecutionEntered.TrySetResult();
