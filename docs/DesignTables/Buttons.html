@@ -101,7 +101,7 @@
       <tr><td class="glyph">&#xE72C; / &#xE73E;</td><td>切换欢迎内容 Cycle welcome content；确认 Confirm</td><td><code>U+E72C</code> / <code>U+E73E</code></td><td>欢迎页底部两个普通图标文字按钮；Cycle 的文字由当前内容变化 — <code>WelcomeWindow.xaml(.cs)</code></td></tr>
       <tr><td class="glyph">无图标</td><td>选择曲线颜色 Select series color</td><td>—</td><td>监控页运行时颜色选择器弹层 — <code>MonitorPage.xaml.cs</code></td></tr>
       <tr><td class="glyph">&#xE777;</td><td>恢复推荐值 Reset recommended value</td><td><code>U+E777</code></td><td>结构页按可编辑属性行生成；字段不同，操作均恢复该字段的推荐值 — <code>StorageStructurePage.xaml.cs</code></td></tr>
-      <tr><td class="glyph">&#xE74E;</td><td>使用最大值 Use maximum</td><td><code>U+E74E</code></td><td>结构页 SSD/HDD/SCM 模拟层容量输入组；应用规划的对齐上限，不代表真实 provider 容量。真实新建 VD 的 MAX 在原容量字段中按该次 Agent provider 范围冻结为精确 bytes — <code>StorageStructurePage.xaml.cs</code></td></tr>
+      <tr><td class="glyph">&#xE74E;</td><td>使用最大值 Use maximum</td><td><code>U+E74E</code></td><td>结构页 SSD/HDD/SCM 模拟层容量输入组应用规划的对齐上限，不代表真实 provider 容量。普通真实 VD 的 MAX 使用 typed <code>UseMaximumSize</code>，由 Windows 决定实际容量，已有设备成功证据；自动布局在 VD 验证后读取实际 OS 磁盘容量。单 HDD 分层 MAX 当前暂时阻止并要求明确容量；显式容量仍经 Agent fresh 范围校验 — <code>StorageStructurePage.xaml.cs</code>、<code>EditorPageBase.cs</code></td></tr>
       <tr><td class="glyph">&#xE8C8;</td><td>复制命令预览 Copy command preview</td><td><code>U+E8C8</code></td><td>结构页待处理操作条目；预览无命令时禁用 — <code>StorageStructurePage.xaml.cs</code></td></tr>
       <tr><td class="glyph">无图标</td><td>属性表复制菜单 Copy current value / group / raw fields</td><td>—</td><td>属性表右键菜单项 — <code>PropertyTableContextMenu.cs</code></td></tr>
       <tr><td class="glyph">无图标</td><td>确认／取消／关闭 Confirm / Cancel / Close</td><td>—</td><td>各页面临时 WinUI 确认对话框的系统文本按钮；标签随操作变化，由所属流程创建</td></tr>

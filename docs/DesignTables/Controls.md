@@ -1,6 +1,6 @@
 # 交互控件说明表
 
-状态：2026-10-08 按当前 XAML 与动态控件代码核对。相同用途的重复行按控件家族归纳；条件只列代码中已实现的规则。悬停帮助指由 `ContextHelp` 提供的帮助或禁用原因；没有特别注明时，不代表所有控件都有自定义悬停文本。按钮图形见[按钮与图标表](Buttons.html)。
+状态：2026-10-09 按当前 XAML 与动态控件代码核对。相同用途的重复行按控件家族归纳；条件只列代码中已实现的规则。普通真实 VD `UseMaximumSize` 已有设备成功证据；单 HDD 分层 MAX 暂时 fail closed，策略与最终验收仍未收口。悬停帮助指由 `ContextHelp` 提供的帮助或禁用原因；没有特别注明时，不代表所有控件都有自定义悬停文本。按钮图形见[按钮与图标表](Buttons.html)。
 
 ## 窗口与导航
 
@@ -57,7 +57,7 @@
 | `RedoButton` | 恢复最近撤销的模拟或真实草稿修改 | 重做栈为空或真实草稿正在执行/等待核对时禁用 | `StorageStructurePage.xaml(.cs)` |
 | `DiscardAllButton` | 放弃当前所有未应用的模拟或真实草稿修改 | 无未应用修改，或真实 Apply、改名、操作忙时禁用；不会撤销已确认并执行的真实步骤 | `StorageStructurePage.xaml(.cs)` |
 | `ApplyAllButton` | 提交模拟待处理计划，或将真实草稿交给准确计划准备、冻结确认与 Agent 执行 | 需要非空可应用草稿、无阻止步骤/构建错误/非法容量及未知结果；真实目标还受真实模式、fresh 来源和执行门禁约束；禁用时显示原因 | `StorageStructurePage.xaml(.cs)`、`EditorPageBase.cs` |
-| `CreatePoolButton` | 在同一编辑草稿中创建新池；真实新池默认使用 Ordinary/MAX 意图 | 当前已有池草稿时禁用；自动创建虚拟磁盘由独立 `AutoCreateVirtualDiskSwitch` 偏好控制 | `StorageStructurePage.xaml(.cs)` |
+| `CreatePoolButton` | 在同一编辑草稿中创建新池；真实新池默认使用 Ordinary/MAX 意图 | 当前已有池草稿时禁用；自动创建虚拟磁盘由独立 `AutoCreateVirtualDiskSwitch` 偏好控制。普通 MAX 有 Windows `UseMaximumSize` 设备正例；单 HDD 分层 MAX 暂时阻止 | `StorageStructurePage.xaml(.cs)` |
 | `DissolveButton` | 将所选模拟池或受支持的真实池解散意图加入草稿；可在同一草稿中明确创建替代池并重新分配成员 | 真实池要求准确单物理成员、最多一个虚拟磁盘及受支持的 HDD 布局；Apply 按准确冻结计划执行，不提供独立重建向导 | `StorageStructurePage.xaml(.cs)` |
 | `RetireButton` | 将所选模拟池成员盘标记为已退役 | 当前仅支持模拟池中的在线、非启动/系统成员盘；真实模式禁用并说明原因；已退役时禁用 | `StorageStructurePage.xaml(.cs)` |
 | `HotSpareButton` | 将所选模拟池成员盘标记为热备 | 当前仅支持模拟池中的在线、非启动/系统成员盘；真实模式禁用并说明原因；已为热备时禁用 | `StorageStructurePage.xaml(.cs)` |
@@ -65,13 +65,13 @@
 | `DeleteVdiskButton` | 将所选虚拟磁盘及其准确关联后代加入删除草稿 | 需可编辑池并有可删除的目标；真实模式只接受页面支持的准确虚拟磁盘，不会因此解散池或自动重建 | `StorageStructurePage.xaml(.cs)` |
 | `ShowHotSpareSwitch` | 显示或隐藏模拟热备磁盘 | 当前仅模拟系统可用；真实模式禁用 | `StorageStructurePage.xaml(.cs)` |
 | `ShowRetiredSwitch` | 显示或隐藏模拟退役磁盘 | 当前仅模拟系统可用；真实模式禁用 | `StorageStructurePage.xaml(.cs)` |
-| `PoolFormGrid` 动态属性表单 | 编辑选中对象的草稿字段；真实池使用 Ordinary/单 HDD、名称、明确 GiB 或 MAX、自动 VD/分区、MSR、文件系统、簇、卷标及盘符等原表单意图 | 文本框、组合框、数值框按对象生成；自动 VD 与自动分区是独立已保存偏好，切换偏好不会改写现存草稿。真实不支持的原地布局/多成员变更会被阻止；真实 MAX 按本次 Agent provider 创建范围冻结成精确 bytes | `StorageStructurePage.xaml(.cs)` |
+| `PoolFormGrid` 动态属性表单 | 编辑选中对象的草稿字段；真实池使用 Ordinary/单 HDD、名称、明确 GiB 或 MAX、自动 VD/分区、MSR、文件系统、簇、卷标及盘符等原表单意图 | 文本框、组合框、数值框按对象生成；自动 VD 与自动分区是独立已保存偏好，切换偏好不会改写现存草稿。普通真实 VD MAX 以 `UseMaximumSize=true` typed 意图提交，由 Windows 决定实际容量；自动布局在 VD 验证后读取实际 OS 磁盘容量，普通 MAX 已有设备成功证据。单 HDD 分层 MAX 当前在任何解散或建池计划前阻止并要求明确容量；这是临时 fail-closed 保护，不是永久支持边界。明确容量仍按新鲜 Agent provider 范围校验；不开放现有 VD/层 MAX 扩展或原地布局改写 | `StorageStructurePage.xaml(.cs)`、`EditorPageBase.cs` |
 | 结构页左右 `GridSplitter` | 调整拓扑／操作区与右侧属性栏宽度 | 右栏初始 320 DIP；可向两侧拖动，属性表单弹性列与换行标签适应栏宽；左侧操作区允许横向滚动 | `StorageStructurePage.xaml` |
 | `SavePoolPropertiesButton` | 将所选池当前表单改动保存到模拟或真实草稿 | 需可编辑的非始祖池且表单有改动；真实字段受对象支持范围、离线/冲突及 busy 门禁限制；此按钮不直接写盘 | `StorageStructurePage.xaml(.cs)` |
 | SSD/HDD/SCM 层配置输入框 | 设置容量、精简/固定配置、复原能力、数据副本、容错数、磁盘数、列数及交错 | 动态使用 `ComboBox`、`TextBox`、`NumberBox`；数值按各字段边界归一化；无自定义帮助时字段标签说明用途 | `StorageStructurePage.xaml.cs` |
 | `MaximumButton` 层容量最大值按钮 | 将 SSD/HDD/SCM 模拟层容量填为规划的对齐上限 | 每个容量输入组生成一个；帮助说明该规划值不保证 Windows 实际可用容量；它不同于真实新建虚拟磁盘的 provider MAX | `StorageStructurePage.xaml.cs` |
 | 动态属性行重置按钮 | 将已改动字段恢复推荐值 | 仅字段不同于已提交值时显示；每项提供推荐值帮助 | `StorageStructurePage.xaml.cs` |
-| `AutoCreateVirtualDiskSwitch`／`AutoCreatePartitionSwitch` 与虚拟磁盘布局选项 | 分别保存自动建 VD、自动建分区偏好；新建 VD 意图可带分区样式、文件系统/簇大小、容量、MSR、卷标和盘符 | 两项偏好独立；更改偏好不会插入/删除已有草稿对象。真实新建容量的 MAX 由该次 Agent provider 精确范围解析；不开放现有 VD/层 MAX 扩展或任意原地布局改写 | `StorageStructurePage.xaml(.cs)` |
+| `AutoCreateVirtualDiskSwitch`／`AutoCreatePartitionSwitch` 与虚拟磁盘布局选项 | 分别保存自动建 VD、自动建分区偏好；新建 VD 意图可带分区样式、文件系统/簇大小、容量、MSR、卷标和盘符 | 两项偏好独立；更改偏好不会插入/删除已有草稿对象。普通真实 MAX 保留 Windows 原生最大容量意图；若同时自动分区，待新 VD 验证后按观测到的真实容量继续布局。单 HDD 分层 MAX 暂时被阻止并要求明确容量；显式容量仍读取新鲜 provider 范围。不开放现有 VD/层 MAX 扩展 | `StorageStructurePage.xaml(.cs)`、`EditorPageBase.cs` |
 | `PendingActionsPanel` 与步骤 `Expander` | 列出当前待处理计划；展开查看步骤详情及只读命令预览 | 空计划显示空状态；步骤命令预览为空时复制命令按钮禁用并说明未通过预检查 | `StorageStructurePage.xaml(.cs)` |
 | 动态“复制命令预览”按钮 | 复制当前步骤预览文本 | 命令列表为空时禁用；复制不会执行命令 | `StorageStructurePage.xaml.cs` |
 | `RealTopologyOverlay`／`RealTopologyProgress` | 真实结构写入及写后刷新阶段遮罩图形区域并显示当前阶段；共享 busy 状态会刷新按钮禁用状态 | 准备阶段可显示 footer 进度；遮罩依 Workspace 图形遮挡状态显示，刷新尾段结束后释放 | `StorageStructurePage.xaml(.cs)`、`EditorPageBase.cs` |

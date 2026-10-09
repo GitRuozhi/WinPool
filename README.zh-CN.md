@@ -4,11 +4,15 @@
 
 WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控设备、编辑模拟系统和执行已支持的本机存储操作。
 
-当前产品版本仍为 **V0.58，迭代 8**。此前单盘真实修改阶段的 H01–H11、收口布局与工程结果见[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。当前阶段已将真实操作接回现有编辑页：普通池、首块普通虚拟磁盘与普通 MAX 自动布局，以及单 HDD 分层 32 GiB 创建和重建已有本机原界面通过证据。单 HDD 分层 MAX 即使满足池与模板的共同 provider 范围，仍在本机被 Windows 以资源不足／不支持拒绝；尚无可靠的只读接口确定其实际可创建上限，相关验收豁免仍待用户答复，这是当前唯一待决定项，阶段未完整验收。授权物理盘已恢复并独立核验为联机 GPT、规范 16 MiB MSR、其余整 MiB 最大范围的 NTFS／64 KiB 数据分区，卷标 `WinPool_Test`、盘符 `E:`。最终对账、重启和正常退出已通过；Samsung 限定存储结构范围比较 0 变化、监控 0 缺口，4 项共享 Primordial 调整单独保留，范围见[活动计划](docs/Plan.md)。多盘冗余、混合介质分层、真实 MBR→GPT 转换与既有 VD／层 MAX 扩展仍禁用。
+当前产品版本仍为 **V0.58，迭代 8**，[活动计划](docs/Plan.md)尚未完成或归档；此前 H01–H11 结果保留在[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。本轮普通 VD 原生 MAX 已通过原界面创建：冻结命令为 `SizeBytes=0`／`UseMaximumSize=true`，Windows 实际返回 VD 与 OS 磁盘容量均为 3,999,688,294,400 bytes，随后完成 GPT、规范 16 MiB MSR、NTFS／64 KiB 数据分区，卷标 `WinPool_V059_Data`、盘符 `W:`。见[原生布局证据](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/native-maximum-layout-readonly-proof.json)、[断言](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/native-maximum-layout-assertion.json)及[原托盘正常退出](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/ordinary-native-max-observed-exit-result.json)。
 
-三块磁盘均有实际 20 Hz 监控样本的六次原界面改名已通过。同机三组匹配样本从接受确认至刷新就绪的中位数由 18.472 秒降至 15.437 秒，减少 16.43%；排除准备和人工等待，不作为普遍性能保证。后续最终构建仅调整告警呈现，采样与执行路径未变，未再重复六次计时；旧基线设备映射及界面就绪条件的限制见 [Development](docs/Development.md)。
+单 HDD 分层 32 GiB 创建与重建的原有成功证据仍有效，不外推至 MAX。分层原生 MAX 两条候选均未满足目标：准确 `StorageTiers` + `UseMaximumSize` 被本机以 48010 拒绝；`MediaType HDD` + `UseMaximumSize` 实际创建了没有 actual tier 的普通 VD。后者经严格只读对账收口为 Failed／ObservedUnexpectedEffect，再由原界面单独确认并清理残留。新分层 MAX 请求已在任何解散或创建计划前阻止，Prepare／Preflight、适配器与固定脚本另设调用前拒绝门。实际 API 冲突的最终处理仍待用户答复；临时防护不定义永久 Windows 限制。先前 `StorageTierSizes` 显式 bytes 失败与本次原生结果分别保留。
 
-最新 Release 工程门覆盖 12 个测试项目，1772 项通过、0 失败、3 未执行，restore／build 均无警告或错误；这不解除分层 MAX 的待决定验收边界。
+本轮[末态原生／full对账](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/final-protected-comparison-review.json)已通过：WDC物理盘在线GPT、规范16 MiB MSR、最大整MiB NTFS／64 KiB数据分区，`WinPool_Test`／`E:`，无concrete pool或VD；Samsung限定结构范围0变化／0证据缺口，4项共享Primordial调整单列保留。[原UI解散局部刷新复验](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/scoped-release-original-ui-review.json)确认WDC准确fresh Primordial成员关系，未扩查Samsung兄弟盘。[普通重启与托盘退出](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/normal-restart-exit-exit-result.json)通过，两进程均exit 0；[只读审计](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/after-normal-restart-readonly-audit.json)确认偏好与B0一致、监控关闭且保留20 Hz设置、写调用边界计数不变、无未终结操作。多盘冗余、混合介质分层、真实 MBR→GPT 转换与既有 VD／层 MAX 扩展仍禁用。
+
+三块磁盘均有实际 20 Hz 监控样本的六次原界面改名已通过。同机三组匹配样本从接受确认至刷新就绪的中位数由 18.472 秒降至 15.437 秒，减少 16.43%；排除准备和人工等待，不作为普遍性能保证。2026-10-08 后续仅调整告警呈现的构建未再重复六次计时，该次改动未改变采样与执行路径；这些测量早于原生 MAX 与局部成员修正，未在其构建重新计时；旧基线设备映射及界面就绪条件的限制见 [Development](docs/Development.md)。
+
+[本轮 Release 工程门](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/final-frozen-gate-20261009-095540/20261009-095540/summary.json)覆盖12项目：1866 Total／1863 Passed／0 Failed／3 NotExecuted，restore／build成功且零警告／错误，源码哈希前后不变。[集中定向门](artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/consolidated-direct-20261009-095138/commands.json) Infrastructure 440/440、App 166/166、Application 6/6通过，覆盖新增拒绝门与局部成员修复。自动验证不代替仍缺失的分层 MAX 正例；本轮物理末态、保护比较、偏好与退出另有上述原生证据。
 
 设置中的开发者模式默认关闭；启用后显示硬件、测试、开发三页，硬件排在管理之前。只读硬件页按十个大类呈现基本硬件报告，支持设备属性详情、本机完整刷新和完整系统 JSON 导出。当前格式为文档 3 / 核心 SQLite 18 / 监控 SQLite 2 / IPC 13，保存来源事实；核心库从 schema 17 升级时执行受检迁移，旧文档格式仍明确拒绝，不删除旧数据。
 
@@ -20,10 +24,10 @@ WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控
 - 查看 Computer、System、Mainboard、CPU、Memory、VirtualMemory、Storage、GPU、Monitor、Network 十段只读硬件报告及原始来源详情。
 - 在存储结构编辑和磁盘分区编辑两页修改模拟系统。
 - 两个编辑页保留授权单盘受控真实操作入口，使用 Agent 冻结计划确认和 OperationId 查询；普通启动时真实编辑关闭。结构页通过原表单、拓扑草稿和净差异 Apply 提交，分区页每项动作独立提交；已有名称按 Enter 单独改名。
-- “存储结构”新建默认普通布局／`MAX`，也可选择单 HDD 分层并输入明确 GiB。普通容量读取准确池的 provider 范围；单 HDD 分层同时读取准确池与尚未用于 VD 的 HDD 模板的范围，`MAX` 取两者精确交集的最大合法 bytes，明确值也须满足两者。范围查询不保证最终 Windows 创建成功，单 HDD 分层 MAX 仍有上述实机限制。自动创建虚拟磁盘（AutoVD）与自动创建分区（AutoPart）是相互独立的已保存偏好；切换偏好不会改动已有对象或草稿。重建必须在草稿中明确提出删除并重新创建，破坏性步骤会分别列入确认计划。单 HDD 分层 32 GiB 已通过本机原界面创建、自动布局与重建，阶段最终验收仍未收口。
+- “存储结构”新建默认普通布局／`MAX`，也可选择单 HDD 分层并输入明确 GiB。普通 MAX 将 `UseMaximumSize` 保留到确认计划，由 Windows 决定容量，不把 provider 范围最大值转成预测 bytes。明确 GiB 须满足准确池的 provider 范围，单 HDD 分层还须满足与尚未用于 VD 的 HDD 模板范围的交集。后续自动分区布局须等待 fresh 身份、规格和实际容量核验；分层目标还必须有唯一 actual tier。本阶段分层 MAX 尚无已核验创建路径，已在删除或创建前拒绝；单 HDD 分层当前须输入明确容量。读查询不预留容量，也不保证创建成功。AutoVD 与 AutoPart 是独立的已保存偏好；切换偏好不会改动已有对象或草稿。重建必须在草稿中明确提出删除并重新创建，破坏性步骤分别列入确认计划。
 - 在“磁盘分区”页，只有准确来源事实返回 `IsOffline` 时，联机/脱机按钮才可操作。RAW 可初始化为 GPT，GPT 显示已初始化；MBR→GPT 仅在模拟模式可转换，真实模式明确拒绝。独立的“清空至 RAW”在模拟模式按原规则支持 GPT/MBR；真实清空当前仅支持联机 GPT 普通数据/MSR 分区，或本次完整来源事实证明分区数为零的 GPT，真实 MBR 清空禁用。该操作不整盘写零、不初始化、不格式化也不建池。自动 GPT 布局沿用已保存的 MSR 偏好：AutoPart 开启且 MSR 开启时，在 1 MiB 处创建唯一 16 MiB MSR，BasicData 从 17 MiB 开始；MSR 关闭时不创建 MSR，BasicData 从 1 MiB 开始。单独初始化不会创建 BasicData、建池或格式化卷。
 - 在 1 MiB 网格上创建模拟 GPT 分区；创建容量使用整数 MiB，默认填入对齐后的最大容量，并提供 MAX 按钮。右侧同一个操作按钮随选择切换“新建分区／格式化分区”。
-- 以 JSON 导出存储系统。分区页的快速格式化与完整格式化互斥；模拟目标不写真实磁盘，真实写入只开放当前支持的单盘路径，并须通过受控计划确认。阶段最终验收仍等待分层 MAX 边界决定。
+- 以 JSON 导出存储系统。分区页的快速格式化与完整格式化互斥；模拟目标不写真实磁盘，真实写入只开放当前支持的单盘路径，并须通过受控计划确认。阶段最终验收仍等待分层 MAX 实际 API 冲突的处理答复。
 - 监控受支持设备，持续显示会话运行时长；异常统一进入消息卡片和本次运行消息记录。
 - 新监控记录使用独立数据库，达到 1 GiB 轮换并以随附 7-Zip 归档；设置支持指定自定义 7Z 路径。
 - 使用中英文界面、主题与键盘导航。
@@ -34,7 +38,7 @@ WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控
 
 模拟结果不能证明 Windows 能够执行该配置，详见[当前限制与变更记录](docs/CHANGELOG.md)。
 
-真实调用报错后仍先保留结果未知屏障。只有严格只读对账确认未创建新对象时，操作才收口为失败；这不等于创建成功。后续调整必须重新确认准确计划，软件不会静默降低 MAX、试写探测或重放未知调用。
+真实调用报错或后置条件无法核实时保留结果未知屏障。严格只读对账可将证据完整的无变化结果收口为 Failed／ObservedNoEffect，或将准确识别的不符目标残留收口为 Failed／ObservedUnexpectedEffect；后者仍保留残留，须另行确认清理，两者都不是创建成功。软件不会静默降低 MAX、改布局、试写探测或重放未知调用。
 
 普通模拟数据分区可按目标总容量扩展或压缩，目标需按 1 MiB 对齐；系统分区仍禁止删除和格式化。真实 RAW 与 NTFS 数据分区按 Agent 实时 provider 范围扩缩，NTFS 可在线操作。扩展公式为 `A + B = C`，压缩为 `A − B = C`：当前容量、变化量和目标总容量；唯一权威目标是精确 bytes 值，Agent 在准备操作前重核实时范围。真实数据分区格式化默认使用 NTFS、64 KiB 簇和快速格式化；其他 NTFS/exFAT 与格式化方式组合仅在当前 provider 能力和准确计划都允许时可用。ReFS 仅在适用的 Workstations/SKU 与 provider 探针通过时支持 64 KiB 快速格式化和扩容；H11 已通过指定测试卷的内容哈希核对。ReFS 收缩与完整格式化、exFAT 扩缩以及系统/启动卷扩缩未开放。
 
