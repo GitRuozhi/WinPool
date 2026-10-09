@@ -492,6 +492,8 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 
 用户已明确要求检索网络与仓库研究，并以本机 PowerShell 和 WinPool 路径辨别问题，强调单 HDD 应可建立 HDD 容量层。这覆盖此前等待产品选择的继续入口：先调查技术事实，不能再次把 MAX 当设计偏好或等待答复。报告见[单 HDD 分层容量调查](Review/Single-Hdd-Tier-Capacity-20261009.md)。新证据单独位于 `artifacts/test-results/20261009-single-hdd-capacity-0e6c6bea2bd143be90a4d2f5bfda04b6/`，旧失败及已完成验收保留。
 
+用户随后明确要求长期记录：本机分层原生MAX失效归因于微软Windows Storage接口／提供程序侧，不是WinPool容量算法问题；WinPool的范围校验／采集缺陷另行区分。该归因不表示微软已公开确认具体缺陷，也不外推所有Windows版本。当前产品没有自动MAX绕过算法，只执行用户明确容量；实验上界减8个层单位不可当作已部署fallback。后续工作按微软侧兼容问题处理，不能重复将归因提请用户决定，不能把明确容量成功等同于自动MAX已交付。持久入口见[AGENTS](../AGENTS.md)。
+
 1. **已完成调查：** 对照V10、Tests01原始命令、微软cmdlet/API和网络原作者实验。V10用明确初始层尺寸再resize，不能充当单HDD原生MAX证据。本轮原UI32GiB再次成功；固定pwsh明确3,997,809,246,208-byte实际层／VD／RAW OS成功。相同近上限请求在5.1与7均失败，缓存0未解决；不能推导固定metadata／heatmap扣减算法。
 2. **已验证容量修正：** tiered `StorageTierSizes`只使用准确unused HDD template范围，不套普通pool的1GiB divisor。范围读、Prepare／Preflight、fixed script及后态能力证明均已修正；保留普通VD规则、历史hash／JSON／失败结果和nativeMAX防错门。实际成功但不整1GiB的容量、越界及新鲜范围变化回归均通过。
 3. **已验证大层采集修正：** 本机GetPhysicalExtent单方法42.6秒、14,893条，触发多次采集接近60秒超时。仅在准确单HDD成员、唯一actualtier／VD／pool及完整相等容量等证据允许时，采用fresh provider VD实际成员关联；多层、多成员或证据缺口沿原严格路径，不放宽安全角色，不靠缓存跳过核验。现存大层的生产采集测试10.53秒，包含Storage和Full的另一测试12.96秒；这是测试用时，不是全部编辑的延迟保证。

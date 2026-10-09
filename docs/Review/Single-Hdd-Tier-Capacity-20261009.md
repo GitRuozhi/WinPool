@@ -6,6 +6,8 @@
 
 单 HDD 可以创建真实 HDD 容量层。本轮 WinPool 原界面再次创建了 32 GiB 实际层；独立 pwsh 调用还创建了接近全盘容量的实际层，不能把接近上限失败解释为单 HDD 不支持分层。
 
+2026-10-09 用户明确要求记录归因：**本机分层原生 MAX 失效是微软 Windows Storage 接口／提供程序侧问题，不是 WinPool 容量算法问题。** 该归因与本报告查出的 WinPool 校验和采集缺陷分开；它不等于微软已公开确认具体缺陷，也不将本机两条失败路径外推为所有 Windows 的永久限制。
+
 目前须分开三个问题：
 
 1. `StorageTiers + UseMaximumSize` 的本机错误消息与官方 48010 的互斥输入定义一致，和容量不足不是同一错误。导出没有保留数值错误字段，48010 数字由当时操作者报告，不能冒充原始数值回执，详见[准确模板调用审阅](../../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/exact-template-native-max-readonly-review.json)。`MediaType HDD + UseMaximumSize` 的前轮 provider 返回了普通 VD；后续只读观察没有找到 VD 关联的 actual tier，严格对账定为 Failed／ObservedUnexpectedEffect，不能当作分层成功。
@@ -49,6 +51,12 @@ Windows 10 专业工作站版 22H2，build 19045；Storage module 2.0。WinPool 
 成功的大容量实际层为 HDD／Simple／Fixed／1列／65536-byte interleave，copies1／redundancy0，实际 AllocationUnitSize=256 MiB，VD WriteCacheSize=0。池 AllocatedSize 等于 VD 容量加 256 MiB。该值除以普通池 divisor 余 256 MiB，却符合层网格，直接反证错误的 pool-grid 限制。unused template 的 AllocationUnitSize 为 Auto 哨兵，不能当成实际层分配单位。
 
 这些减单位请求是明确容量诊断点，没有用作产品 MAX 算法或静默 fallback。一次成功不证明最大值；池与实际层 footprint 的差额也不能解释创建时所有临时资源要求。保存的 StorageManagement 错误事件只重复通用资源不足，没有提供 metadata／heatmap 子因。Driver Diagnostic 抓取每日志最多 300 条且确有截断，不能宣称已穷尽系统日志。
+
+## 当前软件路径与实验算法的区别
+
+当前生产真实分层没有自动 MAX 绕过算法。草稿规划和固定写入脚本均拒绝分层 `UseMaximumSize`；可执行路径接收明确 GiB，将其转换为准确 bytes，依据准确 unused HDD template 的范围校验，再以 `StorageTiers + StorageTierSizes` 创建一次。连续范围要求 `min ≤ size ≤ max` 且 `(size - origin) % divisor = 0`；离散范围要求该值属于 provider 返回的集合。范围校验不承诺 provider 最终创建成功，也不在失败后自动减容量或试写搜索。
+
+本机实验使用的成功诊断值是 `3,999,956,729,856 - 8 × 268,435,456 = 3,997,809,246,208 bytes`，即层查询上界扣2 GiB，得到3723.25 GiB。该公式仅记录这次明确请求如何选值；没有写入生产MAX算法。普通真实VD的MAX直接使用`UseMaximumSize`，模拟MAX估算仍是另外的路径。
 
 ## 软件修正与收口
 
