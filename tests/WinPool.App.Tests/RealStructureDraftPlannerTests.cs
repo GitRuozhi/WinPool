@@ -11,7 +11,7 @@ public sealed class RealStructureDraftPlannerTests
     private const long MiB = 1024L * 1024;
 
     [Theory]
-    [InlineData("replacement-max")]
+    [InlineData("replacement-explicit")]
     [InlineData("continuation")]
     [InlineData("delete-vd")]
     public void NativeSingleHddTierWithReturnedNullAggregateSupportsTheOriginalWorkflow(string action)
@@ -27,12 +27,13 @@ public sealed class RealStructureDraftPlannerTests
         PrepareNativeTierAction(session, action);
         var plan = RealStructureDraftPlanner.Build(session);
         Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
-        if (action == "replacement-max")
+        if (action == "replacement-explicit")
         {
             Assert.Equal(oldPool.StableId, Assert.Single(plan.RemovedPools).StableId);
             var replacement = Assert.Single(plan.Creations);
             Assert.Equal(PoolVirtualDiskLayout.HddTiered, replacement.Intent.Layout);
-            Assert.True(replacement.Intent.VirtualDiskUseMaximum);
+            Assert.False(replacement.Intent.VirtualDiskUseMaximum);
+            Assert.Equal(32 * GiB, replacement.Intent.VirtualDiskSizeBytes);
             Assert.Equal(oldPool.MemberPhysicalDiskIds[0], replacement.PhysicalDiskId);
             Assert.Empty(plan.RemovedVirtualDisks);
         }
@@ -114,7 +115,7 @@ public sealed class RealStructureDraftPlannerTests
                 ? item with { HasReliableIdentity = false } : item).ToImmutableArray() },
             _ => throw new ArgumentException(defect)
         };
-        foreach (var action in new[] { "replacement-max", "continuation" })
+        foreach (var action in new[] { "replacement-explicit", "continuation" })
         {
             var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "local:structure-draft-tests",
                 StorageSystemKind.Local, "Native tier shape", facts, [], DateTimeOffset.UtcNow);
@@ -135,10 +136,10 @@ public sealed class RealStructureDraftPlannerTests
     {
         var pool = session.Baseline.StoragePools.Single(item => !item.IsPrimordial);
         var vd = session.Baseline.VirtualDisks.Single();
-        if (action == "replacement-max")
+        if (action == "replacement-explicit")
         {
             session.Working = SimulationEditingSession.RemoveRealPoolDraft(session.Working, pool.StableId);
-            AddDraft(session, PoolVirtualDiskLayout.HddTiered, maximum: true);
+            AddDraft(session, PoolVirtualDiskLayout.HddTiered, maximum: false);
         }
         else if (action == "delete-vd") session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, vd.StableId);
         else session.PoolIntents[pool.StableId] = Intent() with
@@ -212,17 +213,49 @@ public sealed class RealStructureDraftPlannerTests
         Assert.True(withoutLayout.Preview.CanApply, string.Join("; ", withoutLayout.Preview.BlockingReasons));
         Assert.Equal(oldPool.StableId, Assert.Single(withoutLayout.RemovedPools).StableId);
 
-        // MAX has no known bytes until the accurate pool/template range is read.
+        // Ordinary MAX stays a Windows-chosen intent; tiered MAX is fail-closed while its native path is pending.
         session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
         { AutoCreatePartition = true, VirtualDiskUseMaximum = true, VirtualDiskSizeBytes = null };
-        Assert.True(RealStructureDraftPlanner.Build(session).Preview.CanApply);
+        var maximumChinese = RealStructureDraftPlanner.Build(session, chinese: true);
+        if (layout == PoolVirtualDiskLayout.HddTiered)
+        {
+            Assert.False(maximumChinese.Preview.CanApply);
+            Assert.Contains(maximumChinese.Preview.BlockingReasons,
+                reason => reason.Contains("分层布局当前不提供 MAX", StringComparison.Ordinal));
+            Assert.Empty(maximumChinese.Preview.Actions);
+            Assert.Empty(maximumChinese.RemovedPools);
+            Assert.Empty(maximumChinese.RemovedVirtualDisks);
+            Assert.Empty(maximumChinese.RemovedTiers);
+            Assert.Empty(maximumChinese.Creations);
+        }
+        else
+        {
+            Assert.True(maximumChinese.Preview.CanApply);
+            Assert.Contains(maximumChinese.Preview.Actions,
+                action => action.Contains("最大容量（由 Windows 决定实际容量）", StringComparison.Ordinal));
+        }
+        Assert.DoesNotContain(maximumChinese.Preview.Actions,
+            action => action.Contains("bytes", StringComparison.OrdinalIgnoreCase));
+        var maximumEnglish = RealStructureDraftPlanner.Build(session, chinese: false);
+        if (layout == PoolVirtualDiskLayout.HddTiered)
+        {
+            Assert.False(maximumEnglish.Preview.CanApply);
+            Assert.Contains(maximumEnglish.Preview.BlockingReasons,
+                reason => reason.Contains("MAX is currently unavailable for the single-HDD tiered layout", StringComparison.OrdinalIgnoreCase));
+            Assert.Empty(maximumEnglish.Preview.Actions);
+            Assert.Empty(maximumEnglish.Creations);
+        }
+        else
+        {
+            Assert.Contains(maximumEnglish.Preview.Actions,
+                action => action.Contains("MAX (actual capacity determined by Windows)", StringComparison.Ordinal));
+        }
     }
 
     [Theory]
     [InlineData(PoolVirtualDiskLayout.Ordinary, false)]
     [InlineData(PoolVirtualDiskLayout.Ordinary, true)]
     [InlineData(PoolVirtualDiskLayout.HddTiered, false)]
-    [InlineData(PoolVirtualDiskLayout.HddTiered, true)]
     public void OriginalDraftCarriesNamesLayoutExactSizeOrMaximumAndPartitionChoices(
         PoolVirtualDiskLayout layout, bool maximum)
     {
@@ -262,15 +295,16 @@ public sealed class RealStructureDraftPlannerTests
     }
 
     [Theory]
-    [InlineData(PoolVirtualDiskLayout.Ordinary)]
-    [InlineData(PoolVirtualDiskLayout.HddTiered)]
-    public void DissolveAndNewPoolOnSameMemberIsOneExplicitReplacement(PoolVirtualDiskLayout layout)
+    [InlineData(PoolVirtualDiskLayout.Ordinary, true)]
+    [InlineData(PoolVirtualDiskLayout.HddTiered, false)]
+    public void DissolveAndNewPoolOnSameMemberPreservesOrdinaryMaximumAndTieredExplicitReplacement(
+        PoolVirtualDiskLayout layout, bool maximum)
     {
         var before = ExistingSnapshot(withVirtualDisk: true);
         var session = Session(before);
         var old = before.StoragePools.Single(pool => !pool.IsPrimordial);
         session.Working = SimulationEditingSession.RemoveRealPoolDraft(session.Working, old.StableId);
-        AddDraft(session, layout, maximum: true);
+        AddDraft(session, layout, maximum);
         var plan = RealStructureDraftPlanner.Build(session);
         Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
         Assert.Equal(old.StableId, Assert.Single(plan.RemovedPools).StableId);
@@ -278,8 +312,37 @@ public sealed class RealStructureDraftPlannerTests
         var replacement = Assert.Single(plan.Creations);
         Assert.Equal(old.MemberPhysicalDiskIds[0], replacement.PhysicalDiskId);
         Assert.Equal(layout, replacement.Intent.Layout);
-        Assert.True(replacement.Intent.VirtualDiskUseMaximum);
+        Assert.Equal(maximum, replacement.Intent.VirtualDiskUseMaximum);
         Assert.Contains(plan.Preview.Actions, action => action.Contains("all data", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NewHddTieredMaximumIsBlockedBeforeAnyDissolutionOrCreationPlan(bool replacingExistingPool)
+    {
+        var session = Session(replacingExistingPool
+            ? ExistingSnapshot(withVirtualDisk: true)
+            : FreeSnapshot());
+        if (replacingExistingPool)
+        {
+            var oldPool = session.Baseline.StoragePools.Single(pool => !pool.IsPrimordial);
+            session.Working = SimulationEditingSession.RemoveRealPoolDraft(session.Working, oldPool.StableId);
+        }
+        AddDraft(session, PoolVirtualDiskLayout.HddTiered, maximum: true);
+        var prior = session.Capture();
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply);
+        Assert.Contains(plan.Preview.BlockingReasons,
+            reason => reason.Contains("MAX is currently unavailable for the single-HDD tiered layout", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(plan.Preview.Actions);
+        Assert.Empty(plan.RemovedPools);
+        Assert.Empty(plan.RemovedVirtualDisks);
+        Assert.Empty(plan.RemovedTiers);
+        Assert.Empty(plan.Creations);
+        Assert.Same(prior.Snapshot, session.Working);
     }
 
     [Fact]

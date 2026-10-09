@@ -39,6 +39,9 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         ArgumentNullException.ThrowIfNull(target);
         token.ThrowIfCancellationRequested();
 
+        if (command is CreateTieredVirtualDiskCommand { UseMaximumSize: true })
+            return Rejected("adapter.tiered-native-maximum-pending");
+
         var kind = GetCommandKind(command);
         if (kind is null || !IsExactTarget(command, target) || !IsSupportedParameters(command))
         {
@@ -241,9 +244,11 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             SetDriveLetterCommand value => (value.PreviousLetter is not null || value.NewLetter is not null) &&
                 value.PreviousLetter != value.NewLetter &&
                 IsLetter(value.PreviousLetter) && IsLetter(value.NewLetter),
-            CreateVirtualDiskCommand value => value.SizeBytes > 0 && value.InterleaveBytes == 65536 &&
+            CreateVirtualDiskCommand value => (value.UseMaximumSize ? value.SizeBytes == 0 : value.SizeBytes > 0) && value.InterleaveBytes == 65536 &&
                 value.DataColumns == 1 && !string.IsNullOrWhiteSpace(value.Name),
-            CreateTieredVirtualDiskCommand value => value.SizeBytes > 0 && !string.IsNullOrWhiteSpace(value.Name),
+            CreateTieredVirtualDiskCommand value => (value.UseMaximumSize ? value.SizeBytes == 0 : value.SizeBytes > 0) && !string.IsNullOrWhiteSpace(value.Name)
+                && Enum.IsDefined(value.CreationMechanism)
+                && (value.CreationMechanism != TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd || value.UseMaximumSize),
             CreateTierCommand value => value.InterleaveBytes == 65536 && value.DataColumns == 1 &&
                 !string.IsNullOrWhiteSpace(value.Name),
             ResizeVirtualDiskCommand value => value.SizeBytes > 0,

@@ -36,7 +36,7 @@ public static class RealOperationConfirmationFormatter
         lines.Add($"{Label("有序步骤", "Ordered steps")}:");
         foreach (var (step, index) in real.Steps.Select((value, index) => (value, index)))
         {
-            lines.Add($"  {index + 1}. {step.Id}: {Command(step.Command)}");
+            lines.Add($"  {index + 1}. {step.Id}: {Command(step.Command, chinese)}");
             lines.Add($"     {Label("实时目标事实", "Live target facts")}: {Quoted(step.BeforeCondition)}");
             lines.Add($"     {Label("步骤后态", "Step result")}: {Quoted(step.AfterCondition)}");
             lines.Add($"     {Label("数据损失", "Data loss")}: {Quoted(step.DataLoss)}");
@@ -44,7 +44,7 @@ public static class RealOperationConfirmationFormatter
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static string Command(RealStorageCommand command) => command switch
+    private static string Command(RealStorageCommand command, bool chinese) => command switch
     {
         SetDiskOnlineCommand value => $"SetDiskOnline target={Target(value.Disk)} online={value.Online}",
         InitializeGptCommand value => $"InitializeGpt target={Target(value.Disk)}",
@@ -58,12 +58,12 @@ public static class RealOperationConfirmationFormatter
         CreatePoolCommand value => $"CreatePool member={Target(value.PhysicalDisk)} name={Quoted(value.Name)}",
         DeletePoolCommand value => $"DeletePool target={Target(value.Pool)}",
         RenamePoolCommand value => $"RenamePool target={Target(value.Pool)} name={Quoted(value.Name)}",
-        CreateVirtualDiskCommand value => $"CreateVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} sizeBytes={Number(value.SizeBytes)} interleaveBytes={Number(value.InterleaveBytes)} dataColumns={Number(value.DataColumns)} Simple/Fixed",
+        CreateVirtualDiskCommand value => $"CreateVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} {CreationSize(value.SizeBytes, value.UseMaximumSize, chinese)} interleaveBytes={Number(value.InterleaveBytes)} dataColumns={Number(value.DataColumns)} Simple/Fixed",
         DeleteVirtualDiskCommand value => $"DeleteVirtualDisk target={Target(value.VirtualDisk)}",
         ResizeVirtualDiskCommand value => $"ResizeVirtualDisk target={Target(value.VirtualDisk)} sizeBytes={Number(value.SizeBytes)}",
         RenameVirtualDiskCommand value => $"RenameVirtualDisk target={Target(value.VirtualDisk)} name={Quoted(value.Name)}",
         CreateTierCommand value => $"CreateTier pool={Target(value.Pool)} name={Quoted(value.Name)} interleaveBytes={Number(value.InterleaveBytes)} dataColumns={Number(value.DataColumns)}",
-        CreateTieredVirtualDiskCommand value => $"CreateTieredVirtualDisk pool={Target(value.Pool)} tier={Target(value.Tier)} name={Quoted(value.Name)} sizeBytes={Number(value.SizeBytes)}",
+        CreateTieredVirtualDiskCommand value => $"CreateTieredVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} {CreationSize(value.SizeBytes, value.UseMaximumSize, chinese)} {TieredCreationMechanism(value, chinese)}",
         DeleteTierCommand value => $"DeleteTier target={Target(value.Tier)}",
         ResizeTierCommand value => $"ResizeTier target={Target(value.Tier)} sizeBytes={Number(value.SizeBytes)}",
         RenameTierCommand value => $"RenameTier target={Target(value.Tier)} name={Quoted(value.Name)}",
@@ -80,6 +80,21 @@ public static class RealOperationConfirmationFormatter
 
     private static string Quoted(string? value) =>
         value is null ? "null" : JsonSerializer.Serialize(value, DisplayJson);
+
+    private static string CreationSize(long bytes, bool useMaximumSize, bool chinese) => useMaximumSize
+        ? $"{(chinese ? "容量=最大容量（由 Windows 决定实际容量）" : "capacity=MAX (actual capacity determined by Windows)")} UseMaximumSize=true"
+        : $"sizeBytes={Number(bytes)}";
+
+    private static string TieredCreationMechanism(CreateTieredVirtualDiskCommand command, bool chinese) =>
+        command.CreationMechanism switch
+        {
+            TieredVirtualDiskCreationMechanism.ExactTemplate =>
+                $"creationMechanism=ExactTemplate tier={Target(command.Tier)}",
+            TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd => chinese
+                ? $"原计划请求方式=WindowsAutomaticHdd（MediaType=HDD + UseMaximumSize）；目标要求实际 HDD 层，不能把普通 VD 视为成功；选中模板仅为布局约束={Target(command.Tier)}（不传入创建命令）；该候选未通过实机核验，暂不接受新执行"
+                : $"requested creationMechanism=WindowsAutomaticHdd (MediaType=HDD + UseMaximumSize); the goal requires an actual HDD tier, not an ordinary VD; selected template is a layout constraint only={Target(command.Tier)} (not passed to the creation command); this candidate failed native verification and new execution is blocked",
+            _ => throw new ArgumentException("The Agent plan contains an unsupported tiered virtual-disk creation mechanism.", nameof(command))
+        };
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
 }

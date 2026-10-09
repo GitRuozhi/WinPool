@@ -405,6 +405,84 @@ public sealed class RealOperationContractTests
     private static RealOperationStep Step(string id, RealStorageCommand command, IReadOnlyList<string>? depends = null) =>
         new(id, command, depends ?? [], "Fresh identity and capability checked", "Postcondition checked", "Data loss listed", "Provider evidence");
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NativeMaximumIsExclusiveAndCoveredByIntentAndPlanHash(bool tiered)
+    {
+        var fixture = Fixture.Create();
+        var pool = new StorageObjectId(fixture.SystemId, StorageObjectKind.StoragePool, "pool");
+        var tier = new StorageObjectId(fixture.SystemId, StorageObjectKind.StorageTier, "template");
+        RealStorageCommand Command(long bytes, bool maximum) => tiered
+            ? new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool), RealTargetReference.ForExisting(tier), "VD", bytes, maximum)
+            : new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "VD", bytes, 65536, 1, maximum);
+        RealOperationIntentRequest Proposal(RealStorageCommand command) => new(OperationIntent.CreateVirtualDisk,
+            fixture.SystemId, tiered ? [pool, tier] : [pool], [Step("create", command)], "Requested capacity mode");
+        var native = Proposal(Command(0, true));
+        RealOperationValidator.Validate(native);
+        RealOperationValidator.Validate(Proposal(Command(16L << 30, false)));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(Command(16L << 30, true))));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(Command(0, false))));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(Command(-1, true))));
+        Assert.NotEqual(RealOperationIntentHasher.Compute(native, fixture.Context.RealSession!, "machine"),
+            RealOperationIntentHasher.Compute(Proposal(Command(0, false)), fixture.Context.RealSession!, "machine"));
+        var nativePlan = fixture.Plan with { RealOperation = fixture.Plan.RealOperation! with { Steps = native.Steps } };
+        var changed = nativePlan with { RealOperation = nativePlan.RealOperation! with { Steps = Proposal(Command(0, false)).Steps } };
+        Assert.NotEqual(OperationPlanHasher.Compute(nativePlan), OperationPlanHasher.Compute(changed));
+        Assert.Contains("\"UseMaximumSize\":true", JsonSerializer.Serialize(native));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LegacyExplicitCreationJsonAndFrozenHashRemainCompatible(bool tiered)
+    {
+        var fixture = Fixture.Create();
+        var reference = RealTargetReference.ForExisting(new(fixture.SystemId, StorageObjectKind.StoragePool, "pool"));
+        RealStorageCommand command = tiered
+            ? new CreateTieredVirtualDiskCommand(reference, RealTargetReference.ForExisting(new(fixture.SystemId, StorageObjectKind.StorageTier, "tier")), "VD", 16L << 30)
+            : new CreateVirtualDiskCommand(reference, "VD", 16L << 30, 65536, 1);
+        var json = JsonSerializer.Serialize(command);
+        Assert.DoesNotContain("UseMaximumSize", json); // Exactly the pre-flag command shape.
+        Assert.DoesNotContain("CreationMechanism", json);
+        var restoredCommand = JsonSerializer.Deserialize<RealStorageCommand>(json)!;
+        Assert.Equal(command, restoredCommand);
+        Assert.False(tiered ? ((CreateTieredVirtualDiskCommand)restoredCommand).UseMaximumSize
+            : ((CreateVirtualDiskCommand)restoredCommand).UseMaximumSize);
+        var plan = fixture.Plan with { RealOperation = fixture.Plan.RealOperation! with { Steps = [Step("create", command)] } };
+        plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) };
+        var legacyJson = JsonSerializer.Serialize(plan);
+        Assert.DoesNotContain("UseMaximumSize", legacyJson);
+        var restoredPlan = JsonSerializer.Deserialize<OperationPlan>(legacyJson)!;
+        Assert.Equal(plan.PlanHash, OperationPlanHasher.Compute(restoredPlan));
+    }
+
+    [Fact]
+    public void AutomaticHddMechanismIsFrozenAndLegacyNativeMaximumRetainsExactTemplateMeaning()
+    {
+        var fixture = Fixture.Create();
+        var pool = new StorageObjectId(fixture.SystemId, StorageObjectKind.StoragePool, "pool");
+        var tier = new StorageObjectId(fixture.SystemId, StorageObjectKind.StorageTier, "template");
+        var legacy = new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool), RealTargetReference.ForExisting(tier), "VD", 0, true);
+        RealOperationIntentRequest Proposal(CreateTieredVirtualDiskCommand command) => new(OperationIntent.CreateVirtualDisk,
+            fixture.SystemId, [pool, tier], [Step("create", command)], "Requested creation mechanism");
+        var automatic = legacy with { CreationMechanism = TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd };
+        RealOperationValidator.Validate(Proposal(automatic));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(automatic with { UseMaximumSize = false, SizeBytes = 16L << 30 })));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(automatic with { CreationMechanism = (TieredVirtualDiskCreationMechanism)99 })));
+        var legacyJson = JsonSerializer.Serialize<RealStorageCommand>(legacy);
+        Assert.DoesNotContain("CreationMechanism", legacyJson);
+        Assert.Equal(legacy, Assert.IsType<CreateTieredVirtualDiskCommand>(JsonSerializer.Deserialize<RealStorageCommand>(legacyJson)));
+        Assert.NotEqual(RealOperationIntentHasher.Compute(Proposal(legacy), fixture.Context.RealSession!, "machine"),
+            RealOperationIntentHasher.Compute(Proposal(automatic), fixture.Context.RealSession!, "machine"));
+        var oldPlan = fixture.Plan with { RealOperation = fixture.Plan.RealOperation! with { Steps = Proposal(legacy).Steps } };
+        oldPlan = oldPlan with { PlanHash = OperationPlanHasher.Compute(oldPlan) };
+        var restored = JsonSerializer.Deserialize<OperationPlan>(JsonSerializer.Serialize(oldPlan))!;
+        Assert.Equal(oldPlan.PlanHash, OperationPlanHasher.Compute(restored));
+        Assert.NotEqual(oldPlan.PlanHash, OperationPlanHasher.Compute(oldPlan with
+            { RealOperation = oldPlan.RealOperation! with { Steps = Proposal(automatic).Steps } }));
+    }
+
     private sealed class Fixture
     {
         private Fixture(SystemId systemId, StorageObjectId disk, StorageObjectId partition,

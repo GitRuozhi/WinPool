@@ -573,6 +573,12 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [InlineData("tier-only-max", false, "pool-creation-size-not-supported")]
     [InlineData("intersection-max", true, null)]
     [InlineData("pool-grid-mismatch", false, "pool-creation-size-not-supported")]
+    [InlineData("native-max", false, "tiered-native-maximum-pending")]
+    [InlineData("native-ordinary", true, null)]
+    [InlineData("native-max-error", false, "tiered-native-maximum-pending")]
+    [InlineData("native-auto", false, "tiered-native-maximum-pending")]
+    [InlineData("native-auto-error", false, "tiered-native-maximum-pending")]
+    [InlineData("unknown-mechanism", false, "tier-creation-mechanism-invalid")]
     public async Task CompressedFixedTieredCreationRetainsLiveEvidenceAcrossChildScope(
         string shape, bool invoked, string? diagnostic)
     {
@@ -581,6 +587,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         // local fakes, including Import-Module; no Windows storage API is loaded.
         var fakeCommands = """
             $script:fixtureShape = '__SHAPE__'
+            $script:nativeMaximum = $script:fixtureShape -like 'native-*'
             $script:expectedSize = switch ($script:fixtureShape) {
                 'tier-only-max' { [long]3999956729856 }
                 'intersection-max' { [long]3999688294400 }
@@ -607,6 +614,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
             function Get-VirtualDisk { param($StoragePool, $StorageTier, $ErrorAction) return @() }
             function Invoke-CimMethod {
                 param($InputObject, $MethodName, $Arguments, $ErrorAction)
+                if ($script:nativeMaximum) { throw 'native-max-must-not-query-reported-size' }
                 if ($InputObject.UniqueId -notin @('template-unique','pool-unique') -or $MethodName -ne 'GetSupportedSize' -or
                     $Arguments.ResiliencySettingName -ne 'Simple') { throw 'unexpected-fake-method' }
                 if ($InputObject.UniqueId -eq 'pool-unique') {
@@ -628,14 +636,26 @@ public sealed class WindowsRealStorageCommandAdapterTests
             }
             function New-VirtualDisk {
                 param($InputObject, $FriendlyName, $StorageTiers, $StorageTierSizes, $ResiliencySettingName,
-                    $ProvisioningType, $NumberOfColumns, $Interleave, $ErrorAction)
-                if ($InputObject.UniqueId -ne 'pool-unique' -or $StorageTiers.Count -ne 1 -or
-                    $StorageTiers[0].UniqueId -ne 'template-unique' -or $StorageTierSizes.Count -ne 1 -or
-                    $StorageTierSizes[0] -ne $script:expectedSize -or $ResiliencySettingName -ne 'Simple' -or
+                    $ProvisioningType, $NumberOfColumns, $Interleave, [switch]$UseMaximumSize, $Size, $MediaType, $ErrorAction)
+                if ($InputObject.UniqueId -ne 'pool-unique' -or $ResiliencySettingName -ne 'Simple' -or
                     $ProvisioningType -ne 'Fixed' -or $NumberOfColumns -ne 1 -or $Interleave -ne 65536) {
                     throw 'unexpected-fake-create-parameters'
                 }
+                if ($script:nativeMaximum) {
+                    if (-not $UseMaximumSize.IsPresent -or $PSBoundParameters.ContainsKey('Size') -or
+                        $PSBoundParameters.ContainsKey('StorageTierSizes')) { throw 'native-max-has-explicit-size' }
+                    if ($script:fixtureShape -eq 'native-ordinary') {
+                        if ($PSBoundParameters.ContainsKey('StorageTiers')) { throw 'ordinary-max-has-tier' }
+                    } elseif ($script:fixtureShape -like 'native-auto*') {
+                        if ($MediaType -ne 'HDD' -or $PSBoundParameters.ContainsKey('StorageTiers')) { throw 'automatic-hdd-incorrect-provider-input' }
+                    } elseif ($PSBoundParameters.ContainsKey('MediaType') -or $StorageTiers.Count -ne 1 -or $StorageTiers[0].UniqueId -ne 'template-unique') {
+                        throw 'native-max-lost-exact-template'
+                    }
+                } elseif ($UseMaximumSize.IsPresent -or $StorageTiers.Count -ne 1 -or
+                    $StorageTiers[0].UniqueId -ne 'template-unique' -or $StorageTierSizes.Count -ne 1 -or
+                    $StorageTierSizes[0] -ne $script:expectedSize) { throw 'explicit-size-changed' }
                 $script:fakeWriteCalls++
+                if ($script:fixtureShape -like 'native-*-error') { throw 'native-max-fixture-error' }
                 return [pscustomobject]@{ UniqueId='returned-vd-unique'; ObjectId='returned-vd-object' }
             }
             """.Replace("__SHAPE__", shape, StringComparison.Ordinal);
@@ -645,17 +665,48 @@ public sealed class WindowsRealStorageCommandAdapterTests
             PhysicalMemberObjectId = "physical-object", RelatedUniqueId = "template-unique",
             RelatedObjectId = "template-object"
         };
-        var payload = JsonSerializer.Serialize(new
+        var nativeMaximum = shape.StartsWith("native-", StringComparison.Ordinal);
+        var automaticHdd = shape.StartsWith("native-auto", StringComparison.Ordinal);
+        var poolReference = RealTargetReference.ForExisting(new StorageObjectId(SystemId.New(), StorageObjectKind.StoragePool, "pool"));
+        var tierReference = RealTargetReference.ForExisting(new StorageObjectId(poolReference.Existing!.Value.System, StorageObjectKind.StorageTier, "constraint-template"));
+        var bytes = shape switch
         {
-            CommandKind = "CreateTieredVirtualDisk", Target = target,
-            Command = new { Name = "Tiered VD", SizeBytes = shape switch
-            {
-                "tier-only-max" => 3999956729856L,
-                "intersection-max" => 3999688294400L,
-                "pool-grid-mismatch" => 17448304640L,
-                _ => 16L << 30
-            } }
-        });
+            "tier-only-max" => 3999956729856L,
+            "intersection-max" => 3999688294400L,
+            "pool-grid-mismatch" => 17448304640L,
+            _ => nativeMaximum ? 0L : 16L << 30
+        };
+        RealStorageCommand command = shape == "native-ordinary"
+            ? new CreateVirtualDiskCommand(poolReference, "Tiered VD", bytes, 65536, 1, nativeMaximum)
+            : new CreateTieredVirtualDiskCommand(poolReference, tierReference, "Tiered VD", bytes, nativeMaximum,
+                automaticHdd ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate);
+        if (shape == "unknown-mechanism") command = ((CreateTieredVirtualDiskCommand)command) with
+            { CreationMechanism = (TieredVirtualDiskCreationMechanism)99 };
+        // Obtain payload through the real adapter, including its private
+        // JsonStringEnumConverter options, then execute that exact payload in
+        // the complete production compressed script with all storage calls fake.
+        var serializationRunner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
+        var adapter = new WindowsRealStorageCommandAdapter(serializationRunner);
+        var blockedTieredMaximum = nativeMaximum && shape != "native-ordinary";
+        var blockedDirectWire = blockedTieredMaximum || shape == "unknown-mechanism";
+        var adapterResult = await adapter.ExecuteAsync(command, target, CancellationToken.None);
+        Assert.Equal(!blockedDirectWire, adapterResult.ProviderReturned);
+        Assert.Equal(blockedDirectWire ? 0 : 1, serializationRunner.Calls);
+        if (blockedTieredMaximum) Assert.Equal("adapter.tiered-native-maximum-pending", adapterResult.Code);
+        if (shape == "unknown-mechanism") Assert.Equal("adapter.closed-command-or-target-required", adapterResult.Code);
+        // Historical wire contracts remain readable; even a direct fixed-script
+        // invocation of that valid old payload must now fail before a Windows call.
+        var payload = blockedDirectWire ? JsonSerializer.Serialize(new { CommandKind = "CreateTieredVirtualDisk", Command = command, Target = target },
+            new JsonSerializerOptions { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } })
+            : serializationRunner.Payload!;
+        using (var serialized = JsonDocument.Parse(payload))
+        {
+            var serializedCommand = serialized.RootElement.GetProperty("Command");
+            if (automaticHdd)
+                Assert.Equal("WindowsAutomaticHdd", serializedCommand.GetProperty("CreationMechanism").GetString());
+            else if (shape == "unknown-mechanism") Assert.Equal(99, serializedCommand.GetProperty("CreationMechanism").GetInt32());
+            else Assert.False(serializedCommand.TryGetProperty("CreationMechanism", out _));
+        }
         var output = await RunCompressedFixedScriptWithFakesAsync(WindowsRealStoragePowerShellScript.Source,
             fakeCommands, payload, "[Console]::Out.WriteLine($script:fakeWriteCalls)");
         var lines = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
@@ -663,10 +714,41 @@ public sealed class WindowsRealStorageCommandAdapterTests
         using var response = JsonDocument.Parse(lines[0]);
         var result = response.RootElement;
         Assert.Equal(invoked, result.GetProperty("ProviderReturned").GetBoolean());
-        Assert.Equal(invoked ? "provider.returned" : "adapter.preflight-rejected", result.GetProperty("Code").GetString());
+        Assert.Equal(blockedDirectWire ? "adapter.preflight-rejected" : shape.EndsWith("-error", StringComparison.Ordinal) ? "provider.error-outcome-unknown"
+            : invoked ? "provider.returned" : "adapter.preflight-rejected", result.GetProperty("Code").GetString());
         Assert.Equal(diagnostic, result.GetProperty("ProviderError").GetString());
         Assert.Equal(invoked ? "1" : "0", lines[1]);
+        if (blockedDirectWire)
+        {
+            Assert.Equal(JsonValueKind.Null, result.GetProperty("TieredCreationInput").ValueKind);
+            return;
+        }
         var evidence = result.GetProperty("LiveCapabilityEvidence");
+        if (shape.StartsWith("native-", StringComparison.Ordinal))
+        {
+            if (shape == "native-ordinary") Assert.Equal(JsonValueKind.Null, evidence.ValueKind);
+            else
+            {
+                Assert.True(evidence.GetProperty("UseMaximumSize").GetBoolean());
+                Assert.False(evidence.TryGetProperty("CreationSize", out _));
+                Assert.False(evidence.TryGetProperty("PoolCreationSize", out _));
+                var input = result.GetProperty("TieredCreationInput");
+                Assert.True(input.GetProperty("UseMaximumSize").GetBoolean());
+                Assert.Equal(0, input.GetProperty("SizeBytes").GetInt64());
+                if (shape.StartsWith("native-auto", StringComparison.Ordinal))
+                {
+                    Assert.Equal(1, input.GetProperty("CreationMechanism").GetInt32());
+                    Assert.Equal(1, evidence.GetProperty("CreationMechanism").GetInt32());
+                    Assert.Equal("template-unique", input.GetProperty("ConstraintTemplateUniqueId").GetString());
+                    Assert.Equal("template-object", input.GetProperty("ConstraintTemplateObjectId").GetString());
+                    Assert.Equal(JsonValueKind.Null, input.GetProperty("TemplateUniqueId").ValueKind);
+                    Assert.Equal(JsonValueKind.Null, input.GetProperty("ProviderTemplateUniqueId").ValueKind);
+                    Assert.Equal(JsonValueKind.Null, input.GetProperty("ProviderTemplateObjectId").ValueKind);
+                }
+                else Assert.Equal("template-unique", input.GetProperty("TemplateUniqueId").GetString());
+            }
+            return;
+        }
         Assert.Equal("subsystem-unique", evidence.GetProperty("SubsystemUniqueId").GetString());
         Assert.Equal("physical-object", evidence.GetProperty("PhysicalMemberObjectId").GetString());
         Assert.Equal(shape != "capability-false", evidence.GetProperty("RequiredValue").GetBoolean());
@@ -727,8 +809,12 @@ public sealed class WindowsRealStorageCommandAdapterTests
     private static async Task<string> RunCompressedFixedScriptWithFakesAsync(string script,
         string fakeCommands, string payload, string suffix)
     {
-        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(script);
-        var loader = Encoding.Unicode.GetString(Convert.FromBase64String(encoded));
+        // Compress the complete fixture once. Nesting an already-base64 gzip
+        // loader inside another UTF-16 EncodedCommand exceeds Windows' command
+        // line limit as the fixed script grows. The inner & block retains the
+        // production script's child scope and sees only the closed local fakes;
+        // the unchanged typed JSON payload still travels separately on stdin.
+        var fixtureScript = fakeCommands + "\n& {\n" + script + "\n}\n" + suffix;
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,
             "WindowsPowerShell", "v1.0", "powershell.exe"))
         {
@@ -738,8 +824,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(
-            fakeCommands + "\n" + loader + "\n" + suffix));
+        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(fixtureScript));
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();

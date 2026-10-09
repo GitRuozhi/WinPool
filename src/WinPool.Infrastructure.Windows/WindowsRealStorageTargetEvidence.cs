@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using WinPool.Domain;
 using WinPool.Execution;
 
@@ -54,10 +55,10 @@ public sealed record WindowsStorageCommandResult(
     IReadOnlyList<WindowsNativeMsrSafetyEvidence>? OfflinePartitionAttributes = null,
     WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null);
 
-/// <summary>The fixed adapter's exact template and parameters passed to New-VirtualDisk.</summary>
+/// <summary>Frozen creation mechanism and actual provider parameters. Automatic HDD creation records the constraint template separately from the null provider template.</summary>
 public sealed record WindowsTieredCreationInput(
-    string TemplateUniqueId,
-    string TemplateObjectId,
+    string? TemplateUniqueId,
+    string? TemplateObjectId,
     string PoolUniqueId,
     string PhysicalMemberUniqueId,
     string MediaType,
@@ -65,7 +66,13 @@ public sealed record WindowsTieredCreationInput(
     string ProvisioningType,
     int NumberOfColumns,
     long Interleave,
-    long SizeBytes);
+    long SizeBytes,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UseMaximumSize = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] TieredVirtualDiskCreationMechanism CreationMechanism = TieredVirtualDiskCreationMechanism.ExactTemplate,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ConstraintTemplateUniqueId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ConstraintTemplateObjectId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProviderTemplateUniqueId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProviderTemplateObjectId = null);
 
 public interface IWindowsRealStorageCommandAdapter
 {

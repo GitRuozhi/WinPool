@@ -613,7 +613,7 @@ public sealed class WindowsRealPlanSafetyTests
     }
 
     [Fact]
-    public async Task HddMaximumReadsExactPoolIntersectionAndRechecksBothConstraintsBeforeDispatch()
+    public async Task ExplicitHddCreationReadsExactPoolIntersectionAndRechecksBothConstraintsBeforeDispatch()
     {
         var fixture = new Fixture();
         fixture.SetHddTemplate();
@@ -638,6 +638,79 @@ public sealed class WindowsRealPlanSafetyTests
         fixture.Sizes.Size = fixture.Sizes.Size with { MaximumBytes = 3998614552576 };
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan,
             plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task NativeMaximumAllowsOrdinaryButBlocksNewTieredPreparationAndHistoricalPreflight(bool tiered, bool automaticHdd)
+    {
+        var fixture = new Fixture();
+        if (tiered) fixture.SetHddTemplate(); else fixture.SetOldPool(withChild: false);
+        fixture.Capabilities.TierSupported = true;
+        // Deliberately unusable estimates cannot veto Windows' native maximum.
+        fixture.Sizes.Size = new(0, 0, 0, []);
+        fixture.Capabilities.TierCreationSize = new(0, 0, 0, []);
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
+        RealStorageCommand command = tiered
+            ? new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool), RealTargetReference.ForExisting(tier), "Native MAX", 0, true,
+                automaticHdd ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate)
+            : new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "Native MAX", 0, 65536, 1, true);
+        var proposal = fixture.Proposal(OperationIntent.CreateVirtualDisk,
+            tiered ? [pool, tier] : [pool], [Step("vd", command)], "Native MAX");
+        if (tiered)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(proposal));
+            // A readable, valid historical DTO is still blocked at execution preflight.
+            var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+            var closure = topology.RequireSinglePhysicalClosure([pool]);
+            await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Planner.ValidateCurrentStepAsync(
+                topology, closure, proposal, proposal.Steps[0], CancellationToken.None));
+            Assert.Equal(0, fixture.Sizes.ReadCount);
+            Assert.Equal(0, fixture.Capabilities.TierSizeReadCount);
+            Assert.Equal(0, fixture.Adapter.CallCount);
+            return;
+        }
+        var plan = await fixture.Prepare(proposal);
+        _ = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
+            new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Contains("native-maximum:true", plan.RealOperation.Steps[0].SupportEvidence);
+        Assert.Contains("MAX determined by Windows", plan.RealOperation.ExpectedFinalState);
+        Assert.Equal(automaticHdd, plan.RealOperation.Steps[0].SupportEvidence.Contains("creation-mechanism:WindowsAutomaticHdd", StringComparison.Ordinal));
+        if (automaticHdd)
+        {
+            Assert.Contains("template is a layout constraint only", plan.RealOperation.ExpectedFinalState);
+            Assert.Contains("actual HDD tier uniquely associated", plan.RealOperation.ExpectedFinalState);
+            Assert.DoesNotContain("sole exact template associated", plan.RealOperation.ExpectedFinalState);
+        }
+        Assert.DoesNotContain("exact-template-new-size:", plan.RealOperation.Steps[0].SupportEvidence);
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+        Assert.Equal(0, fixture.Capabilities.TierSizeReadCount);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+        if (tiered)
+        {
+            fixture.Capabilities.TierSupported = false;
+            await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Backend.PreflightStepAsync(plan,
+                plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public async Task NativeMaximumCannotPreFreezePartitionGeometryBeforeActualCapacityExists()
+    {
+        var fixture = new Fixture();
+        fixture.SetOldPool(withChild: false);
+        var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
+        var created = RealTargetReference.FromStep(StorageObjectKind.OsDisk, "vd");
+        var initialized = RealTargetReference.FromStep(StorageObjectKind.OsDisk, "gpt");
+        var proposal = fixture.Proposal(OperationIntent.CreateVirtualDisk, [pool],
+            [Step("vd", new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "Native MAX", 0, 65536, 1, true)),
+             Step("gpt", new InitializeGptCommand(created), ["vd"]),
+             Step("data", new CreatePartitionCommand(initialized, RealPartitionRole.BasicData, 1L << 20, 32L << 20), ["gpt"])], "Premature geometry");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
@@ -709,6 +782,8 @@ public sealed class WindowsRealPlanSafetyTests
         }
 
         public WindowsRealStorageBackend Backend { get; }
+        public WindowsRealStorageTopologyReader Reader => reader;
+        public WindowsRealOperationPlanner Planner => planner;
         public ForbiddenAdapter Adapter { get; }
         public SyntheticSizeReader Sizes { get; }
         public SyntheticPartitionSizeReader PartitionSizes { get; }
@@ -981,6 +1056,7 @@ public sealed class WindowsRealPlanSafetyTests
         public long TierMaximum { get; set; } = 512L << 20;
         public VirtualDiskCreationSize? TierCreationSize { get; set; }
         public int TierReadCount { get; private set; }
+        public int TierSizeReadCount { get; private set; }
         public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
             WindowsRealStorageTopology topology, StorageObjectId volume, CancellationToken token)
         {
@@ -1023,8 +1099,11 @@ public sealed class WindowsRealPlanSafetyTests
                 Now, associations, fields, null));
         }
         public Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(WindowsRealStorageTopology topology,
-            StorageObjectId tier, CancellationToken token) => Task.FromResult(TierCreationSize
-                ?? new VirtualDiskCreationSize(64L << 20, TierMaximum, 64L << 20, []));
+            StorageObjectId tier, CancellationToken token)
+        {
+            TierSizeReadCount++;
+            return Task.FromResult(TierCreationSize ?? new VirtualDiskCreationSize(64L << 20, TierMaximum, 64L << 20, []));
+        }
     }
     private sealed class AdministratorPrivilege : IPrivilegeService
     {

@@ -24,6 +24,7 @@
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationSubmissionState.cs" Link="RealOperationSubmissionState.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationStopSession.cs" Link="RealOperationStopSession.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationConfirmationFormatter.cs" Link="RealOperationConfirmationFormatter.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealVirtualDiskCreationCapacityResolver.cs" Link="RealVirtualDiskCreationCapacityResolver.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealPartitionResizeUiRange.cs" Link="RealPartitionResizeUiRange.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationProposalFactory.cs" Link="RealOperationProposalFactory.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealStructureDraftPlanner.cs" Link="RealStructureDraftPlanner.cs" />

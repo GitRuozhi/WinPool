@@ -408,7 +408,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             args.Handled = true;
             await CommitTierNameAsync();
         };
-        ContextHelp.Set(_creationSizeBox, Text("输入 GiB 容量或 MAX；实际 bytes 由 Agent 从准确的池或模板创建范围冻结。", "Enter GiB or MAX; the Agent freezes bytes from the exact pool or template creation range."));
+        ContextHelp.Set(_creationSizeBox, Text(
+            "输入 GiB 容量或 MAX。真实普通布局的 MAX 由 Windows 决定实际容量；真实单 HDD 分层布局当前请输入明确的 GiB 容量。模拟系统的 MAX 为估算值。",
+            "Enter a GiB capacity or MAX. Windows determines MAX for an ordinary real layout; enter an explicit GiB capacity for a real single-HDD tiered layout. MAX is estimated in simulation."));
         ContextHelp.Set(_driveLetterBox, Text("输入 D–Z，或留空不指定盘符。", "Enter D–Z, or leave blank for no requested drive letter."));
         ContextHelp.Set(_layoutBox, Text("创建布局；已有结构必须显式解散后新建，不能原地切换布局。", "Creation layout; dissolve and create a new pool to change an existing layout."));
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);

@@ -478,21 +478,42 @@ internal static class WindowsRealStoragePowerShellScript
                     $pool = Exact-Pool $t
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0 -or
                         [int]$c.InterleaveBytes -ne 65536 -or [int]$c.DataColumns -ne 1) { throw 'vd-layout-not-enabled' }
+                    $useMaximumSize = [bool](Read-Property $c 'UseMaximumSize')
+                    if (($useMaximumSize -and [long]$c.SizeBytes -ne 0) -or
+                        (-not $useMaximumSize -and [long]$c.SizeBytes -le 0)) { throw 'vd-capacity-mode-invalid' }
                     $invoked = $true
-                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ResiliencySettingName 'Simple' -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                    if ($useMaximumSize) {
+                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -UseMaximumSize -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                    } else {
+                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                    }
                     break
                 }
                 'CreateTieredVirtualDisk' {
+                    if ([bool](Read-Property $c 'UseMaximumSize')) { throw 'tiered-native-maximum-pending' }
+                    # Only the explicit exact-template path is currently executable.
+                    # Historical native mechanisms remain readable by the read-only reconciler.
+                    switch -CaseSensitive ([string](Read-Property $c 'CreationMechanism')) {
+                        '' { }
+                        '0' { }
+                        'ExactTemplate' { }
+                        default { throw 'tier-creation-mechanism-invalid' }
+                    }
                     $pool = Exact-Pool $t
                     Require-TierCapability $t 'SupportsStorageTieredVirtualDiskCreation' ([ref]$capabilityEvidence)
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'tiered-pool-not-empty' }
-                    $tier = Assert-One @(Get-StorageTier -StoragePool $pool -ErrorAction Stop | Where-Object {
+                    $templates = @(Get-StorageTier -StoragePool $pool -ErrorAction Stop)
+                    if ($templates.Count -ne 1) { throw 'tier-template-not-sole' }
+                    $tier = Assert-One @($templates | Where-Object {
                         [string]::Equals([string]$_.UniqueId, [string]$t.RelatedUniqueId, [StringComparison]::Ordinal) -and
                         [string]::Equals([string]$_.ObjectId, [string]$t.RelatedObjectId, [StringComparison]::Ordinal)
                     }) 'tier-not-unique'
-                    if ([string]$tier.MediaType -ne 'HDD' -or [string]$tier.ResiliencySettingName -ne 'Simple' -or
+                    if ($null -eq (Read-Property $tier 'Size') -or [uint64]$tier.Size -ne 0 -or
+                        $null -eq (Read-Property $tier 'AllocatedSize') -or [uint64]$tier.AllocatedSize -ne 0 -or
+                        [string]$tier.MediaType -ne 'HDD' -or [string]$tier.ResiliencySettingName -ne 'Simple' -or
                         [uint64]$tier.Interleave -ne 65536 -or [uint16]$tier.NumberOfColumns -ne 1 -or
                         @(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop).Count -ne 0) { throw 'tier-layout-not-enabled' }
+                    if ([long]$c.SizeBytes -le 0) { throw 'vd-capacity-mode-invalid' }
                     $range = Invoke-CimMethod -InputObject $tier -MethodName GetSupportedSize -Arguments @{ ResiliencySettingName = 'Simple' } -ErrorAction Stop
                     $capabilityEvidence['CreationSize'] = $range
                     if (-not (Test-TierCreationSize $range ([long]$c.SizeBytes))) { throw 'tier-creation-size-not-supported' }
@@ -500,10 +521,11 @@ internal static class WindowsRealStoragePowerShellScript
                     $capabilityEvidence['PoolCreationSize'] = $poolRange
                     if (-not (Test-PoolCreationSize $poolRange ([long]$c.SizeBytes))) { throw 'pool-creation-size-not-supported' }
                     $tieredCreationInput = [ordered]@{
-                        TemplateUniqueId = [string]$tier.UniqueId; TemplateObjectId = [string]$tier.ObjectId;
+                        TemplateUniqueId = [string]$tier.UniqueId;
+                        TemplateObjectId = [string]$tier.ObjectId;
                         PoolUniqueId = [string]$pool.UniqueId; PhysicalMemberUniqueId = [string]$t.PhysicalMemberUniqueId;
                         MediaType = [string]$tier.MediaType; ResiliencySettingName = 'Simple'; ProvisioningType = 'Fixed';
-                        NumberOfColumns = 1; Interleave = 65536; SizeBytes = [long]$c.SizeBytes
+                        NumberOfColumns = 1; Interleave = 65536; SizeBytes = [long]$c.SizeBytes; UseMaximumSize = $false
                     }
                     $invoked = $true
                     $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers @($tier) -StorageTierSizes @([uint64]$c.SizeBytes) -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
@@ -589,7 +611,8 @@ internal static class WindowsRealStoragePowerShellScript
                 Code = $(if ($invoked) { 'provider.error-outcome-unknown' } else { 'adapter.preflight-rejected' });
                 UniqueId = $null; ObjectId = $null; PartitionGuid = $null;
                 DiskNumber = $null; PartitionNumber = $null; ProviderJobId = $null;
-                ProviderError = [string]$_.Exception.Message; LiveCapabilityEvidence = $capabilityEvidence
+                ProviderError = [string]$_.Exception.Message; LiveCapabilityEvidence = $capabilityEvidence;
+                TieredCreationInput = $tieredCreationInput
             }
         }
         [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 8))

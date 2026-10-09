@@ -657,6 +657,11 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 return node.Summary;
             }
 
+            if (!owner.IsUsingSimulatedInventory && EditWorkspace.IsDraftVirtualDisk(disk.StableId))
+            {
+                return string.Concat("Virtual / ", owner.Localization["NotCreatedVirtualDisk"]);
+            }
+
             return TopologyProjector.JoinSummary(
                 disk.TierStableIds.Count > 0 ? "Tiered" : "Virtual",
                 TopologyProjector.FormatBytes(disk.Size));

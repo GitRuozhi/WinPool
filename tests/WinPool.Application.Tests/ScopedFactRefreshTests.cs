@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using WinPool.Domain;
 
 namespace WinPool.Application.Tests;
@@ -7,6 +8,55 @@ public sealed class ScopedFactRefreshTests
 {
     private static readonly SystemId System = SystemId.New();
     private static readonly DateTimeOffset Start = new(2026, 10, 8, 1, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void ScopedPoolDeletionRestoresObservedPrimordialMemberAndPreservesUnqueriedSiblings()
+    {
+        WinPoolFacts StorageCapture(int second, bool scoped)
+        {
+            var time = Start.AddSeconds(second);
+            var covered = new[] { "primordial", "concrete", "wdc" }.ToImmutableArray();
+            WinPoolSource Source(string name) => new(name + second, FactOrigin.StorageCim,
+                "root/microsoft/windows/storage", name, time, CollectionPurpose.Storage)
+            { CaptureGeneration = second, Coverage = scoped ? new("cleanup:result", covered, true, second) : null };
+            var pools = Source("MSFT_StoragePool");
+            var physicals = Source("MSFT_PhysicalDisk");
+            WinPoolSourceObject Pool(string id, bool primordial) => new(id, FactObjectType.StoragePool, pools.Id, id, true,
+                [WinPoolSourceField.Returned("UniqueId", id, FactValueType.String, pools.Id),
+                 WinPoolSourceField.Returned("IsPrimordial", primordial, FactValueType.Boolean, pools.Id)]);
+            WinPoolSourceObject Physical(string id) => new(id, FactObjectType.PhysicalDisk, physicals.Id, id, true,
+                [WinPoolSourceField.Returned("UniqueId", id, FactValueType.String, physicals.Id),
+                 WinPoolSourceField.Returned("CanPool", scoped || id != "wdc", FactValueType.Boolean, physicals.Id)]);
+            return new(WinPoolFacts.CurrentFormatVersion, System, second, [pools, physicals],
+                scoped ? [Pool("primordial", true), Physical("wdc")]
+                    : [Pool("primordial", true), Pool("concrete", false), Physical("wdc"), Physical("samsung-a"), Physical("samsung-b")],
+                scoped ? [new("primordial", "wdc", "pool-member", time)]
+                    : [new("primordial", "samsung-a", "pool-member", time), new("primordial", "samsung-b", "pool-member", time),
+                       new("concrete", "wdc", "pool-member", time)], [], [])
+            { InventoryCapturedAt = time, InventoryVersion = "capture-" + second };
+        }
+
+        var baseline = StorageCapture(0, false);
+        var incoming = StorageCapture(2, true);
+        var merged = WinPoolFactsCodec.Decode(WinPoolFactsCodec.Encode(WinPoolFactRefresh.Merge(baseline, incoming)));
+        Assert.DoesNotContain(merged.Objects, item => item.Id == "concrete");
+        var fresh = Assert.Single(merged.Relationships, edge => edge.ToId == "wdc");
+        Assert.Equal("primordial", fresh.FromId);
+        Assert.False(fresh.IsRetained);
+        Assert.Equal(Start.AddSeconds(2), fresh.ObservedAt);
+        foreach (var sibling in new[] { "samsung-a", "samsung-b" })
+        {
+            Assert.DoesNotContain(incoming.Objects, item => item.Id == sibling);
+            Assert.True(Assert.Single(merged.Relationships, edge => edge.ToId == sibling).IsRetained);
+            Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(baseline.Objects.Single(item => item.Id == sibling)),
+                JsonSerializer.SerializeToElement(merged.Objects.Single(item => item.Id == sibling))));
+        }
+        var snapshot = WinPoolStorageProjection.Project(merged);
+        Assert.Equal("primordial", snapshot.PhysicalDisks.Single(disk => disk.StableId == "wdc").PoolStableId);
+        var node = Assert.Single(EditWorkspace.ProjectPoolWorkspace(snapshot), item => item.Unit.StableId == "primordial");
+        Assert.Equal(new[] { "samsung-a", "samsung-b", "wdc" }, node.Children.Select(child => child.Unit.StableId).Order(StringComparer.Ordinal));
+        Assert.True(merged.IsMerged); // Display cache remains distinct from a fresh execution oracle.
+    }
 
     [Fact]
     public void CompleteLocalAbsenceRemovesOnlyCoveredObjectsAndRoundTripsTheProof()

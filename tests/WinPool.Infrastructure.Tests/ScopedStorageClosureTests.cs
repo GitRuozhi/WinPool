@@ -56,7 +56,9 @@ public sealed class ScopedStorageClosureTests
         var objects = result.RootElement.GetProperty("ClosureObjects").EnumerateArray().ToArray();
         Assert.Equal(graph == "ConcretePoolOnly"
                 ? new[] { "MSFT_PhysicalDisk", "MSFT_StoragePool", "MSFT_StorageSubSystem" }
-                : new[] { "MSFT_Disk", "MSFT_PhysicalDisk", "MSFT_StorageSubSystem" },
+                : graph == "PrimordialOnly"
+                    ? new[] { "MSFT_Disk", "MSFT_PhysicalDisk", "MSFT_StoragePool", "MSFT_StorageSubSystem" }
+                    : new[] { "MSFT_Disk", "MSFT_PhysicalDisk", "MSFT_StorageSubSystem" },
             objects.Select(item => item.GetProperty("ClassName").GetString()).Order(StringComparer.Ordinal));
         var subsystem = Assert.Single(objects, item => item.GetProperty("ClassName").GetString() == "MSFT_StorageSubSystem");
         Assert.Equal("subsystem-uid", subsystem.GetProperty("UniqueId").GetString());
@@ -71,10 +73,22 @@ public sealed class ScopedStorageClosureTests
         var fact = Assert.Single(document.SourceFacts.Objects, item => item.ObjectType == FactObjectType.StorageSubsystem);
         Assert.Equal("subsystem-uid", fact.Field("UniqueId")!.Value!.Value.GetString());
         Assert.Equal("subsystem-object", fact.Field("ObjectId")!.Value!.Value.GetString());
-        if (graph == "ConcretePoolOnly")
+        if (graph is "ConcretePoolOnly" or "PrimordialOnly")
             Assert.Single(document.SourceFacts.Objects, item => item.ObjectType == FactObjectType.StoragePool);
         else Assert.DoesNotContain(document.SourceFacts.Objects, item => item.ObjectType == FactObjectType.StoragePool);
         Assert.Single(document.SourceFacts.Objects, item => item.ObjectType == FactObjectType.PhysicalDisk);
+        if (graph == "PrimordialOnly")
+        {
+            var physical = Assert.Single(document.Snapshot.PhysicalDisks);
+            var pool = Assert.Single(document.Snapshot.StoragePools);
+            Assert.True(pool.IsPrimordial);
+            Assert.Equal(new[] { physical.StableId }, pool.MemberPhysicalDiskIds);
+            Assert.Equal(pool.StableId, physical.PoolStableId);
+            Assert.False(Assert.Single(document.SourceFacts.Relationships, edge => edge.Kind == "pool-member").IsRetained);
+            var node = Assert.Single(EditWorkspace.ProjectPoolWorkspace(document.Snapshot), item => item.Unit.StableId == pool.StableId);
+            Assert.Equal(physical.StableId, Assert.Single(node.Children).Unit.StableId);
+            Assert.Contains("Get-WinPoolScopePrimordialMembers $pool", ScopedStorageInventoryScript.Create(Scope()));
+        }
     }
 
     [Theory]
@@ -253,10 +267,19 @@ $observations = @(foreach ($item in $WinPoolScopeObjects.Values) {
     $fields = @(foreach ($name in @('UniqueId','ObjectId')) {
         [ordered]@{ Name=$name; CimType='String'; ReadState='Returned'; Value=[string]$item.$name }
     })
+    if ([string]$item.CimClass.CimClassName -eq 'MSFT_StoragePool') {
+        $fields += [ordered]@{ Name='IsPrimordial'; CimType='Boolean'; ReadState='Returned'; Value=[bool]$item.IsPrimordial }
+    }
     [ordered]@{ ClassName=[string]$item.CimClass.CimClassName; Namespace=$WinPoolScopeNamespace; Fields=$fields }
 })
 [ordered]@{
     ScannedAt=([DateTimeOffset]::Now).ToString('O'); Computer=[ordered]@{ Name=[Environment]::MachineName };
+    StoragePools=@(foreach ($pool in @(Get-WinPoolScopeClass 'MSFT_StoragePool')) {
+        $members = if ($pool.IsPrimordial) { @(Get-WinPoolScopePrimordialMembers $pool) } else { @($Physical) }
+        [ordered]@{ UniqueId=[string]$pool.UniqueId; ObjectId=[string]$pool.ObjectId;
+            SubsystemAssociationKey='uid:subsystem-uid';
+            MemberPhysicalDiskKeys=@($members | ForEach-Object { 'uid:' + [string]$_.UniqueId }) }
+    });
     SourceObservations=$observations;
     SourceQuerySuccesses=@($WinPoolScopeClasses | ForEach-Object { [ordered]@{ ClassName=$_; Namespace=$WinPoolScopeNamespace } });
     SourceQueryFailures=@($sourceQueryFailures.ToArray());

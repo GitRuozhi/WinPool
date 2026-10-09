@@ -398,14 +398,16 @@ public static class RealOperationValidator
                 (value.NewLetter is { } next && (next < 'D' || next > 'Z')) ||
                 (value.PreviousLetter is not null && value.PreviousLetter == value.NewLetter):
                 throw new ArgumentException("The exact previous and requested drive letters must differ and be valid local letters.");
-            case CreateVirtualDiskCommand value when value.SizeBytes <= 0 || value.InterleaveBytes != 65536 || value.DataColumns != 1 || string.IsNullOrWhiteSpace(value.Name):
+            case CreateVirtualDiskCommand value when (value.UseMaximumSize ? value.SizeBytes != 0 : value.SizeBytes <= 0) || value.InterleaveBytes != 65536 || value.DataColumns != 1 || string.IsNullOrWhiteSpace(value.Name):
                 throw new ArgumentException("Only single-column 64 KiB Simple/Fixed virtual disks are enabled.");
             case ResizeVirtualDiskCommand value when value.SizeBytes <= 0:
                 throw new ArgumentException("The virtual disk size is required.");
             case CreateTierCommand value when value.InterleaveBytes != 65536 || value.DataColumns != 1 || string.IsNullOrWhiteSpace(value.Name):
                 throw new ArgumentException("Only single-column 64 KiB HDD tiers are enabled.");
-            case CreateTieredVirtualDiskCommand value when value.SizeBytes <= 0 || string.IsNullOrWhiteSpace(value.Name):
-                throw new ArgumentException("A tiered virtual disk needs an explicit supported size and name.");
+            case CreateTieredVirtualDiskCommand value when (value.UseMaximumSize ? value.SizeBytes != 0 : value.SizeBytes <= 0) || string.IsNullOrWhiteSpace(value.Name)
+                || !Enum.IsDefined(value.CreationMechanism)
+                || value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd && !value.UseMaximumSize:
+                throw new ArgumentException("A tiered virtual disk needs an exclusive explicit size or native maximum intent and a name.");
             case ResizeTierCommand value when value.SizeBytes <= 0:
                 throw new ArgumentException("A tier size is required.");
             case CreatePoolCommand value when string.IsNullOrWhiteSpace(value.Name):

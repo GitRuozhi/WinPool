@@ -56,12 +56,17 @@ public sealed record RenameVolumeCommand(RealTargetReference Volume, string Labe
 public sealed record CreatePoolCommand(RealTargetReference PhysicalDisk, string Name) : RealStorageCommand;
 public sealed record DeletePoolCommand(RealTargetReference Pool) : RealStorageCommand;
 public sealed record RenamePoolCommand(RealTargetReference Pool, string Name) : RealStorageCommand;
-public sealed record CreateVirtualDiskCommand(RealTargetReference Pool, string Name, long SizeBytes, int InterleaveBytes, int DataColumns) : RealStorageCommand;
+public sealed record CreateVirtualDiskCommand(RealTargetReference Pool, string Name, long SizeBytes, int InterleaveBytes, int DataColumns,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UseMaximumSize = false) : RealStorageCommand;
 public sealed record DeleteVirtualDiskCommand(RealTargetReference VirtualDisk) : RealStorageCommand;
 public sealed record ResizeVirtualDiskCommand(RealTargetReference VirtualDisk, long SizeBytes) : RealStorageCommand;
 public sealed record RenameVirtualDiskCommand(RealTargetReference VirtualDisk, string Name) : RealStorageCommand;
 public sealed record CreateTierCommand(RealTargetReference Pool, string Name, int InterleaveBytes, int DataColumns) : RealStorageCommand;
-public sealed record CreateTieredVirtualDiskCommand(RealTargetReference Pool, RealTargetReference Tier, string Name, long SizeBytes) : RealStorageCommand;
+public enum TieredVirtualDiskCreationMechanism { ExactTemplate = 0, WindowsAutomaticHdd = 1 }
+
+public sealed record CreateTieredVirtualDiskCommand(RealTargetReference Pool, RealTargetReference Tier, string Name, long SizeBytes,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UseMaximumSize = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] TieredVirtualDiskCreationMechanism CreationMechanism = TieredVirtualDiskCreationMechanism.ExactTemplate) : RealStorageCommand;
 public sealed record DeleteTierCommand(RealTargetReference Tier) : RealStorageCommand;
 public sealed record ResizeTierCommand(RealTargetReference Tier, long SizeBytes) : RealStorageCommand;
 public sealed record RenameTierCommand(RealTargetReference Tier, string Name) : RealStorageCommand;

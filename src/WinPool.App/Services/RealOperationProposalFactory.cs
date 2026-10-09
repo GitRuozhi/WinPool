@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -13,7 +13,7 @@ public static class RealOperationProposalFactory
 {
     public sealed record VirtualDiskOptions(
         string Name, long SizeBytes, bool InitializeAndPartition,
-        bool CreateMsr, bool FormatNtfs, string? Label, char? Letter);
+        bool CreateMsr, bool FormatNtfs, string? Label, char? Letter, bool UseMaximumSize = false);
 
     public static RealOperationIntentRequest OneStep(
         SystemId systemId, OperationIntent intent, StorageObjectId target,
@@ -154,13 +154,14 @@ public static class RealOperationProposalFactory
         return request;
     }
 
-    /// <summary>Preserves exact provider bytes/MAX and rejects impossible automatic layout before VD creation.</summary>
+    /// <summary>Validates explicit bytes only. Native MAX is frozen as a command flag, not resolved from a size estimate.</summary>
     public static long ResolveVirtualDiskCreationSize(
         RealVirtualDiskCreationRange range, bool useMaximum, long? requestedSizeBytes,
         bool autoCreatePartition, bool createMsr)
     {
-        var bytes = useMaximum ? range.ResolveMaximum()
-            : requestedSizeBytes ?? throw new InvalidDataException("The exact requested capacity is missing.");
+        if (useMaximum)
+            throw new InvalidOperationException("Native MAX must use the typed UseMaximumSize flag; it has no predicted byte capacity.");
+        var bytes = requestedSizeBytes ?? throw new InvalidDataException("The exact requested capacity is missing.");
         if (!range.Supports(bytes))
             throw new InvalidDataException("The requested capacity is outside the exact provider creation range.");
         if (autoCreatePartition) ValidateAutomaticLayoutCapacity(bytes, createMsr);
@@ -268,7 +269,7 @@ public static class RealOperationProposalFactory
         AppendVirtualDiskSteps(steps, RealTargetReference.ForExisting(pool), options);
         var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk,
             systemId, [pool], steps,
-            $"Simple Fixed one-column virtual disk {options.Name} ({options.SizeBytes} bytes)" +
+            $"Simple Fixed one-column virtual disk {options.Name} ({CreationCapacity(options.SizeBytes, options.UseMaximumSize)})" +
             (options.InitializeAndPartition
                 ? "; GPT metadata only, with provider-created MSR and data layout handled after a fresh read"
                 : "; virtual disk remains RAW without partitions"));
@@ -290,19 +291,23 @@ public static class RealOperationProposalFactory
 
     public static RealOperationIntentRequest CreateTieredVirtualDisk(
         SystemId systemId, StorageObjectId pool, StorageObjectId tier,
-        string name, long sizeBytes)
+        string name, long sizeBytes, bool useMaximumSize = false)
     {
+        if (useMaximumSize)
+            throw new NotSupportedException("MAX is currently unavailable for the single-HDD tiered layout. Enter an explicit GiB capacity.");
+        var capacity = CreationCapacity(sizeBytes, false);
         var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk,
             systemId, [pool, tier],
             [new RealOperationStep("create-tiered-vdisk",
                 new CreateTieredVirtualDiskCommand(
                     RealTargetReference.ForExisting(pool),
-                    RealTargetReference.ForExisting(tier), name, sizeBytes), [],
+                    RealTargetReference.ForExisting(tier), name, sizeBytes, false,
+                    TieredVirtualDiskCreationMechanism.ExactTemplate), [],
                 "The exact single-member pool, sole unused HDD template, and supported Simple creation size are verified",
-                $"One Simple Fixed virtual disk named {name} is created on the exact HDD template with size {sizeBytes} bytes",
+                $"One Simple Fixed virtual disk named {name} is created on the exact HDD template with capacity {capacity}",
                 "The requested capacity is allocated from the exact pool",
                 "Agent live provider and exact-template size verification required")],
-            $"One Simple Fixed virtual disk {name} ({sizeBytes} bytes) is bound to the exact existing HDD template");
+            $"One Simple Fixed virtual disk {name} ({capacity}) is bound to the exact existing HDD template");
         RealOperationValidator.Validate(request);
         return request;
     }
@@ -408,7 +413,7 @@ public static class RealOperationProposalFactory
         var expected = virtualDisk is null
             ? $"One-member storage pool named {poolName}"
             : $"One-member storage pool {poolName}; Simple Fixed one-column " +
-              $"virtual disk {virtualDisk.Name} ({virtualDisk.SizeBytes} bytes)" +
+              $"virtual disk {virtualDisk.Name} ({CreationCapacity(virtualDisk.SizeBytes, virtualDisk.UseMaximumSize)})" +
               (virtualDisk.InitializeAndPartition
                   ? "; GPT metadata only, then provider-created MSR and data layout are handled after a fresh read"
                   : "; virtual disk remains RAW without partitions");
@@ -463,7 +468,7 @@ public static class RealOperationProposalFactory
         var request = new RealOperationIntentRequest(OperationIntent.RebuildStoragePool,
             systemId, targets, steps,
             $"Remove the old pool and virtual disk before separately preparing {newPoolName}/{options.Name}; " +
-            $"requested replacement is Simple Fixed one-column {options.SizeBytes} bytes. " +
+            $"requested replacement is Simple Fixed one-column {CreationCapacity(options.SizeBytes, options.UseMaximumSize)}. " +
             "Released-disk clearing and replacement creation require fresh identities and separate frozen confirmations");
         RealOperationValidator.Validate(request);
         return request;
@@ -637,6 +642,9 @@ public static class RealOperationProposalFactory
                 : throw new InvalidDataException($"The exact rebuild target lacks {name}.");
     }
 
+    private static string CreationCapacity(long bytes, bool useMaximum) =>
+        useMaximum ? "MAX determined by Windows (UseMaximumSize); actual capacity verified after creation" : $"{bytes} bytes";
+
     public static void AppendVirtualDiskSteps(
         List<RealOperationStep> steps, RealTargetReference pool,
         VirtualDiskOptions options)
@@ -644,11 +652,13 @@ public static class RealOperationProposalFactory
         var previous = steps.Count == 0 ? null : steps[^1].Id;
         steps.Add(new RealOperationStep("create-vdisk",
             new CreateVirtualDiskCommand(pool, options.Name, options.SizeBytes,
-                65536, 1), previous is null ? [] : [previous],
-            "The exact single-member pool and supported creation size are verified",
+                65536, 1, options.UseMaximumSize), previous is null ? [] : [previous],
+            options.UseMaximumSize ? "The exact single-member empty pool and fixed layout are verified; Windows determines MAX"
+                : "The exact single-member pool and supported creation size are verified",
             "One Simple Fixed virtual disk exists in the pool",
             "The requested capacity is allocated from the pool",
-            "Agent live pool size support required"));
+            options.UseMaximumSize ? "Agent live identity/layout verification and native UseMaximumSize required; actual size verified after creation"
+                : "Agent live pool size support required"));
         if (!options.InitializeAndPartition)
             return;
 

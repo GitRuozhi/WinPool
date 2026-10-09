@@ -32,10 +32,10 @@ internal static class ScopedStorageInventoryScript
         // Win32 supplement queries use numbers only after exact current provider identities were resolved.
         source = Replace(source, "@(Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction Stop)",
             "@($diskObjects | ForEach-Object { Get-CimInstance -ClassName Win32_DiskDrive -Filter ('Index = ' + [uint32]$_.Number) -ErrorAction Stop })");
-        // A primordial pool is a provider-wide availability container, not the target's storage component.
-        // Do not let the existing pool-report loop expand it to every available physical disk.
-        source = Replace(source, "foreach ($pool in @($nonPrimordialPoolObjects) + @($poolObjects | Where-Object { $_.IsPrimordial })) {",
-            "foreach ($pool in $nonPrimordialPoolObjects) {");
+        // Report only the primordial memberships already returned for exact scoped
+        // physical objects. Never enumerate the shared availability pool's siblings.
+        source = Replace(source, "$members = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop })",
+            "$members = @(Get-SourceSet 'MSFT_PhysicalDisk' { if ($pool.IsPrimordial) { Get-WinPoolScopePrimordialMembers $pool } else { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop } })");
         ReadOnlyStorageCommandPolicy.EnsureSafe(source);
         return source;
     }
@@ -50,6 +50,7 @@ internal static class ScopedStorageInventoryScript
     internal const string Closure = """
 $WinPoolScopeNamespace = 'root/Microsoft/Windows/Storage'
 $WinPoolScopeObjects = @{}
+$WinPoolScopePrimordialMembers = @{}
 $WinPoolScopePending = [System.Collections.Generic.Queue[object]]::new()
 $WinPoolScopeFailed = $false
 $WinPoolScopeClasses = @('MSFT_StorageSubSystem','MSFT_StoragePool','MSFT_PhysicalDisk','MSFT_VirtualDisk','MSFT_StorageTier','MSFT_Disk','MSFT_Partition','MSFT_Volume')
@@ -70,9 +71,13 @@ function Get-WinPoolScopeKey($item) {
 function Add-WinPoolScopeObject($item) {
     $key = Get-WinPoolScopeKey $item
     if ([string]$item.CimClass.CimClassName -eq 'MSFT_StoragePool' -and $item.IsPrimordial) {
-        # The availability pool is not a storage component, but its exact provider parent
-        # is needed to create a concrete pool on an otherwise unpooled physical disk.
-        # Read only that parent; never enqueue the primordial pool or enumerate its siblings.
+        # Retain the observed parent identity without queueing the shared container.
+        # It can report this target's membership, never a complete sibling list.
+        if ($WinPoolScopeObjects.ContainsKey($key) -and
+            -not [string]::Equals([string]$WinPoolScopeObjects[$key].ObjectId, [string]$item.ObjectId, [StringComparison]::Ordinal)) {
+            throw 'scope-provider-identity-ambiguous'
+        }
+        $WinPoolScopeObjects[$key] = $item
         $parents = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName MSFT_StorageSubSystem -ErrorAction Stop)
         if ($parents.Count -ne 1) { throw 'scope-primordial-subsystem-parent-unavailable' }
         foreach ($parent in $parents) { Add-WinPoolScopeObject $parent }
@@ -86,6 +91,12 @@ function Add-WinPoolScopeObject($item) {
     }
     $WinPoolScopeObjects[$key] = $item
     $WinPoolScopePending.Enqueue($item)
+}
+function Get-WinPoolScopePrimordialMembers($pool) {
+    $key = Get-WinPoolScopeKey $pool
+    if (-not $pool.IsPrimordial) { throw 'scope-not-primordial-pool' }
+    if ($WinPoolScopePrimordialMembers.ContainsKey($key)) { return @($WinPoolScopePrimordialMembers[$key].Values) }
+    return @()
 }
 function Find-WinPoolScopeIdentity([string]$class, [string]$property, [string]$value) {
     if ($WinPoolScopeClasses -notcontains $class -or @('UniqueId','ObjectId','Guid') -notcontains $property -or [string]::IsNullOrWhiteSpace($value)) {
@@ -120,6 +131,17 @@ try {
             $associations[$resultClass] = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName $resultClass -ErrorAction Stop)
             foreach ($associated in $associations[$resultClass]) {
                 Add-WinPoolScopeObject $associated
+            }
+        }
+        if ($class -eq 'MSFT_PhysicalDisk') {
+            $primordialParents = @($associations['MSFT_StoragePool'] | Where-Object { $_.IsPrimordial })
+            if ($primordialParents.Count -gt 1) { throw 'scope-physical-primordial-parent-ambiguous' }
+            if (@($associations['MSFT_StoragePool'] | Where-Object { -not $_.IsPrimordial }).Count -eq 0) {
+                foreach ($parent in $primordialParents) {
+                    $parentKey = Get-WinPoolScopeKey $parent
+                    if (-not $WinPoolScopePrimordialMembers.ContainsKey($parentKey)) { $WinPoolScopePrimordialMembers[$parentKey] = @{} }
+                    $WinPoolScopePrimordialMembers[$parentKey][(Get-WinPoolScopeKey $item)] = $item
+                }
             }
         }
         # A successful empty parent query is not positive proof of a usable storage component.

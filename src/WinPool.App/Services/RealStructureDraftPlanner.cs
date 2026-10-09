@@ -33,6 +33,20 @@ public static class RealStructureDraftPlanner
         string T(string zh, string en) => chinese ? zh : en;
         var before = session.Baseline;
         var after = session.Working;
+        var createsTieredMaximumVd = after.VirtualDisks.Any(vd =>
+            before.VirtualDisks.All(old => old.StableId != vd.StableId)
+            && after.StoragePools.FirstOrDefault(pool => pool.StableId == vd.PoolStableId) is
+                { IsPrimordial: false } pool
+            && session.PoolIntents.TryGetValue(pool.StableId, out var intent)
+            && intent.Layout == PoolVirtualDiskLayout.HddTiered
+            && intent.VirtualDiskUseMaximum);
+        if (createsTieredMaximumVd)
+        {
+            return new(new(false, [], [T(
+                "单 HDD 分层布局当前不提供 MAX。请输入明确的 GiB 容量。",
+                "MAX is currently unavailable for the single-HDD tiered layout. Enter an explicit GiB capacity.")]),
+                [], [], [], []);
+        }
         var removedPools = before.StoragePools.Where(pool => !pool.IsPrimordial
             && after.StoragePools.All(item => item.StableId != pool.StableId)).ToArray();
         var removedVds = before.VirtualDisks.Where(vd => after.VirtualDisks.All(item => item.StableId != vd.StableId)
@@ -186,9 +200,21 @@ public static class RealStructureDraftPlanner
             }
             if (createVd || continueLayout)
             {
-                var capacity = intent.VirtualDiskUseMaximum ? "MAX" : $"{intent.VirtualDiskSizeBytes} bytes";
-                if (createVd) actions.Add(T($"创建{(intent.Layout == PoolVirtualDiskLayout.HddTiered ? "单 HDD 分层" : "普通")} VD {intent.VirtualDiskName}，{capacity}；取得准确池/模板范围后冻结 bytes。",
-                    $"Create {(intent.Layout == PoolVirtualDiskLayout.HddTiered ? "single-HDD tiered" : "ordinary")} VD {intent.VirtualDiskName}, {capacity}; freeze bytes from the exact pool/template provider range."));
+                if (createVd)
+                {
+                    if (intent.Layout == PoolVirtualDiskLayout.HddTiered && intent.VirtualDiskUseMaximum)
+                        actions.Add(T(
+                            $"创建单 HDD 分层 VD {intent.VirtualDiskName}；Windows 自动建立 HDD 实际层并决定最大容量，选中模板仅作布局约束。",
+                            $"Create single-HDD tiered VD {intent.VirtualDiskName}; Windows automatically creates the actual HDD tier and determines maximum capacity, with the selected template used only as a layout constraint."));
+                    else
+                    {
+                        var capacity = intent.VirtualDiskUseMaximum
+                            ? T("最大容量（由 Windows 决定实际容量）", "MAX (actual capacity determined by Windows)")
+                            : T($"准确容量 {intent.VirtualDiskSizeBytes} bytes", $"exact capacity {intent.VirtualDiskSizeBytes} bytes");
+                        actions.Add(T($"创建{(intent.Layout == PoolVirtualDiskLayout.HddTiered ? "单 HDD 分层" : "普通")} VD {intent.VirtualDiskName}，{capacity}。",
+                            $"Create {(intent.Layout == PoolVirtualDiskLayout.HddTiered ? "single-HDD tiered" : "ordinary")} VD {intent.VirtualDiskName} with {capacity}."));
+                    }
+                }
                 if (intent.AutoCreatePartition)
                     actions.Add(T($"自动 GPT 布局，{(intent.CreateMsr ? "规范 16 MiB MSR" : "无 MSR")}，NTFS/64 KiB，卷标 {intent.VolumeName}，盘符 {intent.DriveLetter?.ToString() ?? "无"}。",
                         $"Automatic GPT layout, {(intent.CreateMsr ? "canonical 16 MiB MSR" : "no MSR")}, NTFS/64 KiB, label {intent.VolumeName}, letter {intent.DriveLetter?.ToString() ?? "none"}."));

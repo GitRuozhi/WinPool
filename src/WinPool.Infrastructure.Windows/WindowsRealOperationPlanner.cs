@@ -385,6 +385,8 @@ public sealed class WindowsRealOperationPlanner
         bool readOnlyRenameReconciliation = false)
     {
         var snapshot = topology.Snapshot;
+        if (step.Command is CreateTieredVirtualDiskCommand { UseMaximumSize: true })
+            throw new NotSupportedException("MAX is currently unavailable for the single-HDD tiered layout. Enter an explicit GiB capacity.");
         var supportEvidence = "fresh-msft-storage:" + closure.Fingerprint;
         verifiedStepOutputs ??= new Dictionary<string, string>();
         WindowsRealStorageSafetyEvidence? safetyEvidence;
@@ -674,6 +676,11 @@ public sealed class WindowsRealOperationPlanner
                     throw new InvalidDataException("A first virtual disk requires an empty, exact single-member pool.");
                 var target = WindowsRealStorageTargetBuilder.Build(
                     topology, value.Pool, verifiedStepOutputs);
+                if (value.UseMaximumSize)
+                {
+                    supportEvidence = "native-maximum:true; exact single-member empty pool; Simple/Fixed/one-column/65536-byte interleave";
+                    break;
+                }
                 var range = await virtualDiskSizes.ReadAsync(target, cancellationToken)
                     .ConfigureAwait(false);
                 if (!range.Supports(value.SizeBytes))
@@ -706,6 +713,13 @@ public sealed class WindowsRealOperationPlanner
                     || snapshot.StorageTiers.Count(item => item.PoolStableId == pool.StableId) != 1)
                     throw new InvalidDataException("Only the sole unused HDD template can create the first virtual disk.");
                 supportEvidence = await RequireTierCapabilityAsync(topology, closure, "SupportsStorageTieredVirtualDiskCreation", cancellationToken).ConfigureAwait(false);
+                if (value.UseMaximumSize)
+                {
+                    supportEvidence += "; native-maximum:true"
+                        + (value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd
+                            ? "; creation-mechanism:WindowsAutomaticHdd" : string.Empty);
+                    break;
+                }
                 var range = await capabilities.ReadTierCreationSizeAsync(topology,
                     value.Tier.Existing.Value, cancellationToken).ConfigureAwait(false);
                 var poolTarget = WindowsRealStorageTargetBuilder.Build(topology, value.Pool, verifiedStepOutputs);
@@ -1229,8 +1243,8 @@ public sealed class WindowsRealOperationPlanner
             item.Id == reference.CreatedByStep)?.Command;
         return source switch
         {
-            CreateVirtualDiskCommand value => value.SizeBytes,
-            CreateTieredVirtualDiskCommand value => value.SizeBytes,
+            CreateVirtualDiskCommand { UseMaximumSize: false } value => value.SizeBytes,
+            CreateTieredVirtualDiskCommand { UseMaximumSize: false } value => value.SizeBytes,
             InitializeGptCommand value => PlannedDiskSize(snapshot, proposal, value.Disk),
             ClearDiskCommand value => PlannedDiskSize(snapshot, proposal, value.Disk),
             _ => throw new InvalidDataException("The new OS disk has no frozen capacity.")
@@ -1389,15 +1403,21 @@ public sealed class WindowsRealOperationPlanner
         RenameVolumeCommand value => "Selected volume label " + value.Label,
         CreatePoolCommand value => "Single-member pool " + value.Name,
         CreateVirtualDiskCommand value => "Single-column Simple/Fixed virtual disk "
-            + value.Name + ", " + value.SizeBytes.ToString(CultureInfo.InvariantCulture)
-            + " bytes, 65536-byte interleave",
+            + value.Name + ", " + (value.UseMaximumSize ? "MAX determined by Windows (UseMaximumSize); actual capacity verified after creation"
+                : value.SizeBytes.ToString(CultureInfo.InvariantCulture) + " bytes") + ", 65536-byte interleave",
         DeleteVirtualDiskCommand => "Selected virtual disk and its OS disk, partitions and volumes absent",
         DeletePoolCommand => "Selected pool absent; physical member released as observed",
         RenamePoolCommand value => "Selected pool name " + value.Name,
         RenameVirtualDiskCommand value => "Selected virtual disk name " + value.Name,
         CreateTierCommand value => "Unused HDD tier template " + value.Name + "; Simple, 65536-byte interleave, one column; no allocated size",
         CreateTieredVirtualDiskCommand value => "Single-HDD Simple/Fixed tiered virtual disk " + value.Name
-            + ", " + value.SizeBytes.ToString(CultureInfo.InvariantCulture) + " bytes; sole exact template associated",
+            + (value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd
+                ? "; Windows automatic HDD tier (MediaType HDD); exact template is a layout constraint" : "; exact template provider input")
+            + ", " + (value.UseMaximumSize ? "MAX determined by Windows (UseMaximumSize); actual capacity verified after creation"
+                : value.SizeBytes.ToString(CultureInfo.InvariantCulture) + " bytes")
+            + (value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd
+                ? "; template is a layout constraint only; actual HDD tier uniquely associated with the new VD"
+                : "; sole exact template associated"),
         DeleteTierCommand => "Only the exact unused HDD tier template absent",
         RenameTierCommand value => "Exact HDD tier name " + value.Name + "; identity and associations retained",
         _ => "Exact selected object reflects the listed change and retains its expected associations"

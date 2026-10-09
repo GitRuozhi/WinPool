@@ -152,22 +152,29 @@ public partial class EditorPageBase
                         if (existing.Length != 1) throw new InvalidDataException("One exact unused HDD template is required.");
                         sizeTarget = Id(StorageObjectKind.StorageTier, existing[0].StableId);
                     }
-                    ReportRealActivity(Text("正在读取准确创建容量范围", "Reading the exact provider creation range"));
-                    var result = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealVirtualDiskCreationRangeRequest(
-                        sizeTarget, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
-                    if (!result.IsSuccess || result.Value is not AgentRealVirtualDiskCreationRangeResponse sizeResponse
-                        || sizeResponse.Range.Target != sizeTarget)
-                        throw new InvalidDataException(result.Messages.FirstOrDefault()?.DiagnosticText
-                            ?? result.Messages.FirstOrDefault()?.Code ?? "The exact provider creation range is unavailable.");
-                    var bytes = RealOperationProposalFactory.ResolveVirtualDiskCreationSize(sizeResponse.Range,
+                    if (intent.VirtualDiskUseMaximum)
+                        ReportRealActivity(Text("正在准备由 Windows 决定实际容量的最大容量 VD",
+                            "Preparing a maximum-capacity virtual disk; Windows will choose the actual capacity"));
+                    var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(
                         intent.VirtualDiskUseMaximum, intent.VirtualDiskSizeBytes,
-                        intent.AutoCreatePartition, intent.CreateMsr);
+                        intent.AutoCreatePartition, intent.CreateMsr, async () =>
+                        {
+                            ReportRealActivity(Text("正在读取准确创建容量范围", "Reading the exact provider creation range"));
+                            var result = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealVirtualDiskCreationRangeRequest(
+                                sizeTarget, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
+                            if (!result.IsSuccess || result.Value is not AgentRealVirtualDiskCreationRangeResponse sizeResponse
+                                || sizeResponse.Range.Target != sizeTarget)
+                                throw new InvalidDataException(result.Messages.FirstOrDefault()?.DiagnosticText
+                                    ?? result.Messages.FirstOrDefault()?.Code ?? "The exact provider creation range is unavailable.");
+                            return sizeResponse.Range;
+                        });
                     var proposal = intent.Layout == PoolVirtualDiskLayout.HddTiered
                         ? RealOperationProposalFactory.CreateTieredVirtualDisk(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), sizeTarget, intent.VirtualDiskName!, bytes)
+                            Id(StorageObjectKind.StoragePool, poolId), sizeTarget, intent.VirtualDiskName!,
+                            capacity.SizeBytes, capacity.UseMaximumSize)
                         : RealOperationProposalFactory.CreateFirstVirtualDisk(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), new(intent.VirtualDiskName!, bytes, false,
-                                intent.CreateMsr, true, intent.VolumeName, intent.DriveLetter));
+                            Id(StorageObjectKind.StoragePool, poolId), new(intent.VirtualDiskName!, capacity.SizeBytes, false,
+                                intent.CreateMsr, true, intent.VolumeName, intent.DriveLetter, capacity.UseMaximumSize));
                     if (!await Stage(proposal, Text("已核对新 VD", "Verified new VD"), () =>
                         {
                             vdId = RequireVerifiedCreatedId(StorageObjectKind.VirtualDisk,
@@ -179,6 +186,7 @@ public partial class EditorPageBase
                 }
                 if (!intent.AutoCreatePartition) continue;
                 if (vdId is null) throw new InvalidDataException("Automatic layout lacks a verified VD identity.");
+                // Windows chooses the MAX size; partition layout uses only the actual OS-disk size observed after the VD is verified.
                 var osDisk = ViewModel.ActiveDocument.Snapshot.OsDisks.SingleOrDefault(disk => disk.VirtualDiskStableId == vdId)
                     ?? throw new InvalidDataException("The verified VD has no unique current OS disk.");
                 if (osDisk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase))
