@@ -65,8 +65,11 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             if (tier.Kind != StorageObjectKind.StorageTier)
                 throw new InvalidDataException("An exact existing tier template is required.");
             var source = topology.RequireObject(tier);
-            _ = topology.RequireSinglePhysicalClosure([tier]);
             var projected = topology.Snapshot.StorageTiers.Single(item => item.StableId == source.Id);
+            var pool = topology.Snapshot.StoragePools.Single(item => item.StableId == projected.PoolStableId && !item.IsPrimordial);
+            if (pool.MemberPhysicalDiskIds.Count == 1) _ = topology.RequireSinglePhysicalClosure([tier]);
+            else _ = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
+                pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
             if (projected.VirtualDiskStableId is not null)
                 throw new NotSupportedException("Tier size lookup is for an unused creation template, not existing-object expansion.");
             using var searcher = Search("SELECT * FROM MSFT_StorageTier");

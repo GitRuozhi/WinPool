@@ -5,8 +5,8 @@ namespace WinPool.Infrastructure.Sqlite;
 public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
 {
     // Schemas before 17 contain retired product domains and remain rejected.
-    // Schema 17 is verified in full before the narrow, in-place 18 upgrade.
-    public const int CurrentSchemaVersion = 18;
+    // Schemas 17/18 are verified before their narrow, in-place upgrades.
+    public const int CurrentSchemaVersion = 19;
 
     private readonly string connectionString;
 
@@ -76,6 +76,8 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             {
                 await Upgrade17To18Async(cancellationToken);
             }
+            if (version.Version is 17 or 18)
+                await Upgrade18To19Async(cancellationToken);
 
             return;
         }
@@ -134,10 +136,10 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         }
 
         var version = await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken);
-        if (version?.Version is 17 or CurrentSchemaVersion)
+        if (version?.Version is 17 or 18 or CurrentSchemaVersion)
         {
             await CurrentSchemaVerifier.VerifyAsync(connection, cancellationToken,
-                version.Version == 17 ? Legacy17SchemaDefinition : CurrentSchemaDefinition);
+                version.Version switch { 17 => Legacy17SchemaDefinition, 18 => Legacy18SchemaDefinition, _ => CurrentSchemaDefinition });
         }
 
         return new ExistingDatabaseInspection(true, version);
@@ -196,6 +198,25 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             """;
         command.Parameters.AddWithValue("$applied", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task Upgrade18To19Async(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT schema_version FROM schema_info WHERE singleton=1;";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken),
+                System.Globalization.CultureInfo.InvariantCulture) != 18)
+            throw new InvalidDataException("The schema changed while upgrading from 18 to 19.");
+        command.CommandText = CapacityAttemptSchemaDefinition;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.CommandText = "UPDATE schema_info SET schema_version=19,applied_at_utc_ms=$at WHERE singleton=1 AND schema_version=18;";
+        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            throw new InvalidDataException("The capacity journal schema upgrade lost its version CAS.");
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -542,7 +563,7 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             string Definition);
     }
 
-    private static readonly string Legacy17SchemaDefinition = CurrentSchemaDefinition
+    private static readonly string Legacy17SchemaDefinition = Legacy18SchemaDefinition
         .Replace(",\n    authorization_digest TEXT,\n    accepted_at_utc_ms INTEGER,\n    preparation_id TEXT,\n    preparation_intent_hash TEXT", string.Empty,
             StringComparison.Ordinal)
         .Replace(",\n    target_json TEXT,\n    evidence_json TEXT,\n    updated_at_utc_ms INTEGER", string.Empty,
@@ -550,7 +571,26 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         .Replace("\nCREATE UNIQUE INDEX ix_operation_plans_preparation_id\n    ON operation_plans(preparation_id);", string.Empty,
             StringComparison.Ordinal);
 
-    private const string CurrentSchemaDefinition = """
+    private const string CurrentSchemaDefinition = Legacy18SchemaDefinition + "\n" + CapacityAttemptSchemaDefinition;
+
+    private const string CapacityAttemptSchemaDefinition = """
+        CREATE TABLE operation_capacity_attempts(
+            operation_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+            search_target_key TEXT NOT NULL,
+            state INTEGER NOT NULL CHECK(state BETWEEN 0 AND 5),
+            candidate_bytes INTEGER NOT NULL CHECK(candidate_bytes > 0),
+            last_successful_bytes INTEGER NOT NULL CHECK(last_successful_bytes >= 0),
+            attempt_json TEXT NOT NULL,
+            result_json TEXT,
+            updated_at_utc_ms INTEGER NOT NULL,
+            PRIMARY KEY(operation_id,step_id,ordinal),
+            FOREIGN KEY(operation_id,step_id) REFERENCES operation_steps(operation_id,step_id) ON DELETE CASCADE
+        );
+        """;
+
+    private const string Legacy18SchemaDefinition = """
         CREATE TABLE IF NOT EXISTS schema_info(
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
             schema_version INTEGER NOT NULL,

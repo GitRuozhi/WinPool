@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 using WinPool.Infrastructure.Sqlite;
@@ -318,6 +319,194 @@ public sealed class OperationPersistenceTests
             PersistedOperationState.OutcomeUnknown, PersistedOperationState.PartiallyCompleted,
             Event(plan, "invalid-partial")));
         Assert.True(await writer.HasRealWriteBarrierAsync());
+    }
+
+    [Fact]
+    public async Task CapacityAttemptsPersistBoundaryFailureWithoutFailingParentStep()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "capacity-journal");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = await PrepareCapacityParentAsync(writer);
+        var journal = writer.CreateMaximumCapacityJournal(plan.OperationId, "first");
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(1, 4, 0), default));
+        Assert.True(await journal.MarkCallIssuedAsync(1, default));
+        Assert.True(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified, 4,
+            "verified", "{\"actualSize\":4}"), default));
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(2, 5, 4), default));
+        Assert.True(await journal.MarkCallIssuedAsync(2, default));
+        Assert.True(await journal.CompleteAsync(2, new(MaximumCapacityAttemptState.CapacityRejectedUnchanged, 4,
+            "capacity_proven_unchanged", "{\"twoFreshProofs\":true}"), default));
+        await database.Store.InitializeAsync();
+        var rows = await new OperationPlanRepository(database.Store)
+            .ReadMaximumCapacityAttemptsAsync(plan.OperationId, "first");
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(MaximumCapacityAttemptState.CapacityRejectedUnchanged, rows[1].State);
+        Assert.Equal(4, rows[1].Result!.LastSuccessfulBytes);
+        Assert.Equal(PersistedOperationStepState.CallIssued,
+            (await writer.GetStepsAsync(plan.OperationId))[0].State);
+        Assert.True(await writer.HasRealWriteBarrierAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CapacityAttemptCasRejectsDuplicateAndOutOfOrderCalls(bool concurrent)
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "capacity-cas");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = await PrepareCapacityParentAsync(writer);
+        var journal = writer.CreateMaximumCapacityJournal(plan.OperationId, "first");
+        Assert.False(await journal.PrepareAsync(CapacityAttempt(2, 4, 0), default));
+        if (concurrent)
+        {
+            var results = await Task.WhenAll(journal.PrepareAsync(CapacityAttempt(1, 4, 0), default),
+                journal.PrepareAsync(CapacityAttempt(1, 4, 0), default));
+            Assert.Single(results, accepted => accepted);
+        }
+        else
+        {
+            Assert.True(await journal.PrepareAsync(CapacityAttempt(1, 4, 0), default));
+            Assert.False(await journal.PrepareAsync(CapacityAttempt(1, 4, 0), default));
+        }
+        Assert.False(await journal.PrepareAsync(CapacityAttempt(2, 3, 0), default));
+        Assert.False(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified, 4,
+            "premature", "proof"), default));
+        Assert.True(await journal.MarkCallIssuedAsync(1, default));
+        Assert.False(await journal.MarkCallIssuedAsync(1, default));
+        Assert.False(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified, 3,
+            "wrong_size", "proof"), default));
+        Assert.True(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified, 4,
+            "verified", "proof"), default));
+        Assert.False(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.OutcomeUnknown, 0,
+            "late_unknown", "proof"), default));
+        Assert.False(await journal.PrepareAsync(CapacityAttempt(2, 5, 0), default));
+        Assert.Single(await journal.ReadAsync(default));
+    }
+
+    [Theory]
+    [InlineData(MaximumCapacityAttemptState.OutcomeUnknown)]
+    [InlineData(MaximumCapacityAttemptState.FailedWithoutCall)]
+    public async Task UncertainOrInfrastructureAttemptCannotAuthorizeNextCandidate(MaximumCapacityAttemptState state)
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "capacity-stop");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = await PrepareCapacityParentAsync(writer);
+        var journal = writer.CreateMaximumCapacityJournal(plan.OperationId, "first");
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(1, 4, 0), default));
+        if (state == MaximumCapacityAttemptState.OutcomeUnknown)
+            Assert.True(await journal.MarkCallIssuedAsync(1, default));
+        Assert.True(await journal.CompleteAsync(1, new(state, 0, "not_capacity", "proof"), default));
+        Assert.False(await journal.PrepareAsync(CapacityAttempt(2, 3, 0), default));
+        Assert.True(await writer.HasRealWriteBarrierAsync());
+    }
+
+    [Fact]
+    public async Task AttemptEventFailureRollsBackCallIssuedAndReadOnlyJournalCannotWrite()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "capacity-atomic");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = await PrepareCapacityParentAsync(writer);
+        var journal = writer.CreateMaximumCapacityJournal(plan.OperationId, "first");
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(1, 4, 0), default));
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "CREATE TRIGGER reject_capacity_event BEFORE INSERT ON execution_events BEGIN SELECT RAISE(FAIL,'injected'); END;";
+            await command.ExecuteNonQueryAsync();
+        }
+        await Assert.ThrowsAsync<SqliteException>(() => journal.MarkCallIssuedAsync(1, default));
+        Assert.Equal(MaximumCapacityAttemptState.PreparingCall, Assert.Single(await journal.ReadAsync(default)).State);
+        var reader = new OperationPlanRepository(database.Store).CreateMaximumCapacityJournal(plan.OperationId, "first");
+        Assert.Single(await reader.ReadAsync(default));
+        await Assert.ThrowsAsync<AgentWriteOwnershipException>(() => reader.MarkCallIssuedAsync(1, default));
+    }
+
+    [Fact]
+    public async Task LayerJournalTracksEachFrozenSlotAndStopBlocksFurtherCalls()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "capacity-layers");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = await PrepareCapacityParentAsync(writer);
+        var stop = false;
+        var journal = writer.CreateMaximumCapacityJournal(plan.OperationId, "first", () => stop);
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(1, 2, 0), default));
+        Assert.True(await journal.MarkCallIssuedAsync(1, default));
+        Assert.True(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified, 2, "seed", "proof"), default));
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(2, 3, 0) with { SearchTargetKey = "second-layer" }, default));
+        stop = true;
+        Assert.True(journal.IsStopRequested);
+        Assert.False(await journal.MarkCallIssuedAsync(2, default));
+        Assert.True(await journal.CompleteAsync(2, new(MaximumCapacityAttemptState.FailedWithoutCall, 0, "stopped", "proof"), default));
+        Assert.False(await journal.PrepareAsync(CapacityAttempt(3, 4, 2), default));
+    }
+
+    [Fact]
+    public async Task MultiTierSeedCanOnlyInheritExactFrozenPerLayerSuccesses()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "capacity-multi-seed");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var plan = Plan();
+        var pool = RealTargetReference.ForExisting(new(plan.SystemId, StorageObjectKind.StoragePool, "pool"));
+        var first = RealTargetReference.ForExisting(new(plan.SystemId, StorageObjectKind.StorageTier, "hdd-template"));
+        var second = RealTargetReference.ForExisting(new(plan.SystemId, StorageObjectKind.StorageTier, "ssd-template"));
+        var gib = MaximumCapacityAlgorithm.GiB;
+        MaximumCapacityPolicy Policy(long candidate) => new(MaximumCapacityAlgorithm.Version,
+            candidate + MaximumCapacityAlgorithm.ReserveBytes + 1, candidate, 10 * gib, 20,
+            "fresh-template", "frozen-source", DateTimeOffset.UtcNow);
+        var firstPolicy = Policy(gib);
+        var secondPolicy = Policy(3 * gib);
+        var command = new CreateTieredVirtualDiskCommand(pool, first, "multi", 0, true,
+            MaximumCapacity: firstPolicy, CapacityTiers: [new(first, firstPolicy), new(second, secondPolicy)]);
+        plan = plan with { RealOperation = new(1, "test", "machine", "session", "target", "physical", "support",
+            "maximum", DateTimeOffset.UtcNow.AddMinutes(1),
+            [new("first", command, [], "before", "after", "writes", "frozen")]) };
+        plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) };
+        await PrepareCapacityParentAsync(writer, plan);
+        var journal = writer.CreateMaximumCapacityJournal(plan.OperationId, "first");
+        var seed = CapacityAttempt(1, 2 * gib, 0) with
+            { SearchTargetKey = "seed", Phase = MaximumCapacityAttemptPhase.Seed };
+        Assert.True(await journal.PrepareAsync(seed, default));
+        Assert.True(await journal.MarkCallIssuedAsync(1, default));
+        var valid = new MaximumCapacityAttemptResult(MaximumCapacityAttemptState.Verified, 2 * gib,
+            "seed_verified", "strict_all_layer_proof", new Dictionary<string, long>
+                { ["hdd-template"] = gib / 2, ["ssd-template"] = 3 * gib / 2 });
+        Assert.False(await journal.CompleteAsync(1, valid with { SeedSuccessfulBytes = new Dictionary<string, long>
+            { ["hdd-template"] = gib, ["ssd-template"] = gib } }, default));
+        Assert.True(await journal.CompleteAsync(1, valid, default));
+        Assert.False(await journal.PrepareAsync(CapacityAttempt(2, gib, gib) with
+            { SearchTargetKey = "hdd-template" }, default));
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(2, gib, gib / 2) with
+            { SearchTargetKey = "hdd-template" }, default));
+        Assert.True(await journal.MarkCallIssuedAsync(2, default));
+        Assert.True(await journal.CompleteAsync(2, new(MaximumCapacityAttemptState.Verified, gib,
+            "first_layer_verified", "proof"), default));
+        Assert.True(await journal.PrepareAsync(CapacityAttempt(3, 3 * gib, 3 * gib / 2) with
+            { SearchTargetKey = "ssd-template" }, default));
+        Assert.Equal(gib, (await journal.ReadAsync(default))[1].Result!.LastSuccessfulBytes);
+    }
+
+    private static MaximumCapacityAttempt CapacityAttempt(int ordinal, long candidate, long last) =>
+        new(ordinal, "first-layer", ordinal == 1 ? MaximumCapacityAttemptPhase.Create : MaximumCapacityAttemptPhase.Resize,
+            candidate, last, "{\"exactTarget\":true}", "before-fingerprint", "physical-fingerprint", "{\"fresh\":true}");
+
+    private static async Task<OperationPlan> PrepareCapacityParentAsync(OperationPlanRepository writer, OperationPlan? supplied = null)
+    {
+        var plan = supplied ?? Plan();
+        await writer.PrepareAsync(plan, Guid.NewGuid(), "capacity-intent");
+        await writer.AcceptAsync(plan.OperationId, plan.PlanHash, Digest, plan.CreatedAt);
+        Assert.True(await writer.TransitionAsync(plan.OperationId, PersistedOperationState.Accepted,
+            PersistedOperationState.Running, Event(plan, "running")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first", PersistedOperationStepState.NotStarted,
+            PersistedOperationStepState.PreparingCall, "target", null, Event(plan, "preparing")));
+        Assert.True(await writer.TransitionStepAsync(plan.OperationId, "first", PersistedOperationStepState.PreparingCall,
+            PersistedOperationStepState.CallIssued, "target", null, Event(plan, "call_issued")));
+        return plan;
     }
 
     private static async Task VerifyStepAsync(

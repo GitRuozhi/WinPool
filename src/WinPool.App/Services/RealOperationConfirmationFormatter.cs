@@ -58,12 +58,12 @@ public static class RealOperationConfirmationFormatter
         CreatePoolCommand value => $"CreatePool member={Target(value.PhysicalDisk)} name={Quoted(value.Name)}",
         DeletePoolCommand value => $"DeletePool target={Target(value.Pool)}",
         RenamePoolCommand value => $"RenamePool target={Target(value.Pool)} name={Quoted(value.Name)}",
-        CreateVirtualDiskCommand value => $"CreateVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} {CreationSize(value.SizeBytes, value.UseMaximumSize, chinese)} interleaveBytes={Number(value.InterleaveBytes)} dataColumns={Number(value.DataColumns)} Simple/Fixed",
+        CreateVirtualDiskCommand value => $"CreateVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} {CreationSize(value.SizeBytes, value.UseMaximumSize, chinese, value.MaximumCapacity)} interleaveBytes={Number(value.InterleaveBytes)} dataColumns={Number(value.DataColumns)} Simple/Fixed",
         DeleteVirtualDiskCommand value => $"DeleteVirtualDisk target={Target(value.VirtualDisk)}",
         ResizeVirtualDiskCommand value => $"ResizeVirtualDisk target={Target(value.VirtualDisk)} sizeBytes={Number(value.SizeBytes)}",
         RenameVirtualDiskCommand value => $"RenameVirtualDisk target={Target(value.VirtualDisk)} name={Quoted(value.Name)}",
         CreateTierCommand value => $"CreateTier pool={Target(value.Pool)} name={Quoted(value.Name)} interleaveBytes={Number(value.InterleaveBytes)} dataColumns={Number(value.DataColumns)}",
-        CreateTieredVirtualDiskCommand value => $"CreateTieredVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} {CreationSize(value.SizeBytes, value.UseMaximumSize, chinese)} {TieredCreationMechanism(value, chinese)}",
+        CreateTieredVirtualDiskCommand value => $"CreateTieredVirtualDisk pool={Target(value.Pool)} name={Quoted(value.Name)} {CreationSize(value.SizeBytes, value.UseMaximumSize, chinese, value.MaximumCapacity)} {TieredCreationMechanism(value, chinese)}{TierSearchInputs(value, chinese)}",
         DeleteTierCommand value => $"DeleteTier target={Target(value.Tier)}",
         ResizeTierCommand value => $"ResizeTier target={Target(value.Tier)} sizeBytes={Number(value.SizeBytes)}",
         RenameTierCommand value => $"RenameTier target={Target(value.Tier)} name={Quoted(value.Name)}",
@@ -81,9 +81,19 @@ public static class RealOperationConfirmationFormatter
     private static string Quoted(string? value) =>
         value is null ? "null" : JsonSerializer.Serialize(value, DisplayJson);
 
-    private static string CreationSize(long bytes, bool useMaximumSize, bool chinese) => useMaximumSize
+    private static string CreationSize(long bytes, bool useMaximumSize, bool chinese, MaximumCapacityPolicy? policy = null) => policy is { }
+        ? (chinese
+            ? $"WinPool MAX 算法={Quoted(policy.AlgorithmVersion)} A={Number(policy.UpperBoundBytes)} bytes；减去 4,000,000 bytes 后取严格更小整数 GiB；C={Number(policy.InitialCandidateBytes / MaximumCapacityAlgorithm.GiB)} GiB；首次失败每次减 1 GiB 至成功，首次成功每次加 1 GiB 至失败；仅确认无变化的容量拒绝计为边界，未知立即停止；最多 {Number(policy.MaximumAttempts)} 次；来源={Quoted(policy.Source)} 来源指纹={Quoted(policy.SourceFingerprint)} 时间={policy.CapturedAtUtc:O}"
+            : $"WinPool MAX algorithm={Quoted(policy.AlgorithmVersion)} A={Number(policy.UpperBoundBytes)} bytes; subtract 4,000,000 bytes then take the strictly smaller whole GiB; C={Number(policy.InitialCandidateBytes / MaximumCapacityAlgorithm.GiB)} GiB; first failure: descend 1 GiB until success; first success: ascend 1 GiB until rejection; only unchanged capacity rejection proves a boundary, unknown stops; at most {Number(policy.MaximumAttempts)} attempts; source={Quoted(policy.Source)} fingerprint={Quoted(policy.SourceFingerprint)} captured={policy.CapturedAtUtc:O}")
+        : useMaximumSize
         ? $"{(chinese ? "容量=最大容量（由 Windows 决定实际容量）" : "capacity=MAX (actual capacity determined by Windows)")} UseMaximumSize=true"
         : $"sizeBytes={Number(bytes)}";
+
+    private static string TierSearchInputs(CreateTieredVirtualDiskCommand command, bool chinese) =>
+        command.CapacityTiers is not { Count: > 1 } tiers ? string.Empty :
+            (chinese ? "; 同一 VD 先按各层 0.5×C 创建，再按以下顺序逐层搜索：" : "; seed one VD with 0.5×C per tier, then search in this order: ") +
+            string.Join("; ", tiers.Select((tier, index) => $"{index + 1}. {Target(tier.Tier)} " +
+                CreationSize(0, true, chinese, tier.MaximumCapacity)));
 
     private static string TieredCreationMechanism(CreateTieredVirtualDiskCommand command, bool chinese) =>
         command.CreationMechanism switch

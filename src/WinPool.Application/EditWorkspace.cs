@@ -2205,7 +2205,8 @@ public sealed record StructureProblem(
 
                     var members = snapshot.PhysicalDisks
                         .Where(disk => tier.MemberPhysicalDiskIds.Contains(
-                            disk.StableId, StringComparer.OrdinalIgnoreCase))
+                            disk.StableId, StringComparer.OrdinalIgnoreCase)
+                            && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
                         .ToArray();
                     var media = NormalizeMedia(tier.MediaType);
                     var resiliency = RecommendedResiliency(media, members.Length);

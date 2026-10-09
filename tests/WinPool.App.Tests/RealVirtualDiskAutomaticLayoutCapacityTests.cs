@@ -65,7 +65,7 @@ public sealed class RealVirtualDiskAutomaticLayoutCapacityTests
     }
 
     [Fact]
-    public void NativeMaximumCannotBeResolvedToProviderReportedBytesOrPrevalidatedAsGeometry()
+    public void MaximumIntentIsFrozenByAgentAndLayoutWaitsForVerifiedFinalCapacity()
     {
         var range = Range(32 * Mib + 512);
         Assert.Throws<InvalidOperationException>(() => RealOperationProposalFactory.ResolveVirtualDiskCreationSize(
@@ -75,35 +75,27 @@ public sealed class RealVirtualDiskAutomaticLayoutCapacityTests
         var command = Assert.IsType<CreateVirtualDiskCommand>(Assert.Single(request.Steps).Command);
         Assert.True(command.UseMaximumSize);
         Assert.Equal(0, command.SizeBytes);
-        Assert.Contains("Windows", request.ExpectedFinalState);
+        Assert.Contains("WinPool MAX", request.ExpectedFinalState);
         Assert.Empty(request.Steps.Select(step => step.Command).OfType<CreatePartitionCommand>());
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void TieredFactoryTemporarilyRejectsNativeMaximumButPreservesExplicitTemplateCreation(bool nativeMaximum)
+    public void TieredFactoryPreservesExactTemplateForBothExplicitAndMaximumSearch(bool nativeMaximum)
     {
         var pool = Range(32 * Mib).Target;
         var tier = new StorageObjectId(pool.System, StorageObjectKind.StorageTier, "constraint-template");
-        if (nativeMaximum)
-        {
-            var exception = Assert.Throws<NotSupportedException>(() => RealOperationProposalFactory.CreateTieredVirtualDisk(
-                pool.System, pool, tier, "HDD", 0, true));
-            Assert.Contains("Enter an explicit GiB capacity", exception.Message);
-            return;
-        }
         var request = RealOperationProposalFactory.CreateTieredVirtualDisk(pool.System, pool, tier,
             "HDD", nativeMaximum ? 0 : 16L << 30, nativeMaximum);
         var command = Assert.IsType<CreateTieredVirtualDiskCommand>(Assert.Single(request.Steps).Command);
-        Assert.Equal(nativeMaximum ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate,
-            command.CreationMechanism);
+        Assert.Equal(TieredVirtualDiskCreationMechanism.ExactTemplate, command.CreationMechanism);
         Assert.Equal(tier, command.Tier.Existing);
         Assert.Equal(nativeMaximum, command.UseMaximumSize);
         if (nativeMaximum)
         {
-            Assert.Contains("layout constraint", request.ExpectedFinalState);
-            Assert.Contains("MediaType HDD", request.Steps[0].AfterCondition);
+            Assert.Contains("WinPool MAX", request.ExpectedFinalState);
+            Assert.Null(command.MaximumCapacity);
         }
     }
 

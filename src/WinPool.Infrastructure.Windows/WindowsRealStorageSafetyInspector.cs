@@ -1,5 +1,6 @@
 using System.Management;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -32,13 +33,23 @@ public interface IWindowsRealStorageSafetyInspector
         FormatVolumeCommand command, StorageObjectId exactCreatedPartition,
         CancellationToken cancellationToken) =>
         ValidateWithEvidenceAsync(topology, closure, command, cancellationToken);
+
+    Task<WindowsRealStorageSafetyEvidence?> InspectAsync(
+        WindowsRealStorageTopology topology,
+        RealExactPhysicalMemberSetClosure closure,
+        RealStorageCommand command,
+        CancellationToken cancellationToken) =>
+        Task.FromException<WindowsRealStorageSafetyEvidence?>(
+            new NotSupportedException("This safety inspector does not support exact physical member-set MAX."));
 }
 
 public sealed record WindowsRealStorageSafetyEvidence(
     WindowsNativeMsrSafetyEvidence? NativePartitionAttributes,
     IReadOnlyList<WindowsVolumeSafetyEvidence> VolumeSafetyEvidence,
     IReadOnlyList<WindowsNativeMsrSafetyEvidence>? OfflinePartitionAttributes = null,
-    WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null);
+    WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<WindowsPoolMemberRoleEvidence>? PhysicalMemberRoleEvidence = null);
 
 public sealed record WindowsVolumeSafetyEvidence(string InventoryVersion, string VolumeStableId,
     string PartitionStableId, string VolumeGuidPath, bool BitLockerEnumerationComplete,
@@ -140,6 +151,143 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
         CancellationToken cancellationToken) => Task.Run(() =>
             Validate(topology, closure, command, cancellationToken,
                 exactCreatedPartition: exactCreatedPartition), cancellationToken);
+
+    public Task<WindowsRealStorageSafetyEvidence?> InspectAsync(
+        WindowsRealStorageTopology topology,
+        RealExactPhysicalMemberSetClosure closure,
+        RealStorageCommand command,
+        CancellationToken cancellationToken) => Task.Run<WindowsRealStorageSafetyEvidence?>(() =>
+            InspectExactPhysicalMemberSet(topology, closure, command, cancellationToken), cancellationToken);
+
+    private WindowsRealStorageSafetyEvidence InspectExactPhysicalMemberSet(
+        WindowsRealStorageTopology topology,
+        RealExactPhysicalMemberSetClosure supplied,
+        RealStorageCommand command,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (supplied is null || supplied.InventoryVersion != topology.InventoryVersion
+            || supplied.Members is null || supplied.Members.Count < 2
+            || supplied.Members.Any(item => item is null || item.PoolMemberRoleEvidence is null))
+            throw new InvalidDataException("Multi-tier MAX needs a fresh exact physical member-set closure.");
+
+        var approvedMembers = supplied.Members
+            .Select(item => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, item.PhysicalDiskId))
+            .ToArray();
+        var current = topology.RequireExactPhysicalMemberSet(supplied.ConcretePool, approvedMembers);
+        if (!SameExactPhysicalMemberSet(supplied, current))
+            throw new InvalidDataException("The exact physical member-set closure changed or was modified after capture.");
+
+        var tierTarget = command switch
+        {
+            CreateTieredVirtualDiskCommand { Pool.Existing: { } poolId, Tier.Existing: { } tierId }
+                when poolId == current.ConcretePool && tierId.Kind == StorageObjectKind.StorageTier => tierId,
+            ResizeTierCommand { Tier.Existing: { } tierId }
+                when tierId.Kind == StorageObjectKind.StorageTier => tierId,
+            _ => throw new InvalidDataException("Exact physical member-set inspection is limited to existing-pool tiered MAX creation and growth.")
+        };
+        if (tierTarget.System != topology.SystemId
+            || current.Objects.All(item => item.Id != tierTarget.ProviderKey
+                || item.ObjectType != FactObjectType.StorageTier))
+            throw new InvalidDataException("The MAX tier input is outside the exact approved pool closure.");
+
+        foreach (var member in current.Members)
+            ValidateExactPhysicalMemberRoleAndHealth(topology, current.PoolId, member);
+
+        // The ordinary validator already checks the entire connected OS-disk,
+        // partition, volume, BitLocker, runtime-path and command safety surface.
+        // Run it once for the full component, then return the role proofs for
+        // every member in the versioned set.
+        var firstMember = current.Members[0];
+        var componentClosure = new RealTargetClosure(
+            firstMember.PhysicalDiskId,
+            current.Objects,
+            current.Fingerprint,
+            current.PhysicalMemberFingerprint)
+        {
+            PoolMemberRoleEvidence = firstMember.PoolMemberRoleEvidence
+        };
+        var evidence = Validate(topology, componentClosure, command, cancellationToken)
+            ?? throw new InvalidDataException("The exact member-set safety inspection returned no evidence.");
+        return evidence with
+        {
+            PoolMemberRoleEvidence = null,
+            PhysicalMemberRoleEvidence = current.Members
+                .Select(item => item.PoolMemberRoleEvidence)
+                .ToArray()
+        };
+    }
+
+    private static bool SameExactPhysicalMemberSet(
+        RealExactPhysicalMemberSetClosure supplied,
+        RealExactPhysicalMemberSetClosure current)
+    {
+        if (supplied.ConcretePool != current.ConcretePool
+            || supplied.PoolId != current.PoolId
+            || supplied.PoolUniqueId != current.PoolUniqueId
+            || supplied.PoolObjectId != current.PoolObjectId
+            || supplied.InventoryVersion != current.InventoryVersion
+            || supplied.Fingerprint != current.Fingerprint
+            || supplied.PhysicalMemberFingerprint != current.PhysicalMemberFingerprint
+            || supplied.Members.Count != current.Members.Count)
+            return false;
+
+        for (var index = 0; index < current.Members.Count; index++)
+        {
+            var left = supplied.Members[index];
+            var right = current.Members[index];
+            if (left.PhysicalDiskId != right.PhysicalDiskId
+                || left.UniqueId != right.UniqueId
+                || left.ObjectId != right.ObjectId
+                || left.SerialNumber != right.SerialNumber
+                || left.SizeBytes != right.SizeBytes
+                || left.PoolMemberRoleEvidence is null
+                || !SamePoolMemberRoleEvidence(left.PoolMemberRoleEvidence, right.PoolMemberRoleEvidence))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool SamePoolMemberRoleEvidence(
+        WindowsPoolMemberRoleEvidence left,
+        WindowsPoolMemberRoleEvidence right) =>
+        left.InventoryVersion == right.InventoryVersion
+        && left.PhysicalStableId == right.PhysicalStableId
+        && left.PoolStableId == right.PoolStableId
+        && left.IsBoot == right.IsBoot
+        && left.IsSystem == right.IsSystem
+        && left.IsPageFile == right.IsPageFile
+        && left.IsCrashDump == right.IsCrashDump
+        && left.VerificationMethod == right.VerificationMethod
+        && left.AssociatedOsDiskIds.Order(StringComparer.Ordinal)
+            .SequenceEqual(right.AssociatedOsDiskIds.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+
+    private static void ValidateExactPhysicalMemberRoleAndHealth(
+        WindowsRealStorageTopology topology,
+        string poolId,
+        WindowsExactPhysicalMemberRoleEvidence member)
+    {
+        var physical = topology.Snapshot.PhysicalDisks.SingleOrDefault(item => item.StableId == member.PhysicalDiskId);
+        var roles = member.PoolMemberRoleEvidence;
+        if (physical is null || physical.PoolStableId != poolId
+            || physical.IsBoot || physical.IsSystem || physical.IsPageFile || physical.IsCrashDump
+            || physical.IsRetired || physical.IsHotSpare
+            || !physical.HealthStatus.Equals("Healthy", StringComparison.OrdinalIgnoreCase)
+            || roles.InventoryVersion != topology.InventoryVersion
+            || roles.PhysicalStableId != physical.StableId
+            || roles.PoolStableId != poolId
+            || roles.IsBoot || roles.IsSystem || roles.IsPageFile || roles.IsCrashDump)
+            throw new InvalidDataException("An exact pool member has a protected Windows role or unsafe health state.");
+
+        if (topology.Snapshot.FieldIssues.Any(issue => issue.ObjectId == physical.StableId
+            && issue.State != FieldReadState.Returned
+            && issue.FieldName is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump")
+            && (roles.InventoryVersion != topology.InventoryVersion
+                || roles.PhysicalStableId != physical.StableId
+                || roles.PoolStableId != poolId))
+            throw new InvalidDataException("An exact pool member's unknown role lacks current aggregate evidence.");
+    }
 
     private WindowsRealStorageSafetyEvidence? Validate(
         WindowsRealStorageTopology topology,

@@ -864,7 +864,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
             var version = await SqliteSchemaVersionReader.ReadAsync(
                 connection, cancellationToken);
-            if (version?.Version is not (17 or WinPoolSqliteStore.CurrentSchemaVersion))
+            if (version?.Version is not (17 or 18 or WinPoolSqliteStore.CurrentSchemaVersion))
             {
                 return "storage.location.core_database_unreadable";
             }

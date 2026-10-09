@@ -483,6 +483,29 @@ public sealed class RealOperationContractTests
             { RealOperation = oldPlan.RealOperation! with { Steps = Proposal(automatic).Steps } }));
     }
 
+    [Fact]
+    public void MaximumSearchInputsAreValidatedAndParticipateInHashWithoutChangingLegacyJson()
+    {
+        var fixture = Fixture.Create();
+        var pool = new StorageObjectId(fixture.SystemId, StorageObjectKind.StoragePool, "pool");
+        var legacy = new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "VD", 0, 65536, 1, true);
+        Assert.DoesNotContain("MaximumCapacity", JsonSerializer.Serialize<RealStorageCommand>(legacy));
+        var upper = 100 * MaximumCapacityAlgorithm.GiB;
+        var policy = new MaximumCapacityPolicy(MaximumCapacityAlgorithm.Version, upper,
+            MaximumCapacityAlgorithm.InitialCandidateBytes(upper), upper, 204,
+            "provider", "source-fingerprint", Now);
+        RealOperationIntentRequest Proposal(MaximumCapacityPolicy value) => new(OperationIntent.CreateVirtualDisk,
+            fixture.SystemId, [pool], [Step("max", legacy with { MaximumCapacity = value })], "Verified integer GiB MAX");
+        RealOperationValidator.Validate(Proposal(policy));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(policy with { InitialCandidateBytes = upper })));
+        Assert.Throws<ArgumentException>(() => RealOperationValidator.Validate(Proposal(policy with { MaximumAttempts = 0 })));
+        var original = RealOperationIntentHasher.Compute(Proposal(policy), fixture.Context.RealSession!, "machine");
+        Assert.NotEqual(original, RealOperationIntentHasher.Compute(Proposal(policy with { SourceFingerprint = "changed" }),
+            fixture.Context.RealSession!, "machine"));
+        var restored = JsonSerializer.Deserialize<RealOperationIntentRequest>(JsonSerializer.Serialize(Proposal(policy)))!;
+        Assert.Equal(original, RealOperationIntentHasher.Compute(restored, fixture.Context.RealSession!, "machine"));
+    }
+
     private sealed class Fixture
     {
         private Fixture(SystemId systemId, StorageObjectId disk, StorageObjectId partition,

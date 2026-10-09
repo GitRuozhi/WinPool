@@ -97,19 +97,43 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
     }
 
     [Fact]
-    public void TieredMaximumIsRejectedWhileNativeStrategyIsPending()
+    public void TieredMaximumCarriesSearchIntentForAgentFreezing()
     {
         var system = SystemId.New();
         var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
         var tier = new StorageObjectId(system, StorageObjectKind.StorageTier, "hdd-template-id");
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            RealOperationProposalFactory.CreateTieredVirtualDisk(
-                system, pool, tier, "MaximumVD", 0, useMaximumSize: true));
+        var proposal = RealOperationProposalFactory.CreateTieredVirtualDisk(
+            system, pool, tier, "MaximumVD", 0, useMaximumSize: true);
+        var command = Assert.IsType<CreateTieredVirtualDiskCommand>(Assert.Single(proposal.Steps).Command);
+        Assert.True(command.UseMaximumSize);
+        Assert.Null(command.MaximumCapacity); // Only the Agent may freeze live search inputs.
+        Assert.Equal(TieredVirtualDiskCreationMechanism.ExactTemplate, command.CreationMechanism);
+    }
 
-        Assert.Equal(
-            "MAX is currently unavailable for the single-HDD tiered layout. Enter an explicit GiB capacity.",
-            exception.Message);
+    [Fact]
+    public void FrozenMaximumSearchDisplaysExactOriginCandidateDirectionAndStopPolicy()
+    {
+        var system = SystemId.New();
+        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
+        var proposal = RealOperationProposalFactory.CreateFirstVirtualDisk(system, pool,
+            new RealOperationProposalFactory.VirtualDiskOptions("MaximumVD", 0, false, false, false, null, null, true));
+        var upper = 100 * MaximumCapacityAlgorithm.GiB;
+        var policy = new MaximumCapacityPolicy(MaximumCapacityAlgorithm.Version, upper,
+            MaximumCapacityAlgorithm.InitialCandidateBytes(upper), upper, 204,
+            "provider range", "source-fingerprint", DateTimeOffset.UtcNow);
+        proposal = proposal with { Steps = proposal.Steps.Select(step => step with
+        {
+            Command = ((CreateVirtualDiskCommand)step.Command) with { MaximumCapacity = policy }
+        }).ToArray() };
+        var text = RealOperationConfirmationFormatter.Format(Freeze(proposal), chinese: false);
+        Assert.Contains("C=99 GiB", text);
+        Assert.Contains("4,000,000 bytes", text);
+        Assert.Contains("descend 1 GiB", text);
+        Assert.Contains("ascend 1 GiB", text);
+        Assert.Contains("unknown stops", text);
+        Assert.Contains("source-fingerprint", text);
+        Assert.DoesNotContain("actual capacity determined by Windows", text);
     }
 
     [Fact]

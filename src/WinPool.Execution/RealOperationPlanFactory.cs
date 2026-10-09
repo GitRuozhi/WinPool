@@ -56,7 +56,12 @@ public static class RealOperationPlanFactory
         var real = new RealOperationSpecification(
             FormatVersion, AdapterVersion, environment.MachineBinding, session.Binding,
             targetFingerprint, physicalMemberFingerprint, supportEvidence, proposal.ExpectedFinalState, expiresAt,
-            proposal.Steps.Select(step => step with { DependsOn = step.DependsOn.ToArray() }).ToArray());
+            proposal.Steps.Select(step => step with
+            {
+                DependsOn = step.DependsOn.ToArray(),
+                Command = step.Command is CreateTieredVirtualDiskCommand { CapacityTiers: { } tiers } tiered
+                    ? tiered with { CapacityTiers = tiers.ToArray() } : step.Command
+            }).ToArray());
         plan = plan with { RealOperation = real };
         return plan with { PlanHash = OperationPlanHasher.Compute(plan) };
     }
@@ -73,7 +78,9 @@ public static class RealOperationValidator
             request.Intent is OperationIntent.RepairStorageObject or OperationIntent.RawDeviceWrite ||
             request.Targets is null || request.Targets.Count == 0 ||
             request.Targets.Any(target => target.System != request.SystemId) ||
-            request.Targets.Count(target => target.Kind == StorageObjectKind.PhysicalDisk) > 1 ||
+            (request.Targets.Count(target => target.Kind == StorageObjectKind.PhysicalDisk) > 1 &&
+                request.Steps?.Any(step => step.Command is CreateTieredVirtualDiskCommand
+                    { UseMaximumSize: true, CapacityTiers.Count: > 1 }) != true) ||
             request.Targets.Distinct().Count() != request.Targets.Count ||
             request.Steps is null || request.Steps.Count == 0 ||
             string.IsNullOrWhiteSpace(request.ExpectedFinalState))
@@ -99,6 +106,13 @@ public static class RealOperationValidator
                 throw new ArgumentException("A standalone clear requires one exact existing OS disk, one R5 clear step, and a RAW zero-partition result.");
             }
         }
+
+        // Search recovery owns one parent macro. Other work (including partitions)
+        // is prepared separately after its verified identities and final capacity.
+        if (request.Steps.Count != 1 && request.Steps.Any(step => step.Command is
+                CreateVirtualDiskCommand { MaximumCapacity: not null } or
+                CreateTieredVirtualDiskCommand { MaximumCapacity: not null }))
+            throw new ArgumentException("A maximum-capacity search must be its own confirmed plan.");
 
         var prior = new Dictionary<string, HashSet<StorageObjectKind>>(StringComparer.Ordinal);
         var commandsById = new Dictionary<string, RealStorageCommand>(StringComparer.Ordinal);
@@ -129,6 +143,17 @@ public static class RealOperationValidator
             if (step.Command is CreateTieredVirtualDiskCommand tiered)
             {
                 ValidateTarget(tiered.Tier, StorageObjectKind.StorageTier, request, step, prior);
+                if (tiered.CapacityTiers is { } tiers)
+                {
+                    if (!tiered.UseMaximumSize || tiers.Count < 2 || tiers[0].Tier != tiered.Tier ||
+                        tiers.Select(item => item.Tier).Distinct().Count() != tiers.Count)
+                        throw new ArgumentException("Multi-tier MAX needs distinct ordered exact templates and an agreeing first template.");
+                    foreach (var item in tiers)
+                    {
+                        ValidateTarget(item.Tier, StorageObjectKind.StorageTier, request, step, prior);
+                        ValidateMaximumCapacityPolicy(item.MaximumCapacity, true);
+                    }
+                }
             }
             ValidateCommand(step.Command);
             ValidateCreatedPartitionUse(step.Command, commandsById);
@@ -375,6 +400,10 @@ public static class RealOperationValidator
     private static void ValidateCommand(RealStorageCommand command)
     {
         const long mebibyte = 1024L * 1024;
+        if (command is CreateVirtualDiskCommand ordinary)
+            ValidateMaximumCapacityPolicy(ordinary.MaximumCapacity, ordinary.UseMaximumSize);
+        if (command is CreateTieredVirtualDiskCommand tiered)
+            ValidateMaximumCapacityPolicy(tiered.MaximumCapacity, tiered.UseMaximumSize);
         switch (command)
         {
             case ClearDiskCommand { RemoveOem: true }:
@@ -407,7 +436,7 @@ public static class RealOperationValidator
             case CreateTieredVirtualDiskCommand value when (value.UseMaximumSize ? value.SizeBytes != 0 : value.SizeBytes <= 0) || string.IsNullOrWhiteSpace(value.Name)
                 || !Enum.IsDefined(value.CreationMechanism)
                 || value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd && !value.UseMaximumSize:
-                throw new ArgumentException("A tiered virtual disk needs an exclusive explicit size or native maximum intent and a name.");
+                throw new ArgumentException("A tiered virtual disk needs an exclusive explicit size or maximum search intent and a name.");
             case ResizeTierCommand value when value.SizeBytes <= 0:
                 throw new ArgumentException("A tier size is required.");
             case CreatePoolCommand value when string.IsNullOrWhiteSpace(value.Name):
@@ -421,6 +450,20 @@ public static class RealOperationValidator
             case RenameVolumeCommand value when value.Label is null:
                 throw new ArgumentException("A volume label is required.");
         }
+    }
+
+    private static void ValidateMaximumCapacityPolicy(MaximumCapacityPolicy? policy, bool useMaximumSize)
+    {
+        // An App proposal and historical plans may omit this. The Windows planner
+        // must supply fresh inputs for all newly prepared MAX execution plans.
+        if (policy is null) return;
+        if (!useMaximumSize || policy.AlgorithmVersion != MaximumCapacityAlgorithm.Version ||
+            policy.InitialCandidateBytes <= 0 ||
+            policy.InitialCandidateBytes != MaximumCapacityAlgorithm.InitialCandidateBytes(policy.UpperBoundBytes) ||
+            policy.PhysicalCapacityBytes <= 0 || policy.MaximumAttempts <= 0 ||
+            string.IsNullOrWhiteSpace(policy.Source) || string.IsNullOrWhiteSpace(policy.SourceFingerprint) ||
+            policy.CapturedAtUtc == default)
+            throw new ArgumentException("The frozen maximum-capacity policy is invalid.");
     }
 
     private static void ValidateCreatedPartitionUse(

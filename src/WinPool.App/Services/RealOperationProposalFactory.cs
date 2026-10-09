@@ -154,13 +154,13 @@ public static class RealOperationProposalFactory
         return request;
     }
 
-    /// <summary>Validates explicit bytes only. Native MAX is frozen as a command flag, not resolved from a size estimate.</summary>
+    /// <summary>Validates explicit bytes only. MAX inputs are frozen by the Agent from fresh facts.</summary>
     public static long ResolveVirtualDiskCreationSize(
         RealVirtualDiskCreationRange range, bool useMaximum, long? requestedSizeBytes,
         bool autoCreatePartition, bool createMsr)
     {
         if (useMaximum)
-            throw new InvalidOperationException("Native MAX must use the typed UseMaximumSize flag; it has no predicted byte capacity.");
+            throw new InvalidOperationException("MAX must use the typed intent; the Agent freezes and executes the capacity search.");
         var bytes = requestedSizeBytes ?? throw new InvalidDataException("The exact requested capacity is missing.");
         if (!range.Supports(bytes))
             throw new InvalidDataException("The requested capacity is outside the exact provider creation range.");
@@ -293,15 +293,13 @@ public static class RealOperationProposalFactory
         SystemId systemId, StorageObjectId pool, StorageObjectId tier,
         string name, long sizeBytes, bool useMaximumSize = false)
     {
-        if (useMaximumSize)
-            throw new NotSupportedException("MAX is currently unavailable for the single-HDD tiered layout. Enter an explicit GiB capacity.");
-        var capacity = CreationCapacity(sizeBytes, false);
+        var capacity = CreationCapacity(sizeBytes, useMaximumSize);
         var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk,
             systemId, [pool, tier],
             [new RealOperationStep("create-tiered-vdisk",
                 new CreateTieredVirtualDiskCommand(
                     RealTargetReference.ForExisting(pool),
-                    RealTargetReference.ForExisting(tier), name, sizeBytes, false,
+                    RealTargetReference.ForExisting(tier), name, sizeBytes, useMaximumSize,
                     TieredVirtualDiskCreationMechanism.ExactTemplate), [],
                 "The exact single-member pool, sole unused HDD template, and supported Simple creation size are verified",
                 $"One Simple Fixed virtual disk named {name} is created on the exact HDD template with capacity {capacity}",
@@ -319,6 +317,27 @@ public static class RealOperationProposalFactory
             new RenameTierCommand(RealTargetReference.ForExisting(tier), name),
             $"The exact HDD tier retains its identity and associations with name {name}",
             "No data loss expected");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    public static RealOperationIntentRequest CreateMultiTieredMaximumVirtualDisk(
+        SystemId systemId, StorageObjectId pool, IReadOnlyList<StorageObjectId> tiers, string name)
+    {
+        ArgumentNullException.ThrowIfNull(tiers);
+        if (tiers.Count < 2 || tiers.Distinct().Count() != tiers.Count)
+            throw new ArgumentException("Multi-tier MAX requires distinct ordered templates.", nameof(tiers));
+        var inputs = tiers.Select(tier => new MaximumCapacityTier(RealTargetReference.ForExisting(tier), null)).ToArray();
+        var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk, systemId,
+            new[] { pool }.Concat(tiers).ToArray(),
+            [new RealOperationStep("create-tiered-vdisk", new CreateTieredVirtualDiskCommand(
+                RealTargetReference.ForExisting(pool), inputs[0].Tier, name, 0, true,
+                TieredVirtualDiskCreationMechanism.ExactTemplate, CapacityTiers: inputs), [],
+                "Exact unused templates, complete approved member set and per-tier layouts are verified",
+                "One VD is seeded at 0.5 C per tier, then every actual tier reaches its proven whole-GiB maximum in the listed order",
+                "All successful allocation and growth remains in effect if later search stops",
+                "Agent-frozen per-tier origins, durable attempts and strict postconditions required")],
+            "One exact multi-tier VD with verified whole-GiB maximum for every actual tier");
         RealOperationValidator.Validate(request);
         return request;
     }
@@ -643,7 +662,7 @@ public static class RealOperationProposalFactory
     }
 
     private static string CreationCapacity(long bytes, bool useMaximum) =>
-        useMaximum ? "MAX determined by Windows (UseMaximumSize); actual capacity verified after creation" : $"{bytes} bytes";
+        useMaximum ? "WinPool MAX: subtract 4,000,000 bytes, take the strictly smaller whole GiB, then search in 1 GiB steps" : $"{bytes} bytes";
 
     public static void AppendVirtualDiskSteps(
         List<RealOperationStep> steps, RealTargetReference pool,
@@ -653,11 +672,11 @@ public static class RealOperationProposalFactory
         steps.Add(new RealOperationStep("create-vdisk",
             new CreateVirtualDiskCommand(pool, options.Name, options.SizeBytes,
                 65536, 1, options.UseMaximumSize), previous is null ? [] : [previous],
-            options.UseMaximumSize ? "The exact single-member empty pool and fixed layout are verified; Windows determines MAX"
+            options.UseMaximumSize ? "The exact single-member empty pool and fixed layout are verified; Agent freezes the whole-GiB MAX search from fresh facts"
                 : "The exact single-member pool and supported creation size are verified",
             "One Simple Fixed virtual disk exists in the pool",
             "The requested capacity is allocated from the pool",
-            options.UseMaximumSize ? "Agent live identity/layout verification and native UseMaximumSize required; actual size verified after creation"
+            options.UseMaximumSize ? "Journaled explicit-size creation and growth; verified unchanged capacity rejection proves the maximum boundary"
                 : "Agent live pool size support required"));
         if (!options.InitializeAndPartition)
             return;

@@ -51,7 +51,7 @@ public sealed record PersistedOperationStep(
     string? EvidenceJson,
     DateTimeOffset? UpdatedAt);
 
-public sealed class OperationPlanRepository
+public sealed partial class OperationPlanRepository
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Text;
@@ -14,7 +15,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     {
         var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
         var adapter = new WindowsRealStorageCommandAdapter(runner);
-        var name = "pool'; Remove-Disk -Number 0; $x = 1\nUnicode 磁盘";
+        var name = "pool'; Remove-Disk -Number 0; $x = 1\nUnicode 纾佺洏";
         var command = new CreatePoolCommand(
             RealTargetReference.ForExisting(new StorageObjectId(SystemId.New(), StorageObjectKind.PhysicalDisk, "stable")),
             name);
@@ -574,7 +575,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [InlineData("offset-range", true, null)]
     [InlineData("offset-range-wrong-grid", false, "tier-creation-size-not-supported")]
     [InlineData("native-max", false, "tiered-native-maximum-pending")]
-    [InlineData("native-ordinary", true, null)]
+    [InlineData("native-ordinary", false, "maximum-requires-journaled-explicit-attempt")]
     [InlineData("native-max-error", false, "tiered-native-maximum-pending")]
     [InlineData("native-auto", false, "tiered-native-maximum-pending")]
     [InlineData("native-auto-error", false, "tiered-native-maximum-pending")]
@@ -685,16 +686,16 @@ public sealed class WindowsRealStorageCommandAdapterTests
         // the complete production compressed script with all storage calls fake.
         var serializationRunner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
         var adapter = new WindowsRealStorageCommandAdapter(serializationRunner);
-        var blockedTieredMaximum = nativeMaximum && shape != "native-ordinary";
+        var blockedTieredMaximum = nativeMaximum;
         var blockedDirectWire = blockedTieredMaximum || shape == "unknown-mechanism";
         var adapterResult = await adapter.ExecuteAsync(command, target, CancellationToken.None);
         Assert.Equal(!blockedDirectWire, adapterResult.ProviderReturned);
         Assert.Equal(blockedDirectWire ? 0 : 1, serializationRunner.Calls);
-        if (blockedTieredMaximum) Assert.Equal("adapter.tiered-native-maximum-pending", adapterResult.Code);
+        if (blockedTieredMaximum) Assert.Equal("adapter.maximum-requires-journaled-explicit-attempt", adapterResult.Code);
         if (shape == "unknown-mechanism") Assert.Equal("adapter.closed-command-or-target-required", adapterResult.Code);
         // Historical wire contracts remain readable; even a direct fixed-script
         // invocation of that valid old payload must now fail before a Windows call.
-        var payload = blockedDirectWire ? JsonSerializer.Serialize(new { CommandKind = "CreateTieredVirtualDisk", Command = command, Target = target },
+        var payload = blockedDirectWire ? JsonSerializer.Serialize(new { CommandKind = shape == "native-ordinary" ? "CreateVirtualDisk" : "CreateTieredVirtualDisk", Command = command, Target = target },
             new JsonSerializerOptions { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } })
             : serializationRunner.Payload!;
         using (var serialized = JsonDocument.Parse(payload))
@@ -808,11 +809,10 @@ public sealed class WindowsRealStorageCommandAdapterTests
     private static async Task<string> RunCompressedFixedScriptWithFakesAsync(string script,
         string fakeCommands, string payload, string suffix)
     {
-        // Compress the complete fixture once. Nesting an already-base64 gzip
-        // loader inside another UTF-16 EncodedCommand exceeds Windows' command
-        // line limit as the fixed script grows. The inner & block retains the
-        // production script's child scope and sees only the closed local fakes;
-        // the unchanged typed JSON payload still travels separately on stdin.
+        // Only this short loader travels on the command line. Its first stdin
+        // line contains the compressed closed fixture; the remaining bytes are
+        // the unchanged typed JSON read by the production script. No script
+        // file or Windows storage module is loaded by this local fake harness.
         var fixtureScript = fakeCommands + "\n& {\n" + script + "\n}\n" + suffix;
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,
             "WindowsPowerShell", "v1.0", "powershell.exe"))
@@ -823,10 +823,21 @@ public sealed class WindowsRealStorageCommandAdapterTests
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(fixtureScript));
+        // Read the first line byte by byte: Console.In.ReadLine can buffer typed
+        // JSON ahead of the encoding reset performed by the fixed script.
+        const string loader = "$i=[Console]::OpenStandardInput();$l=[IO.MemoryStream]::new();"
+            + "while(($n=$i.ReadByte()) -ge 0 -and $n -ne 10){$l.WriteByte([byte]$n)};"
+            + "$b=[Convert]::FromBase64String([Text.Encoding]::ASCII.GetString($l.ToArray()));$m=[IO.MemoryStream]::new($b);"
+            + "$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
+            + "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
+        start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
+        using var buffer = new MemoryStream();
+        using (var gzip = new GZipStream(buffer, CompressionLevel.Optimal, leaveOpen: true))
+            gzip.Write(Encoding.UTF8.GetBytes(fixtureScript));
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.WriteLineAsync(Convert.ToBase64String(buffer.ToArray()));
         await process.StandardInput.WriteAsync(payload);
         process.StandardInput.Close();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -834,6 +845,16 @@ public sealed class WindowsRealStorageCommandAdapterTests
         Assert.True(process.ExitCode == 0, await error);
         Assert.True(string.IsNullOrWhiteSpace(await error), await error);
         return await output;
+    }
+
+    [Fact]
+    public void ProductionFixedScriptEncodedCommandFitsTheWindowsProcessCommandLine()
+    {
+        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(WindowsRealStoragePowerShellScript.Source);
+        const string arguments = " -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ";
+        var completeLengthWithTerminator = WindowsPowerShellRunner.ExecutablePath.Length + 2 + arguments.Length + encoded.Length + 1;
+        Assert.True(completeLengthWithTerminator <= 32767,
+            $"Fixed production command line is {completeLengthWithTerminator} characters; Windows limit is 32767 including terminator.");
     }
 
     private const string SuccessJson =

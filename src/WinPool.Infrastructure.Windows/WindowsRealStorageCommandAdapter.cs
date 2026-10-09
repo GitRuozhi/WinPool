@@ -39,8 +39,8 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         ArgumentNullException.ThrowIfNull(target);
         token.ThrowIfCancellationRequested();
 
-        if (command is CreateTieredVirtualDiskCommand { UseMaximumSize: true })
-            return Rejected("adapter.tiered-native-maximum-pending");
+        if (command is CreateVirtualDiskCommand { UseMaximumSize: true } or CreateTieredVirtualDiskCommand { UseMaximumSize: true })
+            return Rejected("adapter.maximum-requires-journaled-explicit-attempt");
 
         var kind = GetCommandKind(command);
         if (kind is null || !IsExactTarget(command, target) || !IsSupportedParameters(command))
@@ -366,7 +366,7 @@ internal sealed class WindowsPowerShellStorageWriteRunner : IWindowsStorageWrite
     internal static string EncodeFixedCompressedScript(string script)
     {
         using var buffer = new MemoryStream();
-        using (var gzip = new GZipStream(buffer, CompressionLevel.Optimal, leaveOpen: true))
+        using (var gzip = new GZipStream(buffer, CompressionLevel.SmallestSize, leaveOpen: true))
         {
             gzip.Write(Encoding.UTF8.GetBytes(script));
         }

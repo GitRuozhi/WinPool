@@ -11,7 +11,7 @@ namespace WinPool.Infrastructure.Windows;
 /// requested operation and numeric values, never Windows identities, trusted
 /// conditions, impact text or provider capability evidence.
 /// </summary>
-public sealed class WindowsRealOperationPlanner
+public sealed partial class WindowsRealOperationPlanner
 {
     private readonly WindowsRealStorageTopologyReader topologyReader;
     private readonly IPartitionSupportedSizeReader partitionSizes;
@@ -66,6 +66,9 @@ public sealed class WindowsRealOperationPlanner
         // Static validation is necessary, but not sufficient: every target and
         // mutable condition is resolved again from this newly collected report.
         RealOperationValidator.Validate(proposal);
+        if (proposal.Steps.Count != 1 && proposal.Steps.Any(item => item.Command is
+                CreateVirtualDiskCommand { UseMaximumSize: true } or CreateTieredVirtualDiskCommand { UseMaximumSize: true }))
+            throw new InvalidDataException("MAX must be prepared separately before partition geometry is known.");
         if (proposal.Intent == OperationIntent.InitializeDisk
             && proposal.Steps.Any(item => item.Command is InitializeGptCommand)
             && proposal.Steps.Count != 1)
@@ -79,6 +82,9 @@ public sealed class WindowsRealOperationPlanner
             && !proposal.Steps.Any(item => item.Command is InitializeGptCommand))
             ValidateInitializationContinuation(topology, proposal);
 
+        if (proposal.Steps.Count == 1 && proposal.Steps[0].Command is CreateTieredVirtualDiskCommand { UseMaximumSize: true, CapacityTiers.Count: > 1 })
+            return await PrepareMultiMaximumCapacityAsync(proposal, session, operationId, topology, cancellationToken).ConfigureAwait(false);
+
         var proposedClosure = topology.RequireSinglePhysicalClosure(proposal.Targets);
         var physicalTarget = new StorageObjectId(
             topology.SystemId, StorageObjectKind.PhysicalDisk,
@@ -88,8 +94,9 @@ public sealed class WindowsRealOperationPlanner
             : proposal.Targets.Append(physicalTarget).ToArray();
         var closure = topology.RequireSinglePhysicalClosure(trustedTargets);
         var normalized = new List<RealOperationStep>(proposal.Steps.Count);
-        foreach (var step in proposal.Steps)
+        foreach (var proposedStep in proposal.Steps)
         {
+            var step = await FreezeMaximumCapacityStepAsync(topology, closure, proposedStep, cancellationToken).ConfigureAwait(false);
             var target = WindowsRealStorageTargetBuilder.GetReference(step.Command);
             if (target.Existing is { } existing)
             {
@@ -380,8 +387,9 @@ public sealed class WindowsRealOperationPlanner
         bool readOnlyRenameReconciliation = false)
     {
         var snapshot = topology.Snapshot;
-        if (step.Command is CreateTieredVirtualDiskCommand { UseMaximumSize: true })
-            throw new NotSupportedException("MAX is currently unavailable for the single-HDD tiered layout. Enter an explicit GiB capacity.");
+        if (step.Command is CreateVirtualDiskCommand { UseMaximumSize: true, MaximumCapacity: null }
+            or CreateTieredVirtualDiskCommand { UseMaximumSize: true, MaximumCapacity: null })
+            throw new NotSupportedException("A maximum-capacity search requires an Agent-frozen integer-GiB policy; legacy native maximum is not executed.");
         var supportEvidence = "fresh-msft-storage:" + closure.Fingerprint;
         verifiedStepOutputs ??= new Dictionary<string, string>();
         WindowsRealStorageSafetyEvidence? safetyEvidence;
@@ -673,7 +681,8 @@ public sealed class WindowsRealOperationPlanner
                     topology, value.Pool, verifiedStepOutputs);
                 if (value.UseMaximumSize)
                 {
-                    supportEvidence = "native-maximum:true; exact single-member empty pool; Simple/Fixed/one-column/65536-byte interleave";
+                    ValidateMaximumCapacityPolicy(value.MaximumCapacity!, topology, closure);
+                    supportEvidence = "integer-gib-maximum-search:" + JsonSerializer.Serialize(value.MaximumCapacity);
                     break;
                 }
                 var range = await virtualDiskSizes.ReadAsync(target, cancellationToken)
@@ -710,9 +719,10 @@ public sealed class WindowsRealOperationPlanner
                 supportEvidence = await RequireTierCapabilityAsync(topology, closure, "SupportsStorageTieredVirtualDiskCreation", cancellationToken).ConfigureAwait(false);
                 if (value.UseMaximumSize)
                 {
-                    supportEvidence += "; native-maximum:true"
-                        + (value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd
-                            ? "; creation-mechanism:WindowsAutomaticHdd" : string.Empty);
+                    ValidateMaximumCapacityPolicy(value.MaximumCapacity!, topology, closure);
+                    if (value.CreationMechanism != TieredVirtualDiskCreationMechanism.ExactTemplate)
+                        throw new NotSupportedException("Maximum search uses exact provider templates with explicit candidate sizes.");
+                    supportEvidence += "; integer-gib-maximum-search:" + JsonSerializer.Serialize(value.MaximumCapacity);
                     break;
                 }
                 var range = await capabilities.ReadTierCreationSizeAsync(topology,
@@ -1397,7 +1407,7 @@ public sealed class WindowsRealOperationPlanner
         RenameVolumeCommand value => "Selected volume label " + value.Label,
         CreatePoolCommand value => "Single-member pool " + value.Name,
         CreateVirtualDiskCommand value => "Single-column Simple/Fixed virtual disk "
-            + value.Name + ", " + (value.UseMaximumSize ? "MAX determined by Windows (UseMaximumSize); actual capacity verified after creation"
+            + value.Name + ", " + (value.UseMaximumSize ? "integer-GiB MAX search; explicit creation and grow-only attempts; last verified capacity retained after a proven unchanged capacity rejection"
                 : value.SizeBytes.ToString(CultureInfo.InvariantCulture) + " bytes") + ", 65536-byte interleave",
         DeleteVirtualDiskCommand => "Selected virtual disk and its OS disk, partitions and volumes absent",
         DeletePoolCommand => "Selected pool absent; physical member released as observed",
@@ -1407,7 +1417,7 @@ public sealed class WindowsRealOperationPlanner
         CreateTieredVirtualDiskCommand value => "Single-HDD Simple/Fixed tiered virtual disk " + value.Name
             + (value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd
                 ? "; Windows automatic HDD tier (MediaType HDD); exact template is a layout constraint" : "; exact template provider input")
-            + ", " + (value.UseMaximumSize ? "MAX determined by Windows (UseMaximumSize); actual capacity verified after creation"
+            + ", " + (value.UseMaximumSize ? "integer-GiB MAX search; explicit creation and grow-only attempts; last verified capacity retained after a proven unchanged capacity rejection"
                 : value.SizeBytes.ToString(CultureInfo.InvariantCulture) + " bytes")
             + (value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd
                 ? "; template is a layout constraint only; actual HDD tier uniquely associated with the new VD"

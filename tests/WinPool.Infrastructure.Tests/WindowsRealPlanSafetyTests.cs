@@ -652,57 +652,27 @@ public sealed class WindowsRealPlanSafetyTests
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public async Task NativeMaximumAllowsOrdinaryButBlocksNewTieredPreparationAndHistoricalPreflight(bool tiered, bool automaticHdd)
+    public async Task MaximumRequiresFreshProviderOriginAndBlocksUnjournaledHistoricalPreflight(bool tiered, bool automaticHdd)
     {
         var fixture = new Fixture();
         if (tiered) fixture.SetHddTemplate(); else fixture.SetOldPool(withChild: false);
         fixture.Capabilities.TierSupported = true;
-        // Deliberately unusable estimates cannot veto Windows' native maximum.
         fixture.Sizes.Size = new(0, 0, 0, []);
         fixture.Capabilities.TierCreationSize = new(0, 0, 0, []);
         var pool = fixture.Id(StorageObjectKind.StoragePool, PoolId);
         var tier = fixture.Id(StorageObjectKind.StorageTier, "tier:hdd");
         RealStorageCommand command = tiered
-            ? new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool), RealTargetReference.ForExisting(tier), "Native MAX", 0, true,
+            ? new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool), RealTargetReference.ForExisting(tier), "MAX", 0, true,
                 automaticHdd ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate)
-            : new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "Native MAX", 0, 65536, 1, true);
+            : new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "MAX", 0, 65536, 1, true);
         var proposal = fixture.Proposal(OperationIntent.CreateVirtualDisk,
-            tiered ? [pool, tier] : [pool], [Step("vd", command)], "Native MAX");
-        if (tiered)
-        {
-            await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(proposal));
-            // A readable, valid historical DTO is still blocked at execution preflight.
-            var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
-            var closure = topology.RequireSinglePhysicalClosure([pool]);
-            await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Planner.ValidateCurrentStepAsync(
-                topology, closure, proposal, proposal.Steps[0], CancellationToken.None));
-            Assert.Equal(0, fixture.Sizes.ReadCount);
-            Assert.Equal(0, fixture.Capabilities.TierSizeReadCount);
-            Assert.Equal(0, fixture.Adapter.CallCount);
-            return;
-        }
-        var plan = await fixture.Prepare(proposal);
-        _ = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
-            new Dictionary<string, string>(), CancellationToken.None);
-        Assert.Contains("native-maximum:true", plan.RealOperation.Steps[0].SupportEvidence);
-        Assert.Contains("MAX determined by Windows", plan.RealOperation.ExpectedFinalState);
-        Assert.Equal(automaticHdd, plan.RealOperation.Steps[0].SupportEvidence.Contains("creation-mechanism:WindowsAutomaticHdd", StringComparison.Ordinal));
-        if (automaticHdd)
-        {
-            Assert.Contains("template is a layout constraint only", plan.RealOperation.ExpectedFinalState);
-            Assert.Contains("actual HDD tier uniquely associated", plan.RealOperation.ExpectedFinalState);
-            Assert.DoesNotContain("sole exact template associated", plan.RealOperation.ExpectedFinalState);
-        }
-        Assert.DoesNotContain("exact-template-new-size:", plan.RealOperation.Steps[0].SupportEvidence);
-        Assert.Equal(0, fixture.Sizes.ReadCount);
-        Assert.Equal(0, fixture.Capabilities.TierSizeReadCount);
+            tiered ? [pool, tier] : [pool], [Step("vd", command)], "MAX");
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Prepare(proposal));
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var closure = topology.RequireSinglePhysicalClosure([pool]);
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Planner.ValidateCurrentStepAsync(
+            topology, closure, proposal, proposal.Steps[0], CancellationToken.None));
         Assert.Equal(0, fixture.Adapter.CallCount);
-        if (tiered)
-        {
-            fixture.Capabilities.TierSupported = false;
-            await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Backend.PreflightStepAsync(plan,
-                plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
-        }
     }
 
     [Fact]
@@ -718,6 +688,8 @@ public sealed class WindowsRealPlanSafetyTests
              Step("gpt", new InitializeGptCommand(created), ["vd"]),
              Step("data", new CreatePartitionCommand(initialized, RealPartitionRole.BasicData, 1L << 20, 32L << 20), ["gpt"])], "Premature geometry");
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(proposal));
+        Assert.Equal(0, fixture.Sizes.ReadCount);
+        Assert.Equal(0, fixture.Capabilities.TierSizeReadCount);
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 

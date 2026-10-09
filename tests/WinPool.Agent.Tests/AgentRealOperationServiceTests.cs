@@ -1102,6 +1102,158 @@ public sealed class AgentRealOperationServiceTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MaximumMacroUsesOneAcceptedPlanAndDurableAttemptsIncludingBoundaryFailure(bool descend)
+    {
+        var backend = new RecordingBackend { MaximumSearch = async (plan, step, journal) =>
+        {
+            Assert.True(await journal.PrepareAsync(MacroAttempt(1, 4, 0), default));
+            Assert.True(await journal.MarkCallIssuedAsync(1, default));
+            Assert.True(await journal.CompleteAsync(1, new(descend ? MaximumCapacityAttemptState.CapacityRejectedUnchanged
+                : MaximumCapacityAttemptState.Verified, descend ? 0 : 4 * MaximumCapacityAlgorithm.GiB,
+                "first_observation", "{\"strictProof\":true}"), default));
+            Assert.True(await journal.PrepareAsync(descend ? MacroAttempt(2, 3, 0) : MacroAttempt(2, 5, 4), default));
+            Assert.True(await journal.MarkCallIssuedAsync(2, default));
+            Assert.True(await journal.CompleteAsync(2, new(descend ? MaximumCapacityAttemptState.Verified
+                : MaximumCapacityAttemptState.CapacityRejectedUnchanged, (descend ? 3 : 4) * MaximumCapacityAlgorithm.GiB,
+                "search_boundary", "{\"strictProof\":true}"), default));
+            return new(RealStepOutcome.Verified, "maximum_found",
+                JsonSerializer.Serialize(new { maximumGiB = descend ? 3 : 4 }), "actual-vd-id");
+        }};
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var proposal = MacroProposal(fixture.Proposal);
+        var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
+            new(proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
+            fixture.Session, default)).Value);
+        Assert.True((await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).IsSuccess);
+        await AwaitSucceededAsync(fixture.Service, prepared.Plan.OperationId, fixture.Session);
+        var attempts = await fixture.Plans.ReadMaximumCapacityAttemptsAsync(prepared.Plan.OperationId, "maximum");
+        Assert.Equal(2, attempts.Count);
+        Assert.Equal(descend ? MaximumCapacityAttemptState.Verified
+            : MaximumCapacityAttemptState.CapacityRejectedUnchanged, attempts[1].State);
+        Assert.Equal(1, backend.MaximumSearchCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+        Assert.Equal(PersistedOperationStepState.Verified, Assert.Single(await fixture.Plans.GetStepsAsync(prepared.Plan.OperationId)).State);
+        var history = await fixture.Events.ListAsync(prepared.Plan.OperationId);
+        Assert.Equal(2, history.Count(e => e.Event.Code == "operation.maximum.attempt_call_issued"));
+        Assert.Single(history, e => e.Event.Code == "operation.accepted");
+    }
+
+    [Theory]
+    [InlineData("cas")]
+    [InlineData("crash")]
+    [InlineData("missing-boundary")]
+    public async Task RejectedAttemptCasOrCrashCannotProduceMaximumAndRestartOnlyReads(string scenario)
+    {
+        var backend = new RecordingBackend { MaximumSearch = async (plan, step, journal) =>
+        {
+            Assert.True(await journal.PrepareAsync(MacroAttempt(1, 4, 0), default));
+            Assert.True(await journal.MarkCallIssuedAsync(1, default));
+            if (scenario == "crash") throw new IOException("crash after issued, before receipt");
+            Assert.True(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified,
+                4 * MaximumCapacityAlgorithm.GiB, "verified", "proof"), default));
+            if (scenario == "cas") Assert.False(await journal.MarkCallIssuedAsync(1, default));
+            return new(RealStepOutcome.Verified, "untrusted_success_after_cas_rejected", "proof");
+        }};
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
+            new(MacroProposal(fixture.Proposal), Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
+            fixture.Session, default)).Value);
+        await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+        await AwaitDurableStateAsync(fixture.Plans, prepared.Plan.OperationId, PersistedOperationState.OutcomeUnknown);
+        await fixture.Service.InitializeRecoveryAsync();
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (backend.MaximumRecoveryCalls < 1)
+            {
+                await fixture.Service.QueryAsync(new(prepared.Plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
+                await Task.Delay(10, timeout.Token);
+            }
+        Assert.Equal(1, backend.MaximumSearchCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+        Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+        Assert.Equal(scenario == "crash" ? MaximumCapacityAttemptState.CallIssued : MaximumCapacityAttemptState.Verified,
+            Assert.Single(await fixture.Plans.ReadMaximumCapacityAttemptsAsync(prepared.Plan.OperationId, "maximum")).State);
+    }
+
+    [Fact]
+    public async Task MultiTierMacroPersistsOneSeedAndBothOrderedSearchBoundaries()
+    {
+        var backend = new RecordingBackend { MaximumSearch = async (plan, step, journal) =>
+        {
+            Assert.True(await journal.PrepareAsync(MacroAttempt(1, 5, 0) with
+                { SearchTargetKey = "seed", Phase = MaximumCapacityAttemptPhase.Seed }, default));
+            Assert.True(await journal.MarkCallIssuedAsync(1, default));
+            Assert.True(await journal.CompleteAsync(1, new(MaximumCapacityAttemptState.Verified,
+                5 * MaximumCapacityAlgorithm.GiB, "seed_verified", "all_layers_exact", new Dictionary<string,long>
+                    { ["template-first"] = 2 * MaximumCapacityAlgorithm.GiB,
+                      ["template-second"] = 3 * MaximumCapacityAlgorithm.GiB }), default));
+            var ordinal = 1;
+            foreach (var (key, candidate, seed) in new[] { ("template-first", 4L, 2L), ("template-second", 6L, 3L) })
+            {
+                Assert.True(await journal.PrepareAsync(MacroAttempt(++ordinal, candidate, seed) with
+                    { SearchTargetKey = key }, default));
+                Assert.True(await journal.MarkCallIssuedAsync(ordinal, default));
+                Assert.True(await journal.CompleteAsync(ordinal, new(MaximumCapacityAttemptState.Verified,
+                    candidate * MaximumCapacityAlgorithm.GiB, "layer_verified", "proof"), default));
+                Assert.True(await journal.PrepareAsync(MacroAttempt(++ordinal, candidate + 1, candidate) with
+                    { SearchTargetKey = key }, default));
+                Assert.True(await journal.MarkCallIssuedAsync(ordinal, default));
+                Assert.True(await journal.CompleteAsync(ordinal, new(MaximumCapacityAttemptState.CapacityRejectedUnchanged,
+                    candidate * MaximumCapacityAlgorithm.GiB, "capacity_unchanged", "proof"), default));
+            }
+            return new(RealStepOutcome.Verified, "maximum_found", "{\"twoLayersMaximum\":true}", "actual-vd-id");
+        }};
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var ordinary = MacroProposal(fixture.Proposal);
+        var pool = RealTargetReference.ForExisting(ordinary.Targets[1]);
+        var first = RealTargetReference.ForExisting(new(ordinary.SystemId, StorageObjectKind.StorageTier, "template-first"));
+        var second = RealTargetReference.ForExisting(new(ordinary.SystemId, StorageObjectKind.StorageTier, "template-second"));
+        var firstPolicy = ((CreateVirtualDiskCommand)ordinary.Steps[0].Command).MaximumCapacity!;
+        var upper = 6 * MaximumCapacityAlgorithm.GiB + MaximumCapacityAlgorithm.ReserveBytes + 1;
+        var secondPolicy = firstPolicy with { UpperBoundBytes = upper,
+            InitialCandidateBytes = MaximumCapacityAlgorithm.InitialCandidateBytes(upper) };
+        var proposal = ordinary with { Targets = [.. ordinary.Targets, first.Existing!.Value, second.Existing!.Value],
+            Steps = [ordinary.Steps[0] with { Command = new CreateTieredVirtualDiskCommand(pool, first,
+                "multi", 0, true, MaximumCapacity: firstPolicy,
+                CapacityTiers: [new(first, firstPolicy), new(second, secondPolicy)]) }] };
+        var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
+            new(proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).Value);
+        Assert.True((await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).IsSuccess);
+        await AwaitSucceededAsync(fixture.Service, prepared.Plan.OperationId, fixture.Session);
+        Assert.Equal(5, (await fixture.Plans.ReadMaximumCapacityAttemptsAsync(prepared.Plan.OperationId, "maximum")).Count);
+        Assert.Equal(1, backend.MaximumSearchCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+    }
+
+    private static MaximumCapacityAttempt MacroAttempt(int ordinal, long candidateGiB, long lastGiB) =>
+        new(ordinal, "virtual-disk", lastGiB == 0 ? MaximumCapacityAttemptPhase.Create : MaximumCapacityAttemptPhase.Resize,
+            candidateGiB * MaximumCapacityAlgorithm.GiB, lastGiB * MaximumCapacityAlgorithm.GiB,
+            "{\"exactTarget\":true}", "before-fingerprint", "physical-members-v1", "{\"fresh\":true}");
+
+    private static RealOperationIntentRequest MacroProposal(RealOperationIntentRequest baseline)
+    {
+        var pool = new StorageObjectId(baseline.SystemId, StorageObjectKind.StoragePool, "exact-pool");
+        var upper = 4 * MaximumCapacityAlgorithm.GiB + MaximumCapacityAlgorithm.ReserveBytes + 1;
+        var policy = new MaximumCapacityPolicy(MaximumCapacityAlgorithm.Version, upper,
+            MaximumCapacityAlgorithm.InitialCandidateBytes(upper), 10 * MaximumCapacityAlgorithm.GiB,
+            20, "fresh-provider", "source-fingerprint", DateTimeOffset.UtcNow);
+        return new(OperationIntent.CreateVirtualDisk, baseline.SystemId, [baseline.Targets[0], pool],
+            [new("maximum", new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool),
+                "maximum", 0, 65536, 1, true, policy), [], "exact empty pool", "verified maximum",
+                "capacity search writes", "frozen bounded policy")], "maximum virtual disk");
+    }
+
     private static async Task<(AgentRealOperationService Service, OperationPlanRepository Plans,
         ExecutionEventRepository Events, TrustedRealSession Session, RealOperationIntentRequest Proposal,
         AgentWriteOwnerLease Lease)> CreateAcceptedLifecycleFixtureAsync(RecordingBackend backend,
@@ -1205,8 +1357,29 @@ public sealed class AgentRealOperationServiceTests
             Task.FromResult("machine-binding-test");
     }
 
-    private sealed class RecordingBackend : IRealStorageBackend
+    private sealed class RecordingBackend : IRealStorageBackend, IMaximumCapacitySearchBackend
     {
+        public Func<OperationPlan, RealOperationStep, IMaximumCapacityAttemptJournal, Task<RealStepResult>>? MaximumSearch { get; init; }
+        public int MaximumSearchCalls { get; private set; }
+        public int MaximumRecoveryCalls { get; private set; }
+        public async Task<RealStepResult> ExecuteMaximumCapacitySearchAsync(OperationPlan plan, RealOperationStep step,
+            RealStepPreflight preflight, IMaximumCapacityAttemptJournal journal, CancellationToken cancellationToken)
+        {
+            MaximumSearchCalls++;
+            return await MaximumSearch!(plan, step, journal);
+        }
+        public Task<RealReconciliationResult> ReconcileMaximumCapacitySearchAsync(OperationPlan plan,
+            RealOperationStep step, RealOperationStepProgress parent, IReadOnlyList<MaximumCapacityAttemptRecord> attempts,
+            CancellationToken cancellationToken)
+        {
+            MaximumRecoveryCalls++;
+            var success = parent.State == RealOperationStepState.Verified
+                && attempts.Count > 0 && attempts.All(a => a.State is MaximumCapacityAttemptState.Verified
+                    or MaximumCapacityAttemptState.CapacityRejectedUnchanged);
+            return Task.FromResult(new RealReconciliationResult(success ? RealOperationState.Succeeded
+                : RealOperationState.OutcomeUnknown, [parent], "fake.maximum.readonly_reconcile", success));
+        }
+
         public Task<RealVirtualDiskCreationRange> ReadVirtualDiskCreationRangeAsync(StorageObjectId target,
             TrustedRealSession session, CancellationToken cancellationToken) => Task.FromResult(
                 new RealVirtualDiskCreationRange(target, 1048576, 1073741824, 1048576, 0, [], "fresh-fingerprint", DateTimeOffset.UtcNow));

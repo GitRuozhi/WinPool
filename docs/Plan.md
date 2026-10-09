@@ -2,7 +2,7 @@
 
 日期：2026-10-09；已纳入用户对编辑页交互、执行反馈和采集性能的要求，以及真实 MAX 的执行语义纠正。
 
-**状态：实施中；分层容量调查、明确容量校验和大层采集修正已通过工程门及原界面实机验证，分层原生 MAX 仍技术未解决。** 用户已明确纠正：模拟系统因没有公开最大容量算法才需要估算；真实系统应直接表达 `UseMaximumSize`，由 Windows 决定实际容量。此前两次失败使用的是软件解析出的明确 bytes，不能证明原生 MAX 不支持。新增原生试验及准确失败见§10.2，临时防错阻断不代替正向验收。保留旧证据根 `artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/`；本次修正另建证据目录，不覆盖历史失败。
+**状态：实施中；按最新用户决定实现真实／模拟共用整数 GiB MAX 搜索。** §10.4 取代此前真实原生 MAX、禁止试探及模拟 4 GiB 对齐的当前行为要求；历史测试、微软侧接口归因与证据保持原状。当前版本仍为 V0.58／iteration8，代码及正向实机验收完成前不升版或归档。
 
 第 4.5–4.11 节是已确定要求，不再次询问是否实施。用户本次确认普通和单 HDD 分层重建均为必交付、新建容量默认 MAX，并要求交互以现有模拟系统的操作逻辑为基准。第 9 节记录决定及其来源；不能把先前提出的连续步骤界面、草稿持久化等建议当成用户批准的新产品。已有 WDC 授权和产品禁项保持有效。
 
@@ -421,7 +421,7 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 | W05 | 新建容量默认MAX，原属性区选择普通/单HDD分层，不用16 GiB默认 | 2026-10-08用户选择“按建议冻结”；2026-10-09进一步纠正真实 MAX 直接调用原生参数，取代此前必须先解析 bytes 的实现假设。未编辑布局时新建普通；重建目标由当前草稿显式选择，不能静默降级 |
 | W06 | 公式第一行BB/CC可编辑、第二行只读；告警来自WinPool自身监控；第4.5–4.11节改动必交付 | 本次调查前草稿已记录的用户决定，沿用而不再次索批 |
 | W07 | 真实MBR转换、既有VD/层扩展、多盘/混合介质等保持不支持；WDC授权持续，Samsung保护持续 | AGENTS/Product与本计划§2，不因UI入口恢复扩大能力 |
-| W08 | 真实 MAX 调用原生 `UseMaximumSize`，不沿用模拟的容量估算；冻结操作意图，核验实际结果 | 2026-10-09用户纠正“因为微软没有公开最大容量算法，所以WinPool不得不猜测最大容量以完成模拟系统。现在真实系统完全可以调用这个参数。”；此前准确 bytes 必须预知的计划假设被此决定取代 |
+| W08（已被 W09 取代） | 真实 MAX 调用原生 `UseMaximumSize`，不沿用模拟的容量估算；冻结操作意图，核验实际结果 | 2026-10-09用户纠正“因为微软没有公开最大容量算法，所以WinPool不得不猜测最大容量以完成模拟系统。现在真实系统完全可以调用这个参数。”；此前准确 bytes 必须预知的计划假设被此决定取代 |
 
 编制时没有必须等待用户选择的已知产品分歧；此后用户已明确要求完整执行，本计划于 2026-10-08 激活。执行时出现真正的新冲突按§6.5处理；局部命名、类拆分、测试值回退、控件间距实现、诊断方法和范围内修复由执行Agent负责。原先把明确 bytes 失败泛化为原生 MAX 限制并请求验收豁免的结论已撤回，按用户纠正继续实施与验证。
 
@@ -492,7 +492,7 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 
 用户已明确要求检索网络与仓库研究，并以本机 PowerShell 和 WinPool 路径辨别问题，强调单 HDD 应可建立 HDD 容量层。这覆盖此前等待产品选择的继续入口：先调查技术事实，不能再次把 MAX 当设计偏好或等待答复。报告见[单 HDD 分层容量调查](Review/Single-Hdd-Tier-Capacity-20261009.md)。新证据单独位于 `artifacts/test-results/20261009-single-hdd-capacity-0e6c6bea2bd143be90a4d2f5bfda04b6/`，旧失败及已完成验收保留。
 
-用户随后明确要求长期记录：本机分层原生MAX失效归因于微软Windows Storage接口／提供程序侧，不是WinPool容量算法问题；WinPool的范围校验／采集缺陷另行区分。该归因不表示微软已公开确认具体缺陷，也不外推所有Windows版本。当前产品没有自动MAX绕过算法，只执行用户明确容量；实验上界减8个层单位不可当作已部署fallback。后续工作按微软侧兼容问题处理，不能重复将归因提请用户决定，不能把明确容量成功等同于自动MAX已交付。持久入口见[AGENTS](../AGENTS.md)。
+用户随后明确要求长期记录：本机分层原生MAX失效归因于微软Windows Storage接口／提供程序侧，不是WinPool容量算法问题；WinPool的范围校验／采集缺陷另行区分。该归因不表示微软已公开确认具体缺陷，也不外推所有Windows版本。此处记录调查时的历史状态；随后用户已明确指定内置算法，当前实施按 §10.4。实验上界减8个层单位仍不可当作内置公式。后续工作按微软侧兼容问题处理，不能重复将归因提请用户决定，不能把明确容量成功等同于自动MAX已交付。持久入口见[AGENTS](../AGENTS.md)。
 
 1. **已完成调查：** 对照V10、Tests01原始命令、微软cmdlet/API和网络原作者实验。V10用明确初始层尺寸再resize，不能充当单HDD原生MAX证据。本轮原UI32GiB再次成功；固定pwsh明确3,997,809,246,208-byte实际层／VD／RAW OS成功。相同近上限请求在5.1与7均失败，缓存0未解决；不能推导固定metadata／heatmap扣减算法。
 2. **已验证容量修正：** tiered `StorageTierSizes`只使用准确unused HDD template范围，不套普通pool的1GiB divisor。范围读、Prepare／Preflight、fixed script及后态能力证明均已修正；保留普通VD规则、历史hash／JSON／失败结果和nativeMAX防错门。实际成功但不整1GiB的容量、越界及新鲜范围变化回归均通过。
@@ -500,3 +500,39 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 4. **已只读恢复并另行清理：** 原UI删除大VD的08f82c7e因额外fresh capture超时留下adapter_exception／Unknown。保留原CallIssued，不重放、不手改数据库。旧执行停止后，生产Query以两轮完整same frozen closure、准确仍在的VD／tier／RAW OS、安全角色及终态jobs核对为Failed／NotVerified，adapter0；41项独立审阅通过。原UI查询同一终态后，新计划afd9b476删除残留并Verified，未重放旧请求。缺证仍保持Unknown；未来写前采集失败已在真实边界明确记录尚未调用adapter。
 5. **工程门和原界面同值回归已通过：** 源码冻结后标准runtime重建成功，完整门12项目1900项／1897通过／0失败／3既有测量未执行，源码哈希稳定。原UI03d3e149创建同值明确容量并Verified；独立原生后态确认actualtier、VD、唯一RAW OS同容量／准确成员／完整规格，fresh scoped view完整。随后33d18dd9原UI解散三步Verified。测试值只是实验容量，不改MAX含义、不自动降容量或降为普通布局。
 6. **本轮验收已收口：** 原UI恢复约定物理WDC末态及B0偏好，新原生末态11项全通过，Samsung限定结构0变化／0缺口；七个新UI计划12步的操作终审29项全通过。普通重启RealOff／MonitorOff、保留20Hz，App／Agent正常退出均0；Accepted227／CallIssued289在重启和退出期间不变，无未终结操作、396源码哈希与最终门相同。报告、Product／Development／Quality／README同步，本地提交、不推送。分层原生MAX仍无保型正例，保留技术未解决项和iteration8，不把明确容量／性能修复算作MAX交付，也不再要求用户选择估算方案。后续先寻找官方合同或可复现实机正例支持的保型原生MAX路线；未找到前保留零调用防错门，禁止普通VD替代、试写搜索、扣减上界或自动重放。
+
+### 10.4 用户指定的内置整数 GiB MAX 算法（已验证）
+
+2026-10-09 最新明确决定：真实和模拟共用以下算法；普通真实 MAX 也改用该算法。多层是同一 VD，各层先按自己 0.5×C 创建，C 为奇数时允许临时半 GiB；最终每层整数 GiB。此决定（W09）取代 W08 及前文禁止自动试探／分层 MAX 拒绝门，不改写历史失败与微软侧归因。
+
+固定规则：G=1,073,741,824 bytes，R=4,000,000 bytes（十进制，不是 4 MiB）。A 为准确 provider 上界；模拟无 provider 时先按数据成员、布局／副本／列数／校验列与已知占用折算逻辑上界。C GiB 的严格字节公式为 `(A-R-1)/G`（非负整数除法）；A 不足以得到正 C 时拒绝，不造最小值。模拟直接用 C×G，不试探。真实先尝试 C×G：首次容量失败后每次减 G，首个成功值为 WinPool MAX；首次成功后每次加 G，首个容量失败前的成功值为 WinPool MAX。起点不是硬上限，不能换成二分或旧固定扣减。默认创建最终整数 GiB；显式输入保留原适用 provider 网格校验。
+
+多层严格按冻结层顺序：一次创建全部 0.5×C 的实际层；成功后逐层从该层 C 开始相同步长搜索，已完成的其它层保持原值。Windows actual tier 只支持 grow，因此失败降候选时不得小于已成功 seed，不能执行缩层；不能用 pool template 代替 actual tier。最终 VD 是各层最终容量之和，分区布局仅在搜索核验完成后基于 fresh OS 容量创建。
+
+实施顺序与文件所有权：
+
+1. Domain 共享公式／状态机；移除模拟旧 4 GiB 对齐，统一所有 MAX／建议容量调用，补漏排 HotSpare／Retired／Journal 的路径。覆盖严格边界、布局折算、剩余容量、奇数 seed 与上下方向。
+2. Execution 为现有创建合同添加可省略的搜索策略／有序层输入，不改变旧 JSON／hash；Agent 从 fresh 来源冻结 A、C、来源／身份／时间、固定规格、尝试预算、方向及停止策略，原 Apply 的一次产品确认覆盖当前算法搜索，不逐 GiB 再确认。
+3. SQLite 事务 CAS 尝试日志保存 op／parent step／ordinal、候选、last success、准确目标、before proof、Preparing／CallIssued、provider receipt 与后态。Agent 持原 mutation gate；CAS 拒绝或未知立即停止。父宏步骤只在最大边界已证明后 Verified；容量拒绝作为 attempt 边界，不是夹带 Failed 的成功 operation。
+4. Windows 固定 adapter 每次只调用一次准确 create／grow；每次重采同一身份、完整成员集合、布局与安全角色。成功严格检查 VD／actual tiers／OS、其余层与模板、成员、容量和 RAW 零分区。容量拒绝须有明确 provider 返回、可适用容量错误分类、两轮完整 fresh unchanged 和终态 jobs；参数冲突、权限、超时、transport、部分变化与证据不全不能当容量边界。
+5. Query／重启恢复只读，不自动续写或重放 attempt。缺边界时不称已找到 MAX；保留准确残留与未完成草稿。已有对象的任意 MAX 编辑／缩层不因新建搜索而放开。
+6. 集中编译与相关自动回归，再做最终工程门。真实从原界面验收普通及单 HDD MAX，记录每个候选与最终整数 GiB、actual tier 存在、自动布局。多层通过模拟及固定 backend 夹具验证；本机未授权多盘实机，不借 Samsung 补测，不把夹具通过称作多盘实机通过。
+7. 全部真实写入限已授权 WDC，结束恢复 GPT／16 MiB MSR／余量 NTFS64 KiB／WinPool_Test／E:；比较 Samsung 限定结构、正常重启无续写及 App／Agent 正常退出。同步当前产品／开发／质量文档、证据与本地提交，不推送，不覆盖历史证据。
+
+本轮代码已实现，实机搜索与自动门按以下证据逐项收口；旧运行失败保留，不冒充当前成功。
+
+- 普通原 UI MAX `1c2e730c408c4495901190daaa7bd781`：C=3724 GiB 创建成功，3725 GiB 扩容成功，3726 GiB 返回结构化 StorageWMI 40000。两轮 fresh unchanged 与终态 jobs 证明容量边界，父宏 Verified，最终 3,999,688,294,400 bytes（3725 GiB）。[原生布局核验](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Ordinary-Retry/native-assertions.json)18项全通过，GPT／规范MSR／NTFS64KiB／W:完整；[独立搜索审阅](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/ordinary-native-independent-review/review.json)22项通过。随后原UI `6e3a949c` 两步解散Verified。
+- 单 HDD 原 UI MAX `44bd37886ff346329beea35fc3a0e59d`：C=3725 GiB 容量拒绝且两轮现场无变化；降低1 GiB后3724 GiB创建成功，父宏Verified。最终3,998,614,552,576 bytes。[独立原生布局核验](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Hdd/native-assertions.json)17项全通过，actual HDD tier／VD／OS容量相同，GPT／规范MSR／NTFS64KiB／W:完整；[独立搜索审阅](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/hdd-native-independent-review/review.json)23项通过。原UI `e13a542c` 删除VD、unused模板与池三步Verified。
+- 首轮普通 `b9964157` 的3724 GiB实际已创建，但后态漏处理 PhysicalDisk.VirtualDiskFootprint 增长而超时Unknown。仅允许该物理字段正常增长，池上同名字段及硬件身份仍严格核对；超时收据保留最近fresh事实和失败判据。只读恢复又查明持久化将ObjectId内部 `\"` 重编码为 `\u0022`，兼容复算仅尝试已知字符串／Returned-null表示，完整字段、身份、关系仍须匹配原冻结hash，篡改UID／OID继续拒绝。[生产Query收据](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/closed-maximum-query-recovery-host/execution-receipt-encoding-fixed.json)将旧操作记为Failed／stopped_without_maximum，不称MAX、不自动续写；adapter0，原attempt及其它行不变。原UI `39fa48fb` 另建清理计划Verified；没有手改DB或重放旧调用。
+- `e0347ff3` 分层准备后确认令牌过期，cancelled_before_accept，零Accepted／CallIssued／attempt。由原Apply重新准备上述44bd新计划；此取消不计搜索容量失败。
+- 原UI恢复WDC的清空8353／GPT50f5／规范MSRad56／Data+Format+Letter080c全部Verified；[最终原生比较](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/final-native-verification.json)11项全通过，Samsung限定结构0变化／0缺口，[独立复核](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/final-native-independent-review.json)14项通过。[本轮操作审计](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/final-operation-verification-v2.json)364项通过，310plans／256Accepted／325parent CallIssued，无未终结操作；只读审计首版误将完成后的last-success列当成调用输入，修正审计约定后通过，原失败文件保留，未改产品DB。偏好由原UI恢复，App／Agent原托盘退出均0。
+- 定向修复门16/16、seed只读恢复2/2、JSON往返及身份篡改3/3通过。18:47完整门1976／1973／0／3运行中源码变化，仅作历史；最终冻结工程门、WDC恢复、Samsung比较及普通重启／退出结果见下方。
+
+本轮多层真实受控路径限定既有 Simple／Fixed／每层1列／64 KiB 和互异介质模板；不藉容量算法新增 V10 的镜像／校验真实编辑产品范围。模拟仍按其既有布局计算逻辑上界。多成员精确闭包和逐层算法将以合成 provider 测试验证，本机仅授权 WDC 一盘，不能把这类测试记为多层实机通过。
+
+
+本算法阶段最终验收完成：
+
+- [冻结完整工程门](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/20261009-203701/summary.json)：12项目，1999 Total／1996 Passed／0 Failed／3 NotExecuted，restore／Release build均0，构建零警告／错误，412源码文件前后hash一致。三项既有监控归档测量未执行不算通过；23项目依赖审计复用前轮，无新增依赖。20:30旧门1995／1989／3失败／3未执行如实保留：三条多层恢复正例因漏处理物理VirtualDiskFootprint增长而误拒，最小类型限定修复后[12项定向回归](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/multi-recovery-footprint-final/results.trx)通过，Pool同名／UID／OID篡改仍Unknown；最终完整门已覆盖。
+- 标准运行树普通重启原UI [RealOff及E卷](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Final/normal-restart-ui.txt)可见，监控Off、设置保留20Hz、偏好全部与B0相同。[重启后](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/after-final-restart-readonly-audit.json)与[退出后审计](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/after-final-exit-readonly-audit.json)确认Accepted256／parent CallIssued325不变、0未终结、412源码hash匹配最终门、运行库跨重启不变；不会自动续写旧搜索。原托盘[最终退出](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Final/final-normal-restart-exit-result.json)App／Agent均0。
+- 本次用户指定算法已实现及验证，文档同步并本地提交；不推送、不tag、不发布。产品版本仍V0.58／迭代8，本节完成不等于擅自关闭或归档V0.59整体活动Plan。多层无本机实测、无多盘UI、既有任意VD／层MAX编辑仍不在本次范围。

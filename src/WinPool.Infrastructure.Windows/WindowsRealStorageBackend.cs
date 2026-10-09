@@ -20,7 +20,10 @@ public sealed record WindowsVerifiedStepEvidence(
     IReadOnlyList<WindowsVolumeSafetyEvidence>? VolumeSafetyEvidence = null,
     IReadOnlyList<WindowsNativeMsrSafetyEvidence>? OfflinePartitionAttributes = null,
     WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WindowsTieredCreationInput? TieredCreationInput = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WindowsTieredCreationInput? TieredCreationInput = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WindowsMaximumCapacitySearchEvidence? MaximumCapacity = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    WindowsMaximumCapacityMultiSearchEvidence? MaximumCapacityMulti = null);
 
 public sealed record WindowsGptInitializationEvidence(
     string OsDiskStableId, string OsDiskUniqueId, string OsDiskObjectId,
@@ -78,7 +81,7 @@ public sealed record WindowsObservedUnchangedDeleteStepEvidence(
 /// The only Windows implementation of the Agent's real storage boundary.
 /// An IPC reply, a provider return, and a verified postcondition are distinct.
 /// </summary>
-public sealed class WindowsRealStorageBackend : IRealStorageBackend
+public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMaximumCapacitySearchBackend
 {
     private static readonly TimeSpan PostCallWindow = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan PostCallPoll = TimeSpan.FromSeconds(2);
@@ -137,6 +140,8 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         if (!StringComparer.Ordinal.Equals(topology.MachineBinding,
                 plan.RealOperation!.MachineBinding))
             throw new InvalidDataException("The machine identity changed after preparation.");
+        if (stored.Command is CreateTieredVirtualDiskCommand { UseMaximumSize: true, CapacityTiers.Count: > 1 })
+            return await PreflightMultiMaximumCapacityAsync(plan, stored, topology, cancellationToken).ConfigureAwait(false);
         var physicalId = plan.Targets.SingleOrDefault(target =>
             target.Kind == StorageObjectKind.PhysicalDisk);
         if (physicalId.Kind != StorageObjectKind.PhysicalDisk)
@@ -234,6 +239,9 @@ public sealed class WindowsRealStorageBackend : IRealStorageBackend
         CancellationToken cancellationToken)
     {
         var stored = RequireFrozenStep(plan, step);
+        if (IsMaximumCapacityMacro(stored.Command))
+            return new RealStepResult(RealStepOutcome.FailedWithoutEffect, "real.maximum.journal_required",
+                JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true, "real.maximum.journal_required", plan.RealOperation!.PhysicalMemberFingerprint)));
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(
             preflight.TargetEvidenceJson)
             ?? throw new InvalidDataException("The persisted exact target is unreadable.");

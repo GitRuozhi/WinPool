@@ -409,8 +409,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             await CommitTierNameAsync();
         };
         ContextHelp.Set(_creationSizeBox, Text(
-            "输入 GiB 容量或 MAX。真实普通布局的 MAX 由 Windows 决定实际容量；真实单 HDD 分层布局当前请输入明确的 GiB 容量。模拟系统的 MAX 为估算值。",
-            "Enter a GiB capacity or MAX. Windows determines MAX for an ordinary real layout; enter an explicit GiB capacity for a real single-HDD tiered layout. MAX is estimated in simulation."));
+            "输入 GiB 容量或 MAX。MAX 使用 WinPool 内置算法，最终容量为整数 GiB；真实系统通过 Windows 确认可用最大值，模拟系统直接采用算法起始值。",
+            "Enter a GiB capacity or MAX. MAX uses WinPool's built-in algorithm and produces whole GiB capacities. Windows verifies the maximum in real mode; simulation uses the initial candidate directly."));
         ContextHelp.Set(_driveLetterBox, Text("输入 D–Z，或留空不指定盘符。", "Enter D–Z, or leave blank for no requested drive letter."));
         ContextHelp.Set(_layoutBox, Text("创建布局；已有结构必须显式解散后新建，不能原地切换布局。", "Creation layout; dissolve and create a new pool to change an existing layout."));
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
@@ -423,8 +423,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             FillCombo(group.ProvisioningBox, ["Fixed"], 0);
             ContextHelp.Set(
                 group.MaximumButton,
-                Text("使用当前规划的对齐上限；该值不保证实际 Windows 可用容量。",
-                    "Use the current planned aligned upper bound; it does not guarantee usable Windows capacity."));
+                Text("使用 WinPool 内置算法计算整数 GiB 最大容量。",
+                    "Calculate a whole GiB maximum using WinPool's built-in algorithm."));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
                 group.MaximumButton,
                 ViewModel.Localization["UseMaximumSize"]);
@@ -3075,7 +3075,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private void RestoreTierHelp(TierFields group)
     {
         ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
-        ContextHelp.Set(group.MaximumButton, Text("使用当前规划的对齐上限；不保证实际 Windows 可用容量。", "Use the current planned aligned upper bound; it does not guarantee usable Windows capacity."));
+        ContextHelp.Set(group.MaximumButton, Text("使用 WinPool 内置算法计算整数 GiB 最大容量。", "Calculate a whole GiB maximum using WinPool's built-in algorithm."));
         ContextHelp.Set(group.ProvisioningBox, Text("当前模拟仅支持固定预配。", "The current simulation supports fixed provisioning only."));
         ContextHelp.Set(group.ResiliencyBox, Text("选择现有模拟规则支持的复原类型。", "Choose a resiliency type supported by the existing simulation rules."));
         ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));

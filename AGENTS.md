@@ -56,7 +56,7 @@ Design 是设计储备，Reference 是参考，Archive 是历史；它们不是�
 
 用户明确要求长期记录：**本机分层原生 MAX 失效归因于微软 Windows Storage 接口／提供程序，不是 WinPool 的容量算法问题。** 单 HDD 可以创建真实 HDD 容量层，不能将 MAX 失败归因于单 HDD 不支持分层。准确 `StorageTiers + UseMaximumSize` 的互斥错误和 `MediaType HDD + UseMaximumSize` 返回普通 VD 的结果，与 WinPool 已修复的层／池步长混用、采集超时是不同问题，不得混写或重新要求用户选择是否接受该归因。此结论限定当前本机已测接口路径，不表示微软已公开确认具体缺陷或所有 Windows 版本均相同。
 
-当前生产真实分层路径只支持明确 GiB／`StorageTierSizes`；分层 MAX 在写入前拒绝，**尚未实现自动绕过算法**。实验成功值 `TierSizeMax - 8 × TierSizeDivisor`（本机扣2 GiB）仅是诊断点，不是最大容量证明、固定预留公式或已部署的产品 fallback。后续 Agent 必须先核对源码和[调查报告](docs/Review/Single-Hdd-Tier-Capacity-20261009.md)，不得把这个测试值当成软件算法。普通 VD 原生 MAX 和模拟 MAX 估算分别保持现行语义。
+2026-10-09 用户随后明确授权内置整数 GiB 搜索算法，真实和模拟共用，已实现并通过普通／单 HDD 实机及冻结工程门；普通 MAX 也改用该算法，不再以直接 `UseMaximumSize` 作为新计划路径。准确算法与实施验收见 [Plan §10.4](docs/Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。此前分层 MAX 的拒绝门属于被本决定取代的临时状态。实验成功值 `TierSizeMax - 8 × TierSizeDivisor`（本机扣2 GiB）仅是诊断点，不是最大容量证明、固定预留公式或已部署的产品 fallback。后续 Agent 必须先核对源码和[调查报告](docs/Review/Single-Hdd-Tier-Capacity-20261009.md)，不得把这个测试值当成软件算法。不得恢复旧 4 GiB 对齐或固定扣 2 GiB fallback；历史原生 MAX 计划及证据不重新解释。
 
 ### 已确认的 WDC 真实操作授权（2026-10-07）
 

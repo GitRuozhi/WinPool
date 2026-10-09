@@ -81,6 +81,26 @@ internal static class WindowsRealStoragePowerShellScript
             if ($minimum -le 0 -or $maximum -lt $minimum -or $increment -le 0) { throw 'tier-creation-size-range-invalid' }
             return $size -ge $minimum -and $size -le $maximum -and ($size - $minimum) % $increment -eq 0
         }
+        function Require-MaximumRawDisk($vd) {
+            $disk = Assert-One @(Get-Disk -VirtualDisk $vd -ErrorAction Stop) 'resize-disk-not-unique'
+            if ($null -eq (Read-Property $disk 'IsOffline') -or $disk.IsOffline -or
+                $null -eq (Read-Property $disk 'IsReadOnly') -or $disk.IsReadOnly -or
+                $null -eq (Read-Property $disk 'IsClustered') -or $disk.IsClustered -or
+                $null -eq (Read-Property $disk 'IsBoot') -or $disk.IsBoot -or
+                $null -eq (Read-Property $disk 'IsSystem') -or $disk.IsSystem -or
+                [string]$disk.PartitionStyle -ne 'RAW' -or
+                [uint64]$disk.Size -ne [uint64]$vd.Size -or @(Get-ExactDiskPartitions $disk).Count -ne 0) { throw 'resize-requires-safe-raw-disk' }
+        }
+        function Require-MaximumGrow($object, [long]$bytes, $t) {
+            if (-not [bool](Read-Property $t 'MaximumCapacityAttempt') -or $bytes -le 0 -or
+                $bytes % 1073741824 -ne 0 -or $bytes -le [long]$object.Size -or
+                [string]$object.ResiliencySettingName -ne 'Simple' -or
+                [uint16]$object.NumberOfColumns -ne 1 -or [uint64]$object.Interleave -ne 65536) { throw 'resize-not-approved-integer-gib-grow' }
+            if ([string]$t.Kind -eq 'VirtualDisk') {
+                if ([string]$object.ProvisioningType -ne 'Fixed') { throw 'resize-provisioning-changed' }
+                Require-MaximumRawDisk $object
+            }
+        }
         function Exact-Disk($t) {
             if ($null -eq $t.DiskNumber -or [int]$t.DiskNumber -lt 0) { throw 'disk-number-missing' }
             $disk = Assert-One @(Get-Disk -Number ([uint32]$t.DiskNumber) -ErrorAction Stop) 'disk-not-unique'
@@ -156,6 +176,22 @@ internal static class WindowsRealStoragePowerShellScript
             }) 'physical-disk-not-unique'
             return $physical
         }
+        function Require-ExactMemberSet($members, $t) {
+            $approved = @((Read-Property $t 'PhysicalMembers'))
+            if ($approved.Count -gt 1) {
+                if (-not [bool](Read-Property $t 'MaximumCapacityAttempt') -or $members.Count -ne $approved.Count -or
+                    @($approved.UniqueId | Sort-Object -Unique).Count -ne $approved.Count -or
+                    @($approved.ObjectId | Sort-Object -Unique).Count -ne $approved.Count) { throw 'exact-approved-member-set-invalid' }
+                foreach ($expected in $approved) {
+                    $actual = Assert-One @($members | Where-Object { [string]::Equals([string]$_.UniqueId,[string]$expected.UniqueId,[StringComparison]::Ordinal) }) 'approved-member-missing-or-duplicate'
+                    Assert-Exact $actual.ObjectId $expected.ObjectId 'approved-member-object-id-changed'
+                    Assert-Exact $actual.SerialNumber $expected.SerialNumber 'approved-member-serial-changed'
+                }
+            } else {
+                if ($members.Count -ne 1) { throw 'pool-member-count-changed' }
+                Assert-Exact $members[0].UniqueId $t.PhysicalMemberUniqueId 'pool-member-changed'
+            }
+        }
         function Exact-Pool($t) {
             $subsystem = Exact-Subsystem $t
             Assert-Exact $subsystem.UniqueId $t.ParentUniqueId 'pool-parent-changed'
@@ -165,8 +201,7 @@ internal static class WindowsRealStoragePowerShellScript
                 -not $_.IsPrimordial
             }) 'pool-not-unique'
             $members = @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop)
-            if ($members.Count -ne 1) { throw 'pool-member-count-changed' }
-            Assert-Exact $members[0].UniqueId $t.PhysicalMemberUniqueId 'pool-member-changed'
+            Require-ExactMemberSet $members $t
             return $pool
         }
         function Exact-VirtualDisk($t) {
@@ -175,8 +210,7 @@ internal static class WindowsRealStoragePowerShellScript
                 [string]::Equals([string]$_.UniqueId, [string]$t.ParentUniqueId, [StringComparison]::Ordinal) -and -not $_.IsPrimordial
             }) 'virtual-disk-pool-not-unique'
             $members = @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop)
-            if ($members.Count -ne 1) { throw 'pool-member-count-changed' }
-            Assert-Exact $members[0].UniqueId $t.PhysicalMemberUniqueId 'pool-member-changed'
+            Require-ExactMemberSet $members $t
             return Assert-One @(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop | Where-Object {
                 [string]::Equals([string]$_.UniqueId, [string]$t.UniqueId, [StringComparison]::Ordinal) -and
                 [string]::Equals([string]$_.ObjectId, [string]$t.ObjectId, [StringComparison]::Ordinal)
@@ -188,10 +222,11 @@ internal static class WindowsRealStoragePowerShellScript
                 [string]::Equals([string]$_.UniqueId, [string]$t.ParentUniqueId, [StringComparison]::Ordinal) -and -not $_.IsPrimordial
             }) 'tier-pool-not-unique'
             $members = @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop)
-            if ($members.Count -ne 1) { throw 'pool-member-count-changed' }
-            Assert-Exact $members[0].UniqueId $t.PhysicalMemberUniqueId 'pool-member-changed'
-            Assert-Exact $members[0].ObjectId $t.PhysicalMemberObjectId 'pool-member-object-id-changed'
-            Assert-Exact $members[0].SerialNumber $t.SerialNumber 'pool-member-serial-changed'
+            Require-ExactMemberSet $members $t
+            if (@((Read-Property $t 'PhysicalMembers')).Count -le 1) {
+                Assert-Exact $members[0].ObjectId $t.PhysicalMemberObjectId 'pool-member-object-id-changed'
+                Assert-Exact $members[0].SerialNumber $t.SerialNumber 'pool-member-serial-changed'
+            }
             $templates = @(Get-StorageTier -StoragePool $pool -ErrorAction Stop | Where-Object {
                 [string]::Equals([string]$_.UniqueId, [string]$t.UniqueId, [StringComparison]::Ordinal) -and
                 [string]::Equals([string]$_.ObjectId, [string]$t.ObjectId, [StringComparison]::Ordinal)
@@ -217,7 +252,6 @@ internal static class WindowsRealStoragePowerShellScript
             $owner = Assert-One @(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop) 'tier-owner-not-unique'
             Assert-Exact $owner.UniqueId $virtual.UniqueId 'tier-owner-changed'
             Assert-Exact $owner.ObjectId $virtual.ObjectId 'tier-owner-object-id-changed'
-            # The same exact extent contract is used by the read-only collector.
             $extentResult = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
             if ($null -eq (Read-Property $extentResult 'ReturnValue') -or
                 [uint32](Read-Property $extentResult 'ReturnValue') -ne 0) { throw 'tier-extent-method-failed' }
@@ -228,7 +262,8 @@ internal static class WindowsRealStoragePowerShellScript
                 if ($extentSize -isnot [uint64] -or $extentSize -eq 0) { throw 'tier-extent-size-unknown' }
                 Assert-Exact (Read-Property $extent 'StorageTierUniqueId') $tier.UniqueId 'tier-extent-tier-changed'
                 Assert-Exact (Read-Property $extent 'VirtualDiskUniqueId') $virtual.UniqueId 'tier-extent-owner-changed'
-                Assert-Exact (Read-Property $extent 'PhysicalDiskUniqueId') $members[0].UniqueId 'tier-extent-member-changed'
+                $extentMember = [string](Read-Property $extent 'PhysicalDiskUniqueId')
+                if (@($members | Where-Object { [string]::Equals([string]$_.UniqueId,$extentMember,[StringComparison]::Ordinal) }).Count -ne 1) { throw 'tier-extent-member-changed' }
             }
             return $tier
         }
@@ -457,20 +492,14 @@ internal static class WindowsRealStoragePowerShellScript
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0 -or
                         [int]$c.InterleaveBytes -ne 65536 -or [int]$c.DataColumns -ne 1) { throw 'vd-layout-not-enabled' }
                     $useMaximumSize = [bool](Read-Property $c 'UseMaximumSize')
-                    if (($useMaximumSize -and [long]$c.SizeBytes -ne 0) -or
-                        (-not $useMaximumSize -and [long]$c.SizeBytes -le 0)) { throw 'vd-capacity-mode-invalid' }
+                    if ($useMaximumSize -or [long]$c.SizeBytes -le 0) { throw 'maximum-requires-journaled-explicit-attempt' }
+                    if ([bool](Read-Property $t 'MaximumCapacityAttempt') -and [long]$c.SizeBytes % 1073741824 -ne 0) { throw 'maximum-candidate-grid-invalid' }
                     $invoked = $true
-                    if ($useMaximumSize) {
-                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -UseMaximumSize -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
-                    } else {
-                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
-                    }
+                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
                     break
                 }
                 'CreateTieredVirtualDisk' {
                     if ([bool](Read-Property $c 'UseMaximumSize')) { throw 'tiered-native-maximum-pending' }
-                    # Only the explicit exact-template path is currently executable.
-                    # Historical native mechanisms remain readable by the read-only reconciler.
                     switch -CaseSensitive ([string](Read-Property $c 'CreationMechanism')) {
                         '' { }
                         '0' { }
@@ -478,6 +507,33 @@ internal static class WindowsRealStoragePowerShellScript
                         default { throw 'tier-creation-mechanism-invalid' }
                     }
                     $pool = Exact-Pool $t
+                    $multiInputs = @((Read-Property $t 'TierInputs'))
+                    if ($multiInputs.Count -gt 1) {
+                        if (-not [bool](Read-Property $t 'MaximumCapacityAttempt') -or
+                            @(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'multi-maximum-pool-not-empty' }
+                        $subsystem = Exact-Subsystem $t
+                        if ((Read-Property $subsystem 'SupportsStorageTieredVirtualDiskCreation') -ne $true) { throw 'multi-tier-capability-unverified' }
+                        $templates = @(Get-StorageTier -StoragePool $pool -ErrorAction Stop)
+                        if ($templates.Count -ne $multiInputs.Count) { throw 'multi-template-set-changed' }
+                        $boundTemplates = @(); $boundSizes = @(); $seenMedia = @(); $total = [decimal]0
+                        foreach ($inputTier in $multiInputs) {
+                            $template = Assert-One @($templates | Where-Object { [string]::Equals([string]$_.UniqueId,[string]$inputTier.UniqueId,[StringComparison]::Ordinal) }) 'multi-template-not-unique'
+                            Assert-Exact $template.ObjectId $inputTier.ObjectId 'multi-template-object-id-changed'
+                            Assert-Exact $template.MediaType $inputTier.MediaType 'multi-template-media-changed'
+                            if ([string]$template.MediaType -notin @('HDD','SSD') -or $seenMedia -contains [string]$template.MediaType -or
+                                [uint64]$template.Size -ne 0 -or [uint64]$template.AllocatedSize -ne 0 -or
+                                [string]$template.ResiliencySettingName -ne 'Simple' -or [uint16]$template.NumberOfColumns -ne 1 -or
+                                [uint64]$template.Interleave -ne 65536 -or @(Get-VirtualDisk -StorageTier $template -ErrorAction Stop).Count -ne 0 -or
+                                [long]$inputTier.SizeBytes -le 0 -or [long]$inputTier.SizeBytes % 536870912 -ne 0) { throw 'multi-seed-layout-or-grid-invalid' }
+                            $seenMedia += [string]$template.MediaType
+                            $boundTemplates += $template; $boundSizes += [uint64]$inputTier.SizeBytes; $total += [decimal]$inputTier.SizeBytes
+                        }
+                        if ($total -ne [decimal]$c.SizeBytes) { throw 'multi-seed-total-mismatch' }
+                        $capabilityEvidence = [ordered]@{ RequiredCapability='SupportsStorageTieredVirtualDiskCreation'; RequiredValue=$true; TierInputs=$multiInputs }
+                        $invoked = $true
+                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers $boundTemplates -StorageTierSizes $boundSizes -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                        break
+                    }
                     Require-TierCapability $t 'SupportsStorageTieredVirtualDiskCreation' ([ref]$capabilityEvidence)
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'tiered-pool-not-empty' }
                     $templates = @(Get-StorageTier -StoragePool $pool -ErrorAction Stop)
@@ -494,7 +550,9 @@ internal static class WindowsRealStoragePowerShellScript
                     if ([long]$c.SizeBytes -le 0) { throw 'vd-capacity-mode-invalid' }
                     $range = Invoke-CimMethod -InputObject $tier -MethodName GetSupportedSize -Arguments @{ ResiliencySettingName = 'Simple' } -ErrorAction Stop
                     $capabilityEvidence['CreationSize'] = $range
-                    if (-not (Test-TierCreationSize $range ([long]$c.SizeBytes))) { throw 'tier-creation-size-not-supported' }
+                    if ([bool](Read-Property $t 'MaximumCapacityAttempt')) {
+                        if ([long]$c.SizeBytes -le 0 -or [long]$c.SizeBytes % 1073741824 -ne 0) { throw 'maximum-candidate-grid-invalid' }
+                    } elseif (-not (Test-TierCreationSize $range ([long]$c.SizeBytes))) { throw 'tier-creation-size-not-supported' }
                     $tieredCreationInput = [ordered]@{
                         TemplateUniqueId = [string]$tier.UniqueId;
                         TemplateObjectId = [string]$tier.ObjectId;
@@ -515,6 +573,8 @@ internal static class WindowsRealStoragePowerShellScript
                 }
                 'ResizeVirtualDisk' {
                     $vd = Exact-VirtualDisk $t
+                    Require-MaximumGrow $vd ([long]$c.SizeBytes) $t
+                    if (@(Get-StorageTier -VirtualDisk $vd -ErrorAction Stop).Count -ne 0) { throw 'ordinary-resize-has-tiers' }
                     $invoked = $true
                     Resize-VirtualDisk -InputObject $vd -Size ([uint64]$c.SizeBytes) -ErrorAction Stop | Out-Null
                     $outputObject = $vd
@@ -554,6 +614,10 @@ internal static class WindowsRealStoragePowerShellScript
                 }
                 'ResizeTier' {
                     $tier = Exact-Tier $t
+                    if ([string]::IsNullOrEmpty([string]$t.RelatedUniqueId)) { throw 'cannot-resize-pool-template' }
+                    Require-MaximumGrow $tier ([long]$c.SizeBytes) $t
+                    $owner = Assert-One @(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop) 'resize-tier-owner-not-unique'
+                    Require-MaximumRawDisk $owner
                     $invoked = $true
                     Resize-StorageTier -InputObject $tier -Size ([uint64]$c.SizeBytes) -ErrorAction Stop | Out-Null
                     $outputObject = $tier
@@ -581,13 +645,35 @@ internal static class WindowsRealStoragePowerShellScript
                 LiveCapabilityEvidence = $capabilityEvidence
             }
         } catch {
+            $failure = $_
+            $storageCode = $null
+            $codeSource = 'unavailable'
+            $qualifiedId = [string]$failure.FullyQualifiedErrorId
+            if ($qualifiedId -cmatch '^StorageWMI (?<StorageCode>[0-9]+),(?:New-VirtualDisk|Resize-VirtualDisk|Resize-StorageTier|Microsoft[.]Management[.]Infrastructure[.]CimCmdlets[.][A-Za-z]+)$') {
+                $parsedCode = [uint32]0
+                if ([uint32]::TryParse($Matches['StorageCode'], [ref]$parsedCode)) {
+                    $storageCode = $parsedCode; $codeSource = 'cdxml-storagewmi-error-id'
+                }
+            }
+            $errorData = Read-Property $failure.Exception 'ErrorData'
+            $errorClass = $null
+            if ($null -ne $errorData) { $errorClass = [string]$errorData.CimClass.CimClassName }
+            $nativeCode = Read-Property $failure.Exception 'NativeErrorCode'
+            $providerFailure = [ordered]@{
+                StorageReturnCode = $storageCode; CodeSource = $codeSource; FullyQualifiedErrorId = $qualifiedId;
+                MiNativeErrorCode = $(if ($null -ne $nativeCode) { [uint32]$nativeCode } else { $null });
+                HResult = [int]$failure.Exception.HResult; ErrorDataClass = $errorClass;
+                ErrorDataJson = $(if ($null -ne $errorData) { [string]($errorData | ConvertTo-Json -Compress -Depth 6) } else { $null });
+                ErrorCategory = Read-Property $errorData 'error_Category'; ErrorCode = Read-Property $errorData 'error_Code';
+                ErrorType = Read-Property $errorData 'error_Type'; ExtendedMessage = [string](Read-Property $errorData 'Message')
+            }
             $result = [ordered]@{
                 ProviderReturned = $invoked;
                 Code = $(if ($invoked) { 'provider.error-outcome-unknown' } else { 'adapter.preflight-rejected' });
                 UniqueId = $null; ObjectId = $null; PartitionGuid = $null;
                 DiskNumber = $null; PartitionNumber = $null; ProviderJobId = $null;
                 ProviderError = [string]$_.Exception.Message; LiveCapabilityEvidence = $capabilityEvidence;
-                TieredCreationInput = $tieredCreationInput
+                TieredCreationInput = $tieredCreationInput; ProviderFailure = $providerFailure
             }
         }
         [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 8))

@@ -1492,13 +1492,13 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void SqliteStoreSchemaVersionIsEighteen()
+    public void SqliteStoreSchemaVersionIsNineteen()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(
             Path.Combine(root, "src", "WinPool.Infrastructure.Sqlite", "WinPoolSqliteStore.cs"));
 
-        Assert.Contains("public const int CurrentSchemaVersion = 18;", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentSchemaVersion = 19;", source, StringComparison.Ordinal);
         Assert.DoesNotContain("= 14;", source, StringComparison.Ordinal);
     }
 

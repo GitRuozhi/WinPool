@@ -5,7 +5,7 @@ namespace WinPool.Application.Tests;
 public sealed class V048SimulationSemanticsTests
 {
     [Fact]
-    public void ConservativeCapacityKeepsTwoCopyLogicalAtMostHalfRawThenAligns()
+    public void ConservativeCapacityKeepsTwoCopyLogicalAtMostHalfRawThenUsesSharedWholeGiBCandidate()
     {
         var estimate = ConservativeCapacity.PlanLogicalUpperBound(
             [100L * 1024 * 1024 * 1024, 100L * 1024 * 1024 * 1024],
@@ -13,8 +13,9 @@ public sealed class V048SimulationSemanticsTests
             dataCopies: 2,
             interleaveBytes: 65536);
         Assert.Equal(100L * 1024 * 1024 * 1024, estimate.LogicalGrossBytes);
-        Assert.Equal(estimate.LogicalGrossBytes, estimate.AlignedLogicalBytes);
-        Assert.Equal(0, estimate.AlignedLogicalBytes % ConservativeCapacity.CapacityAlignmentBytes);
+        Assert.Equal(99L * MaximumCapacityAlgorithm.GiB, estimate.AlignedLogicalBytes);
+        Assert.Equal(MaximumCapacityAlgorithm.ReserveBytes, estimate.ReservedBytes);
+        Assert.Equal(0, estimate.AlignedLogicalBytes % MaximumCapacityAlgorithm.GiB);
         Assert.Equal(CapacitySourceKind.SimulatedEstimate, estimate.Source);
     }
 
@@ -23,7 +24,128 @@ public sealed class V048SimulationSemanticsTests
     {
         Assert.False(PhysicalDiskUsage.ContributesDataCapacity(PhysicalDiskUsage.Retired));
         Assert.False(PhysicalDiskUsage.ContributesDataCapacity(PhysicalDiskUsage.HotSpare));
+        Assert.False(PhysicalDiskUsage.ContributesDataCapacity(PhysicalDiskUsage.Journal));
         Assert.True(PhysicalDiskUsage.ContributesDataCapacity(PhysicalDiskUsage.AutoSelect));
+    }
+
+    [Fact]
+    public void TieredMaximumUsesOneWholeGiBCandidatePerMediaTierAndSumsTheVirtualDisk()
+    {
+        var source = Primordial(ssdCount: 4, hddCount: 2);
+        source = source.WithCandidate(source.Snapshot with
+        {
+            PhysicalDisks = source.Snapshot.PhysicalDisks
+                .Select(disk => disk.StableId == "physical:ssd3"
+                    ? disk with { Usage = PhysicalDiskUsage.HotSpare }
+                    : disk)
+                .ToArray()
+        });
+
+        var result = new SimulationOperationService().Apply(
+            source,
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
+                "pool:primordial",
+                Name: "PoolA",
+                VirtualDiskName: "SpaceA",
+                MemberDiskIds:
+                [
+                    "physical:ssd0", "physical:ssd1", "physical:ssd2", "physical:ssd3",
+                    "physical:hdd0", "physical:hdd1"
+                ],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                PerformanceUseMaximum: true,
+                CapacityResiliency: "Simple",
+                CapacityUseMaximum: true,
+                CreateVirtualDisk: true));
+
+        Assert.True(result.Succeeded, result.Error);
+        var pool = result.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var ssd = result.Document.Snapshot.StorageTiers.Single(item =>
+            item.PoolStableId == pool.StableId && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD");
+        var hdd = result.Document.Snapshot.StorageTiers.Single(item =>
+            item.PoolStableId == pool.StableId && EditWorkspace.NormalizeMedia(item.MediaType) == "HDD");
+        Assert.Equal(99L * MaximumCapacityAlgorithm.GiB, ssd.Size);
+        Assert.Equal(199L * MaximumCapacityAlgorithm.GiB, hdd.Size);
+        Assert.Contains("physical:ssd3", ssd.MemberPhysicalDiskIds);
+        Assert.Equal(ssd.Size + hdd.Size, Assert.Single(result.Document.Snapshot.VirtualDisks).Size);
+    }
+
+    [Fact]
+    public void DraftMaximumRecommendationsExcludeRetiredMembersFromResiliencyAndCapacity()
+    {
+        var source = Primordial(ssdCount: 4, hddCount: 0);
+        var working = EditWorkspace.InsertDraftPool(source.Snapshot, "PoolDraft");
+        var pool = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        foreach (var disk in working.PhysicalDisks)
+        {
+            working = EditWorkspace.MoveDiskToPool(working, disk.StableId, pool.StableId);
+        }
+
+        working = working with
+        {
+            PhysicalDisks = working.PhysicalDisks
+                .Select(disk => disk.StableId == "physical:ssd3"
+                    ? disk with { Usage = PhysicalDiskUsage.Retired }
+                    : disk)
+                .ToArray()
+        };
+        working = EditWorkspace.RefreshDraftRecommendations(working, pool.StableId);
+
+        var tier = Assert.Single(working.StorageTiers, item =>
+            item.PoolStableId == pool.StableId && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD");
+        Assert.Equal("Mirror", tier.ResiliencySettingName);
+        Assert.Equal(2, tier.NumberOfDataCopies);
+        Assert.Equal(99L * MaximumCapacityAlgorithm.GiB, tier.Size);
+        Assert.Contains("physical:ssd3", tier.MemberPhysicalDiskIds);
+    }
+
+    [Fact]
+    public void MaximumUpdatePartitionBoundsExcludeRetiredTierMembers()
+    {
+        var created = new SimulationOperationService().Apply(
+            Primordial(ssdCount: 4, hddCount: 0),
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
+                "pool:primordial",
+                Name: "PoolA",
+                VirtualDiskName: "SpaceA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1", "physical:ssd2", "physical:ssd3"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                FileSystem: "NTFS"));
+        Assert.True(created.Succeeded, created.Error);
+
+        var gib = MaximumCapacityAlgorithm.GiB;
+        var pool = created.Document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var snapshot = created.Document.Snapshot with
+        {
+            PhysicalDisks = created.Document.Snapshot.PhysicalDisks
+                .Select(disk => disk.StableId == "physical:ssd3"
+                    ? disk with { Usage = PhysicalDiskUsage.Retired }
+                    : disk)
+                .ToArray(),
+            StorageTiers = created.Document.Snapshot.StorageTiers
+                .Select(tier => tier.PoolStableId == pool.StableId
+                    && EditWorkspace.NormalizeMedia(tier.MediaType) == "SSD"
+                    ? tier with { Size = 99 * gib, FootprintOnPool = 198 * gib }
+                    : tier)
+                .ToArray(),
+            Partitions = created.Document.Snapshot.Partitions
+                .Select(partition => partition with { Size = 150 * gib, SizeRemaining = 149 * gib })
+                .ToArray()
+        };
+
+        var decision = StorageEditRules.Evaluate(
+            snapshot,
+            new SimulationEditRequest(
+                SimulationEditKind.UpdateStoragePool,
+                pool.StableId,
+                PerformanceUseMaximum: true));
+
+        Assert.Equal("storage.rule.update-pool.partition-bounds", decision.Code);
+        Assert.Contains((99 * gib).ToString(), decision.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -309,7 +431,7 @@ public sealed class V048SimulationSemanticsTests
         var working = EditWorkspace.InsertDraftVirtualDisk(
             emptyPool.Document.Snapshot, pool.StableId, "SpaceA", "Mirror", 65536);
         var draft = Assert.Single(working.VirtualDisks);
-        Assert.Equal(100L * 1024 * 1024 * 1024, draft.Size);
+        Assert.Equal(99L * MaximumCapacityAlgorithm.GiB, draft.Size);
 
         var plan = SimulationDraftPlanner.Build(emptyPool.Document.Snapshot, working);
         var create = Assert.Single(plan.Steps, item => item.Kind == SimulationEditKind.CreateVirtualDisk);

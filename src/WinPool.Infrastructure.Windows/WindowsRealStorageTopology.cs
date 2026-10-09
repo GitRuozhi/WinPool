@@ -206,8 +206,205 @@ public sealed class WindowsRealStorageTopology
         };
     }
 
+    /// <summary>
+    /// Resolves the complete physical membership of one already-existing
+    /// concrete pool for the multi-tier MAX macro. Unlike the ordinary
+    /// single-disk closure, this method never grows the approved set from
+    /// neighboring pools or arbitrary connected physical objects.
+    /// </summary>
+    public RealExactPhysicalMemberSetClosure RequireExactPhysicalMemberSet(
+        StorageObjectId concretePool,
+        IReadOnlyList<StorageObjectId> approvedMembers)
+    {
+        if (concretePool.Kind != StorageObjectKind.StoragePool
+            || concretePool.System != SystemId
+            || approvedMembers is null
+            || approvedMembers.Count < 2)
+        {
+            throw new InvalidDataException("Multi-tier MAX requires one existing pool and its complete approved physical member set.");
+        }
+
+        var pool = RequireObject(concretePool);
+        if (pool.ObjectType != FactObjectType.StoragePool
+            || !IsReturnedBoolean(pool, "IsPrimordial", false)
+            || string.IsNullOrWhiteSpace(RequiredText(pool, "UniqueId"))
+            || string.IsNullOrWhiteSpace(RequiredText(pool, "ObjectId")))
+        {
+            throw new InvalidDataException("Multi-tier MAX requires one exact current non-primordial pool identity.");
+        }
+
+        var membersById = new Dictionary<string, WinPoolSourceObject>(StringComparer.Ordinal);
+        foreach (var target in approvedMembers)
+        {
+            if (target.Kind != StorageObjectKind.PhysicalDisk || target.System != SystemId)
+                throw new InvalidDataException("Every approved pool member must be an exact physical-disk target.");
+            var member = RequireObject(target);
+            if (member.ObjectType != FactObjectType.PhysicalDisk
+                || !HasIdentity(member)
+                || string.IsNullOrWhiteSpace(RequiredText(member, "UniqueId"))
+                || string.IsNullOrWhiteSpace(RequiredText(member, "ObjectId"))
+                || string.IsNullOrWhiteSpace(RequiredText(member, "SerialNumber"))
+                || !membersById.TryAdd(member.Id, member))
+            {
+                throw new InvalidDataException("The approved physical member set contains a duplicate or incomplete identity.");
+            }
+        }
+
+        var relations = Facts.Relationships.Where(item => !item.IsRetained).ToArray();
+        var poolMembers = relations.Where(item => item.Kind == "pool-member" && item.FromId == pool.Id).ToArray();
+        var poolMemberIds = poolMembers.Select(item => item.ToId).ToArray();
+        if (poolMemberIds.Length != membersById.Count
+            || poolMemberIds.Distinct(StringComparer.Ordinal).Count() != poolMemberIds.Length
+            || !poolMemberIds.ToHashSet(StringComparer.Ordinal).SetEquals(membersById.Keys))
+        {
+            throw new InvalidDataException("The approved physical member set does not exactly match the current pool-member associations.");
+        }
+
+        var projectedPool = Snapshot.StoragePools.SingleOrDefault(item => item.StableId == pool.Id);
+        if (projectedPool is null || projectedPool.IsPrimordial
+            || projectedPool.MemberPhysicalDiskIds.Count != membersById.Count
+            || !projectedPool.MemberPhysicalDiskIds.ToHashSet(StringComparer.Ordinal).SetEquals(membersById.Keys))
+        {
+            throw new InvalidDataException("The projected pool membership does not exactly match current provider associations.");
+        }
+
+        var subsystemParents = relations.Where(item => item.Kind == "subsystem-pool" && item.ToId == pool.Id).ToArray();
+        if (subsystemParents.Length != 1
+            || objects[subsystemParents[0].FromId] is not { ObjectType: FactObjectType.StorageSubsystem,
+                HasReliableIdentity: true } subsystem
+            || !HasIdentity(subsystem)
+            || string.IsNullOrWhiteSpace(RequiredText(subsystem, "UniqueId"))
+            || string.IsNullOrWhiteSpace(RequiredText(subsystem, "ObjectId")))
+        {
+            throw new InvalidDataException("The exact pool lacks one current identified storage-subsystem association.");
+        }
+
+        RequireSource(Facts, "MSFT_VirtualDisk");
+        RequireSource(Facts, "MSFT_StorageTier");
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>();
+        pending.Enqueue(pool.Id);
+        while (pending.TryDequeue(out var id))
+        {
+            if (!visited.Add(id)) continue;
+            foreach (var neighbour in neighbours[id]) pending.Enqueue(neighbour);
+        }
+
+        var connected = visited.Select(id => objects[id]).ToArray();
+        var connectedPools = connected.Where(item => item.ObjectType == FactObjectType.StoragePool).ToArray();
+        var connectedPhysical = connected.Where(item => item.ObjectType == FactObjectType.PhysicalDisk).ToArray();
+        if (connectedPools.Length != 1 || connectedPools[0].Id != pool.Id
+            || connectedPhysical.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count() != membersById.Count
+            || !connectedPhysical.Select(item => item.Id).ToHashSet(StringComparer.Ordinal).SetEquals(membersById.Keys))
+        {
+            throw new InvalidDataException("The current component is not one existing multi-tier pool with exactly the approved physical members.");
+        }
+
+        foreach (var item in connected)
+        {
+            if (!item.HasReliableIdentity || !HasIdentity(item))
+                throw new InvalidDataException("A related storage object has an unreliable Windows identity.");
+            if (item.ObjectType == FactObjectType.StorageTier)
+                RequireExactTierMemberEvidence(item, pool.Id, membersById.Keys.ToHashSet(StringComparer.Ordinal));
+            if (item.ObjectType == FactObjectType.Disk)
+            {
+                if (string.IsNullOrWhiteSpace(RequiredText(item, "Path")))
+                    throw new InvalidDataException("A related OS disk lacks its provider path.");
+                var deviceParents = relations.Where(relation => relation.Kind == "same-device" && relation.ToId == item.Id).ToArray();
+                if (deviceParents.Length != 1 || objects[deviceParents[0].FromId].ObjectType is not
+                    (FactObjectType.PhysicalDisk or FactObjectType.VirtualDisk))
+                    throw new InvalidDataException("A related OS disk lacks one exact physical or virtual device parent.");
+            }
+            if (item.ObjectType == FactObjectType.Partition
+                && string.IsNullOrWhiteSpace(RequiredText(item, "Guid")))
+                throw new InvalidDataException("A related partition lacks its GUID.");
+
+            foreach (var issue in Snapshot.FieldIssues.Where(issue =>
+                         StringComparer.Ordinal.Equals(issue.ObjectId, item.Id)
+                         && issue.State != FieldReadState.Returned))
+            {
+                if (item.ObjectType == FactObjectType.PhysicalDisk
+                    && issue.FieldName is "InterfaceType" or "ProvisioningType" or "PnpDeviceId") continue;
+                if (item.ObjectType == FactObjectType.PhysicalDisk
+                    && issue.FieldName is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump")
+                {
+                    if (issue.State is not (FieldReadState.NotCollected or FieldReadState.Unavailable))
+                        throw new InvalidDataException("A physical role observation failed.");
+                    continue;
+                }
+                if (IsUnallocatedTemplateCapacity(item, issue)) continue;
+                if (IsOfflinePartitionHiddenUnavailable(item, issue)) continue;
+                throw new InvalidDataException("A related storage safety field could not be read.");
+            }
+        }
+
+        var memberEvidence = membersById.Values
+            .OrderBy(item => item.Id, StringComparer.Ordinal)
+            .Select(item => new WindowsExactPhysicalMemberRoleEvidence(
+                item.Id,
+                RequiredText(item, "UniqueId"),
+                RequiredText(item, "ObjectId"),
+                RequiredText(item, "SerialNumber"),
+                RequiredPositiveInt64(item, "Size"),
+                RequireExactPoolMemberRoleEvidence(item, pool, membersById.Keys.ToHashSet(StringComparer.Ordinal))))
+            .ToArray();
+
+        var component = "real-exact-physical-member-set-v1\n" + CanonicalComponent(connected, visited);
+        var fingerprint = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(component))).ToLowerInvariant();
+        var physicalMemberFingerprint = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+            {
+                Version = "physical-member-set-v1",
+                MachineBinding,
+                Pool = new { Id = pool.Id, UniqueId = RequiredText(pool, "UniqueId"), ObjectId = RequiredText(pool, "ObjectId") },
+                Members = memberEvidence.Select(member => new
+                {
+                    member.PhysicalDiskId,
+                    member.UniqueId,
+                    member.ObjectId,
+                    member.SerialNumber,
+                    member.SizeBytes,
+                    Roles = new
+                    {
+                        member.PoolMemberRoleEvidence.IsBoot,
+                        member.PoolMemberRoleEvidence.IsSystem,
+                        member.PoolMemberRoleEvidence.IsPageFile,
+                        member.PoolMemberRoleEvidence.IsCrashDump
+                    }
+                }).ToArray()
+            })))).ToLowerInvariant();
+
+        return new RealExactPhysicalMemberSetClosure(
+            concretePool,
+            pool.Id,
+            RequiredText(pool, "UniqueId"),
+            RequiredText(pool, "ObjectId"),
+            InventoryVersion,
+            connected.OrderBy(item => item.Id, StringComparer.Ordinal).ToArray(),
+            fingerprint,
+            physicalMemberFingerprint,
+            memberEvidence);
+    }
+
     private WindowsPoolMemberRoleEvidence RequirePoolMemberRoleEvidence(WinPoolSourceObject physical)
     {
+        var relations = Facts.Relationships.Where(item => !item.IsRetained).ToArray();
+        var parents = relations.Where(item => item.Kind == "pool-member" && item.ToId == physical.Id
+            && objects[item.FromId].ObjectType == FactObjectType.StoragePool && !IsPrimordialPool(objects[item.FromId])).ToArray();
+        if (parents.Length != 1 || objects[parents[0].FromId] is not { HasReliableIdentity: true } pool
+            || !HasIdentity(pool) || !IsReturnedBoolean(pool, "IsPrimordial", false))
+            throw new InvalidDataException("Unknown physical roles need one exact current concrete pool membership.");
+        return RequireExactPoolMemberRoleEvidence(physical, pool,
+            new HashSet<string>(StringComparer.Ordinal) { physical.Id });
+    }
+
+    private WindowsPoolMemberRoleEvidence RequireExactPoolMemberRoleEvidence(
+        WinPoolSourceObject physical,
+        WinPoolSourceObject pool,
+        IReadOnlySet<string> expectedMemberIds)
+    {
+        var relations = Facts.Relationships.Where(item => !item.IsRetained).ToArray();
         foreach (var name in new[] { "IsBoot", "IsSystem", "IsPageFile", "IsCrashDump" })
         {
             if (physical.Field(name) is not { } field) continue;
@@ -218,19 +415,19 @@ public sealed class WindowsRealStorageTopology
                 throw new InvalidDataException("The physical member has a protected Windows role.");
         }
         foreach (var name in new[] { "MSFT_StorageSubSystem", "MSFT_PhysicalDisk", "MSFT_StoragePool",
-                     "MSFT_VirtualDisk", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume" }) RequireSource(Facts, name);
-        var relations = Facts.Relationships.Where(item => !item.IsRetained).ToArray();
-        var parents = relations.Where(item => item.Kind == "pool-member" && item.ToId == physical.Id
-            && objects[item.FromId].ObjectType == FactObjectType.StoragePool && !IsPrimordialPool(objects[item.FromId])).ToArray();
-        if (parents.Length != 1 || objects[parents[0].FromId] is not { HasReliableIdentity: true } pool
-            || !HasIdentity(pool) || !IsReturnedBoolean(pool, "IsPrimordial", false))
+                     "MSFT_VirtualDisk", "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume" }) RequireSource(Facts, name);
+        if (pool.ObjectType != FactObjectType.StoragePool || !pool.HasReliableIdentity || !HasIdentity(pool)
+            || !IsReturnedBoolean(pool, "IsPrimordial", false))
             throw new InvalidDataException("Unknown physical roles need one exact current concrete pool membership.");
         var members = relations.Where(item => item.Kind == "pool-member" && item.FromId == pool.Id).ToArray();
         var projectedPool = Snapshot.StoragePools.SingleOrDefault(item => item.StableId == pool.Id);
         var subsystemParents = relations.Where(item => item.Kind == "subsystem-pool" && item.ToId == pool.Id).ToArray();
-        if (members.Length != 1 || members[0].ToId != physical.Id || projectedPool is null
-            || projectedPool.IsPrimordial || projectedPool.MemberPhysicalDiskIds.Count != 1
-            || projectedPool.MemberPhysicalDiskIds[0] != physical.Id
+        if (members.Length != expectedMemberIds.Count
+            || members.Select(item => item.ToId).Distinct(StringComparer.Ordinal).Count() != members.Length
+            || !members.Select(item => item.ToId).ToHashSet(StringComparer.Ordinal).SetEquals(expectedMemberIds)
+            || projectedPool is null || projectedPool.IsPrimordial
+            || projectedPool.MemberPhysicalDiskIds.Count != expectedMemberIds.Count
+            || !projectedPool.MemberPhysicalDiskIds.ToHashSet(StringComparer.Ordinal).SetEquals(expectedMemberIds)
             || subsystemParents.Length != 1
             || objects[subsystemParents[0].FromId] is not { ObjectType: FactObjectType.StorageSubsystem,
                 HasReliableIdentity: true } subsystem || !HasIdentity(subsystem))
@@ -420,6 +617,35 @@ public sealed class WindowsRealStorageTopology
             throw new InvalidDataException("The tier's exact template eligibility or instance allocation member is unknown.");
     }
 
+    private void RequireExactTierMemberEvidence(
+        WinPoolSourceObject item,
+        string poolId,
+        IReadOnlySet<string> approvedMemberIds)
+    {
+        var parents = Facts.Relationships.Where(relation => !relation.IsRetained
+            && relation.Kind == "pool-tier" && relation.ToId == item.Id).ToArray();
+        var owners = Facts.Relationships.Where(relation => !relation.IsRetained
+            && relation.Kind == "virtual-disk-tier" && relation.ToId == item.Id).ToArray();
+        if (parents.Length != 1 || parents[0].FromId != poolId || owners.Length > 1)
+            throw new InvalidDataException("A tier lacks one exact selected-pool association or has ambiguous instance ownership.");
+        var relationKind = owners.Length == 0 ? "template-pool-member" : "tier-member";
+        var members = Facts.Relationships.Where(relation => !relation.IsRetained
+            && relation.Kind == relationKind && relation.FromId == item.Id).ToArray();
+        if (members.Length == 0
+            || members.Any(member => !approvedMemberIds.Contains(member.ToId)
+                || !objects.TryGetValue(member.ToId, out var physical)
+                || physical.ObjectType != FactObjectType.PhysicalDisk)
+            || members.Select(member => member.ToId).Distinct(StringComparer.Ordinal).Count() != members.Length)
+            throw new InvalidDataException("A tier's exact template or allocated members are outside the approved pool member set.");
+    }
+
+    private static long RequiredPositiveInt64(WinPoolSourceObject item, string name) =>
+        item.Field(name) is { ReadState: FieldReadState.Returned,
+            Value: { ValueKind: JsonValueKind.Number } value }
+        && value.TryGetInt64(out var result) && result > 0
+            ? result
+            : throw new InvalidDataException("A physical member lacks a positive current " + name + " value.");
+
     private static bool IsCoreStorageType(FactObjectType type) => type is
         FactObjectType.PhysicalDisk or FactObjectType.StoragePool or
         FactObjectType.StorageTier or FactObjectType.VirtualDisk or
@@ -480,6 +706,25 @@ public sealed record WindowsPoolMemberRoleEvidence(string InventoryVersion, stri
 {
     public string VerificationMethod { get; init; } = "CompleteCurrentPoolAndOsDiskAssociations";
 }
+
+public sealed record WindowsExactPhysicalMemberRoleEvidence(
+    string PhysicalDiskId,
+    string UniqueId,
+    string ObjectId,
+    string SerialNumber,
+    long SizeBytes,
+    WindowsPoolMemberRoleEvidence PoolMemberRoleEvidence);
+
+public sealed record RealExactPhysicalMemberSetClosure(
+    StorageObjectId ConcretePool,
+    string PoolId,
+    string PoolUniqueId,
+    string PoolObjectId,
+    string InventoryVersion,
+    IReadOnlyList<WinPoolSourceObject> Objects,
+    string Fingerprint,
+    string PhysicalMemberFingerprint,
+    IReadOnlyList<WindowsExactPhysicalMemberRoleEvidence> Members);
 
 public interface IWindowsRealStorageFactSource
 {

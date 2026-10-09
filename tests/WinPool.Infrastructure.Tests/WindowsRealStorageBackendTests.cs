@@ -7,7 +7,7 @@ using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
 
-public sealed class WindowsRealStorageBackendTests
+public sealed partial class WindowsRealStorageBackendTests
 {
     private const string PhysicalId = "physical:7";
     private const string OtherPhysicalId = "physical:8";
@@ -2033,9 +2033,15 @@ public sealed class WindowsRealStorageBackendTests
             fixture.Adapter.OnExecute = () => fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true, actual);
             var result = await fixture.Backend.ExecuteStepAsync(plan, plan.RealOperation!.Steps[0],
                 new(progress.TargetEvidence!, closure.Fingerprint, closure.Fingerprint, closure.PhysicalMemberFingerprint), CancellationToken.None);
-            Assert.Equal(RealStepOutcome.Verified, result.Outcome);
-            evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson!)!;
-            Assert.Equal(1, fixture.Adapter.CallCount);
+            Assert.Equal(RealStepOutcome.FailedWithoutEffect, result.Outcome);
+            Assert.Equal("real.maximum.journal_required", result.Code);
+            Assert.True(JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(result.ResultEvidenceJson)!.NoWindowsCall);
+            Assert.Equal(0, fixture.Adapter.CallCount);
+            var historical = Assert.IsType<CreateTieredVirtualDiskCommand>(plan.RealOperation!.Steps[0].Command);
+            Assert.True(historical.UseMaximumSize);
+            Assert.Equal(0, historical.SizeBytes);
+            Assert.Equal(plan.PlanHash, OperationPlanHasher.Compute(plan));
+            return;
         }
         Assert.Equal(actual, evidence.TieredCreation!.SizeBytes);
         Assert.Equal("tier:template", evidence.TieredCreation.TemplateStableId);
@@ -2723,7 +2729,7 @@ public sealed class WindowsRealStorageBackendTests
 
         public Fixture(bool secondDisk = false, bool sharedOrdinaryPool = false, bool expirePostCallWindow = false,
             IWindowsRealStorageCapabilityReader? tierCapabilities = null, bool scopedCaptures = false,
-            IWindowsStorageJobReader? storageJobs = null)
+            IWindowsStorageJobReader? storageJobs = null, bool maximumCapacityClock = false)
         {
             this.secondDisk = secondDisk;
             this.sharedOrdinaryPool = sharedOrdinaryPool;
@@ -2737,7 +2743,8 @@ public sealed class WindowsRealStorageBackendTests
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
                 new FixedTimeProvider(Now), Safety, capabilities: tierCapabilities);
             Backend = new WindowsRealStorageBackend(Adapter, planner, Reader,
-                expirePostCallWindow ? new ExpiringPostCallTimeProvider(Now) : new FixedTimeProvider(Now), storageJobs);
+                expirePostCallWindow ? new ExpiringPostCallTimeProvider(Now)
+                    : maximumCapacityClock ? new ElapsedTimeProvider(Now) : new FixedTimeProvider(Now), storageJobs);
         }
 
         public SyntheticFactSource Source { get; }
@@ -2748,6 +2755,7 @@ public sealed class WindowsRealStorageBackendTests
         public string VolumeLabel { get; set; } = "OLD";
         public Func<StorageSnapshot, StorageSnapshot>? SnapshotTransform { get; set; }
         public Func<WinPoolSourceObject, WinPoolSourceObject>? FactsTransform { get; set; }
+        public Func<WinPoolFacts, WinPoolFacts>? CompleteFactsTransform { get; set; }
         public TrustedRealSession Session => new(SessionId.New(), "synthetic-product-session",
             "synthetic-process-instance", 1234, Now.AddMinutes(-1),
             @"C:\Synthetic\WinPool.Agent.exe", true);
@@ -2936,6 +2944,7 @@ public sealed class WindowsRealStorageBackendTests
                 Sources = sources,
                 Objects = objects
             };
+            if (CompleteFactsTransform is not null) facts = CompleteFactsTransform(facts);
             return new StorageSystemDocument(
                 StorageSystemDocument.CurrentSchemaVersion, "local:synthetic",
                 StorageSystemKind.Local, "Synthetic Storage", facts, [], Now)
@@ -3044,6 +3053,12 @@ public sealed class WindowsRealStorageBackendTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
+    private sealed class ElapsedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private readonly global::System.Diagnostics.Stopwatch elapsed = global::System.Diagnostics.Stopwatch.StartNew();
+        public override DateTimeOffset GetUtcNow() => now + elapsed.Elapsed;
+    }
+
     private sealed class ExpiringPostCallTimeProvider(DateTimeOffset now) : TimeProvider
     {
         private int reads;
@@ -3065,7 +3080,9 @@ public sealed class WindowsRealStorageBackendTests
         public bool Reject { get; set; }
         public Exception? ProbeFailure { get; set; }
         public WindowsRealStorageSafetyEvidence? Evidence { get; set; }
+        public bool ReturnFreshPoolRoles { get; set; }
         public WindowsRealStorageSafetyEvidence? ObservedEvidence { get; set; }
+        public Func<IReadOnlyList<WindowsPoolMemberRoleEvidence>, IReadOnlyList<WindowsPoolMemberRoleEvidence>>? MultiRolesTransform { get; set; }
         public Exception? ObservedFailure { get; set; }
         public WindowsRealStorageSafetyEvidence? CreatedFormatEvidence { get; set; }
         public Exception? CreatedFormatFailure { get; set; }
@@ -3085,7 +3102,18 @@ public sealed class WindowsRealStorageBackendTests
             RealStorageCommand command, CancellationToken cancellationToken)
         {
             await ValidateAsync(topology, closure, command, cancellationToken);
-            return Evidence;
+            return ReturnFreshPoolRoles ? new(null, [], PoolMemberRoleEvidence: closure.PoolMemberRoleEvidence) : Evidence;
+        }
+
+        public Task<WindowsRealStorageSafetyEvidence?> InspectAsync(WindowsRealStorageTopology topology,
+            RealExactPhysicalMemberSetClosure closure, RealStorageCommand command, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (ProbeFailure is not null) throw ProbeFailure;
+            if (Reject) throw new InvalidDataException("Synthetic member-set safety facts are unsafe.");
+            IReadOnlyList<WindowsPoolMemberRoleEvidence> roles = closure.Members.Select(item => item.PoolMemberRoleEvidence).ToArray();
+            return Task.FromResult<WindowsRealStorageSafetyEvidence?>(new(null, [],
+                PhysicalMemberRoleEvidence: MultiRolesTransform?.Invoke(roles) ?? roles));
         }
 
         public Task<WindowsRealStorageSafetyEvidence?> ValidateObservedDiskStateWithEvidenceAsync(

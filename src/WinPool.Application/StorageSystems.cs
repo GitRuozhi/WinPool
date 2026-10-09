@@ -1201,13 +1201,13 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var members = poolMembers
             .Where(disk => EditWorkspace.NormalizeMedia(disk.MediaType) == media)
             .ToArray();
-        var setting = resiliency ?? EditWorkspace.RecommendedResiliency(media, members.Length);
-        var copies = dataCopies ?? EditWorkspace.RecommendedDataCopies(setting, members.Length);
+        var dataMembers = members.Where(item => PhysicalDiskUsage.ContributesDataCapacity(item.Usage)).ToArray();
+        var setting = resiliency ?? EditWorkspace.RecommendedResiliency(media, dataMembers.Length);
+        var copies = dataCopies ?? EditWorkspace.RecommendedDataCopies(setting, dataMembers.Length);
         var tolerated = toleratedFailures ?? EditWorkspace.RecommendedToleratedFailures(setting, copies);
         var columnCount = media == "HDD"
-            ? columns ?? EditWorkspace.RecommendedCapacityColumns(members)
+            ? columns ?? EditWorkspace.RecommendedCapacityColumns(dataMembers)
             : (int?)null;
-        var dataMembers = members.Where(item => PhysicalDiskUsage.ContributesDataCapacity(item.Usage)).ToArray();
         var estimate = ConservativeCapacity.PlanLogicalUpperBound(
             dataMembers.Select(item => item.Size).ToArray(),
             setting,
@@ -1381,9 +1381,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
         bool useMaximum,
         StorageSnapshot snapshot)
     {
+        var dataMembers = tier.MemberPhysicalDiskIds
+            .Select(id => snapshot.PhysicalDisks.FirstOrDefault(disk => disk.StableId == id))
+            .Where(disk => disk is not null && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
+            .Select(disk => disk!)
+            .ToArray();
         var setting = resiliency ?? tier.ResiliencySettingName;
         var copies = dataCopies ?? tier.NumberOfDataCopies
-            ?? EditWorkspace.RecommendedDataCopies(setting, tier.MemberPhysicalDiskIds.Count);
+            ?? EditWorkspace.RecommendedDataCopies(setting, dataMembers.Length);
         var redundancy = tolerated ?? tier.PhysicalDiskRedundancy
             ?? EditWorkspace.RecommendedToleratedFailures(setting, copies);
         var targetColumns = columns ?? tier.NumberOfColumns;
@@ -1392,11 +1397,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
             : 0;
         var targetSize = useMaximum
             ? ConservativeCapacity.PlanLogicalUpperBound(
-                tier.MemberPhysicalDiskIds
-                    .Select(id => snapshot.PhysicalDisks.FirstOrDefault(disk => disk.StableId == id))
-                    .Where(disk => disk is not null && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
-                    .Select(disk => disk!.Size)
-                    .ToArray(),
+                dataMembers.Select(disk => disk.Size).ToArray(),
                 setting,
                 Math.Max(1, copies),
                 targetColumns,

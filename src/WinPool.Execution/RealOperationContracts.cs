@@ -57,7 +57,8 @@ public sealed record CreatePoolCommand(RealTargetReference PhysicalDisk, string 
 public sealed record DeletePoolCommand(RealTargetReference Pool) : RealStorageCommand;
 public sealed record RenamePoolCommand(RealTargetReference Pool, string Name) : RealStorageCommand;
 public sealed record CreateVirtualDiskCommand(RealTargetReference Pool, string Name, long SizeBytes, int InterleaveBytes, int DataColumns,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UseMaximumSize = false) : RealStorageCommand;
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UseMaximumSize = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MaximumCapacityPolicy? MaximumCapacity = null) : RealStorageCommand;
 public sealed record DeleteVirtualDiskCommand(RealTargetReference VirtualDisk) : RealStorageCommand;
 public sealed record ResizeVirtualDiskCommand(RealTargetReference VirtualDisk, long SizeBytes) : RealStorageCommand;
 public sealed record RenameVirtualDiskCommand(RealTargetReference VirtualDisk, string Name) : RealStorageCommand;
@@ -66,7 +67,18 @@ public enum TieredVirtualDiskCreationMechanism { ExactTemplate = 0, WindowsAutom
 
 public sealed record CreateTieredVirtualDiskCommand(RealTargetReference Pool, RealTargetReference Tier, string Name, long SizeBytes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UseMaximumSize = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] TieredVirtualDiskCreationMechanism CreationMechanism = TieredVirtualDiskCreationMechanism.ExactTemplate) : RealStorageCommand;
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] TieredVirtualDiskCreationMechanism CreationMechanism = TieredVirtualDiskCreationMechanism.ExactTemplate,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MaximumCapacityPolicy? MaximumCapacity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<MaximumCapacityTier>? CapacityTiers = null) : RealStorageCommand;
+
+/// <summary>The Agent freezes the search inputs from fresh provider and physical facts before confirmation.</summary>
+public sealed record MaximumCapacityPolicy(
+    string AlgorithmVersion, long UpperBoundBytes, long InitialCandidateBytes,
+    long PhysicalCapacityBytes, int MaximumAttempts, string Source,
+    string SourceFingerprint, DateTimeOffset CapturedAtUtc);
+
+/// <summary>Ordered template inputs for one multi-tier virtual disk; each layer has its own search origin.</summary>
+public sealed record MaximumCapacityTier(RealTargetReference Tier, MaximumCapacityPolicy? MaximumCapacity);
 public sealed record DeleteTierCommand(RealTargetReference Tier) : RealStorageCommand;
 public sealed record ResizeTierCommand(RealTargetReference Tier, long SizeBytes) : RealStorageCommand;
 public sealed record RenameTierCommand(RealTargetReference Tier, string Name) : RealStorageCommand;

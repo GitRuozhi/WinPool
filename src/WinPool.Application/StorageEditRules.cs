@@ -1524,7 +1524,7 @@ public static class StorageEditRules
                 setting.Equals("Parity", StringComparison.OrdinalIgnoreCase) ? tolerated ?? 1 : 0);
             if (estimate.AlignedLogicalBytes <= 0)
             {
-                return Deny("storage.rule.capacity.none", "The selected layout has less than 4 GiB of createable logical capacity.");
+                return Deny("storage.rule.capacity.none", "The selected layout has no positive whole-GiB candidate after the configured reserve.");
             }
 
             return requestedBytes > estimate.AlignedLogicalBytes
@@ -1575,7 +1575,9 @@ public static class StorageEditRules
         {
             return ConservativeCapacity.PlanLogicalUpperBound(
                 tier.MemberPhysicalDiskIds
-                    .Select(id => snapshot.PhysicalDisks.First(item => item.StableId == id).Size)
+                    .Select(id => snapshot.PhysicalDisks.First(item => item.StableId == id))
+                    .Where(disk => PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
+                    .Select(disk => disk.Size)
                     .ToArray(),
                 setting,
                 copies,
@@ -1600,7 +1602,7 @@ public static class StorageEditRules
     private static bool TierLayoutChanges(StorageTierInfo tier, SimulationEditRequest request)
     {
         var media = EditWorkspace.NormalizeMedia(tier.MediaType);
-        return media switch
+        return UsesMaximumCapacity(tier, request) || (media switch
         {
             "HDD" => Different(request.CapacityResiliency, tier.ResiliencySettingName)
                 || Different(request.CapacityInterleaveBytes, tier.Interleave)
@@ -1615,7 +1617,7 @@ public static class StorageEditRules
                 || Different(request.PerformanceInterleaveBytes, tier.Interleave)
                 || Different(request.PerformanceSizeBytes, tier.Size)
                 || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
-        };
+        });
     }
 
     private static bool TierSpecificationChanges(StorageTierInfo tier, SimulationEditRequest request)

@@ -41,7 +41,7 @@ public sealed class StorageMathTests
     }
 
     [Fact]
-    public void ConservativeCapacityAppliesMirrorAndFourGibAlignment()
+    public void ConservativeCapacityAppliesTheSharedWholeGiBCandidateAfterReserve()
     {
         var estimate = ConservativeCapacity.PlanLogicalUpperBound(
             [200L * 1024 * 1024 * 1024, 200L * 1024 * 1024 * 1024],
@@ -49,8 +49,9 @@ public sealed class StorageMathTests
             dataCopies: 2,
             interleaveBytes: 65536);
         Assert.Equal(200L * 1024 * 1024 * 1024, estimate.LogicalGrossBytes);
-        Assert.Equal(estimate.LogicalGrossBytes, estimate.AlignedLogicalBytes);
-        Assert.Equal(0, estimate.AlignedLogicalBytes % ConservativeCapacity.CapacityAlignmentBytes);
+        Assert.Equal(199L * MaximumCapacityAlgorithm.GiB, estimate.AlignedLogicalBytes);
+        Assert.Equal(MaximumCapacityAlgorithm.ReserveBytes, estimate.ReservedBytes);
+        Assert.Equal(0, estimate.AlignedLogicalBytes % MaximumCapacityAlgorithm.GiB);
         Assert.Equal(400L * 1024 * 1024 * 1024, estimate.PhysicalFootprintBytes);
     }
 
@@ -64,6 +65,20 @@ public sealed class StorageMathTests
     }
 
     [Fact]
+    public void KnownPhysicalAllocationIsRemovedBeforeTheSharedReserveIsApplied()
+    {
+        var gib = MaximumCapacityAlgorithm.GiB;
+        var estimate = ConservativeCapacity.PlanLogicalUpperBound(
+            [100 * gib],
+            "Simple",
+            knownPhysicalAllocatedBytes: gib);
+
+        Assert.Equal(100 * gib, estimate.LogicalGrossBytes);
+        Assert.Equal(98 * gib, estimate.AlignedLogicalBytes);
+        Assert.Equal(MaximumCapacityAlgorithm.ReserveBytes, estimate.ReservedBytes);
+    }
+
+    [Fact]
     public void ParityUsesColumnsAndParityOverhead()
     {
         var gib = 1024L * 1024 * 1024;
@@ -73,7 +88,7 @@ public sealed class StorageMathTests
             columns: 3,
             parityColumns: 1);
 
-        Assert.Equal(200 * gib, estimate.AlignedLogicalBytes);
+        Assert.Equal(199 * gib, estimate.AlignedLogicalBytes);
         Assert.Equal(300 * gib, estimate.PhysicalFootprintBytes);
     }
 

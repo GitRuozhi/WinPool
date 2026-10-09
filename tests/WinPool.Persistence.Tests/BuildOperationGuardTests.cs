@@ -78,14 +78,17 @@ public sealed class BuildOperationGuardTests
         Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
     }
 
-    [Fact]
-    public async Task Schema17WithoutRealOperationsPassesWithoutUpgrade()
+    [Theory]
+    [InlineData(17)]
+    [InlineData(18)]
+    [InlineData(19)]
+    public async Task SupportedSchemasWithoutRealOperationsPassWithoutUpgrade(int version)
     {
         if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
         await fixture.ExecuteSqlAsync(store,
-            "UPDATE schema_info SET schema_version = 17 WHERE singleton = 1;");
+            "UPDATE schema_info SET schema_version = $version WHERE singleton = 1;", ("$version", (object)version));
         var before = await File.ReadAllBytesAsync(store.DatabasePath);
 
         Assert.Equal(0, await fixture.ProbeAsync());

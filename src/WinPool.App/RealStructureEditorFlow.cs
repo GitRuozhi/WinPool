@@ -153,8 +153,8 @@ public partial class EditorPageBase
                         sizeTarget = Id(StorageObjectKind.StorageTier, existing[0].StableId);
                     }
                     if (intent.VirtualDiskUseMaximum)
-                        ReportRealActivity(Text("正在准备由 Windows 决定实际容量的最大容量 VD",
-                            "Preparing a maximum-capacity virtual disk; Windows will choose the actual capacity"));
+                        ReportRealActivity(Text("正在准备 WinPool 整数 GiB 最大容量搜索",
+                            "Preparing the WinPool maximum-capacity search in whole GiB"));
                     var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(
                         intent.VirtualDiskUseMaximum, intent.VirtualDiskSizeBytes,
                         intent.AutoCreatePartition, intent.CreateMsr, async () =>
@@ -186,7 +186,7 @@ public partial class EditorPageBase
                 }
                 if (!intent.AutoCreatePartition) continue;
                 if (vdId is null) throw new InvalidDataException("Automatic layout lacks a verified VD identity.");
-                // Windows chooses the MAX size; partition layout uses only the actual OS-disk size observed after the VD is verified.
+                // Partition layout uses the actual OS-disk size only after the MAX search/explicit creation is verified.
                 var osDisk = ViewModel.ActiveDocument.Snapshot.OsDisks.SingleOrDefault(disk => disk.VirtualDiskStableId == vdId)
                     ?? throw new InvalidDataException("The verified VD has no unique current OS disk.");
                 if (osDisk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase))

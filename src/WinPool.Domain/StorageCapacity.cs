@@ -37,8 +37,6 @@ public sealed record ConservativeCapacityEstimate(
 
 public static class ConservativeCapacity
 {
-    public const long CapacityAlignmentBytes = 4L * 1024 * 1024 * 1024;
-
     public static ConservativeCapacityEstimate PlanLogicalUpperBound(
         IReadOnlyList<long> dataMemberBytes,
         string resiliency,
@@ -159,14 +157,13 @@ public static class ConservativeCapacity
         var availableLogical = footprint == 0
             ? 0
             : (long)((decimal)gross * availablePhysical / footprint);
-        var aligned = (long)StorageMath.AlignDown(
-            (ulong)availableLogical,
-            (ulong)CapacityAlignmentBytes);
+        var maximumCandidateBytes = MaximumCapacityAlgorithm.InitialCandidateBytes(availableLogical);
+        var reservedBytes = Math.Min(availableLogical, MaximumCapacityAlgorithm.ReserveBytes);
         return new(
             raw,
             gross,
-            0,
-            aligned,
+            reservedBytes,
+            maximumCandidateBytes,
             dataCopies,
             interleaveBytes,
             CapacitySourceKind.SimulatedEstimate,
@@ -253,5 +250,5 @@ public static class ConservativeCapacity
     }
 
     private static string PolicyLabel() =>
-        "WinPool simulated Fixed estimate: exclude non-data members, apply the selected Simple/Mirror/Parity layout, and align the logical maximum down to 4 GiB. Not a Windows guarantee.";
+        $"WinPool simulated Fixed estimate ({MaximumCapacityAlgorithm.Version}): exclude non-data members, apply the selected Simple/Mirror/Parity layout, reserve {MaximumCapacityAlgorithm.ReserveBytes} bytes, and select whole GiB strictly below the resulting logical upper bound. Not a Windows guarantee.";
 }

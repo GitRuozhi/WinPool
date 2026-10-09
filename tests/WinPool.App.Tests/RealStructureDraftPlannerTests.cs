@@ -213,43 +213,15 @@ public sealed class RealStructureDraftPlannerTests
         Assert.True(withoutLayout.Preview.CanApply, string.Join("; ", withoutLayout.Preview.BlockingReasons));
         Assert.Equal(oldPool.StableId, Assert.Single(withoutLayout.RemovedPools).StableId);
 
-        // Ordinary MAX stays a Windows-chosen intent; tiered MAX is fail-closed while its native path is pending.
+        // Both layouts preserve MAX for the Agent to freeze the shared GiB search.
         session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
         { AutoCreatePartition = true, VirtualDiskUseMaximum = true, VirtualDiskSizeBytes = null };
         var maximumChinese = RealStructureDraftPlanner.Build(session, chinese: true);
-        if (layout == PoolVirtualDiskLayout.HddTiered)
-        {
-            Assert.False(maximumChinese.Preview.CanApply);
-            Assert.Contains(maximumChinese.Preview.BlockingReasons,
-                reason => reason.Contains("分层布局当前不提供 MAX", StringComparison.Ordinal));
-            Assert.Empty(maximumChinese.Preview.Actions);
-            Assert.Empty(maximumChinese.RemovedPools);
-            Assert.Empty(maximumChinese.RemovedVirtualDisks);
-            Assert.Empty(maximumChinese.RemovedTiers);
-            Assert.Empty(maximumChinese.Creations);
-        }
-        else
-        {
-            Assert.True(maximumChinese.Preview.CanApply);
-            Assert.Contains(maximumChinese.Preview.Actions,
-                action => action.Contains("最大容量（由 Windows 决定实际容量）", StringComparison.Ordinal));
-        }
-        Assert.DoesNotContain(maximumChinese.Preview.Actions,
-            action => action.Contains("bytes", StringComparison.OrdinalIgnoreCase));
+        Assert.True(maximumChinese.Preview.CanApply, string.Join("; ", maximumChinese.Preview.BlockingReasons));
+        Assert.Contains(maximumChinese.Preview.Actions, action => action.Contains("1 GiB", StringComparison.Ordinal));
         var maximumEnglish = RealStructureDraftPlanner.Build(session, chinese: false);
-        if (layout == PoolVirtualDiskLayout.HddTiered)
-        {
-            Assert.False(maximumEnglish.Preview.CanApply);
-            Assert.Contains(maximumEnglish.Preview.BlockingReasons,
-                reason => reason.Contains("MAX is currently unavailable for the single-HDD tiered layout", StringComparison.OrdinalIgnoreCase));
-            Assert.Empty(maximumEnglish.Preview.Actions);
-            Assert.Empty(maximumEnglish.Creations);
-        }
-        else
-        {
-            Assert.Contains(maximumEnglish.Preview.Actions,
-                action => action.Contains("MAX (actual capacity determined by Windows)", StringComparison.Ordinal));
-        }
+        Assert.True(maximumEnglish.Preview.CanApply);
+        Assert.Contains(maximumEnglish.Preview.Actions, action => action.Contains("1 GiB steps", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -319,7 +291,7 @@ public sealed class RealStructureDraftPlannerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void NewHddTieredMaximumIsBlockedBeforeAnyDissolutionOrCreationPlan(bool replacingExistingPool)
+    public void NewHddTieredMaximumKeepsDraftAndCreatesAnAgentSearchIntent(bool replacingExistingPool)
     {
         var session = Session(replacingExistingPool
             ? ExistingSnapshot(withVirtualDisk: true)
@@ -334,14 +306,12 @@ public sealed class RealStructureDraftPlannerTests
 
         var plan = RealStructureDraftPlanner.Build(session);
 
-        Assert.False(plan.Preview.CanApply);
-        Assert.Contains(plan.Preview.BlockingReasons,
-            reason => reason.Contains("MAX is currently unavailable for the single-HDD tiered layout", StringComparison.OrdinalIgnoreCase));
-        Assert.Empty(plan.Preview.Actions);
-        Assert.Empty(plan.RemovedPools);
-        Assert.Empty(plan.RemovedVirtualDisks);
-        Assert.Empty(plan.RemovedTiers);
-        Assert.Empty(plan.Creations);
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        Assert.Contains(plan.Preview.Actions, action => action.Contains("1 GiB steps", StringComparison.Ordinal));
+        Assert.Equal(replacingExistingPool ? 1 : 0, plan.RemovedPools.Count);
+        var creation = Assert.Single(plan.Creations);
+        Assert.True(creation.Intent.VirtualDiskUseMaximum);
+        Assert.Equal(PoolVirtualDiskLayout.HddTiered, creation.Intent.Layout);
         Assert.Same(prior.Snapshot, session.Working);
     }
 

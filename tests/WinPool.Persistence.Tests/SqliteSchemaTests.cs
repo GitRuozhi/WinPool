@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
@@ -11,7 +11,7 @@ public sealed class SqliteSchemaTests
     [
         "schema_info", "workspace_state", "systems",
         "inventory_snapshots", "local_inventory_document", "storage_objects", "storage_relationships",
-        "operation_plans", "operation_steps", "execution_events",
+        "operation_plans", "operation_steps", "operation_capacity_attempts", "execution_events",
         "simulation_documents", "simulation_edit_commits",
         "monitor_sessions", "monitor_devices", "monitor_samples", "storage_health_events",
         "monitor_rollups",
@@ -261,7 +261,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 18, 0);
+        VALUES(1, 19, 0);
         """,
         "schema_info.checks")]
     [InlineData(
@@ -298,6 +298,33 @@ public sealed class SqliteSchemaTests
     }
 
     [Fact]
+    public async Task Schema18UpgradeAddsAttemptJournalWithoutChangingUnknownOperationEvidence()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        var operation = Guid.NewGuid().ToString("N");
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                DROP TABLE operation_capacity_attempts;
+                UPDATE schema_info SET schema_version=18 WHERE singleton=1;
+                INSERT INTO operation_plans(operation_id,plan_hash,environment_id,risk,state,sanitized_json,created_at_utc_ms)
+                    VALUES($operation,'hash','environment',4,11,'{}',1000);
+                INSERT INTO operation_steps(operation_id,step_id,sequence_no,state,sanitized_json,target_json,evidence_json)
+                    VALUES($operation,'step',0,7,'{}','exact-old-target','original-unknown-receipt');
+                """;
+            command.Parameters.AddWithValue("$operation", operation);
+            await command.ExecuteNonQueryAsync();
+        }
+        await database.Store.InitializeAsync();
+        await using var verify = await database.Store.OpenConnectionAsync();
+        Assert.Equal(19, await ScalarInt64Async(verify,"SELECT schema_version FROM schema_info WHERE singleton=1;"));
+        Assert.Equal(11, await ScalarInt64Async(verify,"SELECT state FROM operation_plans;"));
+        Assert.Equal("original-unknown-receipt", await ScalarTextAsync(verify,"SELECT evidence_json FROM operation_steps;"));
+        Assert.Equal(0, await ScalarInt64Async(verify,"SELECT COUNT(*) FROM operation_capacity_attempts;"));
+    }
+
+    [Fact]
     public async Task Schema17UpgradePreservesUnfinishedOperationAndHistory()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
@@ -306,6 +333,7 @@ public sealed class SqliteSchemaTests
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = """
+                DROP TABLE operation_capacity_attempts;
                 ALTER TABLE operation_plans DROP COLUMN authorization_digest;
                 ALTER TABLE operation_plans DROP COLUMN accepted_at_utc_ms;
                 DROP INDEX ix_operation_plans_preparation_id;
@@ -331,7 +359,7 @@ public sealed class SqliteSchemaTests
         await database.Store.InitializeAsync();
 
         await using var verify = await database.Store.OpenConnectionAsync();
-        Assert.Equal(18, await ScalarInt64Async(verify,
+        Assert.Equal(WinPoolSqliteStore.CurrentSchemaVersion, await ScalarInt64Async(verify,
             "SELECT schema_version FROM schema_info WHERE singleton=1;"));
         Assert.Equal(3, await ScalarInt64Async(verify,
             $"SELECT state FROM operation_plans WHERE operation_id='{operation}';"));

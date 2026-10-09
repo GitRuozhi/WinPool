@@ -4,7 +4,7 @@ namespace WinPool.App.Services;
 
 internal readonly record struct RealVirtualDiskCreationCapacity(long SizeBytes, bool UseMaximumSize);
 
-/// <summary>Preserves native MAX intent; only explicit byte requests query and validate provider ranges.</summary>
+/// <summary>Preserves MAX intent for Agent-side freezing and search; explicit bytes are validated here.</summary>
 internal static class RealVirtualDiskCreationCapacityResolver
 {
     public static async Task<RealVirtualDiskCreationCapacity> ResolveAsync(

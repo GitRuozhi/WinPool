@@ -31,7 +31,13 @@ public sealed record WindowsStorageCommandTarget(
     string PartitionTypeGuid = "",
     bool CreatedInThisPlan = false,
     string StorageSubsystemObjectId = "",
-    string PhysicalMemberObjectId = "");
+    string PhysicalMemberObjectId = "",
+    bool MaximumCapacityAttempt = false,
+    IReadOnlyList<WindowsStoragePhysicalMemberTarget>? PhysicalMembers = null,
+    IReadOnlyList<WindowsStorageTierTarget>? TierInputs = null);
+
+public sealed record WindowsStoragePhysicalMemberTarget(string StableId, string UniqueId, string ObjectId, string SerialNumber);
+public sealed record WindowsStorageTierTarget(string TemplateStableId, string UniqueId, string ObjectId, string MediaType, long SizeBytes);
 
 /// <summary>
 /// A command return is evidence for post-call capture, not a verified success.
@@ -53,7 +59,13 @@ public sealed record WindowsStorageCommandResult(
     WindowsNativeMsrSafetyEvidence? NativeMsrSafetyEvidence = null,
     IReadOnlyList<WindowsVolumeSafetyEvidence>? VolumeSafetyEvidence = null,
     IReadOnlyList<WindowsNativeMsrSafetyEvidence>? OfflinePartitionAttributes = null,
-    WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null);
+    WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null,
+    WindowsStorageProviderFailure? ProviderFailure = null);
+
+/// <summary>Storage method status is distinct from MI native status or HRESULT. Never infer capacity from translated text.</summary>
+public sealed record WindowsStorageProviderFailure(uint? StorageReturnCode, string CodeSource,
+    string FullyQualifiedErrorId, uint? MiNativeErrorCode, int? HResult, string? ErrorDataClass, string? ErrorDataJson,
+    int? ErrorCategory = null, uint? ErrorCode = null, string? ErrorType = null, string? ExtendedMessage = null);
 
 /// <summary>Frozen creation mechanism and actual provider parameters. Automatic HDD creation records the constraint template separately from the null provider template.</summary>
 public sealed record WindowsTieredCreationInput(

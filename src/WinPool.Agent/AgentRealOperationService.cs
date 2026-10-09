@@ -875,8 +875,7 @@ public sealed class AgentRealOperationService : IRealOperationService
                 step.StepId, ToPublicState(step.State),
                 stepCodes.GetValueOrDefault(step.StepId),
                 step.TargetJson, step.EvidenceJson)).ToArray();
-            var result = await backend!.ReconcileAsync(
-                plan, progress, CancellationToken.None);
+            var result = await ReconcilePlanAsync(plan, progress);
             if (!result.CanReleaseWriteBarrier)
             {
                 return;
@@ -986,6 +985,163 @@ public sealed class AgentRealOperationService : IRealOperationService
         };
     }
 
+    private static bool IsMaximumCapacityMacro(RealOperationStep step) => step.Command is
+        CreateVirtualDiskCommand { UseMaximumSize: true, MaximumCapacity: not null }
+        or CreateTieredVirtualDiskCommand { UseMaximumSize: true, MaximumCapacity: not null };
+
+    private async Task<RealStepResult> ExecuteAcceptedStepAsync(OperationPlan plan,
+        RealOperationStep step, RealStepPreflight preflight)
+    {
+        if (!IsMaximumCapacityMacro(step))
+            return await backend!.ExecuteStepAsync(plan, step, preflight, CancellationToken.None);
+        if (backend is not IMaximumCapacitySearchBackend maximum)
+            return new(RealStepOutcome.OutcomeUnknown, "operation.maximum.backend_unavailable",
+                "{\"NotVerified\":true,\"Reason\":\"capacity_backend_unavailable\"}");
+        var journal = new GuardedMaximumCapacityJournal(plans.CreateMaximumCapacityJournal(
+            plan.OperationId, step.Id, () => stopAfterCurrentStep.ContainsKey(plan.OperationId)));
+        // The parent CallIssued is durable before entry. The backend must also
+        // persist each candidate and its own CallIssued before invoking Windows.
+        var result = await maximum.ExecuteMaximumCapacitySearchAsync(plan, step, preflight,
+            journal, CancellationToken.None);
+        var attempts = await journal.ReadAsync(CancellationToken.None);
+        if (journal.MutationRejected || attempts.Any(attempt => attempt.State is
+                MaximumCapacityAttemptState.PreparingCall or MaximumCapacityAttemptState.CallIssued
+                    or MaximumCapacityAttemptState.OutcomeUnknown)
+            || result.Outcome == RealStepOutcome.Verified &&
+                (attempts.Count == 0 || !attempts.Any(attempt => attempt.State == MaximumCapacityAttemptState.Verified)
+                 || attempts.Any(attempt => attempt.State == MaximumCapacityAttemptState.FailedWithoutCall)
+                 || !CapacityJournalProvesMaximum(step, attempts)))
+            return new(RealStepOutcome.OutcomeUnknown, "operation.maximum.attempt_not_durable",
+                JsonSerializer.Serialize(new { NotVerified = true, Attempts = attempts }));
+        return result;
+    }
+
+    private async Task<RealReconciliationResult> ReconcilePlanAsync(OperationPlan plan,
+        IReadOnlyList<RealOperationStepProgress> progress)
+    {
+        var macros = plan.RealOperation!.Steps.Where(IsMaximumCapacityMacro).ToArray();
+        if (macros.Length == 0)
+            return await backend!.ReconcileAsync(plan, progress, CancellationToken.None);
+        // Creation plans currently contain one macro; layer attempts are its
+        // journal children, never mutable additions to the frozen plan/hash.
+        if (macros.Length != 1 || plan.RealOperation.Steps.Count != 1 || progress.Count != 1
+            || backend is not IMaximumCapacitySearchBackend maximum)
+            return new(RealOperationState.OutcomeUnknown, progress,
+                "operation.maximum.recovery_shape_unavailable", false);
+        var attempts = await plans.ReadMaximumCapacityAttemptsAsync(plan.OperationId, macros[0].Id);
+        // A snapshot, not a writer: Query/startup/final reconciliation cannot
+        // continue a capacity search or replay an issued child attempt.
+        var result = await maximum.ReconcileMaximumCapacitySearchAsync(plan, macros[0], progress[0],
+            attempts, CancellationToken.None);
+        return result.State == RealOperationState.Succeeded && !CapacityJournalProvesMaximum(macros[0], attempts)
+            ? new(RealOperationState.OutcomeUnknown, progress, "operation.maximum.boundary_not_durable", false)
+            : result;
+    }
+
+    private static bool CapacityJournalProvesMaximum(RealOperationStep step,
+        IReadOnlyList<MaximumCapacityAttemptRecord> attempts)
+    {
+        try
+        {
+            var policies = new Dictionary<string, MaximumCapacityPolicy>(StringComparer.Ordinal);
+            var seeds = new Dictionary<string, long>(StringComparer.Ordinal);
+            if (step.Command is CreateTieredVirtualDiskCommand { CapacityTiers: { Count: > 1 } tiers })
+            {
+                var seed = attempts.FirstOrDefault();
+                if (seed?.Attempt is not { Phase: MaximumCapacityAttemptPhase.Seed, Ordinal: 1, SearchTargetKey: "seed" }
+                    || seed.State != MaximumCapacityAttemptState.Verified
+                    || seed.Result is not { SeedSuccessfulBytes: { } sizes } seedResult || sizes.Count != tiers.Count) return false;
+                long total = 0;
+                foreach (var tier in tiers)
+                {
+                    if (tier.Tier.Existing is not { } id || tier.MaximumCapacity is not { } policy
+                        || !sizes.TryGetValue(id.ProviderKey, out var bytes)
+                        || bytes != MaximumCapacityAlgorithm.SeedBytes(policy.InitialCandidateBytes) || bytes <= 0)
+                        return false;
+                    policies.Add(id.ProviderKey, policy);
+                    seeds.Add(id.ProviderKey, bytes);
+                    total = checked(total + bytes);
+                }
+                if (seed.Attempt.CandidateBytes != total || seedResult.LastSuccessfulBytes != total) return false;
+            }
+            else
+            {
+                var policy = step.Command switch
+                {
+                    CreateVirtualDiskCommand value => value.MaximumCapacity,
+                    CreateTieredVirtualDiskCommand value => value.MaximumCapacity,
+                    _ => null
+                };
+                if (policy is null) return false;
+                var key = step.Command is CreateTieredVirtualDiskCommand { Tier.Existing: { } tierId }
+                    ? tierId.ProviderKey : "virtual-disk";
+                policies.Add(key, policy);
+            }
+            if (attempts.Select((row, index) => row.Attempt.Ordinal == index + 1).Any(valid => !valid)
+                || attempts.Count(row => row.Attempt.Phase == MaximumCapacityAttemptPhase.Seed) != (seeds.Count > 0 ? 1 : 0)
+                || attempts.Any(row => row.Attempt.Phase != MaximumCapacityAttemptPhase.Seed
+                    && !policies.ContainsKey(row.Attempt.SearchTargetKey))) return false;
+            var order = new List<string>();
+            foreach (var row in attempts.Where(row => row.Attempt.Phase != MaximumCapacityAttemptPhase.Seed))
+                if (order.Count == 0 || order[^1] != row.Attempt.SearchTargetKey)
+                    order.Add(row.Attempt.SearchTargetKey);
+            if (!order.SequenceEqual(policies.Keys, StringComparer.Ordinal)) return false;
+            foreach (var (key, policy) in policies)
+            {
+                var state = MaximumCapacitySearchState.Start(policy.InitialCandidateBytes, seeds.GetValueOrDefault(key));
+                var rows = attempts.Where(row => row.Attempt.SearchTargetKey == key).ToArray();
+                if (rows.Length == 0 || rows.Length > policy.MaximumAttempts) return false;
+                foreach (var row in rows)
+                {
+                    if (state.IsComplete || row.Attempt.CandidateBytes != state.CandidateBytes
+                        || row.Attempt.LastSuccessfulBytes != state.LastSuccessfulBytes
+                        || row.State is not (MaximumCapacityAttemptState.Verified or MaximumCapacityAttemptState.CapacityRejectedUnchanged)
+                        || row.Attempt.Phase != (state.LastSuccessfulBytes == 0
+                            ? MaximumCapacityAttemptPhase.Create : MaximumCapacityAttemptPhase.Resize)) return false;
+                    state.Observe(row.State == MaximumCapacityAttemptState.Verified);
+                    if (row.Result is not { } observed || observed.State != row.State
+                        || observed.LastSuccessfulBytes != state.LastSuccessfulBytes) return false;
+                }
+                if (!state.HasMaximum) return false;
+            }
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+        {
+            return false;
+        }
+    }
+
+    private sealed class GuardedMaximumCapacityJournal(IMaximumCapacityAttemptJournal inner)
+        : IMaximumCapacityAttemptJournal
+    {
+        private int rejected;
+        public bool MutationRejected => Volatile.Read(ref rejected) != 0;
+        public bool IsStopRequested => inner.IsStopRequested;
+        public Task<IReadOnlyList<MaximumCapacityAttemptRecord>> ReadAsync(CancellationToken cancellationToken) =>
+            inner.ReadAsync(cancellationToken);
+        public Task<bool> PrepareAsync(MaximumCapacityAttempt attempt, CancellationToken cancellationToken) =>
+            GuardAsync(() => inner.PrepareAsync(attempt, cancellationToken));
+        public Task<bool> MarkCallIssuedAsync(int ordinal, CancellationToken cancellationToken) =>
+            GuardAsync(() => inner.MarkCallIssuedAsync(ordinal, cancellationToken));
+        public Task<bool> CompleteAsync(int ordinal, MaximumCapacityAttemptResult result, CancellationToken cancellationToken) =>
+            GuardAsync(() => inner.CompleteAsync(ordinal, result, cancellationToken));
+        private async Task<bool> GuardAsync(Func<Task<bool>> action)
+        {
+            try
+            {
+                var accepted = await action();
+                if (!accepted) Interlocked.Exchange(ref rejected, 1);
+                return accepted;
+            }
+            catch
+            {
+                Interlocked.Exchange(ref rejected, 1);
+                throw;
+            }
+        }
+    }
+
     private async Task RunStepsAsync(OperationPlan plan)
     {
         var operationId = plan.OperationId;
@@ -1089,8 +1245,8 @@ public sealed class AgentRealOperationService : IRealOperationService
             await NotifyEditObserverAsync(operationId);
             try
             {
-                result = await StorageOperationTiming.MeasureAsync("real.step.execute", () => backend!.ExecuteStepAsync(
-                    plan, step, preflight, CancellationToken.None), operationId, step.Id);
+                result = await StorageOperationTiming.MeasureAsync("real.step.execute", () => ExecuteAcceptedStepAsync(
+                    plan, step, preflight), operationId, step.Id);
             }
             catch
             {
@@ -1175,8 +1331,7 @@ public sealed class AgentRealOperationService : IRealOperationService
         RealReconciliationResult reconciled;
         try
         {
-            reconciled = await backend!.ReconcileAsync(
-                plan, progress, CancellationToken.None);
+            reconciled = await ReconcilePlanAsync(plan, progress);
         }
         catch
         {
