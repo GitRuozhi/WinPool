@@ -489,7 +489,7 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
-    public void FrozenConfirmationShowsExactTargetsTrustedFactsParametersAndLoss()
+    public void FrozenConfirmationShowsReadableTargetsChangesAndDataImpactWithoutInternalIds()
     {
         var system = SystemId.New();
         var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "os-disk-0-id");
@@ -501,11 +501,11 @@ public sealed class RealOperationUiFlowTests
         }] };
         var text = RealOperationConfirmationFormatter.Format(Freeze(clear), true);
         Assert.Contains("os-disk-0-id", text);
-        Assert.Contains("WDC WD40EZAZ", text);
-        Assert.Contains("OS disk number 0", text);
-        Assert.Contains("offset 17825792", text);
-        Assert.Contains("removeOem=False", text);
-        Assert.Contains("数据损失", text);
+        Assert.Contains("清空为 RAW", text);
+        Assert.Contains("数据影响", text);
+        Assert.DoesNotContain("OperationId", text);
+        Assert.DoesNotContain("Plan hash", text);
+        Assert.DoesNotContain("WDC WD40EZAZ", text); // BeforeCondition prose is not used as identity.
 
         var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
         var create = RealOperationProposalFactory.CreateFirstVirtualDisk(
@@ -514,9 +514,11 @@ public sealed class RealOperationUiFlowTests
                 true, true, true, "Data", 'E'));
         var createText = RealOperationConfirmationFormatter.Format(Freeze(create), false);
         Assert.Contains("pool-id", createText);
-        Assert.Contains("sizeBytes=17179869184", createText);
-        Assert.Contains("interleaveBytes=65536 dataColumns=1", createText);
-        Assert.Contains("createdByStep=", createText);
+        Assert.Contains("17,179,869,184 bytes", createText);
+        Assert.Contains("65,536 bytes interleave", createText);
+        Assert.Contains("virtual disk “NewVD”", createText);
+        Assert.DoesNotContain("createdByStep", createText);
+        Assert.DoesNotContain("operation-1", createText);
 
         var msr = new StorageObjectId(system, StorageObjectKind.Partition, "provider-msr-id");
         var layout = RealOperationProposalFactory.ConfigureInitializedDisk(

@@ -271,11 +271,11 @@
                 <Button x:Name="QueryRealOperationButton"
                         HorizontalAlignment="Left"
                         Click="QueryRealOperation_Click"
-                        Content="Query real operation by ID" />
+                        Content="View operation result" />
                 <Button x:Name="StopRealOperationButton"
                         HorizontalAlignment="Left"
                         Click="StopRealOperation_Click"
-                        Content="Stop following real steps by ID" />
+                        Content="Stop following steps" />
             </StackPanel>
         </Border>
         <ScrollViewer

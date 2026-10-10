@@ -283,9 +283,46 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        await coordinator.HandleAsync(new RequestAgentShutdownRequest(
-            ShutdownReason.TrayExit, CorrelationId.New()));
+        try
+        {
+            var result = await coordinator.HandleAsync(new RequestAgentShutdownRequest(
+                ShutdownReason.TrayExit, CorrelationId.New()));
+            if (result.Status == ApplicationStatus.Succeeded
+                && result.Value is ShutdownResponse { Result.Completed: true }) return;
+
+            var code = result.Messages.FirstOrDefault()?.Code ?? "agent.shutdown.incomplete";
+            var detail = code == "agent.shutdown.real_operation_active"
+                ? ExitText("真实磁盘操作仍在处理。已停止接收新写入，当前操作会继续，不会被强制终止。请在操作完成后重试退出。",
+                    "A real disk operation is still being processed. New writes are blocked and the current operation will continue without being terminated. Retry Exit after it finishes.")
+                : ExitText("WinPool 尚未完成退出，请重试。", "WinPool could not finish exiting. Please retry.");
+            detail += $"\n\n{code}";
+            if (coordinator.ShutdownExecution is { } execution)
+            {
+                if (execution.FailedSteps.Count > 0)
+                    detail += "\n" + ExitText("未完成步骤：", "Incomplete steps: ")
+                        + string.Join(", ", execution.FailedSteps);
+                if (execution.Result.RemainingProcessIds.Count > 0)
+                    detail += "\n" + ExitText("仍在运行的进程：", "Processes still running: ")
+                        + string.Join(", ", execution.Result.RemainingProcessIds);
+            }
+            ShowExitFailure(detail);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            ShowExitFailure(ExitText("退出失败：", "Exit failed: ") + exception.Message);
+        }
     }
+
+    private string ExitText(string chinese, string english) =>
+        preferences.Language == LanguagePreference.ZhCn
+            || preferences.Language == LanguagePreference.SystemDefault
+            && System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
+                .Equals("zh", StringComparison.OrdinalIgnoreCase) ? chinese : english;
+
+    private void ShowExitFailure(string detail) => uiContext.Post(_ =>
+        MessageBox.Show(detail, ExitText("WinPool 退出未完成", "WinPool exit incomplete"),
+            MessageBoxButtons.OK, MessageBoxIcon.Warning), null);
 
     private static string ResolveMainApplicationPath() =>
         Path.GetFullPath(

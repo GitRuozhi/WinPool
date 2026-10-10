@@ -1,6 +1,6 @@
 # V0.59 执行计划：真实操作回归产品设计
 
-日期：2026-10-09；已纳入用户对编辑页交互、执行反馈和采集性能的要求，以及真实 MAX 的执行语义纠正。
+日期：2026-10-10；已纳入用户对编辑页交互、执行反馈和采集性能的要求，以及真实 MAX 的执行语义纠正。
 
 **状态：实施中；按最新用户决定实现真实／模拟共用整数 GiB MAX 搜索。** §10.4 取代此前真实原生 MAX、禁止试探及模拟 4 GiB 对齐的当前行为要求；历史测试、微软侧接口归因与证据保持原状。当前版本仍为 V0.58／iteration8，代码及正向实机验收完成前不升版或归档。
 
@@ -12,7 +12,7 @@
 | 接手基线 | `main`，`0609e90`；本地 HEAD 与当前本地上游引用 `origin/main` 相同，未联网核对远端；功能收口提交为 `6f51bc7`，后两次提交仅扩充 Plan |
 | 本阶段目标版本 | V0.59；实施与验收收口时将迭代值改为 9，本草稿不提前升版 |
 | 核心目标 | 将真实执行能力接回原产品建池、改池流程；按用户要求调整两编辑页、磁盘按钮与扩缩公式，修复 MSR 选项，缩短执行/刷新等待并联动预期改动 |
-| 当前进度 | 普通原生 MAX、自动布局和前轮B5保留成功证据。单 HDD 明确3,997,809,246,208-byte实际层已由pwsh及修正后原UI同值创建；层范围校验、大层采集、写前NoCall和旧未知删除只读恢复已验证。最新门1900项／1897通过／0失败／3未执行，WDC恢复及Samsung限定结构比较通过。单 HDD 分层 MAX 两条原生候选未保型成功，仍继续技术调查。保持iteration8和活动Plan，既不估算回退，也不把临时拒绝门算作正向完成 |
+| 当前进度 | §10.4 的共享整数 GiB MAX 已验证；不能据此认定整个产品流程已收口。2026-10-10 用户指出层列数、位置格式、按ID入口、准备计划及异常退出残留，按§10.5修复；本轮只做相关回归、构建和必要退出验证，不运行全量测试。保持iteration8和活动Plan |
 
 ## 1. 依据与问题定位
 
@@ -536,3 +536,11 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 - [冻结完整工程门](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/20261009-203701/summary.json)：12项目，1999 Total／1996 Passed／0 Failed／3 NotExecuted，restore／Release build均0，构建零警告／错误，412源码文件前后hash一致。三项既有监控归档测量未执行不算通过；23项目依赖审计复用前轮，无新增依赖。20:30旧门1995／1989／3失败／3未执行如实保留：三条多层恢复正例因漏处理物理VirtualDiskFootprint增长而误拒，最小类型限定修复后[12项定向回归](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/multi-recovery-footprint-final/results.trx)通过，Pool同名／UID／OID篡改仍Unknown；最终完整门已覆盖。
 - 标准运行树普通重启原UI [RealOff及E卷](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Final/normal-restart-ui.txt)可见，监控Off、设置保留20Hz、偏好全部与B0相同。[重启后](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/after-final-restart-readonly-audit.json)与[退出后审计](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/after-final-exit-readonly-audit.json)确认Accepted256／parent CallIssued325不变、0未终结、412源码hash匹配最终门、运行库跨重启不变；不会自动续写旧搜索。原托盘[最终退出](../artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Final/final-normal-restart-exit-result.json)App／Agent均0。
 - 本次用户指定算法已实现及验证，文档同步并本地提交；不推送、不tag、不发布。产品版本仍V0.58／迭代8，本节完成不等于擅自关闭或归档V0.59整体活动Plan。多层无本机实测、无多盘UI、既有任意VD／层MAX编辑仍不在本次范围。
+
+### 10.5 编辑残留与异常退出修复（2026-10-10）
+
+用户要求修复只读自查确认的六项问题，并明确本轮不运行全量测试、修好即停。修复范围为层列数及三介质保存链、起止值格式、当前／恢复操作的结果与停止入口、扩缩主按钮、技术确认清单及旧编排残留、未知结果下的退出。真实多盘支持范围和 MAX 算法不扩大。
+
+持久 OutcomeUnknown 继续保留写入屏障与原证据；正常退出和安装修复版本不要求先把它变为终态。活动真实调用仍受 mutationGate 保护，退出请求停止接收新写入、说明原因，不能强杀调用。2026-10-10 的 `76958d530df843e083d1664a643fd74e` 为现有完整格式化未知记录，本次只用于重启／退出验证，不重放或修改历史证据。空输出的新故障保留真实进程退出码和错误输出；旧记录缺失诊断，不能补造原因或归因于固定超时。
+
+本轮仅执行直接相关过滤回归、一次 App／Agent Release 构建及原生退出检查；结果见 [Quality](Quality.md)。既有完整工程门只保留为历史，本轮不据此关闭 V0.59 整体活动计划。

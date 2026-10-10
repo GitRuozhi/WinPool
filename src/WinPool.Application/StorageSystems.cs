@@ -1132,18 +1132,18 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var tiers = new List<StorageTierInfo>
         {
             BuildTier(pool.StableId, "SSD", "Performance", members, request.PerformanceResiliency,
-                request.PerformanceInterleaveBytes, request.PerformanceDataCopies, null,
-                request.PerformanceUseMaximum ? null : request.PerformanceSizeBytes),
+                request.PerformanceInterleaveBytes, request.PerformanceDataCopies, request.PerformanceToleratedFailures,
+                request.PerformanceUseMaximum ? null : request.PerformanceSizeBytes, request.PerformanceColumns),
             BuildTier(pool.StableId, "HDD", "Capacity", members, request.CapacityResiliency,
-                request.CapacityInterleaveBytes, null, request.CapacityToleratedFailures,
+                request.CapacityInterleaveBytes, request.CapacityDataCopies, request.CapacityToleratedFailures,
                 request.CapacityUseMaximum ? null : request.CapacitySizeBytes,
                 request.CapacityColumns)
         };
         if (showScm)
         {
             tiers.Add(BuildTier(pool.StableId, "SCM", "Dedicated", members, request.ScmResiliency,
-                request.ScmInterleaveBytes, request.ScmDataCopies, null,
-                request.ScmUseMaximum ? null : request.ScmSizeBytes));
+                request.ScmInterleaveBytes, request.ScmDataCopies, request.ScmToleratedFailures,
+                request.ScmUseMaximum ? null : request.ScmSizeBytes, request.ScmColumns));
         }
 
         created = created with
@@ -1205,9 +1205,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var setting = resiliency ?? EditWorkspace.RecommendedResiliency(media, dataMembers.Length);
         var copies = dataCopies ?? EditWorkspace.RecommendedDataCopies(setting, dataMembers.Length);
         var tolerated = toleratedFailures ?? EditWorkspace.RecommendedToleratedFailures(setting, copies);
-        var columnCount = media == "HDD"
-            ? columns ?? EditWorkspace.RecommendedCapacityColumns(dataMembers)
-            : (int?)null;
+        var columnCount = columns ?? EditWorkspace.RecommendedTierColumns(setting, dataMembers);
         var estimate = ConservativeCapacity.PlanLogicalUpperBound(
             dataMembers.Select(item => item.Size).ToArray(),
             setting,
@@ -1272,21 +1270,21 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 if (media == "SSD")
                 {
                     return PatchTier(tier, request.PerformanceResiliency, request.PerformanceInterleaveBytes,
-                        request.PerformanceDataCopies, null, request.PerformanceSizeBytes, null,
+                        request.PerformanceDataCopies, request.PerformanceToleratedFailures, request.PerformanceSizeBytes, request.PerformanceColumns,
                         request.PerformanceUseMaximum, snapshot);
                 }
 
                 if (media == "HDD")
                 {
                     return PatchTier(tier, request.CapacityResiliency, request.CapacityInterleaveBytes,
-                        null, request.CapacityToleratedFailures, request.CapacitySizeBytes, request.CapacityColumns,
+                        request.CapacityDataCopies, request.CapacityToleratedFailures, request.CapacitySizeBytes, request.CapacityColumns,
                         request.CapacityUseMaximum, snapshot);
                 }
 
                 if (media == "SCM")
                 {
                     return PatchTier(tier, request.ScmResiliency, request.ScmInterleaveBytes,
-                        request.ScmDataCopies, null, request.ScmSizeBytes, null,
+                        request.ScmDataCopies, request.ScmToleratedFailures, request.ScmSizeBytes, request.ScmColumns,
                         request.ScmUseMaximum, snapshot);
                 }
 

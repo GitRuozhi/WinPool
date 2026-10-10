@@ -84,7 +84,18 @@ public sealed record SimulationEditRequest(
     string? PartitionStyle = null,
     // Null leaves unrelated requests unchanged and means the legacy quick-format default for format operations.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    bool? QuickFormat = null);
+    bool? QuickFormat = null,
+    // Optional additions preserve legacy JSON and plan hashes when unused.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? PerformanceColumns = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ScmColumns = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? CapacityDataCopies = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? PerformanceToleratedFailures = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? ScmToleratedFailures = null);
 
 public sealed record SimulationPlanItem(
     string Id,

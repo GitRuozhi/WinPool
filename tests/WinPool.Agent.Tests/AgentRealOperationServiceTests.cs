@@ -11,6 +11,72 @@ namespace WinPool.Agent.Tests;
 public sealed class AgentRealOperationServiceTests
 {
     [Fact]
+    public async Task DurableUnknownAllowsShutdownWithoutChangingEvidenceOrReplayingOnRestart()
+    {
+        var backend = new RecordingBackend { UnknownStepId = "initialize-gpt" };
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
+        await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.OutcomeUnknown);
+        var before = await fixture.Plans.GetAsync(plan.OperationId);
+        var beforeSteps = await fixture.Plans.GetStepsAsync(plan.OperationId);
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (!await fixture.Service.TryCloseAdmissionForShutdownAsync())
+                await Task.Delay(10, timeout.Token);
+
+        Assert.Equal(JsonSerializer.Serialize(before), JsonSerializer.Serialize(await fixture.Plans.GetAsync(plan.OperationId)));
+        Assert.Equal(beforeSteps, await fixture.Plans.GetStepsAsync(plan.OperationId));
+        Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+        Assert.False((await fixture.Service.PrepareAsync(new(fixture.Proposal, Guid.NewGuid(),
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).IsSuccess);
+        Assert.Equal(1, backend.ExecuteCalls);
+
+        var reconciled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var restartedBackend = new RecordingBackend { Reconciliation = (_, steps) =>
+        {
+            reconciled.TrySetResult();
+            return Task.FromResult(new RealReconciliationResult(RealOperationState.OutcomeUnknown,
+                steps, "fake.readonly_recovery", false));
+        }};
+        var restarted = new AgentRealOperationService(fixture.Plans, fixture.Events, restartedBackend,
+            new FixedMachineIdentity(), authority: null, timeProvider: null,
+            isSessionStillArmed: _ => true, isAdministrator: () => true);
+        await restarted.InitializeRecoveryAsync();
+        await reconciled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+        Assert.Equal(0, restartedBackend.ExecuteCalls);
+        Assert.False((await restarted.EnterModeAsync(new(fixture.Session.ProductSessionId,
+            CorrelationId.New()), fixture.Session, default)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task ShutdownClosesNewWriteAdmissionButDoesNotCancelAnActiveProvider()
+    {
+        var backend = new RecordingBackend { PauseExecution = true };
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        try
+        {
+            var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
+            await backend.ExecutionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(await fixture.Service.TryCloseAdmissionForShutdownAsync());
+            Assert.False(backend.ExecutionToken.IsCancellationRequested);
+            Assert.Equal(PersistedOperationState.Running, (await fixture.Plans.GetAsync(plan.OperationId))!.State);
+            backend.ReleaseExecution.TrySetResult();
+            await AwaitSucceededAsync(fixture.Service, plan.OperationId, fixture.Session);
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                while (!await fixture.Service.TryCloseAdmissionForShutdownAsync())
+                    await Task.Delay(10, timeout.Token);
+            Assert.False((await fixture.Service.PrepareAsync(new(fixture.Proposal, Guid.NewGuid(),
+                fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).IsSuccess);
+            Assert.Equal(1, backend.ExecuteCalls);
+        }
+        finally { backend.ReleaseExecution.TrySetResult(); }
+    }
+
+    [Fact]
     public async Task CreationBoundsAreReadOnlyAndRequireTheArmedProductSession()
     {
         var backend = new RecordingBackend();
@@ -1401,6 +1467,7 @@ public sealed class AgentRealOperationServiceTests
         public bool PauseRunnerPreflight { get; init; }
         public bool PauseAcceptPreflight { get; init; }
         public bool PauseExecution { get; init; }
+        public CancellationToken ExecutionToken { get; private set; }
         public TimeProvider Clock { get; init; } = TimeProvider.System;
         public TaskCompletionSource AcceptPreflightEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseAcceptPreflight { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1481,6 +1548,7 @@ public sealed class AgentRealOperationServiceTests
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref executeCalls);
+            ExecutionToken = cancellationToken;
             if (ExecutionException is { } failure) throw failure;
             if (PauseExecution)
             {

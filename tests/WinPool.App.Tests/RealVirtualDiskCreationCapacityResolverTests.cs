@@ -88,11 +88,11 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
         var chinese = RealOperationConfirmationFormatter.Format(plan, chinese: true);
         var english = RealOperationConfirmationFormatter.Format(plan, chinese: false);
 
-        Assert.Contains("最大容量（由 Windows 决定实际容量）", chinese);
-        Assert.Contains("UseMaximumSize=true", chinese);
+        Assert.Contains("最大可用容量（执行时测定）", chinese);
+        Assert.DoesNotContain("UseMaximumSize=true", chinese);
         Assert.DoesNotContain("sizeBytes=0", chinese);
-        Assert.Contains("MAX (actual capacity determined by Windows)", english);
-        Assert.Contains("UseMaximumSize=true", english);
+        Assert.Contains("maximum available capacity (measured during the operation)", english);
+        Assert.DoesNotContain("UseMaximumSize=true", english);
         Assert.DoesNotContain("sizeBytes=0", english);
     }
 
@@ -112,7 +112,7 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
     }
 
     [Fact]
-    public void FrozenMaximumSearchDisplaysExactOriginCandidateDirectionAndStopPolicy()
+    public void FrozenMaximumSearchShowsUserRelevantCandidateWithoutInternalSearchDiagnostics()
     {
         var system = SystemId.New();
         var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
@@ -127,12 +127,14 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
             Command = ((CreateVirtualDiskCommand)step.Command) with { MaximumCapacity = policy }
         }).ToArray() };
         var text = RealOperationConfirmationFormatter.Format(Freeze(proposal), chinese: false);
-        Assert.Contains("C=99 GiB", text);
-        Assert.Contains("4,000,000 bytes", text);
-        Assert.Contains("descend 1 GiB", text);
-        Assert.Contains("ascend 1 GiB", text);
-        Assert.Contains("unknown stops", text);
-        Assert.Contains("source-fingerprint", text);
+        Assert.Contains("starting candidate", text);
+        Assert.Contains("99 GiB", text);
+        Assert.Contains("maximum-capacity search", text);
+        Assert.DoesNotContain("4,000,000 bytes", text);
+        Assert.DoesNotContain("descend 1 GiB", text);
+        Assert.DoesNotContain("ascend 1 GiB", text);
+        Assert.DoesNotContain("source-fingerprint", text);
+        Assert.DoesNotContain("fingerprint", text);
         Assert.DoesNotContain("actual capacity determined by Windows", text);
     }
 
@@ -149,9 +151,9 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
 
         var text = RealOperationConfirmationFormatter.Format(Freeze(proposal), chinese: false);
 
-        Assert.Contains("creationMechanism=ExactTemplate", text);
-        Assert.Contains("tier=StorageTier id=\"hdd-template-id\"", text);
-        Assert.Contains($"sizeBytes={16 * MiB}", text);
+        Assert.Contains("storage pool (pool-id)", text);
+        Assert.Contains("storage tier (hdd-template-id)", text);
+        Assert.Contains("16,777,216 bytes", text);
         Assert.DoesNotContain("WindowsAutomaticHdd", text);
     }
 
@@ -167,7 +169,7 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
 
         var text = RealOperationConfirmationFormatter.Format(Freeze(proposal), chinese: false);
 
-        Assert.Contains($"sizeBytes={bytes}", text);
+        Assert.Contains("17,179,869,184 bytes", text);
         Assert.DoesNotContain("UseMaximumSize=true", text);
         Assert.DoesNotContain("actual capacity determined by Windows", text);
     }

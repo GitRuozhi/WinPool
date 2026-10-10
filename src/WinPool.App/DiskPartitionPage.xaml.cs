@@ -127,10 +127,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
         ShowPropertiesButton.Content = Text("属性", "Properties");
-        QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
-        QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
-        StopRealOperationButton.Content = Text("按 ID 停止后续真实步骤", "Stop following real steps by ID");
-        StopRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
+        QueryRealOperationButton.Content = Text("查看操作结果", "View operation result");
+        StopRealOperationButton.Content = Text("停止后续步骤", "Stop following steps");
+        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         DiskOnlineStateButtonLabel.Text = Text("联机/脱机", "Online/offline");
         DiskPartitionStyleButtonLabel.Text = Text("分区表状态", "Partition style");
         ClearDiskButtonLabel.Text = Text("清空至 RAW", "Clear to RAW");
@@ -749,6 +748,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void UpdateButtonState()
     {
+        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var real = ViewModel.CanSubmitRealOperation;
         var operationBusy = ViewModel.IsRealOperationBusy
@@ -1579,13 +1579,45 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        var cultureName = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn
-            ? "zh-CN"
-            : "en-US";
-        mibValue.Text = "MiB " + ((decimal)value / BytesPerMiB).ToString(
-            "#,0.################",
-            System.Globalization.CultureInfo.GetCultureInfo(cultureName));
-        adaptiveValue.Text = TopologyProjector.FormatBytes(value);
+        var culture = OffsetDisplayCulture();
+        mibValue.Text = $"{FormatExactMib(value, culture)} MiB";
+        adaptiveValue.Text = FormatAdaptiveBytes(value, culture);
+    }
+
+    private System.Globalization.CultureInfo OffsetDisplayCulture() =>
+        System.Globalization.CultureInfo.GetCultureInfo(
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "zh-CN" : "en-US");
+
+    private static string FormatExactMib(long bytes, System.Globalization.CultureInfo culture)
+    {
+        var whole = Math.Abs(bytes / BytesPerMiB);
+        var remainder = Math.Abs(bytes % BytesPerMiB);
+        var sign = bytes < 0 ? culture.NumberFormat.NegativeSign : string.Empty;
+        var value = whole.ToString("N0", culture);
+        if (remainder == 0)
+            return sign + value;
+
+        // MiB has a denominator of 2^20, so every byte value has an exact
+        // finite decimal representation with at most 20 fractional digits.
+        var fraction = ((decimal)remainder * 95_367_431_640_625m)
+            .ToString("00000000000000000000", System.Globalization.CultureInfo.InvariantCulture)
+            .TrimEnd('0');
+        return sign + value + culture.NumberFormat.NumberDecimalSeparator + fraction;
+    }
+
+    private static string FormatAdaptiveBytes(long bytes, System.Globalization.CultureInfo culture)
+    {
+        if (bytes <= 0)
+            return "0 B";
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+        var value = (double)bytes;
+        var index = 0;
+        while (value >= 1024 && index < units.Length - 1)
+        {
+            value /= 1024;
+            index++;
+        }
+        return $"{value.ToString("0.##", culture)} {units[index]}";
     }
 
     private static bool TryGetExclusiveRangeEnd(long startBytes, long sizeBytes, out long endBytes)
@@ -1718,10 +1750,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     }
 
     private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await QueryRealOperationByIdAsync();
+        await ViewCurrentRealOperationResultAsync();
 
     private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await StopRealOperationFollowingStepsByIdAsync();
+        await StopCurrentRealOperationFollowingStepsAsync();
 
     private async void DiskOnlineState_Click(object sender, RoutedEventArgs e)
     {
@@ -2436,17 +2468,20 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
         var suggestedMib = extend ? minimumMib : maximumMib;
+        var culture = OffsetDisplayCulture();
+        var targetName = RealOperationConfirmationFormatter.FormatTarget(
+            target,
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
+            ViewModel.ActiveDocument.SourceFacts);
         var rangeDetails =
-            $"{Text("准确目标", "Exact target")}: {range.Partition.ProviderKey}\n" +
-            $"{Text("当前容量", "Current size")}: {range.CurrentSizeBytes} bytes\n" +
-            $"{Text("Windows 支持范围", "Windows provider range")}: " +
-            $"{range.ProviderMinBytes}–{range.ProviderMaxBytes} bytes\n" +
+            $"{Text("目标分区", "Target partition")}: {targetName}\n" +
+            $"{Text("当前容量", "Current size")}: {FormatExactMib(range.CurrentSizeBytes, culture)} MiB ({range.CurrentSizeBytes.ToString("N0", culture)} bytes)\n" +
+            $"{Text("Windows 支持范围", "Windows supported range")}: " +
+            $"{FormatExactMib(range.ProviderMinBytes, culture)}–{FormatExactMib(range.ProviderMaxBytes, culture)} MiB\n" +
             $"{Text("几何交集", "Geometry intersection")}: " +
-            $"{range.AllowedMinBytes}–{range.AllowedMaxBytes} bytes\n" +
+            $"{FormatExactMib(range.AllowedMinBytes, culture)}–{FormatExactMib(range.AllowedMaxBytes, culture)} MiB\n" +
             $"{Text("本方向 1 MiB 目标范围", "Whole-MiB targets in this direction")}: " +
-            $"{minimumMib}–{maximumMib} MiB\n" +
-            $"{Text("采集时间", "Captured")}: {range.CapturedAtUtc.LocalDateTime:G}\n" +
-            $"Target fingerprint: {range.TargetFingerprint}";
+            $"{minimumMib.ToString("N0", culture)}–{maximumMib.ToString("N0", culture)} MiB";
         var targetSize = await PromptResizeFormulaAsync(
             range.CurrentSizeBytes,
             minimumMib,
@@ -2454,9 +2489,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             suggestedMib,
             extend,
             rangeDetails,
-            extend ? Text("真实扩展分区", "Extend real partition")
-                : Text("真实压缩分区", "Shrink real partition"),
-            Text("准备 Agent 计划", "Prepare Agent plan"));
+            extend ? Text("扩展分区", "Extend partition")
+                : Text("压缩分区", "Shrink partition"),
+            extend ? Text("扩展", "Extend") : Text("压缩", "Shrink"));
         if (targetSize is null)
             return;
         await SubmitRealAsync(RealPartitionIntent(OperationIntent.ResizePartition,

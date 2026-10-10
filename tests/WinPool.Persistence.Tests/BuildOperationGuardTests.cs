@@ -57,7 +57,6 @@ public sealed class BuildOperationGuardTests
     [InlineData(PersistedOperationState.Prepared)]
     [InlineData(PersistedOperationState.Accepted)]
     [InlineData(PersistedOperationState.Running)]
-    [InlineData(PersistedOperationState.OutcomeUnknown)]
     public async Task RefusalIdentifiesOperationAndStateWithoutChangingDatabase(
         PersistedOperationState state)
     {
@@ -75,6 +74,25 @@ public sealed class BuildOperationGuardTests
         Assert.Contains($"state={state}", fixture.LastProbeError);
         Assert.Contains("existing runtime tree", fixture.LastProbeError);
         Assert.Contains("query by OperationId for read-only reconciliation", fixture.LastProbeError);
+        Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
+    }
+
+    [Fact]
+    public async Task StoppedUnknownResultAllowsRepairWithoutChangingDatabaseOrWriteBarrier()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await using var fixture = new Fixture();
+        var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
+        var operationId = await fixture.PrepareAsync(store);
+        await fixture.ExecuteSqlAsync(store,
+            "UPDATE operation_plans SET state = $state;", ("$state", (object)(int)PersistedOperationState.OutcomeUnknown));
+        var before = await File.ReadAllBytesAsync(store.DatabasePath);
+
+        Assert.Equal(0, await fixture.ProbeAsync());
+
+        var reader = new OperationPlanRepository(store);
+        Assert.True(await reader.HasRealWriteBarrierAsync());
+        Assert.Equal(PersistedOperationState.OutcomeUnknown, (await reader.GetAsync(operationId))!.State);
         Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
     }
 

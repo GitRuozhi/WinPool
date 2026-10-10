@@ -402,60 +402,9 @@
                     </Grid>
                 </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="CreateHddTierButton" Visibility="Collapsed"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="CreateVdisk_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock x:Name="CreateHddTierButtonLabel" Grid.Column="1"
-                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="CreateTieredVdiskButton" Visibility="Collapsed"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="CreateVdisk_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock x:Name="CreateTieredVdiskButtonLabel" Grid.Column="1"
-                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="RenameHddTierButton" Visibility="Collapsed"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="SavePoolProperties_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE8AC;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock x:Name="RenameHddTierButtonLabel" Grid.Column="1"
-                                   VerticalAlignment="Center" MaxWidth="130" TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
+
+
+
                 <controls:ContextHelpHost>
                 <Button
                     x:Name="DeleteHddTierButton"
@@ -479,11 +428,11 @@
                 <Button x:Name="QueryRealOperationButton"
                         HorizontalAlignment="Left"
                         Click="QueryRealOperation_Click"
-                        Content="Query real operation by ID" />
+                        Content="View operation result" />
                 <Button x:Name="StopRealOperationButton"
                         HorizontalAlignment="Left"
                         Click="StopRealOperation_Click"
-                        Content="Stop following real steps by ID" />
+                        Content="Stop following steps" />
             </StackPanel>
         </Border>
         <toolkit:GridSplitter

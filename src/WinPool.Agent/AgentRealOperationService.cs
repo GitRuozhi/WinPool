@@ -621,6 +621,9 @@ public sealed class AgentRealOperationService : IRealOperationService
 
     public async Task<bool> TryCloseAdmissionForShutdownAsync()
     {
+        // Stop accepting new writes immediately, including while an accepted
+        // worker is still running. Never cancel that worker or its provider.
+        Volatile.Write(ref admissionClosed, 1);
         if (!await mutationGate.WaitAsync(0))
         {
             return false;
@@ -628,18 +631,9 @@ public sealed class AgentRealOperationService : IRealOperationService
 
         try
         {
-            if (Volatile.Read(ref recoveryReady) != 1
-                || await plans.HasRealWriteBarrierAsync(CancellationToken.None))
-            {
-                return false;
-            }
-
-            Volatile.Write(ref admissionClosed, 1);
+            // A durable unfinished/Unknown plan is a write barrier, not a live
+            // provider call. Leave it untouched for read-only startup recovery.
             return true;
-        }
-        catch
-        {
-            return false;
         }
         finally
         {

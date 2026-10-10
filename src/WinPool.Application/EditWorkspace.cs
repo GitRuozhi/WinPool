@@ -174,6 +174,13 @@ public static class EditWorkspace
         return sizes.Length == 1 ? members.Count : Math.Max(1, members.Count - 1);
     }
 
+    public static int RecommendedTierColumns(string resiliency, IReadOnlyList<PhysicalDiskInfo> members) =>
+        resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase)
+            ? 1
+            : resiliency.Equals("Parity", StringComparison.OrdinalIgnoreCase)
+                ? Math.Max(3, RecommendedCapacityColumns(members))
+                : RecommendedCapacityColumns(members);
+
     public static IReadOnlyList<TopologyNode> ProjectPartitionWorkspace(
         StorageSnapshot snapshot,
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes)
@@ -2212,7 +2219,7 @@ public sealed record StructureProblem(
                     var resiliency = RecommendedResiliency(media, members.Length);
                     var copies = RecommendedDataCopies(resiliency, members.Length);
                     var failures = RecommendedToleratedFailures(resiliency, copies);
-                    var columns = media == "HDD" ? RecommendedCapacityColumns(members) : (int?)null;
+                    var columns = RecommendedTierColumns(resiliency, members);
                     ConservativeCapacityEstimate? estimate = null;
                     try
                     {

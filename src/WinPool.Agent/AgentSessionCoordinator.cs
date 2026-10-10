@@ -417,7 +417,7 @@ public sealed class AgentSessionCoordinator
             && !await realService.TryCloseAdmissionForShutdownAsync())
         {
             return RejectRealRequest(
-                request.CorrelationId, "agent.shutdown.real_operation_unfinished");
+                request.CorrelationId, "agent.shutdown.real_operation_active");
         }
 
         Task<AgentShutdownExecution> executionTask;

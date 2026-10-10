@@ -140,7 +140,31 @@ public sealed class WindowsRealStorageCommandAdapterTests
 
         Assert.True(result.ProviderReturned);
         Assert.Equal("adapter.response-outcome-unknown", result.Code);
-        Assert.DoesNotContain("provider details", result.ProviderError!, StringComparison.Ordinal);
+        using var diagnostic = JsonDocument.Parse(result.ProviderError!);
+        Assert.Equal(0, diagnostic.RootElement.GetProperty("ExitCode").GetInt32());
+        Assert.Equal("provider details", diagnostic.RootElement.GetProperty("StandardError").GetString());
+        Assert.Equal("not-json", diagnostic.RootElement.GetProperty("StandardOutput").GetString());
+    }
+
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(-1, "PowerShell terminated without a result")]
+    public async Task EmptyOutputRetainsProcessDiagnosticsAndRemainsUnknown(int exitCode, string standardError)
+    {
+        var runner = new FakeRunner(new WindowsStorageProcessResult(exitCode, "", standardError));
+        var adapter = new WindowsRealStorageCommandAdapter(runner);
+        var disk = RealTargetReference.ForExisting(new StorageObjectId(SystemId.New(), StorageObjectKind.OsDisk, "disk"));
+
+        var result = await adapter.ExecuteAsync(new InitializeGptCommand(disk), DiskTarget(), default);
+
+        Assert.True(result.ProviderReturned);
+        Assert.Equal("adapter.response-outcome-unknown", result.Code);
+        using var diagnostic = JsonDocument.Parse(result.ProviderError!);
+        Assert.Equal("The write process returned no structured result.", diagnostic.RootElement.GetProperty("Reason").GetString());
+        Assert.Equal(exitCode, diagnostic.RootElement.GetProperty("ExitCode").GetInt32());
+        Assert.Equal(standardError, diagnostic.RootElement.GetProperty("StandardError").GetString());
+        Assert.Equal(0, diagnostic.RootElement.GetProperty("StandardOutputLength").GetInt32());
+        Assert.False(diagnostic.RootElement.GetProperty("StandardErrorTruncated").GetBoolean());
     }
 
     [Fact]
@@ -193,6 +217,9 @@ public sealed class WindowsRealStorageCommandAdapterTests
 
         Assert.True(result.ProviderReturned);
         Assert.Equal("adapter.response-outcome-unknown", result.Code);
+        using var diagnostic = JsonDocument.Parse(result.ProviderError!);
+        Assert.Equal(1, diagnostic.RootElement.GetProperty("ExitCode").GetInt32());
+        Assert.Equal("provider details", diagnostic.RootElement.GetProperty("StandardError").GetString());
         Assert.Equal(1, runner.Calls);
     }
 

@@ -69,7 +69,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
 
         if (string.IsNullOrWhiteSpace(process.StandardOutput))
         {
-            return Unknown("The write process returned no structured result.");
+            return Unknown("The write process returned no structured result.", process);
         }
 
         try
@@ -77,12 +77,12 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             var result = JsonSerializer.Deserialize<WindowsStorageCommandResult>(process.StandardOutput.Trim(), JsonOptions);
             if (result is null || string.IsNullOrWhiteSpace(result.Code))
             {
-                return Unknown("The write process result was incomplete.");
+                return Unknown("The write process result was incomplete.", process);
             }
 
             if (process.ExitCode != 0)
             {
-                return Unknown("The write process exited abnormally; a storage call may have changed the target.");
+                return Unknown("The write process exited abnormally; a storage call may have changed the target.", process);
             }
 
             return result switch
@@ -90,20 +90,35 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
                 { Code: "provider.returned", ProviderReturned: true } => result,
                 { Code: "adapter.preflight-rejected", ProviderReturned: false } => result,
                 { Code: "provider.error-outcome-unknown", ProviderReturned: true } => result,
-                _ => Unknown("The write process returned an inconsistent result.")
+                _ => Unknown("The write process returned an inconsistent result.", process)
             };
         }
         catch (JsonException)
         {
-            return Unknown("The write process returned invalid structured data.");
+            return Unknown("The write process returned invalid structured data.", process);
         }
     }
 
     private static WindowsStorageCommandResult Rejected(string code) =>
         new(false, code, null, null, null, null, null, null, null);
 
-    private static WindowsStorageCommandResult Unknown(string reason) =>
-        new(true, "adapter.response-outcome-unknown", null, null, null, null, null, null, reason);
+    private static WindowsStorageCommandResult Unknown(string reason, WindowsStorageProcessResult process) =>
+        new(true, "adapter.response-outcome-unknown", null, null, null, null, null, null,
+            JsonSerializer.Serialize(new
+            {
+                Reason = reason,
+                process.ExitCode,
+                StandardError = DiagnosticTail(process.StandardError),
+                StandardErrorLength = process.StandardError.Length,
+                StandardErrorTruncated = process.StandardError.Length > ProcessDiagnosticLimit,
+                StandardOutput = DiagnosticTail(process.StandardOutput),
+                StandardOutputLength = process.StandardOutput.Length,
+                StandardOutputTruncated = process.StandardOutput.Length > ProcessDiagnosticLimit
+            }, JsonOptions));
+
+    private const int ProcessDiagnosticLimit = 16_384;
+    private static string DiagnosticTail(string text) =>
+        text.Length <= ProcessDiagnosticLimit ? text : text[^ProcessDiagnosticLimit..];
 
     private static string? GetCommandKind(RealStorageCommand command) => command switch
     {

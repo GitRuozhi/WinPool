@@ -263,10 +263,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _autoVdiskSwitch.OffContent = Text("关", "Off");
         _autoPartitionSwitch.OnContent = Text("开", "On");
         _autoPartitionSwitch.OffContent = Text("关", "Off");
-        QueryRealOperationButton.Content = Text("按 ID 查询真实操作", "Query real operation by ID");
-        QueryRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
-        StopRealOperationButton.Content = Text("按 ID 停止后续真实步骤", "Stop following real steps by ID");
-        StopRealOperationButton.IsEnabled = ViewModel.AgentConnection is not null;
+        QueryRealOperationButton.Content = Text("查看操作结果", "View operation result");
+        StopRealOperationButton.Content = Text("停止后续步骤", "Stop following steps");
+        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         UndoButtonLabel.Text = ViewModel.Localization["Undo"];
         RedoButtonLabel.Text = ViewModel.Localization["Redo"];
         DiscardAllButtonLabel.Text = ViewModel.Localization["DiscardAll"];
@@ -277,9 +276,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HotSpareButtonLabel.Text = ViewModel.Localization["HotSpareDisk"];
         CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘和分区", "Create virtual disk and partition");
         DeleteVdiskButtonLabel.Text = Text("删除虚拟磁盘和分区", "Delete virtual disk and partition");
-        CreateHddTierButtonLabel.Text = Text("创建 HDD 层模板", "Create HDD tier template");
-        CreateTieredVdiskButtonLabel.Text = Text("按 HDD 层创建 16 GiB 虚拟磁盘", "Create 16 GiB HDD-tier virtual disk");
-        RenameHddTierButtonLabel.Text = Text("重命名 HDD 层", "Rename HDD tier");
         DeleteHddTierButtonLabel.Text = Text("删除未使用 HDD 层", "Delete unused HDD tier");
         SavePoolPropertiesButtonLabel.Text = ViewModel.Localization["SavePoolProperties"];
         ShowHotSpareLabel.Text = ViewModel.Localization["ShowHotSpareLayer"];
@@ -300,9 +296,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(HotSpareButton, Text("将选中的模拟池成员标为热备。", "Mark the selected simulated pool member as a hot spare."));
         ContextHelp.Set(CreateVdiskButton, Text("为符合条件的存储池创建虚拟磁盘和分区；真实操作需单独确认。", "Create a virtual disk and partition for an eligible pool; a real operation requires separate confirmation."));
         ContextHelp.Set(DeleteVdiskButton, Text("删除虚拟磁盘及其分区；真实删除会使其数据丢失。", "Delete a virtual disk and its partitions; real deletion loses their data."));
-        ContextHelp.Set(CreateHddTierButton, Text("在精确单 HDD 池中建立 64 KiB、单列 HDD 层模板。", "Create a 64 KiB, one-column HDD tier template in the exact single-HDD pool."));
-        ContextHelp.Set(CreateTieredVdiskButton, Text("将 16 GiB Simple Fixed 虚拟磁盘绑定到选中的真实 HDD 层模板；Agent 会核验精确容量。", "Create a 16 GiB Simple Fixed virtual disk bound to the selected real HDD template; the Agent verifies the exact supported size."));
-        ContextHelp.Set(RenameHddTierButton, Text("重命名选中的真实 HDD 层；不更改其身份或关联。", "Rename the selected real HDD tier without changing its identity or association."));
         ContextHelp.Set(DeleteHddTierButton, Text("只删除未关联虚拟磁盘的池级 HDD 层模板。", "Delete only an unused pool-level HDD tier template."));
         ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
         ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
@@ -474,7 +467,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
             ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
             ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
-            ContextHelp.Set(group.ColumnsBox, Text("奇偶校验层列数；按 Enter 规范化。", "Column count for a parity tier; press Enter to normalize."));
+            ContextHelp.Set(group.ColumnsBox, Text("列数须符合数据盘数和副本数；按 Enter 规范化。", "Columns must fit the data disk and copy counts; press Enter to normalize."));
         }
 
         var row = 0;
@@ -967,7 +960,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             if (ReferenceEquals(group.ColumnsBox, number))
             {
                 var value = NumValue(number) ?? (tier.NumberOfColumns ?? 1);
-                SetNum(number, Math.Clamp(value, 1, 64));
+                var setting = group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
+                var count = TierDataDisks(group.Media).Count;
+                var copies = Math.Max(1, (int)(NumValue(group.CopiesBox) ?? tier.NumberOfDataCopies ?? 1));
+                var minimum = setting.Equals("Parity", StringComparison.OrdinalIgnoreCase)
+                    ? Math.Max(1, (int)(NumValue(group.FailuresBox) ?? 1)) + 2 : 1;
+                var maximum = setting.Equals("Mirror", StringComparison.OrdinalIgnoreCase) ? count / copies : count;
+                SetNum(number, Math.Clamp((int)value, minimum, Math.Max(minimum, maximum)));
                 return;
             }
         }
@@ -1945,7 +1944,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             isDraft || !capacityUnavailable
                 ? Math.Round(tierBytes / 1024d / 1024d / 1024d, 2)
                 : null);
-        SetNum(group.ColumnsBox, tier.NumberOfColumns);
+        SetNum(group.ColumnsBox, tier.NumberOfColumns ?? (ViewModel.IsUsingSimulatedInventory
+            ? EditWorkspace.RecommendedTierColumns(tier.ResiliencySettingName, TierDataDisks(group.Media))
+            : (int?)null));
         SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? 1);
         SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? 1);
         group.DiskCountBox.Text = tier.MemberPhysicalDiskIds.Count.ToString();
@@ -2591,6 +2592,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void UpdateButtonState()
     {
+        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         RefreshPendingActions();
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
@@ -2653,9 +2655,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DeleteVdiskButton.IsEnabled = CanEditDraft && (canEditPool || CanUseRealSingleMemberPool(pool)
             || pool is { IsPrimordial: false } && EditWorkspace.IsDraftPool(pool.StableId))
             && deleteTarget is not null && !virtualDiskOffline;
-        CreateHddTierButton.Visibility = Visibility.Collapsed;
-        CreateTieredVdiskButton.Visibility = Visibility.Collapsed;
-        RenameHddTierButton.Visibility = Visibility.Collapsed;
         var realHddPool = IsSingleRealHddMemberPool(pool);
         var realPoolTiers = realHddPool
             ? RealPoolTiers(pool!) : Array.Empty<StorageTierInfo>();
@@ -2663,16 +2662,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var realPoolVdisks = realHddPool
             ? _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray()
             : Array.Empty<VirtualDiskInfo>();
-        CreateHddTierButton.IsEnabled = CanEditDraft && realHddPool
-            && realPoolVdisks.Length == 0 && realPoolTiers.Length == 0;
-        CreateTieredVdiskButton.IsEnabled = CanEditDraft && realHddPool
-            && realPoolVdisks.Length == 0 && realPoolTiers.Length == 1
-            && selectedRealTier is not null
-            && selectedRealTier.VirtualDiskStableId is null
-            && IsSupportedRealHddTier(pool!, selectedRealTier);
-        RenameHddTierButton.IsEnabled = CanEditDraft && realHddPool
-            && selectedRealTier is not null
-            && IsSupportedRealHddTier(pool!, selectedRealTier);
         DeleteHddTierButton.IsEnabled = CanEditDraft && realHddPool
             && realPoolVdisks.Length == 0 && realPoolTiers.Length == 1
             && selectedRealTier is not null
@@ -2759,26 +2748,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     : virtualDiskOffline
                         ? Text("该虚拟磁盘已脱机；请先在磁盘分区页联机。", "This virtual disk is offline; bring it online in the disk partition page first.")
                         : Text("当前虚拟磁盘不能删除。", "The current virtual disk cannot be deleted.")));
-        SetDisabledReason(CreateHddTierButton,
-            !realHddPool
-                ? Text("需要选中包含一块 HDD 的真实单盘池。", "Select a real single-HDD pool.")
-                : realPoolVdisks.Length > 0
-                    ? Text("创建 HDD 层模板前，池中不能有虚拟磁盘。", "The pool must have no virtual disk before creating an HDD template.")
-                    : realPoolTiers.Length > 0
-                        ? Text("该池已有层；当前入口只创建首个 HDD 模板。", "This pool already has a tier; this action creates only the first HDD template.")
-                        : null);
-        SetDisabledReason(CreateTieredVdiskButton,
-            !realHddPool || realPoolTiers.Length != 1 || selectedRealTier is null
-                ? Text("请选择该池唯一的真实 HDD 层模板。", "Select the pool's sole real HDD tier template.")
-                : realPoolVdisks.Length > 0
-                    ? Text("该池已有虚拟磁盘。", "The pool already has a virtual disk.")
-                    : selectedRealTier.VirtualDiskStableId is not null
-                        ? Text("所选层是虚拟磁盘实例，不能作为模板重复绑定。", "The selected tier belongs to a virtual disk and cannot be reused as a template.")
-                        : Text("请在原属性区选择分层布局和容量，再使用创建虚拟磁盘及应用。", "Choose the tiered layout and size in properties, then create the virtual disk and apply."));
-        SetDisabledReason(RenameHddTierButton,
-            selectedRealTier is null
-                ? Text("请选择真实 HDD 层。", "Select a real HDD tier.")
-                : Text("只支持重命名单盘 HDD 层。", "Only the supported single-disk HDD tier can be renamed."));
         SetDisabledReason(DeleteHddTierButton,
             selectedRealTier is null
                 ? Text("请选择未使用的池级 HDD 层模板。", "Select an unused pool-level HDD tier template.")
@@ -2813,20 +2782,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (_outcomeUnknown)
         {
-            return Text("上次提交结果未知；请刷新模拟状态后再继续编辑或应用。",
-                "The previous submission outcome is unknown; refresh the simulation state before editing or applying again.");
+            return Text("上次提交结果未知；请先查询并核对结果，再继续编辑或应用。",
+                "The previous submission outcome is unknown; query and reconcile it before editing or applying again.");
         }
 
         if (pool is null)
         {
-            return Text("请选择一个非原始模拟存储池以编辑属性。",
-                "Select a non-primordial simulated storage pool to edit properties.");
+            return Text("请选择一个非原始存储池以编辑属性。",
+                "Select a non-primordial storage pool to edit properties.");
         }
 
         if (pool.IsPrimordial)
         {
-            return Text("原始池不可在此编辑；请选择或创建普通模拟存储池。",
-                "The primordial pool cannot be edited here; select or create a normal simulated storage pool.");
+            return Text("原始池不可在此编辑；请选择或创建普通存储池。",
+                "The primordial pool cannot be edited here; select or create a normal storage pool.");
         }
 
         if (poolOffline)
@@ -2920,7 +2889,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 ? 0
                 : _working.VirtualDisks.Count(item => item.PoolStableId == pool.StableId
                     && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))
-            ?? Text("请选择可编辑的模拟存储池。", "Select an editable simulated storage pool.");
+            ?? Text("请选择可编辑的存储池。", "Select an editable storage pool.");
         SetDisabledReason(_poolNameBox, formDisabledReason);
         var volumePartition = pool is not null && vdisk is not null
             ? PrimaryPartition(pool.StableId)
@@ -3018,11 +2987,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             group.DiskCountBox.Text = TierMemberCount(pool.StableId, group.Media).ToString();
             group.CopiesBox.IsEnabled = specEditable && isMirror;
             group.FailuresBox.IsEnabled = specEditable && !isMirror && !isSimple;
-            group.ColumnsBox.IsEnabled = specEditable && !isMirror && !isSimple;
-            if (isMirror || isSimple)
-            {
-                SetNum(group.ColumnsBox, null);
-            }
+            group.ColumnsBox.IsEnabled = specEditable;
             UpdateMaximumSizeText(group);
             var disabledReason = ResolveStructureDisabledReason(
                 ViewModel.IsUsingSimulatedInventory,
@@ -3030,12 +2995,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]),
                 _working.VirtualDisks.Count(item => item.PoolStableId == pool.StableId
                     && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))
-                ?? (holdsData
+                ?? (real
+                    ? Text("真实新建目前仅支持 Simple、Fixed、1 列、64 KiB 交错；已有层规格不支持原地修改。",
+                        "Real creation currently supports Simple, Fixed, one column and 64 KiB interleave; existing tier specifications cannot change in place.")
+                    : holdsData
                     ? Text("池含有已存储数据；会改变结构的字段已锁定。",
                         "The pool holds stored data, so structure-changing fields are locked.")
                     : Text("此层字段受当前层和复原类型限制。",
                         "This tier field is limited by the current tier and resiliency type."));
             SetTierDisabledReasons(group, disabledReason, supportedInterleave);
+            if (real && formEnabled)
+            {
+                var sizeReason = hasVdisk
+                    ? Text("已有真实虚拟磁盘和层的扩缩容当前不受支持。", "Resizing existing real virtual disks and tiers is currently unsupported.")
+                    : Text("请在虚拟磁盘容量字段输入 GiB 或 MAX；真实容量按准确池或层模板核验。", "Enter GiB or MAX in Virtual disk capacity; real capacity is verified against the exact pool or tier template.");
+                SetDisabledReason(group.SizeBox, sizeReason);
+                SetDisabledReason(group.MaximumButton, sizeReason);
+            }
         }
 
         // Disk and partition group.
@@ -3081,7 +3057,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
         ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
         ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
-        ContextHelp.Set(group.ColumnsBox, Text("奇偶校验层列数；按 Enter 规范化。", "Column count for a parity tier; press Enter to normalize."));
+        ContextHelp.Set(group.ColumnsBox, Text("列数须符合数据盘数和副本数；按 Enter 规范化。", "Columns must fit the data disk and copy counts; press Enter to normalize."));
         ContextHelp.Set(group.DiskCountBox, Text("显示当前层的成员磁盘数量，只读。", "Shows the number of member disks in this tier; read-only."));
     }
 
@@ -3333,10 +3309,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private void CreatePool_Click(object sender, RoutedEventArgs e) => CreateDraftPoolAndSelect();
 
     private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await QueryRealOperationByIdAsync();
+        await ViewCurrentRealOperationResultAsync();
 
     private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await StopRealOperationFollowingStepsByIdAsync();
+        await StopCurrentRealOperationFollowingStepsAsync();
 
     private bool CanUseRealSingleMemberPool(StoragePoolInfo? pool) =>
         ViewModel.CanSubmitRealOperation && pool is
@@ -4358,7 +4334,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ? []
             : _working.PhysicalDisks
                 .Where(disk => tier.MemberPhysicalDiskIds.Contains(
-                    disk.StableId, StringComparer.OrdinalIgnoreCase))
+                    disk.StableId, StringComparer.OrdinalIgnoreCase)
+                    && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
                 .ToArray();
     }
 
@@ -4416,14 +4393,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 SetNum(group.FailuresBox, EditWorkspace.RecommendedToleratedFailures(resiliency, copies));
                 break;
             case "Columns":
-                // Mirror and Simple keep an automatic, read-only column
-                // count; only Parity exposes an editable column number.
                 var columnResiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
-                if (!columnResiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase)
-                    && !columnResiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase))
-                {
-                    SetNum(group.ColumnsBox, EditWorkspace.RecommendedCapacityColumns(TierDataDisks(media)));
-                }
+                SetNum(group.ColumnsBox, EditWorkspace.RecommendedTierColumns(columnResiliency, TierDataDisks(media)));
 
                 break;
             case "Stripe":

@@ -87,7 +87,7 @@ public static class WinPoolBuildSqliteProbe
     public static bool HasUnfinishedRealOperation(string path) =>
         ProbeUnfinishedRealOperations(path).Length != 0;
 
-    public static UnfinishedRealOperation[] ProbeUnfinishedRealOperations(string path)
+    public static UnfinishedRealOperation[] ProbeUnfinishedRealOperations(string path, bool includeUnknown = true)
     {
         IntPtr database;
         int result = sqlite3_open_v2(path, out database, 1, IntPtr.Zero);
@@ -105,12 +105,14 @@ public static class WinPoolBuildSqliteProbe
                 "SELECT schema_version FROM schema_info WHERE singleton = 1;");
             if (version != 17 && version != 18 && version != 19)
                 throw new InvalidOperationException("Unsupported core schema " + version + ".");
-            // Keep the write-barrier predicate unchanged. Bound both the row
-            // count and identifier text used in the diagnostic.
+            // An unknown result remains a product write barrier, but once the
+            // runtime is stopped it must not prevent installing a repair.
+            // Filter before LIMIT so unknown rows cannot hide an active call.
             IntPtr statement;
             result = sqlite3_prepare_v2(database,
                 "SELECT substr(operation_id,1,64), state FROM operation_plans WHERE risk >= 4 " +
-                "AND state NOT IN (4,5,6,7,10) ORDER BY operation_id LIMIT 10;",
+                "AND state NOT IN (4,5,6,7,10" + (includeUnknown ? "" : ",11") +
+                ") ORDER BY operation_id LIMIT 10;",
                 -1, out statement, IntPtr.Zero);
             if (result != 0) throw new InvalidOperationException(Error(database));
             try
@@ -201,7 +203,8 @@ function Assert-WinPoolRealOperationIdle {
         throw "Core database is a link: $database"
     }
     try {
-        $operations = @([WinPoolBuildSqliteProbe]::ProbeUnfinishedRealOperations($database))
+        $hasLiveWinPool = @(Get-Process -Name 'WinPool.App', 'WinPool.Agent' -ErrorAction SilentlyContinue).Count -gt 0
+        $operations = @([WinPoolBuildSqliteProbe]::ProbeUnfinishedRealOperations($database, $hasLiveWinPool))
         if ($operations.Count -gt 0) {
             $details = ($operations | ForEach-Object { "OperationId=$($_.OperationId), state=$($_.StateName)" }) -join '; '
             throw "Unfinished real operation in active WinPool database: $database. Blocking operations (up to 10): $details. Start WinPool from the existing runtime tree and query by OperationId for read-only reconciliation before retrying runtime replacement."

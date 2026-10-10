@@ -1,6 +1,14 @@
 # WinPool 验证与验收
 
-日期：2026-10-09。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-10。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+
+## 2026-10-10 编辑残留与异常退出修复：限定验证
+
+按用户要求，仅执行本轮修复的定向检查，没有运行全量测试、依赖审计或真实存储修改。定向回归 **37 Passed／0 Failed**：Agent 2、App 10、Application 11、Infrastructure 4、Persistence 10，覆盖模拟各介质层列数保存及兼容、用户确认摘要、容量显示、活动调用退出保护、持久未知结果退出、适配器错误诊断和停止进程后的修复构建门。测试首次编译问题修正后通过，初始日志仍保留。标准 App／Agent Release 构建 **0 warnings／0 errors**。
+
+在当前开发数据库已有 `76958d530df843e083d1664a643fd74e`／OutcomeUnknown 的情况下，从原 Agent 托盘菜单执行“退出 WinPool”，App（2404）和 Agent（28004）退出码均为 **0**，随后无两进程残留。冻结计划与步骤证据 SHA-256 保持 `b7063a9c004c0a67068365666caeb13ef5c9d56a677170e104bc865b4dce7e0b`，未知状态保持 11；Accepted **258**、CallIssued **328** 均未增加。只读恢复和写屏障未解除，没有重放旧调用。旧运行树 Agent 因该缺陷不能退出，替换前已核实准确路径及无子进程后终止；最终成功证据来自新运行树的正常退出。
+
+本轮未完成所有页面交互与设备场景的整体复验，不据此关闭 V0.59。起止值、按钮绑定与退役入口通过源码审阅和编译检查；原生检查仅验证上述退出路径。证据：[汇总](../artifacts/test-results/20261010-product-fixes-14e8d93a753e414cb66d6570f301938f/summary.json)、[构建日志](../artifacts/test-results/20261010-product-fixes-14e8d93a753e414cb66d6570f301938f/build.log)、[原托盘退出](../artifacts/test-results/20261010-product-fixes-14e8d93a753e414cb66d6570f301938f/Native/unknown-exit-result.json)。
 
 ## V0.58 单盘真实修改第一阶段（历史，已归档）
 

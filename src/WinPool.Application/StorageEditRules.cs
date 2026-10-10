@@ -1050,15 +1050,20 @@ public static class StorageEditRules
                 _ => request.PerformanceResiliency ?? request.Resiliency
             };
             setting ??= EditWorkspace.RecommendedResiliency(group.Key, ids.Length);
-            var copies = group.Key == "SCM" ? request.ScmDataCopies : request.PerformanceDataCopies;
+            var copies = group.Key switch
+            {
+                "HDD" => request.CapacityDataCopies,
+                "SCM" => request.ScmDataCopies,
+                _ => request.PerformanceDataCopies
+            };
             copies ??= EditWorkspace.RecommendedDataCopies(setting, ids.Length);
             var decision = EvaluateLayout(
                 snapshot,
                 ids,
                 setting,
                 copies,
-                group.Key == "HDD" ? request.CapacityColumns : null,
-                group.Key == "HDD" ? request.CapacityToleratedFailures : null);
+                RequestedColumns(group.Key, request),
+                RequestedToleratedFailures(group.Key, request));
             if (decision.Verdict != StorageRuleVerdict.Allow)
             {
                 return decision;
@@ -1072,8 +1077,8 @@ public static class StorageEditRules
             };
             var capacity = EvaluateCapacity(
                 snapshot, ids, setting, copies,
-                group.Key == "HDD" ? request.CapacityColumns : null,
-                group.Key == "HDD" ? request.CapacityToleratedFailures : null,
+                RequestedColumns(group.Key, request),
+                RequestedToleratedFailures(group.Key, request),
                 requestedSize);
             if (capacity.Verdict != StorageRuleVerdict.Allow)
             {
@@ -1184,14 +1189,12 @@ public static class StorageEditRules
             };
             var copies = media switch
             {
-                "HDD" => tier.NumberOfDataCopies,
+                "HDD" => request.CapacityDataCopies ?? tier.NumberOfDataCopies,
                 "SCM" => request.ScmDataCopies ?? tier.NumberOfDataCopies,
                 _ => request.PerformanceDataCopies ?? tier.NumberOfDataCopies
             };
-            var columns = media == "HDD" ? request.CapacityColumns ?? tier.NumberOfColumns : tier.NumberOfColumns;
-            var tolerated = media == "HDD"
-                ? request.CapacityToleratedFailures ?? tier.PhysicalDiskRedundancy
-                : tier.PhysicalDiskRedundancy;
+            var columns = RequestedColumns(media, request) ?? tier.NumberOfColumns;
+            var tolerated = RequestedToleratedFailures(media, request) ?? tier.PhysicalDiskRedundancy;
             var layout = EvaluateLayout(snapshot, tier.MemberPhysicalDiskIds, setting, copies, columns, tolerated);
             if (layout.Verdict != StorageRuleVerdict.Allow)
             {
@@ -1457,6 +1460,8 @@ public static class StorageEditRules
                     "storage.rule.layout.mirror-disks",
                     $"A {copies}-copy mirror needs at least {copies} data disks. A single-disk mirror is not legal.");
             }
+            if (columns is { } mirrorColumns && (mirrorColumns < 1 || mirrorColumns > dataMembers.Length / copies))
+                return Deny("storage.rule.layout.mirror-columns", "Mirror columns times data copies cannot exceed the data disk count.");
         }
         else if (string.Equals(setting, "Simple", StringComparison.OrdinalIgnoreCase))
         {
@@ -1464,6 +1469,8 @@ public static class StorageEditRules
             {
                 return Deny("storage.rule.layout.simple-disks", "Simple layout needs at least one data disk.");
             }
+            if (columns is { } simpleColumns && (simpleColumns < 1 || simpleColumns > dataMembers.Length))
+                return Deny("storage.rule.layout.simple-columns", "Simple columns must be between one and the data disk count.");
         }
         else if (string.Equals(setting, "Parity", StringComparison.OrdinalIgnoreCase))
         {
@@ -1557,14 +1564,12 @@ public static class StorageEditRules
         };
         var copies = media switch
         {
-            "HDD" => tier.NumberOfDataCopies ?? 1,
+            "HDD" => request.CapacityDataCopies ?? tier.NumberOfDataCopies ?? 1,
             "SCM" => request.ScmDataCopies ?? tier.NumberOfDataCopies ?? 1,
             _ => request.PerformanceDataCopies ?? tier.NumberOfDataCopies ?? 1
         };
-        var columns = media == "HDD" ? request.CapacityColumns ?? tier.NumberOfColumns : tier.NumberOfColumns;
-        var tolerated = media == "HDD"
-            ? request.CapacityToleratedFailures ?? tier.PhysicalDiskRedundancy ?? 1
-            : tier.PhysicalDiskRedundancy ?? 0;
+        var columns = RequestedColumns(media, request) ?? tier.NumberOfColumns;
+        var tolerated = RequestedToleratedFailures(media, request) ?? tier.PhysicalDiskRedundancy ?? 1;
         var useMaximum = media switch
         {
             "HDD" => request.CapacityUseMaximum,
@@ -1599,6 +1604,20 @@ public static class StorageEditRules
         };
     }
 
+    private static int? RequestedColumns(string media, SimulationEditRequest request) => media switch
+    {
+        "HDD" => request.CapacityColumns,
+        "SCM" => request.ScmColumns,
+        _ => request.PerformanceColumns
+    };
+
+    private static int? RequestedToleratedFailures(string media, SimulationEditRequest request) => media switch
+    {
+        "HDD" => request.CapacityToleratedFailures,
+        "SCM" => request.ScmToleratedFailures,
+        _ => request.PerformanceToleratedFailures
+    };
+
     private static bool TierLayoutChanges(StorageTierInfo tier, SimulationEditRequest request)
     {
         var media = EditWorkspace.NormalizeMedia(tier.MediaType);
@@ -1607,16 +1626,21 @@ public static class StorageEditRules
             "HDD" => Different(request.CapacityResiliency, tier.ResiliencySettingName)
                 || Different(request.CapacityInterleaveBytes, tier.Interleave)
                 || Different(request.CapacitySizeBytes, tier.Size)
+                || Different(request.CapacityDataCopies, tier.NumberOfDataCopies)
                 || Different(request.CapacityColumns, tier.NumberOfColumns)
                 || Different(request.CapacityToleratedFailures, tier.PhysicalDiskRedundancy),
             "SCM" => Different(request.ScmResiliency, tier.ResiliencySettingName)
                 || Different(request.ScmInterleaveBytes, tier.Interleave)
                 || Different(request.ScmSizeBytes, tier.Size)
-                || Different(request.ScmDataCopies, tier.NumberOfDataCopies),
+                || Different(request.ScmDataCopies, tier.NumberOfDataCopies)
+                || Different(request.ScmColumns, tier.NumberOfColumns)
+                || Different(request.ScmToleratedFailures, tier.PhysicalDiskRedundancy),
             _ => Different(request.PerformanceResiliency, tier.ResiliencySettingName)
                 || Different(request.PerformanceInterleaveBytes, tier.Interleave)
                 || Different(request.PerformanceSizeBytes, tier.Size)
                 || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
+                || Different(request.PerformanceColumns, tier.NumberOfColumns)
+                || Different(request.PerformanceToleratedFailures, tier.PhysicalDiskRedundancy)
         });
     }
 
@@ -1627,14 +1651,19 @@ public static class StorageEditRules
         {
             "HDD" => Different(request.CapacityResiliency, tier.ResiliencySettingName)
                 || Different(request.CapacityInterleaveBytes, tier.Interleave)
+                || Different(request.CapacityDataCopies, tier.NumberOfDataCopies)
                 || Different(request.CapacityColumns, tier.NumberOfColumns)
                 || Different(request.CapacityToleratedFailures, tier.PhysicalDiskRedundancy),
             "SCM" => Different(request.ScmResiliency, tier.ResiliencySettingName)
                 || Different(request.ScmInterleaveBytes, tier.Interleave)
-                || Different(request.ScmDataCopies, tier.NumberOfDataCopies),
+                || Different(request.ScmDataCopies, tier.NumberOfDataCopies)
+                || Different(request.ScmColumns, tier.NumberOfColumns)
+                || Different(request.ScmToleratedFailures, tier.PhysicalDiskRedundancy),
             _ => Different(request.PerformanceResiliency, tier.ResiliencySettingName)
                 || Different(request.PerformanceInterleaveBytes, tier.Interleave)
                 || Different(request.PerformanceDataCopies, tier.NumberOfDataCopies)
+                || Different(request.PerformanceColumns, tier.NumberOfColumns)
+                || Different(request.PerformanceToleratedFailures, tier.PhysicalDiskRedundancy)
         };
     }
 

@@ -162,15 +162,20 @@ public static class SimulationDraftPlanner
                 PerformanceInterleaveBytes: ssd?.Interleave,
                 PerformanceSizeBytes: ssd?.Size,
                 PerformanceDataCopies: ssd?.NumberOfDataCopies,
+                PerformanceColumns: ssd?.NumberOfColumns,
+                PerformanceToleratedFailures: ssd?.PhysicalDiskRedundancy,
                 CapacityResiliency: hdd?.ResiliencySettingName,
                 CapacityInterleaveBytes: hdd?.Interleave,
                 CapacitySizeBytes: hdd?.Size,
                 CapacityColumns: hdd?.NumberOfColumns,
+                CapacityDataCopies: hdd?.NumberOfDataCopies,
                 CapacityToleratedFailures: hdd?.PhysicalDiskRedundancy,
                 ScmResiliency: scm?.ResiliencySettingName,
                 ScmInterleaveBytes: scm?.Interleave,
                 ScmSizeBytes: scm?.Size,
                 ScmDataCopies: scm?.NumberOfDataCopies,
+                ScmColumns: scm?.NumberOfColumns,
+                ScmToleratedFailures: scm?.PhysicalDiskRedundancy,
                 SizeBytes: vdisk is null
                     ? null
                     : new[] { ssd, hdd, scm }
@@ -365,15 +370,20 @@ public static class SimulationDraftPlanner
                     PerformanceInterleaveBytes: ssd?.Interleave,
                     PerformanceSizeBytes: ssd?.Size,
                     PerformanceDataCopies: ssd?.NumberOfDataCopies,
+                    PerformanceColumns: ssd?.NumberOfColumns,
+                    PerformanceToleratedFailures: ssd?.PhysicalDiskRedundancy,
                     CapacityResiliency: hdd?.ResiliencySettingName,
                     CapacityInterleaveBytes: hdd?.Interleave,
                     CapacitySizeBytes: hdd?.Size,
                     CapacityColumns: hdd?.NumberOfColumns,
+                    CapacityDataCopies: hdd?.NumberOfDataCopies,
                     CapacityToleratedFailures: hdd?.PhysicalDiskRedundancy,
                     ScmResiliency: scm?.ResiliencySettingName,
                     ScmInterleaveBytes: scm?.Interleave,
                     ScmSizeBytes: scm?.Size,
-                    ScmDataCopies: scm?.NumberOfDataCopies));
+                    ScmDataCopies: scm?.NumberOfDataCopies,
+                    ScmColumns: scm?.NumberOfColumns,
+                    ScmToleratedFailures: scm?.PhysicalDiskRedundancy));
             }
         }
 
