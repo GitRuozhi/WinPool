@@ -10,6 +10,14 @@
 
 本轮未完成所有页面交互与设备场景的整体复验，不据此关闭 V0.59。起止值、按钮绑定与退役入口通过源码审阅和编译检查；原生检查仅验证上述退出路径。证据：[汇总](../artifacts/test-results/20261010-product-fixes-14e8d93a753e414cb66d6570f301938f/summary.json)、[构建日志](../artifacts/test-results/20261010-product-fixes-14e8d93a753e414cb66d6570f301938f/build.log)、[原托盘退出](../artifacts/test-results/20261010-product-fixes-14e8d93a753e414cb66d6570f301938f/Native/unknown-exit-result.json)。
 
+## 2026-10-10 真实编辑拒绝与核对诊断：限定验证
+
+修复真实编辑拒绝时只有通用“错误”标题、错误码未填入专用字段，以及后台只读核对原因丢失的问题。拒绝通知关联已恢复操作的准确目标、操作身份和原步骤证据；重启后恢复当前待核实操作的说明，不加载旧消息日志。最新核对诊断仅保存在 Agent 内存、随查询响应返回，不修改原状态／步骤证据／事件；同一恢复状态及诊断不变时不重复通知。
+
+仅运行 **6 项定向回归，全部通过**（Agent 3、App 3），覆盖后台诊断、有界异常、证据不变、成功清理旧诊断、中文／英文提示、开发页字段及格式化未知说明；App 首次编译发现值类型空合并问题，修正后通过，初始日志保留。最终标准 Release 构建 **0 warnings／0 errors**，没有全量测试。实机开发页标题、详情中的 write_barrier／reconciliation 代码、准确 OperationId、原 ProviderError、WDC 目标与 RealOff 共 7 项文本／状态检查通过。
+
+前后只读数据库比较完全相同：旧 `76958d530df843e083d1664a643fd74e` 保持 OutcomeUnknown，冻结计划与步骤证据摘要不变，Accepted **258**／CallIssued **328** 未增长。该完整格式化缺少可靠的结束及完成证据，**本次不新增释放屏障的恢复分支，真实编辑仍被这条未知记录保护性阻止**。没有新增真实存储写入。证据：[汇总](../artifacts/test-results/20261010-real-error-feedback-1791621932214/summary.json)、[最终构建](../artifacts/test-results/20261010-real-error-feedback-1791621932214/build-final.log)、[原生开发页详情](../artifacts/test-results/20261010-real-error-feedback-1791621932214/Native/developer-details.txt)。
+
 ## V0.58 单盘真实修改第一阶段（历史，已归档）
 
 - **现场序列：** H00 基线及 H01–H11 适用操作已完成。包括分区/GPT/MSR、NTFS/exFAT/ReFS、EFI/Recovery、RAW 扩缩与删除、盘符/卷标、脱机/联机、建池、VD 与 HDD tier template、自动布局和分阶段重建。C03 因目标盘原已为 GPT 而 `not_required`；C05 现有 VD 与实际层实例扩展仍按边界条件禁用；D 类能力保持拒绝。

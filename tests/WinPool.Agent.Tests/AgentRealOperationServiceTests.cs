@@ -11,6 +11,84 @@ namespace WinPool.Agent.Tests;
 public sealed class AgentRealOperationServiceTests
 {
     [Fact]
+    public async Task ReadOnlyRecoveryDiagnosticsPreserveEvidenceBoundExceptionsAndClearAfterRecovery()
+    {
+        var backend = new RecordingBackend { UnknownStepId = "initialize-gpt" };
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
+        await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.OutcomeUnknown);
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (!await fixture.Service.TryCloseAdmissionForShutdownAsync())
+                await Task.Delay(10, timeout.Token);
+
+        var before = JsonSerializer.Serialize(await fixture.Plans.GetAsync(plan.OperationId));
+        var beforeSteps = JsonSerializer.Serialize(await fixture.Plans.GetStepsAsync(plan.OperationId));
+        var beforeEvents = JsonSerializer.Serialize(await fixture.Events.ListAsync(plan.OperationId));
+        var recoveryMode = 0;
+        var reconciliationCalls = 0;
+        var recoveredBackend = new RecordingBackend { Reconciliation = (currentPlan, steps) =>
+        {
+            Interlocked.Increment(ref reconciliationCalls);
+            return Volatile.Read(ref recoveryMode) switch
+            {
+                1 => throw new InvalidOperationException("read-only probe failed: " + new string('x', 6000)),
+                2 => Task.FromResult(ObservedNoEffect(currentPlan, steps)),
+                _ => Task.FromResult(new RealReconciliationResult(RealOperationState.OutcomeUnknown,
+                    steps, "real.reconciliation_step_outcome_unknown", false))
+            };
+        }};
+        var recovered = new AgentRealOperationService(fixture.Plans, fixture.Events, recoveredBackend,
+            new FixedMachineIdentity(), authority: null, timeProvider: null,
+            isSessionStillArmed: _ => true, isAdministrator: () => true);
+        await recovered.InitializeRecoveryAsync();
+
+        async Task<AgentRealOperationResponse> AwaitStatusAsync(Func<AgentRealOperationResponse, bool> matches)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                var response = Assert.IsType<AgentRealOperationResponse>((await recovered.QueryAsync(
+                    new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token)).Value);
+                if (matches(response)) return response;
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+
+        var unknown = await AwaitStatusAsync(response => response.ReconciliationDiagnostic?.Code
+            == "real.reconciliation_step_outcome_unknown");
+        Assert.Equal(RealOperationState.OutcomeUnknown, unknown.State);
+        Assert.True(unknown.RequiresReconciliation);
+        Assert.Null(unknown.ReconciliationDiagnostic!.Detail);
+        var repeatedAfter = Volatile.Read(ref reconciliationCalls) + 2;
+        await AwaitStatusAsync(_ => Volatile.Read(ref reconciliationCalls) >= repeatedAfter);
+
+        Volatile.Write(ref recoveryMode, 1);
+        var failure = await AwaitStatusAsync(response => response.ReconciliationDiagnostic?.Detail is not null);
+        Assert.Equal("operation.reconciliation_failed", failure.ReconciliationDiagnostic!.Code);
+        Assert.StartsWith("System.InvalidOperationException: read-only probe failed: ", failure.ReconciliationDiagnostic.Detail);
+        Assert.Equal(4096, failure.ReconciliationDiagnostic.Detail!.Length);
+        Assert.Equal(before, JsonSerializer.Serialize(await fixture.Plans.GetAsync(plan.OperationId)));
+        Assert.Equal(beforeSteps, JsonSerializer.Serialize(await fixture.Plans.GetStepsAsync(plan.OperationId)));
+        Assert.Equal(beforeEvents, JsonSerializer.Serialize(await fixture.Events.ListAsync(plan.OperationId)));
+        Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+        Assert.Equal(0, recoveredBackend.ExecuteCalls);
+
+        Volatile.Write(ref recoveryMode, 0);
+        await AwaitStatusAsync(response => response.ReconciliationDiagnostic is
+            { Code: "real.reconciliation_step_outcome_unknown", Detail: null });
+        Volatile.Write(ref recoveryMode, 2);
+        var terminal = await AwaitStatusAsync(response => response.State == RealOperationState.Failed);
+        Assert.Null(terminal.ReconciliationDiagnostic);
+        Assert.False(terminal.RequiresReconciliation);
+        Assert.DoesNotContain("ReconciliationDiagnostic", JsonSerializer.Serialize(terminal));
+        Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
+        Assert.Equal(0, recoveredBackend.ExecuteCalls);
+        Assert.Equal(1, backend.ExecuteCalls);
+    }
+
+    [Fact]
     public async Task DurableUnknownAllowsShutdownWithoutChangingEvidenceOrReplayingOnRestart()
     {
         var backend = new RecordingBackend { UnknownStepId = "initialize-gpt" };

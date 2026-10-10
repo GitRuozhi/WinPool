@@ -1206,6 +1206,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             if (error is not null)
             {
                 TrySetExecutionMode(ExecutionMode.Simulation);
+                if (error == "agent.real_operation.write_barrier")
+                    await RecoverRealOperationsAsync();
                 return error;
             }
             TrySetExecutionMode(ExecutionMode.Real);

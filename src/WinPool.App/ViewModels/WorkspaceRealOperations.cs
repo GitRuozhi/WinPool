@@ -7,6 +7,7 @@ namespace WinPool.App.ViewModels;
 
 public sealed partial class WorkspaceViewModel
 {
+    private readonly Dictionary<OperationId, string> _recoveredRealOperationFeedback = [];
     public bool IsRealOperationBusy { get; private set; }
     public bool IsRealGraphObscured { get; private set; }
     public string RealOperationPhase { get; private set; } = string.Empty;
@@ -25,6 +26,18 @@ public sealed partial class WorkspaceViewModel
     {
         LastRealOperationStatus = status;
         RealOperationSubmission.Observe(status);
+        if (_recoveredRealOperationFeedback.TryGetValue(status.Plan.OperationId, out var previous))
+        {
+            var key = RealOperationFeedback.RecoveryKey(status);
+            if (!StringComparer.Ordinal.Equals(previous, key))
+            {
+                _recoveredRealOperationFeedback[status.Plan.OperationId] = key;
+                var feedback = RealOperationFeedback.Recovery(status,
+                    Localization.EffectiveLanguage == LanguagePreference.ZhCn, ActiveDocument.SourceFacts);
+                _notificationService.PublishWarning(feedback.Title, feedback.Message, "real",
+                    $"real:recover:{status.Plan.OperationId.Value}", options: feedback.Options);
+            }
+        }
     }
 
     public Task<bool> RefreshRealOperationScopeAsync(StorageInventoryScope scope) =>
@@ -93,10 +106,8 @@ public sealed partial class WorkspaceViewModel
             if (result.Value is not AgentRecoverableRealOperationsResponse recovered) return;
             foreach (var status in recovered.Operations)
             {
+                _recoveredRealOperationFeedback.TryAdd(status.Plan.OperationId, string.Empty);
                 ObserveRealOperation(status);
-                _notificationService.PublishWarning(Localization["Warning"],
-                    $"真实操作需要只读核对 / Real operation needs read-only reconciliation: {status.Plan.OperationId.Value} ({status.State})",
-                    "real", $"real:recover:{status.Plan.OperationId.Value}");
             }
             // Restart restores query/reconciliation only. It does not arm real
             // mode, reconstruct tokens, replay calls, or resume a draft.

@@ -418,9 +418,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                NotificationService.PublishError(
-                    ViewModel.Localization["Error"], enterError,
-                    "real-mode", "real-mode-startup-rejected");
+                PublishRealModeFailure(enterError, entering: true);
             }
         }
         ApplyTheme(ViewModel.CurrentPreferences.Theme);
@@ -1001,6 +999,15 @@ public sealed partial class MainWindow : Window
                 : ExecutionMode.Simulation);
     }
 
+    private void PublishRealModeFailure(string code, bool entering)
+    {
+        var feedback = RealOperationFeedback.ModeFailure(code, entering,
+            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
+            ViewModel.LastRealOperationStatus, ViewModel.ActiveDocument.SourceFacts);
+        NotificationService.PublishError(feedback.Title, feedback.Message, "real-mode",
+            $"real-mode:{DateTimeOffset.UtcNow.Ticks}", options: feedback.Options);
+    }
+
     /// <summary>
     /// Requests the execution mode change. Returns <see langword="true"/> only
     /// when this window has handed off to an elevated replacement and is closing.
@@ -1012,9 +1019,7 @@ public sealed partial class MainWindow : Window
         {
             var exitError = await ViewModel.ExitRealModeAsync();
             if (exitError is not null)
-                NotificationService.PublishError(
-                    ViewModel.Localization["Error"], exitError,
-                    "real-mode", $"real-mode-exit:{DateTimeOffset.UtcNow.Ticks}");
+                PublishRealModeFailure(exitError, entering: false);
             SyncModeSwitch();
             return false;
         }
@@ -1053,9 +1058,7 @@ public sealed partial class MainWindow : Window
                 if (enterError is null)
                     PublishRealOperationsWarning();
                 else
-                    NotificationService.PublishError(
-                        localization["Error"], enterError,
-                        "real-mode", $"real-mode-enter:{DateTimeOffset.UtcNow.Ticks}");
+                    PublishRealModeFailure(enterError, entering: true);
                 SyncModeSwitch();
                 return false;
             }

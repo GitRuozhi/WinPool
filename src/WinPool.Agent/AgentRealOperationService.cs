@@ -29,6 +29,7 @@ public sealed class AgentRealOperationService : IRealOperationService
     private readonly ConcurrentDictionary<OperationId, byte> stopAfterCurrentStep = new();
     private readonly ConcurrentDictionary<OperationId, Task> runningTasks = new();
     private readonly ConcurrentDictionary<OperationId, Task> reconciliationTasks = new();
+    private readonly ConcurrentDictionary<OperationId, RealOperationReconciliationDiagnostic> reconciliationDiagnostics = new();
     private int recoveryReady;
     private int admissionClosed;
     private IRealStorageEditObserver? editObserver;
@@ -738,6 +739,8 @@ public sealed class AgentRealOperationService : IRealOperationService
         var steps = await plans.GetStepsAsync(operation.Plan.OperationId, cancellationToken);
         var history = await events.ListAsync(operation.Plan.OperationId, cancellationToken);
         var stepCodes = LatestStepCodes(steps, history);
+        if (operation.State != PersistedOperationState.OutcomeUnknown)
+            reconciliationDiagnostics.TryRemove(operation.Plan.OperationId, out _);
         var response = new AgentRealOperationResponse(
             operation.Plan,
             ToPublicState(operation.State),
@@ -748,7 +751,9 @@ public sealed class AgentRealOperationService : IRealOperationService
                 step.TargetJson,
                 step.EvidenceJson)).ToArray(),
             history.LastOrDefault()?.Event.Code,
-            operation.State == PersistedOperationState.OutcomeUnknown);
+            operation.State == PersistedOperationState.OutcomeUnknown,
+            operation.State == PersistedOperationState.OutcomeUnknown
+                ? reconciliationDiagnostics.GetValueOrDefault(operation.Plan.OperationId) : null);
         if (editObserver is { } observer)
         {
             try { await observer.ObserveAsync(response, CancellationToken.None).ConfigureAwait(false); }
@@ -872,13 +877,14 @@ public sealed class AgentRealOperationService : IRealOperationService
             var result = await ReconcilePlanAsync(plan, progress);
             if (!result.CanReleaseWriteBarrier)
             {
+                SetReconciliationDiagnostic(plan.OperationId, result.Code);
                 return;
             }
 
             var terminal = await PersistReconciledStepsAsync(plan, stored, result);
             if (terminal != PersistedOperationState.OutcomeUnknown)
             {
-                await plans.TransitionAsync(
+                if (await plans.TransitionAsync(
                     plan.OperationId,
                     PersistedOperationState.OutcomeUnknown,
                     terminal,
@@ -889,18 +895,35 @@ public sealed class AgentRealOperationService : IRealOperationService
                             PersistedOperationState.Cancelled => ExecutionEventKind.Cancelled,
                             _ => ExecutionEventKind.Failed
                         },
-                        result.Code));
+                        result.Code)))
+                    reconciliationDiagnostics.TryRemove(plan.OperationId, out _);
+                else
+                    SetReconciliationDiagnostic(plan.OperationId, "operation.reconciled_transition_conflict");
             }
+            else
+                SetReconciliationDiagnostic(plan.OperationId, "operation.reconciled_steps_persistence_conflict");
         }
-        catch
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // Keep the durable barrier. The next explicit query can retry a
             // read-only reconciliation against current facts.
+            SetReconciliationDiagnostic(plan.OperationId, "operation.reconciliation_failed", exception);
         }
         finally
         {
             await NotifyEditObserverAsync(plan.OperationId).ConfigureAwait(false);
         }
+    }
+
+    private void SetReconciliationDiagnostic(OperationId operationId, string code, Exception? exception = null)
+    {
+        // These observations are intentionally not appended as execution events:
+        // polling unchanged Unknown outcomes must not grow the durable history.
+        var detail = exception is null ? null : exception.GetType().FullName + ": " + exception.Message;
+        const int detailLimit = 4096;
+        if (detail?.Length > detailLimit)
+            detail = detail[..detailLimit];
+        reconciliationDiagnostics[operationId] = new(code, detail);
     }
 
     // A reconciled operation may finish only after its observed step states and

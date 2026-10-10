@@ -106,6 +106,12 @@ public sealed record RealOperationStepProgress(
     string? ResultEvidence);
 
 /// <summary>
+/// The latest read-only reconciliation observation in this Agent lifetime.
+/// It does not replace persisted operation state or evidence.
+/// </summary>
+public sealed record RealOperationReconciliationDiagnostic(string Code, string? Detail = null);
+
+/// <summary>
 /// The persisted status is authoritative; a lost Accept reply is recovered by
 /// querying the same OperationId, never by submitting another operation.
 /// </summary>
@@ -114,7 +120,9 @@ public sealed record AgentRealOperationResponse(
     RealOperationState State,
     IReadOnlyList<RealOperationStepProgress> Steps,
     string? Code,
-    bool RequiresReconciliation) : AgentResponse;
+    bool RequiresReconciliation,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null) : AgentResponse;
 
 public interface IRealOperationService
 {

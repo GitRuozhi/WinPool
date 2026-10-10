@@ -46,8 +46,10 @@ public static class RealOperationConfirmationFormatter
         {
             $"{(chinese ? "操作状态" : "Operation status")}: {State(status.State, chinese)}",
             $"{(chinese ? "需要核对" : "Needs review")}: {(status.RequiresReconciliation ? (chinese ? "是" : "Yes") : (chinese ? "否" : "No"))}",
-            chinese ? "本次变更：" : "Changes:"
         };
+        if (status.RequiresReconciliation || status.ReconciliationDiagnostic is not null)
+            lines.Add(RealOperationFeedback.ReconciliationReason(status, chinese));
+        lines.Add(chinese ? "本次变更：" : "Changes:");
         foreach (var step in real.Steps)
         {
             progressById.TryGetValue(step.Id, out var progress);

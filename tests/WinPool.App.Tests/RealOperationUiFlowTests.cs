@@ -8,6 +8,58 @@ namespace WinPool.App.Tests;
 public sealed class RealOperationUiFlowTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RealModeBarrierFeedbackShowsReasonAndRetainsDeveloperEvidence(bool chinese)
+    {
+        var system = SystemId.New();
+        var partition = new StorageObjectId(system, StorageObjectKind.Partition, "exact-format-partition");
+        var plan = Freeze(RealOperationProposalFactory.OneStep(system, OperationIntent.FormatVolume, partition,
+            new FormatVolumeCommand(RealTargetReference.ForExisting(partition), RealFileSystem.Ntfs, 65536, true, null),
+            "NTFS", "All existing data is erased"));
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        const string originalEvidence = "{\"Code\":\"adapter.response-outcome-unknown\",\"ProviderError\":\"The write process returned no structured result.\"}";
+        var status = new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown,
+            [new(step.Id, RealOperationStepState.OutcomeUnknown, "real.provider_reported_uncertain_result", null, originalEvidence)],
+            "operation.interrupted_requires_reconciliation", true,
+            new("real.reconciliation_step_outcome_unknown"));
+        var feedback = RealOperationFeedback.ModeFailure("agent.real_operation.write_barrier", true, chinese, status);
+        Assert.Contains(chinese ? "阻止" : "blocks", feedback.Title);
+        Assert.Contains(chinese ? "查看操作结果" : "View operation result", feedback.Message);
+        Assert.Contains(chinese ? "格式化未返回" : "Formatting returned no", feedback.Message);
+        var notifications = new GlobalNotificationService();
+        notifications.PublishError(feedback.Title, feedback.Message, "real-mode", options: feedback.Options);
+        var retained = Assert.Single(notifications.History);
+        Assert.Equal("agent.real_operation.write_barrier", retained.Code);
+        Assert.Equal(system.Value.ToString("D"), retained.SystemId);
+        Assert.Contains(partition.ProviderKey, retained.Target);
+        Assert.Contains(plan.OperationId.Value.ToString(), retained.Detail);
+        Assert.Contains("real.reconciliation_step_outcome_unknown", retained.Detail);
+        Assert.Contains(originalEvidence, retained.Detail);
+        Assert.Contains(chinese ? "无法确认其结果" : "cannot establish its outcome",
+            RealOperationConfirmationFormatter.FormatStatus(status, chinese));
+        Assert.Equal(RealOperationState.OutcomeUnknown, status.State);
+        Assert.True(status.RequiresReconciliation);
+        Assert.Equal(originalEvidence, status.Steps[0].ResultEvidence);
+    }
+
+    [Fact]
+    public void RealModeUnknownFailureAndReadOnlyProbeFailureKeepTechnicalDetails()
+    {
+        var unknown = RealOperationFeedback.ModeFailure("new.agent.failure", false, true, null);
+        Assert.Equal("无法关闭真实编辑", unknown.Title);
+        Assert.Equal("new.agent.failure", unknown.Options.Code);
+        Assert.Contains("new.agent.failure", unknown.Options.Detail);
+        var (_, plan) = CreatePlan();
+        var status = new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true,
+            new("operation.reconciliation_failed", "IOException: exact read-only probe failure"));
+        var feedback = RealOperationFeedback.Recovery(status, true);
+        Assert.Contains("只读核对未能", feedback.Message);
+        Assert.Equal("operation.reconciliation_failed", feedback.Options.Code);
+        Assert.Contains("IOException: exact read-only probe failure", feedback.Options.Detail);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void AutomaticInitializedDiskLayoutUsesTheSameRealMaximumGeometry(bool createMsr)

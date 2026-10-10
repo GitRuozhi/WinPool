@@ -1,12 +1,14 @@
 # 消息卡与消息列表触发表
 
-状态：2026-10-08。来源是 `GlobalNotificationService`、`ApplicationNotificationPresenter` 和各页面的发布点；开发页“消息列表”读取本进程内存 `History`，与写入 `Diagnostics/*.jsonl` 的故障日志不同。每次独立完成事件分配独立 ID；相同文案不会合并。
+状态：2026-10-10。来源是 `GlobalNotificationService`、`ApplicationNotificationPresenter` 和各页面的发布点；开发页“消息列表”读取本进程内存 `History`，与写入 `Diagnostics/*.jsonl` 的故障日志不同。每次独立完成事件分配独立 ID；相同文案不会合并。
 
 | 场景 | 实际触发条件 | 右下角卡 | 开发页消息列表 | 不触发／结束条件 | 代码入口 |
 | --- | --- | --- | --- | --- | --- |
 | 普通完成／提示 | 调用 `Publish`，默认 `ShowNotification=true`、`RecordInHistory=true`，且标题、正文或详情非空 | 是，通常 8 秒 | 是，最多保留最近 200 条 | 关闭卡片不清除历史；到期只移除卡片 | `GlobalNotificationService.Publish` |
 | 警告 | 状态变化、操作拒绝、结果未知等发布 Warning | 是，通常 8 秒 | 是 | 持续异常的重复轮询不重新发布 | `PublishWarning`／各来源 |
 | 错误 | 采集、连接、模拟操作、导入导出等失败发布 Error | 是，通常 20 秒；点击打开可读错误正文 | 是 | 点击或到期不删除历史 | `PublishError`／各来源 |
+| 真实编辑开启／关闭被拒绝 | Agent 返回模式拒绝码或连接异常 | 是，标题和正文说明具体原因；未核实操作阻止开启时指向原编辑页“查看操作结果” | 是，保留错误码、已恢复操作的准确对象及详情 | 不以通用“错误”代替原因；每次显式尝试均留记录，拒绝不解除写入屏障 | `MainWindow`、`RealOperationFeedback` |
+| 重启恢复／只读核对仍未知 | 当前运行从 Agent 获得未核实操作，或最新只读核对诊断变化 | 是，警告说明准确操作及无法核实的原因 | 是，详情保留操作身份、步骤证据和核对代码 | 同一操作的状态和诊断不变时不重复通知；不补读旧消息日志、不把未知记为成功，不续写或重放 | `WorkspaceRealOperations`、`RealOperationFeedback` |
 | 进行中 | 明确设置 `IsProgress=true` 并带进度键 | 是，同一键更新，不计自动到期 | 否，服务强制排除 | 完成、失败、取消或结果未知时按键移除，再发布结果 | `GlobalNotificationService.UpdateProgress` |
 | 仅记录 | 发布者显式设置 `ShowNotification=false`、`RecordInHistory=true` | 否 | 是 | 用于不应重复打扰但需留记录的结果 | `EditorPageBase`、`MonitorPage`、`AgentInventorySynchronizer` |
 | 自动本机采集开始 | Agent 报 Started，展示进度 | 是，进度卡 | 否 | 仅启动显示；晚连接补读与重复事件不当作新开始 | `AgentInventorySynchronizer` |
