@@ -2,6 +2,14 @@
 
 日期：2026-10-10。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-10 用户要求解除旧未知记录：开发数据收口
+
+用户在反馈修复后明确要求解除阻塞。停止标准 WinPool 进程、保留完整数据库备份后，两轮生产只读采集确认准确 WDC／分区闭包稳定、存储 jobs 均为终态，旧写入进程已不存在。这些观察不证明完整格式化成功；本次依据用户明确放弃未知结果，使用现有 Repository CAS 将 `76958d530df843e083d1664a643fd74e` 的 format-volume 从 OutcomeUnknown 收口为 **Failed／NotVerified**，整体从 OutcomeUnknown 收口为 **PartiallyCompleted**。create-partition 保持 Verified，assign-letter 保持 Skipped；原目标及结果证据以原始字符串完整保留，新增证据明确记录用户要求、未验证完整格式化、禁止重放及核验收据。
+
+全库前后比较通过：仅上述操作／步骤状态及格式化证据更新，原事件全部保留，只新增两条 `developer.explicit_unknown_closeout` 事件；Accepted **258**／CallIssued **328** 不变，生产 Repository 报告全局写入屏障为 false。标准 App 重启并完成原有确认后，原生 UI 的“真实编辑”开关显示 **on**，再次比较没有新增磁盘调用。未改产品自动恢复规则，未运行全量测试，未执行存储修改。一次性 host 首次因误读 PRAGMA schema 版本在 CAS 前停止；改为生产 `schema_info` 只读检查后成功，无初始化／迁移。
+
+证据：[执行收据](../artifacts/test-results/20261010-explicit-unknown-closeout-host/execution-receipt.json)、[独立前后核对](../artifacts/test-results/20261010-explicit-unknown-closeout-host/verification-after.json)、[真实编辑开启](../artifacts/test-results/20261010-explicit-unknown-closeout-host/real-mode-ui.txt)。以下同日“保持 Unknown”的验证记录属于此前阶段，不代表当前阻塞仍存在；本次是准确旧记录的一次性开发数据处理，不是其它 Unknown 自动放行的先例。
+
 ## 2026-10-10 编辑残留与异常退出修复：限定验证
 
 按用户要求，仅执行本轮修复的定向检查，没有运行全量测试、依赖审计或真实存储修改。定向回归 **37 Passed／0 Failed**：Agent 2、App 10、Application 11、Infrastructure 4、Persistence 10，覆盖模拟各介质层列数保存及兼容、用户确认摘要、容量显示、活动调用退出保护、持久未知结果退出、适配器错误诊断和停止进程后的修复构建门。测试首次编译问题修正后通过，初始日志仍保留。标准 App／Agent Release 构建 **0 warnings／0 errors**。
