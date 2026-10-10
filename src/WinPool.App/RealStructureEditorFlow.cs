@@ -68,6 +68,18 @@ public partial class EditorPageBase
             session.RealApplyMessage = string.Join(Environment.NewLine, draft.Preview.BlockingReasons);
             return false;
         }
+        RealStructureApplyAuthorization authorization;
+        try
+        {
+            authorization = new RealStructureApplyAuthorization(draft, session, ViewModel.RealProductSessionId);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            session.RealApplyMessage = exception.Message;
+            PublishOperationException(Text("无法确认结构变更", "Cannot confirm structural changes"),
+                "real", exception, "real.structure.confirmation_invalid");
+            return false;
+        }
         IsRealStructureApplyInProgress = true;
         structureHasWritten = false;
         var completed = new List<string>();
@@ -86,6 +98,12 @@ public partial class EditorPageBase
                     throw new InvalidDataException(support.Messages.FirstOrDefault()?.DiagnosticText
                         ?? support.Messages.FirstOrDefault()?.Code ?? "The requested layout is unsupported.");
             }
+            ValidateApplyContext();
+            if (!await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"),
+                authorization.Describe(draft, session.BaselineSourceFacts,
+                    ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn))) return false;
+            ValidateApplyContext();
+            authorization.Confirm();
             foreach (var pool in draft.RemovedPools)
             {
                 var vds = session.Baseline.VirtualDisks.Where(vd => vd.PoolStableId == pool.StableId).ToArray();
@@ -145,7 +163,7 @@ public partial class EditorPageBase
                         {
                             if (!await Stage(RealOperationProposalFactory.CreateHddTierTemplate(session.SystemId,
                                 Id(StorageObjectKind.StoragePool, poolId), creation.Pool.FriendlyName + "_HDD"),
-                                Text("已核对 HDD 模板", "Verified HDD template"))) return false;
+                                Text("已准备 HDD 分层", "Prepared HDD tiering"))) return false;
                             existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
                                 && tier.VirtualDiskStableId is null).ToArray();
                         }
@@ -153,13 +171,12 @@ public partial class EditorPageBase
                         sizeTarget = Id(StorageObjectKind.StorageTier, existing[0].StableId);
                     }
                     if (intent.VirtualDiskUseMaximum)
-                        ReportRealActivity(Text("正在准备 WinPool 整数 GiB 最大容量搜索",
-                            "Preparing the WinPool maximum-capacity search in whole GiB"));
+                        ReportRealActivity(Text("正在确定最大可用容量", "Determining maximum available capacity"));
                     var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(
                         intent.VirtualDiskUseMaximum, intent.VirtualDiskSizeBytes,
                         intent.AutoCreatePartition, intent.CreateMsr, async () =>
                         {
-                            ReportRealActivity(Text("正在读取准确创建容量范围", "Reading the exact provider creation range"));
+                            ReportRealActivity(Text("正在核对创建容量", "Checking creation capacity"));
                             var result = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealVirtualDiskCreationRangeRequest(
                                 sizeTarget, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
                             if (!result.IsSuccess || result.Value is not AgentRealVirtualDiskCreationRangeResponse sizeResponse
@@ -213,7 +230,16 @@ public partial class EditorPageBase
                 }
                 while (progress.BuildNext(ViewModel.ActiveDocument, currentIntent) is { } next)
                 {
-                    if (!await Stage(next, Text("已核对自动布局步骤 ", "Verified automatic layout step ") + next.Steps[0].Id,
+                    var description = next.Steps[0].Command switch
+                    {
+                        DeletePartitionCommand => Text("已调整保留分区", "Adjusted the reserved partition"),
+                        CreatePartitionCommand { Role: RealPartitionRole.Msr } => Text("已配置 MSR", "Configured the MSR"),
+                        CreatePartitionCommand => Text("已创建数据分区", "Created the data partition"),
+                        FormatVolumeCommand => Text("已格式化数据卷", "Formatted the data volume"),
+                        SetDriveLetterCommand => Text("已设置盘符", "Assigned the drive letter"),
+                        _ => Text("已完成自动分区", "Completed automatic partitioning")
+                    };
+                    if (!await Stage(next, description,
                         observe: response => progress.Observe(next, response))) return false;
                 }
                 session.PoolIntents[poolId] = currentIntent with { PendingAutomaticLayout = false };
@@ -232,16 +258,27 @@ public partial class EditorPageBase
         }
         finally
         {
+            authorization.Stop();
             IsRealStructureApplyInProgress = false;
             structureHasWritten = false;
             EndRealActivity();
         }
 
         StorageObjectId Id(StorageObjectKind kind, string key) => new(session.SystemId, kind, key);
+        void ValidateApplyContext()
+        {
+            authorization.ValidateContext(ViewModel.ActiveDocument.SystemId, ViewModel.RealProductSessionId,
+                session.BindingGeneration, session.HasBaselineConflict, session.OutcomeUnknown);
+            if (!ViewModel.IsRealMode || !ViewModel.IsLocalSystem
+                || session.BaselineRevision != ViewModel.ActiveDocument.Revision
+                || session.Baseline.SnapshotVersion != ViewModel.ActiveDocument.Snapshot.SnapshotVersion)
+                throw new InvalidOperationException("The structural baseline changed outside this Apply.");
+        }
         async Task<bool> Stage(RealOperationIntentRequest proposal, string description, Action? map = null,
             Action<AgentRealOperationResponse>? observe = null)
         {
-            var succeeded = await SubmitRealAsync(proposal);
+            ValidateApplyContext();
+            var succeeded = await SubmitRealAsync(proposal, authorization, ValidateApplyContext);
             if (LastRealOperationResponse is { } durable)
             {
                 if (durable.RequiresReconciliation) session.OutcomeUnknown = true;
@@ -258,13 +295,20 @@ public partial class EditorPageBase
             }
             if (LastRealInventoryRefreshSucceeded && LastRealOperationResponse is { } response)
             {
+                if (succeeded)
+                {
+                    authorization.ValidateContext(ViewModel.ActiveDocument.SystemId, ViewModel.RealProductSessionId,
+                        session.BindingGeneration, session.HasBaselineConflict, session.OutcomeUnknown);
+                    authorization.ObserveVerified(proposal, response, ViewModel.ActiveDocument);
+                }
+                else authorization.Stop();
                 if (succeeded) map?.Invoke();
                 if (response.Steps.Any(item => item.State == RealOperationStepState.Verified))
                     RebaseRemainingDraft(session, ViewModel.ActiveDocument);
                 if (response.RequiresReconciliation) session.OutcomeUnknown = true;
             }
             if (succeeded) completed.Add(description);
-            else completed.Add(Text("本段停止；未执行后续，已核对结果保留。", "This segment stopped; following writes were not executed and verified results remain."));
+            else completed.Add(Text("应用停止；已完成的更改保留，剩余目标未执行。", "Apply stopped; completed changes remain and the remaining goal was not executed."));
             session.RealApplyMessage = string.Join(Environment.NewLine, completed);
             return succeeded;
         }

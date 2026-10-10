@@ -1,6 +1,18 @@
 # WinPool 验证与验收
 
-日期：2026-10-10。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-11。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+
+## 2026-10-11 建池属性与一次 Apply：限定验证
+
+本轮追踪动态属性、容量保存、撤销／重做及完整 Apply 链。结构页额外盘符、已有层名称输入及其独立 Enter 操作已移除；HDD 新建容量使用原容量层输入／MAX，普通布局保留其必要容量输入和用户已确认的布局选择。准确 bytes 在显示、解析与确认间保持，不将模拟容量上限用于真实校验。
+
+结构 Apply 改为一次完整目标／风险确认。后继段仍逐次 fresh Prepare、短时令牌及执行前核验，新增仅本次 Apply 有效的封闭授权：固定目标、参数、草稿代际及会话，准确匹配冻结计划和 Verified OperationId／PlanHash／post fingerprint，新对象只能由已核验映射引入。四种普通／HDD、明确容量／MAX 的完整合法推进与参数、目标、会话、收据篡改拒绝由定向测试覆盖；失败／未知停止，独立磁盘操作不继承授权，重启不自动续写。
+
+集中运行三个直接相关测试类，**115 Passed／0 Failed**，包括23条授权用例及10条精确容量新增 cases；没有全量门。最终标准 App／Agent Release 构建 **0 warnings／0 errors**、运行树合并0碰撞。原生 UI 核实 HDD 原字段默认 MAX、保存64 GiB时预览为68,719,476,736 bytes、撤销MAX／重做64、额外行消失。最终版本总确认列出准确 WDC身份、64 GiB、GPT、当前无MSR偏好、NTFS／64 KiB、名称与清盘风险；取消保留草稿，放弃后清除。本次首次草稿遇启动采集更新导致基线冲突，保护正常停止；两项自动采集成功后按新事实建立草稿完成上述检查。
+
+只读前后审计：321个计划、531个步骤、2370条执行事件的行数及完整内容 SHA-256 相同；Accepted265／CallIssued339不变，旧 `76958…` 仍为PartiallyCompleted。本轮没有真实写入，收敛后的连续创建未作实机写入复验，不能将合成链测试或取消确认视为设备验收。标准版本已重启，真实编辑on、测试草稿已放弃；V0.58／迭代8及V0.59整体活动状态不变。
+
+证据：[定向回归](../artifacts/test-results/20261011-pool-creation-alignment/targeted.trx)、[最终构建](../artifacts/test-results/20261011-pool-creation-alignment/final-release-build.log)、[最终容量保存](../artifacts/test-results/20261011-pool-creation-alignment/final-hdd-saved-ui.txt)、[总确认正文](../artifacts/test-results/20261011-pool-creation-alignment/final-confirmation-content.txt)、[原生断言](../artifacts/test-results/20261011-pool-creation-alignment/final-native-assertions.json)、[只读前态](../artifacts/test-results/20261011-pool-creation-alignment/before.json)、[只读后态](../artifacts/test-results/20261011-pool-creation-alignment/after.json)。
 
 ## 2026-10-10 编辑页额外入口移除：限定验证
 

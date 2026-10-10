@@ -218,10 +218,10 @@ public sealed class RealStructureDraftPlannerTests
         { AutoCreatePartition = true, VirtualDiskUseMaximum = true, VirtualDiskSizeBytes = null };
         var maximumChinese = RealStructureDraftPlanner.Build(session, chinese: true);
         Assert.True(maximumChinese.Preview.CanApply, string.Join("; ", maximumChinese.Preview.BlockingReasons));
-        Assert.Contains(maximumChinese.Preview.Actions, action => action.Contains("1 GiB", StringComparison.Ordinal));
+        Assert.Contains(maximumChinese.Preview.Actions, action => action.Contains("最大容量（MAX", StringComparison.Ordinal));
         var maximumEnglish = RealStructureDraftPlanner.Build(session, chinese: false);
         Assert.True(maximumEnglish.Preview.CanApply);
-        Assert.Contains(maximumEnglish.Preview.Actions, action => action.Contains("1 GiB steps", StringComparison.Ordinal));
+        Assert.Contains(maximumEnglish.Preview.Actions, action => action.Contains("maximum capacity (MAX", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -307,7 +307,7 @@ public sealed class RealStructureDraftPlannerTests
         var plan = RealStructureDraftPlanner.Build(session);
 
         Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
-        Assert.Contains(plan.Preview.Actions, action => action.Contains("1 GiB steps", StringComparison.Ordinal));
+        Assert.Contains(plan.Preview.Actions, action => action.Contains("maximum capacity (MAX", StringComparison.Ordinal));
         Assert.Equal(replacingExistingPool ? 1 : 0, plan.RemovedPools.Count);
         var creation = Assert.Single(plan.Creations);
         Assert.True(creation.Intent.VirtualDiskUseMaximum);

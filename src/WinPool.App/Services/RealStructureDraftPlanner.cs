@@ -180,8 +180,8 @@ public static class RealStructureDraftPlanner
                 var direct = before.OsDisks.SingleOrDefault(disk => disk.PhysicalDiskStableId == memberId && disk.VirtualDiskStableId is null);
                 if (priorOwner is not null || direct is not null && (!direct.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
                     || before.Partitions.Any(p => p.OsDiskStableId == direct.StableId)))
-                    actions.Add(T("核对释放成员；若仍有磁盘结构，下一段准确确认清空至 RAW（数据丢失）。",
-                        "Verify the released member; if disk structure remains, separately confirm clearing the exact disk to RAW (data loss)."));
+                    actions.Add(T("清除目标成员磁盘上的现有分区和数据，再创建存储池。",
+                        "Clear existing partitions and data on the target member disk before creating the storage pool."));
                 actions.Add(T($"创建单成员池 {pool.FriendlyName}。", $"Create single-member pool {pool.FriendlyName}."));
             }
             if (createVd || continueLayout)
@@ -190,12 +190,12 @@ public static class RealStructureDraftPlanner
                 {
                     if (intent.Layout == PoolVirtualDiskLayout.HddTiered && intent.VirtualDiskUseMaximum)
                         actions.Add(T(
-                            $"创建单 HDD 分层 VD {intent.VirtualDiskName}；使用准确 HDD 模板，减去 4,000,000 bytes 后取严格更小的整数 GiB，以 1 GiB 步长搜索最大容量。",
-                            $"Create single-HDD tiered VD {intent.VirtualDiskName}; use the exact HDD template, subtract 4,000,000 bytes, take the strictly smaller whole GiB, and search in 1 GiB steps."));
+                            $"创建单 HDD 分层虚拟磁盘 {intent.VirtualDiskName}，使用最大容量（MAX）；完成后显示实际容量。",
+                            $"Create single-HDD tiered virtual disk {intent.VirtualDiskName} with maximum capacity (MAX); show the actual capacity when complete."));
                     else
                     {
                         var capacity = intent.VirtualDiskUseMaximum
-                            ? T("WinPool 最大容量（整数 GiB，1 GiB 步长搜索）", "WinPool MAX (whole GiB, search in 1 GiB steps)")
+                            ? T("最大容量（MAX，完成后显示实际容量）", "maximum capacity (MAX; actual capacity shown when complete)")
                             : T($"准确容量 {intent.VirtualDiskSizeBytes} bytes", $"exact capacity {intent.VirtualDiskSizeBytes} bytes");
                         actions.Add(T($"创建{(intent.Layout == PoolVirtualDiskLayout.HddTiered ? "单 HDD 分层" : "普通")} VD {intent.VirtualDiskName}，{capacity}。",
                             $"Create {(intent.Layout == PoolVirtualDiskLayout.HddTiered ? "single-HDD tiered" : "ordinary")} VD {intent.VirtualDiskName} with {capacity}."));

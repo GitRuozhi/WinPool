@@ -290,7 +290,10 @@ public partial class EditorPageBase : Page
         await DialogCoordinator.ShowAsync(dialog);
     }
 
-    protected async Task<bool> SubmitRealAsync(RealOperationIntentRequest intent)
+    protected Task<bool> SubmitRealAsync(RealOperationIntentRequest intent) => SubmitRealAsync(intent, null, null);
+
+    private async Task<bool> SubmitRealAsync(RealOperationIntentRequest intent,
+        RealStructureApplyAuthorization? authorization, Action? validateApplyContext)
     {
         if (!ViewModel.CanSubmitRealOperation || ViewModel.AgentConnection is null)
             return false;
@@ -298,6 +301,8 @@ public partial class EditorPageBase : Page
         try
         {
             RealOperationValidator.Validate(intent);
+            validateApplyContext?.Invoke();
+            authorization?.ValidateProposal(intent);
         }
         catch (ArgumentException exception)
         {
@@ -314,7 +319,8 @@ public partial class EditorPageBase : Page
         ReportRealActivity(Text("正在准备应用", "Preparing to apply"));
         try
         {
-            return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId);
+            return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId,
+                authorization, validateApplyContext);
         }
         finally
         {
@@ -324,7 +330,8 @@ public partial class EditorPageBase : Page
     }
 
     private async Task<bool> SubmitReservedRealAsync(
-        RealOperationIntentRequest intent, IAgentConnection connection, string productSessionId)
+        RealOperationIntentRequest intent, IAgentConnection connection, string productSessionId,
+        RealStructureApplyAuthorization? authorization, Action? validateApplyContext)
     {
         var systemId = ViewModel.ActiveDocument.SystemId;
         var flow = new RealOperationRequestSession(connection, productSessionId);
@@ -365,16 +372,38 @@ public partial class EditorPageBase : Page
             await CancelPreparedRealAsync(connection, productSessionId, frozen);
             return false;
         }
-        var confirmation = RealOperationConfirmationFormatter.Format(plan,
-            ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
-            ViewModel.ActiveDocument.SourceFacts);
-        ReportRealActivity(Text("等待确认应用", "Waiting for apply confirmation"));
-        if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation)
-            || !ViewModel.IsRealMode || !ViewModel.IsLocalSystem
-            || ViewModel.ActiveDocument.SystemId != systemId)
+        try
+        {
+            if (authorization is not null)
+            {
+                // Each fresh frozen segment must fit the one confirmed structural goal.
+                // This does not bypass Agent preparation, token issuance or live preflight.
+                validateApplyContext!.Invoke();
+                authorization.ValidateFrozen(intent, frozen);
+            }
+            else
+            {
+                var confirmation = RealOperationConfirmationFormatter.Format(plan,
+                    ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
+                    ViewModel.ActiveDocument.SourceFacts);
+                ReportRealActivity(Text("等待确认应用", "Waiting for apply confirmation"));
+                if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation))
+                {
+                    await CancelPreparedRealAsync(connection, productSessionId, frozen);
+                    return false;
+                }
+            }
+            if (!ViewModel.IsRealMode || !ViewModel.IsLocalSystem || ViewModel.ActiveDocument.SystemId != systemId
+                || ViewModel.RealProductSessionId != productSessionId)
+            {
+                await CancelPreparedRealAsync(connection, productSessionId, frozen);
+                return false;
+            }
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
         {
             await CancelPreparedRealAsync(connection, productSessionId, frozen);
-            return false;
+            throw;
         }
         flow.Confirm(frozen);
         ReportRealActivity(Text("正在应用", "Applying"));

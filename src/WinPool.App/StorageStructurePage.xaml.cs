@@ -31,10 +31,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _applyingRealDraft;
     private RealStructureDraftPreview? _realDraftPreview;
     private readonly List<FrameworkElement> _realCreationRows = [];
+    private readonly List<FrameworkElement> _ordinaryCapacityRows = [];
     private readonly ComboBox _layoutBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _creationSizeBox = new() { Text = "MAX" };
-    private readonly TextBox _driveLetterBox = new() { MaxLength = 1 };
-    private readonly TextBox _tierNameBox = new();
     private bool CanEditDraft => (ViewModel.IsUsingSimulatedInventory || ViewModel.CanSubmitRealOperation)
         && !_applyingRealDraft && !IsRealStructureApplyInProgress && !_renameInProgress
         && !_outcomeUnknown && !EditingSession.HasBaselineConflict
@@ -355,8 +354,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             (_virtualDiskNameBox, "VirtualDiskNameBox"),
             (_layoutBox, "VirtualDiskLayoutBox"),
             (_creationSizeBox, "VirtualDiskCreationSizeBox"),
-            (_driveLetterBox, "StructureDriveLetterBox"),
-            (_tierNameBox, "TierNameBox"),
             (_volumeNameBox, "StructureVolumeNameBox"),
             (_autoVdiskSwitch, "AutoCreateVirtualDiskSwitch"),
             (_autoPartitionSwitch, "AutoCreatePartitionSwitch"),
@@ -389,17 +386,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         HookFormField(_layoutBox, isCombo: true);
         HookFormField(_creationSizeBox);
         HookEnterCommit(_creationSizeBox);
-        HookFormField(_driveLetterBox);
-        _tierNameBox.KeyDown += async (_, args) =>
-        {
-            if (args.Key != Windows.System.VirtualKey.Enter) return;
-            args.Handled = true;
-            await CommitTierNameAsync();
-        };
         ContextHelp.Set(_creationSizeBox, Text(
             "输入 GiB 容量或 MAX。MAX 使用 WinPool 内置算法，最终容量为整数 GiB；真实系统通过 Windows 确认可用最大值，模拟系统直接采用算法起始值。",
             "Enter a GiB capacity or MAX. MAX uses WinPool's built-in algorithm and produces whole GiB capacities. Windows verifies the maximum in real mode; simulation uses the initial candidate directly."));
-        ContextHelp.Set(_driveLetterBox, Text("输入 D–Z，或留空不指定盘符。", "Enter D–Z, or leave blank for no requested drive letter."));
         ContextHelp.Set(_layoutBox, Text("创建布局；已有结构必须显式解散后新建，不能原地切换布局。", "Creation layout; dissolve and create a new pool to change an existing layout."));
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
@@ -471,12 +460,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         row = AddFormRow(row, "VirtualDiskName", _virtualDiskNameBox);
         row = AddFormRow(row, "VirtualDiskLayout", _layoutBox, visibilityGroup: _realCreationRows,
             labelText: Text("虚拟磁盘布局", "Virtual disk layout"));
-        row = AddFormRow(row, "VirtualDiskCapacity", _creationSizeBox, visibilityGroup: _realCreationRows,
+        row = AddFormRow(row, "VirtualDiskCapacity", _creationSizeBox, visibilityGroup: _ordinaryCapacityRows,
             labelText: Text("虚拟磁盘容量（GiB / MAX）", "Virtual disk size (GiB / MAX)"));
-        row = AddFormRow(row, "DriveLetter", _driveLetterBox, visibilityGroup: _realCreationRows,
-            labelText: Text("盘符", "Drive letter"));
-        row = AddFormRow(row, "TierName", _tierNameBox, visibilityGroup: _realCreationRows,
-            labelText: Text("已有层名称（Enter）", "Existing tier name (Enter)"));
         row = AddFormRow(row, "VolumeName", _volumeNameBox);
         row = AddFormRow(row, "AutoCreateVirtualDisk", _autoVdiskSwitch);
         row = AddFormRow(row, "AutoCreatePartition", _autoPartitionSwitch);
@@ -667,7 +652,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                             // been released. Keep the mode when the visible
                             // value is still our generated MAX token.
                             if (_maximumSizeFields.Contains(maximumKey)
-                                && box.Text.StartsWith("MAX(", StringComparison.OrdinalIgnoreCase))
+                                && (box.Text.Equals("MAX", StringComparison.OrdinalIgnoreCase)
+                                    || box.Text.StartsWith("MAX(", StringComparison.OrdinalIgnoreCase)))
                             {
                                 _formDirty = true;
                                 UpdateButtonState();
@@ -675,7 +661,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
                             }
                             if (_maximumSizeFields.Contains(maximumKey))
                             {
-                                CaptureSelectedIntent();
+                                if (!ViewModel.IsUsingSimulatedInventory)
+                                    _poolIntents[_selectedPoolId!] = SelectedCreationIntent() with
+                                    {
+                                        VirtualDiskSizeBytes = null,
+                                        VirtualDiskUseMaximum = true
+                                    };
+                                else
+                                    CaptureSelectedIntent();
                                 _undoStack.Push(CaptureDraftState());
                                 _redoStack.Clear();
                             }
@@ -697,10 +690,31 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 };
                 break;
             case ComboBox combo when isCombo:
-                combo.SelectionChanged += (_, _) =>
+                combo.SelectionChanged += (_, args) =>
                 {
                     if (!_filling && control.IsEnabled && SelectedPool() is { IsPrimordial: false })
                     {
+                        if (!ViewModel.IsUsingSimulatedInventory && ReferenceEquals(control, _layoutBox))
+                        {
+                            var previousTiered = args.RemovedItems.Any(item => Equals(item, _layoutBox.Items[1]));
+                            var prior = SelectedCreationIntent(previousTiered);
+                            _poolIntents[_selectedPoolId!] = prior;
+                            _undoStack.Push(CaptureDraftState());
+                            _redoStack.Clear();
+                            var text = previousTiered ? Capacity.SizeBox.Text : _creationSizeBox.Text;
+                            var wasFilling = _filling;
+                            _filling = true;
+                            try
+                            {
+                                _creationSizeBox.Text = text;
+                                Capacity.SizeBox.Text = text;
+                                if (text.Trim().Equals("MAX", StringComparison.OrdinalIgnoreCase))
+                                    _maximumSizeFields.Add(MaximumKey(Capacity));
+                                else
+                                    _maximumSizeFields.Remove(MaximumKey(Capacity));
+                            }
+                            finally { _filling = wasFilling; }
+                        }
                         _formDirty = true;
                         UpdateLinkedFields();
                         if (ReferenceEquals(control, _layoutBox)) RefreshTopology();
@@ -893,28 +907,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             RefreshTopology();
             UpdateButtonState();
         }
-    }
-
-    private async Task CommitTierNameAsync()
-    {
-        if (!CanEditDraft || ViewModel.IsUsingSimulatedInventory || SelectedPool() is not { } pool
-            || SelectedRealPoolTier(pool) is not { } tier || !IsSupportedRealHddTier(pool, tier)) return;
-        var name = _tierNameBox.Text.Trim();
-        if (name.Length == 0 || name == tier.FriendlyName) return;
-        _renameInProgress = true;
-        try
-        {
-            var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId, StorageObjectKind.StorageTier, tier.StableId);
-            if (await SubmitRealAsync(RealOperationProposalFactory.OneStep(target.System,
-                OperationIntent.RenameStorageObject, target,
-                new RenameTierCommand(RealTargetReference.ForExisting(target), name),
-                $"Tier name becomes {name}", "No file data loss expected")))
-            {
-                SynchronizeCommittedName(tier.StableId);
-                RefreshTopology();
-            }
-        }
-        finally { _renameInProgress = false; UpdateButtonState(); }
     }
 
     private void SynchronizeCommittedName(string targetId) =>
@@ -1823,8 +1815,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _layoutBox.SelectedIndex = realLayout ? 1 : 0;
             _creationSizeBox.Text = vdisk is not null && !EditWorkspace.IsDraftVirtualDisk(vdisk.StableId)
                 ? CreationGigabytes(vdisk.Size) : "MAX";
-            _driveLetterBox.Text = string.Empty;
-            _tierNameBox.Text = SelectedRealPoolTier(pool)?.FriendlyName ?? string.Empty;
             if (_poolIntents.TryGetValue(pool.StableId, out var intent))
             {
                 if (vdisk is null || EditWorkspace.IsDraftVirtualDisk(vdisk.StableId))
@@ -1832,7 +1822,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     _layoutBox.SelectedIndex = intent.Layout == PoolVirtualDiskLayout.HddTiered ? 1 : 0;
                     _creationSizeBox.Text = intent.VirtualDiskUseMaximum ? "MAX" : CreationGigabytes(intent.VirtualDiskSizeBytes);
                 }
-                _driveLetterBox.Text = intent.DriveLetter?.ToString() ?? string.Empty;
                 _partitionStyleBox.SelectedItem = intent.PartitionStyle;
                 if (vdisk is null || EditWorkspace.IsDraftVirtualDisk(vdisk.StableId))
                     _virtualDiskNameBox.Text = intent.VirtualDiskName ?? vdisk?.FriendlyName ?? pool.FriendlyName;
@@ -1845,6 +1834,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 {
                     _volumeNameBox.Text = intent.VolumeName;
                 }
+            }
+
+            if (!ViewModel.IsUsingSimulatedInventory
+                && (vdisk is null || EditWorkspace.IsDraftVirtualDisk(vdisk.StableId)))
+            {
+                // Both layouts store one exact capacity goal. The HDD layout
+                // edits it through the original layer field and MAX button.
+                Capacity.SizeBox.Text = _creationSizeBox.Text;
+                if (intent?.VirtualDiskUseMaximum ?? true)
+                    _maximumSizeFields.Add(MaximumKey(Capacity));
+                else
+                    _maximumSizeFields.Remove(MaximumKey(Capacity));
             }
 
             _lastVirtualDiskName = _virtualDiskNameBox.Text;
@@ -1877,8 +1878,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var nextName = NextPoolName();
         _layoutBox.SelectedIndex = 0;
         _creationSizeBox.Text = "MAX";
-        _driveLetterBox.Text = string.Empty;
-        _tierNameBox.Text = string.Empty;
         _poolNameBox.Text = nextName;
         _lastPoolName = nextName;
         _virtualDiskNameBox.Text = nextName;
@@ -1931,11 +1930,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
             : isDraft ? TierCapacityMaxBytes(group.Media) : 0;
         // Only a new draft has a planner default. A real tier with a missing
         // source Size stays blank; a returned zero is intentionally shown.
-        SetNum(
-            group.SizeBox,
-            isDraft || !capacityUnavailable
-                ? Math.Round(tierBytes / 1024d / 1024d / 1024d, 2)
-                : null);
+        if (!ViewModel.IsUsingSimulatedInventory)
+            group.SizeBox.Text = !capacityUnavailable ? CreationGigabytes(tier.Size) : string.Empty;
+        else
+            SetNum(
+                group.SizeBox,
+                isDraft || !capacityUnavailable
+                    ? Math.Round(tierBytes / 1024d / 1024d / 1024d, 2)
+                    : null);
         SetNum(group.ColumnsBox, tier.NumberOfColumns ?? (ViewModel.IsUsingSimulatedInventory
             ? EditWorkspace.RecommendedTierColumns(tier.ResiliencySettingName, TierDataDisks(group.Media))
             : (int?)null));
@@ -1960,8 +1962,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     /// <summary>Source templates remain visible before any space is allocated.</summary>
     private bool TierVisible(string poolId, string media) =>
-        TierMap(poolId).GetValueOrDefault(media) is { } tier
-        && (!ViewModel.IsUsingSimulatedInventory || tier.MemberPhysicalDiskIds.Count > 0);
+        !ViewModel.IsUsingSimulatedInventory && media == "HDD" && _layoutBox.SelectedIndex == 1
+        || TierMap(poolId).GetValueOrDefault(media) is { } tier
+            && (!ViewModel.IsUsingSimulatedInventory || tier.MemberPhysicalDiskIds.Count > 0);
 
     /// <summary>Member disk count of the tier (0 when the tier does not exist).</summary>
     private int TierMemberCount(string poolId, string media) =>
@@ -2320,29 +2323,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
         VirtualDiskName: volumeName,
         CreateMsr: ViewModel.CurrentPreferences.CreateMsrOnInitialize);
 
-    private static string CreationGigabytes(long? bytes) => bytes is > 0
-        ? (bytes.Value / 1073741824m).ToString("G29", System.Globalization.CultureInfo.CurrentCulture)
-        : string.Empty;
+    private static string CreationGigabytes(long? bytes) =>
+        RealVirtualDiskCreationCapacityResolver.FormatGigabytes(bytes);
 
-    private bool TryReadCreationSize(out long? bytes, out bool maximum)
+    private bool TryReadCreationSize(out long? bytes, out bool maximum, bool? tiered = null)
     {
-        bytes = null;
-        var text = _creationSizeBox.Text.Trim();
-        maximum = text.Equals("MAX", StringComparison.OrdinalIgnoreCase);
-        if (maximum) return true;
-        if (!decimal.TryParse(text, System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.CurrentCulture, out var gib) || gib <= 0) return false;
-        try
-        {
-            var value = gib * 1024m * 1024m * 1024m;
-            if (value > long.MaxValue || decimal.Truncate(value) != value) return false;
-            bytes = decimal.ToInt64(value);
-            return bytes > 0;
-        }
-        catch (OverflowException) { return false; }
+        var text = !ViewModel.IsUsingSimulatedInventory && (tiered ?? _layoutBox.SelectedIndex == 1)
+            ? Capacity.SizeBox.Text : _creationSizeBox.Text;
+        return RealVirtualDiskCreationCapacityResolver.TryParseGigabytes(text, out bytes, out maximum);
     }
 
-    private PoolEditIntent SelectedCreationIntent()
+    private PoolEditIntent SelectedCreationIntent(bool? tiered = null)
     {
         var savedPartition = _selectedPoolId is null ? null : CommittedPrimaryPartition(_selectedPoolId);
         _poolIntents.TryGetValue(_selectedPoolId ?? string.Empty, out var prior);
@@ -2350,18 +2341,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         // Provider-created unformatted partitions and later preference changes
         // must not replace its label, format or MSR/letter choices.
         if (prior is { PendingAutomaticLayout: true }) return prior;
-        TryReadCreationSize(out var bytes, out var maximum);
-        var letter = _driveLetterBox.Text.Trim().ToUpperInvariant();
+        var hddTiered = tiered ?? _layoutBox.SelectedIndex == 1;
+        TryReadCreationSize(out var bytes, out var maximum, hddTiered);
         return new PoolEditIntent(
             ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
             ViewModel.CurrentPreferences.AutoCreatePartition,
             _fileSystemBox.SelectedItem as string ?? "NTFS",
             ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
             savedPartition is null ? _volumeNameBox.Text.Trim() : savedPartition.FileSystemLabel,
-            _layoutBox.SelectedIndex == 1 ? PoolVirtualDiskLayout.HddTiered : PoolVirtualDiskLayout.Ordinary,
+            hddTiered ? PoolVirtualDiskLayout.HddTiered : PoolVirtualDiskLayout.Ordinary,
             _virtualDiskNameBox.Text.Trim(), bytes, maximum,
             ViewModel.CurrentPreferences.CreateMsrOnInitialize,
-            letter.Length == 1 ? letter[0] : null,
+            prior?.DriveLetter,
             _partitionStyleBox.SelectedItem as string ?? "GPT",
             prior?.QuickFormat ?? true,
             prior?.VerifiedVirtualDiskId,
@@ -2571,9 +2562,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             var hasExistingVdisk = _working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId
                 && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
-            if (!hasExistingVdisk && !TryReadCreationSize(out _, out _)) return true;
-            var letter = _driveLetterBox.Text.Trim().ToUpperInvariant();
-            return letter.Length > 0 && (letter.Length != 1 || letter[0] is < 'D' or > 'Z');
+            return !hasExistingVdisk && !TryReadCreationSize(out _, out _);
         }
         return pool is not null && TierGroups().Any(group =>
             TierVisible(pool.StableId, group.Media)
@@ -2611,6 +2600,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = CanEditDraft
             && _formDirty
+            && (simulated || !HasInvalidSizeInput())
             && pool is { IsPrimordial: false }
             && (!simulated || !EditWorkspace.IsDraftPool(pool.StableId))
             && !poolOffline;
@@ -2636,7 +2626,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !poolOffline;
         CreateVdiskButton.IsEnabled = CanEditDraft && (canEditPool || CanUseRealSingleMemberPool(pool)
                 || pool is { IsPrimordial: false } && EditWorkspace.IsDraftPool(pool.StableId))
-            && poolVdisks.Count == 0
+            && poolVdisks.Count == 0 && (simulated || !HasInvalidSizeInput())
             && (CanUseRealSingleMemberPool(pool)
                 || pool!.MemberPhysicalDiskIds.Count > 0
                 || DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD")
@@ -2834,15 +2824,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
             element.Visibility = real ? Visibility.Visible : Visibility.Collapsed;
             PoolFormGrid.RowDefinitions[Grid.GetRow(element)].MinHeight = real ? 40 : 0;
         }
-        var canConfigureCreation = real && formEnabled && !hasVdisk;
+        var pendingAutomaticLayout = pool is not null
+            && _poolIntents.TryGetValue(pool.StableId, out var savedIntent) && savedIntent.PendingAutomaticLayout;
+        var canConfigureCreation = real && formEnabled && !hasVdisk && !pendingAutomaticLayout;
         _layoutBox.IsEnabled = canConfigureCreation && (isDraft || pool is not null && RealPoolTiers(pool).Length == 0);
-        _creationSizeBox.IsEnabled = canConfigureCreation;
-        _driveLetterBox.IsEnabled = canConfigureCreation && ViewModel.CurrentPreferences.AutoCreatePartition;
-        _tierNameBox.IsEnabled = real && CanEditDraft && pool is not null
-            && SelectedRealPoolTier(pool) is { } namedTier && IsSupportedRealHddTier(pool, namedTier);
+        var ordinaryCapacityVisible = real && pool is { IsPrimordial: false } && _layoutBox.SelectedIndex != 1;
+        foreach (var element in _ordinaryCapacityRows)
+        {
+            element.Visibility = ordinaryCapacityVisible ? Visibility.Visible : Visibility.Collapsed;
+            PoolFormGrid.RowDefinitions[Grid.GetRow(element)].MinHeight = ordinaryCapacityVisible ? 40 : 0;
+        }
+        _creationSizeBox.IsEnabled = canConfigureCreation && ordinaryCapacityVisible;
         SetDisabledReason(_layoutBox, Text("已有布局不能原地更改；请显式解散旧池后新建目标草稿。", "An existing layout cannot change in place; explicitly dissolve the old pool and create a new draft."));
         SetDisabledReason(_creationSizeBox, Text("已有虚拟磁盘扩缩当前不受支持；此输入仅用于新建。", "Resizing an existing virtual disk is unsupported; this input is for creation."));
-        SetDisabledReason(_tierNameBox, Text("请选择受支持的已有单 HDD 层。", "Select a supported existing single-HDD tier."));
         ContextHelp.Set(
             _poolNameBox,
             isDraft
@@ -2914,12 +2908,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             RestoreTierHelp(group);
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
             var tierVisible = TierVisible(pool.StableId, group.Media);
-            var sizeEditable = formEnabled && tierVisible && tier is not null && !holdsData && !real;
-            var specEditable = sizeEditable;
+            var realHddCreation = canConfigureCreation && _layoutBox.SelectedIndex == 1 && group == Capacity;
+            var sizeEditable = realHddCreation || formEnabled && tierVisible && tier is not null && !holdsData && !real;
+            var specEditable = sizeEditable && !real;
             var maximumBytes = tierVisible && tier is not null ? TierCapacityMaxBytes(group.Media) : 0;
             var maximumSelected = _maximumSizeFields.Contains(MaximumKey(group));
             group.SizeBox.IsEnabled = sizeEditable;
-            group.MaximumButton.IsEnabled = formEnabled && !real
+            group.MaximumButton.IsEnabled = realHddCreation || formEnabled && !real
                 && tierVisible
                 && tier is not null
                 && maximumBytes > 0
@@ -2932,7 +2927,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 group.ProvisioningBox.Items.Add(provisioning);
             }
             group.ProvisioningBox.SelectedItem = provisioning;
-            group.ProvisioningBox.IsEnabled = sizeEditable
+            group.ProvisioningBox.IsEnabled = specEditable
                 && provisioning.Equals("Fixed", StringComparison.OrdinalIgnoreCase);
             group.ResiliencyBox.IsEnabled = specEditable;
             var supportedInterleave = tier?.Interleave is null
@@ -2951,10 +2946,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
 
             var resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
+            if (realHddCreation)
+            {
+                SetResiliency(group.ResiliencyBox, "Simple");
+                SetInterleave(group.InterleaveBox, 65536);
+                SetNum(group.ColumnsBox, 1);
+                resiliency = "Simple";
+            }
             var isMirror = resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase);
             var isSimple = resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase);
             LinkResiliency(group);
-            group.DiskCountBox.Text = TierMemberCount(pool.StableId, group.Media).ToString();
+            group.DiskCountBox.Text = (realHddCreation
+                ? pool.MemberPhysicalDiskIds.Count : TierMemberCount(pool.StableId, group.Media)).ToString();
             group.CopiesBox.IsEnabled = specEditable && isMirror;
             group.FailuresBox.IsEnabled = specEditable && !isMirror && !isSimple;
             group.ColumnsBox.IsEnabled = specEditable;
@@ -2976,9 +2979,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             SetTierDisabledReasons(group, disabledReason, supportedInterleave);
             if (real && formEnabled)
             {
-                var sizeReason = hasVdisk
-                    ? Text("已有真实虚拟磁盘和层的扩缩容当前不受支持。", "Resizing existing real virtual disks and tiers is currently unsupported.")
-                    : Text("请在虚拟磁盘容量字段输入 GiB 或 MAX；真实容量按准确池或层模板核验。", "Enter GiB or MAX in Virtual disk capacity; real capacity is verified against the exact pool or tier template.");
+                var sizeReason = Text("已有真实虚拟磁盘和层的扩缩容当前不受支持。", "Resizing existing real virtual disks and tiers is currently unsupported.");
                 SetDisabledReason(group.SizeBox, sizeReason);
                 SetDisabledReason(group.MaximumButton, sizeReason);
             }
@@ -3294,12 +3295,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             tier.PoolStableId == pool.StableId)
             .ToArray();
 
-    private StorageTierInfo? SelectedRealPoolTier(StoragePoolInfo pool) =>
-        _selectedPoolTierId is null
-            ? null
-            : RealPoolTiers(pool).SingleOrDefault(tier =>
-                tier.StableId.Equals(_selectedPoolTierId, StringComparison.OrdinalIgnoreCase));
-
     private static bool IsSupportedRealHddTier(StoragePoolInfo pool, StorageTierInfo tier) =>
         tier.IsStable
         && tier.PoolStableId == pool.StableId
@@ -3418,6 +3413,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         var pool = SelectedPool();
         if (!CanEditDraft || pool is null || pool.IsPrimordial
+            || !ViewModel.IsUsingSimulatedInventory && HasInvalidSizeInput()
             || (!ViewModel.IsUsingSimulatedInventory
                 && !EditWorkspace.IsDraftPool(pool.StableId)
                 && !CanDissolveRealSingleMemberPool(pool))) return;
@@ -3977,7 +3973,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         if (!ViewModel.IsUsingSimulatedInventory)
         {
-            if (!CanEditDraft || !_formDirty || SelectedPool() is not { IsPrimordial: false }) return;
+            if (!CanEditDraft || !_formDirty || HasInvalidSizeInput() || SelectedPool() is not { IsPrimordial: false }) return;
             var prior = CaptureDraftState();
             CaptureSelectedIntent();
             _working = ApplyFormToWorking(_working);
@@ -4151,10 +4147,30 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ToggleMaximumSize(TierFields group)
     {
+        if (!group.MaximumButton.IsEnabled) return;
         CaptureSelectedIntent();
         _undoStack.Push(CaptureDraftState());
         _redoStack.Clear();
         var key = MaximumKey(group);
+        if (!ViewModel.IsUsingSimulatedInventory)
+        {
+            var wasFilling = _filling;
+            _filling = true;
+            try
+            {
+                if (_maximumSizeFields.Remove(key))
+                    group.SizeBox.Text = string.Empty;
+                else
+                {
+                    _maximumSizeFields.Add(key);
+                    group.SizeBox.Text = "MAX";
+                }
+            }
+            finally { _filling = wasFilling; }
+            _formDirty = true;
+            UpdateButtonState();
+            return;
+        }
         var maximum = TierCapacityMaxBytes(group.Media);
         if (_maximumSizeFields.Remove(key))
         {
@@ -4179,10 +4195,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var maximumGiB = TierCapacityMaxBytes(group.Media) / 1024L / 1024L / 1024L;
+        if (!ViewModel.IsUsingSimulatedInventory
+            && (group != Capacity || _layoutBox.SelectedIndex != 1
+                || SelectedPool() is not { } pool
+                || _working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId
+                    && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))) return;
+        var wasFilling = _filling;
         _filling = true;
-        group.SizeBox.Text = $"MAX({maximumGiB}GiB)";
-        _filling = false;
+        try
+        {
+            group.SizeBox.Text = !ViewModel.IsUsingSimulatedInventory
+                ? "MAX"
+                : $"MAX({TierCapacityMaxBytes(group.Media) / 1024L / 1024L / 1024L}GiB)";
+        }
+        finally { _filling = wasFilling; }
     }
 
     private static bool NumberEquals(double? actual, int? expected) =>
@@ -4299,6 +4325,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return false;
         }
 
+        if (!ViewModel.IsUsingSimulatedInventory)
+            return field == TierFieldKind.Size && group == Capacity && group.SizeBox.IsEnabled
+                && TryReadCreationSize(out _, out var maximum) && !maximum;
+
         return field switch
         {
             TierFieldKind.Size => Math.Abs(((NumValue(group.SizeBox) ?? 0) * 1024d * 1024d * 1024d) - tier.Size) > 1,
@@ -4317,6 +4347,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
     /// <summary>Restores one parameter field to its recommended value.</summary>
     private void ResetTierField(TierFields group, string kind)
     {
+        if (!ViewModel.IsUsingSimulatedInventory)
+        {
+            if (kind == "Size" && group == Capacity && group.SizeBox.IsEnabled)
+            {
+                _maximumSizeFields.Add(MaximumKey(group));
+                UpdateMaximumSizeText(group);
+            }
+            return;
+        }
         var media = group.Media;
         var count = TierDataDiskCount(media);
         switch (kind)
