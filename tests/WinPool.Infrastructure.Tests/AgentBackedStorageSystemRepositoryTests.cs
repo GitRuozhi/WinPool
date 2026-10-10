@@ -72,6 +72,30 @@ public sealed class AgentBackedStorageSystemRepositoryTests
     }
 
     [Fact]
+    public async Task ManageInventoryFailurePreservesDiagnosticTextAndFallsBackToCode()
+    {
+        var connection = new RecordingConnection
+        {
+            CaptureFailure = new ApplicationMessage(
+                "agent.inventory.manage_capture_failed", "agent.inventory.manage_capture_failed",
+                "Stage: inventory.local_document.encode\nInvalidDataException: escaped payload limit",
+                ApplicationMessageSeverity.Error, [])
+        };
+        var provider = new AgentBackedHardwareInventoryProvider(connection);
+
+        var detailed = await Assert.ThrowsAsync<InventoryScanException>(
+            () => provider.CollectLocalAsync(CancellationToken.None));
+        Assert.Equal("Stage: inventory.local_document.encode\nInvalidDataException: escaped payload limit", detailed.Diagnostic);
+
+        connection.CaptureFailure = new ApplicationMessage(
+            "agent.inventory.manage_capture_failed", "agent.inventory.manage_capture_failed",
+            string.Empty, ApplicationMessageSeverity.Error, []);
+        var fallback = await Assert.ThrowsAsync<InventoryScanException>(
+            () => provider.CollectLocalAsync(CancellationToken.None));
+        Assert.Equal("agent.inventory.manage_capture_failed", fallback.Diagnostic);
+    }
+
+    [Fact]
     public void LocalInventoryCodecAcceptsUnixMillisecondCapturedAtWithADifferentOffset()
     {
         var document = Document(StorageSystemKind.Local);
@@ -122,6 +146,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         private SimulationDocumentPayload? current;
         private LocalInventoryDocumentPayload? localInventory;
         public List<AgentRequest> Requests { get; } = [];
+        public ApplicationMessage? CaptureFailure { get; set; }
 
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(
             CancellationToken cancellationToken) =>
@@ -140,6 +165,11 @@ public sealed class AgentBackedStorageSystemRepositoryTests
             CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            if (request is CaptureAgentManageInventoryRequest && CaptureFailure is { } failure)
+            {
+                return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(
+                    ApplicationStatus.Failed, request.CorrelationId, failure));
+            }
             AgentResponse response = request switch
             {
                 ListAgentSimulationDocumentsRequest =>

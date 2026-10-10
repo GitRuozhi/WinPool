@@ -209,8 +209,23 @@ public static class WinPoolFactRefresh
                     ObservedAt = x.ObservedAt ?? oldSources[oldObjects[x.ToId].SourceRef].CapturedAt }
                 : x);
         var usedSources = objects.Select(x => x.SourceRef).Concat(objects.SelectMany(x => x.Fields.Select(f => f.SourceRef))).ToHashSet();
+        var completeFullSources = sources.Where(x => x.Coverage is null && Complete(x))
+            .GroupBy(Key).ToDictionary(x => x.Key, x => x.ToArray());
         var latestSources = sources.GroupBy(x => (Key(x), x.Coverage?.ScopeKey))
-            .Select(x => x.OrderByDescending(s => s.CaptureGeneration).ThenByDescending(s => s.CapturedAt).First().Id).ToHashSet();
+            .SelectMany(group =>
+            {
+                var observations = group.ToArray();
+                var latest = observations.OrderByDescending(x => x.CaptureGeneration).ThenByDescending(x => x.CapturedAt).First();
+                // An incomplete result (or a smaller closure) cannot erase an earlier absence proof.
+                return observations.Where(x => x.Id == latest.Id || (x.Coverage is not null && Complete(x)
+                    && !observations.Any(candidate => Complete(candidate) && Newer(candidate, x)
+                        && x.Coverage.ObjectIds.All(id => Covers(candidate, id)))));
+            })
+            // A newer complete whole-class result proves absence throughout every older scope.
+            // Keep referenced observations below, but do not retain superseded operation markers forever.
+            .Where(x => x.Coverage is null || !completeFullSources.TryGetValue(Key(x), out var full)
+                || !full.Any(candidate => Newer(candidate, x)))
+            .Select(x => x.Id).ToHashSet();
         sources = sources.Where(x => usedSources.Contains(x.Id) || latestSources.Contains(x.Id)).ToImmutableArray();
         var merged = current with
         {

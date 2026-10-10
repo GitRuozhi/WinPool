@@ -708,11 +708,13 @@ public sealed class NamedPipeAgentConnectionTests
             Assert.True(await secondEventEnumerator.MoveNextAsync());
             Assert.Equal(report, Assert.IsType<AgentInventoryUpdatedEvent>(secondEventEnumerator.Current));
         }
-        eventHub.Publish(new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "test.capture_failed", occurredAt, IsAutomatic: true));
+        var failedReport = new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "test.capture_failed", occurredAt,
+            IsAutomatic: true, Detail: "Stage: inventory.local_document.encode\nInvalidDataException: budget");
+        eventHub.Publish(failedReport);
         Assert.True(await eventEnumerator.MoveNextAsync());
-        Assert.True(Assert.IsType<AgentInventoryFailedEvent>(eventEnumerator.Current).IsAutomatic);
+        Assert.Equal(failedReport, Assert.IsType<AgentInventoryFailedEvent>(eventEnumerator.Current));
         Assert.True(await secondEventEnumerator.MoveNextAsync());
-        Assert.IsType<AgentInventoryFailedEvent>(secondEventEnumerator.Current);
+        Assert.Equal(failedReport, Assert.IsType<AgentInventoryFailedEvent>(secondEventEnumerator.Current));
         var cachedInventoryResponse = await connection.SendAsync(
             new LoadAgentManageInventoryRequest(CorrelationId.New()),
             CancellationToken.None);

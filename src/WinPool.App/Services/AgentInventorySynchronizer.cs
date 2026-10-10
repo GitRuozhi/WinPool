@@ -76,7 +76,8 @@ internal sealed class AgentInventorySynchronizer : IDisposable
     private void ReportCapture(AgentEvent report) => dispatcher.TryEnqueue(() =>
     {
         if (cancellation.IsCancellationRequested) return;
-        if (report is AgentInventoryFailedEvent failedReport) LogFailure($"{failedReport.Code}.{failedReport.Purpose}", null);
+        if (report is AgentInventoryFailedEvent failedReport)
+            LogFailure($"{failedReport.Code}.{failedReport.Purpose}", null, failedReport.Detail);
         if (report is AgentStateReseedEvent)
         {
             // A reseed proves that the event transport is reachable, but its
@@ -231,9 +232,9 @@ internal sealed class AgentInventorySynchronizer : IDisposable
         _ => chinese ? "存储" : "storage"
     };
 
-    private static void LogFailure(string code, Exception? exception)
+    private static void LogFailure(string code, Exception? exception, string? diagnostic = null)
     {
-        try { DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot, "inventory-refresh.jsonl", code, exception); }
+        try { DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot, "inventory-refresh.jsonl", code, exception, diagnostic); }
         catch (Exception loggingException) when (loggingException is IOException or UnauthorizedAccessException) { }
     }
 

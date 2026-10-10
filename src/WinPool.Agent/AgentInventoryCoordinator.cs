@@ -66,7 +66,8 @@ internal sealed class AgentInventoryCoordinator
                 // A native provider failure must not fault an unobserved startup task
                 // or prevent the independent full-hardware attempt.
                 System.Diagnostics.Trace.TraceError("agent.inventory.startup_failed: {0}", exception);
-                publish(new AgentInventoryFailedEvent(purpose, "agent.inventory.startup_failed", DateTimeOffset.UtcNow, IsAutomatic: true));
+                publish(new AgentInventoryFailedEvent(purpose, "agent.inventory.startup_failed", DateTimeOffset.UtcNow,
+                    IsAutomatic: true, Detail: FormatFailureDetail("inventory.startup", exception)));
             }
         }
     }
@@ -104,17 +105,22 @@ internal sealed class AgentInventoryCoordinator
         var queuedAt = Stopwatch.GetTimestamp();
         await localCaptureGate.WaitAsync(cancellationToken);
         var gateAt = Stopwatch.GetTimestamp();
+        var failureStage = "inventory.prepare";
         StorageOperationTiming.Record("inventory.queue", queuedAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
         try
         {
             if (!Enum.IsDefined(request.Purpose)) return Failed(request.CorrelationId, "agent.inventory.invalid_purpose");
+            failureStage = "local_identity.resolve";
             var identity = await localIdentity.ResolveAsync(cancellationToken);
             var canonicalSystemId = identity.SystemId;
+            failureStage = "local_document.load";
             var cached = await localDocument.LoadAsync(cancellationToken);
+            failureStage = "local_document.decode";
             var previous = cached is null ? null : LocalInventoryDocumentCodec.Decode(cached.Document);
             var generation = checked((previous?.SourceFacts?.Sources.Select(x => x.CaptureGeneration).DefaultIfEmpty(0).Max() ?? 0) + 1);
             if (scope is not null)
             {
+                failureStage = "inventory.scope.resolve";
                 scope.Validate();
                 if (scope.SystemId != canonicalSystemId || previous?.SourceFacts is not { } authority
                     || authority.SystemId != canonicalSystemId)
@@ -135,6 +141,7 @@ internal sealed class AgentInventoryCoordinator
             }
             publish(new AgentInventoryStartedEvent(request.Purpose, DateTimeOffset.UtcNow, isAutomatic));
             var captureAt = Stopwatch.GetTimestamp();
+            failureStage = "inventory.provider.collect";
             var document = scope is not null
                 ? await ((IScopedHardwareInventoryProvider)manageProvider).CollectScopedAsync(scope, cancellationToken)
                 : request.Purpose == CollectionPurpose.Hardware
@@ -142,6 +149,7 @@ internal sealed class AgentInventoryCoordinator
                 : await manageProvider.CollectLocalAsync(cancellationToken);
             var capturedAt = Stopwatch.GetTimestamp();
             StorageOperationTiming.Record("inventory.collect", captureAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString(), 1);
+            failureStage = "inventory.capture.validate";
             if (scope is not null && (document.SystemId != canonicalSystemId
                 || document.SourceFacts?.ScopedCollection?.Scope != scope || document.SourceFacts.IsMerged))
                 throw new InvalidDataException("Scoped inventory returned mismatched or merged evidence.");
@@ -155,32 +163,39 @@ internal sealed class AgentInventoryCoordinator
                 }
             };
             var incomplete = scope is not null && document.SourceFacts?.ScopedCollection?.Complete != true;
+            failureStage = "inventory.facts.merge";
             if (previous is not null && document.SourceFacts is not null)
             {
                 if (previous.SystemId == canonicalSystemId && previous.SourceFacts is not null)
                     document = document with { SourceFacts = WinPoolFactRefresh.Merge(previous.SourceFacts, document.SourceFacts) };
             }
+            failureStage = "inventory.device_ids.cache";
             CachePhysicalDeviceIds(document);
             StorageOperationTiming.Record("inventory.merge", capturedAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             var projectionAt = Stopwatch.GetTimestamp();
+            failureStage = "inventory.snapshot.project";
             var projected = EmbeddedPowerShellInventoryProvider.Project(
                 canonicalSystemId,
                 document.Snapshot);
             StorageOperationTiming.Record("inventory.project", projectionAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             var persistenceAt = Stopwatch.GetTimestamp();
+            failureStage = "inventory.snapshot.save";
             var saved = await snapshots.SaveAsync(
                 projected,
                 PersistedSystemKind.Local,
                 Environment.MachineName,
                 cancellationToken,
                 LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
+            failureStage = "inventory.local_document.encode";
             var payload = LocalInventoryDocumentCodec.Encode(document);
+            failureStage = "inventory.local_document.verify";
             if (LocalInventoryDocumentCodec.Decode(payload).SystemId != canonicalSystemId
                 || projected.SystemId != canonicalSystemId
                 || saved.Snapshot.SystemId != canonicalSystemId)
             {
                 throw new InvalidDataException("The Local inventory identity is inconsistent.");
             }
+            failureStage = "inventory.local_document.save";
             await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
             StorageOperationTiming.Record("inventory.persist", persistenceAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             Trace.WriteLine(JsonSerializer.Serialize(new { Event = "inventory.coordinator", Purpose = scope is null ? request.Purpose.ToString() : "ScopedStorage",
@@ -213,10 +228,13 @@ internal sealed class AgentInventoryCoordinator
                 or InvalidOperationException
                 or ArgumentException
                 or Microsoft.Data.Sqlite.SqliteException
-                or UnauthorizedAccessException)
+                or UnauthorizedAccessException
+                or TimeoutException)
         {
-            publish(new AgentInventoryFailedEvent(request.Purpose, "agent.inventory.manage_capture_failed", DateTimeOffset.UtcNow, isAutomatic));
-            return Failed(request.CorrelationId, "agent.inventory.manage_capture_failed");
+            const string code = "agent.inventory.manage_capture_failed";
+            var detail = FormatFailureDetail(failureStage, exception);
+            publish(new AgentInventoryFailedEvent(request.Purpose, code, DateTimeOffset.UtcNow, isAutomatic, detail));
+            return Failed(request.CorrelationId, code, detail);
         }
         finally
         {
@@ -394,11 +412,33 @@ internal sealed class AgentInventoryCoordinator
 
     private static ApplicationResult<AgentResponse> Failed(
         CorrelationId correlationId,
-        string code) =>
+        string code,
+        string? diagnostic = null) =>
         ApplicationResult<AgentResponse>.FromStatus(
             ApplicationStatus.Failed,
             correlationId,
-            new ApplicationMessage(code, code, string.Empty, ApplicationMessageSeverity.Error, []));
+            new ApplicationMessage(code, code, diagnostic ?? string.Empty, ApplicationMessageSeverity.Error, []));
+
+    private const int MaximumFailureDetailLength = 2048;
+
+    private static string FormatFailureDetail(string stage, Exception exception)
+    {
+        var details = new List<string> { $"Stage: {stage}" };
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            details.Add($"{current.GetType().FullName}: {current.Message}");
+            if (current is InventoryScanException scanException
+                && !string.IsNullOrWhiteSpace(scanException.Diagnostic))
+            {
+                details.Add($"Inventory diagnostic: {scanException.Diagnostic}");
+            }
+        }
+
+        var detail = string.Join(Environment.NewLine, details);
+        return detail.Length <= MaximumFailureDetailLength
+            ? detail
+            : detail[..MaximumFailureDetailLength];
+    }
 
     private static ApplicationResult<AgentResponse> Succeeded(
         AgentResponse response,

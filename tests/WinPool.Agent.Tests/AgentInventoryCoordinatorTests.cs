@@ -102,7 +102,9 @@ public sealed class AgentInventoryCoordinatorTests
         harness.provider.Sequence.Enqueue((CollectionPurpose.Hardware, NetworkCapture(1, ["ethernet"], includeOtherObjects: true)));
         await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
         Assert.True(Assert.IsType<AgentInventoryStartedEvent>(harness.Events[0]).IsAutomatic);
-        Assert.True(Assert.IsType<AgentInventoryFailedEvent>(harness.Events[1]).IsAutomatic);
+        var storageFailure = Assert.IsType<AgentInventoryFailedEvent>(harness.Events[1]);
+        Assert.True(storageFailure.IsAutomatic);
+        Assert.Contains("Inventory diagnostic: test", Assert.IsType<string>(storageFailure.Detail));
         Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryStartedEvent>(harness.Events[2]).Purpose);
         Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[3]).Purpose);
 
@@ -111,6 +113,41 @@ public sealed class AgentInventoryCoordinatorTests
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.coordinator.CaptureStartupAsync(cancellation.Token));
         Assert.Empty(cancelled.Events);
+    }
+
+    [Theory]
+    [InlineData("inventory")]
+    [InlineData("timeout")]
+    public async Task ManualCaptureFailurePreservesBoundedExceptionDetailsInResultAndEvent(string failureKind)
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        Exception injected = failureKind == "timeout"
+            ? new TimeoutException("Injected timeout")
+            : new InventoryScanException("Injected failure", new string('x', 4096));
+        harness.provider.CaptureOverride = _ => Task.FromException<StorageSystemDocument>(injected);
+
+        var result = await harness.coordinator.CaptureManageAsync(
+            new(CorrelationId.New()), CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        var responseMessage = Assert.Single(result.Messages);
+        var failed = Assert.IsType<AgentInventoryFailedEvent>(harness.Events[^1]);
+        var detail = Assert.IsType<string>(failed.Detail);
+        Assert.Equal("agent.inventory.manage_capture_failed", failed.Code);
+        Assert.False(failed.IsAutomatic);
+        Assert.Equal(responseMessage.DiagnosticText, detail);
+        Assert.StartsWith("Stage: inventory.provider.collect", detail);
+        if (failureKind == "timeout")
+        {
+            Assert.Contains("System.TimeoutException: Injected timeout", detail);
+            Assert.True(detail.Length <= 2048);
+        }
+        else
+        {
+            Assert.Contains("WinPool.Infrastructure.Windows.InventoryScanException: Injected failure", detail);
+            Assert.Contains("Inventory diagnostic: ", detail);
+            Assert.Equal(2048, detail.Length);
+        }
     }
 
     [Fact]

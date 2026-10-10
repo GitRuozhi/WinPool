@@ -1353,11 +1353,21 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                         StatusMessage = string.Empty;
                         break;
                     case ManualScanOutcome.Failed:
-                        ScanError = $"{Localization["ScanFailed"]} {result.Error!.Message}";
+                    {
+                        var diagnostic = result.Error is InventoryScanException inventoryFailure
+                            ? BoundInventoryDiagnostic(inventoryFailure.Diagnostic)
+                            : string.Empty;
+                        ScanError = string.IsNullOrWhiteSpace(diagnostic)
+                            ? $"{Localization["ScanFailed"]} {result.Error!.Message}"
+                            : $"{Localization["ScanFailed"]} {result.Error!.Message}{Environment.NewLine}{diagnostic}";
                         StatusMessage = ScanError;
-                        PresentNotification(WinPool.Application.WorkspaceNotificationFactory.ScanFailed(
-                            ManualFailedKey(purpose)));
+                        var failure = WinPool.Application.WorkspaceNotificationFactory.ScanFailed(
+                            ManualFailedKey(purpose));
+                        PresentNotification(string.IsNullOrWhiteSpace(diagnostic)
+                            ? failure
+                            : failure with { UserDetailText = diagnostic });
                         break;
+                    }
                 }
             }
             finally
@@ -1372,6 +1382,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private static string ManualCompletedKey(CollectionPurpose purpose) => $"inventory:manual:{purpose}:completed";
 
     private static string ManualFailedKey(CollectionPurpose purpose) => $"inventory:manual:{purpose}:failed";
+
+    private static string BoundInventoryDiagnostic(string diagnostic) =>
+        diagnostic.Length <= 2048 ? diagnostic : diagnostic[..2048];
 
     public void SelectTopologyUnit(StorageUnitRef unit) =>
         SelectTopologyUnit(unit, ActiveSnapshot);

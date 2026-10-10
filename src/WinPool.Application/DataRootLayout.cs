@@ -36,13 +36,15 @@ public static class DataRootLayout
 public static class DiagnosticLog
 {
     private const long MaximumActiveFileBytes = 1_048_576;
+    private const int MaximumDiagnosticLength = 2048;
     private static readonly object Sync = new();
 
     public static void AppendFailure(
         string dataRoot,
         string fileName,
         string source,
-        Exception? exception)
+        Exception? exception,
+        string? diagnostic = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
@@ -60,13 +62,19 @@ public static class DiagnosticLog
                     File.Move(path, path + ".1", overwrite: true);
                 }
 
-                var entry = JsonSerializer.Serialize(new
+                var entry = new Dictionary<string, object?>
                 {
-                    timestampUtc = DateTimeOffset.UtcNow,
-                    source,
-                    exception = exception?.ToString()
-                });
-                File.AppendAllText(path, entry + Environment.NewLine);
+                    ["timestampUtc"] = DateTimeOffset.UtcNow,
+                    ["source"] = source,
+                    ["exception"] = exception?.ToString()
+                };
+                if (!string.IsNullOrWhiteSpace(diagnostic))
+                {
+                    entry["diagnostic"] = diagnostic.Length <= MaximumDiagnosticLength
+                        ? diagnostic
+                        : diagnostic[..MaximumDiagnosticLength];
+                }
+                File.AppendAllText(path, JsonSerializer.Serialize(entry) + Environment.NewLine);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -137,6 +137,63 @@ public sealed class ScopedFactRefreshTests
             [new StorageObjectId(SystemId.New(), target.Kind, target.ProviderKey)]));
     }
 
+    [Fact]
+    public void CompleteFullRefreshCompactsHistoricalOperationMarkersAndStillRejectsLateResurrection()
+    {
+        var current = Capture(0, ["a", "b"], generation: 1);
+        for (var second = 1; second <= 100; second++)
+        {
+            var incoming = Capture(second, [], ["a"], generation: second + 1);
+            incoming = incoming with { Sources = incoming.Sources.Select(x => x with
+                { Coverage = x.Coverage! with { ScopeKey = "operation-" + second } }).ToImmutableArray() };
+            current = WinPoolFactRefresh.Merge(current, incoming);
+        }
+        Assert.Equal(101, current.Sources.Length); // All independent absence domains are still protected.
+        var compacted = WinPoolFactRefresh.Merge(current, Capture(101, ["b"], generation: 102));
+        Assert.Single(compacted.Sources);
+        Assert.DoesNotContain(compacted.Objects, x => x.Id == "a");
+        Assert.Same(compacted, WinPoolFactRefresh.Merge(compacted, Capture(100, ["a", "b"], generation: 101)));
+        for (var second = 102; second <= 120; second++)
+        {
+            compacted = WinPoolFactRefresh.Merge(compacted, Capture(second, [], ["a"], generation: second + 1));
+            Assert.Equal(2, compacted.Sources.Length); // Repeated updates of one scope stay bounded.
+        }
+        compacted = WinPoolFactRefresh.Merge(compacted, Capture(121, ["b"], generation: 122));
+        Assert.Single(compacted.Sources);
+    }
+
+    [Theory]
+    [InlineData(4, 8, FieldReadState.Returned, false)] // Newer clock, older generation.
+    [InlineData(2, 10, FieldReadState.Returned, false)] // Newer generation, older clock.
+    [InlineData(4, 10, FieldReadState.Failed, false)]
+    [InlineData(4, 10, FieldReadState.Returned, true)] // Partial scope cannot replace whole-class proof.
+    public void IncompleteOrOutOfOrderRefreshPreservesScopedAbsenceMarker(int second, long generation,
+        FieldReadState state, bool partial)
+    {
+        var current = WinPoolFactRefresh.Merge(Capture(0, ["a", "b"], generation: 1),
+            Capture(3, [], ["a"], generation: 9));
+        var marker = current.Sources.Single(x => x.Coverage is not null);
+        var refreshed = WinPoolFactRefresh.Merge(current, Capture(second, [], partial ? ["b"] : null,
+            complete: !partial, state: state, generation: generation));
+        Assert.Contains(refreshed.Sources, x => x.Id == marker.Id);
+        var late = WinPoolFactRefresh.Merge(refreshed, Capture(1, ["a", "b"], generation: 2));
+        Assert.DoesNotContain(late.Objects, x => x.Id == "a");
+    }
+
+    [Fact]
+    public void FullRefreshKeepsHistoricalSourceReferencedByRetainedField()
+    {
+        var baseline = Capture(0, ["a"], ["a"], generation: 1);
+        var original = Assert.Single(baseline.Sources);
+        var incoming = Capture(1, ["a"], generation: 2) with { Sources = [original, .. Capture(1, [], generation: 2).Sources] };
+        incoming = incoming with { Objects = incoming.Objects.Select(x => x with
+            { Fields = [WinPoolSourceField.Returned("RetainedField", "original", FactValueType.String, original.Id)] }).ToImmutableArray() };
+        var merged = WinPoolFactRefresh.Merge(baseline, incoming);
+        Assert.Contains(merged.Sources, x => x.Id == original.Id);
+        Assert.Equal(original.Id, Assert.Single(Assert.Single(merged.Objects).Fields).SourceRef);
+        merged.Validate();
+    }
+
     private static WinPoolFacts Capture(int second, string[] objectIds, string[]? coverage = null, bool complete = true,
         FieldReadState state = FieldReadState.Returned, long generation = 0)
     {

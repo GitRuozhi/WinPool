@@ -328,7 +328,9 @@ public sealed record AgentInventoryFailedEvent(
     CollectionPurpose Purpose,
     string Code,
     DateTimeOffset OccurredAtUtc,
-    bool IsAutomatic = false) : AgentEvent(OccurredAtUtc);
+    bool IsAutomatic = false,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Detail = null) : AgentEvent(OccurredAtUtc);
 
 public sealed record AgentTaskEvent(ApplicationTaskEvent TaskEvent)
     : AgentEvent(TaskEvent.OccurredAtUtc);

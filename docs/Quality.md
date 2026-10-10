@@ -2,6 +2,16 @@
 
 日期：2026-10-10。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-10 采集报告超限与诊断丢失：限定验证
+
+数据库副本复现确认 collect／merge／project／snapshot_save 成功，`LocalInventoryDocumentCodec.Encode` 因 `The escaped document payload exceeds its IPC budget.` 失败。原缓存1476个来源中1440个为历史操作 scope 标记；旧合并一直保留每个 scope 的最新观察，完整成功采集没有淘汰其已覆盖的旧缺席证明。相同首次只读事实重放修复后的合并，来源1476→36、对象同为78，原始报告2,349,609→545,930 bytes，转义载荷3,185,256→835,197 bytes，原预算3,145,728 bytes不变。修复后 Encode／Decode 成功；没有重建或清空开发数据库。
+
+仅执行直接回归 **29 Passed／0 Failed**：Application24（事实合并19、自动通知5）、Infrastructure1（手动诊断）、Agent3（两种异常及启动失败／取消）、Client1（事件详情往返）。同 scope 的不完整刷新首次暴露旧完整缺席证明被替换的问题，修复后最终门通过，初始失败 TRX 保留。失败／不完整／迟到采集和仍被字段引用的来源继续受保护；TimeoutException、provider诊断和失败阶段有界透传。Agent／Client两次运行未保存原 stdout／TRX，仅有执行方交接摘要，没有为补证重跑；现有诊断日志可选字段未单独测试。
+
+标准 App／Agent Release 构建 **0 warnings／0 errors**、运行树合并0碰撞。旧 App2944／Agent12096 经原托盘退出均0；新标准 App3836 的原生开发页确认自动 Storage 与 Hardware 均成功，当前报告36个来源、78个对象、545,960 bytes，原确认后真实编辑开关 on。前后 Accepted262／CallIssued334、318个计划不变，旧 `76958…` 仍为 PartiallyCompleted；这些计数高于上一任务是用户随后已执行的操作，本修复未增加存储调用。未跑全量测试，未执行真实存储修改，不关闭V0.59整体阶段。
+
+证据：[原异常](../artifacts/test-results/20261010-inventory-persistence-repro/exception.json)、[同事实大小对照](../artifacts/test-results/20261010-inventory-persistence-repro/payload-size-metrics.json)、[事实回归](../artifacts/test-results/20261010-inventory-persistence-repro/application-tests/fact-refresh-fixed.trx)、[诊断门交接](../artifacts/test-results/20261010-inventory-persistence-repro/diagnostic-tests-summary.json)、[Release构建](../artifacts/test-results/20261010-inventory-persistence-repro/release-build.log)、[原生最终收据](../artifacts/test-results/20261010-inventory-persistence-repro/final-native-receipt.json)。
+
 ## 2026-10-10 用户要求解除旧未知记录：开发数据收口
 
 用户在反馈修复后明确要求解除阻塞。停止标准 WinPool 进程、保留完整数据库备份后，两轮生产只读采集确认准确 WDC／分区闭包稳定、存储 jobs 均为终态，旧写入进程已不存在。这些观察不证明完整格式化成功；本次依据用户明确放弃未知结果，使用现有 Repository CAS 将 `76958d530df843e083d1664a643fd74e` 的 format-volume 从 OutcomeUnknown 收口为 **Failed／NotVerified**，整体从 OutcomeUnknown 收口为 **PartiallyCompleted**。create-partition 保持 Verified，assign-letter 保持 Skipped；原目标及结果证据以原始字符串完整保留，新增证据明确记录用户要求、未验证完整格式化、禁止重放及核验收据。

@@ -12,7 +12,8 @@ public sealed class AutomaticInventoryNotificationTests
         var now = DateTimeOffset.UtcNow;
         var started = AutomaticInventoryNotification.FromEvent(new AgentInventoryStartedEvent(purpose, now, true))!;
         var success = AutomaticInventoryNotification.FromEvent(new AgentInventoryUpdatedEvent(purpose, null!, now, true))!;
-        var failure = AutomaticInventoryNotification.FromEvent(new AgentInventoryFailedEvent(purpose, "test.failure", now, true))!;
+        var failure = AutomaticInventoryNotification.FromEvent(new AgentInventoryFailedEvent(
+            purpose, "test.failure", now, true, "Stage: inventory.snapshot.save\nSqliteException: injected"))!;
         Assert.Equal(WorkspaceNotificationFactory.ScanStarted().TitleTextKey, started.TitleTextKey);
         Assert.Equal(WorkspaceNotificationFactory.ScanCompleted("", now).TitleTextKey, success.TitleTextKey);
         Assert.Equal("ScanFailed", failure.TitleTextKey);
@@ -26,6 +27,7 @@ public sealed class AutomaticInventoryNotificationTests
         Assert.Equal(AutomaticInventoryNotification.CompletedKey(purpose), success.OccurrenceKey);
         Assert.Equal(AutomaticInventoryNotification.FailedKey(purpose), failure.OccurrenceKey);
         Assert.Equal("test.failure", failure.Code);
+        Assert.Equal("Stage: inventory.snapshot.save\nSqliteException: injected", failure.UserDetailText);
         Assert.NotEqual(WorkspaceNotificationFactory.ScanStarted().OccurrenceKey, started.OccurrenceKey);
         foreach (var notification in new[] { started, success, failure })
         {
@@ -50,5 +52,16 @@ public sealed class AutomaticInventoryNotificationTests
             AutomaticInventoryNotification.ProgressKey(CollectionPurpose.Hardware));
         Assert.NotEqual(AutomaticInventoryNotification.ProgressKey(purpose),
             AutomaticInventoryNotification.InterruptedKey(purpose));
+    }
+
+    [Fact]
+    public void FailedEventOmitsNullDetailFromWireJson()
+    {
+        var report = new AgentInventoryFailedEvent(
+            CollectionPurpose.Storage, "test.failure", DateTimeOffset.UtcNow);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(report);
+
+        Assert.DoesNotContain("Detail", json, StringComparison.Ordinal);
     }
 }

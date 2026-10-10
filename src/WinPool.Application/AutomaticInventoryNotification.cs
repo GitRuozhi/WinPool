@@ -36,7 +36,14 @@ public static class AutomaticInventoryNotification
         {
             MessageTextKey = purpose == CollectionPurpose.Hardware ? "InventoryAutomaticHardware" : "InventoryAutomaticStorage",
             TitleTextKey = report is AgentInventoryFailedEvent ? "ScanFailed" : notification.TitleTextKey,
-            Code = report is AgentInventoryFailedEvent failure ? failure.Code : notification.Code
+            Code = report is AgentInventoryFailedEvent failure ? failure.Code : notification.Code,
+            UserDetailText = report is AgentInventoryFailedEvent failureEvent
+                ? BoundDetail(failureEvent.Detail)
+                : notification.UserDetailText
         };
     }
+
+    private static string BoundDetail(string? detail) => string.IsNullOrWhiteSpace(detail)
+        ? string.Empty
+        : detail.Length <= 2048 ? detail : detail[..2048];
 }

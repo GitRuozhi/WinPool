@@ -314,9 +314,10 @@ public sealed class AgentBackedHardwareInventoryProvider(IAgentConnection connec
         if (!result.IsSuccess
             || result.Value is not ManageInventoryCaptureResponse response)
         {
+            var message = result.Messages.FirstOrDefault();
             throw new InventoryScanException(
                 "The Agent local inventory request failed.",
-                result.Messages.FirstOrDefault()?.Code ?? string.Empty);
+                !string.IsNullOrWhiteSpace(message?.DiagnosticText) ? message.DiagnosticText : message?.Code ?? string.Empty);
         }
 
         return LocalInventoryDocumentCodec.Decode(response.Document);
