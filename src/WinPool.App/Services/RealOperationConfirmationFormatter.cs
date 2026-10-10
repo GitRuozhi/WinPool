@@ -61,16 +61,6 @@ public static class RealOperationConfirmationFormatter
         return string.Join(Environment.NewLine, lines);
     }
 
-    public static string FormatStopConfirmation(
-        AgentRealOperationResponse status, bool chinese, WinPoolFacts? sourceFacts = null)
-    {
-        var summary = FormatStatus(status, chinese, sourceFacts);
-        var caveat = chinese
-            ? "停止只阻止尚未开始的后续步骤。正在执行的 Windows 调用可能继续，已完成的步骤不会回滚。"
-            : "Stopping prevents only later steps from starting. A Windows call already in progress may continue, and completed steps are not rolled back.";
-        return summary + Environment.NewLine + Environment.NewLine + caveat;
-    }
-
     public static string FormatTarget(StorageObjectId target, bool chinese, WinPoolFacts? sourceFacts = null) =>
         ResolveExistingTarget(target, sourceFacts, chinese);
 

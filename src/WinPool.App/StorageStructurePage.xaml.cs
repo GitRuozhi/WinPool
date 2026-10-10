@@ -263,9 +263,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _autoVdiskSwitch.OffContent = Text("关", "Off");
         _autoPartitionSwitch.OnContent = Text("开", "On");
         _autoPartitionSwitch.OffContent = Text("关", "Off");
-        QueryRealOperationButton.Content = Text("查看操作结果", "View operation result");
-        StopRealOperationButton.Content = Text("停止后续步骤", "Stop following steps");
-        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         UndoButtonLabel.Text = ViewModel.Localization["Undo"];
         RedoButtonLabel.Text = ViewModel.Localization["Redo"];
         DiscardAllButtonLabel.Text = ViewModel.Localization["DiscardAll"];
@@ -274,9 +271,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DissolveButtonLabel.Text = ViewModel.Localization["DissolvePool"];
         RetireButtonLabel.Text = ViewModel.Localization["RetireDisk"];
         HotSpareButtonLabel.Text = ViewModel.Localization["HotSpareDisk"];
-        CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘和分区", "Create virtual disk and partition");
-        DeleteVdiskButtonLabel.Text = Text("删除虚拟磁盘和分区", "Delete virtual disk and partition");
-        DeleteHddTierButtonLabel.Text = Text("删除未使用 HDD 层", "Delete unused HDD tier");
+        CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘", "Create virtual disk");
+        DeleteVdiskButtonLabel.Text = Text("删除虚拟磁盘", "Delete virtual disk");
         SavePoolPropertiesButtonLabel.Text = ViewModel.Localization["SavePoolProperties"];
         ShowHotSpareLabel.Text = ViewModel.Localization["ShowHotSpareLayer"];
         ShowRetiredLabel.Text = ViewModel.Localization["ShowRetiredLayer"];
@@ -296,7 +292,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(HotSpareButton, Text("将选中的模拟池成员标为热备。", "Mark the selected simulated pool member as a hot spare."));
         ContextHelp.Set(CreateVdiskButton, Text("为符合条件的存储池创建虚拟磁盘和分区；真实操作需单独确认。", "Create a virtual disk and partition for an eligible pool; a real operation requires separate confirmation."));
         ContextHelp.Set(DeleteVdiskButton, Text("删除虚拟磁盘及其分区；真实删除会使其数据丢失。", "Delete a virtual disk and its partitions; real deletion loses their data."));
-        ContextHelp.Set(DeleteHddTierButton, Text("只删除未关联虚拟磁盘的池级 HDD 层模板。", "Delete only an unused pool-level HDD tier template."));
         ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
         ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
         ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前属性到同一待应用草稿。", "Save the current properties to the same pending draft."));
@@ -517,9 +512,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private void UpdateAutomaticCreationChrome()
     {
         var createsPartition = ViewModel.CurrentPreferences.AutoCreatePartition;
-        CreateVdiskButtonLabel.Text = createsPartition
-            ? Text("创建虚拟磁盘和分区", "Create virtual disk and partition")
-            : Text("创建虚拟磁盘", "Create virtual disk");
         ContextHelp.Set(
             CreateVdiskButton,
             createsPartition
@@ -2592,7 +2584,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void UpdateButtonState()
     {
-        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         RefreshPendingActions();
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
@@ -2655,19 +2646,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DeleteVdiskButton.IsEnabled = CanEditDraft && (canEditPool || CanUseRealSingleMemberPool(pool)
             || pool is { IsPrimordial: false } && EditWorkspace.IsDraftPool(pool.StableId))
             && deleteTarget is not null && !virtualDiskOffline;
-        var realHddPool = IsSingleRealHddMemberPool(pool);
-        var realPoolTiers = realHddPool
-            ? RealPoolTiers(pool!) : Array.Empty<StorageTierInfo>();
-        var selectedRealTier = realHddPool ? SelectedRealPoolTier(pool!) : null;
-        var realPoolVdisks = realHddPool
-            ? _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray()
-            : Array.Empty<VirtualDiskInfo>();
-        DeleteHddTierButton.IsEnabled = CanEditDraft && realHddPool
-            && realPoolVdisks.Length == 0 && realPoolTiers.Length == 1
-            && selectedRealTier is not null
-            && selectedRealTier.VirtualDiskStableId is null
-            && IsSupportedRealHddTier(pool!, selectedRealTier);
-
         var formEnabled = CanEditDraft
             && pool is { IsPrimordial: false }
             && !poolOffline
@@ -2748,14 +2726,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     : virtualDiskOffline
                         ? Text("该虚拟磁盘已脱机；请先在磁盘分区页联机。", "This virtual disk is offline; bring it online in the disk partition page first.")
                         : Text("当前虚拟磁盘不能删除。", "The current virtual disk cannot be deleted.")));
-        SetDisabledReason(DeleteHddTierButton,
-            selectedRealTier is null
-                ? Text("请选择未使用的池级 HDD 层模板。", "Select an unused pool-level HDD tier template.")
-                : selectedRealTier.VirtualDiskStableId is not null
-                    ? Text("虚拟磁盘层实例随虚拟磁盘删除，不能单独删除。", "A virtual-disk tier instance is removed with its virtual disk and cannot be deleted separately.")
-                    : realPoolVdisks.Length > 0
-                        ? Text("池中仍有虚拟磁盘。", "The pool still has a virtual disk.")
-                        : Text("当前层不符合受支持的单盘 HDD 模板。", "This tier is outside the supported single-disk HDD template."));
         SetDisabledReason(
             ShowHotSpareSwitch,
             Text("热备图层开关仅支持模拟系统。", "The hot-spare layer switch is available only in simulated systems."));
@@ -2782,8 +2752,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (_outcomeUnknown)
         {
-            return Text("上次提交结果未知；请先查询并核对结果，再继续编辑或应用。",
-                "The previous submission outcome is unknown; query and reconcile it before editing or applying again.");
+            return Text("上次提交结果尚未核实，暂时不能继续编辑或应用。相关结果见消息，详细原因见开发页消息详情。",
+                "The previous submission outcome remains unresolved, so editing and applying are blocked. Review the outcome in messages and the diagnostic details on the developer page.");
         }
 
         if (pool is null)
@@ -3308,12 +3278,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void CreatePool_Click(object sender, RoutedEventArgs e) => CreateDraftPoolAndSelect();
 
-    private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await ViewCurrentRealOperationResultAsync();
-
-    private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await StopCurrentRealOperationFollowingStepsAsync();
-
     private bool CanUseRealSingleMemberPool(StoragePoolInfo? pool) =>
         ViewModel.CanSubmitRealOperation && pool is
         {
@@ -3324,13 +3288,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             disk.StableId == pool.MemberPhysicalDiskIds[0]
             && !disk.IsBoot && !disk.IsSystem && !disk.IsPageFile
             && !disk.IsCrashDump);
-
-    private bool IsSingleRealHddMemberPool(StoragePoolInfo? pool) =>
-        CanUseRealSingleMemberPool(pool)
-        && pool!.IsStable
-        && _working.PhysicalDisks.SingleOrDefault(disk =>
-            disk.StableId == pool.MemberPhysicalDiskIds[0]) is { IsStable: true } physical
-        && physical.MediaType.Equals("HDD", StringComparison.OrdinalIgnoreCase);
 
     private StorageTierInfo[] RealPoolTiers(StoragePoolInfo pool) =>
         _working.StorageTiers.Where(tier =>
@@ -3369,18 +3326,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return false;
         var vdisks = _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray();
         return vdisks.Length <= 1 && HasOnlySupportedRealHddTiers(pool!, vdisks);
-    }
-
-    private void DeleteHddTier_Click(object sender, RoutedEventArgs e)
-    {
-        var pool = SelectedPool();
-        if (!CanEditDraft || pool is null || SelectedRealPoolTier(pool) is not { VirtualDiskStableId: null } tier
-            || _working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId)) return;
-        MergeFormIntoWorking();
-        CommitWorkingStep(_working with
-        {
-            StorageTiers = _working.StorageTiers.Where(item => item.StableId != tier.StableId).ToArray()
-        });
     }
 
     private void Dissolve_Click(object sender, RoutedEventArgs e)

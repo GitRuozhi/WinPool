@@ -127,9 +127,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
         ShowPropertiesButton.Content = Text("属性", "Properties");
-        QueryRealOperationButton.Content = Text("查看操作结果", "View operation result");
-        StopRealOperationButton.Content = Text("停止后续步骤", "Stop following steps");
-        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         DiskOnlineStateButtonLabel.Text = Text("联机/脱机", "Online/offline");
         DiskPartitionStyleButtonLabel.Text = Text("分区表状态", "Partition style");
         ClearDiskButtonLabel.Text = Text("清空至 RAW", "Clear to RAW");
@@ -748,7 +745,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void UpdateButtonState()
     {
-        UpdateRealOperationActionButtons(QueryRealOperationButton, StopRealOperationButton);
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var real = ViewModel.CanSubmitRealOperation;
         var operationBusy = ViewModel.IsRealOperationBusy
@@ -1748,12 +1744,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             _renameInProgress = false;
         }
     }
-
-    private async void QueryRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await ViewCurrentRealOperationResultAsync();
-
-    private async void StopRealOperation_Click(object sender, RoutedEventArgs e) =>
-        await StopCurrentRealOperationFollowingStepsAsync();
 
     private async void DiskOnlineState_Click(object sender, RoutedEventArgs e)
     {

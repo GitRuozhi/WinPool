@@ -268,14 +268,6 @@
                 </controls:ContextHelpHost>
                 </controls:FixedWrapPanel>
                 </ScrollViewer>
-                <Button x:Name="QueryRealOperationButton"
-                        HorizontalAlignment="Left"
-                        Click="QueryRealOperation_Click"
-                        Content="View operation result" />
-                <Button x:Name="StopRealOperationButton"
-                        HorizontalAlignment="Left"
-                        Click="StopRealOperation_Click"
-                        Content="Stop following steps" />
             </StackPanel>
         </Border>
         <ScrollViewer

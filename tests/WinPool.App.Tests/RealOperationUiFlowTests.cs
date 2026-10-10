@@ -25,7 +25,10 @@ public sealed class RealOperationUiFlowTests
             new("real.reconciliation_step_outcome_unknown"));
         var feedback = RealOperationFeedback.ModeFailure("agent.real_operation.write_barrier", true, chinese, status);
         Assert.Contains(chinese ? "阻止" : "blocks", feedback.Title);
-        Assert.Contains(chinese ? "查看操作结果" : "View operation result", feedback.Message);
+        Assert.Contains(chinese ? "开发页消息详情" : "developer page", feedback.Message);
+        Assert.DoesNotContain(chinese ? "查看操作结果" : "View operation result", feedback.Message);
+        Assert.DoesNotContain(chinese ? "停止后续步骤" : "Stop following steps", feedback.Message);
+        Assert.DoesNotContain("OperationId", feedback.Message);
         Assert.Contains(chinese ? "格式化未返回" : "Formatting returned no", feedback.Message);
         var notifications = new GlobalNotificationService();
         notifications.PublishError(feedback.Title, feedback.Message, "real-mode", options: feedback.Options);
@@ -43,20 +46,29 @@ public sealed class RealOperationUiFlowTests
         Assert.Equal(originalEvidence, status.Steps[0].ResultEvidence);
     }
 
-    [Fact]
-    public void RealModeUnknownFailureAndReadOnlyProbeFailureKeepTechnicalDetails()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RealModeUnknownFailureAndReadOnlyProbeFailureKeepTechnicalDetails(bool chinese)
     {
-        var unknown = RealOperationFeedback.ModeFailure("new.agent.failure", false, true, null);
-        Assert.Equal("无法关闭真实编辑", unknown.Title);
+        var unknown = RealOperationFeedback.ModeFailure("new.agent.failure", false, chinese, null);
+        Assert.Equal(chinese ? "无法关闭真实编辑" : "Cannot disable real editing", unknown.Title);
         Assert.Equal("new.agent.failure", unknown.Options.Code);
         Assert.Contains("new.agent.failure", unknown.Options.Detail);
+        Assert.Contains(chinese ? "开发页消息详情" : "developer message details", unknown.Message);
+        Assert.DoesNotContain("new.agent.failure", unknown.Message);
         var (_, plan) = CreatePlan();
         var status = new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true,
             new("operation.reconciliation_failed", "IOException: exact read-only probe failure"));
-        var feedback = RealOperationFeedback.Recovery(status, true);
-        Assert.Contains("只读核对未能", feedback.Message);
+        var feedback = RealOperationFeedback.Recovery(status, chinese);
+        Assert.Contains(chinese ? "只读核对未能" : "Read-only review could not", feedback.Message);
+        Assert.Contains(chinese ? "开发页消息详情" : "developer message details", feedback.Message);
+        Assert.DoesNotContain(chinese ? "查看操作结果" : "View operation result", feedback.Message);
+        Assert.DoesNotContain(chinese ? "停止后续步骤" : "Stop following steps", feedback.Message);
+        Assert.DoesNotContain("OperationId", feedback.Message);
         Assert.Equal("operation.reconciliation_failed", feedback.Options.Code);
         Assert.Contains("IOException: exact read-only probe failure", feedback.Options.Detail);
+        Assert.Contains(plan.OperationId.Value.ToString(), feedback.Options.Detail);
     }
 
     [Theory]
@@ -191,29 +203,6 @@ public sealed class RealOperationUiFlowTests
             otherPlan, RealOperationState.Cancelled, [], null, false)));
         Assert.True(state.IsBlocked);
         Assert.Equal(plan.OperationId, state.OperationId);
-    }
-
-    [Fact]
-    public async Task FinalConfirmationCancellationStopsExactPreparedPlanWithoutAccept()
-    {
-        var (_, plan) = CreatePlan();
-        var prepared = new AgentRealOperationResponse(plan, RealOperationState.Prepared, [], null, false);
-        var connection = new RecordingConnection(request => request switch
-        {
-            StopAgentRealOperationFollowingStepsRequest => ApplicationResult<AgentResponse>.Succeeded(
-                prepared with { State = RealOperationState.Cancelled }, request.CorrelationId),
-            _ => throw new InvalidOperationException("Cancellation must not accept a storage write.")
-        });
-        var state = new RealOperationSubmissionState();
-        Assert.True(state.TryReservePreparation());
-        state.TrackPrepared(prepared);
-        var flow = new RealOperationStopSession(connection, "product-session");
-        var result = await flow.StopAfterCurrentStepAsync(prepared, true, CancellationToken.None)!;
-        state.Observe(Assert.IsType<AgentRealOperationResponse>(result.Value));
-        var stop = Assert.IsType<StopAgentRealOperationFollowingStepsRequest>(Assert.Single(connection.Requests));
-        Assert.Equal(plan.OperationId, stop.OperationId);
-        Assert.Equal(plan.PlanHash, stop.PlanHash);
-        Assert.False(state.IsBlocked);
     }
 
     [Fact]
@@ -592,33 +581,6 @@ public sealed class RealOperationUiFlowTests
         Assert.Equal('E', letter.NewLetter);
         Assert.Contains("create-data", layout.Steps[4].DependsOn);
         Assert.Contains("format-data", layout.Steps[4].DependsOn);
-    }
-
-    [Fact]
-    public async Task StopCancellationMakesNoStopRequestAndConfirmedStopUsesQueriedPlanHash()
-    {
-        var (_, plan) = CreatePlan();
-        var observed = new AgentRealOperationResponse(
-            plan, RealOperationState.Running, [], null, false);
-        var connection = new RecordingConnection(request => request switch
-        {
-            QueryAgentRealOperationRequest => ApplicationResult<AgentResponse>.Succeeded(
-                observed, request.CorrelationId),
-            StopAgentRealOperationFollowingStepsRequest => ApplicationResult<AgentResponse>.Succeeded(
-                observed, request.CorrelationId),
-            _ => throw new InvalidOperationException()
-        });
-        var flow = new RealOperationStopSession(connection, "product-session");
-        var queried = await flow.QueryAsync(plan.OperationId, CancellationToken.None);
-        var frozen = Assert.IsType<AgentRealOperationResponse>(queried.Value);
-        Assert.Null(flow.StopAfterCurrentStepAsync(frozen, false, CancellationToken.None));
-        Assert.Empty(connection.Requests.OfType<StopAgentRealOperationFollowingStepsRequest>());
-        var result = await flow.StopAfterCurrentStepAsync(frozen, true, CancellationToken.None)!;
-        Assert.True(result.IsSuccess);
-        var stop = Assert.Single(connection.Requests.OfType<StopAgentRealOperationFollowingStepsRequest>());
-        Assert.Equal(plan.OperationId, stop.OperationId);
-        Assert.Equal(plan.PlanHash, stop.PlanHash);
-        Assert.Equal("product-session", stop.ProductSessionId);
     }
 
     [Fact]

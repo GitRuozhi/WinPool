@@ -2,6 +2,14 @@
 
 日期：2026-10-10。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-10 编辑页额外入口移除：限定验证
+
+两页查询／停止控件、事件、共用状态及专用 UI helper 已移除，结构页 unused HDD 层按钮及专属逻辑已移除。原草稿／Apply、Agent 删除模板能力、自动只读核对及取消冻结确认的 Stop／Query 保留。原虚拟磁盘按钮文案恢复，自动分区仍使用既有偏好。Product 和 Plan 中把额外技术入口写成产品设计的表述已纠正，历史变更记录保留并说明本次修正。
+
+仅执行中英文反馈定向回归 **4 Passed／0 Failed**，覆盖不再引导点击旧按钮或手查 ID，以及开发消息仍保留错误码、操作身份和原证据。标准 App／Agent Release 构建 **0 warnings／0 errors**、运行树合并0碰撞。旧 App14224／Agent27960 原托盘退出均0；新标准 App9068 原生两页检查确认额外入口消失、原操作仍在，“创建虚拟磁盘／删除虚拟磁盘”在自动分区开启时保持原文案。启动 Storage／Hardware 均成功，真实编辑经原确认后 on。
+
+只读前后核对：321个计划、531个步骤、2370条执行事件的行数及完整内容 SHA-256 相同；Accepted265／CallIssued339不变，旧 `76958…` 仍为 PartiallyCompleted。没有运行全量测试或真实存储修改，不关闭V0.59整体计划。证据：[反馈回归](../artifacts/test-results/20261010-editor-product-controls/feedback.trx)、[Release构建](../artifacts/test-results/20261010-editor-product-controls/release-build.log)、[结构页](../artifacts/test-results/20261010-editor-product-controls/structure-ui.txt)、[分区页](../artifacts/test-results/20261010-editor-product-controls/partition-ui.txt)、[开发页](../artifacts/test-results/20261010-editor-product-controls/startup-development-final.txt)、[只读前态](../artifacts/test-results/20261010-editor-product-controls/before.json)、[只读后态](../artifacts/test-results/20261010-editor-product-controls/after.json)。
+
 ## 2026-10-10 采集报告超限与诊断丢失：限定验证
 
 数据库副本复现确认 collect／merge／project／snapshot_save 成功，`LocalInventoryDocumentCodec.Encode` 因 `The escaped document payload exceeds its IPC budget.` 失败。原缓存1476个来源中1440个为历史操作 scope 标记；旧合并一直保留每个 scope 的最新观察，完整成功采集没有淘汰其已覆盖的旧缺席证明。相同首次只读事实重放修复后的合并，来源1476→36、对象同为78，原始报告2,349,609→545,930 bytes，转义载荷3,185,256→835,197 bytes，原预算3,145,728 bytes不变。修复后 Encode／Decode 成功；没有重建或清空开发数据库。

@@ -19,8 +19,8 @@ public static class RealOperationFeedback
         var message = code switch
         {
             "agent.real_operation.write_barrier" => chinese
-                ? "存在结果尚未核实的真实操作，暂时不能开启真实编辑。请到存储结构编辑或磁盘分区编辑页点击“查看操作结果”。"
-                : "A real operation has an unresolved outcome. Open Storage structure or Disk partitions and select View operation result before enabling real editing.",
+                ? "存在结果尚未核实的真实操作，暂时不能开启真实编辑。相关结果见消息，详细原因见开发页消息详情。"
+                : "A real operation has an unresolved outcome, so real editing cannot be enabled. Review the outcome in messages and the diagnostic details on the developer page.",
             "agent.real_operation.busy" => chinese ? "Agent 正在处理真实操作，请等待当前操作结束后重试。" : "The Agent is processing a real operation. Retry after it finishes.",
             "agent.real_mode.administrator_required" => chinese ? "App 和 Agent 需要管理员权限，请通过真实编辑开关重新启动为管理员。" : "The App and Agent require administrator privileges. Use the real editing switch to restart as administrator.",
             "agent.real_mode.another_session_armed" => chinese ? "另一个 WinPool 窗口已开启真实编辑，请先在该窗口关闭真实编辑。" : "Another WinPool window has real editing enabled. Disable it there first.",
@@ -36,7 +36,7 @@ public static class RealOperationFeedback
             ? (chinese ? (HasUnknownFormat(status) ? "格式化结果尚未核实" : "真实操作结果尚未核实") : "Real operation outcome remains unresolved")
             : (chinese ? "真实操作核对状态已更新" : "Real operation review updated"),
         ReconciliationReason(status, chinese) + Environment.NewLine
-            + (chinese ? "请在原编辑页点击“查看操作结果”核对目标与各步结果。" : "Select View operation result in the editor to review the target and each step."),
+            + (chinese ? "相关结果见消息，目标与各步结果见开发页消息详情。" : "Review the outcome in messages and the target and step results in the developer message details."),
         Options(status.ReconciliationDiagnostic?.Code ?? status.Code ?? "agent.real_operation.outcome_unknown", status, chinese, facts));
 
     public static string ReconciliationReason(AgentRealOperationResponse status, bool chinese)

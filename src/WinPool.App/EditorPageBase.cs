@@ -40,8 +40,6 @@ public partial class EditorPageBase : Page
     protected AgentRealOperationResponse? LastRealOperationResponse { get; private set; }
     private bool structureHasWritten;
     private readonly string realProgressKey = "real:editor:" + Guid.NewGuid().ToString("N");
-    private Button? viewRealOperationResultButton;
-    private Button? stopRealOperationStepsButton;
 
     private void ReportRealActivity(string phase, bool overlay = false)
     {
@@ -313,7 +311,7 @@ public partial class EditorPageBase : Page
         var reservationId = ViewModel.RealOperationSubmission.ReservationId;
         LastRealOperationResponse = null;
         LastRealInventoryRefreshSucceeded = false;
-        ReportRealActivity(Text("正在准备准确计划", "Preparing the exact plan"));
+        ReportRealActivity(Text("正在准备应用", "Preparing to apply"));
         try
         {
             return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId);
@@ -350,13 +348,6 @@ public partial class EditorPageBase : Page
             {
                 PublishOperationResult(prepared.Status, prepared.Messages, prepared.CorrelationId,
                     Text("真实准备未完成", "Real preparation did not complete"), "real");
-                var reason = prepared.Messages.FirstOrDefault();
-                var detail = $"{Text("状态", "Status")}: {prepared.Status}\n" +
-                    $"{Text("代码", "Code")}: {reason?.Code ?? "agent.real_operation.unexpected_response"}\n" +
-                    $"CorrelationId: {prepared.CorrelationId.Value}";
-                if (!string.IsNullOrWhiteSpace(reason?.DiagnosticText))
-                    detail += $"\n{Text("诊断", "Diagnostic")}: {reason.DiagnosticText}";
-                await ShowMessageAsync(Text("真实准备未完成", "Real preparation did not complete"), detail);
             }
             return false;
         }
@@ -377,7 +368,7 @@ public partial class EditorPageBase : Page
         var confirmation = RealOperationConfirmationFormatter.Format(plan,
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
             ViewModel.ActiveDocument.SourceFacts);
-        ReportRealActivity(Text("等待确认准确计划", "Waiting for exact-plan confirmation"));
+        ReportRealActivity(Text("等待确认应用", "Waiting for apply confirmation"));
         if (!await ConfirmAsync(Text("确认真实磁盘写入", "Confirm real disk write"), confirmation)
             || !ViewModel.IsRealMode || !ViewModel.IsLocalSystem
             || ViewModel.ActiveDocument.SystemId != systemId)
@@ -386,7 +377,7 @@ public partial class EditorPageBase : Page
             return false;
         }
         flow.Confirm(frozen);
-        ReportRealActivity(Text("正在接受并执行", "Accepting and executing"));
+        ReportRealActivity(Text("正在应用", "Applying"));
 
         ApplicationResult<AgentResponse>? accepted = null;
         try
@@ -438,8 +429,7 @@ public partial class EditorPageBase : Page
                 or RealOperationStepState.WaitingForProvider or RealOperationStepState.Verifying
                 or RealOperationStepState.Verified or RealOperationStepState.OutcomeUnknown);
             if (IsRealStructureApplyInProgress && hasWritten) structureHasWritten = true;
-            ReportRealActivity(Text("正在执行 / 核对", "Executing / verifying") + ": "
-                + string.Join(", ", current.Steps.Select(step => $"{step.StepId}: {step.State}")), hasWritten);
+            ReportRealActivity(Text("正在执行 / 核对", "Executing / verifying"), hasWritten);
             if (current.State is RealOperationState.Accepted or RealOperationState.Running)
                 continue;
             var succeeded = current.State == RealOperationState.Succeeded && !current.RequiresReconciliation;
@@ -457,15 +447,25 @@ public partial class EditorPageBase : Page
                 observedNoEffect
                     ? Text("Windows 拒绝了此容量或布局，已核实没有创建新对象。请调整目标后重新应用。",
                         "Windows rejected this capacity or layout. No new objects were observed. Adjust the target and apply again.")
-                    : $"{current.State}: {current.Code ?? "-"}", "real", current.Code ?? "real.completed",
-                $"OperationId: {plan.OperationId.Value}");
+                    : succeeded
+                        ? Text("已完成应用并核对结果。", "The changes were applied and verified.")
+                        : current.RequiresReconciliation
+                            ? RealOperationFeedback.ReconciliationReason(current,
+                                ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn)
+                            : Text("操作未完成。相关结果见消息，详细原因见开发页消息详情。",
+                                "The operation did not complete. Review the outcome in messages and the diagnostic details on the developer page."),
+                "real", current.Code ?? "real.completed",
+                RealOperationFeedback.Recovery(current,
+                    ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
+                    ViewModel.ActiveDocument.SourceFacts).Options.Detail);
             return succeeded && LastRealInventoryRefreshSucceeded;
         }
 
-        await ShowMessageAsync(Text("真实操作继续执行", "Real operation continues"),
-            $"OperationId: {plan.OperationId.Value}\n" +
-            Text("请稍后按此 OperationId 查询持久化状态。",
-                "Query this OperationId later for its persisted status."));
+        PublishOperationFeedback(GlobalNotificationSeverity.Warning,
+            Text("真实操作结果尚未确认", "Real operation outcome is not confirmed"),
+            Text("当前尚未收到可核实的完成结果。相关状态见消息，详细原因见开发页消息详情。",
+                "A verifiable completion result has not been received. Review the status in messages and the diagnostic details on the developer page."),
+            "real", "real.query.wait_expired", $"OperationId: {plan.OperationId.Value}");
         return false;
     }
 
@@ -508,162 +508,6 @@ public partial class EditorPageBase : Page
         }
     }
 
-    protected OperationId? CurrentObservedRealOperationId =>
-        ViewModel.RealOperationSubmission.OperationId
-        ?? ViewModel.LastRealOperationStatus?.Plan.OperationId;
-
-    protected void UpdateRealOperationActionButtons(Button viewResultButton, Button stopStepsButton)
-    {
-        viewRealOperationResultButton = viewResultButton;
-        stopRealOperationStepsButton = stopStepsButton;
-        SyncRealOperationActionButtons();
-    }
-
-    private void SyncRealOperationActionButtons()
-    {
-        if (viewRealOperationResultButton is not { } viewResultButton
-            || stopRealOperationStepsButton is not { } stopStepsButton)
-            return;
-        var localWorkspace = ViewModel.IsLocalSystem;
-        viewResultButton.Visibility = localWorkspace ? Visibility.Visible : Visibility.Collapsed;
-        stopStepsButton.Visibility = localWorkspace ? Visibility.Visible : Visibility.Collapsed;
-        viewResultButton.IsEnabled = localWorkspace
-            && ViewModel.AgentConnection is not null
-            && CurrentObservedRealOperationId is not null;
-
-        var currentId = CurrentObservedRealOperationId;
-        var status = ViewModel.LastRealOperationStatus;
-        stopStepsButton.IsEnabled = localWorkspace
-            && ViewModel.AgentConnection is not null
-            && currentId is not null
-            && status is { } currentStatus
-            && currentStatus.Plan.OperationId == currentId
-            && currentStatus.State is RealOperationState.Prepared
-                or RealOperationState.Accepted
-                or RealOperationState.Running;
-    }
-
-    private void RefreshRealOperationActionButtons() => SyncRealOperationActionButtons();
-
-    protected async Task ViewCurrentRealOperationResultAsync()
-    {
-        if (ViewModel.AgentConnection is null)
-            return;
-        if (CurrentObservedRealOperationId is not { } operationId)
-        {
-            await ShowMessageAsync(Text("当前没有操作结果", "No operation result is available"),
-                Text("当前工作区没有已执行或已恢复的真实操作可供查询。执行或恢复操作后，这里会显示其结果。",
-                    "There is no executed or recovered real operation in the current workspace to view. Its result will appear here after an operation is submitted or recovered."));
-            return;
-        }
-        try
-        {
-            var result = await ViewModel.AgentConnection.SendAsync(
-                new QueryAgentRealOperationRequest(operationId, CorrelationId.New()),
-                CancellationToken.None);
-            if (!result.IsSuccess || result.Value is not AgentRealOperationResponse current)
-            {
-                PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
-                    Text("真实状态查询失败", "Real status query failed"), "real");
-                return;
-            }
-            if (current.Plan.OperationId != operationId)
-                throw new InvalidOperationException("The Agent response did not match the queried operation.");
-            ViewModel.ObserveRealOperation(current);
-            RefreshRealOperationActionButtons();
-            if (current.State is not (RealOperationState.Prepared or RealOperationState.Accepted or RealOperationState.Running)
-                && ViewModel.ActiveDocument.SourceFacts is { } facts)
-            {
-                var anchors = current.Plan.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
-                if (anchors.Length > 0)
-                    await RefreshRealInventoryAsync(StorageInventoryScopeFactory.Create(facts,
-                        current.Plan.OperationId, "query-result", anchors));
-            }
-            await ShowMessageAsync(Text("真实操作状态", "Real operation status"),
-                RealOperationConfirmationFormatter.FormatStatus(current,
-                    ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
-                    ViewModel.ActiveDocument.SourceFacts));
-        }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
-        {
-            PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
-                "real", exception, "real.query.failed");
-        }
-    }
-
-    protected async Task StopCurrentRealOperationFollowingStepsAsync()
-    {
-        if (ViewModel.AgentConnection is null)
-            return;
-        if (CurrentObservedRealOperationId is not { } operationId)
-        {
-            await ShowMessageAsync(Text("当前没有可停止的操作", "No operation can be stopped"),
-                Text("当前工作区没有正在执行或待核对的真实操作。执行或恢复操作后，这里会提供停止后续步骤的入口。",
-                    "There is no running or unresolved real operation in the current workspace. This action is available for an operation after it is submitted or recovered."));
-            return;
-        }
-
-        var flow = new RealOperationStopSession(
-            ViewModel.AgentConnection, ViewModel.RealProductSessionId);
-        try
-        {
-            var queried = await flow.QueryAsync(operationId, CancellationToken.None);
-            if (!queried.IsSuccess || queried.Value is not AgentRealOperationResponse observed)
-            {
-                PublishOperationResult(queried.Status, queried.Messages, queried.CorrelationId,
-                    Text("真实状态查询失败", "Real status query failed"), "real");
-                return;
-            }
-            if (observed.Plan.OperationId != operationId)
-                throw new InvalidOperationException("The Agent response did not match the queried operation.");
-            ViewModel.ObserveRealOperation(observed);
-            RefreshRealOperationActionButtons();
-            if (observed.State is not (RealOperationState.Prepared
-                or RealOperationState.Accepted or RealOperationState.Running))
-            {
-                await ShowMessageAsync(Text("没有可停止的后续步骤", "No following steps to stop"),
-                    RealOperationConfirmationFormatter.FormatStatus(observed,
-                        ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
-                        ViewModel.ActiveDocument.SourceFacts)
-                    + Environment.NewLine
-                    + Text("此操作已结束或需要核对，不能停止后续步骤。",
-                        "This operation has ended or needs reconciliation, so later steps cannot be stopped."));
-                return;
-            }
-
-            var warning = RealOperationConfirmationFormatter.FormatStopConfirmation(observed,
-                ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
-                ViewModel.ActiveDocument.SourceFacts);
-            var confirmed = await ConfirmAsync(
-                Text("确认停止后续步骤", "Confirm stop of following steps"), warning);
-            var stopTask = flow.StopAfterCurrentStepAsync(
-                observed, confirmed, CancellationToken.None);
-            if (stopTask is null)
-                return;
-            var result = await stopTask;
-            if (!result.IsSuccess || result.Value is not AgentRealOperationResponse status)
-            {
-                PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
-                    Text("停止请求未确认", "Stop request was not confirmed"), "real");
-                return;
-            }
-            if (status.Plan.OperationId != observed.Plan.OperationId
-                || !StringComparer.Ordinal.Equals(status.Plan.PlanHash, observed.Plan.PlanHash))
-                throw new InvalidOperationException("The Agent response did not match the stopped operation.");
-            ViewModel.ObserveRealOperation(status);
-            RefreshRealOperationActionButtons();
-            await ShowMessageAsync(Text("已请求停止后续步骤", "Following-step stop requested"),
-                RealOperationConfirmationFormatter.FormatStatus(status,
-                    ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
-                    ViewModel.ActiveDocument.SourceFacts));
-        }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
-        {
-            PublishOperationException(Text("停止结果待核对", "Stop result needs review"),
-                "real", exception, "real.stop.uncertain");
-        }
-    }
-
     /// <summary>Target text accompanies user-visible operation feedback.</summary>
     protected string OperationTarget => ViewModel.IsUsingSimulatedInventory
         ? Text($"模拟目标：{ViewModel.SelectedSystem.DisplayName}",
@@ -701,9 +545,12 @@ public partial class EditorPageBase : Page
         var first = messages.FirstOrDefault();
         var outcomeUnknown = status == ApplicationStatus.OutcomeUnknown;
         var message = outcomeUnknown
-            ? Text(
-                "操作结果尚未确认。请刷新当前模拟状态后再决定是否重试。",
-                "The operation outcome is not confirmed. Refresh the current simulation state before deciding whether to retry.")
+            ? source == "real"
+                ? Text("操作结果尚未确认，暂时不能继续写入。相关结果见消息，详细原因见开发页消息详情。",
+                    "The operation outcome is not confirmed and further writes are blocked. Review the outcome in messages and the diagnostic details on the developer page.")
+                : Text(
+                    "操作结果尚未确认。请刷新当前模拟状态后再决定是否重试。",
+                    "The operation outcome is not confirmed. Refresh the current simulation state before deciding whether to retry.")
             : Text(
                 "操作未完成。请检查当前选择或条件后重试。",
                 "The operation did not complete. Check the current selection or conditions, then try again.");
