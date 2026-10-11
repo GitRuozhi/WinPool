@@ -8,7 +8,7 @@ public sealed record RealStructureDraftPreview(bool CanApply,
     IReadOnlyList<string> Actions, IReadOnlyList<string> BlockingReasons);
 
 public sealed record RealPoolCreationDraft(StoragePoolInfo Pool, string PhysicalDiskId,
-    PoolEditIntent Intent, bool CreatePool, bool CreateVirtualDisk, bool ContinueLayout = false);
+    PoolEditIntent Intent, bool CreatePool, bool CreateVirtualDisk, bool ContinueLayout = false, bool CreateTier = false);
 
 public sealed record RealStructureDraftPlan(RealStructureDraftPreview Preview,
     IReadOnlyList<StoragePoolInfo> RemovedPools,
@@ -99,7 +99,10 @@ public static class RealStructureDraftPlanner
             }
             var continueLayout = session.PoolIntents.TryGetValue(pool.StableId, out var saved)
                 && saved.PendingAutomaticLayout;
-            if (!newPool && draftVds.Length == 0 && !continueLayout) continue;
+            var pendingTier = saved?.Layout == PoolVirtualDiskLayout.HddTiered
+                && !before.StorageTiers.Any(tier => tier.PoolStableId == pool.StableId)
+                && !before.VirtualDisks.Any(vd => vd.PoolStableId == pool.StableId);
+            if (!newPool && draftVds.Length == 0 && !continueLayout && !pendingTier) continue;
             if (pool.MemberPhysicalDiskIds.Count != 1)
             {
                 blocks.Add(T("真实池草稿必须且只能包含一块准确成员；无成员不能应用。", "A real pool draft requires exactly one identified physical member."));
@@ -127,6 +130,27 @@ public static class RealStructureDraftPlanner
                 continue;
             }
             var createVd = draftVds.Length > 0;
+            var plannedTiers = after.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId
+                && tier.MemberPhysicalDiskIds.Count > 0 && before.StorageTiers.All(old => old.StableId != tier.StableId)).ToArray();
+            var createTier = intent.Layout == PoolVirtualDiskLayout.HddTiered
+                && !before.StorageTiers.Any(tier => tier.PoolStableId == pool.StableId)
+                && (newPool || createVd || pendingTier);
+            if (newPool && plannedTiers.Length > 0)
+            {
+                if (intent.Layout != PoolVirtualDiskLayout.HddTiered || plannedTiers.Length != 1
+                    || !SupportedHddTier(plannedTiers[0])
+                    || plannedTiers[0].VirtualDiskStableId is not null
+                    || plannedTiers[0].MemberPhysicalDiskIds.Count != 1
+                    || plannedTiers[0].MemberPhysicalDiskIds[0] != memberId)
+                    blocks.Add(T("新池的自动层草稿仅支持准确单 HDD、Simple、Fixed、1 列、64 KiB；其余媒体或规格保留草稿但不能应用。",
+                        "The automatic tier draft requires one exact HDD, Simple, Fixed, one column and 64 KiB; other media or specifications remain in the draft and cannot be applied."));
+                if (createVd && !intent.VirtualDiskUseMaximum && plannedTiers.Length == 1
+                    && plannedTiers[0].Size != intent.VirtualDiskSizeBytes)
+                    blocks.Add(T("层容量与已保存的虚拟磁盘创建目标不一致，请保存原层属性。",
+                        "The tier capacity differs from the saved virtual-disk creation goal. Save the tier properties."));
+            }
+            if (newPool && createTier && plannedTiers.Length == 0)
+                blocks.Add(T("自动 HDD 层缺少草稿成员关系，不能推断或忽略该目标。", "The automatic HDD tier lacks its draft member relationship."));
             if (continueLayout && (newPool || createVd || saved!.VerifiedVirtualDiskId is null
                 || before.VirtualDisks.SingleOrDefault(vd => vd.StableId == saved.VerifiedVirtualDiskId)
                     is not { IsStable: true } verified || verified.PoolStableId != pool.StableId))
@@ -174,7 +198,7 @@ public static class RealStructureDraftPlanner
                     blocks.Add(T("自动布局当前仅支持 GPT、NTFS/64 KiB、快速格式化及可用 D–Z 盘符。", "Automatic layout currently requires GPT, quick NTFS/64 KiB and an available D–Z letter."));
             }
             members.Add(memberId);
-            creations.Add(new(pool, memberId, intent, newPool, createVd, continueLayout));
+            creations.Add(new(pool, memberId, intent, newPool, createVd, continueLayout, createTier));
             if (newPool)
             {
                 var direct = before.OsDisks.SingleOrDefault(disk => disk.PhysicalDiskStableId == memberId && disk.VirtualDiskStableId is null);
@@ -184,6 +208,9 @@ public static class RealStructureDraftPlanner
                         "Clear existing partitions and data on the target member disk before creating the storage pool."));
                 actions.Add(T($"创建单成员池 {pool.FriendlyName}。", $"Create single-member pool {pool.FriendlyName}."));
             }
+            if (createTier)
+                actions.Add(T($"按 HDD 成员自动创建容量层 {pool.FriendlyName}_HDD：Simple、Fixed、1 列、64 KiB；模板尚未分配容量。",
+                    $"Automatically create HDD capacity tier {pool.FriendlyName}_HDD: Simple, Fixed, one column, 64 KiB; the template has no allocated capacity."));
             if (createVd || continueLayout)
             {
                 if (createVd)

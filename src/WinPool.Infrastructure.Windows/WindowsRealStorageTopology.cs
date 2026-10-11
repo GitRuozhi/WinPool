@@ -517,6 +517,18 @@ public sealed class WindowsRealStorageTopology
                 // identity, protection, geometry, layout, or mount ownership.
                 if (field.Name.Equals("SizeRemaining", StringComparison.OrdinalIgnoreCase))
                     continue;
+                // MSFT_PhysicalDisk can retain an old allocation counter after
+                // Clear-Disk, then change it during provider cache discovery.
+                // Keep presence/read-state in the fingerprint, but use actual
+                // pool membership and disk/partition geometry for structure.
+                // Tier and VD AllocatedSize remain exact capacity evidence.
+                if (item.ObjectType == FactObjectType.PhysicalDisk
+                    && field.Name.Equals("AllocatedSize", StringComparison.OrdinalIgnoreCase))
+                {
+                    builder.Append("field|").Append(field.Name).Append('|')
+                        .Append((int)field.ReadState).Append("|<provider-counter>\n");
+                    continue;
+                }
                 // A value and its read state are both part of the safety facts.
                 builder.Append("field|").Append(field.Name).Append('|')
                     .Append((int)field.ReadState).Append('|')

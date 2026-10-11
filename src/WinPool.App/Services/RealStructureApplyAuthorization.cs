@@ -106,6 +106,8 @@ public sealed class RealStructureApplyAuthorization
             var intent = goal.Intent;
             if (goal.CreatePool)
                 lines.Add(T($"• 创建池“{goal.Pool.FriendlyName}”；入池所需的清空会使该物理磁盘上的现有分区和数据丢失。", $"• Create pool “{goal.Pool.FriendlyName}”; clearing required to join the pool will destroy existing partitions and data on this physical disk."));
+            if (goal.CreateTier)
+                lines.Add(T($"• 按 HDD 成员自动创建容量层“{goal.Pool.FriendlyName}_HDD”：Simple / Fixed，1 列，64 KiB；层模板尚未分配容量。", $"• Automatically create HDD capacity tier “{goal.Pool.FriendlyName}_HDD”: Simple / Fixed, one column, 64 KiB; the template has no allocated capacity."));
             if (goal.CreateVirtualDisk || goal.ContinueLayout)
             {
                 var capacity = intent.VirtualDiskUseMaximum ? "MAX" : RealVirtualDiskCreationCapacityResolver.FormatGigabytes(intent.VirtualDiskSizeBytes) + " GiB";
@@ -206,8 +208,13 @@ public sealed class RealStructureApplyAuthorization
                     break;
                 case CreateTierCommand:
                     tierId = Output(StorageObjectKind.StorageTier, "CreatedObjectId");
-                    if (fresh.Snapshot.StorageTiers.Single(item => item.StableId == tierId).PoolStableId != poolId)
-                        throw new InvalidDataException("The verified template belongs to another pool.");
+                    var template = fresh.Snapshot.StorageTiers.Single(item => item.StableId == tierId);
+                    if (template.PoolStableId != poolId || template.VirtualDiskStableId is not null
+                        || template.MediaType != "HDD" || template.ResiliencySettingName != "Simple"
+                        || template.Interleave != 65536 || template.NumberOfColumns != 1
+                        || template.NumberOfDataCopies is not (null or 1) || template.PhysicalDiskRedundancy is not (null or 0)
+                        || template.Size != 0 || template.FootprintOnPool != 0)
+                        throw new InvalidDataException("The verified template does not match the confirmed HDD tier goal.");
                     break;
                 case CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand:
                     vdId = Output(StorageObjectKind.VirtualDisk, "CreatedObjectId");
@@ -266,7 +273,8 @@ public sealed class RealStructureApplyAuthorization
             DeleteTierCommand value => value.Tier.Existing is { } tier && removableTiers.Contains(tier.ProviderKey),
             ClearDiskCommand value => creation is { CreatePool: true } && !value.RemoveOem && Target(value.Disk, StorageObjectKind.OsDisk, directDiskId),
             CreatePoolCommand value => creation is { CreatePool: true } && poolId is null && value.Name == creation.Pool.FriendlyName && value.PhysicalDisk == RealTargetReference.ForExisting(PhysicalTarget),
-            CreateTierCommand value => creation is { CreateVirtualDisk: true } && intent!.Layout == PoolVirtualDiskLayout.HddTiered && tierId is null
+            CreateTierCommand value => creation is not null && (creation.CreateTier || creation.CreateVirtualDisk)
+                && intent!.Layout == PoolVirtualDiskLayout.HddTiered && tierId is null
                 && Target(value.Pool, StorageObjectKind.StoragePool, poolId) && value.Name == creation.Pool.FriendlyName + "_HDD" && value.InterleaveBytes == 65536 && value.DataColumns == 1,
             CreateVirtualDiskCommand value => creation is { CreateVirtualDisk: true } && vdId is null && intent!.Layout == PoolVirtualDiskLayout.Ordinary
                 && Target(value.Pool, StorageObjectKind.StoragePool, poolId) && value.Name == intent.VirtualDiskName && Capacity(value.SizeBytes, value.UseMaximumSize)

@@ -10,7 +10,8 @@ public sealed record TopologyEditInteraction(
     Action<TopologyNodeViewModel> OnSelect,
     bool AllowDiskDrag,
     Action<string, string>? OnDiskDropped = null,
-    Func<bool>? CanEditNow = null);
+    Func<bool>? CanEditNow = null,
+    Func<string, string, bool>? CanDropDisk = null);
 
 public sealed partial class TopologyNodeViewModel : ObservableObject
 {
@@ -72,12 +73,12 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == unit.StableId);
         IsDragSource = edit?.AllowDiskDrag == true
             && unit.Kind == StorageUnitKind.PhysicalDisk
-            && physical is { IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false };
+            && physical is { IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false }
+            && !IsOffline;
         IsDropTarget = edit?.AllowDiskDrag == true
             && (unit.Kind == StorageUnitKind.StoragePool
-                || (unit.Kind == StorageUnitKind.StorageTier
-                    && (EditWorkspace.IsRetiredLayer(unit.StableId)
-                        || EditWorkspace.IsHotSpareLayer(unit.StableId))));
+                || unit.Kind == StorageUnitKind.StorageTier
+                || unit.Kind == StorageUnitKind.DirectDiskGroup);
     }
 
     public bool IsDragSource { get; }

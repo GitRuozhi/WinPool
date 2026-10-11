@@ -86,11 +86,11 @@ public partial class EditorPageBase
         try
         {
             // Reject known provider/layout limitations before deleting or clearing anything.
-            foreach (var creation in draft.Creations.Where(item => item.CreatePool || item.CreateVirtualDisk))
+            foreach (var creation in draft.Creations.Where(item => item.CreatePool || item.CreateVirtualDisk || item.CreateTier))
             {
                 ReportRealActivity(Text("正在核对目标布局支持", "Checking the target layout support"));
                 var target = Id(StorageObjectKind.PhysicalDisk, creation.PhysicalDiskId);
-                var tiered = creation.CreateVirtualDisk && creation.Intent.Layout == PoolVirtualDiskLayout.HddTiered;
+                var tiered = (creation.CreateTier || creation.CreateVirtualDisk) && creation.Intent.Layout == PoolVirtualDiskLayout.HddTiered;
                 var support = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealStructureCreationSupportRequest(
                     target, tiered, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
                 if (!support.IsSuccess || support.Value is not AgentRealStructureCreationSupportResponse actual
@@ -150,26 +150,26 @@ public partial class EditorPageBase
                             RemapCreatedPool(session, temporaryPoolId, poolId);
                         })) return false;
                 }
+                var sizeTarget = Id(StorageObjectKind.StoragePool, poolId);
+                if ((creation.CreateTier || creation.CreateVirtualDisk) && intent.Layout == PoolVirtualDiskLayout.HddTiered)
+                {
+                    var existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
+                        && tier.VirtualDiskStableId is null).ToArray();
+                    if (existing.Length == 0)
+                    {
+                        if (!await Stage(RealOperationProposalFactory.CreateHddTierTemplate(session.SystemId,
+                            Id(StorageObjectKind.StoragePool, poolId), creation.Pool.FriendlyName + "_HDD"),
+                            Text("已核对自动 HDD 容量层", "Verified automatic HDD capacity tier"))) return false;
+                        existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
+                            && tier.VirtualDiskStableId is null).ToArray();
+                    }
+                    if (existing.Length != 1) throw new InvalidDataException("One exact unused HDD template is required.");
+                    sizeTarget = Id(StorageObjectKind.StorageTier, existing[0].StableId);
+                }
                 if (!creation.CreateVirtualDisk && !creation.ContinueLayout) continue;
                 string? vdId = intent.VerifiedVirtualDiskId;
                 if (creation.CreateVirtualDisk)
                 {
-                    var sizeTarget = Id(StorageObjectKind.StoragePool, poolId);
-                    if (intent.Layout == PoolVirtualDiskLayout.HddTiered)
-                    {
-                        var existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
-                            && tier.VirtualDiskStableId is null).ToArray();
-                        if (existing.Length == 0)
-                        {
-                            if (!await Stage(RealOperationProposalFactory.CreateHddTierTemplate(session.SystemId,
-                                Id(StorageObjectKind.StoragePool, poolId), creation.Pool.FriendlyName + "_HDD"),
-                                Text("已准备 HDD 分层", "Prepared HDD tiering"))) return false;
-                            existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
-                                && tier.VirtualDiskStableId is null).ToArray();
-                        }
-                        if (existing.Length != 1) throw new InvalidDataException("One exact unused HDD template is required.");
-                        sizeTarget = Id(StorageObjectKind.StorageTier, existing[0].StableId);
-                    }
                     if (intent.VirtualDiskUseMaximum)
                         ReportRealActivity(Text("正在确定最大可用容量", "Determining maximum available capacity"));
                     var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(

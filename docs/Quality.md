@@ -2,17 +2,29 @@
 
 日期：2026-10-11。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
-## 2026-10-11 建池属性与一次 Apply：限定验证
+## 2026-10-11 建池字段与确认摘要：局部验证
 
-本轮追踪动态属性、容量保存、撤销／重做及完整 Apply 链。结构页额外盘符、已有层名称输入及其独立 Enter 操作已移除；HDD 新建容量使用原容量层输入／MAX，普通布局保留其必要容量输入和用户已确认的布局选择。准确 bytes 在显示、解析与确认间保持，不将模拟容量上限用于真实校验。
+此前将本轮描述为追踪动态属性、容量保存、撤销／重做及完整 Apply 链，范围表述过宽。`732a9d8` 记录的是表单字段收缩、容量保存和确认取消等局部工作；该轮没有验证成员拖入、按介质自动生成层、拖动反馈或一次被接受的原 Apply 全流程。旧文字“普通布局保留其必要容量输入和用户已确认的布局选择”是当时记录，不是当前产品约束，现由最新用户决定取代。
 
-结构 Apply 改为一次完整目标／风险确认。后继段仍逐次 fresh Prepare、短时令牌及执行前核验，新增仅本次 Apply 有效的封闭授权：固定目标、参数、草稿代际及会话，准确匹配冻结计划和 Verified OperationId／PlanHash／post fingerprint，新对象只能由已核验映射引入。四种普通／HDD、明确容量／MAX 的完整合法推进与参数、目标、会话、收据篡改拒绝由定向测试覆盖；失败／未知停止，独立磁盘操作不继承授权，重启不自动续写。
+结构页额外盘符、已有层名称输入及其独立 Enter 操作已移除；HDD 新建容量使用原容量层输入／MAX。准确 bytes 在显示、解析与确认间保持，不将模拟容量上限用于真实校验。结构 Apply 的直接授权测试覆盖一次完整目标／风险确认下，固定目标、参数、草稿代际及会话、冻结计划和 Verified OperationId／PlanHash／post fingerprint；失败／未知停止，独立磁盘操作不继承授权，重启不自动续写。这些 typed test 不证明真实拖动或已接受 Apply 的原生成功路径。
 
 集中运行三个直接相关测试类，**115 Passed／0 Failed**，包括23条授权用例及10条精确容量新增 cases；没有全量门。最终标准 App／Agent Release 构建 **0 warnings／0 errors**、运行树合并0碰撞。原生 UI 核实 HDD 原字段默认 MAX、保存64 GiB时预览为68,719,476,736 bytes、撤销MAX／重做64、额外行消失。最终版本总确认列出准确 WDC身份、64 GiB、GPT、当前无MSR偏好、NTFS／64 KiB、名称与清盘风险；取消保留草稿，放弃后清除。本次首次草稿遇启动采集更新导致基线冲突，保护正常停止；两项自动采集成功后按新事实建立草稿完成上述检查。
 
 只读前后审计：321个计划、531个步骤、2370条执行事件的行数及完整内容 SHA-256 相同；Accepted265／CallIssued339不变，旧 `76958…` 仍为PartiallyCompleted。本轮没有真实写入，收敛后的连续创建未作实机写入复验，不能将合成链测试或取消确认视为设备验收。标准版本已重启，真实编辑on、测试草稿已放弃；V0.58／迭代8及V0.59整体活动状态不变。
 
 证据：[定向回归](../artifacts/test-results/20261011-pool-creation-alignment/targeted.trx)、[最终构建](../artifacts/test-results/20261011-pool-creation-alignment/final-release-build.log)、[最终容量保存](../artifacts/test-results/20261011-pool-creation-alignment/final-hdd-saved-ui.txt)、[总确认正文](../artifacts/test-results/20261011-pool-creation-alignment/final-confirmation-content.txt)、[原生断言](../artifacts/test-results/20261011-pool-creation-alignment/final-native-assertions.json)、[只读前态](../artifacts/test-results/20261011-pool-creation-alignment/before.json)、[只读后态](../artifacts/test-results/20261011-pool-creation-alignment/after.json)。
+
+## 2026-10-11 按介质自动建层与原 Apply：限定范围验收
+
+本轮限定验收已通过，整体 V0.59 仍在进行。建池按成员介质生成对应草稿层，不提供普通／单 HDD 布局选择；AutoVD 关闭时保留 HDD 模板而不建 VD，AutoPart 独立控制后续布局。模拟 HDD 新建、已有池容量／列数保存与撤销重做通过。模拟 SSD 拖入后形成 931 GiB Performance 层与 VD 草稿，DiscardAll 后原 DataPool 恢复；没有 Apply。SCM 本轮未原生检查，不据此声称全介质矩阵通过。结构 Apply 使用一次完整确认，独立磁盘操作仍分别使用各自当次确认。
+
+主要原生证据：模拟 Pool02／Pool03 均以 64 GiB Apply，Pool03 无 VD；HDD3 拖入既有 Capacity 后成员数为 2。真实流程创建池 `pool:uid:cc9030b7111abe972424e87b` 和 HDD tier `tier:uid:80fec57b6e0790931ba6cce5`，随后创建 64 GiB VD（68,719,476,736 bytes）并完成 AutoPart，准确关联 WDC。WDC 最终恢复在线 GPT、1 MiB 起点／16 MiB MSR、17 MiB 起始／4,000,767,279,104-byte 最大整 MiB NTFS／64 KiB 数据分区，`WinPool_Test`／E:。重启后 Storage（10:33:07–09 +08）和 Hardware（10:33:10–16 +08）采集均 Returned；最终 `protected-comparison-final.log` 对 Samsung 15 个关联对象的几何、文件系统、簇、角色、挂载及对象闭包比较 PASS。canonical 归一定向回归 4 Passed／0 Failed；Apply 后拖动构建及最后仅同步提示文字的标准 App Release 构建均为 0 warnings／0 errors，后者 Union merge 0 collisions、exit 0（26.33 秒）。CreatePool HelpText 原生读取为同步后的新文案。托盘退出时 App／Agent 均 exit 0；重启后的原生结构页 Real Editing 为 on 且无待应用动作。未运行全量测试。证据：[模拟编辑](../artifacts/test-results/20261011-pool-drag-product-alignment/sim-edit-drop-ui.txt)、[SSD 草稿](../artifacts/test-results/20261011-pool-drag-product-alignment/sim-ssd-auto-layer-ui.txt)、[WDC 末态截图](../artifacts/test-results/20261011-pool-drag-product-alignment/restored-wdc-verified-final.png)、[重启后 Storage／Hardware 快照](../artifacts/test-results/20261011-pool-drag-product-alignment/after-restart-local-snapshot.json)、[重启后本机文档](../artifacts/test-results/20261011-pool-drag-product-alignment/after-restart-local-document.json)、[最终 Samsung 比较](../artifacts/test-results/20261011-pool-drag-product-alignment/protected-comparison-final.log)、[正常托盘退出](../artifacts/test-results/20261011-pool-drag-product-alignment/normal-exit.json)、[最终原生结构页](../artifacts/test-results/20261011-pool-drag-product-alignment/final-running-structure-ui.txt)、[真实池／层结果](../artifacts/test-results/20261011-pool-drag-product-alignment/verified-pool-tier-no-vd-ui.txt)、[64 GiB VD 与 AutoPart](../artifacts/test-results/20261011-pool-drag-product-alignment/verified-vd64-auto-layout-ui.txt)。
+
+先前 CreatePool Prepare 指纹不匹配的唯一 canonical 差异为 `PhysicalDisk.AllocatedSize` provider counter 从 17,653,760 变为 1,801,766,920,192 bytes，是 Windows 清盘后的缓存计数更新，不是 Windows MAX 或层容量问题。实现只将该物理盘字段的 value 归一，同时保留存在状态和 `ReadState`；身份、几何、关系、健康／运行状态及 Pool／Tier／VD 的容量仍精确比较，App post-fingerprint 检查不变。详见[单字段 canonical diff](../artifacts/test-results/20261011-pool-drag-product-alignment/physical-allocation-counter-proof.diff.txt)。Apply 后拖动修正要求 finally 在 `_applyingRealDraft` 清零后刷新执行模式；修正后的[真实录像](../artifacts/test-results/20261011-pool-drag-product-alignment/real-post-apply-drag-fixed.mp4)显示 ghost 与源磁盘透明度，释放到目标外后[撤销／Apply 禁用且无待应用动作](../artifacts/test-results/20261011-pool-drag-product-alignment/real-post-apply-invalid-drop-ui.txt)。修复前失败录像仍保留：[real-edit-invalid-drop.mp4](../artifacts/test-results/20261011-pool-drag-product-alignment/real-edit-invalid-drop.mp4)。
+
+WDC 测试池已通过原 UI 解散，末态按原 UI 恢复完成。重启后两类来源均重新 Returned，Samsung 最终保护比较再次 PASS。模拟 SSD 自动层／VD 仅验证草稿并 DiscardAll；没有真实 SSD 写入。当前模拟目录没有三层 SCM 夹具，本轮未重置用户模拟数据目录来造夹具，因此 SCM 未原生核验。完整字段出现／启用条件矩阵和失败／未知反馈全场景仍未验收；它们不否定本节 HDD／SSD 限定范围结果，也不阻塞本轮收口。全介质矩阵仍未完成，整体 V0.59 保持进行中。
+
+证据：[最终提示同步 Release 构建](../artifacts/test-results/20261011-pool-drag-product-alignment/final-release-build-tooltip-sync.log)、[Apply 后拖动 Release 构建](../artifacts/test-results/20261011-pool-drag-product-alignment/final-release-build-after-drag-state.log)、[canonical 四案例](../artifacts/test-results/20261011-pool-drag-product-alignment/fingerprint-four-cases.log)、[池／层本地快照](../artifacts/test-results/20261011-pool-drag-product-alignment/verified-pool-tier-local-snapshot.json)、[VD 本地快照](../artifacts/test-results/20261011-pool-drag-product-alignment/verified-vd64-local-snapshot.json)、[canonical 根因摘要](../artifacts/test-results/20261011-pool-drag-product-alignment/physical-allocation-counter-proof.json)。
 
 ## 2026-10-10 编辑页额外入口移除：限定验证
 

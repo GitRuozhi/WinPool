@@ -281,6 +281,90 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Fact]
+    public async Task PhysicalAllocationCounterValueDoesNotChangeTheStructuralFingerprint()
+    {
+        var allocated = 17_653_760L;
+        var fixture = new Fixture
+        {
+            FactsTransform = item => item.ObjectType != FactObjectType.PhysicalDisk ? item : item with
+            {
+                Fields = item.Fields.Add(WinPoolSourceField.Returned("AllocatedSize", allocated,
+                    FactValueType.UInt64, item.SourceRef))
+            }
+        };
+        var target = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+        var before = (await fixture.Reader.CaptureAsync(default)).RequireSinglePhysicalClosure([target]);
+
+        // Exact old/new provider values from the ClearDisk -> CreatePool native regression.
+        allocated = 1_801_766_920_192L;
+        var after = (await fixture.Reader.CaptureAsync(default)).RequireSinglePhysicalClosure([target]);
+
+        Assert.Equal(before.Fingerprint, after.Fingerprint);
+        Assert.Equal(before.PhysicalMemberFingerprint, after.PhysicalMemberFingerprint);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task PhysicalAllocationCounterReadStateRemainsFingerprintEvidence()
+    {
+        var failed = false;
+        var fixture = new Fixture
+        {
+            FactsTransform = item => item.ObjectType != FactObjectType.PhysicalDisk ? item : item with
+            {
+                Fields = item.Fields.Add(failed
+                    ? WinPoolSourceField.Missing("AllocatedSize", FactValueType.UInt64,
+                        item.SourceRef, FieldReadState.Failed, "synthetic-provider-read-failed")
+                    : WinPoolSourceField.Returned("AllocatedSize", 17_653_760L, FactValueType.UInt64, item.SourceRef))
+            }
+        };
+        var target = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+        var before = (await fixture.Reader.CaptureAsync(default)).RequireSinglePhysicalClosure([target]);
+
+        failed = true;
+        var after = (await fixture.Reader.CaptureAsync(default)).RequireSinglePhysicalClosure([target]);
+
+        Assert.NotEqual(before.Fingerprint, after.Fingerprint);
+        Assert.Equal(before.PhysicalMemberFingerprint, after.PhysicalMemberFingerprint);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData("vd:tiered")]
+    [InlineData("tier:instance")]
+    public async Task VirtualDiskAndTierAllocatedSizeRemainExactFingerprintEvidence(string changedId)
+    {
+        var change = false;
+        var fixture = new Fixture
+        {
+            SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, created: true),
+            FactsTransform = item =>
+            {
+                if (item.ObjectType == FactObjectType.StorageTier)
+                    item = item with { Fields = item.Fields.Add(WinPoolSourceField.Returned("AllocatedSize",
+                        item.Field("Size")!.Value!.Value.GetInt64(), FactValueType.UInt64, item.SourceRef)) };
+                return !change || item.Id != changedId ? item : item with
+                {
+                    Fields = item.Fields.Select(field => field.Name != "AllocatedSize" ? field : field with
+                    {
+                        Value = JsonSerializer.SerializeToElement(field.Value!.Value.GetInt64() + (1L << 30))
+                    }).ToImmutableArray()
+                };
+            }
+        };
+        var target = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+        var before = (await fixture.Reader.CaptureAsync(default)).RequireSinglePhysicalClosure([target]);
+        Assert.Contains(before.Objects, item => item.Id == changedId);
+
+        change = true;
+        var after = (await fixture.Reader.CaptureAsync(default)).RequireSinglePhysicalClosure([target]);
+
+        Assert.NotEqual(before.Fingerprint, after.Fingerprint);
+        Assert.Equal(before.PhysicalMemberFingerprint, after.PhysicalMemberFingerprint);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Fact]
     public async Task PrimordialMembershipDoesNotJoinIndependentPhysicalDisks()
     {
         var fixture = new Fixture(secondDisk: true);

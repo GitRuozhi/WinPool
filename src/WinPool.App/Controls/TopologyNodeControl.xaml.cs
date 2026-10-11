@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
@@ -26,6 +27,8 @@ public sealed partial class TopologyNodeControl : UserControl
     private TopologyEditInteraction? _dragInteraction;
     private bool _isDragging;
     private bool _suppressNextTap;
+    private Popup? _dragPreview;
+    private double _dragSourceOpacity;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -394,8 +397,10 @@ public sealed partial class TopologyNodeControl : UserControl
             _isDragging = true;
             _suppressNextTap = true;
             Focus(FocusState.Programmatic); // Escape now belongs to this drag.
+            ShowDragPreview();
         }
         e.Handled = true;
+        MoveDragPreview(point);
         var target = HitTestDropTarget(point);
         if (!ReferenceEquals(s_highlightedDropTarget, target))
         {
@@ -411,10 +416,44 @@ public sealed partial class TopologyNodeControl : UserControl
         // Topmost hit only: never drop through overlays, panels or scrollbars.
         var hit = VisualTreeHelper.FindElementsInHostCoordinates(point, _dragRoot).FirstOrDefault();
         var target = NearestTopologyNode(hit)?.FindPoolDropTargetControl();
-        return target is { IsLoaded: true, IsEnabled: true }
+        return target is { IsLoaded: true, IsEnabled: true, ViewModel: { } targetModel }
             && ReferenceEquals(target.XamlRoot, XamlRoot)
-            && ReferenceEquals(target.ViewModel?.EditInteraction, _dragInteraction)
-            && (target.ViewModel?.EditInteraction?.CanEditNow?.Invoke() ?? true) ? target : null;
+            && ReferenceEquals(targetModel.EditInteraction, _dragInteraction)
+            && (targetModel.EditInteraction?.CanEditNow?.Invoke() ?? true)
+            && (_dragInteraction?.CanDropDisk?.Invoke(ViewModel.Unit.StableId, targetModel.Unit.StableId) ?? true)
+                ? target : null;
+    }
+
+    private void ShowDragPreview()
+    {
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        heading.Children.Add(new FontIcon { Glyph = ViewModel.TypeGlyph, FontSize = 14,
+            Foreground = Brush("TextFillColorPrimaryBrush") });
+        heading.Children.Add(new TextBlock { Text = ViewModel.Unit.DisplayName,
+            MaxWidth = Math.Clamp(ActualWidth, 180, 300) - 52,
+            Foreground = Brush("TextFillColorPrimaryBrush"), TextWrapping = TextWrapping.Wrap });
+        var content = new StackPanel { Spacing = 4 };
+        content.Children.Add(heading);
+        content.Children.Add(new TextBlock { Text = ViewModel.Summary,
+            Foreground = Brush("TextFillColorSecondaryBrush"), TextWrapping = TextWrapping.Wrap });
+        var card = new Border
+        {
+            Child = content, Width = Math.Clamp(ActualWidth, 180, 300), Padding = new Thickness(10),
+            Background = Brush("LayerFillColorDefaultBrush"), BorderBrush = Brush("WinPoolAccentBorderBrush"),
+            BorderThickness = new Thickness(2), CornerRadius = new CornerRadius(2),
+            Opacity = 0.9, IsHitTestVisible = false
+        };
+        _dragPreview = new Popup { XamlRoot = XamlRoot, Child = card, IsHitTestVisible = false };
+        _dragSourceOpacity = Opacity;
+        Opacity = 0.5;
+    }
+
+    private void MoveDragPreview(Point point)
+    {
+        if (_dragPreview is null) return;
+        _dragPreview.HorizontalOffset = point.X + 14;
+        _dragPreview.VerticalOffset = point.Y + 14;
+        _dragPreview.IsOpen = true;
     }
 
     private void TopologyNodeControl_PointerReleased(object sender, PointerRoutedEventArgs e)
@@ -449,6 +488,13 @@ public sealed partial class TopologyNodeControl : UserControl
             s_suppressTapUntil = Environment.TickCount64 + 250;
         }
         _isDragging = false;
+        if (_dragPreview is not null)
+        {
+            _dragPreview.IsOpen = false;
+            _dragPreview.Child = null;
+            _dragPreview = null;
+            Opacity = _dragSourceOpacity;
+        }
         if (_dragRoot is not null) _dragRoot.KeyDown -= DragRoot_KeyDown;
         _dragRoot = null;
         _dragInteraction = null;

@@ -195,6 +195,8 @@ public sealed class RealStructureDraftPlannerTests
         var pool = session.Working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
         session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
         { VirtualDiskSizeBytes = bytes, CreateMsr = createMsr };
+        session.Working = session.Working with { StorageTiers = session.Working.StorageTiers.Select(tier =>
+            tier.PoolStableId == pool.StableId && tier.MediaType == "HDD" ? tier with { Size = bytes } : tier).ToArray() };
         var prior = session.Capture();
 
         var blocked = RealStructureDraftPlanner.Build(session);
@@ -693,6 +695,11 @@ public sealed class RealStructureDraftPlannerTests
         session.Working = EditWorkspace.InsertDraftPool(session.Working, "User pool");
         var pool = session.Working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
         session.Working = EditWorkspace.MoveDiskToPool(session.Working, member.StableId, pool.StableId);
+        // Ordinary provider cases have no tier goal; automatic-layer cases retain the shared draft relationship.
+        session.Working = session.Working with { StorageTiers = layout == PoolVirtualDiskLayout.Ordinary
+            ? session.Working.StorageTiers.Where(tier => tier.PoolStableId != pool.StableId).ToArray()
+            : session.Working.StorageTiers.Select(tier => tier.PoolStableId == pool.StableId && tier.MediaType == "HDD"
+                ? tier with { Size = maximum ? 0 : 32L * GiB } : tier).ToArray() };
         session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "User VD");
         session.PoolIntents[pool.StableId] = Intent() with
         {

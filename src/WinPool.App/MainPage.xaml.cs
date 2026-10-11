@@ -735,12 +735,15 @@ public sealed partial class MainPage : Page
 
     private string RealEditorNavigationPurpose(ManageCommandKind kind) => kind switch
     {
-        ManageCommandKind.CreatePool or ManageCommandKind.RenamePool or ManageCommandKind.EditPool => Text(
-            "打开存储结构编辑页。目标页会再次检查当前对象和可用能力；写入前须预览准确计划并单独确认。",
-            "Open Storage structure. The editor checks the current target and capability again; a write requires an exact plan preview and separate confirmation."),
+        ManageCommandKind.RenamePool => Text(
+            "打开存储结构编辑页。目标页会重新核对当前对象；改名按 Enter 单独提交，其他池结构修改在应用前整体展示并确认。",
+            "Open Storage structure. The editor rechecks the current object; a rename is submitted with Enter, while other pool structure changes are shown together for confirmation before applying."),
+        ManageCommandKind.CreatePool or ManageCommandKind.EditPool => Text(
+            "打开存储结构编辑页。目标页会重新核对当前对象和可用能力；应用整份池结构修改前会显示一次整体确认。",
+            "Open Storage structure. The editor rechecks the current target and available capabilities, then shows one confirmation for the full set of pool structure changes before applying them."),
         _ => Text(
-            "打开磁盘分区编辑页。目标页会再次检查当前对象和可用能力；写入前须预览准确计划并单独确认。",
-            "Open Disk and partitions. The editor checks the current target and capability again; a write requires an exact plan preview and separate confirmation.")
+            "打开磁盘分区编辑页。目标页会重新核对当前目标和可用能力；真实磁盘操作会逐项说明目标和影响，并在提交前单独确认。",
+            "Open Disk and partitions. The editor rechecks the current target and available capabilities; each real disk operation shows its target and impact for confirmation before submission.")
     };
 
     private CommandSpec Spec(

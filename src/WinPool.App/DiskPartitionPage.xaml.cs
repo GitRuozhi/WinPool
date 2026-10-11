@@ -155,8 +155,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         AutomationProperties.SetName(SizeBox, Text("容量", "Capacity"));
         AutomationProperties.SetName(SizeAdaptiveValue, Text("自适应容量单位", "Adaptive capacity unit"));
         ContextHelp.Set(DiskOnlineStateButton,
-            Text("根据磁盘当前采集到的联机状态提供相反动作；真实操作在计划核对成功后才更新显示。",
-                "Offers the opposite of the collected disk online state; the displayed state changes only after a real operation is verified."));
+            Text("根据磁盘当前采集到的联机状态提供相反动作；只有真实操作完成且结果核对成功后才更新显示。",
+                "Offers the opposite of the collected disk online state; the display changes only after a real operation completes and its result is verified."));
         ContextHelp.Set(DiskPartitionStyleButton,
             Text("RAW 可初始化为 GPT；模拟 MBR 可转换为 GPT；GPT 已初始化后此按钮禁用。真实 MBR 转换尚未支持。",
                 "Initialize RAW as GPT, or convert a simulated MBR disk to GPT. GPT is already initialized and disables this button. Real MBR conversion is not supported."));
@@ -1017,7 +1017,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(
             PartitionActionButton,
             createActionSelected
-                ? Text("在选中的 GPT 未分配空间中创建分区；真实操作需单独预览和确认。", "Create a partition in the selected GPT gap; a real operation requires its own preview and confirmation.")
+                ? Text("在选中的 GPT 未分配空间中创建分区；真实操作会显示目标空间和分区参数，确认后才提交。", "Create a partition in the selected GPT gap; a real operation shows the target space and partition settings for confirmation before submission.")
                 : Text("提交当前分区格式化设置；真实操作会清除目标分区的数据。", "Submit the partition format settings; a real operation erases data on the target partition."));
         SetDisabledReason(PartitionActionButton, realRefsUnsupported
             ? Text("ReFS 真实创建仍待 C01 现场能力证据，本阶段禁用。",
@@ -1811,8 +1811,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 if (refreshedDisk is null)
                 {
                     await ShowMessageAsync(Text("磁盘初始化后无法继续", "Cannot continue after disk initialization"),
-                        Text("新扫描中找不到原目标磁盘；未提交后续布局计划。",
-                            "The fresh scan no longer contains the target disk. No follow-up layout plan was submitted."));
+                        Text("新扫描中找不到已初始化的目标磁盘；已停止后续分区设置。",
+                            "The initialized target disk was not found in the fresh scan. Further partition setup was stopped."));
                     return;
                 }
 
@@ -2438,8 +2438,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             response.Range.Partition != target)
         {
             await ShowMessageAsync(Text("实时扩缩范围无效", "Invalid live resize range"),
-                Text("Agent 回执未匹配所选分区；未准备写入计划。",
-                    "The Agent response did not match the selected partition; no write plan was prepared."));
+                Text("无法将 Agent 返回的扩缩范围核对到所选分区；未提交扩缩操作。",
+                    "The Agent's resize range could not be matched to the selected partition; no resize was submitted."));
             return;
         }
         var range = response.Range;

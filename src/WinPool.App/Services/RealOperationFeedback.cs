@@ -49,7 +49,7 @@ public static class RealOperationFeedback
         {
             "real.reconciliation_step_outcome_unknown" => chinese ? "已有 Windows 调用的结果仍无法核实，写入保护仍保留。" : "An issued Windows call still has an unverifiable outcome; write protection remains active.",
             "real.reconciliation_capture_failed" or "operation.reconciliation_failed" => chinese ? "只读核对未能取得或验证所需事实；详细原因见开发页消息详情。" : "Read-only review could not obtain or validate the required facts. See the developer message details.",
-            "real.reconciliation_physical_changed" or "real.reconciliation_machine_changed" or "real.reconciliation_topology_changed" => chinese ? "当前机器、目标磁盘或相关结构与冻结计划不一致，无法确认旧操作结果。" : "The current machine, target disk or related topology differs from the frozen plan; the old outcome cannot be confirmed.",
+            "real.reconciliation_physical_changed" or "real.reconciliation_machine_changed" or "real.reconciliation_topology_changed" => chinese ? "当前机器、目标磁盘或相关结构与操作发起时已核对的目标不一致，无法确认旧操作结果。" : "The current machine, target disk or related topology differs from the target verified when the operation was submitted; the previous result cannot be confirmed.",
             _ => status.RequiresReconciliation
                 ? (chinese ? "真实操作结果尚未核实，写入保护仍保留；核对代码和原步骤证据见开发页消息详情。" : "The outcome is unresolved and write protection remains active. Review codes and original step evidence are in the developer message details.")
                 : (chinese ? "请根据各步核对结果决定后续操作；旧调用不会自动重放。" : "Review each step before deciding what to do next. Old calls are not replayed automatically.")

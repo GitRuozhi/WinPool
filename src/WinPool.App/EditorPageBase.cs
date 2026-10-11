@@ -102,9 +102,9 @@ public partial class EditorPageBase : Page
     {
         if (!string.Equals(disk.PartitionStyle, "GPT", StringComparison.OrdinalIgnoreCase))
         {
-            await ShowMessageAsync(Text("布局计划被阻止", "Layout plan blocked"),
-                Text("新扫描中的目标磁盘不是 GPT；未提交后续布局计划。",
-                    "The target disk in the fresh scan is not GPT. No follow-up layout plan was submitted."));
+            await ShowMessageAsync(Text("后续分区设置已停止", "Further partition setup stopped"),
+                Text("新扫描中的目标磁盘不是 GPT；未继续执行分区变更。",
+                    "The target disk in the fresh scan is not GPT. No further partition changes were made."));
             return false;
         }
 
@@ -114,9 +114,9 @@ public partial class EditorPageBase : Page
         if (partitions.Any(partition => !IsExactProviderMsr(partition))
             || partitions.Length > 1)
         {
-            await ShowMessageAsync(Text("布局计划被阻止", "Layout plan blocked"),
-                Text("新扫描发现 MSR 以外的分区或多个 MSR。请先核对实际布局；未提交后续布局计划。",
-                    "The fresh scan found a non-MSR partition or multiple MSRs. Review the actual layout first; no follow-up layout plan was submitted."));
+            await ShowMessageAsync(Text("后续分区设置已停止", "Further partition setup stopped"),
+                Text("新扫描发现 MSR 以外的分区或多个 MSR。请先核对实际布局；未继续执行分区变更。",
+                    "The fresh scan found a non-MSR partition or multiple MSRs. Review the actual layout first; no further partition changes were made."));
             return false;
         }
 
@@ -316,7 +316,7 @@ public partial class EditorPageBase : Page
         var reservationId = ViewModel.RealOperationSubmission.ReservationId;
         LastRealOperationResponse = null;
         LastRealInventoryRefreshSucceeded = false;
-        ReportRealActivity(Text("正在准备应用", "Preparing to apply"));
+        ReportRealActivity(Text("正在核对目标和操作条件", "Checking the target and operation conditions"));
         try
         {
             return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId,
@@ -342,7 +342,7 @@ public partial class EditorPageBase : Page
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
-            PublishOperationException(Text("真实准备失败", "Real preparation failed"),
+            PublishOperationException(Text("操作未能开始", "Operation did not start"),
                 "real", exception, "real.prepare.exception");
             return false;
         }
@@ -354,7 +354,7 @@ public partial class EditorPageBase : Page
             if (prepared is not null)
             {
                 PublishOperationResult(prepared.Status, prepared.Messages, prepared.CorrelationId,
-                    Text("真实准备未完成", "Real preparation did not complete"), "real");
+                    Text("操作未能开始", "Operation did not start"), "real");
             }
             return false;
         }
@@ -445,7 +445,7 @@ public partial class EditorPageBase : Page
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
             {
-                PublishOperationException(Text("真实状态查询失败", "Real status query failed"),
+                PublishOperationException(Text("无法读取操作结果", "Could not read the operation result"),
                     "real", exception, "real.query.failed");
                 return false;
             }
@@ -528,11 +528,11 @@ public partial class EditorPageBase : Page
                 && !ViewModel.RealOperationSubmission.IsBlocked)
                 return;
             PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
-                Text("取消准备结果待核对", "Prepared cancellation needs review"), "real");
+                Text("操作取消结果待核对", "Operation cancellation needs review"), "real");
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
         {
-            PublishOperationException(Text("取消准备结果待核对", "Prepared cancellation needs review"),
+            PublishOperationException(Text("操作取消结果待核对", "Operation cancellation needs review"),
                 "real", exception, "real.cancel_prepared.uncertain");
         }
     }
