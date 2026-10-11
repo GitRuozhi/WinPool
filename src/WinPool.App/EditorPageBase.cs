@@ -22,11 +22,17 @@ public partial class EditorPageBase : Page
             if (ViewModel is null) return;
             ViewModel.RealOperationActivityChanged -= SyncRealOperationActivity;
             ViewModel.RealOperationActivityChanged += SyncRealOperationActivity;
+            ViewModel.RealOperationRecovered -= HandleRecoveredRealOperation;
+            ViewModel.RealOperationRecovered += HandleRecoveredRealOperation;
             SyncRealOperationActivity();
         };
         Unloaded += (_, _) =>
         {
-            if (ViewModel is not null) ViewModel.RealOperationActivityChanged -= SyncRealOperationActivity;
+            if (ViewModel is not null)
+            {
+                ViewModel.RealOperationActivityChanged -= SyncRealOperationActivity;
+                ViewModel.RealOperationRecovered -= HandleRecoveredRealOperation;
+            }
         };
     }
 
@@ -34,6 +40,14 @@ public partial class EditorPageBase : Page
         ViewModel.IsRealOperationBusy, ViewModel.IsRealGraphObscured, ViewModel.RealOperationPhase);
 
     protected virtual void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase) { }
+    protected virtual bool OnRecoveredRealOperation(AgentRealOperationResponse status, bool inventoryRefreshed) => true;
+
+    private bool HandleRecoveredRealOperation(AgentRealOperationResponse status, bool inventoryRefreshed)
+    {
+        if (ViewModel.ActiveDocument.SystemId != status.Plan.SystemId) return true;
+        if (inventoryRefreshed) OnRealInventoryRefreshed();
+        return OnRecoveredRealOperation(status, inventoryRefreshed);
+    }
     protected bool IsRealStructureApplyInProgress { get; private set; }
     protected AgentRealOperationResponse? LastRealOperationResponse { get; private set; }
     private bool structureHasWritten;

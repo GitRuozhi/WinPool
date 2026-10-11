@@ -2,6 +2,18 @@
 
 日期：2026-10-11。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-11 真实 MAX 核对误锁与编辑恢复：限定验收
+
+前轮真实验证只覆盖草稿和属性重置，没有实际提交默认 MAX 创建及分区修改；该覆盖缺口不能作为这些操作可用的证据。本轮复现用户现场并修复 MAX 指纹规则分叉和界面恢复漏接终态的问题，未扩大真实硬件支持范围，未运行全量测试。
+
+定向回归 **104/104 通过**：Infrastructure 29项、App 73项、Application 2项。证据：[MAX 恢复](../artifacts/test-results/20261011-v059-operation-lock-repair/targeted-infrastructure/maximum-recovery.trx)、[界面恢复与自动布局](../artifacts/test-results/20261011-v059-operation-lock-repair/targeted-app/app-recovery.trx)、[准确草稿身份](../artifacts/test-results/20261011-v059-operation-lock-repair/targeted-session/session-recovery.trx)。[标准 Release 构建](../artifacts/test-results/20261011-v059-operation-lock-repair/release-build.log)38.92秒，0警告／0错误，运行树合并0碰撞。
+
+原现场未知操作 `635a2328` 经生产只读恢复为成功；Accepted306／CallIssued386不变，步骤表哈希不变，没有重放调用。随后原界面拖入 WDC 自动生成 HDD 层，接受默认 MAX 的完整结构 Apply，得到3724 GiB实际层／VD、GPT无MSR、NTFS64 KiB自动分区。实际卷标改为 `WinPool_Repair_Check`，再压缩64 MiB，容量从3,813,374降至3,813,310 MiB；各次操作后入口正常恢复。[自动分区事实](../artifacts/test-results/20261011-v059-operation-lock-repair/new-max-applied-local-snapshot.json)、[卷标修改](../artifacts/test-results/20261011-v059-operation-lock-repair/partition-renamed-local-snapshot.json)、[压缩事实](../artifacts/test-results/20261011-v059-operation-lock-repair/partition-shrunk-local-snapshot.json)及[实际界面](../artifacts/test-results/20261011-v059-operation-lock-repair/partition-shrunk.png)。准确身份匹配、终态查询和自动布局恢复有定向回归；本轮未额外注入实机未知故障。
+
+[末态终审](../artifacts/test-results/20261011-v059-operation-lock-repair/final-verification.json)确认本轮16个真实操作／23步全部成功／Verified，0未终结真实操作；WDC在线GPT、规范16 MiB MSR、其余最大整MiB BasicData、NTFS64 KiB、`WinPool_Test`／E:，无具体池或VD。Samsung限定结构15对象[比较通过](../artifacts/test-results/20261011-v059-operation-lock-repair/protected-comparison-final.log)，[末态界面](../artifacts/test-results/20261011-v059-operation-lock-repair/final-selected.png)已检查。MSR默认关、AutoVD／AutoPart开、监控开／20Hz均恢复原偏好。[原托盘正常退出](../artifacts/test-results/20261011-v059-operation-lock-repair/normal-exit.json)App／Agent均0。
+
+普通重启时Real默认关，随后通过原开关重新开启供用户测试；[退出前账本](../artifacts/test-results/20261011-v059-operation-lock-repair/final-before-exit-real-audit.json)与[重启后账本](../artifacts/test-results/20261011-v059-operation-lock-repair/after-restart-real-audit.json)的343 plans／441 steps／2,682 events三表哈希完全一致，Accepted322／CallIssued409不变，没有自动续写。未据此关闭V0.59整体Plan的其它未验项目。
+
 ## 2026-10-11 编辑流程审计残留修复：限定验收完成
 
 本轮只收口五项已审计残留：新建草稿池共用 `poolSave` 保存链；模拟模式下 AutoPart 关闭保留 RAW／无分区状态，开启时按已保存的 MSR 偏好自动分区；真实文件系统、簇大小、快速格式化及重置状态指示对应准确目标和可核实状态；移除两个无调用方的辅助方法；修正操作界面用语。功能回归、原生界面、最终构建与限定末态证据均已通过。

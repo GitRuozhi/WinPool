@@ -183,7 +183,8 @@ public sealed partial class WindowsRealStorageBackendTests
         };
 
     private static async Task<(Fixture Fixture, OperationPlan Plan, RealOperationStep Step, RealStepPreflight Preflight,
-        MaximumMemoryJournal Journal)> MaximumFixtureAsync(int supportedGib, bool expirePostCallWindow = false)
+        MaximumMemoryJournal Journal)> MaximumFixtureAsync(int supportedGib, bool expirePostCallWindow = false,
+            bool physicalAllocationCounter = false)
     {
         var fixture = new Fixture(storageJobs: new SyntheticStorageJobReader(), maximumCapacityClock: true, expirePostCallWindow: expirePostCallWindow);
         long footprint = 0;
@@ -194,7 +195,15 @@ public sealed partial class WindowsRealStorageBackendTests
             return pooled with { PhysicalDisks = pooled.PhysicalDisks.Select(item => item with { Size = 100 * MaximumCapacityAlgorithm.GiB }).ToArray() };
         }
         fixture.SnapshotTransform = snapshot => Snapshot(snapshot, false, 0);
-        fixture.FactsTransform = item => MaximumPhysicalFootprint(TieredCreationFacts(item), footprint);
+        fixture.FactsTransform = item =>
+        {
+            item = MaximumPhysicalFootprint(TieredCreationFacts(item), footprint);
+            return !physicalAllocationCounter || item.ObjectType != FactObjectType.PhysicalDisk ? item : item with
+            {
+                Fields = item.Fields.Add(WinPoolSourceField.Returned("AllocatedSize", 822_960_128L,
+                    FactValueType.UInt64, item.SourceRef))
+            };
+        };
         var topology = await fixture.Reader.CaptureAsync(default);
         var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
         var pool = fixture.Id(StorageObjectKind.StoragePool, "pool:returned");

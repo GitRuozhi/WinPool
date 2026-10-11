@@ -61,6 +61,25 @@ public sealed class RealAutomaticLayoutProgress
         }
     }
 
+    public void ReconcileTerminal(RealOperationIntentRequest submitted, AgentRealOperationResponse response)
+    {
+        if (!RealOperationSubmissionState.IsReconciledTerminal(response)
+            || response.Steps.Any(step => step.State == RealOperationStepState.OutcomeUnknown))
+            throw new InvalidDataException("The layout operation does not have a reconciled terminal result.");
+
+        var previouslyUnresolved = RequiresReconciliation;
+        RequiresReconciliation = false;
+        try
+        {
+            Observe(submitted, response);
+        }
+        catch
+        {
+            RequiresReconciliation = previouslyUnresolved;
+            throw;
+        }
+    }
+
     private static bool MatchesRole(PartitionInfo partition, RealPartitionRole role)
     {
         var expected = role switch

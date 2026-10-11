@@ -205,6 +205,139 @@ public sealed class RealOperationUiFlowTests
         Assert.Equal(plan.OperationId, state.OperationId);
     }
 
+    [Theory]
+    [InlineData(RealOperationState.Cancelled)]
+    [InlineData(RealOperationState.Rejected)]
+    [InlineData(RealOperationState.Failed)]
+    [InlineData(RealOperationState.PartiallyCompleted)]
+    [InlineData(RealOperationState.Succeeded)]
+    public async Task RecoveryQueriesRetainedTerminalOperationMissingFromUnfinishedList(RealOperationState terminal)
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true));
+        var closed = new AgentRealOperationResponse(plan, terminal, [], "real.known_terminal", false);
+        var connection = new RecordingConnection(request => ApplicationResult<AgentResponse>.Succeeded(
+            request is QueryAgentRealOperationRequest query
+                ? query.OperationId == plan.OperationId ? closed : throw new InvalidOperationException()
+                : new AgentRecoverableRealOperationsResponse([]), request.CorrelationId));
+        var observed = new List<AgentRealOperationResponse>();
+        await RealOperationRecovery.RefreshAsync(connection, state, status =>
+        {
+            observed.Add(status);
+            state.Observe(status);
+        }, CancellationToken.None);
+
+        Assert.False(state.IsBlocked);
+        Assert.Same(closed, Assert.Single(observed));
+        Assert.Collection(connection.Requests,
+            request => Assert.Equal(plan.OperationId, Assert.IsType<QueryAgentRealOperationRequest>(request).OperationId),
+            request => Assert.IsType<ListAgentRecoverableRealOperationsRequest>(request));
+    }
+
+    [Fact]
+    public async Task RecoveryQueriesDiscoveredOperationAgainAfterAsynchronousReconciliationClosesIt()
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        var queryCount = 0;
+        var connection = new RecordingConnection(request =>
+        {
+            AgentResponse response = request switch
+            {
+                ListAgentRecoverableRealOperationsRequest => new AgentRecoverableRealOperationsResponse(queryCount > 1
+                    ? [] : [new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true)]),
+                QueryAgentRealOperationRequest => ++queryCount == 1
+                    ? new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true)
+                    : new AgentRealOperationResponse(plan, RealOperationState.Failed,
+                        [new(plan.RealOperation!.Steps[0].Id, RealOperationStepState.Failed, "operation.step.failed_no_effect", null, null)],
+                        "real.reconciliation_observed_no_effect", false),
+                _ => throw new InvalidOperationException("Recovery must remain read-only.")
+            };
+            return ApplicationResult<AgentResponse>.Succeeded(response, request.CorrelationId);
+        });
+        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
+        Assert.True(state.IsBlocked);
+        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
+        Assert.False(state.IsBlocked);
+        Assert.Equal(2, queryCount);
+        Assert.All(connection.Requests, request => Assert.True(request is
+            QueryAgentRealOperationRequest or ListAgentRecoverableRealOperationsRequest));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RecoveryNeverClearsUnknownOrMismatchedTerminalResponse(bool samePlanHash)
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true));
+        var queried = new AgentRealOperationResponse(samePlanHash ? plan : plan with { PlanHash = "another-plan" },
+            samePlanHash ? RealOperationState.OutcomeUnknown : RealOperationState.Succeeded,
+            [], null, samePlanHash);
+        var connection = new RecordingConnection(request => ApplicationResult<AgentResponse>.Succeeded(
+            request is QueryAgentRealOperationRequest ? queried : new AgentRecoverableRealOperationsResponse([]),
+            request.CorrelationId));
+        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
+        Assert.True(state.IsBlocked);
+        Assert.Equal(plan.OperationId, state.OperationId);
+        Assert.Equal(plan.PlanHash, state.PlanHash);
+    }
+
+    [Fact]
+    public async Task RecoveryRetainsExactTerminalWhileRelatedInventoryRefreshNeedsRetry()
+    {
+        var (_, plan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true));
+        var closed = new AgentRealOperationResponse(plan, RealOperationState.Succeeded, [], null, false);
+        var connection = new RecordingConnection(request => ApplicationResult<AgentResponse>.Succeeded(
+            request is QueryAgentRealOperationRequest ? closed : new AgentRecoverableRealOperationsResponse([]),
+            request.CorrelationId));
+
+        AgentRealOperationResponse? awaitingRefresh = null;
+        await RealOperationRecovery.RefreshAsync(connection, state,
+            status => awaitingRefresh = status, CancellationToken.None);
+        Assert.Same(closed, awaitingRefresh);
+        Assert.True(state.IsBlocked);
+        Assert.Equal(plan.OperationId, state.OperationId);
+
+        // The next read-only refresh still queries the retained terminal ID.
+        // Its consumer applies the terminal only after fresh related facts.
+        await RealOperationRecovery.RefreshAsync(connection, state,
+            status => state.Observe(status), CancellationToken.None);
+        Assert.False(state.IsBlocked);
+        Assert.Equal(2, connection.Requests.OfType<QueryAgentRealOperationRequest>().Count());
+        Assert.All(connection.Requests, request => Assert.True(request is
+            QueryAgentRealOperationRequest or ListAgentRecoverableRealOperationsRequest));
+    }
+
+    [Fact]
+    public async Task RecoverySurfacesAnotherUnfinishedIdentityBeforeTerminalInventoryRefreshFinishes()
+    {
+        var (_, plan) = CreatePlan();
+        var (_, otherPlan) = CreatePlan();
+        var state = new RealOperationSubmissionState();
+        state.Observe(new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true));
+        var closed = new AgentRealOperationResponse(plan, RealOperationState.Succeeded, [], null, false);
+        var unfinished = new AgentRealOperationResponse(otherPlan, RealOperationState.OutcomeUnknown, [], null, true);
+        var connection = new RecordingConnection(request => ApplicationResult<AgentResponse>.Succeeded(
+            request is QueryAgentRealOperationRequest ? closed : new AgentRecoverableRealOperationsResponse([unfinished]),
+            request.CorrelationId));
+        var observations = new List<AgentRealOperationResponse>();
+        await RealOperationRecovery.RefreshAsync(connection, state, observations.Add, CancellationToken.None);
+
+        Assert.Equal([closed, unfinished], observations);
+        Assert.True(state.IsBlocked);
+        // Once the first operation's scoped refresh completes, the other
+        // listed identity remains available to retain the global barrier.
+        Assert.True(state.Observe(observations[0]));
+        Assert.True(state.Observe(observations[1]));
+        Assert.True(state.IsBlocked);
+        Assert.Equal(otherPlan.OperationId, state.OperationId);
+    }
+
     [Fact]
     public void DataLocationSwitchNeedsExplicitCompletedShutdownReceipt()
     {

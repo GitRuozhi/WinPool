@@ -8,8 +8,14 @@ namespace WinPool_App;
 
 public partial class EditorPageBase
 {
-    private sealed record PendingVerifiedDraftRefresh(AgentRealOperationResponse Response, string Description, Action? Map, long BindingGeneration);
+    private sealed record PendingVerifiedDraftRefresh(
+        AgentRealOperationResponse Response,
+        string Description,
+        Action? Map,
+        long BindingGeneration,
+        RealOperationIntentRequest? Proposal = null);
     private readonly Dictionary<SimulationEditingSession, PendingVerifiedDraftRefresh> pendingDraftRefreshes = new();
+    private readonly Dictionary<SimulationEditingSession, PendingVerifiedDraftRefresh> outcomeUnknownDraftRefreshes = new();
     private readonly Dictionary<SimulationEditingSession, RealAutomaticLayoutProgress> automaticLayoutProgress = new();
     protected RealStructureDraftPreview BuildRealStructureDraftPreview(SimulationEditingSession session) =>
         RealStructureDraftPlanner.Build(session,
@@ -281,14 +287,20 @@ public partial class EditorPageBase
             var succeeded = await SubmitRealAsync(proposal, authorization, ValidateApplyContext);
             if (LastRealOperationResponse is { } durable)
             {
-                if (durable.RequiresReconciliation) session.OutcomeUnknown = true;
+                if (durable.RequiresReconciliation)
+                {
+                    session.MarkOutcomeUnknown(durable.Plan.OperationId, durable.Plan.PlanHash);
+                    outcomeUnknownDraftRefreshes[session] = new(durable, description, map,
+                        session.BindingGeneration, proposal);
+                }
                 observe?.Invoke(durable);
                 if ((durable.State == RealOperationState.Succeeded
                         || durable.Steps.Any(step => step.State == RealOperationStepState.Verified))
                     && !durable.RequiresReconciliation && !LastRealInventoryRefreshSucceeded)
                 {
                     pendingDraftRefreshes[session] = new(durable, description,
-                        durable.State == RealOperationState.Succeeded ? map : null, session.BindingGeneration);
+                        durable.State == RealOperationState.Succeeded ? map : null, session.BindingGeneration,
+                        proposal);
                     session.RealApplyMessage = Text("写入已完成，等待只读刷新后继续剩余草稿。", "The write completed. Refresh its result before continuing the remaining draft.");
                     return false;
                 }
@@ -305,13 +317,85 @@ public partial class EditorPageBase
                 if (succeeded) map?.Invoke();
                 if (response.Steps.Any(item => item.State == RealOperationStepState.Verified))
                     RebaseRemainingDraft(session, ViewModel.ActiveDocument);
-                if (response.RequiresReconciliation) session.OutcomeUnknown = true;
+                if (response.RequiresReconciliation)
+                {
+                    session.MarkOutcomeUnknown(response.Plan.OperationId, response.Plan.PlanHash);
+                    outcomeUnknownDraftRefreshes[session] = new(response, description, map,
+                        session.BindingGeneration, proposal);
+                }
             }
             if (succeeded) completed.Add(description);
             else completed.Add(Text("应用停止；已完成的更改保留，剩余目标未执行。", "Apply stopped; completed changes remain and the remaining goal was not executed."));
             session.RealApplyMessage = string.Join(Environment.NewLine, completed);
             return succeeded;
         }
+    }
+
+    protected bool ReconcileUnknownRealStructureDraft(
+        SimulationEditingSession session,
+        AgentRealOperationResponse response,
+        bool inventoryRefreshed)
+    {
+        if (!HasMatchingUnknownRealStructureDraft(session, response, inventoryRefreshed)
+            || !outcomeUnknownDraftRefreshes.TryGetValue(session, out var pending))
+            return false;
+
+        try
+        {
+            LastRealOperationResponse = response;
+            if (pending.Proposal is { } proposal
+                && automaticLayoutProgress.TryGetValue(session, out var progress))
+                progress.ReconcileTerminal(proposal, response);
+            if (response.State == RealOperationState.Succeeded)
+                pending.Map?.Invoke();
+
+            // The terminal result and its complete scoped inventory close the
+            // exact unknown stage. Keep any later draft intent against the
+            // newly observed facts so ordinary apply validation can run.
+            RebaseRemainingDraft(session, ViewModel.ActiveDocument);
+            if (!session.ClearOutcomeUnknown(response.Plan.OperationId, response.Plan.PlanHash))
+                return false;
+
+            outcomeUnknownDraftRefreshes.Remove(session);
+            session.RealApplyMessage = Text(
+                "先前操作已取得最终结果并完成刷新；剩余草稿已按新事实重新核对。",
+                "The earlier operation reached a terminal result and refreshed; the remaining draft was reconciled with the new facts.");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
+        {
+            session.RealApplyMessage = Text(
+                "先前操作已取得最终结果，但草稿仍需按新事实核对：",
+                "The earlier operation reached a terminal result, but the draft still needs reconciliation with the new facts: ")
+                + exception.Message;
+            return false;
+        }
+    }
+
+    protected bool HasMatchingUnknownRealStructureDraft(
+        SimulationEditingSession session,
+        AgentRealOperationResponse response,
+        bool inventoryRefreshed)
+    {
+        if (!inventoryRefreshed
+            || !RealOperationSubmissionState.IsReconciledTerminal(response)
+            || response.Steps.Any(step => step.State == RealOperationStepState.OutcomeUnknown)
+            || response.Plan.SystemId != session.SystemId
+            || ViewModel.ActiveDocument.SystemId != session.SystemId
+            || !session.OutcomeUnknown
+            || !outcomeUnknownDraftRefreshes.TryGetValue(session, out var pending))
+            return false;
+
+        if (pending.BindingGeneration != session.BindingGeneration)
+        {
+            outcomeUnknownDraftRefreshes.Remove(session);
+            return false;
+        }
+
+        return pending.Response.Plan.OperationId == response.Plan.OperationId
+            && StringComparer.Ordinal.Equals(pending.Response.Plan.PlanHash, response.Plan.PlanHash)
+            && session.OutcomeUnknownOperationId == response.Plan.OperationId
+            && StringComparer.Ordinal.Equals(session.OutcomeUnknownPlanHash, response.Plan.PlanHash);
     }
 
     private string RequireVerifiedCreatedId(StorageObjectKind kind, string stepId)

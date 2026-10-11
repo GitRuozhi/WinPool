@@ -246,6 +246,21 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RefreshAll();
     }
 
+    protected override bool OnRecoveredRealOperation(AgentRealOperationResponse response, bool inventoryRefreshed)
+    {
+        if (ReconcileUnknownRealStructureDraft(EditingSession, response, inventoryRefreshed))
+        {
+            RefreshAll();
+            return true;
+        }
+
+        UpdateButtonState();
+        // Keep the global exact-operation barrier in place if this page owns
+        // the matching unknown draft and could not safely reconcile it. The
+        // workspace will retry the terminal status after another fresh scan.
+        return !HasMatchingUnknownRealStructureDraft(EditingSession, response, inventoryRefreshed);
+    }
+
     private bool HasRoleDisks(string poolId, string usage) =>
         _working.PhysicalDisks.Any(disk =>
             string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)
@@ -2723,18 +2738,31 @@ public sealed partial class StorageStructurePage : EditorPageBase
         bool poolOffline,
         int realVirtualDiskCount)
     {
-        if (EditingSession.HasBaselineConflict)
-            return Text("实时基线已改变；草稿已保留。请放弃草稿后按新事实编辑。", EditingSession.ConflictReason);
-        if (_applyingRealDraft || IsRealStructureApplyInProgress || !simulated && ViewModel.IsRealOperationBusy)
-            return Text("正在执行并核对当前草稿。", "The current draft is executing and being verified.");
-        if (!simulated && !ViewModel.CanSubmitRealOperation)
-            return Text("本机存储当前只读；请开启受控真实编辑。", "Local storage is read-only; enable controlled real editing.");
-
         if (_outcomeUnknown)
         {
             return Text("上次提交结果尚未核实，暂时不能继续编辑或应用。相关结果见消息，详细原因见开发页消息详情。",
                 "The previous submission outcome remains unresolved, so editing and applying are blocked. Review the outcome in messages and the diagnostic details on the developer page.");
         }
+
+        if (!simulated && ViewModel.RealOperationSubmission.IsBlocked)
+        {
+            return Text("先前真实操作仍在等待最终结果和刷新核对；核对完成前暂不能编辑。",
+                "A previous real operation is still awaiting its final result and refreshed inventory. Editing is paused until reconciliation completes.");
+        }
+
+        if (!simulated && ViewModel.IsRealOperationBusy)
+        {
+            return Text("真实存储操作正在执行或刷新核对；请等待完成后再编辑。",
+                "A real storage operation is running or refreshing its result. Wait for it to finish before editing.");
+        }
+
+        if (_applyingRealDraft || IsRealStructureApplyInProgress)
+            return Text("正在执行并核对当前草稿。", "The current draft is executing and being verified.");
+
+        if (EditingSession.HasBaselineConflict)
+            return Text("实时基线已改变；草稿已保留。请放弃草稿后按新事实编辑。", EditingSession.ConflictReason);
+        if (!simulated && !ViewModel.CanSubmitRealOperation)
+            return Text("本机存储当前只读；请开启受控真实编辑。", "Local storage is read-only; enable controlled real editing.");
 
         if (pool is null)
         {

@@ -114,6 +114,22 @@ public sealed class RealAutomaticLayoutProgressTests
         Assert.Throws<InvalidOperationException>(() => fixture.Progress.BuildNext(fixture.Fresh(2), fixture.Intent));
     }
 
+    [Fact]
+    public void ReconciledTerminalResultReleasesOnlyTheAutomaticLayoutProgressLock()
+    {
+        var fixture = new Fixture();
+        var unknown = Response(fixture.Layout, "create-msr") with
+        { State = RealOperationState.OutcomeUnknown, RequiresReconciliation = true };
+        fixture.Progress.Observe(fixture.Layout, unknown);
+        Assert.Throws<InvalidOperationException>(() => fixture.Progress.BuildNext(fixture.Fresh(1), fixture.Intent));
+
+        var terminal = Response(fixture.Layout, "create-msr") with { Plan = unknown.Plan };
+        fixture.Progress.ReconcileTerminal(fixture.Layout, terminal);
+
+        var remaining = fixture.Progress.BuildNext(fixture.Fresh(1), fixture.Intent);
+        Assert.Equal("create-data", Assert.Single(remaining!.Steps).Id);
+    }
+
     [Theory]
     [InlineData("label")]
     [InlineData("letter")]

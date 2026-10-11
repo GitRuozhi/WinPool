@@ -119,7 +119,8 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     private static async Task<(Fixture Fixture, OperationPlan Plan, RealOperationStep Step, RealStepPreflight Preflight, MaximumMemoryJournal Journal)>
-        MultiMaximumFixtureAsync(bool partial, int initialGib = 5, int hddMaximumGib = 6, int ssdMaximumGib = 3)
+        MultiMaximumFixtureAsync(bool partial, int initialGib = 5, int hddMaximumGib = 6, int ssdMaximumGib = 3,
+            bool physicalAllocationCounter = false)
     {
         var fixture = new Fixture(secondDisk: true, storageJobs: new SyntheticStorageJobReader(), maximumCapacityClock: true);
         var allocated = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -146,8 +147,16 @@ public sealed partial class WindowsRealStorageBackendTests
             };
         }
         fixture.SnapshotTransform = Snapshot;
-        fixture.FactsTransform = item => MaximumPhysicalFootprint(TieredCreationFacts(item),
-            allocated.GetValueOrDefault(item.Id == OtherPhysicalId ? "tier:ssd" : "tier:template"));
+        fixture.FactsTransform = item =>
+        {
+            item = MaximumPhysicalFootprint(TieredCreationFacts(item),
+                allocated.GetValueOrDefault(item.Id == OtherPhysicalId ? "tier:ssd" : "tier:template"));
+            return !physicalAllocationCounter || item.ObjectType != FactObjectType.PhysicalDisk ? item : item with
+            {
+                Fields = item.Fields.Add(WinPoolSourceField.Returned("AllocatedSize", 822_960_128L,
+                    FactValueType.UInt64, item.SourceRef))
+            };
+        };
         fixture.CompleteFactsTransform = facts =>
         {
             var roleSource = facts.Sources.First(item => item.ClassName == "Windows.DiskRoles");

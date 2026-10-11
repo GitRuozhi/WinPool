@@ -612,6 +612,7 @@ public sealed partial class MainWindow : Window
 
     private void StopCloseTimeUiSources()
     {
+        ViewModel.StopRealOperationRecovery();
         RootGrid.Loaded -= RootGrid_Loaded;
         RootGrid.SizeChanged -= RootGrid_SizeChanged;
         RootGrid.ActualThemeChanged -= RootGrid_ActualThemeChanged;

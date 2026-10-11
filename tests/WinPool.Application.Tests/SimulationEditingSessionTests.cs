@@ -1,3 +1,5 @@
+using WinPool.Domain;
+
 namespace WinPool.Application.Tests;
 
 public sealed class SimulationEditingSessionTests
@@ -176,6 +178,25 @@ public sealed class SimulationEditingSessionTests
         Assert.Throws<InvalidOperationException>(() => session.RebaseVerified(document.AsImportedSimulation(), remaining));
         session.RebaseVerified(document, remaining);
         Assert.True(session.OutcomeUnknown);
+    }
+
+    [Fact]
+    public void UnknownWriteBarrierClearsOnlyForTheExactOperationAndPlanHash()
+    {
+        var session = new SimulationEditingSession();
+        var operationId = OperationId.New();
+        session.MarkOutcomeUnknown(operationId, "exact-plan-hash");
+
+        Assert.False(session.ClearOutcomeUnknown(OperationId.New(), "exact-plan-hash"));
+        Assert.False(session.ClearOutcomeUnknown(operationId, "different-plan-hash"));
+        Assert.True(session.OutcomeUnknown);
+        Assert.Equal(operationId, session.OutcomeUnknownOperationId);
+        Assert.Equal("exact-plan-hash", session.OutcomeUnknownPlanHash);
+
+        Assert.True(session.ClearOutcomeUnknown(operationId, "exact-plan-hash"));
+        Assert.False(session.OutcomeUnknown);
+        Assert.Null(session.OutcomeUnknownOperationId);
+        Assert.Null(session.OutcomeUnknownPlanHash);
     }
 
     [Fact]

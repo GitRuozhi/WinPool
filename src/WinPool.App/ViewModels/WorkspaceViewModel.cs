@@ -158,7 +158,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     public RealOperationSubmissionState RealOperationSubmission { get; } = new();
 
     public bool CanSubmitRealOperation => IsRealMode && _realModeSession?.IsArmed == true && IsLocalSystem
-        && !RealOperationSubmission.IsBlocked;
+        && !RealOperationSubmission.IsBlocked && !_refreshingRecoveredRealOperation;
 
     public StorageSystemCatalog SystemCatalog { get; } = new();
 
@@ -1228,7 +1228,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
         try
         {
-            return await _realModeSession.ExitAsync(cancellationToken);
+            var error = await _realModeSession.ExitAsync(cancellationToken);
+            await RecoverRealOperationsAsync();
+            return error;
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
         {

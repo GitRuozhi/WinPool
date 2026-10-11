@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text;
 using System.Security.Cryptography;
-using System.Text.Encodings.Web;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -228,43 +227,25 @@ public sealed partial class WindowsRealStorageBackend
     private static bool MaximumRecordedFingerprintMatches(string machine, IReadOnlyList<WinPoolSourceObject> objects,
         IReadOnlyList<WinPoolFactRelationship> associations, string fingerprint, bool multi = false) =>
         new[] { true, false }.Any(nullAsJson => new[] { false, true }.Any(powerShellStrings =>
-            MaximumRecordedComponentFingerprint(machine, objects, associations, multi, nullAsJson, powerShellStrings) == fingerprint));
-
-    private static readonly JsonSerializerOptions MaximumPowerShellStringEncoding = new()
-    {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+            new[] { true, false }.Any(normalizeCounter => MaximumRecordedComponentFingerprint(machine, objects,
+                associations, multi, nullAsJson, powerShellStrings, normalizeCounter) == fingerprint)));
 
     // Recompute the complete canonical component used by fresh preflight. Receipt
     // serialization can change PowerShell's \" string escapes to \u0022 and
     // returned JSON null to nullable null. Try only those known encodings; every
     // field, identity and edge must still hash to the original frozen fingerprint.
+    // Share the live canonical form, while recognizing historical receipts from
+    // before PhysicalDisk.AllocatedSize became a normalized provider counter.
     private static string MaximumRecordedComponentFingerprint(string machine,
         IReadOnlyList<WinPoolSourceObject> objects, IReadOnlyList<WinPoolFactRelationship> associations,
-        bool multi = false, bool returnedNullAsJsonNull = true, bool powerShellStrings = false)
+        bool multi = false, bool returnedNullAsJsonNull = true, bool powerShellStrings = false,
+        bool normalizePhysicalAllocationCounter = true)
     {
-        var builder = new StringBuilder();
-        if (multi) builder.Append("real-exact-physical-member-set-v1\n");
-        builder.Append("real-component-v2\n").Append(machine).Append('\n');
-        var ids = objects.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
-        if (ids.Count != objects.Count) return "";
-        foreach (var item in objects.OrderBy(item => item.Id, StringComparer.Ordinal))
-        {
-            builder.Append("object|").Append((int)item.ObjectType).Append('|').Append(item.Id).Append('|').Append(item.SourceIdentity).Append('\n');
-            foreach (var field in item.Fields.OrderBy(field => field.Name, StringComparer.Ordinal))
-            {
-                if (field.Name.Equals("SizeRemaining", StringComparison.OrdinalIgnoreCase)) continue;
-                builder.Append("field|").Append(field.Name).Append('|').Append((int)field.ReadState).Append('|')
-                    .Append(field.Value is { } value ? powerShellStrings && value.ValueKind == JsonValueKind.String
-                            ? JsonSerializer.Serialize(value.GetString(), MaximumPowerShellStringEncoding) : value.GetRawText()
-                        : returnedNullAsJsonNull && field.ReadState == FieldReadState.Returned ? "null" : "<missing>").Append('\n');
-            }
-        }
-        foreach (var edge in associations.Where(item => !item.IsRetained && ids.Contains(item.FromId) && ids.Contains(item.ToId))
-                     .OrderBy(item => item.FromId, StringComparer.Ordinal).ThenBy(item => item.Kind, StringComparer.Ordinal)
-                     .ThenBy(item => item.ToId, StringComparer.Ordinal))
-            builder.Append("edge|").Append(edge.FromId).Append('|').Append(edge.Kind).Append('|').Append(edge.ToId).Append('\n');
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()))).ToLowerInvariant();
+        if (objects.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count() != objects.Count) return "";
+        var component = (multi ? "real-exact-physical-member-set-v1\n" : "")
+            + WindowsRealStorageTopology.CanonicalComponent(machine, objects, associations, returnedNullAsJsonNull,
+                powerShellStrings, normalizePhysicalAllocationCounter);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(component))).ToLowerInvariant();
     }
 
     private static bool MaximumRecordedSuccessIdentityMatches(RealStorageCommand macro, MaximumCapacityAttempt attempt,

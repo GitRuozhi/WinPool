@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using WinPool.Application;
 using WinPool.Domain;
 
@@ -503,10 +504,23 @@ public sealed class WindowsRealStorageTopology
 
     private string CanonicalComponent(
         IReadOnlyList<WinPoolSourceObject> connected,
-        HashSet<string> visited)
+        HashSet<string> visited) => CanonicalComponent(MachineBinding, connected,
+            Facts.Relationships.Where(relation => visited.Contains(relation.FromId) && visited.Contains(relation.ToId)));
+
+    private static readonly JsonSerializerOptions PowerShellStringEncoding = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    internal static string CanonicalComponent(string machineBinding,
+        IReadOnlyList<WinPoolSourceObject> connected,
+        IEnumerable<WinPoolFactRelationship> relationships,
+        bool returnedNullAsJsonNull = false, bool powerShellStrings = false,
+        bool normalizePhysicalAllocationCounter = true)
     {
         var builder = new StringBuilder();
-        builder.Append("real-component-v2\n").Append(MachineBinding).Append('\n');
+        builder.Append("real-component-v2\n").Append(machineBinding).Append('\n');
+        var visited = connected.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var item in connected.OrderBy(item => item.Id, StringComparer.Ordinal))
         {
             builder.Append("object|").Append((int)item.ObjectType).Append('|')
@@ -522,7 +536,7 @@ public sealed class WindowsRealStorageTopology
                 // Keep presence/read-state in the fingerprint, but use actual
                 // pool membership and disk/partition geometry for structure.
                 // Tier and VD AllocatedSize remain exact capacity evidence.
-                if (item.ObjectType == FactObjectType.PhysicalDisk
+                if (normalizePhysicalAllocationCounter && item.ObjectType == FactObjectType.PhysicalDisk
                     && field.Name.Equals("AllocatedSize", StringComparison.OrdinalIgnoreCase))
                 {
                     builder.Append("field|").Append(field.Name).Append('|')
@@ -532,11 +546,14 @@ public sealed class WindowsRealStorageTopology
                 // A value and its read state are both part of the safety facts.
                 builder.Append("field|").Append(field.Name).Append('|')
                     .Append((int)field.ReadState).Append('|')
-                    .Append(field.Value is { } value ? value.GetRawText() : "<missing>")
+                    .Append(field.Value is { } value
+                        ? powerShellStrings && value.ValueKind == JsonValueKind.String
+                            ? JsonSerializer.Serialize(value.GetString(), PowerShellStringEncoding) : value.GetRawText()
+                        : returnedNullAsJsonNull && field.ReadState == FieldReadState.Returned ? "null" : "<missing>")
                     .Append('\n');
             }
         }
-        foreach (var relation in Facts.Relationships
+        foreach (var relation in relationships
                      .Where(relation => !relation.IsRetained
                          && visited.Contains(relation.FromId)
                          && visited.Contains(relation.ToId))

@@ -601,3 +601,13 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 **最终收口：** 初始标准 App／Agent Release 构建在 25.77 秒内成功，0 警告、0 错误、0 merge collision；随后多项纯文案调整也已包含于[最终 Release 构建](../artifacts/test-results/20261011-v059-editor-flow-unification/final-release-build.log)，该构建17.87秒、0警告／0错误、0 collision。标准版本重启后 About 显示 V0.59，HelpText 与最终结构页状态已核对。原托盘退出时 App／Agent 均在15秒内退出；进程退出码不可用，不报告为0。最终只读审计确认真实操作319 plans、410 steps、2,479 events三表哈希与基线相同，Accepted299／CallIssued379不变；Samsung 15个受保护关联对象比较通过。WDC 最终只读断言确认约定 GPT／16 MiB MSR／NTFS 64 KiB、`WinPool_Test`／E: 末态。[WDC断言](../artifacts/test-results/20261011-v059-editor-flow-unification/final-wdc-assertions.json)、[版本界面](../artifacts/test-results/20261011-v059-editor-flow-unification/final-start-ui.txt)、[HelpText](../artifacts/test-results/20261011-v059-editor-flow-unification/final-disk-neutral-help-ui.txt)、[托盘退出](../artifacts/test-results/20261011-v059-editor-flow-unification/normal-exit.json)、[最终真实账本](../artifacts/test-results/20261011-v059-editor-flow-unification/final-real-audit.json)和[受保护对象比较](../artifacts/test-results/20261011-v059-editor-flow-unification/protected-comparison-final.log)。本轮没有真实存储写入。
 
 本节验收不关闭 V0.59 整体 Plan。SCM 原生检查、完整字段启用条件矩阵、失败／未知反馈的全场景核验等既有余项继续保持未验；不据此创建 iteration 10，也不归档本 Plan。
+
+### 10.9 真实 MAX 核对误锁与编辑恢复修复（2026-10-11）
+
+用户现场 `635a2328deb3417da9432b8269647bba` 已在3725 GiB容量拒绝后，以3724 GiB创建成功并记录整数GiB边界核验。实时指纹已规范化物理盘 `AllocatedSize` 易变计数，但 MAX 恢复仍独立复算旧原始值，因此随后误报 `real.maximum.recovery_origin_invalid`，锁住全部真实提交。该故障属于 WinPool，不改变微软原生分层 MAX 的既有归因，也不改变用户指定搜索算法。
+
+修复范围：实时／恢复共用规范化；保持字段存在性、读取状态、准确身份、VD／实际层容量和关系核验，兼容已知历史收据编码。界面保留准确OperationId／hash查询，直到终态、相关新事实和所属草稿核对成功后解锁；刷新或草稿核对失败继续只读重试，退出取消恢复任务。自动恢复不提交写入，不增加操作结果／查询／准备按钮；未核实结果仍保持写入屏障。两编辑页优先说明实际核对阻断原因。
+
+原现场操作经生产只读恢复为成功，Accepted／CallIssued不增。随后通过原UI实际提交默认 MAX 建池：`bd6ed99309c6485c9cf048a3a5839e68` 成功，实际HDD层与VD均3724 GiB；自动GPT、无MSR、NTFS64 KiB布局完整。卷标修改 `0db136cdfa364433a7ad8628c45e0c99`、64 MiB压缩 `248780f8db404d2cbb49f0625195f5c6` 均成功并恢复入口；随后原UI清理测试池及恢复约定物理WDC末态。此次补足§10.8没有实际真实提交的验证缺口，不把此前草稿／重置验证改写为实机写入验证。
+
+104项定向回归、标准Release构建、16个真实操作／23步终审、Samsung保护比较和正常退出通过；详细证据归属 [Quality](Quality.md)。没有全量测试、没有多盘实机或SCM新增验收，版本维持V0.59／迭代9，整体Plan其余未验项目保持原状态。

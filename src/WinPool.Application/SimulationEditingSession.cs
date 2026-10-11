@@ -40,7 +40,22 @@ public sealed class SimulationEditingSession
     public Dictionary<string, PoolEditIntent> PoolIntents { get; } = new(StringComparer.OrdinalIgnoreCase);
     public SimulationDraftPlan? CurrentPlan { get; set; }
     public string PlanBuildError { get; set; } = string.Empty;
-    public bool OutcomeUnknown { get; set; }
+    private bool outcomeUnknown;
+    public bool OutcomeUnknown
+    {
+        get => outcomeUnknown;
+        set
+        {
+            outcomeUnknown = value;
+            if (!value)
+            {
+                OutcomeUnknownOperationId = null;
+                OutcomeUnknownPlanHash = null;
+            }
+        }
+    }
+    public OperationId? OutcomeUnknownOperationId { get; private set; }
+    public string? OutcomeUnknownPlanHash { get; private set; }
     public bool RenameInProgress { get; set; }
     public bool HasBaselineConflict { get; private set; }
     public string ConflictReason { get; private set; } = string.Empty;
@@ -114,6 +129,23 @@ public sealed class SimulationEditingSession
         CurrentPlan = null;
     }
 
+    public void MarkOutcomeUnknown(OperationId operationId, string planHash)
+    {
+        OutcomeUnknown = true;
+        OutcomeUnknownOperationId = operationId.Value == Guid.Empty ? null : operationId;
+        OutcomeUnknownPlanHash = string.IsNullOrWhiteSpace(planHash) ? null : planHash;
+    }
+
+    public bool ClearOutcomeUnknown(OperationId operationId, string planHash)
+    {
+        if (!OutcomeUnknown || OutcomeUnknownOperationId != operationId
+            || !StringComparer.Ordinal.Equals(OutcomeUnknownPlanHash, planHash))
+            return false;
+
+        OutcomeUnknown = false;
+        return true;
+    }
+
     /// <summary>Advance only after the caller has verified an expected operation result.</summary>
     public void RebaseVerified(StorageSystemDocument document, EditorDraftState remainingDraft)
     {
@@ -150,6 +182,8 @@ public sealed class SimulationEditingSession
             Baseline = Baseline, BaselineSourceFacts = BaselineSourceFacts,
             SystemId = SystemId, BaselineRevision = BaselineRevision,
             BindingGeneration = BindingGeneration, OutcomeUnknown = OutcomeUnknown,
+            OutcomeUnknownOperationId = OutcomeUnknownOperationId,
+            OutcomeUnknownPlanHash = OutcomeUnknownPlanHash,
             HasBaselineConflict = HasBaselineConflict, ConflictReason = ConflictReason,
             RealApplyMessage = RealApplyMessage
         };

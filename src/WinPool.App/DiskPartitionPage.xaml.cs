@@ -1227,11 +1227,26 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         return null;
     }
 
-    private string LocalReadOnlyReason() => ViewModel.CanSubmitRealOperation
-        ? Text("所选真实操作或目标尚未通过本阶段安全校验，入口保持禁用。",
-            "This real operation or target has not passed this stage's safety checks and remains disabled.")
-        : Text("本机存储在此页只读；请先取得 Agent 真实模式回执或选择模拟系统。",
-            "Local storage is read-only here until the Agent arms real mode, or select a simulation.");
+    private string LocalReadOnlyReason()
+    {
+        if (ViewModel.RealOperationSubmission.IsBlocked)
+        {
+            return Text("先前真实操作仍在等待最终结果和刷新核对；核对完成前暂不能修改磁盘。",
+                "A previous real operation is still awaiting its final result and refreshed inventory. Disk changes are paused until reconciliation completes.");
+        }
+
+        if (ViewModel.IsRealOperationBusy)
+        {
+            return Text("真实存储操作正在执行或刷新核对；请等待完成后再修改磁盘。",
+                "A real storage operation is running or refreshing its result. Wait for it to finish before changing the disk.");
+        }
+
+        return ViewModel.CanSubmitRealOperation
+            ? Text("所选真实操作或目标尚未通过本阶段安全校验，入口保持禁用。",
+                "This real operation or target has not passed this stage's safety checks and remains disabled.")
+            : Text("本机存储在此页只读；请先取得 Agent 真实模式回执或选择模拟系统。",
+                "Local storage is read-only here until the Agent arms real mode, or select a simulation.");
+    }
 
     private string? DescribeFormatPartitionReason(PartitionInfo? partition)
     {

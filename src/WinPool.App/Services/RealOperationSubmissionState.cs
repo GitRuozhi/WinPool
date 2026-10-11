@@ -12,6 +12,11 @@ public sealed class RealOperationSubmissionState
     public string? PlanHash { get; private set; }
     public event Action? Changed;
 
+    public static bool IsReconciledTerminal(AgentRealOperationResponse response) =>
+        !response.RequiresReconciliation && response.State is RealOperationState.Succeeded
+            or RealOperationState.Rejected or RealOperationState.Cancelled
+            or RealOperationState.Failed or RealOperationState.PartiallyCompleted;
+
     public bool TryReservePreparation()
     {
         if (IsBlocked)
@@ -57,7 +62,7 @@ public sealed class RealOperationSubmissionState
             if (response.Plan.OperationId != operationId
                 || !StringComparer.Ordinal.Equals(response.Plan.PlanHash, PlanHash))
                 return false;
-            if (terminal && !response.RequiresReconciliation)
+            if (IsReconciledTerminal(response))
             {
                 OperationId = null;
                 PlanHash = null;

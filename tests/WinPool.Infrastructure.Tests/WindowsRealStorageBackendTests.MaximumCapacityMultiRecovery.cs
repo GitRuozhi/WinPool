@@ -58,11 +58,13 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Theory]
-    [InlineData(5, 6, 3)]
-    [InlineData(4, 2, 2)]
-    public async Task MultiMaximumReadOnlyRecoveryVerifiesEachBoundaryIncludingTheOriginalIntegerSeed(int initial, int hdd, int ssd)
+    [InlineData(5, 6, 3, false)]
+    [InlineData(4, 2, 2, false)]
+    [InlineData(5, 6, 3, true)]
+    public async Task MultiMaximumReadOnlyRecoveryVerifiesEachBoundaryIncludingTheOriginalIntegerSeed(
+        int initial, int hdd, int ssd, bool physicalAllocationCounter)
     {
-        var setup = await MultiMaximumFixtureAsync(false, initial, hdd, ssd);
+        var setup = await MultiMaximumFixtureAsync(false, initial, hdd, ssd, physicalAllocationCounter);
         var execution = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step, setup.Preflight, setup.Journal, default);
         Assert.Equal(RealStepOutcome.Verified, execution.Outcome);
         var calls = setup.Fixture.Adapter.CallCount;
