@@ -76,11 +76,11 @@ public static class SimulationCommandPreview
                 }
                 lines.Add("$targetPool = New-StoragePool -InputObject $targetStorageSubsystem -FriendlyName " + Quote(step.Name) + " -PhysicalDisks $memberDisks");
                 if (step.Kind == SimulationEditKind.CreateTieredPool)
-                    foreach (var disk in after.VirtualDisks.Where(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId))) AddVirtualDisk(lines, disk, after);
+                    foreach (var disk in after.VirtualDisks.Where(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId))) AddVirtualDisk(lines, disk, after, step.QuickFormat);
                 break;
             case SimulationEditKind.CreateVirtualDisk:
                 var created = after.VirtualDisks.FirstOrDefault(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId));
-                if (created is not null) AddVirtualDisk(lines, created, after);
+                if (created is not null) AddVirtualDisk(lines, created, after, step.QuickFormat);
                 else lines.Add("# No new virtual disk was produced by this step.");
                 break;
             case SimulationEditKind.MovePhysicalDisk:
@@ -174,7 +174,7 @@ public static class SimulationCommandPreview
                 VolumeName: volume.FileSystemLabel, QuickFormat: quickFormat), null));
     }
 
-    private static void AddVirtualDisk(List<string> lines, VirtualDiskInfo disk, StorageSnapshot candidate)
+    private static void AddVirtualDisk(List<string> lines, VirtualDiskInfo disk, StorageSnapshot candidate, bool? quickFormat)
     {
         var tiers = candidate.StorageTiers.Where(x => disk.TierStableIds.Contains(x.StableId)).ToArray();
         for (var i = 0; i < tiers.Length; i++)
@@ -199,7 +199,7 @@ public static class SimulationCommandPreview
             lines.Add("$targetDisk = $newVirtualDisk | Get-Disk");
             if (osDisk.PartitionStyle != "RAW") lines.Add("Initialize-Disk -InputObject $targetDisk -PartitionStyle " + Quote(osDisk.PartitionStyle));
             foreach (var partition in candidate.Partitions.Where(x => x.OsDiskStableId == osDisk.StableId).OrderBy(x => x.Offset))
-                AddPartition(lines, partition, candidate, quickFormat: null);
+                AddPartition(lines, partition, candidate, quickFormat);
         }
     }
 

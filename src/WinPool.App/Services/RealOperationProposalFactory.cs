@@ -172,15 +172,8 @@ public static class RealOperationProposalFactory
 
     private static (long OffsetBytes, long SizeBytes) GetAutomaticDataGeometry(long sizeBytes, bool createMsr)
     {
-        const long mib = 1024L * 1024;
-        if (sizeBytes <= 0 || sizeBytes % mib != 0)
-            throw new ArgumentException("Automatic partition layout needs a positive whole-MiB virtual-disk size.", nameof(sizeBytes));
-        var offset = createMsr ? 17 * mib : mib;
-        var geometry = EditWorkspace.GetRealPartitionCreateGeometry(sizeBytes, offset, sizeBytes - offset);
-        if (geometry is not { CanCreate: true, StartOffsetBytes: long start, MaximumSizeBytes: long size }
-            || start != offset)
-            throw new ArgumentException("The requested virtual-disk size cannot hold the selected MSR layout and a BasicData partition.", nameof(sizeBytes));
-        return (offset, size);
+        var geometry = EditWorkspace.GetAutomaticPartitionCreateGeometry(sizeBytes, createMsr);
+        return (geometry.StartOffsetBytes!.Value, geometry.MaximumSizeBytes!.Value);
     }
 
     public static RealOperationIntentRequest? TryFormatExistingData(

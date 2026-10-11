@@ -46,33 +46,6 @@ public sealed class SimulationEditingSession
     public string ConflictReason { get; private set; } = string.Empty;
     public string RealApplyMessage { get; set; } = string.Empty;
 
-    /// <summary>Real drag expresses a replacement relationship, never a member-move operation.</summary>
-    public bool CanAssignRealDraftMember(string diskId, string targetPoolId)
-    {
-        var disk = Working.PhysicalDisks.FirstOrDefault(item => item.StableId == diskId);
-        var target = Working.StoragePools.FirstOrDefault(item => item.StableId == targetPoolId);
-        if (disk is null || target is null || !disk.IsStable || disk.IsBoot || disk.IsSystem
-            || disk.IsPageFile || disk.IsCrashDump || disk.IsRetired || disk.IsHotSpare) return false;
-        var origin = Baseline.PhysicalDisks.FirstOrDefault(item => item.StableId == diskId);
-        if (origin is null || !origin.IsStable || origin.IsBoot || origin.IsSystem
-            || origin.IsPageFile || origin.IsCrashDump || origin.IsRetired || origin.IsHotSpare
-            || PhysicalDiskUsage.Normalize(origin.Usage) is PhysicalDiskUsage.ManualSelect or PhysicalDiskUsage.Journal
-            || PhysicalDiskUsage.IsUnknown(origin.Usage)) return false;
-        var owners = Baseline.StoragePools.Where(item => !item.IsPrimordial
-            && (item.StableId == origin.PoolStableId
-                || item.MemberPhysicalDiskIds.Contains(diskId, StringComparer.OrdinalIgnoreCase))).ToArray();
-        if (owners.Length > 1) return false;
-        var originPool = owners.SingleOrDefault();
-        var explicitlyDissolved = originPool is { IsPrimordial: false }
-            && !Working.StoragePools.Any(item => item.StableId == originPool.StableId);
-        if (originPool is { IsPrimordial: false } && !explicitlyDissolved) return false;
-        if (target.IsPrimordial)
-            return disk.PoolStableId is not null && EditWorkspace.IsDraftPool(disk.PoolStableId);
-        return EditWorkspace.IsDraftPool(target.StableId)
-            && target.MemberPhysicalDiskIds.All(id => id == diskId);
-    }
-
-
     /// <summary>A real creation placeholder carries no simulated/provider capacity claim.</summary>
     public static StorageSnapshot InsertRealDraftVirtualDisk(StorageSnapshot snapshot, string poolId, string name)
     {

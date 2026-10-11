@@ -1039,11 +1039,15 @@ public sealed class SimulationOperationService : ISimulationOperationService
             tierIds,
             [osDiskNumber],
             CapacitySourceKind.SimulatedEstimate);
+        var partitionStyle = request.PartitionStyle?.Trim().ToUpperInvariant()
+            ?? (request.CreateMsr is not null && request.CreatePartition != true ? "RAW" : "GPT");
+        if (partitionStyle is not ("RAW" or "GPT") || partitionStyle == "RAW" && request.CreatePartition == true)
+            throw new InvalidOperationException("Automatic partitions require GPT; a virtual disk without them can remain RAW.");
         var osDisk = new OsDiskInfo(
             osDiskId,
             name,
             osDiskNumber,
-            "GPT",
+            partitionStyle,
             size,
             false,
             false,
@@ -1069,6 +1073,23 @@ public sealed class SimulationOperationService : ISimulationOperationService
         };
         if (request.CreatePartition != true)
         {
+            return result;
+        }
+
+        // Explicit modern intent shares the real automatic GPT bounds. Nullable
+        // legacy requests retain their original modeled creation behavior.
+        if (request.CreateMsr is bool createMsr)
+        {
+            var intent = new PoolEditIntent(false, true,
+                string.IsNullOrWhiteSpace(request.FileSystem) ? "NTFS" : request.FileSystem,
+                request.AllocationUnitSize ?? 65536,
+                string.IsNullOrWhiteSpace(request.VolumeName) ? name : request.VolumeName,
+                CreateMsr: createMsr, QuickFormat: request.QuickFormat ?? true);
+            foreach (var step in SimulationDraftPlanner.CreateAutomaticPartitionSteps(
+                osDiskId, size, intent, request.AllocatedPartitionId, request.AllocatedVolumeId))
+                result = CreatePartition(result, step with { DriveLetter = step.PartitionKind == PartitionKind.BasicData
+                    ? request.DriveLetter ?? string.Empty : null, AccessPaths = step.PartitionKind == PartitionKind.BasicData
+                    ? request.AccessPaths : null });
             return result;
         }
 
@@ -1177,6 +1198,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
             AllocationUnitSize: request.AllocationUnitSize ?? 65536,
             PerformanceDataCopies: performanceTier?.NumberOfDataCopies,
             CreatePartition: request.CreatePartition ?? true,
+            CreateMsr: request.CreateMsr,
+            PartitionStyle: request.PartitionStyle,
+            QuickFormat: request.QuickFormat,
+            DriveLetter: request.DriveLetter,
             FileSystem: request.FileSystem,
             VolumeName: request.VolumeName,
             AllocatedVirtualDiskId: request.AllocatedVirtualDiskId,

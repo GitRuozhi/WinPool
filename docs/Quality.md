@@ -1,6 +1,14 @@
 # WinPool 验证与验收
 
-日期：2026-10-11。当前产品版本仍为 V0.58。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程对齐计划已激活，自动/真实界面/设备验收尚未全部结束。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-11。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+
+## 2026-10-11 编辑流程审计残留修复：限定验收完成
+
+本轮只收口五项已审计残留：新建草稿池共用 `poolSave` 保存链；模拟模式下 AutoPart 关闭保留 RAW／无分区状态，开启时按已保存的 MSR 偏好自动分区；真实文件系统、簇大小、快速格式化及重置状态指示对应准确目标和可核实状态；移除两个无调用方的辅助方法；修正操作界面用语。功能回归、原生界面、最终构建与限定末态证据均已通过。
+
+App 定向回归 11/11、Application 最终新增用例 13/13及23项既有相关用例通过，合计 **47 项不同用例通过、0 失败**；初始12项新增用例由最终13项替代，不重复计数。证据：[App](../artifacts/test-results/20261011-v059-editor-flow-unification/app-targeted.trx)、[初始 Application](../artifacts/test-results/20261011-v059-editor-flow-unification/application-targeted.trx)、[最终 Application](../artifacts/test-results/20261011-v059-editor-flow-unification/application-final-targeted.trx)。真实新池草稿、保存／撤销／重做／放弃以及 E: 格式化表单切至 ReFS+完整格式化（未提交）、格式按钮禁用后经快速重置重新启用、文件系统重置和簇大小重置均已按原生界面核验；模拟池 MSR 开／关、AutoPart 关的最终 GPT+MSR／GPT无MSR／RAW无分区结果通过截图及 simulation-document 核验，三个池通过原界面清理并保留原 DataPool。详细 UI 记录见[证据目录](../artifacts/test-results/20261011-v059-editor-flow-unification/)。
+
+初始标准 App／Agent Release 构建成功，用时25.77秒，0警告／0错误、Union merge 0碰撞；随后多项纯文案调整已包含于最终构建，17.87秒、0警告／0错误、0 collision。标准版本重启后原生 About 显示 V0.59，HelpText 与结构页已核对。原托盘退出时 App／Agent 均在15秒内退出，退出码不可用。最终只读审计确认真实操作三表319 plans、410 steps、2,479 events哈希与基线一致；Accepted299／CallIssued379不变，Samsung受保护关联对象15项比较PASS，WDC最终布局断言通过。见 [Plan §10.8](Plan.md) 中的证据链接。本轮无真实存储写入；其它阶段余项仍未关闭。
 
 ## 2026-10-11 建池字段与确认摘要：局部验证
 

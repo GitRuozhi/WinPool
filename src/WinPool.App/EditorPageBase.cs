@@ -5,8 +5,6 @@ using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
-using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
-using SimulationOperationResult = WinPool.Application.SimulationEditReceipt;
 
 namespace WinPool_App;
 
@@ -202,41 +200,6 @@ public partial class EditorPageBase : Page
 
         gigabytes = parsed;
         return true;
-    }
-
-    protected async Task<SimulationOperationResult?> ApplyAsync(SimulationEditRequest request)
-    {
-        WinPool.Application.ApplicationResult<SimulationOperationResult> result;
-        try
-        {
-            result = await ViewModel.ApplySimulationOperationAsync(request);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or UnauthorizedAccessException
-                or InvalidOperationException
-                or ArgumentException)
-        {
-            PublishOperationException(
-                Text("操作失败", "Operation failed"),
-                "editor",
-                exception,
-                "editor.apply.exception");
-            return null;
-        }
-
-        if (!result.IsSuccess || result.Value is null)
-        {
-            PublishOperationResult(
-                result.Status,
-                result.Messages,
-                result.CorrelationId,
-                Text("操作未完成", "Operation did not complete"),
-                "editor");
-            return null;
-        }
-
-        return result.Value;
     }
 
     protected async Task<string?> PromptAsync(string title, string value)

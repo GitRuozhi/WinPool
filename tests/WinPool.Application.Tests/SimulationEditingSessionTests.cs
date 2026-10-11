@@ -179,28 +179,6 @@ public sealed class SimulationEditingSessionTests
     }
 
     [Fact]
-    public void RealMemberDragRequiresExplicitDissolutionInTheSameDraft()
-    {
-        var snapshot = SimulationLayouts.StandardTiered();
-        var original = snapshot.StoragePools.First(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Count > 0);
-        var member = original.MemberPhysicalDiskIds.First();
-        var document = Document().WithCandidate(snapshot);
-        var session = new SimulationEditingSession();
-        session.Bind(document, snapshot);
-        session.Working = EditWorkspace.InsertDraftPool(snapshot, "Replacement");
-        var replacement = session.Working.StoragePools.Single(pool => EditWorkspace.IsDraftPool(pool.StableId));
-        Assert.False(session.CanAssignRealDraftMember(member, replacement.StableId));
-
-        session.Working = EditWorkspace.DissolvePoolInWorking(session.Working, original.StableId);
-        Assert.True(session.CanAssignRealDraftMember(member, replacement.StableId));
-        session.Working = EditWorkspace.MoveDiskToPool(session.Working, member, replacement.StableId);
-        var primordial = session.Working.StoragePools.Single(pool => pool.IsPrimordial);
-        Assert.True(session.CanAssignRealDraftMember(member, primordial.StableId));
-        var other = session.Working.PhysicalDisks.FirstOrDefault(disk => disk.StableId != member);
-        if (other is not null) Assert.False(session.CanAssignRealDraftMember(other.StableId, replacement.StableId));
-    }
-
-    [Fact]
     public void NewCreationDefaultsRemainOrdinaryAndMaximumWithIndependentPartitionPreference()
     {
         var intent = new PoolEditIntent(true, false, "NTFS", 65536, "Original");

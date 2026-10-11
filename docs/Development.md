@@ -2,7 +2,7 @@
 
 > 2026-10-09 当前实现：新建普通／分层 MAX 使用共享整数 GiB 算法，详见 [Plan §10.4](Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。原UI普通3725 GiB、单HDD分层3724 GiB及自动布局已独立核验；多层仅模拟及backend夹具。下文原生 MAX／拒绝门和旧工程门是历史证据，不能据此恢复旧行为。本轮冻结完整门为1999项／1996通过／0失败／3既有测量未执行，412源码hash稳定；WDC末态、Samsung限定结构比较、偏好及普通重启／退出均通过，准确证据见该节。
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前版本源仍为 V0.58、迭代 8；本机单盘真实修改第一阶段 H01–H11 及其工程门已完成，历史结果见 [CHANGELOG](CHANGELOG.md) 和 [Quality](Quality.md)。真实编辑接回原界面、范围采集及监控联动按活动 [V0.59 Plan](Plan.md) 实施，阶段未完整验收、未升版或归档。前轮普通 VD 原生 `UseMaximumSize` 已通过创建及实际容量后的自动布局；单 HDD 分层明确 32 GiB 的历史成功不外推 MAX。准确模板加原生开关被本机拒绝，WindowsAutomaticHdd 则实际创建普通 VD 而无 actual tier；后者经严格只读 UnexpectedEffect 对账终结 Failed，并由原界面另行清理。当时的分层 MAX 临时写前拒绝现由用户指定整数 GiB 搜索替代；微软原生 MAX 的本机问题仍保留归因，不能泛化为所有 Windows 版本的永久限制。前轮原生 MAX 运行的物理末态、保护比较、解散后的准确成员返回及普通重启／退出已独立核验；旧末态及工程门仍只证明各自历史快照。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.59、迭代 9；本机单盘真实修改第一阶段 H01–H11 及其工程门已完成，历史结果见 [CHANGELOG](CHANGELOG.md) 和 [Quality](Quality.md)。真实编辑接回原界面、范围采集及监控联动按活动 [V0.59 Plan](Plan.md) 实施，整体仍有未完成工作，未归档；本轮五项审计残留的47项相关定向用例、限定原生流程、最终构建与只读末态核验已通过，见 [Plan §10.8](Plan.md)。前轮普通 VD 原生 `UseMaximumSize` 已通过创建及实际容量后的自动布局；单 HDD 分层明确 32 GiB 的历史成功不外推 MAX。准确模板加原生开关被本机拒绝，WindowsAutomaticHdd 则实际创建普通 VD 而无 actual tier；后者经严格只读 UnexpectedEffect 对账终结 Failed，并由原界面另行清理。当时的分层 MAX 临时写前拒绝现由用户指定整数 GiB 搜索替代；微软原生 MAX 的本机问题仍保留归因，不能泛化为所有 Windows 版本的永久限制。前轮原生 MAX 运行的物理末态、保护比较、解散后的准确成员返回及普通重启／退出已独立核验；旧末态及工程门仍只证明各自历史快照。
 
 原生 MAX 修正前的源码通过[统一 Release 工程门](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-223310/summary.md)：12 个测试项目共 1775 条，1772 Passed、0 Failed、3 NotExecuted，restore／build 成功且 0 warnings／errors，393 个源码文件 hash 前后一致、运行树 merge 无冲突。该历史结果仍有效，未执行项不计为通过，不代替本轮修正的工程门或实机核验。该构建已通过普通启动 RealOff／MonitorOff、无历史监控误报、真实 E: 与两块 Samsung 显示及原 Agent 托盘 Exit 两进程 exit 0；[退出结果](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-exit-result.json)与[退出后偏好／计数](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-after.json)保留准确现场。标题栏关闭 App exit 0、Agent 继续运行及后续正常重启也有[独立原生证据](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/close-repaired-titlebar-native-result.json)；这不是原生分层 MAX 创建通过证明。
 
@@ -180,7 +180,7 @@ scoped 请求回包与 observer 事件可按任意顺序交付同一已提交批
 
 模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。当前编辑资格与几何边界见[模拟规则表](DesignTables/SimulationRules.md)；旧叙述稿已[归档](Archive/20260923-design-details/README.md)。
 
-模拟新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。分区页与结构页自动创建读取该几何，草稿规划先按同一粒度整理容量，规则校验及模拟提交再以共享几何核对，不能由界面独自夹紧超界容量。空盘勾选 MSR 时创建于 1–17 MiB；已有导入结构保持原始偏移及容量，不自动重排。
+模拟分区页手动新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。结构页的新 VD 自动布局与真实路径共用 `GetAutomaticPartitionCreateGeometry`，保留 1 MiB 尾端空间；MSR 开启时创建于 1–17 MiB，数据分区从 17 MiB 开始，关闭时数据分区从 1 MiB 开始。AutoPart 关闭则保留 RAW、无分区。草稿规划、规则校验及模拟提交沿用共享几何核对，不能由界面独自夹紧超界容量；已有导入结构保持原始偏移及容量，不自动重排。
 
 存储结构与磁盘分区编辑页右侧属性栏均从 320 DIP 宽开始，使用 8 DIP 可拖拽分隔槽调整左右比例；属性栏紧贴分隔槽，不再叠加 8 DIP 左边距。两页属性表单使用受栏宽约束的弹性标签／值列，不再强制 412 DIP 内容宽或横向滚动。分区属性行最小高 40 DIP、行距 4 DIP；容量输入与换算组成的复合行按内容增高。左下操作区的按钮槽最小高 44 DIP，实际高度随同行内容增长；窄窗可双向滚动且最高 220 DIP，结构页待处理列表内容最高 96 DIP，以保留拓扑视口。起点与终点分别显示两行：第一行准确 MiB，第二行有限小数的自适应单位；终点为 `start + size` 的排他结束偏移，不可得时显示横线。两页根外边距为 24 DIP，图形遮罩局限拓扑区域；视觉与窄窗结果另按 Quality 验证。容量输入下方的只读自动单位值使用普通正文文字样式。管理、监控和开发页的实际区域分隔槽同样为 8 DIP 且可拖；普通卡片之间的间距不创建分隔槽。
 
@@ -297,7 +297,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 
 有活动阶段时，Plan 记录范围、固定决策、任务依赖和验收；执行时及时更新实际状态。阶段被替代时如实归档，不写成验收完成；阶段结束时记重要结果、归档 Plan，没有新阶段就不保留活动 Plan。CHANGELOG 按重要结果记录，长历史可按明确时间点归档，Git 保留过程。
 
-用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。此前界面与人工反馈阶段的 Plan 已[归档](Archive/20260924-before-real-edit/README.md)；2026-09-27 开始的本机真实修改第一阶段已完成并归档，H01–H11、正常重启保护及工程门为该阶段结果。当前 [V0.59 Plan](Plan.md) 已激活，源码版本仍为 V0.58，本轮最终状态以其验收与版本收口为准。2026-10-07 用户重申 WDC 全部真实操作已获批准、E: 无有效数据，执行时沿用 [AGENTS](../AGENTS.md) 的持续授权，范围内不再逐操作聊天索批；该授权不扩大产品能力或其它磁盘范围。未激活 Design 不因此获得实施授权。
+用户明确要求留待以后执行的计划可以保留在 `docs/Plan.md` 中，标记“未激活”并与当前任务分节；不提前归档，也不视为执行授权。此前界面与人工反馈阶段的 Plan 已[归档](Archive/20260924-before-real-edit/README.md)；2026-09-27 开始的本机真实修改第一阶段已完成并归档，H01–H11、正常重启保护及工程门为该阶段结果。当前 [V0.59 Plan](Plan.md) 已激活，当前版本为 V0.59／迭代 9；整体 Plan 仍有工作待完成。2026-10-07 用户重申 WDC 全部真实操作已获批准、E: 无有效数据，执行时沿用 [AGENTS](../AGENTS.md) 的持续授权，范围内不再逐操作聊天索批；该授权不扩大产品能力或其它磁盘范围。未激活 Design 不因此获得实施授权。
 
 唯一产品版本源为 `Directory.Build.props`：`Va.b` 表示产品线，`Va.bc` 的 `c` 为 1–9 的迭代；迭代为 0 时显示补零，因此产品线 0.5 显示为 V0.50，框架数字版本为 0.5.0。框架必需数字版本由该文件机械生成。
 

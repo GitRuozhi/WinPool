@@ -2,17 +2,17 @@
 
 日期：2026-10-11；已纳入用户对编辑页交互、执行反馈和采集性能的要求，以及真实 MAX 的执行语义纠正和建池流程再次纠偏。
 
-**状态：实施中；按最新用户决定实现真实／模拟共用整数 GiB MAX 搜索，并让池层随成员介质自动进入草稿。** §10.4 取代此前真实原生 MAX、禁止试探及模拟 4 GiB 对齐的当前行为要求；§10.7 取代此前要求在属性区选择普通／单 HDD 布局的旧交互。历史测试、微软侧接口归因与证据保持原状。当前版本仍为 V0.58／iteration8，原生流程验收完成前不升版或归档。
+**状态：实施中；当前产品版本为 V0.59／iteration 9。** §10.4 取代此前真实原生 MAX、禁止试探及模拟 4 GiB 对齐的当前行为要求；§10.7 取代此前要求在属性区选择普通／单 HDD 布局的旧交互。§10.8 五项编辑残留的定向测试、功能界面核验、最终 Release 构建、HelpText／版本核对、托盘退出及只读末态对账均已完成。历史测试、微软侧接口归因与证据保持原状；本计划仍有其它未完成工作，不因单节收口而归档。
 
 第 4.5–4.11 节保存本阶段曾确定的要求，但布局选择细节已由 2026-10-11 用户最新决定取代：不保留普通默认或普通／单 HDD 显式布局下拉，按成员介质自动生成草稿层。新建容量的 MAX 意图及原生 Apply 入口仍按当前约定执行。第 9 节保留旧决定来源；不能把旧 Product／Plan 或 Agent 建议当成当前用户授权。已有 WDC 授权和产品禁项保持有效。
 
 | 项目 | 基线与目标 |
 | --- | --- |
-| 当前版本 | V0.58，版本源为 `Directory.Build.props`，迭代值为 8 |
+| 当前版本 | V0.59，版本源为 `Directory.Build.props`，迭代值为 9 |
 | 接手基线 | `main`，`0609e90`；本地 HEAD 与当前本地上游引用 `origin/main` 相同，未联网核对远端；功能收口提交为 `6f51bc7`，后两次提交仅扩充 Plan |
-| 本阶段目标版本 | V0.59；实施与验收收口时将迭代值改为 9，本草稿不提前升版 |
+| 本阶段目标版本 | V0.59／迭代 9；用户已授权本次升版，活动计划继续收口 |
 | 核心目标 | 将真实执行能力接回原产品建池、改池流程；按用户要求调整两编辑页、磁盘按钮与扩缩公式，修复 MSR 选项，缩短执行/刷新等待并联动预期改动 |
-| 当前进度 | §10.4 的共享整数 GiB MAX 已验证。§10.7 本轮限定范围已核验：模拟 HDD 新建／改池、SSD 自动层草稿、真实单 HDD 建池／AutoPart／Apply 后拖动，以及 WDC 末态和 Samsung 保护比较。SCM、完整字段条件矩阵和失败／未知反馈全场景仍未核验；不据此声称全介质矩阵完成。保持 iteration 8 和活动 Plan |
+| 当前进度 | §10.4 的共享整数 GiB MAX 已验证。§10.7 本轮限定范围已核验：模拟 HDD 新建／改池、SSD 自动层草稿、真实单 HDD 建池／AutoPart／Apply 后拖动，以及 WDC 末态和 Samsung 保护比较。§10.8 47 项不同定向用例、规定范围内原生界面操作、最终 Release 构建、HelpText／V0.59 核对、正常托盘退出、真实操作账本只读比较及 Samsung 保护比较均已通过。SCM、完整字段条件矩阵和失败／未知反馈全场景仍未核验；V0.59／迭代 9 活动 Plan 保持实施中 |
 
 ## 1. 依据与问题定位
 
@@ -250,7 +250,7 @@ Windows 在 GPT 初始化时可能自动生成 MSR，现有 H07 证据记录过�
 
 ## 6. 工作包、执行顺序与停止规则
 
-P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分层容量与采集修正已验证，分层原生MAX继续技术调查。P9本轮受影响验收已完成，P10保留未升版／未归档状态并本地提交。实施状态只使用未开始、实施中、已实现待验证、已验证、受阻；测试结果另按Quality记录。
+P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分层容量与采集修正已验证，分层原生MAX继续技术调查。P9本轮受影响验收已完成。早先“P10 保持 iteration 8、待整体验收后再升版”的状态已被 2026-10-11 用户授权 V0.59／iteration 9 取代；本轮 §10.8 限定验收完成，但整体 Plan 仍实施中。实施状态只使用未开始、实施中、已实现待验证、已验证、受阻；测试结果另按Quality记录。
 
 | 包 | 当前状态 | 证据与剩余事项 |
 | --- | --- | --- |
@@ -262,7 +262,7 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 | P7 | 已验证 | 同键工作消息、黑色遮罩和写后先刷新已实测；observer同批结果竞态、InvalidDataException异步边界及Agent对账先落盘已修，进入1763 passed工程门；关闭前清理已通过原生正常退出复验 |
 | P8 | 已验证 | bd1六state各5912非NULL样本、delete-vdisk准确缺口归因/旧身份终结/新身份重绑通过；810会话三盘各4252样本、20.006Hz/max65ms、Stopped/dropped0、当前gap0。旧NULL端点保持未知；MonitorOff历史pending误报警呈现修复通过最后门与原生启动检查 |
 | P9 | 部分已验证 | B0–B3、B4 32 GiB及历史B5适用验收通过；新增普通原生 MAX 与完整自动布局、严格失败恢复/准确残留清理保留前轮证据；本轮同值大容量分层创建、1897 passed完整门、WDC末态与Samsung独立比较、偏好/普通重启/正常退出均通过。单 HDD 分层 MAX 保型正例仍未完成 |
-| P10 | 部分完成 | 当前代码/测试及正式文档按真实结果本地提交；分层 MAX 必交付未解决，保持iteration8，不机械升版或归档。没有推送、tag或发布 |
+| P10 | 部分完成 | 用户已授权并设置 V0.59／iteration 9；§10.8 限定修复验收完成。V0.59 整体 Plan 仍有其它未完成工作，不据此归档或创建 iteration 10 |
 
 早期执行记录保留：首轮 Release 构建零警告/零错误，12 项目共 1540 项，1530 通过、7 失败、3 显式跳过；第二轮 1583 项中 1577 通过、3 失败、3 跳过。失败为新增夹具或旧接口/协议/schema 断言，此后已修复，不能把早期失败轮改写或与 433/433 定向门拼作一次完整全绿。B0 首次优化同向三样本中位 18.472→14.179 秒，最终源码复测另记。管理员 OLE 拖放不可用已改为内部 pointer 手势，原草稿操作及 B3 真创建验证通过。首个 RAW 建池范围缺 subsystem 导致适配器 NoWindowsCall 拒绝，此后已修并由 B3 普通池/MAX 及 B4 单 HDD 池/32 GiB 实机正例闭合。最近完整门和新发现均见§10；源码再变更后重新执行最终门。
 
@@ -580,4 +580,24 @@ P0–P2、P5–P8沿用已有有效验证；P3/P4的普通原生MAX、明确分�
 - **已核验（真实末态与保护）：** WDC 已恢复在线 GPT、1 MiB 起点／16 MiB MSR、17 MiB 起始／4,000,767,279,104-byte 最大 NTFS／64 KiB 数据分区，卷标 `WinPool_Test`、盘符 E:。重启后 Storage（10:33:07–09 +08）和 Hardware（10:33:10–16 +08）采集均 Returned；最终 `protected-comparison-final.log` 对 15 个 Samsung 关联对象的几何、文件系统、簇、角色、挂载及对象闭包比较为 PASS。
 - **未覆盖范围：** SCM 本轮未作原生检查，当前模拟目录没有三层池夹具；不为此重置整个用户模拟目录。完整字段出现／启用条件矩阵和失败／未知反馈的全场景仍未核验，不声称全介质矩阵完成；这些余项不阻塞本节限定范围收口。
 
-真实原生检查限已支持的单 HDD 路径，不扩展多盘或混合介质实机范围。§10.6 的 115 项回归和取消确认不替代本节真实端到端验收。本节按上述限定范围收口；SCM 和其它未覆盖项保持明确未验，V0.59 整体仍为实施中，不升版、不归档。
+真实原生检查限已支持的单 HDD 路径，不扩展多盘或混合介质实机范围。§10.6 的 115 项回归和取消确认不替代本节真实端到端验收。截至本节验收完成时，SCM 和其它未覆盖项仍明确未验，V0.59 整体仍为实施中，尚未升版或归档。当前版本与后续修复状态见 §10.8。
+
+### 10.8 编辑流程审计残留修复（V0.59 iteration 9，限定验收完成）
+
+本节按用户授权修复审计确认的五项残留，范围限定如下：
+
+1. 统一 `poolSave` 保存路径，新建草稿池也经过同一保存链。
+2. 模拟模式下 AutoPart 关闭时保留 RAW／无分区状态；开启时自动分区并遵循已保存的 MSR 偏好。
+3. 真实模式的文件系统、簇大小、快速格式化和重置状态指示准确对应当前目标及可核实状态；快速重置后立即刷新，自动分区遵循共享的 1 MiB 尾端几何。
+4. 移除两个已无调用方的辅助方法。
+5. 校正操作界面用语，使其沿用用户可理解的业务动作名称。
+
+**定向回归：** 最终变更后 App 过滤回归 11/11，Application 最终新增用例 13/13；另有 23 项既有相关用例通过，合计 **47 项不同用例通过、0 失败**。初始 Application 12 项新用例被最终 13 项替代，计数不重复。见 [App TRX](../artifacts/test-results/20261011-v059-editor-flow-unification/app-targeted.trx)、[初始 Application TRX](../artifacts/test-results/20261011-v059-editor-flow-unification/application-targeted.trx) 和 [最终 Application TRX](../artifacts/test-results/20261011-v059-editor-flow-unification/application-final-targeted.trx)。
+
+**功能界面核验：** 真实新建池草稿拖入 WDC、保存 64 GiB、撤销 MAX／重做 64 GiB及放弃确认均通过；既有 E: 格式化表单切换为 ReFS+完整格式化（未提交）时格式按钮禁用，快速重置后立即重新启用；文件系统重置和簇大小 32→重置 64 通过。模拟 Pool02、Pool03、Pool04 分别核验 MSR 开、MSR 关、AutoPart 关：结果分别为 GPT+16 MiB MSR、GPT 无 MSR、RAW／无分区。三个模拟池均用原界面解散并 Apply 清理，原 DataPool 保留，模拟版本为 18。[原生布局断言](../artifacts/test-results/20261011-v059-editor-flow-unification/native-layout-assertions.json)确认三种几何及原 DataPool／虚拟磁盘不变。快速重置后状态立即刷新，自动分区共享 1 MiB 尾端几何；UI 文本与截图见[本轮证据目录](../artifacts/test-results/20261011-v059-editor-flow-unification/)。
+
+**无真实写入：** 整体账本含模拟历史的 364／590／2,659 计数会因模拟 Apply 正常变化。真实操作范围从 `before-real-audit.json` 到清理后审计，319 个计划、410 个步骤、2,479 条事件的三张表哈希完全一致；Accepted 299／CallIssued 379 不变。没有真实存储写入。
+
+**最终收口：** 初始标准 App／Agent Release 构建在 25.77 秒内成功，0 警告、0 错误、0 merge collision；随后多项纯文案调整也已包含于[最终 Release 构建](../artifacts/test-results/20261011-v059-editor-flow-unification/final-release-build.log)，该构建17.87秒、0警告／0错误、0 collision。标准版本重启后 About 显示 V0.59，HelpText 与最终结构页状态已核对。原托盘退出时 App／Agent 均在15秒内退出；进程退出码不可用，不报告为0。最终只读审计确认真实操作319 plans、410 steps、2,479 events三表哈希与基线相同，Accepted299／CallIssued379不变；Samsung 15个受保护关联对象比较通过。WDC 最终只读断言确认约定 GPT／16 MiB MSR／NTFS 64 KiB、`WinPool_Test`／E: 末态。[WDC断言](../artifacts/test-results/20261011-v059-editor-flow-unification/final-wdc-assertions.json)、[版本界面](../artifacts/test-results/20261011-v059-editor-flow-unification/final-start-ui.txt)、[HelpText](../artifacts/test-results/20261011-v059-editor-flow-unification/final-disk-neutral-help-ui.txt)、[托盘退出](../artifacts/test-results/20261011-v059-editor-flow-unification/normal-exit.json)、[最终真实账本](../artifacts/test-results/20261011-v059-editor-flow-unification/final-real-audit.json)和[受保护对象比较](../artifacts/test-results/20261011-v059-editor-flow-unification/protected-comparison-final.log)。本轮没有真实存储写入。
+
+本节验收不关闭 V0.59 整体 Plan。SCM 原生检查、完整字段启用条件矩阵、失败／未知反馈的全场景核验等既有余项继续保持未验；不据此创建 iteration 10，也不归档本 Plan。

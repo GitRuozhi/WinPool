@@ -788,9 +788,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var contextReason = ResolveContextDisabledReason(simulated, disk, offlineState, operationBusy);
         var createReason = contextReason
             ?? (!alreadyGpt
-                ? Text("新建分区需要已初始化的 GPT 模拟磁盘。", "Creating a partition requires an initialized simulated GPT disk.")
+                ? Text("新建分区需要已初始化的 GPT 磁盘。", "Creating a partition requires an initialized GPT disk.")
                 : !isGapSelection
-                    ? Text("请选择 GPT 模拟磁盘上的未分配空间。", "Select unallocated space on a simulated GPT disk.")
+                    ? Text("请选择 GPT 磁盘上的未分配空间。", "Select unallocated space on a GPT disk.")
                     : createGeometry is { CanCreate: false }
                         ? GeometryUnavailableReason(createGeometry)
                         : !hasIntegerSize
@@ -919,18 +919,18 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var protectedPartitionReason = DescribeFormatPartitionReason(partition);
         var destructiveReason = contextReason
             ?? (partition is null
-                ? Text("请选择一个模拟分区。", "Select a simulated partition.")
+                ? Text("请选择一个分区。", "Select a partition.")
                 : partition.IsBoot || partition.IsSystem
                     ? Text("系统或启动分区不能删除。", "A system or boot partition cannot be deleted.")
-                    : Text("当前选择不具备模拟删除条件。", "The current selection cannot be deleted in the simulation."));
+                    : Text("当前选择不满足删除条件。", "The current selection does not meet the deletion requirements."));
         var selectionReason = contextReason;
         var extendEligibilityReason = contextReason
             ?? (partition is null
-                ? Text("请选择普通模拟数据分区以扩展。", "Select a normal simulated data partition to extend.")
+                ? Text("请选择普通数据分区以扩展。", "Select a normal data partition to extend.")
                 : ResizeCapabilityReason(extendCapability!, extend: true));
         var shrinkEligibilityReason = contextReason
             ?? (partition is null
-                ? Text("请选择普通模拟数据分区以压缩。", "Select a normal simulated data partition to shrink.")
+                ? Text("请选择普通数据分区以压缩。", "Select a normal data partition to shrink.")
                 : ResizeCapabilityReason(shrinkCapability!, extend: false));
         var realRangeReason = realRefsResize
             ? Text("ReFS 真实分区仅开放扩展；压缩保持禁用，扩展范围由 Agent 实时核验。",
@@ -963,12 +963,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             selectionReason
             ?? (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery
                 ? Text("EFI、MSR 和恢复分区不能分配盘符。", "EFI, MSR, and recovery partitions cannot receive a drive letter.")
-                : Text("当前选择没有可改写盘符的模拟卷。", "The current selection has no simulated volume whose drive letter can be changed.")));
+                : Text("当前选择没有可改写盘符的卷。", "The current selection has no volume whose drive letter can be changed.")));
         SetDisabledReason(VolumeLabelBox,
             selectionReason
             ?? (createMode && kind == PartitionKind.MicrosoftReserved
                 ? Text("Microsoft 保留分区没有卷标。", "A Microsoft Reserved Partition has no volume label.")
-                : Text("当前选择没有可改写卷标的模拟卷。", "The current selection has no simulated volume whose label can be changed.")));
+                : Text("当前选择没有可改写卷标的卷。", "The current selection has no volume whose label can be changed.")));
         SetDisabledReason(SizeBox,
             selectionReason
             ?? (isGapSelection
@@ -990,11 +990,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     : null
                 : protectedPartitionReason
                     ?? (partition is null
-                        ? Text("请选择可格式化的普通模拟数据分区。", "Select a formatable simulated data partition.")
+                        ? Text("请选择可格式化的普通数据分区。", "Select a data partition that can be formatted.")
                         : null));
         var formatReason = contextReason
             ?? (partition is null
-                ? Text("请选择现有的普通模拟数据分区以格式化。", "Select an existing simulated data partition to format.")
+                ? Text("请选择现有的普通数据分区以格式化。", "Select an existing data partition to format.")
                 : protectedPartitionReason);
         var createActionSelected = partition is null;
         var selectedRealFileSystem = SelectedFileSystemToken();
@@ -1242,9 +1242,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         if (partition.IsBoot || partition.IsSystem)
         {
-            return Text(
-                "系统或启动分区不能格式化；卷标、盘符和符合条件的模拟扩缩仍可编辑。",
-                "A system or boot partition cannot be formatted; label, drive letter, and eligible simulated resize remain editable.");
+            return ViewModel.IsUsingSimulatedInventory
+                ? Text(
+                    "系统或启动分区不能格式化；卷标、盘符和符合条件的模拟扩缩仍可编辑。",
+                    "A system or boot partition cannot be formatted; label, drive letter, and eligible simulated resize remain editable.")
+                : Text("系统或启动分区不能格式化。", "A system or boot partition cannot be formatted.");
         }
 
         return partition.Type switch
@@ -1411,7 +1413,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var partition = SelectedPartition();
         var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
         var gap = _selectedUnallocatedOffset is not null;
-        var parameterEnabled = ViewModel.IsUsingSimulatedInventory && (partition is not null || gap);
+        var parameterEnabled = partition is not null || gap;
         var recommendedSizeMib = RecommendedCreateSizeMib();
         var baselineFileSystem = volume?.FileSystem ?? partition?.FileSystem;
         if (string.IsNullOrWhiteSpace(baselineFileSystem))
@@ -1494,6 +1496,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         SetFormatMode(quickFormat: true);
         UpdatePropertyResetState();
+        UpdateButtonState();
     }
 
     private long? RecommendedCreateSizeMib()
@@ -2719,7 +2722,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             quick ? Text("快速格式化成功", "Quick format succeeded") : Text("完整格式化成功", "Full format succeeded"),
             quick
                 ? Text("模拟快速格式化已写入文档；没有格式化真实磁盘。", "The simulated quick format was saved; no real disk was formatted.")
-                : Text("模拟完整格式化模式已写入操作计划；没有扫描真实介质。", "The simulated full-format mode was recorded in the operation plan; no real media was scanned."),
+                : Text("模拟完整格式化已完成；没有格式化真实磁盘。", "Simulated full formatting completed; no real disk was formatted."),
             failTitle: Text("格式化失败", "Format failed"));
         _ = ok;
     }
@@ -2731,8 +2734,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 "模拟快速格式化会清除该分区上的已用数据；不会格式化真实磁盘。",
                 "Simulated quick formatting clears used data on this partition; no real disk will be formatted.")
             : Text(
-                "模拟完整格式化会清除该分区上的已用数据，并将完整模式写入操作计划；不会扫描真实介质或格式化真实磁盘。",
-                "Simulated full formatting clears used data on this partition and records full mode in the operation plan; it does not scan real media or format a real disk.");
+                "模拟完整格式化会清除该分区上的已用数据；不会格式化真实磁盘。",
+                "Simulated full formatting clears used data on this partition; it does not format a real disk.");
         if (!usesRefs)
         {
             return Text($"{modeWarning} 确定继续？", $"{modeWarning} Continue?");

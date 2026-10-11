@@ -4,7 +4,7 @@
 
 WinPool is a Windows desktop application for viewing storage topology, monitoring devices, editing simulated systems, and performing supported local storage operations.
 
-The current product version remains **V0.58, iteration 8**; the [active plan](docs/Plan.md) is not complete or archived. Earlier H01–H11 results remain in the [historical archive](docs/Archive/20261007-real-edit-stage1/Plan.md).
+The current product version is **V0.59, iteration 9**; the [active plan](docs/Plan.md) still has work beyond this update and is not archived. Earlier H01–H11 results remain in the [historical archive](docs/Archive/20261007-real-edit-stage1/Plan.md).
 
 `WINPOOL-MAX-GIB-1` computes `C = floor((A - 4,000,000 - 1) / 1,073,741,824)`. For real operations A is the smaller of the fresh provider maximum and physical-capacity budget; for simulation it is layout-adjusted logical headroom after known allocation. C is a starting candidate, not a promised physical maximum: simulation adopts each tier's C directly, while real MAX tests capacity in 1 GiB steps without passing Windows `UseMaximumSize`. Real tiered creation remains limited to the controlled typed backend for Simple/Fixed, one-column, 64 KiB tiers on distinct media. Each tier starts from an exact half-C seed and is searched separately to a whole-GiB result; the seed is only an initial structure size, and the final VD size is the sum of tier results. There is no multi-disk UI or real multi-tier MAX device result. The previous native `UseMaximumSize` attempts are historical; details are in [Quality](docs/Quality.md).
 

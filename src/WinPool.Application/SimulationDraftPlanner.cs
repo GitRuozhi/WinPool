@@ -7,6 +7,50 @@ namespace WinPool.Application;
 
 public static class SimulationDraftPlanner
 {
+    /// <summary>Freeze the editor's automatic policy without changing legacy nullable request defaults.</summary>
+    public static void ConfigureAutomaticPartitionIntent(
+        List<SimulationEditRequest> steps, SimulationEditRequest createVirtualDisk, PoolEditIntent intent,
+        string partitionId, string volumeId, string msrId)
+    {
+        if (createVirtualDisk.Kind != SimulationEditKind.CreateVirtualDisk
+            || createVirtualDisk.AllocatedOsDiskId is not string diskId)
+            throw new ArgumentException("Automatic layout requires an allocated virtual-disk OS disk.", nameof(createVirtualDisk));
+        var index = steps.IndexOf(createVirtualDisk);
+        if (index < 0) throw new ArgumentException("The virtual-disk creation step is missing.", nameof(steps));
+        steps[index] = createVirtualDisk with
+        {
+            PartitionStyle = intent.AutoCreatePartition ? "GPT" : "RAW",
+            CreatePartition = false,
+            CreateMsr = intent.CreateMsr
+        };
+        if (!intent.AutoCreatePartition || steps.Any(step => step.Kind == SimulationEditKind.CreatePartition
+            && step.TargetProviderKey.Equals(diskId, StringComparison.OrdinalIgnoreCase))) return;
+        var size = createVirtualDisk.SizeBytes
+            ?? throw new InvalidOperationException("Automatic layout requires the modeled virtual-disk size.");
+        steps.AddRange(CreateAutomaticPartitionSteps(diskId, size, intent, partitionId, volumeId, msrId));
+    }
+
+    public static IReadOnlyList<SimulationEditRequest> CreateAutomaticPartitionSteps(
+        string diskId, long sizeBytes, PoolEditIntent intent, string? partitionId = null,
+        string? volumeId = null, string? msrId = null)
+    {
+        if (!intent.AutoCreatePartition) return [];
+        var geometry = EditWorkspace.GetAutomaticPartitionCreateGeometry(sizeBytes, intent.CreateMsr);
+        var steps = new List<SimulationEditRequest>();
+        if (intent.CreateMsr)
+            steps.Add(new(SimulationEditKind.CreatePartition, diskId,
+                OffsetBytes: EditWorkspace.PartitionCreateAlignmentBytes,
+                SizeBytes: 16 * EditWorkspace.PartitionCreateAlignmentBytes,
+                AllocatedPartitionId: msrId, PartitionKind: PartitionKind.MicrosoftReserved));
+        steps.Add(new(SimulationEditKind.CreatePartition, diskId,
+            Name: intent.VolumeName, DriveLetter: intent.DriveLetter?.ToString() ?? string.Empty,
+            FileSystem: intent.FileSystem, AllocationUnitSize: intent.AllocationUnitSize,
+            OffsetBytes: geometry.StartOffsetBytes, SizeBytes: geometry.DefaultSizeBytes,
+            AllocatedPartitionId: partitionId, AllocatedVolumeId: volumeId,
+            PartitionKind: PartitionKind.BasicData, QuickFormat: intent.QuickFormat));
+        return steps;
+    }
+
     public static SimulationDraftPlan Build(StorageSnapshot committed, StorageSnapshot working)
     {
         ArgumentNullException.ThrowIfNull(committed);

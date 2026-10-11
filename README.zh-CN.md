@@ -4,7 +4,7 @@
 
 WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控设备、编辑模拟系统和执行已支持的本机存储操作。
 
-当前产品版本仍为 **V0.58，迭代 8**，[活动计划](docs/Plan.md)尚未完成或归档；此前 H01–H11 结果保留在[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。
+当前产品版本为 **V0.59，迭代 9**；[活动计划](docs/Plan.md)仍有超出本次修复范围的工作，尚未归档。此前 H01–H11 结果保留在[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。
 
 `WINPOOL-MAX-GIB-1` 使用 `G = 1,073,741,824` bytes、`R = 4,000,000` bytes，计算 `C = floor((A - R - 1) / G)`。真实路径的 A 是 fresh provider 最大范围与物理容量预算中的较小值；模拟路径的 A 是应用布局折算并扣除已知物理占用后的逻辑余量。C 是起始候选而非保证的物理最大值：模拟每层直接采用其 C，真实 MAX 按 1 GiB 步长搜索，不传递 Windows `UseMaximumSize`。真实分层仅限受控 typed backend 支持的 Simple／Fixed、单列、64 KiB 且各层介质不同布局；每层从精确 `0.5C` bytes seed 开始并独立搜索到整数 GiB 结果，最终 VD 容量为层容量之和。seed 仅为初始结构，不是最终 MAX。没有多盘 UI 或真实多层 MAX 实机结果。历史原生 `UseMaximumSize` 结果见[Quality](docs/Quality.md)。
 

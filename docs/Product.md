@@ -4,7 +4,9 @@
 
 2026-10-11 建池交互按成员介质形成草稿层；不提供普通／单 HDD 布局选择。自动生成的 HDD 模板不受 AutoVD 开关控制；AutoVD 只决定是否自动创建虚拟磁盘。模拟 HDD 新建／改池、SSD 自动 Performance 层与 VD（仅草稿，随后放弃）、真实单 HDD 建池至 AutoPart、Apply 后拖动和无效释放均已按本轮范围核验；WDC 末态恢复及 Samsung 保护对象比较通过。SCM 本轮未作原生检查，不据此声称全介质矩阵完成；本节限定范围及余项见 [Plan §10.7](Plan.md)。V0.59 整体仍在进行。
 
-本文件是当前产品行为、边界和路线的中文权威。当前产品版本仍为 V0.58、迭代8；V0.59 整体阶段按活动 [Plan](Plan.md)继续，不提前升版或归档。当前新建普通与单 HDD 分层 MAX 使用用户指定的共享整数 GiB 算法。原界面实机已分别验证3725 GiB与3724 GiB，以及GPT、规范MSR、NTFS／64 KiB自动布局；多层算法仅有模拟和受控backend夹具验证，没有多盘UI或多层实机结果。本轮末态与Samsung保护比较、1996项通过／0失败的冻结工程门及普通重启／退出已通过；3项既有测量未执行，详细证据见[Plan §10.4](Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。既有H01–H11与历史原生MAX证据见[Quality](Quality.md)和[CHANGELOG](CHANGELOG.md)，不能替代本轮算法的验证。
+2026-10-11 V0.59／迭代9编辑收口：新建草稿池和后续池保存共用保存流程；模拟模式下 AutoPart 关闭保留 RAW／无分区状态，开启时按已保存的 MSR 偏好自动分区；真实模式的文件系统、簇大小、快速格式化和重置提示对应准确目标及可核实状态；操作提示沿用业务动作名称。限定回归、原生界面、最终构建和末态保护比较均通过；本轮无真实存储写入，V0.59整体计划仍有其它工作，见 [Plan §10.8](Plan.md)。
+
+本文件是当前产品行为、边界和路线的中文权威。当前产品版本为 V0.59、迭代 9；活动 [Plan](Plan.md)仍有其它未完成工作，不因本轮限定修复而归档。当前新建普通与单 HDD 分层 MAX 使用用户指定的共享整数 GiB 算法。原界面实机已分别验证3725 GiB与3724 GiB，以及GPT、规范MSR、NTFS／64 KiB自动布局；多层算法仅有模拟和受控backend夹具验证，没有多盘UI或多层实机结果。本轮末态与Samsung保护比较、1996项通过／0失败的冻结工程门及普通重启／退出已通过；3项既有测量未执行，详细证据见[Plan §10.4](Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。既有H01–H11与历史原生MAX证据见[Quality](Quality.md)和[CHANGELOG](CHANGELOG.md)，不能替代本轮算法的验证。
 
 已有对象在名称输入框按 Enter 独立提交改名，模拟提交后即时生效；真实实现按本阶段约定确认准确目标与新值后执行。普通失焦不提交，不增加保存名称按钮。改名不参与结构撤销或放弃；名称只用于显示，身份与关联使用可靠 ID。尚未创建对象的名称属于创建参数。历史修复与验证范围见 [CHANGELOG](CHANGELOG.md) 的 2026-09-11 记录。
 
@@ -27,7 +29,7 @@ WinPool 是 Windows 存储结构管理软件，以统一桌面界面呈现存储
 
 **分层原生 MAX 的归因（2026-10-09）：** 按用户明确要求记录，本机原生分层 MAX 失效属于微软 Windows Storage 接口／提供程序侧问题，不是 WinPool 容量算法错误，也不是单 HDD 不能建立 HDD 容量层。WinPool 已修复的层／池步长混用和大层采集超时另行记录，不能与该系统侧边界混为一谈。此处不宣称微软已公开确认具体缺陷，亦不外推所有 Windows 版本。当前新建普通及单 HDD MAX 已实现用户指定算法（普通及单 HDD 实机和最终工程门均已通过），每轮以明确 bytes 创建／扩展并核验，替代旧临时拒绝门；明确容量仍支持。实验中的上界减8个层单位不构成产品容量规则，详见[调查报告](Review/Single-Hdd-Tier-Capacity-20261009.md)。
 
-当前产品版本为 V0.58；公开能力见 [简体中文用户说明](../README.zh-CN.md)。结构页提供净差异动作面板、MAX 容量意图和整批预检查；分区页仍及时提交。已完成的单盘真实修改第一阶段通过了 H01–H11 场景、最终 GPT/NTFS MAX 布局和工程门。该历史阶段收口时 WDC 布局为 GPT、1 MiB 起点/16 MiB MSR、其后 BasicData；E: 为 64 KiB NTFS 卷 `WinPool_Test`。H10 验证了 HDD 模板选择及由其创建实际分层虚拟磁盘；H11 验证了 ReFS 扩容后的内容哈希并确认收缩入口禁用。
+当前产品版本为 V0.59／迭代 9；公开能力见 [简体中文用户说明](../README.zh-CN.md)。结构页提供净差异动作面板、MAX 容量意图和整批预检查；分区页仍及时提交。已完成的单盘真实修改第一阶段通过了 H01–H11 场景、最终 GPT/NTFS MAX 布局和工程门。该历史阶段收口时 WDC 布局为 GPT、1 MiB 起点/16 MiB MSR、其后 BasicData；E: 为 64 KiB NTFS 卷 `WinPool_Test`。H10 验证了 HDD 模板选择及由其创建实际分层虚拟磁盘；H11 验证了 ReFS 扩容后的内容哈希并确认收缩入口禁用。V0.59 后续范围与验收状态见 [Plan](Plan.md)。
 
 V0.59 阶段已将新的单盘真实操作接回现有结构页和分区页，范围包括普通或单 HDD 分层 VD 的明确容量／MAX 创建、明确发起的删除重建、独立清空至 RAW、RAW 初始化 GPT，以及按 Agent 实时范围扩缩 RAW/NTFS 数据分区。前轮普通原生 MAX 以 `SizeBytes=0`／`UseMaximumSize=true` 冻结并完成创建，Windows 实际返回 VD 与 OS 磁盘均为 3,999,688,294,400 bytes，随后完成 GPT、规范 16 MiB MSR、NTFS／64 KiB 数据分区与 `WinPool_V059_Data`／`W:`，见[原生布局证据](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/native-maximum-layout-readonly-proof.json)和[断言](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/native-maximum-layout-assertion.json)。[原 Agent 托盘正常退出](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/ordinary-native-max-observed-exit-result.json)确认 App／Agent 均 exit 0。已有空池首块普通 32 GiB、普通 MAX 意图重建与单 HDD 分层明确 32 GiB 创建、布局、重建的历史证据仍有效，不能外推分层 MAX。修正前 B5 曾通过物理 WDC 联机 GPT、规范 MSR、NTFS／64 KiB 最大整 MiB 数据分区、`WinPool_Test`／`E:` 且无 concrete pool／VD，以及 Samsung 限定范围 0 变化、监控 0 缺口；4 项共享 Primordial 调整另存。前轮原生 MAX 写入后的[独立原生／full对账](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/final-protected-comparison-review.json)也已通过：WDC物理盘在线GPT、1 MiB起点／16 MiB MSR、17 MiB起点／4,000,767,279,104-byte最大整MiB数据分区、NTFS／64 KiB／`WinPool_Test`／`E:`，无concrete pool或VD；Samsung限定结构范围0变化／0证据缺口，4项共享Primordial调整单独保留。准确成员返回的[原UI局部刷新复验](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Engineering/scoped-release-original-ui-review.json)通过，未扩查Samsung兄弟盘。[普通重启及托盘退出](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/normal-restart-exit-exit-result.json)两进程exit 0，[审计](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/after-normal-restart-readonly-audit.json)确认偏好与B0一致、RealOff／MonitorOff、监控设置20 Hz、Accepted 214／CallIssued 271不变、无未终结操作。
 
@@ -138,8 +140,9 @@ Windows 11 has not yet received equivalent testing because current storage hardw
 | V0.51 | 模拟脱机状态持久化、GPT 分区类型、空池、创建子动作、入口一致性和平均换行修复；无真实存储写操作 |
 | V0.52 | 统一来源事实、只读硬件页、分用途采集、模拟编辑会话和步骤命令预览；真实存储只读 |
 | V0.53 | 开发者模式默认隐藏硬件、测试、开发三页；启用后硬件位于管理之前 |
-| V0.57 | 上一产品版本；包含单盘实机验收阶段的实现进展 |
-| V0.58 | 当前产品版本、迭代 8；单盘真实修改第一阶段已完成。现有编辑页真实流程、监控、末态与退出已有本机证据；普通新建原生 MAX 已通过，分层 MAX 因实际 API 冲突未收口，活动阶段未标记完成 |
+| V0.57 | 历史版本；包含单盘实机验收阶段的实现进展 |
+| V0.58 | 上一产品版本（迭代 8）；单盘真实修改第一阶段已完成。现有编辑页真实流程、监控、末态与退出已有本机证据；普通新建原生 MAX 已通过，分层 MAX 因实际 API 冲突未收口，V0.59 当时尚未标记完成 |
+| V0.59 | 当前产品版本（迭代 9）；完成本轮编辑流程审计残留修复的限定验收。V0.59 整体活动 Plan 仍有未完成工作 |
 | V0.5x | 1.0 必需的最小管理编辑闭环，逐项引入经授权的真实操作 |
 | V0.6 | 监控与存储健康；不加入完整测试工作区 |
 | V0.7 | 冻结 1.0 功能，关闭集成缺口，不引入新功能家族 |

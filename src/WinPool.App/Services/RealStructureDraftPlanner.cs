@@ -276,7 +276,7 @@ public static class RealStructureDraftPlanner
         }
         if (after.StorageTiers.Any(tier => before.StorageTiers.All(old => old.StableId != tier.StableId)
             && !EditWorkspace.IsDraftPool(tier.PoolStableId)))
-            blocks.Add(T("未核验的新增层不能直接进入真实计划。", "Unverified added tiers cannot enter a real plan."));
+            blocks.Add(T("新增层信息尚未核实；请先核对后再应用更改。", "New tier details are unverified; review them before applying the change."));
         var deletedVdIds = before.VirtualDisks.Where(vd => removedPools.Any(pool => pool.StableId == vd.PoolStableId)
             || removedVds.Any(removed => removed.StableId == vd.StableId)).Select(vd => vd.StableId).ToHashSet();
         var deletedDiskIds = before.OsDisks.Where(disk => deletedVdIds.Contains(disk.VirtualDiskStableId ?? ""))

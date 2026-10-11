@@ -434,7 +434,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         foreach (var group in TierGroups())
         {
             ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
-            ContextHelp.Set(group.ResiliencyBox, Text("选择现有模拟规则支持的复原类型。", "Choose a resiliency type supported by the existing simulation rules."));
+            ContextHelp.Set(group.ResiliencyBox, Text("选择支持的复原类型。", "Choose a supported resiliency type."));
             ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
             ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
             ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
@@ -2192,8 +2192,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _ = exception;
             _currentPlan = null;
             _planBuildError = Text(
-                "当前草稿无法生成可应用计划；请检查字段值和待处理操作。",
-                "The current draft cannot produce an applicable plan; check field values and pending operations.");
+                "当前草稿无法生成可应用的操作；请检查字段值和待处理操作。",
+                "The current draft cannot produce applicable operations; check field values and pending operations.");
         }
 
         if (_currentPlan is null || _currentPlan.IsEmpty)
@@ -2389,12 +2389,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var intents = new Dictionary<string, PoolEditIntent>(_poolIntents, StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(_selectedPoolId))
         {
-            intents[_selectedPoolId] = new PoolEditIntent(
-                ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
-                ViewModel.CurrentPreferences.AutoCreatePartition,
-                _fileSystemBox.SelectedItem as string ?? "NTFS",
-                ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
-                _volumeNameBox.Text.Trim());
+            intents[_selectedPoolId] = SelectedCreationIntent();
         }
 
         foreach (var pair in intents)
@@ -2421,24 +2416,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var createVdisk = steps.FirstOrDefault(item =>
             item.Kind == SimulationEditKind.CreateVirtualDisk
             && item.TargetProviderKey.Equals(appliedPoolId, StringComparison.OrdinalIgnoreCase));
-        if (intent.AutoCreatePartition
-            && createVdisk?.AllocatedOsDiskId is not null
-            && !steps.Any(item => item.Kind == SimulationEditKind.CreatePartition
-                && item.TargetProviderKey.Equals(createVdisk.AllocatedOsDiskId, StringComparison.OrdinalIgnoreCase)))
+        if (createVdisk?.AllocatedOsDiskId is not null)
         {
-            var defaultPartitionSize = createVdisk.SizeBytes is long virtualDiskSize
-                ? EditWorkspace.GetPartitionCreateGeometry(0, virtualDiskSize).DefaultSizeBytes
-                : null;
-            steps.Add(new SimulationEditRequest(
-                SimulationEditKind.CreatePartition,
-                createVdisk.AllocatedOsDiskId,
-                Name: intent.VolumeName,
-                FileSystem: intent.FileSystem,
-                AllocationUnitSize: intent.AllocationUnitSize,
-                SizeBytes: defaultPartitionSize,
-                AllocatedPartitionId: StableIntentObjectId("sim:partition", poolId),
-                AllocatedVolumeId: StableIntentObjectId("sim:volume", poolId),
-                PartitionKind: PartitionKind.BasicData));
+            SimulationDraftPlanner.ConfigureAutomaticPartitionIntent(steps, createVdisk, intent,
+                StableIntentObjectId("sim:partition", poolId),
+                StableIntentObjectId("sim:volume", poolId),
+                StableIntentObjectId("sim:msr", poolId));
         }
 
         if (EditWorkspace.IsDraftPool(poolId))
@@ -2608,9 +2591,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = CanEditDraft
             && _formDirty
-            && (simulated || !HasInvalidSizeInput())
+            && !HasInvalidSizeInput()
             && pool is { IsPrimordial: false }
-            && (!simulated || !EditWorkspace.IsDraftPool(pool.StableId))
             && !poolOffline;
 
         var selectedDisk = _working!.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedPoolDiskId);
@@ -2680,7 +2662,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                                 ? Text("容量必须是有效的非负 GiB 数值。", "Capacity must be a valid non-negative GiB value.")
                                 : _outcomeUnknown
                                     ? structureReason
-                                    : Text("需要可应用的无阻塞模拟计划。", "A non-blocked simulated plan is required."));
+                                    : Text("需要可应用且未被规则阻止的修改。", "Applicable changes that pass the rules are required."));
         SetDisabledReason(
             CreatePoolButton,
             structureReason ?? Text("当前已有一个池草稿；请先应用或放弃它。", "A pool draft already exists; apply or discard it first."));
@@ -2693,7 +2675,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     : Text("请选择可解散的普通模拟存储池。", "Select a normal simulated storage pool to dissolve.")));
         SetDisabledReason(
             SavePoolPropertiesButton,
-            structureReason ?? Text("没有可保存的模拟池属性修改。", "There is no simulated pool property change to save."));
+            structureReason ?? Text("没有可保存的池属性修改。", "There is no pool property change to save."));
         var diskRoleReason = structureReason
             ?? (selectedDisk is null
                 ? Text("请选择该池中的一块数据磁盘。", "Select a data disk in this pool.")
@@ -3010,8 +2992,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
         ContextHelp.Set(group.MaximumButton, Text("使用 WinPool 内置算法计算整数 GiB 最大容量。", "Calculate a whole GiB maximum using WinPool's built-in algorithm."));
-        ContextHelp.Set(group.ProvisioningBox, Text("当前模拟仅支持固定预配。", "The current simulation supports fixed provisioning only."));
-        ContextHelp.Set(group.ResiliencyBox, Text("选择现有模拟规则支持的复原类型。", "Choose a resiliency type supported by the existing simulation rules."));
+        ContextHelp.Set(group.ProvisioningBox, Text("当前仅支持固定预配。", "Fixed provisioning is currently supported."));
+        ContextHelp.Set(group.ResiliencyBox, Text("选择支持的复原类型。", "Choose a supported resiliency type."));
         ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
         ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
         ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
@@ -3571,7 +3553,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (blockedItem is not null)
         {
             await ShowMessageAsync(
-                Text("计划被规则阻止", "Plan blocked by rules"),
+                Text("修改被规则阻止", "Changes blocked by rules"),
                 blockedItem.Decision?.Message ?? blockedItem.Title);
             return;
         }
@@ -3599,8 +3581,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (planned.DisplayItems.Any(item => item.CausesDataLoss))
         {
             warnings.Add(Text(
-                "计划会删除含有已用数据的分区或虚拟磁盘。",
-                "The plan deletes a partition or virtual disk that holds used data."));
+                "这些修改会删除含有已用数据的分区或虚拟磁盘。",
+                "These changes delete a partition or virtual disk that holds used data."));
         }
         if (joiningWithData.Length > 0)
         {
@@ -3969,35 +3951,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async void SavePoolProperties_Click(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.IsUsingSimulatedInventory)
-        {
-            if (!CanEditDraft || !_formDirty || HasInvalidSizeInput() || SelectedPool() is not { IsPrimordial: false }) return;
-            var prior = CaptureDraftState();
-            CaptureSelectedIntent();
-            _working = ApplyFormToWorking(_working);
-            _undoStack.Push(prior);
-            _redoStack.Clear();
-            _formDirty = false;
-            RefreshAll();
-            return;
-        }
         var pool = SelectedPool();
-        if (!ViewModel.IsUsingSimulatedInventory
-            || pool is null
-            || pool.IsPrimordial
-            || EditWorkspace.IsDraftPool(pool.StableId))
-        {
-            return;
-        }
-
-        if (!_formDirty)
+        if (!CanEditDraft || !_formDirty || HasInvalidSizeInput()
+            || pool is not { IsPrimordial: false }
+            || StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]))
         {
             return;
         }
 
         var priorState = CaptureDraftState();
-        CaptureSelectedIntent();
-        var merged = EditWorkspace.NormalizeTierCapacities(ApplyFormToWorking(_working));
+        var merged = ApplyFormToWorking(_working);
+        if (ViewModel.IsUsingSimulatedInventory)
+            merged = EditWorkspace.NormalizeTierCapacities(merged);
         var committed = EditingSession.Baseline;
         var objectChanged = EditWorkspace.HasPoolPropertyChanges(merged, committed, pool.StableId);
         var tierChanged = objectChanged && RebuildsTierParameters(merged, committed, pool.StableId);
@@ -4019,17 +3984,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        if (!objectChanged && !partitionChanged)
-        {
-            await ShowMessageAsync(
-                Text("没有可保存的属性修改", "No pool properties to save"),
-                Text(
-                    "当前表单没有可保存的池属性修改。",
-                    "The property form holds no changes to save."));
-            _formDirty = true;
-            return;
-        }
-
+        CaptureSelectedIntent();
         _undoStack.Push(priorState);
         _redoStack.Clear();
         _working = merged;

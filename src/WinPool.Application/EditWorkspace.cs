@@ -807,6 +807,18 @@ public sealed record StructureProblem(
             tolerated);
     }
 
+    /// <summary>Canonical automatic GPT data range, shared by real and simulated creation.</summary>
+    public static PartitionCreateGeometry GetAutomaticPartitionCreateGeometry(long sizeBytes, bool createMsr)
+    {
+        if (sizeBytes <= 0 || sizeBytes % PartitionCreateAlignmentBytes != 0)
+            throw new ArgumentException("Automatic partition layout needs a positive whole-MiB virtual-disk size.", nameof(sizeBytes));
+        var offset = (createMsr ? 17 : 1) * PartitionCreateAlignmentBytes;
+        var geometry = GetRealPartitionCreateGeometry(sizeBytes, offset, sizeBytes - offset);
+        if (geometry is not { CanCreate: true, StartOffsetBytes: long start } || start != offset)
+            throw new ArgumentException("The requested virtual-disk size cannot hold the selected MSR layout and a BasicData partition.", nameof(sizeBytes));
+        return geometry;
+    }
+
     /// <summary>
     /// Calculates real GPT creation geometry inside an observed gap, retaining the
     /// Windows planner's one-MiB reservation at each disk end.
