@@ -270,7 +270,8 @@ public partial class EditorPageBase : Page
     protected Task<bool> SubmitRealAsync(RealOperationIntentRequest intent) => SubmitRealAsync(intent, null, null);
 
     private async Task<bool> SubmitRealAsync(RealOperationIntentRequest intent,
-        RealStructureApplyAuthorization? authorization, Action? validateApplyContext)
+        RealStructureApplyAuthorization? authorization, Action? validateApplyContext,
+        Action<AgentRealOperationResponse>? registerFrozenStage = null)
     {
         if (!ViewModel.CanSubmitRealOperation || ViewModel.AgentConnection is null)
             return false;
@@ -297,7 +298,7 @@ public partial class EditorPageBase : Page
         try
         {
             return await SubmitReservedRealAsync(intent, ViewModel.AgentConnection, ViewModel.RealProductSessionId,
-                authorization, validateApplyContext);
+                authorization, validateApplyContext, registerFrozenStage);
         }
         finally
         {
@@ -308,7 +309,8 @@ public partial class EditorPageBase : Page
 
     private async Task<bool> SubmitReservedRealAsync(
         RealOperationIntentRequest intent, IAgentConnection connection, string productSessionId,
-        RealStructureApplyAuthorization? authorization, Action? validateApplyContext)
+        RealStructureApplyAuthorization? authorization, Action? validateApplyContext,
+        Action<AgentRealOperationResponse>? registerFrozenStage = null)
     {
         var systemId = ViewModel.ActiveDocument.SystemId;
         var flow = new RealOperationRequestSession(connection, productSessionId);
@@ -382,7 +384,16 @@ public partial class EditorPageBase : Page
             await CancelPreparedRealAsync(connection, productSessionId, frozen);
             throw;
         }
-        flow.Confirm(frozen);
+        try
+        {
+            flow.Confirm(frozen);
+            registerFrozenStage?.Invoke(frozen);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            await CancelPreparedRealAsync(connection, productSessionId, frozen);
+            throw;
+        }
         ReportRealActivity(Text("正在应用", "Applying"));
 
         ApplicationResult<AgentResponse>? accepted = null;
@@ -403,8 +414,9 @@ public partial class EditorPageBase : Page
             await CancelPreparedRealAsync(connection, productSessionId, frozen);
             return false;
         }
-        if (accepted is { IsSuccess: true, Value: AgentRealOperationResponse acceptedStatus })
-            ObserveFrozenRealStatus(plan, acceptedStatus);
+        if (accepted is { IsSuccess: true, Value: AgentRealOperationResponse acceptedStatus }
+            && ObserveFrozenRealStatus(plan, acceptedStatus, observeTerminal: false))
+            LastRealOperationResponse = acceptedStatus;
 
         // Accept is short-lived. Query the assigned identity after a lost reply;
         // never issue a second write request to infer whether the first ran.
@@ -428,7 +440,7 @@ public partial class EditorPageBase : Page
             }
             if (!status.IsSuccess || status.Value is not AgentRealOperationResponse current)
                 continue;
-            if (!ObserveFrozenRealStatus(plan, current))
+            if (!ObserveFrozenRealStatus(plan, current, observeTerminal: false))
                 continue;
             LastRealOperationResponse = current;
             var hasWritten = current.Steps.Any(step => step.State is RealOperationStepState.CallIssued
@@ -439,11 +451,16 @@ public partial class EditorPageBase : Page
             if (current.State is RealOperationState.Accepted or RealOperationState.Running)
                 continue;
             var succeeded = current.State == RealOperationState.Succeeded && !current.RequiresReconciliation;
-            if (succeeded || hasWritten)
+            var needsRefresh = succeeded || hasWritten
+                || current.State is RealOperationState.Failed or RealOperationState.PartiallyCompleted;
+            if (needsRefresh)
             {
                 ReportRealActivity(Text("正在刷新相关对象", "Refreshing related objects"), hasWritten);
                 await RefreshRealInventoryAsync(refreshScope);
             }
+            if (!ViewModel.RealStructureResults.Owns(current)
+                && (!needsRefresh || LastRealInventoryRefreshSucceeded))
+                ViewModel.ObserveRealOperation(current);
             var observedNoEffect = current.State == RealOperationState.Failed
                 && current.Code == "real.reconciliation_observed_tiered_creation_no_effect";
             PublishOperationFeedback(succeeded ? GlobalNotificationSeverity.Info : GlobalNotificationSeverity.Warning,
@@ -475,11 +492,15 @@ public partial class EditorPageBase : Page
         return false;
     }
 
-    private bool ObserveFrozenRealStatus(OperationPlan plan, AgentRealOperationResponse response)
+    private bool ObserveFrozenRealStatus(OperationPlan plan, AgentRealOperationResponse response, bool observeTerminal = true)
     {
         if (response.Plan.OperationId != plan.OperationId
             || !StringComparer.Ordinal.Equals(response.Plan.PlanHash, plan.PlanHash)) return false;
-        ViewModel.ObserveRealOperation(response);
+        // Structural terminal results retain the exact global barrier until
+        // the same stage's outputs and remaining draft have synchronized.
+        if (!RealOperationSubmissionState.IsReconciledTerminal(response)
+            || observeTerminal && !ViewModel.RealStructureResults.Owns(response))
+            ViewModel.ObserveRealOperation(response);
         return true;
     }
 
@@ -492,18 +513,28 @@ public partial class EditorPageBase : Page
                 frozen.Plan.OperationId, frozen.Plan.PlanHash, productSessionId,
                 CorrelationId.New()), CancellationToken.None);
             if (result.IsSuccess && result.Value is AgentRealOperationResponse current
-                && ObserveFrozenRealStatus(frozen.Plan, current)
-                && !ViewModel.RealOperationSubmission.IsBlocked)
-                return;
+                && ObserveFrozenRealStatus(frozen.Plan, current))
+            {
+                LastRealOperationResponse = current;
+                if (!ViewModel.RealStructureResults.Owns(current) && !ViewModel.RealOperationSubmission.IsBlocked)
+                    return;
+                if (ViewModel.RealStructureResults.Owns(current)
+                    && RealOperationSubmissionState.IsReconciledTerminal(current)) return;
+            }
             // Mode exit may already have cancelled this plan. Only a read-only
             // query for the same frozen identity can prove that after a lost
             // or rejected stop reply.
             result = await connection.SendAsync(new QueryAgentRealOperationRequest(
                 frozen.Plan.OperationId, CorrelationId.New()), CancellationToken.None);
             if (result.IsSuccess && result.Value is AgentRealOperationResponse queried
-                && ObserveFrozenRealStatus(frozen.Plan, queried)
-                && !ViewModel.RealOperationSubmission.IsBlocked)
-                return;
+                && ObserveFrozenRealStatus(frozen.Plan, queried))
+            {
+                LastRealOperationResponse = queried;
+                if (!ViewModel.RealStructureResults.Owns(queried) && !ViewModel.RealOperationSubmission.IsBlocked)
+                    return;
+                if (ViewModel.RealStructureResults.Owns(queried)
+                    && RealOperationSubmissionState.IsReconciledTerminal(queried)) return;
+            }
             PublishOperationResult(result.Status, result.Messages, result.CorrelationId,
                 Text("操作取消结果待核对", "Operation cancellation needs review"), "real");
         }

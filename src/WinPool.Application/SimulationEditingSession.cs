@@ -30,7 +30,16 @@ public sealed class SimulationEditingSession
 {
     public StorageSnapshot Baseline { get; private set; } = StorageSnapshot.Empty("editor");
     public WinPoolFacts? BaselineSourceFacts { get; private set; }
-    public StorageSnapshot Working { get; set; } = StorageSnapshot.Empty("editor");
+    private StorageSnapshot working = StorageSnapshot.Empty("editor");
+    public StorageSnapshot Working
+    {
+        get => working;
+        set { if (!ReferenceEquals(working, value)) ContentRevision = checked(ContentRevision + 1); working = value; }
+    }
+    public long ContentRevision { get; private set; }
+    public bool RealResultSynchronizationPending { get; private set; }
+    public void SetRealResultSynchronizationPending(bool pending) => RealResultSynchronizationPending = pending;
+    public void MarkDraftContentChanged() => ContentRevision = checked(ContentRevision + 1);
     public SystemId SystemId { get; private set; }
     public long BaselineRevision { get; private set; }
     public long BindingGeneration { get; private set; }
@@ -164,6 +173,7 @@ public sealed class SimulationEditingSession
     public void Bind(StorageSystemDocument document, StorageSnapshot working)
     {
         BindingGeneration = checked(BindingGeneration + 1);
+        RealResultSynchronizationPending = false;
         SystemId = document.SystemId;
         BaselineRevision = document.Revision;
         Baseline = document.Snapshot;
@@ -181,7 +191,8 @@ public sealed class SimulationEditingSession
         {
             Baseline = Baseline, BaselineSourceFacts = BaselineSourceFacts,
             SystemId = SystemId, BaselineRevision = BaselineRevision,
-            BindingGeneration = BindingGeneration, OutcomeUnknown = OutcomeUnknown,
+            BindingGeneration = BindingGeneration, ContentRevision = ContentRevision,
+            RealResultSynchronizationPending = RealResultSynchronizationPending, OutcomeUnknown = OutcomeUnknown,
             OutcomeUnknownOperationId = OutcomeUnknownOperationId,
             OutcomeUnknownPlanHash = OutcomeUnknownPlanHash,
             HasBaselineConflict = HasBaselineConflict, ConflictReason = ConflictReason,
@@ -197,6 +208,7 @@ public sealed class SimulationEditingSession
 
     public void Restore(EditorDraftState state)
     {
+        MarkDraftContentChanged();
         Working = state.Snapshot;
         PoolIntents.Clear();
         foreach (var pair in state.PoolIntents) PoolIntents[pair.Key] = pair.Value;
@@ -226,6 +238,7 @@ public sealed class SimulationEditingSession
     public void Discard()
     {
         BindingGeneration = checked(BindingGeneration + 1);
+        RealResultSynchronizationPending = false;
         Working = Baseline; UndoStack.Clear(); RedoStack.Clear(); MaximumSizeFields.Clear(); PoolIntents.Clear();
         CurrentPlan = null; PlanBuildError = string.Empty; OutcomeUnknown = false;
         HasBaselineConflict = false; ConflictReason = string.Empty; RealApplyMessage = string.Empty;

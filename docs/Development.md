@@ -75,6 +75,12 @@ Agent 的退出信号覆盖全部 App 启动目标，包括独立 `--page Welcom
 
 `SimulationEditingSession` 是结构页模拟与真实草稿的共同会话，保存 SystemId、Baseline/Revision、Working、`PoolEditIntent`、MAX 意图、undo/redo 和冲突/未知状态。模拟仍生成同一批类型化步骤并原子提交；真实路径只比较最终关系和参数，不执行模拟命令，也不将成员拖放翻译为 `MovePhysicalDisk`。新池和模拟池按成员介质创建或填充相应草稿层，沿用既有层规格／容量；AutoVD=false 仍会为 HDD 成员生成 HDD 模板，但不创建 VD。AutoVD 与 AutoPart 各自只控制 VD 创建和分区布局。已有成员只有在同一草稿显式解散旧池后，才可分配给新 replacement 草稿池。无成员的真实空池只保留输入，不生成创建计划；不支持的既有对象改动必须列明阻止原因，不能静默忽略。
 
+工作区的 `RealStructureResultSynchronization` 在准确冻结计划获当批授权后、首次 Accept 前登记阶段，持有 ID/hash、会话绑定代际、提案和类型化输出映射。传输失联、Running、轮询耗尽和成功待刷新共用这份上下文；完成同步前冻结所属草稿编辑。后台恢复只读取得完整相关事实后，先核验输出并重基剩余目标，再通知页面和释放全局身份；刷新失败保留阶段。明确无调用的取消／拒绝同样在后台刷新后推进基线，避免误标冲突。映射只合并已验证身份和布局进度，不回写捕获的整份旧参数；内容修订与重新绑定代际分开。重新绑定不能把旧输出写入新草稿，重启不恢复写入授权或自动续写。
+
+同池替换 VD 采用原草稿的明确删除加新建：规划器核对唯一受支持旧 VD 已删除，执行器在删除 Verified 且相关新事实证明准确池为空后才准备创建。盘符取消只对仍选中的同一分区／卷／物理父链恢复事实选择，不发“改回”调用；未知结果和写后未刷新不按取消处理。提交状态保留最近 128 个准确终态 ID/hash，拒绝这些身份的迟到非终态响应，同时允许新发现的未完成操作。
+
+后台采集更新同一系统时，MainWindow 通知现有编辑页处理新文档，不以重新导航代替刷新。`EditorInventoryRefreshState` 合并相同 SystemId／Revision／UpdatedAt／InventoryVersion 的重复通知；写后刷新已处理的批次也登记，避免排队的观察者再通知一次。页面沿用原规则：空闲无修改草稿重新绑定，有修改草稿保留并报告基线冲突，正在执行或结果同步中的草稿由所属阶段协调器处理。不能通过忽略版本差异绕过冻结核验。
+
 拓扑草稿拖动统一使用同一 `XamlRoot` 内的 pointer capture，不依赖管理员进程受限的原生 OLE 拖放。左键移动达到 8 DIP 后，拖动预览跟随指针；`CanDropDisk` 在目标高亮及释放前校验磁盘角色、池／层关系、介质匹配和当前编辑状态，仅有效目标高亮。Escape、capture lost 或控件卸载取消拖动；无效目标或非目标释放不改变草稿，拖后抑制误触选择。2026-10-08 的[管理员实机回归证据](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B3/internal-drag-success.jsonl)只核验当时的 WDC 普通新池草稿操作；当前成员介质建层、Apply 后拖动和原生建池／Apply 证据见 [Quality §10.7](Quality.md#2026-10-11-按介质自动建层与原-apply限定范围验收)。
 
 真实 Apply 的 `finally` 必须在 `_applyingRealDraft` 清零后调用 `RefreshExecutionMode()`，重新生成拓扑交互并恢复 `AllowDiskDrag`。若 Apply 中途 `RefreshAll`／`RefreshTopology` 在草稿仍标记 applying 时执行，重画时拖动权限会被关掉；finally 只恢复按钮状态不足以恢复拖动。最新 Release 与真实 Apply 后拖动复验已通过；WDC 末态恢复及 Samsung 保护比较也已通过，证据见 [Quality §10.7](Quality.md#2026-10-11-按介质自动建层与原-apply限定范围验收)。模拟 SSD 仅核验自动 Performance 层／VD 草稿并放弃，SCM 本轮未原生检查，不外推为全介质矩阵完成。

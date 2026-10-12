@@ -1686,11 +1686,39 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             var previous = volume.DriveLetter.Length == 1
                 ? char.ToUpperInvariant(volume.DriveLetter[0]) : (char?)null;
             var requested = next.Length == 1 ? char.ToUpperInvariant(next[0]) : (char?)null;
-            await SubmitRealAsync(RealPartitionIntent(OperationIntent.SetDriveLetter,
+            var target = new RealDriveLetterSelectionTarget(ViewModel.ActiveDocument.SystemId,
+                partition.StableId, volume.StableId,
+                RealDriveLetterSelectionRecovery.ResolvePhysicalDiskStableId(_working, partition.StableId));
+            var previousResponse = LastRealOperationResponse;
+            var succeeded = await SubmitRealAsync(RealPartitionIntent(OperationIntent.SetDriveLetter,
                 partition, new SetDriveLetterCommand(PartitionReference(partition),
                     previous, requested),
                 $"Drive letter changes from {previous?.ToString() ?? "none"} to {requested?.ToString() ?? "none"}",
                 "No partition data loss expected"));
+            var currentPartition = SelectedPartition();
+            var currentVolume = currentPartition is null
+                ? null : _working.VolumeForPartition(currentPartition.StableId);
+            if (ViewModel.CanSubmitRealOperation && currentPartition is not null && currentVolume is not null
+                && RealDriveLetterSelectionRecovery.ShouldRestoreFactSelection(
+                    LastRealOperationResponse, succeeded, LastRealInventoryRefreshSucceeded,
+                    ViewModel.RealOperationSubmission.IsBlocked, _filling, target,
+                    new RealDriveLetterSelectionTarget(ViewModel.ActiveDocument.SystemId,
+                        currentPartition.StableId, currentVolume.StableId,
+                        RealDriveLetterSelectionRecovery.ResolvePhysicalDiskStableId(_working,
+                            currentPartition.StableId)), previousResponse))
+            {
+                var wasFilling = _filling;
+                _filling = true;
+                try
+                {
+                    FillDriveLetters(currentPartition, currentVolume, autoAssign: false);
+                }
+                finally
+                {
+                    _filling = wasFilling;
+                }
+                UpdateButtonState();
+            }
             return;
         }
 

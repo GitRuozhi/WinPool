@@ -8,14 +8,6 @@ namespace WinPool_App;
 
 public partial class EditorPageBase
 {
-    private sealed record PendingVerifiedDraftRefresh(
-        AgentRealOperationResponse Response,
-        string Description,
-        Action? Map,
-        long BindingGeneration,
-        RealOperationIntentRequest? Proposal = null);
-    private readonly Dictionary<SimulationEditingSession, PendingVerifiedDraftRefresh> pendingDraftRefreshes = new();
-    private readonly Dictionary<SimulationEditingSession, PendingVerifiedDraftRefresh> outcomeUnknownDraftRefreshes = new();
     private readonly Dictionary<SimulationEditingSession, RealAutomaticLayoutProgress> automaticLayoutProgress = new();
     protected RealStructureDraftPreview BuildRealStructureDraftPreview(SimulationEditingSession session) =>
         RealStructureDraftPlanner.Build(session,
@@ -25,41 +17,7 @@ public partial class EditorPageBase
     {
         if (IsRealStructureApplyInProgress || !ViewModel.CanSubmitRealOperation
             || session.SystemId != ViewModel.ActiveDocument.SystemId) return false;
-        var recoveredVerifiedWrite = false;
-        if (pendingDraftRefreshes.TryGetValue(session, out var pending))
-        {
-            var anchors = pending.Response.Plan.Targets.Where(item => item.Kind == StorageObjectKind.PhysicalDisk).ToArray();
-            if (ViewModel.ActiveDocument.SourceFacts is not { } facts || anchors.Length == 0) return false;
-            try
-            {
-                ReportRealActivity(Text("正在重新核对已完成结果", "Refreshing the verified result"), true);
-                await RefreshRealInventoryAsync(StorageInventoryScopeFactory.Create(facts,
-                    pending.Response.Plan.OperationId, "draft-recovery", anchors));
-                if (!LastRealInventoryRefreshSucceeded) return false;
-                LastRealOperationResponse = pending.Response;
-                if (pending.BindingGeneration != session.BindingGeneration)
-                {
-                    pendingDraftRefreshes.Remove(session);
-                    automaticLayoutProgress.Remove(session);
-                    session.MarkBaselineConflict(ViewModel.ActiveDocument);
-                    session.RealApplyMessage = Text("已核对先前写入；新的草稿未被旧结果改写，请按新事实重新核对。", "The earlier write was refreshed. Its old mapping was not applied to the new draft; reconcile the new facts.");
-                    return false;
-                }
-                pending.Map?.Invoke();
-                RebaseRemainingDraft(session, ViewModel.ActiveDocument);
-                recoveredVerifiedWrite = pending.Response.State == RealOperationState.Succeeded
-                    && !pending.Response.RequiresReconciliation && pending.Response.Steps.Count > 0
-                    && pending.Response.Steps.All(step => step.State == RealOperationStepState.Verified);
-                session.RealApplyMessage = pending.Description;
-                pendingDraftRefreshes.Remove(session);
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
-            {
-                session.RealApplyMessage = Text("已完成写入的只读核对尚未完成，保留剩余目标：", "Read-only recovery of the completed write is incomplete; remaining target retained: ") + exception.Message;
-                return false;
-            }
-            finally { EndRealActivity(); }
-        }
+        if (ViewModel.RealStructureResults.HasPending(session)) return false;
         if (session.BaselineRevision != ViewModel.ActiveDocument.Revision
             || session.Baseline.SnapshotVersion != ViewModel.ActiveDocument.Snapshot.SnapshotVersion)
         {
@@ -70,7 +28,6 @@ public partial class EditorPageBase
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
         if (!draft.Preview.CanApply)
         {
-            if (recoveredVerifiedWrite && RealStructureDraftPlanner.IsSatisfiedByVerifiedBaseline(session)) return true;
             session.RealApplyMessage = string.Join(Environment.NewLine, draft.Preview.BlockingReasons);
             return false;
         }
@@ -150,11 +107,10 @@ public partial class EditorPageBase
                     var temporaryPoolId = poolId;
                     if (!await Stage(RealOperationProposalFactory.CreateSingleMemberPool(session.SystemId,
                         Id(StorageObjectKind.PhysicalDisk, creation.PhysicalDiskId), creation.Pool.FriendlyName, null),
-                        Text("已核对新池", "Verified new pool"), () =>
-                        {
-                            poolId = RequireVerifiedCreatedId(StorageObjectKind.StoragePool, "create-pool");
-                            RemapCreatedPool(session, temporaryPoolId, poolId);
-                        })) return false;
+                        Text("已核对新池", "Verified new pool"),
+                        new(StorageObjectKind.StoragePool, temporaryPoolId, "create-pool"))) return false;
+                    poolId = session.PoolIntents.Keys.Single(id => ViewModel.ActiveDocument.Snapshot.StoragePools
+                        .Any(pool => pool.StableId == id && pool.MemberPhysicalDiskIds.Contains(creation.PhysicalDiskId)));
                 }
                 var sizeTarget = Id(StorageObjectKind.StoragePool, poolId);
                 if ((creation.CreateTier || creation.CreateVirtualDisk) && intent.Layout == PoolVirtualDiskLayout.HddTiered)
@@ -176,6 +132,13 @@ public partial class EditorPageBase
                 string? vdId = intent.VerifiedVirtualDiskId;
                 if (creation.CreateVirtualDisk)
                 {
+                    // In a same-pool replacement this is reached only after the exact
+                    // old VD deletion stage and its scoped refresh have completed.
+                    var freshPool = ViewModel.ActiveDocument.Snapshot.StoragePools.SingleOrDefault(pool => pool.StableId == poolId);
+                    if (freshPool is null || ViewModel.ActiveDocument.SourceFacts?.Objects
+                        .SingleOrDefault(item => item.Id == poolId) is not { HasReliableIdentity: true }
+                        || ViewModel.ActiveDocument.Snapshot.VirtualDisks.Any(vd => vd.PoolStableId == poolId))
+                        throw new InvalidDataException("The fresh exact pool must be empty before preparing its first virtual disk.");
                     if (intent.VirtualDiskUseMaximum)
                         ReportRealActivity(Text("正在确定最大可用容量", "Determining maximum available capacity"));
                     var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(
@@ -198,14 +161,10 @@ public partial class EditorPageBase
                         : RealOperationProposalFactory.CreateFirstVirtualDisk(session.SystemId,
                             Id(StorageObjectKind.StoragePool, poolId), new(intent.VirtualDiskName!, capacity.SizeBytes, false,
                                 intent.CreateMsr, true, intent.VolumeName, intent.DriveLetter, capacity.UseMaximumSize));
-                    if (!await Stage(proposal, Text("已核对新 VD", "Verified new VD"), () =>
-                        {
-                            vdId = RequireVerifiedCreatedId(StorageObjectKind.VirtualDisk,
-                                intent.Layout == PoolVirtualDiskLayout.HddTiered ? "create-tiered-vdisk" : "create-vdisk");
-                            RemapCreatedVirtualDisk(session, poolId, vdId);
-                            session.PoolIntents[poolId] = intent with { VerifiedVirtualDiskId = vdId,
-                                PendingAutomaticLayout = intent.AutoCreatePartition };
-                        })) return false;
+                    if (!await Stage(proposal, Text("已核对新 VD", "Verified new VD"),
+                        new(StorageObjectKind.VirtualDisk, poolId,
+                            intent.Layout == PoolVirtualDiskLayout.HddTiered ? "create-tiered-vdisk" : "create-vdisk"))) return false;
+                    vdId = session.PoolIntents[poolId].VerifiedVirtualDiskId;
                 }
                 if (!intent.AutoCreatePartition) continue;
                 if (vdId is null) throw new InvalidDataException("Automatic layout lacks a verified VD identity.");
@@ -245,8 +204,7 @@ public partial class EditorPageBase
                         SetDriveLetterCommand => Text("已设置盘符", "Assigned the drive letter"),
                         _ => Text("已完成自动分区", "Completed automatic partitioning")
                     };
-                    if (!await Stage(next, description,
-                        observe: response => progress.Observe(next, response))) return false;
+                    if (!await Stage(next, description, layout: progress)) return false;
                 }
                 session.PoolIntents[poolId] = currentIntent with { PendingAutomaticLayout = false };
                 automaticLayoutProgress.Remove(session);
@@ -280,202 +238,36 @@ public partial class EditorPageBase
                 || session.Baseline.SnapshotVersion != ViewModel.ActiveDocument.Snapshot.SnapshotVersion)
                 throw new InvalidOperationException("The structural baseline changed outside this Apply.");
         }
-        async Task<bool> Stage(RealOperationIntentRequest proposal, string description, Action? map = null,
-            Action<AgentRealOperationResponse>? observe = null)
+        async Task<bool> Stage(RealOperationIntentRequest proposal, string description,
+            RealStructureResultSynchronization.OutputMapping? mapping = null, RealAutomaticLayoutProgress? layout = null)
         {
             ValidateApplyContext();
-            var succeeded = await SubmitRealAsync(proposal, authorization, ValidateApplyContext);
-            if (LastRealOperationResponse is { } durable)
+            var succeeded = await SubmitRealAsync(proposal, authorization, ValidateApplyContext,
+                frozen => ViewModel.RealStructureResults.Register(session, frozen, proposal, mapping, layout));
+            if (LastRealOperationResponse is { } response)
             {
-                if (durable.RequiresReconciliation)
+                ViewModel.RealStructureResults.ObserveUnresolved(response);
+                if (RealOperationSubmissionState.IsReconciledTerminal(response))
                 {
-                    session.MarkOutcomeUnknown(durable.Plan.OperationId, durable.Plan.PlanHash);
-                    outcomeUnknownDraftRefreshes[session] = new(durable, description, map,
-                        session.BindingGeneration, proposal);
-                }
-                observe?.Invoke(durable);
-                if ((durable.State == RealOperationState.Succeeded
-                        || durable.Steps.Any(step => step.State == RealOperationStepState.Verified))
-                    && !durable.RequiresReconciliation && !LastRealInventoryRefreshSucceeded)
-                {
-                    pendingDraftRefreshes[session] = new(durable, description,
-                        durable.State == RealOperationState.Succeeded ? map : null, session.BindingGeneration,
-                        proposal);
-                    session.RealApplyMessage = Text("写入已完成，等待只读刷新后继续剩余草稿。", "The write completed. Refresh its result before continuing the remaining draft.");
-                    return false;
+                    if (!ViewModel.RealStructureResults.Reconcile(response, ViewModel.ActiveDocument, LastRealInventoryRefreshSucceeded))
+                    {
+                        authorization.Stop();
+                        session.RealApplyMessage = Text("结果同步尚未完成，保留剩余目标并等待只读核对。", "Result synchronization is incomplete; remaining goals are retained for read-only recovery.");
+                        return false;
+                    }
+                    ViewModel.ObserveRealOperation(response);
+                    if (succeeded)
+                    {
+                        authorization.ValidateContext(ViewModel.ActiveDocument.SystemId, ViewModel.RealProductSessionId,
+                            session.BindingGeneration, session.HasBaselineConflict, session.OutcomeUnknown);
+                        authorization.ObserveVerified(proposal, response, ViewModel.ActiveDocument);
+                    }
                 }
             }
-            if (LastRealInventoryRefreshSucceeded && LastRealOperationResponse is { } response)
-            {
-                if (succeeded)
-                {
-                    authorization.ValidateContext(ViewModel.ActiveDocument.SystemId, ViewModel.RealProductSessionId,
-                        session.BindingGeneration, session.HasBaselineConflict, session.OutcomeUnknown);
-                    authorization.ObserveVerified(proposal, response, ViewModel.ActiveDocument);
-                }
-                else authorization.Stop();
-                if (succeeded) map?.Invoke();
-                if (response.Steps.Any(item => item.State == RealOperationStepState.Verified))
-                    RebaseRemainingDraft(session, ViewModel.ActiveDocument);
-                if (response.RequiresReconciliation)
-                {
-                    session.MarkOutcomeUnknown(response.Plan.OperationId, response.Plan.PlanHash);
-                    outcomeUnknownDraftRefreshes[session] = new(response, description, map,
-                        session.BindingGeneration, proposal);
-                }
-            }
-            if (succeeded) completed.Add(description);
-            else completed.Add(Text("应用停止；已完成的更改保留，剩余目标未执行。", "Apply stopped; completed changes remain and the remaining goal was not executed."));
+            if (!succeeded) authorization.Stop();
+            completed.Add(succeeded ? description : Text("应用停止；已完成的更改保留，剩余目标未执行。", "Apply stopped; completed changes remain and the remaining goal was not executed."));
             session.RealApplyMessage = string.Join(Environment.NewLine, completed);
             return succeeded;
         }
-    }
-
-    protected bool ReconcileUnknownRealStructureDraft(
-        SimulationEditingSession session,
-        AgentRealOperationResponse response,
-        bool inventoryRefreshed)
-    {
-        if (!HasMatchingUnknownRealStructureDraft(session, response, inventoryRefreshed)
-            || !outcomeUnknownDraftRefreshes.TryGetValue(session, out var pending))
-            return false;
-
-        try
-        {
-            LastRealOperationResponse = response;
-            if (pending.Proposal is { } proposal
-                && automaticLayoutProgress.TryGetValue(session, out var progress))
-                progress.ReconcileTerminal(proposal, response);
-            if (response.State == RealOperationState.Succeeded)
-                pending.Map?.Invoke();
-
-            // The terminal result and its complete scoped inventory close the
-            // exact unknown stage. Keep any later draft intent against the
-            // newly observed facts so ordinary apply validation can run.
-            RebaseRemainingDraft(session, ViewModel.ActiveDocument);
-            if (!session.ClearOutcomeUnknown(response.Plan.OperationId, response.Plan.PlanHash))
-                return false;
-
-            outcomeUnknownDraftRefreshes.Remove(session);
-            session.RealApplyMessage = Text(
-                "先前操作已取得最终结果并完成刷新；剩余草稿已按新事实重新核对。",
-                "The earlier operation reached a terminal result and refreshed; the remaining draft was reconciled with the new facts.");
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
-        {
-            session.RealApplyMessage = Text(
-                "先前操作已取得最终结果，但草稿仍需按新事实核对：",
-                "The earlier operation reached a terminal result, but the draft still needs reconciliation with the new facts: ")
-                + exception.Message;
-            return false;
-        }
-    }
-
-    protected bool HasMatchingUnknownRealStructureDraft(
-        SimulationEditingSession session,
-        AgentRealOperationResponse response,
-        bool inventoryRefreshed)
-    {
-        if (!inventoryRefreshed
-            || !RealOperationSubmissionState.IsReconciledTerminal(response)
-            || response.Steps.Any(step => step.State == RealOperationStepState.OutcomeUnknown)
-            || response.Plan.SystemId != session.SystemId
-            || ViewModel.ActiveDocument.SystemId != session.SystemId
-            || !session.OutcomeUnknown
-            || !outcomeUnknownDraftRefreshes.TryGetValue(session, out var pending))
-            return false;
-
-        if (pending.BindingGeneration != session.BindingGeneration)
-        {
-            outcomeUnknownDraftRefreshes.Remove(session);
-            return false;
-        }
-
-        return pending.Response.Plan.OperationId == response.Plan.OperationId
-            && StringComparer.Ordinal.Equals(pending.Response.Plan.PlanHash, response.Plan.PlanHash)
-            && session.OutcomeUnknownOperationId == response.Plan.OperationId
-            && StringComparer.Ordinal.Equals(session.OutcomeUnknownPlanHash, response.Plan.PlanHash);
-    }
-
-    private string RequireVerifiedCreatedId(StorageObjectKind kind, string stepId)
-    {
-        var step = LastRealOperationResponse?.Steps.SingleOrDefault(step => step.StepId == stepId
-            && step.State == RealOperationStepState.Verified)
-            ?? throw new InvalidDataException("The creation step has no verified output.");
-        using var evidence = JsonDocument.Parse(step.ResultEvidence ?? "{}");
-        var key = evidence.RootElement.GetProperty("CreatedObjectId").GetString();
-        if (string.IsNullOrWhiteSpace(key) || ViewModel.ActiveDocument.SourceFacts?.Objects
-            .SingleOrDefault(item => item.Id == key) is not { HasReliableIdentity: true })
-            throw new InvalidDataException("The verified creation output is absent from the fresh related inventory.");
-        var exists = kind switch
-        {
-            StorageObjectKind.StoragePool => ViewModel.ActiveDocument.Snapshot.StoragePools.Any(item => item.StableId == key),
-            StorageObjectKind.VirtualDisk => ViewModel.ActiveDocument.Snapshot.VirtualDisks.Any(item => item.StableId == key),
-            _ => false
-        };
-        return exists ? key : throw new InvalidDataException("The verified creation output has the wrong object kind.");
-    }
-
-    private static void RemapCreatedPool(SimulationEditingSession session, string temporaryId, string realId)
-    {
-        session.Working = session.Working with
-        {
-            StoragePools = session.Working.StoragePools.Where(pool => pool.StableId != temporaryId).ToArray(),
-            StorageTiers = session.Working.StorageTiers.Where(tier => tier.PoolStableId != temporaryId).ToArray(),
-            VirtualDisks = session.Working.VirtualDisks.Select(vd => vd.PoolStableId == temporaryId ? vd with { PoolStableId = realId } : vd).ToArray(),
-            PhysicalDisks = session.Working.PhysicalDisks.Select(disk => disk.PoolStableId == temporaryId ? disk with { PoolStableId = realId } : disk).ToArray()
-        };
-        if (session.PoolIntents.Remove(temporaryId, out var intent)) session.PoolIntents[realId] = intent;
-    }
-
-    private static void RemapCreatedVirtualDisk(SimulationEditingSession session, string poolId, string realId)
-    {
-        var temporaryVds = session.Working.VirtualDisks.Where(vd => vd.PoolStableId == poolId
-            && EditWorkspace.IsDraftVirtualDisk(vd.StableId)).Select(vd => vd.StableId).ToHashSet();
-        var temporaryDisks = session.Working.OsDisks.Where(disk => temporaryVds.Contains(disk.VirtualDiskStableId ?? ""))
-            .Select(disk => disk.StableId).ToHashSet();
-        var temporaryPartitions = session.Working.Partitions.Where(partition => temporaryDisks.Contains(partition.OsDiskStableId ?? ""))
-            .Select(partition => partition.StableId).ToHashSet();
-        session.Working = session.Working with
-        {
-            VirtualDisks = session.Working.VirtualDisks.Where(vd => !temporaryVds.Contains(vd.StableId)).ToArray(),
-            OsDisks = session.Working.OsDisks.Where(disk => !temporaryDisks.Contains(disk.StableId)).ToArray(),
-            Partitions = session.Working.Partitions.Where(partition => !temporaryPartitions.Contains(partition.StableId)).ToArray(),
-            Volumes = session.Working.Volumes.Where(volume => !temporaryPartitions.Contains(volume.PartitionStableId ?? "")).ToArray()
-        };
-    }
-
-    private static void RebaseRemainingDraft(SimulationEditingSession session, StorageSystemDocument fresh)
-    {
-        var old = session.Baseline;
-        var target = session.Working;
-        var actual = fresh.Snapshot;
-        static T[] Merge<T>(IReadOnlyList<T> baseline, IReadOnlyList<T> desired, IReadOnlyList<T> live, Func<T, string> id)
-        {
-            var oldIds = baseline.Select(id).ToHashSet();
-            var desiredIds = desired.Select(id).ToHashSet();
-            var liveIds = live.Select(id).ToHashSet();
-            return live.Where(item => !oldIds.Contains(id(item)) || desiredIds.Contains(id(item)))
-                .Concat(desired.Where(item => !oldIds.Contains(id(item)) && !liveIds.Contains(id(item)))).ToArray();
-        }
-        var remaining = target with
-        {
-            SnapshotVersion = actual.SnapshotVersion, ScannedAt = actual.ScannedAt,
-            PhysicalDisks = actual.PhysicalDisks.Select(live =>
-            {
-                var desired = target.PhysicalDisks.SingleOrDefault(item => item.StableId == live.StableId);
-                var prior = old.PhysicalDisks.SingleOrDefault(item => item.StableId == live.StableId);
-                return desired is not null && prior is not null && desired.PoolStableId != prior.PoolStableId
-                    ? live with { PoolStableId = desired.PoolStableId } : live;
-            }).ToArray(),
-            StoragePools = Merge(old.StoragePools, target.StoragePools, actual.StoragePools, item => item.StableId),
-            StorageTiers = Merge(old.StorageTiers, target.StorageTiers, actual.StorageTiers, item => item.StableId),
-            VirtualDisks = Merge(old.VirtualDisks, target.VirtualDisks, actual.VirtualDisks, item => item.StableId),
-            OsDisks = Merge(old.OsDisks, target.OsDisks, actual.OsDisks, item => item.StableId),
-            Partitions = Merge(old.Partitions, target.Partitions, actual.Partitions, item => item.StableId),
-            Volumes = Merge(old.Volumes, target.Volumes, actual.Volumes, item => item.StableId)
-        };
-        session.RebaseVerified(fresh, session.Capture() with { Snapshot = remaining });
     }
 }

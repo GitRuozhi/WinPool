@@ -146,14 +146,21 @@ public sealed class RealStructureDraftPlannerTests
         { Layout = PoolVirtualDiskLayout.HddTiered, VerifiedVirtualDiskId = vd.StableId, PendingAutomaticLayout = true };
     }
 
-    private static SimulationEditingSession NativeTierSession()
+    private static SimulationEditingSession NativeTierSession(bool keepUnusedTemplate = true)
     {
         var snapshot = ExistingSnapshot(withVirtualDisk: true, withTemplate: true);
         var pool = snapshot.StoragePools.Single(item => !item.IsPrimordial);
         var vd = snapshot.VirtualDisks.Single() with { Size = 32 * GiB, FootprintOnPool = 32 * GiB, AllocatedSize = 32 * GiB };
         var actual = snapshot.StorageTiers.Single() with { Size = 32 * GiB, FootprintOnPool = 32 * GiB };
-        var template = actual with { StableId = "tier:unused-template", VirtualDiskStableId = null, Size = 0, FootprintOnPool = 0 };
-        snapshot = snapshot with { VirtualDisks = [vd], StorageTiers = [actual, template] };
+        var template = actual with
+        {
+            StableId = "tier:unused-template", VirtualDiskStableId = null,
+            Size = 0, FootprintOnPool = 0, MemberPhysicalDiskIds = []
+        };
+        snapshot = snapshot with
+        {
+            VirtualDisks = [vd], StorageTiers = keepUnusedTemplate ? [actual, template] : [actual]
+        };
         var document = Document(snapshot);
         var facts = WinPoolSimulationFacts.Create(snapshot, document.SystemId);
         facts = facts with
@@ -368,6 +375,181 @@ public sealed class RealStructureDraftPlannerTests
         Assert.True(plan.Preview.CanApply);
         Assert.Equal(vd.StableId, Assert.Single(plan.RemovedVirtualDisks).StableId);
         Assert.Empty(plan.RemovedPools);
+        Assert.Empty(plan.Creations);
+    }
+
+    [Fact]
+    public void ExplicitlyDeletedSoleSupportedVdCanBeRecreatedInTheSamePool()
+    {
+        var session = Session(ExistingSnapshot(withVirtualDisk: true));
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        var oldVd = Assert.Single(session.Working.VirtualDisks);
+        session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, oldVd.StableId);
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "Replacement");
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            VirtualDiskName = "Replacement",
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = false,
+            VirtualDiskSizeBytes = 32 * GiB
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        Assert.Empty(plan.RemovedPools);
+        Assert.Equal(oldVd.StableId, Assert.Single(plan.RemovedVirtualDisks).StableId);
+        var creation = Assert.Single(plan.Creations);
+        Assert.False(creation.CreatePool);
+        Assert.True(creation.CreateVirtualDisk);
+        Assert.Equal(pool.StableId, creation.Pool.StableId);
+        Assert.Contains("Delete VD Existing VD", plan.Preview.Actions[0], StringComparison.Ordinal);
+        Assert.Contains("Create ordinary VD Replacement", plan.Preview.Actions[^1], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("retained-old")]
+    [InlineData("two-source-vds")]
+    [InlineData("two-draft-vds")]
+    [InlineData("unsupported-old")]
+    public void SamePoolVdReplacementRequiresOneAccuratelyDeletedSupportedSource(string defect)
+    {
+        var snapshot = ExistingSnapshot(withVirtualDisk: true);
+        var oldVd = snapshot.VirtualDisks.Single();
+        if (defect == "unsupported-old")
+            snapshot = snapshot with { VirtualDisks = [oldVd with { Interleave = 262144 }] };
+        else if (defect == "two-source-vds")
+            snapshot = snapshot with { VirtualDisks = [oldVd, oldVd with { StableId = "vd:second", FriendlyName = "Second VD" }] };
+
+        var session = Session(snapshot);
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        var sourceVds = session.Working.VirtualDisks.ToArray();
+        foreach (var sourceVd in sourceVds)
+            session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, sourceVd.StableId);
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "Replacement");
+        if (defect is "retained-old" or "two-source-vds")
+            session.Working = session.Working with
+            {
+                VirtualDisks = session.Working.VirtualDisks.Concat(sourceVds).ToArray()
+            };
+        if (defect == "two-draft-vds")
+        {
+            var firstDraft = session.Working.VirtualDisks.Single(vd => EditWorkspace.IsDraftVirtualDisk(vd.StableId));
+            session.Working = session.Working with
+            {
+                VirtualDisks = session.Working.VirtualDisks.Append(firstDraft with
+                {
+                    StableId = $"{EditWorkspace.DraftVirtualDiskPrefix}second",
+                    FriendlyName = "Second replacement"
+                }).ToArray()
+            };
+        }
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            VirtualDiskName = "Replacement",
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = false,
+            VirtualDiskSizeBytes = 32 * GiB
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply, defect);
+        Assert.NotEmpty(plan.Preview.BlockingReasons);
+        Assert.Empty(plan.RemovedVirtualDisks);
+        Assert.Empty(plan.Creations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SamePoolTieredVdReplacementUsesOnlyTheTargetHddTemplate(bool hasUnusedTemplate)
+    {
+        var session = NativeTierSession(keepUnusedTemplate: hasUnusedTemplate);
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        var oldVd = Assert.Single(session.Working.VirtualDisks);
+        session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, oldVd.StableId);
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "Tiered replacement");
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            Layout = PoolVirtualDiskLayout.HddTiered,
+            VirtualDiskName = "Tiered replacement",
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = false,
+            VirtualDiskSizeBytes = 32 * GiB
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        Assert.Equal(oldVd.StableId, Assert.Single(plan.RemovedVirtualDisks).StableId);
+        var creation = Assert.Single(plan.Creations);
+        Assert.True(creation.CreateVirtualDisk);
+        Assert.Equal(!hasUnusedTemplate, creation.CreateTier);
+    }
+
+    [Fact]
+    public void FreshUnassignedHddTemplateCanBeReusedThroughItsExactPoolParent()
+    {
+        var session = NativeTierSession(keepUnusedTemplate: true);
+        var pool = session.Baseline.StoragePools.Single(item => !item.IsPrimordial);
+        var template = Assert.Single(session.Baseline.StorageTiers,
+            item => item.PoolStableId == pool.StableId && item.VirtualDiskStableId is null);
+        var memberId = Assert.Single(pool.MemberPhysicalDiskIds);
+        var facts = Assert.IsType<WinPoolFacts>(session.BaselineSourceFacts);
+        Assert.Empty(template.MemberPhysicalDiskIds);
+        var poolMember = Assert.Single(facts.Relationships, edge => edge.Kind == "pool-member"
+            && edge.FromId == pool.StableId && !edge.IsRetained);
+        Assert.Equal(memberId, poolMember.ToId);
+        Assert.DoesNotContain(facts.Relationships, edge => edge.Kind == "tier-member"
+            && edge.FromId == template.StableId);
+
+        var oldVd = Assert.Single(session.Working.VirtualDisks);
+        session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, oldVd.StableId);
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working,
+            pool.StableId, "Tiered replacement");
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            Layout = PoolVirtualDiskLayout.HddTiered,
+            VirtualDiskName = "Tiered replacement",
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = false,
+            VirtualDiskSizeBytes = 32 * GiB
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        Assert.False(Assert.Single(plan.Creations).CreateTier);
+    }
+
+    [Fact]
+    public void SamePoolTieredReplacementRejectsATemplateOwnedByAnotherMember()
+    {
+        var session = NativeTierSession();
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        var oldVd = Assert.Single(session.Working.VirtualDisks);
+        session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, oldVd.StableId);
+        session.Working = session.Working with
+        {
+            StorageTiers = session.Working.StorageTiers.Select(tier => tier.VirtualDiskStableId is null
+                ? tier with { MemberPhysicalDiskIds = ["physical:other"] } : tier).ToArray()
+        };
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId,
+            "Tiered replacement");
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            Layout = PoolVirtualDiskLayout.HddTiered,
+            VirtualDiskName = "Tiered replacement",
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = false,
+            VirtualDiskSizeBytes = 32 * GiB
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply);
+        Assert.NotEmpty(plan.Preview.BlockingReasons);
         Assert.Empty(plan.Creations);
     }
 

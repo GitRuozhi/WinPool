@@ -48,9 +48,7 @@ public sealed partial class MainWindow : Window
     private bool _suppressWorkspaceStatePersistence;
     private bool _systemSelectorRefreshPending;
     private string? _pendingSystemSelectionId;
-    private SystemId? _editorSystemId;
-    private long _editorDocumentRevision;
-    private DateTimeOffset _editorDocumentUpdatedAt;
+    private readonly EditorInventoryRefreshState _editorInventoryRefresh = new();
     private bool _requestingElevation;
     private bool _closingForElevationHandoff;
     private bool _closePreparationStarted;
@@ -1537,9 +1535,7 @@ public sealed partial class MainWindow : Window
                     typeof(StorageStructurePage),
                     new EditorNavigationParameter(ViewModel, editorTargetStableId)))
                 {
-                    _editorSystemId = ViewModel.SelectedSystem.SystemId;
-                    _editorDocumentRevision = ViewModel.SelectedSystem.Revision;
-                    _editorDocumentUpdatedAt = ViewModel.SelectedSystem.UpdatedAt;
+                    _editorInventoryRefresh.Remember(ViewModel.SelectedSystem);
                 }
                 break;
             case ShellPageKind.DiskPartition:
@@ -1547,9 +1543,7 @@ public sealed partial class MainWindow : Window
                     typeof(DiskPartitionPage),
                     new EditorNavigationParameter(ViewModel, editorTargetStableId)))
                 {
-                    _editorSystemId = ViewModel.SelectedSystem.SystemId;
-                    _editorDocumentRevision = ViewModel.SelectedSystem.Revision;
-                    _editorDocumentUpdatedAt = ViewModel.SelectedSystem.UpdatedAt;
+                    _editorInventoryRefresh.Remember(ViewModel.SelectedSystem);
                 }
                 break;
             case ShellPageKind.Test:
@@ -1567,10 +1561,13 @@ public sealed partial class MainWindow : Window
 
     internal void RefreshActiveEditorAfterRealInventory(EditorPageBase source)
     {
-        if (RootFrame.Content is EditorPageBase activePage
-            && !ReferenceEquals(activePage, source))
+        if (RootFrame.Content is EditorPageBase activePage)
         {
-            activePage.RefreshActiveRealInventoryFromWorkspace();
+            if (!ReferenceEquals(activePage, source))
+                activePage.RefreshActiveRealInventoryFromWorkspace();
+            // The source already handled its own write refresh. Consume this
+            // batch so the queued SelectedSystem observer does not notify twice.
+            _editorInventoryRefresh.Remember(ViewModel.SelectedSystem);
         }
     }
 
@@ -1652,12 +1649,15 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        // The editors already refresh their own content after a commit.
-        // Re-navigating for a new revision of the same system replaces the
-        // entire page, flashes, and discards its selection and scroll state.
-        // Compare at dispatch time so queued duplicate notifications coalesce.
-        if (_editorSystemId == ViewModel.SelectedSystem.SystemId)
+        // A background inventory batch updates the workspace without an editor
+        // commit callback. Notify the existing page so a clean draft binds the
+        // new facts and a dirty draft follows its existing conflict policy.
+        // Compare at dispatch time to coalesce observer and write-refresh replies.
+        if (_editorInventoryRefresh.IsSameSystem(ViewModel.SelectedSystem))
         {
+            if (RootFrame.Content is EditorPageBase editor)
+                _editorInventoryRefresh.NotifyChangedSameSystem(ViewModel.SelectedSystem,
+                    editor.RefreshActiveRealInventoryFromWorkspace);
             return;
         }
 
@@ -1666,10 +1666,7 @@ public sealed partial class MainWindow : Window
         SelectShellPage(SelectedShellItem.Page);
     }
 
-    private bool EditorDocumentChanged() =>
-        _editorSystemId != ViewModel.SelectedSystem.SystemId
-        || _editorDocumentRevision != ViewModel.SelectedSystem.Revision
-        || _editorDocumentUpdatedAt != ViewModel.SelectedSystem.UpdatedAt;
+    private bool EditorDocumentChanged() => _editorInventoryRefresh.HasChanged(ViewModel.SelectedSystem);
 
     private void ViewModel_WorkspaceSelectionChanged(object? sender, EventArgs e)
     {

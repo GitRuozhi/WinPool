@@ -84,6 +84,13 @@ public static class RealStructureDraftPlanner
                 && before.VirtualDisks.All(old => old.StableId != vd.StableId)).ToArray();
             if (draftVds.Any(vd => !EditWorkspace.IsDraftVirtualDisk(vd.StableId)))
                 blocks.Add(T("新 VD 必须来自本地草稿，不能使用未核验的源身份。", "A new VD must be a local draft, never an unverified source identity."));
+            var sourceVds = before.VirtualDisks.Where(vd => vd.PoolStableId == pool.StableId).ToArray();
+            var explicitlyRemovedSourceVds = sourceVds.Where(vd => removedVds.Any(removed => removed.StableId == vd.StableId)).ToArray();
+            var retainedSourceVds = sourceVds.Where(vd => after.VirtualDisks.Any(current =>
+                current.StableId == vd.StableId && current.PoolStableId == pool.StableId)).ToArray();
+            var replacesSoleSourceVd = !newPool && draftVds.Length == 1 && sourceVds.Length == 1
+                && explicitlyRemovedSourceVds.Length == 1 && retainedSourceVds.Length == 0
+                && SupportedObservedVirtualDisk(session, explicitlyRemovedSourceVds[0]);
             if (!newPool)
             {
                 if (!original!.MemberPhysicalDiskIds.Order().SequenceEqual(pool.MemberPhysicalDiskIds.Order()))
@@ -122,8 +129,10 @@ public static class RealStructureDraftPlanner
             var priorOwner = priorOwners.FirstOrDefault();
             if (newPool && priorOwner is not null && removedPools.All(item => item.StableId != priorOwner.StableId))
                 blocks.Add(T("不能直接迁移池成员；同一草稿须显式解散其旧池。", "A member cannot be migrated directly; its previous pool must be explicitly dissolved in this draft."));
-            if (draftVds.Length > 1 || (draftVds.Length > 0 && !newPool && before.VirtualDisks.Any(vd => vd.PoolStableId == pool.StableId)))
-                blocks.Add(T("仅支持已有空池的首块 VD，不支持替换时保留旧 VD 或第二块 VD。", "Only the first VD in an existing empty pool is supported; a second VD is not supported."));
+            if (draftVds.Length > 1 || (draftVds.Length > 0 && !newPool
+                && sourceVds.Length > 0 && !replacesSoleSourceVd))
+                blocks.Add(T("仅支持已有空池的首块 VD，或同池明确删除唯一受支持旧 VD 后创建；保留旧 VD 或第二块 VD 不支持。",
+                    "Only the first VD in an empty pool or creation after explicitly deleting its sole supported VD is supported; retaining an old VD or adding a second VD is unsupported."));
             if (!session.PoolIntents.TryGetValue(pool.StableId, out var intent))
             {
                 blocks.Add(T("池草稿缺少原属性区的创建参数，请保存属性。", "Save the original property form: this pool draft has no creation parameters."));
@@ -132,9 +141,10 @@ public static class RealStructureDraftPlanner
             var createVd = draftVds.Length > 0;
             var plannedTiers = after.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId
                 && tier.MemberPhysicalDiskIds.Count > 0 && before.StorageTiers.All(old => old.StableId != tier.StableId)).ToArray();
+            var targetHddTemplates = after.StorageTiers.Where(tier => IsExactHddTemplateForMember(tier,
+                pool.StableId, memberId)).ToArray();
             var createTier = intent.Layout == PoolVirtualDiskLayout.HddTiered
-                && !before.StorageTiers.Any(tier => tier.PoolStableId == pool.StableId)
-                && (newPool || createVd || pendingTier);
+                && (newPool || ((createVd || pendingTier) && targetHddTemplates.Length == 0));
             if (newPool && plannedTiers.Length > 0)
             {
                 if (intent.Layout != PoolVirtualDiskLayout.HddTiered || plannedTiers.Length != 1
@@ -163,10 +173,11 @@ public static class RealStructureDraftPlanner
                 blocks.Add(T("新 VD 草稿仅支持 Simple/Fixed、1 列及 64 KiB interleave。", "A new VD draft requires Simple/Fixed, one column and 64 KiB interleave."));
             if (!newPool && createVd)
             {
-                var existingTiers = before.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId).ToArray();
+                var existingTiers = after.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId).ToArray();
                 if (intent.Layout == PoolVirtualDiskLayout.Ordinary && existingTiers.Length > 0
                     || intent.Layout == PoolVirtualDiskLayout.HddTiered
-                        && (existingTiers.Length > 1 || existingTiers.Any(tier => !SupportedHddTier(tier) || tier.VirtualDiskStableId is not null)))
+                        && (existingTiers.Length > 1 || existingTiers.Any(tier =>
+                            !IsExactHddTemplateForMember(tier, pool.StableId, memberId))))
                     blocks.Add(T("当前池模板不匹配所选布局；不能降级或忽略已有模板。", "The existing pool templates do not match the requested layout."));
             }
             if (continueLayout)
@@ -400,6 +411,11 @@ public static class RealStructureDraftPlanner
         && tier.ResiliencySettingName.Equals("Simple", StringComparison.OrdinalIgnoreCase)
         && tier.NumberOfColumns == 1 && tier.Interleave == 65536
         && tier.NumberOfDataCopies is null or 1 && tier.PhysicalDiskRedundancy is null or 0;
+
+    private static bool IsExactHddTemplateForMember(StorageTierInfo tier, string poolId, string memberId) =>
+        tier.PoolStableId == poolId && tier.VirtualDiskStableId is null && SupportedHddTier(tier)
+        && (tier.MemberPhysicalDiskIds.Count == 0
+            || tier.MemberPhysicalDiskIds.Count == 1 && tier.MemberPhysicalDiskIds[0] == memberId);
 
     private static bool NestedObjectsDiffer<T>(IReadOnlyList<T> before, IReadOnlyList<T> after, Func<T, string> id,
         Func<T, T, bool>? equal = null)

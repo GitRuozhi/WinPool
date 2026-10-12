@@ -32,7 +32,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private RealStructureDraftPreview? _realDraftPreview;
     private bool CanEditDraft => (ViewModel.IsUsingSimulatedInventory || ViewModel.CanSubmitRealOperation)
         && !_applyingRealDraft && !IsRealStructureApplyInProgress && !_renameInProgress
-        && !_outcomeUnknown && !EditingSession.HasBaselineConflict
+        && !_outcomeUnknown && !EditingSession.RealResultSynchronizationPending && !EditingSession.HasBaselineConflict
         && (ViewModel.IsUsingSimulatedInventory || !ViewModel.IsRealOperationBusy);
 
     private bool _formDirty;
@@ -197,7 +197,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RealTopologyOverlay.Visibility = showOverlay ? Visibility.Visible : Visibility.Collapsed;
         RealTopologyProgress.IsActive = showOverlay;
         RealTopologyPhase.Text = phase;
-        UpdateButtonState();
+        if (isBusy) UpdateButtonState();
+        else RefreshExecutionMode();
     }
 
     protected override void OnRealInventoryRefreshed()
@@ -205,7 +206,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (ViewModel.IsUsingSimulatedInventory)
             return;
 
-        if (_applyingRealDraft || IsRealStructureApplyInProgress || _renameInProgress)
+        if (_applyingRealDraft || IsRealStructureApplyInProgress || _renameInProgress
+            || EditingSession.RealResultSynchronizationPending)
             return;
         if (HasUncommittedChanges())
         {
@@ -248,17 +250,25 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     protected override bool OnRecoveredRealOperation(AgentRealOperationResponse response, bool inventoryRefreshed)
     {
-        if (ReconcileUnknownRealStructureDraft(EditingSession, response, inventoryRefreshed))
+        // The workspace maps exact owned stages before it notifies any view.
+        // A terminal with a pending stage is not safe to release yet.
+        if (ViewModel.RealStructureResults.Owns(response))
         {
-            RefreshAll();
-            return true;
+            UpdateButtonState();
+            return false;
         }
-
-        UpdateButtonState();
-        // Keep the global exact-operation barrier in place if this page owns
-        // the matching unknown draft and could not safely reconcile it. The
-        // workspace will retry the terminal status after another fresh scan.
-        return !HasMatchingUnknownRealStructureDraft(EditingSession, response, inventoryRefreshed);
+        var selectedDraftVd = EditWorkspace.IsDraftVirtualDisk(_selectedPoolVdiskId ?? string.Empty);
+        var selectedPoolWasRemoved = _selectedPoolId is not null
+            && !_working.StoragePools.Any(pool => pool.StableId == _selectedPoolId);
+        NormalizeSelection();
+        var physicalTargets = response.Plan.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+        if (selectedPoolWasRemoved && physicalTargets.Length == 1)
+            RestoreRealSelection(physicalTargets[0].ProviderKey);
+        if (selectedDraftVd && _selectedPoolId is { } poolId
+            && _poolIntents.TryGetValue(poolId, out var intent))
+            _selectedPoolVdiskId = intent.VerifiedVirtualDiskId;
+        RefreshAll();
+        return true;
     }
 
     private bool HasRoleDisks(string poolId, string usage) =>
@@ -2358,6 +2368,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private PoolEditIntent SelectedCreationIntent()
     {
         var savedPartition = _selectedPoolId is null ? null : CommittedPrimaryPartition(_selectedPoolId);
+        // A replacement VD has its own layout inputs. The deleted VD's volume
+        // remains in the baseline, but must not override the new label field.
+        if (savedPartition is not null && _working.Partitions.All(item => item.StableId != savedPartition.StableId))
+            savedPartition = null;
         _poolIntents.TryGetValue(_selectedPoolId ?? string.Empty, out var prior);
         // A partially verified workflow keeps the frozen original layout goal.
         // Provider-created unformatted partitions and later preference changes
@@ -2383,12 +2397,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void CaptureSelectedIntent()
     {
-        if (_filling || string.IsNullOrWhiteSpace(_selectedPoolId))
+        if (_filling || EditingSession.RealResultSynchronizationPending || string.IsNullOrWhiteSpace(_selectedPoolId))
         {
             return;
         }
 
-        _poolIntents[_selectedPoolId] = SelectedCreationIntent();
+        var current = SelectedCreationIntent();
+        if (!_poolIntents.TryGetValue(_selectedPoolId, out var previous) || current != previous)
+            EditingSession.MarkDraftContentChanged();
+        _poolIntents[_selectedPoolId] = current;
     }
 
     private EditorDraftState CaptureDraftState() => EditingSession.Capture();

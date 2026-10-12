@@ -1,3 +1,4 @@
+using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
@@ -12,6 +13,7 @@ public sealed partial class WorkspaceViewModel
     private Task? _realOperationRecoveryRefresh;
     private Task? _realOperationRecoveryPoll;
     private bool _refreshingRecoveredRealOperation;
+    public RealStructureResultSynchronization RealStructureResults { get; } = new();
     public bool IsRealOperationBusy { get; private set; }
     public bool IsRealGraphObscured { get; private set; }
     public string RealOperationPhase { get; private set; } = string.Empty;
@@ -101,7 +103,7 @@ public sealed partial class WorkspaceViewModel
     {
         ScanError = exception.Message;
         _notificationService.PublishWarning(Localization["Warning"],
-            "磁盘操作结果已记录，但相关视图未刷新；请查询结果并重试只读刷新。 / The operation result is recorded, but its related view is stale. Query the result and retry a read-only refresh.",
+            "磁盘操作结果已记录，但相关视图未刷新；后台将继续只读核对。 / The operation result is recorded, but its related view is stale. Background read-only recovery will continue.",
             "real", $"real:refresh:{scope.Key}", options: new GlobalNotificationOptions { Detail = exception.Message });
     }
 
@@ -160,7 +162,7 @@ public sealed partial class WorkspaceViewModel
                     ObserveRealOperation(status);
                 }, cancellationToken);
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 // A list failure cannot discard a terminal status already
@@ -170,12 +172,10 @@ public sealed partial class WorkspaceViewModel
             }
             foreach (var status in closed)
             {
-                var refreshed = await RefreshRecoveredRealOperationAsync(status, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                // Keep the retained identity on a failed refresh so the next
-                // automatic query can retry its read-only scoped refresh.
-                var editorRecovered = NotifyRecoveredRealOperation(status, refreshed);
-                if (refreshed && editorRecovered) ObserveRealOperation(status);
+                await RealStructureResults.RecoverAsync(status,
+                    () => RefreshRecoveredRealOperationAsync(status, cancellationToken),
+                    () => SystemCatalog.Systems.Single(document => document.IsLocal && document.SystemId == status.Plan.SystemId),
+                    NotifyRecoveredRealOperation, ObserveRealOperation, cancellationToken);
             }
             // A terminal retained plan can have hidden another recoverable
             // identity in the same list. Adopt it before exposing submission.
@@ -185,14 +185,10 @@ public sealed partial class WorkspaceViewModel
                 _recoveredRealOperationFeedback.TryAdd(status.Plan.OperationId, string.Empty);
                 ObserveRealOperation(status);
             }
-            // Restart restores query/reconciliation only. It does not arm real
-            // mode, reconstruct tokens, replay calls, or resume a draft.
-            if (!IsRealOperationBusy)
-                SetRealOperationActivity(false, false,
-                    RealOperationSubmission.IsBlocked ? "待核对 / Needs reconciliation" : string.Empty);
+
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
         {
             if (!cancellationToken.IsCancellationRequested)
                 _notificationService.PublishWarning(Localization["Warning"], exception.Message,
@@ -202,7 +198,15 @@ public sealed partial class WorkspaceViewModel
         {
             _refreshingRecoveredRealOperation = false;
             if (!cancellationToken.IsCancellationRequested)
+            {
                 OnPropertyChanged(nameof(CanSubmitRealOperation));
+                // Notify views only after both the exact identity and the recovery
+                // busy gate have settled, so topology interaction is rebuilt enabled.
+                // Recovery does not arm real mode, restore tokens or resume any draft.
+                if (!IsRealOperationBusy)
+                    SetRealOperationActivity(false, false,
+                        RealOperationSubmission.IsBlocked ? "待核对 / Needs reconciliation" : string.Empty);
+            }
         }
     }
 

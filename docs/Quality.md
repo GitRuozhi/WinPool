@@ -1,6 +1,20 @@
 # WinPool 验证与验收
 
-日期：2026-10-11。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-12。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+
+## 2026-10-12 审阅修复：工程及限定原生验收完成
+
+本轮针对 F1–F4 修复真实提交恢复和编辑状态衔接。F1/F2 将接受操作的恢复上下文保留到准确结果及作用域刷新完成后再映射草稿，避免迟到结果覆盖用户后续编辑；生产恢复协调器自动化回归覆盖30个故障场景。F3 允许在同一池中按准确关系显式删除一个受支持的旧虚拟磁盘，再于删除验证和新鲜空池核对后创建替代项；未分配 HDD 层模板仅接受零个成员或唯一准确池成员，保留旧盘、附加第二个虚拟磁盘及不支持的结构仍拒绝。F4 在准确目标匹配、界面填充保护和可证实无写入终态下恢复事实盘符选项；未知结果及成功但尚未同步的结果继续保持只读。终态身份历史保留128项，防止同一身份的迟到非终态响应重开旧操作。
+
+11个非 App 测试项目共 **1,863 项通过、3 项既有测量跳过、0 项失败**；WinPool.App.Tests 单独运行269项通过，随后 GUI 发现的后台刷新通知缺口增加4项定向回归并通过，合并为 **2,136 项通过、3 项跳过、0 项失败**。这是一项目一最终结果加4项新用例的组合证据，不声称一次运行273项 App 用例；相关架构回归1项重测通过，不重复计数。证据见[非 App 全量日志](../artifacts/test-results/20261012-review-repair/full-tests.log)、[App 测试日志](../artifacts/test-results/20261012-review-repair/app-final-native-fixes/WinPool.App.Tests.log)、[新增刷新测试](../artifacts/test-results/20261012-review-repair/editor-inventory-refresh-tests/)和[工程汇总](../artifacts/test-results/20261012-review-repair/engineering-summary.json)。报告引用的16条回归规格附件未随本地报告提供，不将未见规格或未做的原生故障注入计入通过数。F1/F2 故障证据来自直接驱动生产协调器的自动化测试，正常与取消路径另作原生验证。
+
+[最终标准 Release 构建](../artifacts/test-results/20261012-review-repair/final-inventory-fix-release-build.log)17.88秒，0警告／0错误，运行树合并0碰撞。原生发现并修复两个追加缺口：删除旧分区后新 VD 的预览不得复用旧卷标；后台同系统采集必须通知原编辑页重新绑定空闲基线。后者不重新导航、不忽略版本冲突，原生启动后首次草稿 Apply 已正常到达确认并取消：[最终确认截图](../artifacts/test-results/20261012-review-repair/final-background-refresh-first-apply.png)。
+
+原生默认 MAX 创建成功，实际 HDD 层／VD 为3724 GiB，自动布局完成。清盘后下一冻结段曾因 post-fingerprint 不匹配在 Accept 前安全取消；原剩余草稿经用户原 Apply 重新确认后完成，没有自动重放或放宽后态核验。收据只保存哈希，当前证据不能确定具体漂移字段，不将它重新归因于已修复的物理分配计数。同池替换以一次确认连续完成删除、64 GiB新 VD、GPT、移除 provider MSR、创建数据分区、NTFS64 KiB格式化六个操作，新卷标实际为 `ReviewReplacement`，界面无待应用动作：[结果截图](../artifacts/test-results/20261012-review-repair/same-pool-replacement-verified.png)、[事实快照](../artifacts/test-results/20261012-review-repair/state-captures/replacement-verified/local-snapshot.json)。MAX 路径在仅增加输入日志的临时诊断 DLL 上完成，后端源码相同；该诊断已从最终源码与 DLL 清除，同池替换及后续验收使用无诊断构建。中间一次保留旧时间戳导致增量构建残留诊断的日志不作最终运行树证明，完整经过保留于工程汇总。
+
+最终原生盘符 E→F 在确认取消后恢复 E，再次选择 F 可重新到达确认；三次最终取消的 Accepted／CallIssued 均保持341／433，没有“改回”调用。第一次基线 GUI 已复现旧版取消后仍显示 F。本轮新增26个真实计划，19个 Accepted 全部 Succeeded、24步全部 Verified，7个接受前 Cancelled 均无写；详细目标、命令及逐步证据见[最终审计](../artifacts/test-results/20261012-review-repair/final-audit/final-audit.json)。WDC 准确硬件身份恢复在线 GPT：MSR 起点1,048,576／大小16,777,216 bytes，数据起点17,825,792／大小4,000,767,279,104 bytes，NTFS／65,536-byte簇、`WinPool_Test`／E:，无具体池或 VD。Samsung15个关联对象闭包无差异，App／Agent偏好与基线完全相同。[末态截图](../artifacts/test-results/20261012-review-repair/final-restored.png)、[再次选择确认](../artifacts/test-results/20261012-review-repair/final-f4-repeat-confirmation.png)。
+
+[最终原托盘退出](../artifacts/test-results/20261012-review-repair/Native/final-clean-exit-exit-result.json)确认 App／Agent 两进程均退出码0。重启保持真实编辑 Off，无自动写入；完整存储／硬件采集及账本比较另留[重启证据](../artifacts/test-results/20261012-review-repair/state-captures/final-after-restart/)。[依赖漏洞检查](../artifacts/test-results/20261012-review-repair/package-vulnerability.log)退出码0，23个项目未发现易受攻击的包。旧审查归档90个原文件逐项SHA-256及Git blob核对通过，最新审查原文保留。本轮限定验收完成，整体 V0.59 其余未验范围维持原状态。
 
 ## 2026-10-11 真实 MAX 核对误锁与编辑恢复：限定验收
 

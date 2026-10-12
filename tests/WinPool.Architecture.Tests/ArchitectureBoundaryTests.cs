@@ -1058,10 +1058,14 @@ public sealed class ArchitectureBoundaryTests
             "private void RefreshSelectedSystemEditor()", StringComparison.Ordinal)..];
         refreshEditor = refreshEditor[..refreshEditor.IndexOf(
             "private void ViewModel_WorkspaceSelectionChanged", StringComparison.Ordinal)];
-        Assert.Contains("if (_editorSystemId == ViewModel.SelectedSystem.SystemId)", refreshEditor, StringComparison.Ordinal);
-        Assert.True(refreshEditor.IndexOf("if (_editorSystemId ==", StringComparison.Ordinal)
-            < refreshEditor.IndexOf("SelectShellPage(SelectedShellItem.Page)", StringComparison.Ordinal));
-        Assert.Equal(2, windowSource.Split("_editorSystemId = ViewModel.SelectedSystem.SystemId;").Length - 1);
+        var sameSystemGuard = refreshEditor.IndexOf(
+            "if (_editorInventoryRefresh.IsSameSystem(ViewModel.SelectedSystem))", StringComparison.Ordinal);
+        var sameSystemRefresh = refreshEditor.IndexOf(
+            "_editorInventoryRefresh.NotifyChangedSameSystem(ViewModel.SelectedSystem,", StringComparison.Ordinal);
+        var navigation = refreshEditor.IndexOf("SelectShellPage(SelectedShellItem.Page)", StringComparison.Ordinal);
+        Assert.True(sameSystemGuard >= 0 && sameSystemRefresh > sameSystemGuard);
+        Assert.True(refreshEditor.IndexOf("return;", sameSystemRefresh, StringComparison.Ordinal) < navigation);
+        Assert.Contains("editor.RefreshActiveRealInventoryFromWorkspace", refreshEditor, StringComparison.Ordinal);
         Assert.Contains("ShellPageKind.StorageStructure or ShellPageKind.DiskPartition", windowSource, StringComparison.Ordinal);
         Assert.Contains("ActiveSystemSelector.BorderBrush = accent", windowSource, StringComparison.Ordinal);
         Assert.Contains("elements.Add(ActiveSystemSelectorHost)", windowSource, StringComparison.Ordinal);
