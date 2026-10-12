@@ -26,7 +26,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="TargetsColumn" Width="*" MinWidth="120" />
             <ColumnDefinition x:Name="SplitterColumn" Width="8" />
-            <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="240" />
+            <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="280" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -68,12 +68,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
-                <Border x:Name="RealTopologyOverlay" Background="#B3000000" Visibility="Collapsed">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" Margin="16">
-                        <ProgressRing x:Name="RealTopologyProgress" IsActive="False" Width="36" Height="36" />
-                        <TextBlock x:Name="RealTopologyPhase" Foreground="White" TextWrapping="Wrap" TextAlignment="Center" />
-                    </StackPanel>
-                </Border>
+
             </Grid>
         </Border>
         <toolkit:GridSplitter
@@ -270,392 +265,136 @@
                 </ScrollViewer>
             </StackPanel>
         </Border>
-        <ScrollViewer
-            x:Name="PropertiesPane"
-            Grid.Column="2"
-            Grid.RowSpan="2"
-            VerticalAlignment="Stretch"
-            VerticalScrollBarVisibility="Auto"
-            HorizontalScrollBarVisibility="Disabled"
-            HorizontalScrollMode="Disabled">
-                <StackPanel>
-                    <Border
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4">
-                        <Grid
-                            x:Name="PartitionFormGrid"
-                            Margin="8"
-                            ColumnSpacing="6"
-                            RowSpacing="4">
+        <ScrollViewer x:Name="PropertiesPane" Grid.Column="2" Grid.RowSpan="2"
+                      VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
+            <StackPanel Spacing="{StaticResource WinPoolCardGap}">
+                <Border Padding="8" Style="{StaticResource WinPoolCardBorderStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Name="ImmediatePropertiesTitle" FontWeight="SemiBold" />
+                        <Grid x:Name="PartitionFormGrid" ColumnSpacing="4" RowSpacing="4">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="32" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="32" />
-                                <ColumnDefinition Width="2*" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
-                                <RowDefinition Height="Auto" MinHeight="40" />
+                                <RowDefinition Height="40" />
+                                <RowDefinition Height="56" />
+                                <RowDefinition Height="40" />
+                                <RowDefinition Height="40" />
                             </Grid.RowDefinitions>
-                            <TextBlock
-                                x:Name="DiskLocationLabel"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <TextBlock
-                                x:Name="DiskLocationValue"
-                                Grid.Column="2"
-                                VerticalAlignment="Center"
-                                TextWrapping="Wrap" />
-                            <TextBlock
-                                x:Name="PartitionNumberLabel"
-                                Grid.Row="1"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <TextBlock
-                                x:Name="PartitionNumberValue"
-                                Grid.Row="1"
-                                Grid.Column="2"
-                                VerticalAlignment="Center" />
-                            <TextBlock
-                                x:Name="StartOffsetLabel"
-                                Grid.Row="2"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <TextBlock
-                                x:Name="EndOffsetLabel"
-                                Grid.Row="3"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <Grid
-                                Grid.Row="2"
-                                Grid.Column="1"
-                                Grid.ColumnSpan="2"
-                                ColumnSpacing="0"
-                                RowSpacing="2"
-                                VerticalAlignment="Center">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock
-                                    x:Name="StartOffsetValue"
-                                    Grid.Row="0"
-                                    TextAlignment="Right"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
-                                    x:Name="StartOffsetAdaptiveValue"
-                                    Grid.Row="1"
-                                    TextAlignment="Right"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
-                                    x:Name="StartOffsetUnavailableValue"
-                                    Grid.RowSpan="2"
-                                    Text="—"
-                                    TextAlignment="Right"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                            </Grid>
-                            <Grid
-                                Grid.Row="3"
-                                Grid.Column="1"
-                                Grid.ColumnSpan="2"
-                                ColumnSpacing="0"
-                                RowSpacing="2"
-                                VerticalAlignment="Center">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock
-                                    x:Name="EndOffsetValue"
-                                    Grid.Row="0"
-                                    TextAlignment="Right"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
-                                    x:Name="EndOffsetAdaptiveValue"
-                                    Grid.Row="1"
-                                    TextAlignment="Right"
-                                    TextWrapping="NoWrap"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                                <TextBlock
-                                    x:Name="EndOffsetUnavailableValue"
-                                    Grid.RowSpan="2"
-                                    Text="—"
-                                    TextAlignment="Right"
-                                    Visibility="Collapsed"
-                                    VerticalAlignment="Center" />
-                            </Grid>
-                            <TextBlock
-                                x:Name="PartitionTypeLabel"
-                                Grid.Row="4"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <controls:ContextHelpHost Grid.Row="4" Grid.Column="2">
-                                <ComboBox
-                                    x:Name="PartitionTypeBox"
-                                    MinHeight="32"
-                                    HorizontalAlignment="Stretch"
-                                    SelectionChanged="PartitionTypeBox_SelectionChanged" />
-                            </controls:ContextHelpHost>
-                            <TextBlock
-                                x:Name="DriveLetterLabel"
-                                Grid.Row="5"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <controls:ContextHelpHost Grid.Row="5" Grid.Column="2">
-                                <ComboBox
-                                    x:Name="DriveLetterBox"
-                                    MinHeight="32"
-                                    HorizontalAlignment="Stretch"
-                                    SelectionChanged="DriveLetterBox_SelectionChanged" />
-                            </controls:ContextHelpHost>
-                            <TextBlock
-                                x:Name="VolumeLabelCaption"
-                                Grid.Row="6"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <controls:ContextHelpHost Grid.Row="6" Grid.Column="2">
-                                <TextBox
-                                    x:Name="VolumeLabelBox"
-                                    MinHeight="32"
-                                    KeyDown="VolumeLabelBox_KeyDown" />
-                            </controls:ContextHelpHost>
-                            <Grid
-                                Grid.Row="7"
-                                ColumnSpacing="5"
-                                VerticalAlignment="Top">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="SizeLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                <Border
-                                    x:Name="SizeChangedIndicator"
-                                    Grid.Column="1"
-                                    Width="6"
-                                    Height="6"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="3"
-                                    VerticalAlignment="Center"
-                                    Visibility="Collapsed" />
-                            </Grid>
-                            <Button
-                                x:Name="ResetSizeButton"
-                                Grid.Row="7"
-                                Grid.Column="1"
-                                Style="{StaticResource WinPoolInlineIconButtonStyle}"
-                                Click="ResetSize_Click"
-                                VerticalAlignment="Top"
-                                Visibility="Collapsed">
-                                <FontIcon Glyph="&#xE777;" FontSize="12" />
-                            </Button>
-                            <controls:ContextHelpHost Grid.Row="7" Grid.Column="2">
-                                <Grid ColumnSpacing="6" RowSpacing="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <TextBox
-                                        x:Name="SizeBox"
-                                        Grid.Column="0"
-                                        MinWidth="0"
-                                        MinHeight="32"
-                                        TextChanged="SizeBox_TextChanged" />
-                                    <TextBlock
-                                        Grid.Column="1"
-                                        Text="MiB"
-                                        Margin="0,0,2,0"
-                                        VerticalAlignment="Center" />
-                                    <TextBlock
-                                        x:Name="SizeAdaptiveValue"
-                                        Grid.Row="1"
-                                        Grid.ColumnSpan="2"
-                                        VerticalAlignment="Center" />
-                                    <controls:ContextHelpHost Grid.Column="2" Grid.Row="0">
-                                        <Button
-                                            x:Name="MaximumSizeButton"
-                                            Style="{StaticResource WinPoolInlineIconButtonStyle}"
-                                            VerticalAlignment="Center"
-                                            Click="MaximumSize_Click">
-                                            <FontIcon Glyph="&#xE74E;" FontSize="14" />
-                                        </Button>
-                                    </controls:ContextHelpHost>
-                                </Grid>
-                            </controls:ContextHelpHost>
-                            <Grid
-                                Grid.Row="8"
-                                ColumnSpacing="5"
-                                VerticalAlignment="Center">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="FileSystemLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                <Border
-                                    x:Name="FileSystemChangedIndicator"
-                                    Grid.Column="1"
-                                    Width="6"
-                                    Height="6"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="3"
-                                    VerticalAlignment="Center"
-                                    Visibility="Collapsed" />
-                            </Grid>
-                            <Button
-                                x:Name="ResetFileSystemButton"
-                                Grid.Row="8"
-                                Grid.Column="1"
-                                Style="{StaticResource WinPoolInlineIconButtonStyle}"
-                                VerticalAlignment="Center"
-                                Click="ResetFileSystem_Click"
-                                Visibility="Collapsed">
-                                <FontIcon Glyph="&#xE777;" FontSize="12" />
-                            </Button>
-                            <controls:ContextHelpHost Grid.Row="8" Grid.Column="2">
-                                <ComboBox
-                                    x:Name="FileSystemBox"
-                                    MinHeight="32"
-                                    HorizontalAlignment="Stretch"
-                                    SelectionChanged="FileSystemBox_SelectionChanged" />
-                            </controls:ContextHelpHost>
-                            <Grid
-                                Grid.Row="9"
-                                ColumnSpacing="5"
-                                VerticalAlignment="Center">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="ClusterLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                <Border
-                                    x:Name="ClusterChangedIndicator"
-                                    Grid.Column="1"
-                                    Width="6"
-                                    Height="6"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="3"
-                                    VerticalAlignment="Center"
-                                    Visibility="Collapsed" />
-                            </Grid>
-                            <Button
-                                x:Name="ResetClusterButton"
-                                Grid.Row="9"
-                                Grid.Column="1"
-                                Style="{StaticResource WinPoolInlineIconButtonStyle}"
-                                VerticalAlignment="Center"
-                                Click="ResetCluster_Click"
-                                Visibility="Collapsed">
-                                <FontIcon Glyph="&#xE777;" FontSize="12" />
-                            </Button>
-                            <controls:ContextHelpHost Grid.Row="9" Grid.Column="2">
-                                <ComboBox
-                                    x:Name="ClusterBox"
-                                    MinHeight="32"
-                                    HorizontalAlignment="Stretch"
-                                    SelectionChanged="ClusterBox_SelectionChanged" />
-                            </controls:ContextHelpHost>
-                            <Grid
-                                Grid.Row="10"
-                                ColumnSpacing="5"
-                                VerticalAlignment="Center">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="QuickFormatLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                <Border
-                                    x:Name="QuickFormatChangedIndicator"
-                                    Grid.Column="1"
-                                    Width="6"
-                                    Height="6"
-                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                    CornerRadius="3"
-                                    VerticalAlignment="Center"
-                                    Visibility="Collapsed" />
-                            </Grid>
-                            <Button
-                                x:Name="ResetQuickFormatButton"
-                                Grid.Row="10"
-                                Grid.Column="1"
-                                Style="{StaticResource WinPoolInlineIconButtonStyle}"
-                                VerticalAlignment="Center"
-                                Click="ResetQuickFormat_Click"
-                                Visibility="Collapsed">
-                                <FontIcon Glyph="&#xE777;" FontSize="12" />
-                            </Button>
-                            <controls:ContextHelpHost Grid.Row="10" Grid.Column="2">
-                                <ToggleSwitch
-                                    x:Name="QuickFormatSwitch"
-                                    MinHeight="32"
-                                    MinWidth="0"
-                                    Margin="0"
-                                    IsOn="True"
-                                    OffContent=""
-                                    OnContent=""
-                                    Toggled="FormatModeSwitch_Toggled" />
-                            </controls:ContextHelpHost>
-                            <TextBlock
-                                x:Name="FullFormatLabel"
-                                Grid.Row="11"
-                                TextWrapping="Wrap"
-                                VerticalAlignment="Center" />
-                            <controls:ContextHelpHost Grid.Row="11" Grid.Column="2">
-                                <ToggleSwitch
-                                    x:Name="FullFormatSwitch"
-                                    MinHeight="32"
-                                    MinWidth="0"
-                                    Margin="0"
-                                    IsOn="False"
-                                    OffContent=""
-                                    OnContent=""
-                                    Toggled="FormatModeSwitch_Toggled" />
-                            </controls:ContextHelpHost>
-                        </Grid>
-                    </Border>
-                    <controls:ContextHelpHost Margin="0,8,0,0">
-                        <Button
-                            x:Name="PartitionActionButton"
-                            Style="{StaticResource WinPoolButtonBaseStyle}"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Center"
-                            Click="PartitionActionButton_Click">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon x:Name="PartitionActionButtonIcon" Glyph="&#xE710;" FontSize="14" />
-                                <TextBlock x:Name="PartitionActionButtonLabel" VerticalAlignment="Center" />
+                            <TextBlock x:Name="DiskLocationLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <TextBlock x:Name="DiskLocationValue" Grid.Column="2" Grid.ColumnSpan="2" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <TextBlock x:Name="PartitionNumberLabel" Grid.Row="1" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <TextBlock x:Name="PartitionNumberValue" Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" VerticalAlignment="Center" />
+                            <StackPanel Grid.Row="2" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock x:Name="StartOffsetLabel" Height="24" VerticalAlignment="Center" />
+                                <TextBlock x:Name="EndOffsetLabel" Height="24" VerticalAlignment="Center" />
                             </StackPanel>
-                        </Button>
-                    </controls:ContextHelpHost>
-                </StackPanel>
-            </ScrollViewer>
+                            <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" RowSpacing="2" ColumnSpacing="4" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="24" /><RowDefinition Height="24" /></Grid.RowDefinitions>
+                                <TextBlock x:Name="StartOffsetValue" TextAlignment="Right" VerticalAlignment="Center" />
+                                <TextBlock Text="-" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock x:Name="EndOffsetValue" Grid.Column="2" TextAlignment="Right" VerticalAlignment="Center" />
+                                <TextBlock x:Name="StartOffsetAdaptiveValue" Grid.Row="1" TextAlignment="Right" VerticalAlignment="Center" />
+                                <TextBlock Text="-" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock x:Name="EndOffsetAdaptiveValue" Grid.Row="1" Grid.Column="2" TextAlignment="Right" VerticalAlignment="Center" />
+                                <TextBlock x:Name="StartOffsetUnavailableValue" Text="—" Grid.RowSpan="2" TextAlignment="Right" Visibility="Collapsed" VerticalAlignment="Center" />
+                                <TextBlock x:Name="EndOffsetUnavailableValue" Text="—" Grid.Column="2" Grid.RowSpan="2" TextAlignment="Right" Visibility="Collapsed" VerticalAlignment="Center" />
+                            </Grid>
+                            <TextBlock x:Name="DriveLetterLabel" Grid.Row="3" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <Button x:Name="UndoDriveLetterButton" Grid.Row="3" Grid.Column="1" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="UndoDriveLetter_Click"><FontIcon Glyph="&#xE7A7;" FontSize="12" /></Button>
+                            <controls:ContextHelpHost Grid.Row="3" Grid.Column="2">
+                                <ComboBox x:Name="DriveLetterBox" Height="32" MinWidth="0" HorizontalAlignment="Stretch" SelectionChanged="DriveLetterBox_SelectionChanged" />
+                            </controls:ContextHelpHost>
+                            <Button x:Name="CommitDriveLetterButton" Grid.Row="3" Grid.Column="3" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="CommitDriveLetter_Click"><FontIcon Glyph="&#xE73E;" FontSize="12" /></Button>
+                            <TextBlock x:Name="VolumeLabelCaption" Grid.Row="4" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <Button x:Name="UndoVolumeLabelButton" Grid.Row="4" Grid.Column="1" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="UndoVolumeLabel_Click"><FontIcon Glyph="&#xE7A7;" FontSize="12" /></Button>
+                            <controls:ContextHelpHost Grid.Row="4" Grid.Column="2">
+                                <TextBox x:Name="VolumeLabelBox" Height="32" MinWidth="0" KeyDown="VolumeLabelBox_KeyDown" TextChanged="VolumeLabelBox_TextChanged" />
+                            </controls:ContextHelpHost>
+                            <Button x:Name="CommitVolumeLabelButton" Grid.Row="4" Grid.Column="3" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="CommitVolumeLabel_Click"><FontIcon Glyph="&#xE73E;" FontSize="12" /></Button>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+                <Border Padding="8" Style="{StaticResource WinPoolCardBorderStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Name="FormattingPropertiesTitle" FontWeight="SemiBold" />
+                        <Grid ColumnSpacing="4" RowSpacing="4">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="84" /><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="32" /></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="40" /><RowDefinition Height="68" /><RowDefinition Height="40" /><RowDefinition Height="40" /><RowDefinition Height="40" /><RowDefinition Height="40" />
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="PartitionTypeLabel" Grid.Row="0" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <controls:ContextHelpHost Grid.Row="0" Grid.Column="2" Grid.ColumnSpan="2">
+                                <ComboBox x:Name="PartitionTypeBox" Height="32" MinWidth="0" HorizontalAlignment="Stretch" SelectionChanged="PartitionTypeBox_SelectionChanged" />
+                            </controls:ContextHelpHost>
+                            <Grid Grid.Row="1" VerticalAlignment="Center" ColumnSpacing="4" RowSpacing="4">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="32" /><RowDefinition Height="32" /></Grid.RowDefinitions>
+                                <TextBlock x:Name="SizeLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SizeAdaptiveLabel" Grid.Row="1" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Border x:Name="SizeChangedIndicator" Grid.Column="1" Width="6" Height="6" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="3" Visibility="Collapsed" />
+                            </Grid>
+                            <Button x:Name="ResetSizeButton" Grid.Row="1" Grid.Column="1" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="ResetSize_Click" Visibility="Collapsed"><FontIcon Glyph="&#xE777;" FontSize="12" /></Button>
+                            <Grid Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" ColumnSpacing="4" RowSpacing="4">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="36" /><ColumnDefinition Width="44" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="32" /><RowDefinition Height="32" /></Grid.RowDefinitions>
+                                <controls:ContextHelpHost>
+                                    <TextBox x:Name="SizeBox" MinWidth="0" Height="32" TextChanged="SizeBox_TextChanged" />
+                                </controls:ContextHelpHost>
+                                <TextBlock Grid.Column="1" Text="MiB" VerticalAlignment="Center" />
+                                <Button x:Name="MaximumSizeButton" Grid.Column="2" Content="Max" MinWidth="0" Height="32" Padding="4,0" Style="{StaticResource WinPoolButtonBaseStyle}" Click="MaximumSize_Click" />
+                                <TextBox x:Name="SizeAdaptiveValue" Grid.Row="1" MinWidth="0" Height="32" IsReadOnly="True" />
+                                <TextBlock x:Name="SizeAdaptiveUnit" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Grid.Row="2" ColumnSpacing="4" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock x:Name="FileSystemLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Border x:Name="FileSystemChangedIndicator" Grid.Column="1" Width="6" Height="6" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="3" Visibility="Collapsed" />
+                            </Grid>
+                            <Button x:Name="ResetFileSystemButton" Grid.Row="2" Grid.Column="1" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="ResetFileSystem_Click" Visibility="Collapsed"><FontIcon Glyph="&#xE777;" FontSize="12" /></Button>
+                            <controls:ContextHelpHost Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2"><ComboBox x:Name="FileSystemBox" Height="32" MinWidth="0" HorizontalAlignment="Stretch" SelectionChanged="FileSystemBox_SelectionChanged" /></controls:ContextHelpHost>
+                            <Grid Grid.Row="3" ColumnSpacing="4" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock x:Name="ClusterLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Border x:Name="ClusterChangedIndicator" Grid.Column="1" Width="6" Height="6" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="3" Visibility="Collapsed" />
+                            </Grid>
+                            <Button x:Name="ResetClusterButton" Grid.Row="3" Grid.Column="1" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="ResetCluster_Click" Visibility="Collapsed"><FontIcon Glyph="&#xE777;" FontSize="12" /></Button>
+                            <controls:ContextHelpHost Grid.Row="3" Grid.Column="2" Grid.ColumnSpan="2"><ComboBox x:Name="ClusterBox" Height="32" MinWidth="0" HorizontalAlignment="Stretch" SelectionChanged="ClusterBox_SelectionChanged" /></controls:ContextHelpHost>
+                            <Grid Grid.Row="4" ColumnSpacing="4" VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock x:Name="QuickFormatLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Border x:Name="QuickFormatChangedIndicator" Grid.Column="1" Width="6" Height="6" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="3" Visibility="Collapsed" />
+                            </Grid>
+                            <Button x:Name="ResetQuickFormatButton" Grid.Row="4" Grid.Column="1" Style="{StaticResource WinPoolInlineIconButtonStyle}" Click="ResetQuickFormat_Click" Visibility="Collapsed"><FontIcon Glyph="&#xE777;" FontSize="12" /></Button>
+                            <controls:ContextHelpHost Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="2"><ToggleSwitch x:Name="QuickFormatSwitch" MinHeight="32" MinWidth="0" IsOn="True" OffContent="" OnContent="" Toggled="FormatModeSwitch_Toggled" /></controls:ContextHelpHost>
+                            <TextBlock x:Name="FullFormatLabel" Grid.Row="5" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <controls:ContextHelpHost Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2"><ToggleSwitch x:Name="FullFormatSwitch" MinHeight="32" MinWidth="0" IsOn="False" OffContent="" OnContent="" Toggled="FormatModeSwitch_Toggled" /></controls:ContextHelpHost>
+                        </Grid>
+                        <controls:ContextHelpHost>
+                            <Button x:Name="PartitionActionButton" Style="{StaticResource WinPoolButtonBaseStyle}" HorizontalAlignment="Stretch" Click="PartitionActionButton_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon x:Name="PartitionActionButtonIcon" Glyph="&#xE710;" FontSize="14" /><TextBlock x:Name="PartitionActionButtonLabel" VerticalAlignment="Center" /></StackPanel>
+                            </Button>
+                        </controls:ContextHelpHost>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
         </Grid>
+        <Border x:Name="RealTopologyOverlay" Grid.RowSpan="2" Background="#B3000000" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" Margin="16">
+                <ProgressRing x:Name="RealTopologyProgress" IsActive="False" Width="72" Height="72" />
+                <TextBlock x:Name="RealTopologyPhase" Foreground="White" TextWrapping="Wrap" TextAlignment="Center" />
+            </StackPanel>
+        </Border>
     </Grid>
 </editors:EditorPageBase>

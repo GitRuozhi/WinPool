@@ -25,10 +25,7 @@
 
         <Border
             Grid.Row="0"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <ScrollViewer
                 x:Name="TopologyScrollViewer"
                 Padding="8"
@@ -72,10 +69,7 @@
 
         <Border
             Grid.Row="2"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />

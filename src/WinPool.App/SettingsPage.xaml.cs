@@ -15,6 +15,7 @@ using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
 using WinPool.Ipc;
+using WinPool_App.Controls;
 using DomainStorageLocationMode = WinPool.Domain.StorageLocationMode;
 
 namespace WinPool_App;
@@ -37,6 +38,7 @@ public sealed partial class SettingsPage : Page
     public SettingsPage()
     {
         InitializeComponent();
+        IntegerTextInput.Attach(PartitionGapBox, () => 1024, minimum: 0);
     }
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
@@ -542,9 +544,6 @@ public sealed partial class SettingsPage : Page
         mainWindow.RefreshChrome();
     }
 
-    private void PartitionGapBox_TextChanged(object sender, TextChangedEventArgs e) =>
-        KeepDigitsOnly(PartitionGapBox);
-
     private void PartitionGapBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
@@ -786,20 +785,6 @@ public sealed partial class SettingsPage : Page
         if (sender is TextBox box)
         {
             box.SelectAll();
-        }
-    }
-
-    /// <summary>
-    /// Strips everything except digits so the box always holds a pure number;
-    /// the MiB unit is displayed beside the box instead of inside it.
-    /// </summary>
-    private static void KeepDigitsOnly(TextBox box)
-    {
-        var digits = new string(box.Text?.Where(char.IsDigit).ToArray() ?? []);
-        if (!string.Equals(box.Text, digits, StringComparison.Ordinal))
-        {
-            box.Text = digits;
-            box.SelectionStart = digits.Length;
         }
     }
 

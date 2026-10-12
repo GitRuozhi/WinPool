@@ -2193,7 +2193,7 @@ public sealed partial class MainWindow : Window
         object? sender,
         NotificationCardEventArgs e)
     {
-        if (_closePreparationStarted || _windowClosed)
+        if (_closePreparationStarted || _windowClosed || e.Notification.IsProgress)
         {
             return;
         }

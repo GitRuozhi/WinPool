@@ -19,6 +19,16 @@ public sealed class NotificationSeverityConverter : IValueConverter
             _ => InfoBarSeverity.Informational
         };
 
+    public static IconSource ToIconSource(GlobalNotificationSeverity severity) => new FontIconSource
+    {
+        Glyph = severity switch
+        {
+            GlobalNotificationSeverity.Warning => "\uE7BA",
+            GlobalNotificationSeverity.Error => "\uEA39",
+            _ => "\uE946"
+        }
+    };
+
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();
 }

@@ -124,37 +124,62 @@ public sealed partial class NotificationCard : UserControl
             return;
         }
 
+        var isProgress = notification.IsProgress;
         NotificationInfoBar.Severity = NotificationSeverityConverter.ToInfoBarSeverity(notification.Severity);
+        NotificationInfoBar.IconSource = NotificationSeverityConverter.ToIconSource(notification.Severity);
         NotificationInfoBar.Title = Shorten(
             notification.Title,
             IsChinese ? MaximumChineseCardTitleLength : MaximumEnglishCardTitleLength);
         NotificationInfoBar.Message = DisplayMessage(notification);
-        var action = notification.Severity == GlobalNotificationSeverity.Error
-            ? Text("单击查看此错误消息；完整详情在开发页消息列表。", "Click to view this error message; full details are in the Developer message list.")
-            : Text("单击关闭此消息。", "Click to dismiss this message.");
+        NotificationInfoBar.Visibility = isProgress ? Visibility.Collapsed : Visibility.Visible;
+        ProgressSurface.Visibility = isProgress ? Visibility.Visible : Visibility.Collapsed;
+        ProgressRing.IsActive = isProgress;
+        ProgressTitle.Text = Shorten(
+            notification.Title,
+            IsChinese ? MaximumChineseCardTitleLength : MaximumEnglishCardTitleLength);
+        ProgressMessage.Text = Shorten(notification.Message, IsChinese ? 100 : 180);
+        IsTabStop = !isProgress;
+        var action = isProgress
+            ? Text("操作正在进行。", "Operation in progress.")
+            : notification.Severity == GlobalNotificationSeverity.Error
+                ? Text("单击查看此错误消息；完整详情在开发页消息列表。", "Click to view this error message; full details are in the Developer message list.")
+                : Text("单击关闭此消息。", "Click to dismiss this message.");
         ToolTipService.SetToolTip(this, action);
+        var visibleMessage = isProgress ? ProgressMessage.Text : NotificationInfoBar.Message;
         AutomationProperties.SetName(
             this,
-            string.IsNullOrWhiteSpace(NotificationInfoBar.Message)
+            string.IsNullOrWhiteSpace(visibleMessage)
                 ? notification.Title
-                : $"{notification.Title}: {NotificationInfoBar.Message}");
+                : $"{notification.Title}: {visibleMessage}");
         AutomationProperties.SetHelpText(this, action);
     }
 
-    private void NotificationCard_Tapped(object sender, TappedRoutedEventArgs e) => Invoke();
+    private void NotificationCard_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (Notification?.IsProgress == true)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        Invoke();
+    }
 
     private void NotificationCard_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key is VirtualKey.Enter or VirtualKey.Space)
         {
             e.Handled = true;
-            Invoke();
+            if (Notification?.IsProgress != true)
+            {
+                Invoke();
+            }
         }
     }
 
     private void Invoke()
     {
-        if (Notification is { } notification)
+        if (Notification is { IsProgress: false } notification)
         {
             Invoked?.Invoke(this, new NotificationCardEventArgs(notification));
         }

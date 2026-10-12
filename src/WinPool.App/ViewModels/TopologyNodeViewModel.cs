@@ -198,6 +198,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public bool HasChildren => Children.Count > 0;
 
+    public double MinimumCardHeight =>
+        _edit is not null && Unit.Kind == StorageUnitKind.OsDisk && !HasChildren ? 96 : 0;
+
     public bool IsReference { get; }
 
     public bool IsSelectable { get; }

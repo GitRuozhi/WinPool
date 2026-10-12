@@ -44,7 +44,6 @@ public partial class EditorPageBase
             return false;
         }
         IsRealStructureApplyInProgress = true;
-        structureHasWritten = false;
         var completed = new List<string>();
         try
         {
@@ -225,7 +224,6 @@ public partial class EditorPageBase
         {
             authorization.Stop();
             IsRealStructureApplyInProgress = false;
-            structureHasWritten = false;
             EndRealActivity();
         }
 

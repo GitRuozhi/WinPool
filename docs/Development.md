@@ -12,9 +12,9 @@
 
 表单保存、模拟规划与模拟更新共用唯一业务层选择：同介质actual优先，无actual才选唯一模板；每次修改按准确StableId落到该对象，不按介质覆盖所有来源层。多个actual或无actual的多个模板无法由当前每介质一组的参数请求唯一表达时，拒绝其歧义参数修改；不因此锁掉模板＋唯一actual的正常导入模拟路径。
 
-> 2026-10-09 当前实现：新建普通／分层 MAX 使用共享整数 GiB 算法，详见 [Plan §10.4](Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。原UI普通3725 GiB、单HDD分层3724 GiB及自动布局已独立核验；多层仅模拟及backend夹具。下文原生 MAX／拒绝门和旧工程门是历史证据，不能据此恢复旧行为。本轮冻结完整门为1999项／1996通过／0失败／3既有测量未执行，412源码hash稳定；WDC末态、Samsung限定结构比较、偏好及普通重启／退出均通过，准确证据见该节。
+> 2026-10-09 当前实现：新建普通／分层 MAX 使用共享整数 GiB 算法，详见[归档 Plan §10.4](Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。原UI普通3725 GiB、单HDD分层3724 GiB及自动布局已独立核验；多层仅模拟及backend夹具。下文原生 MAX／拒绝门和旧工程门是历史证据，不能据此恢复旧行为。本轮冻结完整门为1999项／1996通过／0失败／3既有测量未执行，412源码hash稳定；WDC末态、Samsung限定结构比较、偏好及普通重启／退出均通过，准确证据见该节。
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.59、迭代 9；本机单盘真实修改第一阶段 H01–H11 及其工程门已完成，历史结果见 [CHANGELOG](CHANGELOG.md) 和 [Quality](Quality.md)。真实编辑接回原界面、范围采集及监控联动按活动 [V0.59 Plan](Plan.md) 实施，整体仍有未完成工作，未归档；本轮五项审计残留的47项相关定向用例、限定原生流程、最终构建与只读末态核验已通过，见 [Plan §10.8](Plan.md)。前轮普通 VD 原生 `UseMaximumSize` 已通过创建及实际容量后的自动布局；单 HDD 分层明确 32 GiB 的历史成功不外推 MAX。准确模板加原生开关被本机拒绝，WindowsAutomaticHdd 则实际创建普通 VD 而无 actual tier；后者经严格只读 UnexpectedEffect 对账终结 Failed，并由原界面另行清理。当时的分层 MAX 临时写前拒绝现由用户指定整数 GiB 搜索替代；微软原生 MAX 的本机问题仍保留归因，不能泛化为所有 Windows 版本的永久限制。前轮原生 MAX 运行的物理末态、保护比较、解散后的准确成员返回及普通重启／退出已独立核验；旧末态及工程门仍只证明各自历史快照。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.59、迭代 9；本机单盘真实修改第一阶段 H01–H11 及其工程门已完成，历史结果见 [CHANGELOG](CHANGELOG.md) 和 [Quality](Quality.md)。真实编辑接回原界面、范围采集及监控联动按活动 [V0.59 Plan](Plan.md) 实施，整体仍有未完成工作，未归档；本轮五项审计残留的47项相关定向用例、限定原生流程、最终构建与只读末态核验已通过，见[归档 Plan §10.8](Archive/20261012-editor-ui-baseline/Plan.md)。前轮普通 VD 原生 `UseMaximumSize` 已通过创建及实际容量后的自动布局；单 HDD 分层明确 32 GiB 的历史成功不外推 MAX。准确模板加原生开关被本机拒绝，WindowsAutomaticHdd 则实际创建普通 VD 而无 actual tier；后者经严格只读 UnexpectedEffect 对账终结 Failed，并由原界面另行清理。当时的分层 MAX 临时写前拒绝现由用户指定整数 GiB 搜索替代；微软原生 MAX 的本机问题仍保留归因，不能泛化为所有 Windows 版本的永久限制。前轮原生 MAX 运行的物理末态、保护比较、解散后的准确成员返回及普通重启／退出已独立核验；旧末态及工程门仍只证明各自历史快照。
 
 原生 MAX 修正前的源码通过[统一 Release 工程门](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-223310/summary.md)：12 个测试项目共 1775 条，1772 Passed、0 Failed、3 NotExecuted，restore／build 成功且 0 warnings／errors，393 个源码文件 hash 前后一致、运行树 merge 无冲突。该历史结果仍有效，未执行项不计为通过，不代替本轮修正的工程门或实机核验。该构建已通过普通启动 RealOff／MonitorOff、无历史监控误报、真实 E: 与两块 Samsung 显示及原 Agent 托盘 Exit 两进程 exit 0；[退出结果](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-exit-result.json)与[退出后偏好／计数](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-after.json)保留准确现场。标题栏关闭 App exit 0、Agent 继续运行及后续正常重启也有[独立原生证据](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/close-repaired-titlebar-native-result.json)；这不是原生分层 MAX 创建通过证明。
 
@@ -115,7 +115,7 @@ Agent 的退出信号覆盖全部 App 启动目标，包括独立 `--page Welcom
 
 ## 规则与容量
 
-本机分层原生 MAX 失效按用户要求归因于微软 Storage 接口／提供程序侧，详见[持久项目记录](../AGENTS.md)。当前新增 MAX 计划使用 `WINPOOL-MAX-GIB-1`：Agent 以 fresh provider 上界和物理容量冻结起点，固定适配器逐次明确容量执行，每次持久化独立调用及核验收据；模拟直接使用同一初始整数 GiB。实验扣 2 GiB 不是内置公式。准确算法、逐层 seed 及边界见 [Plan §10.4](Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。
+本机分层原生 MAX 失效按用户要求归因于微软 Storage 接口／提供程序侧，详见[持久项目记录](../AGENTS.md)。当前新增 MAX 计划使用 `WINPOOL-MAX-GIB-1`：Agent 以 fresh provider 上界和物理容量冻结起点，固定适配器逐次明确容量执行，每次持久化独立调用及核验收据；模拟直接使用同一初始整数 GiB。实验扣 2 GiB 不是内置公式。准确算法、逐层 seed 及边界见[归档 Plan §10.4](Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。
 
 规则统一入口，内部按对象/操作分组。合法性规则输出允许、拒绝或信息不足，并携带稳定原因、受影响对象和依据/适用条件。App 用同一规则和模拟操作服务完成表单反馈、动作预检查及内存候选文档；UI 禁用不是校验边界。模拟提交到 Agent 时系统校验明确标记为 `SkippedForSimulation`，Agent 不重跑整套业务规则，只执行封闭请求、格式/哈希、修订、CommitId 对账、事务和单写入方等提交保护。真实执行由 Agent 重新检查实际 Windows 状态，不能信任模拟规则或 App 提案作为实时证据。
 
@@ -200,11 +200,11 @@ scoped 请求回包与 observer 事件可按任意顺序交付同一已提交批
 
 模拟分区页手动新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。结构页的新 VD 自动布局与真实路径共用 `GetAutomaticPartitionCreateGeometry`，保留 1 MiB 尾端空间；MSR 开启时创建于 1–17 MiB，数据分区从 17 MiB 开始，关闭时数据分区从 1 MiB 开始。AutoPart 关闭则保留 RAW、无分区。草稿规划、规则校验及模拟提交沿用共享几何核对，不能由界面独自夹紧超界容量；已有导入结构保持原始偏移及容量，不自动重排。
 
-存储结构与磁盘分区编辑页右侧属性栏均从 320 DIP 宽开始，使用 8 DIP 可拖拽分隔槽调整左右比例；属性栏紧贴分隔槽，不再叠加 8 DIP 左边距。两页属性表单使用受栏宽约束的弹性标签／值列，不再强制 412 DIP 内容宽或横向滚动。分区属性行最小高 40 DIP、行距 4 DIP；容量输入与换算组成的复合行按内容增高。左下操作区的按钮槽最小高 44 DIP，实际高度随同行内容增长；窄窗可双向滚动且最高 220 DIP，结构页待处理列表内容最高 96 DIP，以保留拓扑视口。起点与终点分别显示两行：第一行准确 MiB，第二行有限小数的自适应单位；终点为 `start + size` 的排他结束偏移，不可得时显示横线。两页根外边距为 24 DIP，图形遮罩局限拓扑区域；视觉与窄窗结果另按 Quality 验证。容量输入下方的只读自动单位值使用普通正文文字样式。管理、监控和开发页的实际区域分隔槽同样为 8 DIP 且可拖；普通卡片之间的间距不创建分隔槽。
+存储结构与磁盘分区编辑页右侧属性栏均从 320 DIP 宽开始，使用 8 DIP 可拖拽分隔槽调整左右比例；属性栏紧贴分隔槽，不再叠加 8 DIP 左边距。两页属性表单使用受栏宽约束的弹性标签／值列，不再强制 412 DIP 内容宽或横向滚动。分区属性行最小高 40 DIP、行距 4 DIP；容量输入与换算组成的复合行按内容增高。左下操作区的按钮槽最小高 44 DIP，实际高度随同行内容增长；窄窗可双向滚动且最高 220 DIP，结构页待处理列表内容最高 96 DIP，以保留拓扑视口。起点／终点共两行、同列对齐：第一行各自以整数除法截断为MiB，第二行各自显示自适应单位；终点为 `start + size` 的排他结束偏移，不可得时显示横线。两页根外边距为 24 DIP，半透明黑遮罩覆盖发起页全部内容，居中72DIP ProgressRing；Workspace记录页类型owner，Shell导航与全局通知独立于遮罩；视觉与窄窗结果另按 Quality 验证。容量两行使用同宽32DIP TextBox，下行只读且单位另列；新建容量可编辑，已有分区只读。管理、监控和开发页的实际区域分隔槽同样为 8 DIP 且可拖；普通卡片之间的间距不创建分隔槽。
 
 模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。该建模范围不是 Windows `Get-PartitionSupportedSize` 实测，不授权真实写入。
 
-分区页扩缩入口使用同窗口串行对话框：扩展 `A MiB + B MiB = C MiB`，压缩 `A MiB − B MiB = C MiB`；A 只读，整数 MiB 的 B/C 双向联动，第二行只读显示自适应单位。单一 nullable long bytes 目标为权威值，避免递归事件和显示舍入后二次提交；当前 bytes 不是整 MiB 时拒绝，不把四舍五入值当起点。真实 UI 查询到的 provider range 仅作候选限制，Prepare/Preflight 仍 fresh 重读并拒绝过期范围；模拟沿用自身建模规则。已有分区的页面容量框仅显示当前值，不隐式改变目标。支持范围和验证结果见 [Product](Product.md)、[Quality](Quality.md)。
+分区页扩缩入口共用同一对话框，ToggleSwitch切换方向、同时显示两个方向的最大变化量；公式固定516DIP宽、B/C提供极值按钮（压缩C为Min）：扩展 `A MiB + B MiB = C MiB`，压缩 `A MiB − B MiB = C MiB`；A 只读，整数 MiB 的 B/C 双向联动，第二行只读显示自适应单位。单一 nullable long bytes 目标为权威值，避免递归事件和显示舍入后二次提交；当前 bytes 不是整 MiB 时拒绝，不把四舍五入值当起点。真实 UI 查询到的 provider range 仅作候选限制，Prepare/Preflight 仍 fresh 重读并拒绝过期范围；模拟沿用自身建模规则。已有分区的页面容量框仅显示当前值，不隐式改变目标。支持范围和验证结果见 [Product](Product.md)、[Quality](Quality.md)。
 
 模拟分区删除资格只由所选分区自身的 Boot／System 标记决定，页面、管理页投影和服务端共用 `StorageEditRules.CanDeleteSimulatedPartition`：同盘的系统身份、分区类型（含 EFI、MSR、恢复）和所属系统盘都不再单独禁止删除，但仍不得删除标记为 Boot 或 System 的分区。格式化保持更窄的范围，只允许普通 Primary／BasicData 且非 Boot／System，不随删除资格一起放宽。
 
@@ -328,3 +328,7 @@ Product 管产品，[UnifiedModel](UnifiedModel.md) 是其统一对象与派生�
 磁盘补充事实通过 disk-supplement 关联匹配唯一 Disk.Number。OS 磁盘的 Number、PartitionStyle 等仍读取自己的来源，不能被物理磁盘主来源覆盖。单例 Computer/OperatingSystem 身份按系统和类名确定。按来源刷新只替换本次成功且完整覆盖的对象域；保留仍被事实字段引用的历史来源及每类 full/各 scoped 范围的最新状态，避免重复失败状态增长，不将局部成功称为整类刷新。模拟提交保留仍有效的补充关系，删除联合体时同时去掉其附属逻辑来源，真正孤立来源继续保留。
 
 固定采集脚本始终内嵌，经标准输入执行，不输出独立 inventory 脚本。分区联合体修复的历史验证见 [CHANGELOG](CHANGELOG.md) 中 2026-09-15 对应记录。
+
+本轮整数前端由 `IntegerTextInput` 与UI无关的 `IntegerInputPolicy` 共用：BeforeTextChanging取消非ASCII数字，TextChanged即时夹紧（含溢出），临时空输入在失焦时归一；NumberBox内层TextBox使用动态上下限。MAX意图独立于数字文本，不从字符串MAX推断。直接属性Check使用 `RealPropertyActionAuthorization`，仅允许单一既有名称或盘符命令；初始化连续链使用 `RealDiskInitializationAuthorization`，只有同一Verified操作的provider MSR收据与fresh事实一致才能自动继续。两种授权均不绕过Agent冻结、令牌或live preflight。全局进度由Workspace统一管理，所有页面可见、不可点击关闭；结果未知时保留进度并只读恢复，完成刷新后移除。
+
+本机文档复制为模拟时，`WinPoolFacts.CopyTo` 同步重映射对象、历史identity、coverage和scoped collection中的系统／目标／before引用，再校验副本。模拟候选重建存储拓扑后，旧关系仅在至少一端为额外保留硬件对象时保留；不能因两端对象仍存在就恢复已经移除的pool-member。Provider locator原始值及硬件补充事实不因此丢失。

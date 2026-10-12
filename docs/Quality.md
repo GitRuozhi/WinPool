@@ -1,6 +1,18 @@
 # WinPool 验证与验收
 
-日期：2026-10-12。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-12。当前产品版本为 V0.59／迭代 9。本轮25项编辑界面任务已按活动 [Plan](Plan.md)完成限定验收；历史计划的多盘、SCM与长期耐久范围不因此通过。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+
+## 2026-10-12 编辑界面、整数输入与反馈统一
+
+旧Plan逐字节归档，新Plan覆盖本轮25项要求及三项用户答复。最终标准Release构建27.56秒、0警告／0错误，日志 [build-final-accepted](../artifacts/test-results/20261012-editor-ui-build-final-accepted.log)。仅运行相关直接回归，最终有效用例去重 **118项通过**：分区扩缩18、整数策略13、初始化/直接属性/结构窄授权78、事实复制与关系保留9；没有跑全量。初次组合日志中的7个失败来自与canonical projection不一致的夹具，已修正并移除3个不能成立的状态；受影响初始化52项和整数13项分别重跑通过，旧失败日志保留，不能当成最终绿灯。证据见 [初始化](../artifacts/test-results/20261012-editor-ui-initialization.log)、[整数](../artifacts/test-results/20261012-editor-ui-numeric.log)、[事实回归TRX](../artifacts/test-results/20261012-scoped-copy-audit/dissolve-audit.trx)；分区18项来自执行console，未伪称有TRX。
+
+实际桌面操作、UIA树与截图保存在 [GUI目录](../artifacts/test-results/20261012-editor-ui/)。逐项验证两行起止／容量、MiB截断、只读既有容量、新建默认最大及“新卷”、卷标32px行、RAW空卡96px、独立属性卡、Max文字按钮和创建开关文案；1000px窗口下通过导航菜单切页，右栏无重叠。各类整数框非法UIA赋值均拒绝，设置框另以实际字母键入和混合粘贴验证拒绝，容量溢出即时夹紧；NumberBox内部文本也过滤表达式并遵守动态上下限。扩缩同窗Switch在两个方向间切换，短／长值的公式bounds不变，压缩结果Min和变化量Max按准确MiB边界联动。硬件、测试页已实际查看卡片；通知Info／Warning／Error显式图标与Progress转圈分开。
+
+独立GUI转换副本 `simulation:a84fe544fd534abba931bec9707f43fb` 实测清空、MSR开／关初始化、32GiB NTFS／4KiB创建、压缩1GiB再扩展1GiB、盘符与卷标Undo／Check、完整格式化选项及快速格式化为64KiB、VD名称直接Check。解散池及拖盘到“+”新建池区域后自动生成唯一HDD层，一次Apply完成池／MAX VD／分区创建；最后已通过原界面删除该临时副本，原有5个模拟系统保留。过程发现并修复两项真实采集副本特有问题：复制时scope／coverage仍引用本机ID；保留额外硬件事实时旧pool-member被重新合并，导致空池删除被拒。修复保留校验与硬件补充关系，实际文档内存重放及GUI重试均通过。临时副本末态、清理收据和原失败证据均留在GUI目录。
+
+真实GUI卷标由空改为 `WinPool_UI_Check` 再恢复，池名 `Pool01` 改为 `WinPool_UI_Pool` 再恢复；Undo不写入，Check直接提交，无额外改名确认。发起页整页半透明黑遮罩／72px转圈可见，切到硬件、管理、测试或另一个编辑页仍有不可关闭的右下持续进度；另一页内容不被遮罩。完成刷新后解除。只读账本Accepted393→397、CallIssued498→502，4个新增真实步骤全部Verified。模拟跨页提交也遵守全局busy，防止第二页覆盖owner／提前清除进度。
+
+本轮保留实际已有ReFS／4KiB／E:和约35GiB数据，**没有实机清空、创建、格式化或扩缩写入**；MSR连续自动清理的真实收据与目标范围由窄授权回归覆盖，不能把模拟初始化称作provider实机验证。两块Samsung及WDC链25个存储对象和存储关联、偏好恢复核验通过；仅排除实时剩余空间，并将完整硬件刷新改变的Computer根key规范化到其Subsystem父引用，未忽略磁盘／分区／卷身份或结构参数。见 [末态核对](../artifacts/test-results/20261012-editor-ui/editor-ui-final-20261012-verification.json)。[重启核对](../artifacts/test-results/20261012-editor-ui/editor-ui-after-restart-20261012-verification.json)无新增写入，Real默认Off；[最终托盘退出](../artifacts/test-results/20261012-product-parity/Native/editor-ui-after-restart-clean-exit-result.json)App／Agent均exit0。版本保持V0.59。
 
 ## 2026-10-12 打开后立即开启真实编辑：启动时序修复
 
@@ -28,7 +40,7 @@
 
 ## 2026-10-12 产品交互回归修复：限定验收完成（V0.59）
 
-本条与本页同日“审阅修复”F1–F4 的工程及原生验收分开记录。本轮四项产品交互修复的实现范围见 [Plan §10.11](Plan.md#1011-产品交互回归修复2026-10-12)：真实投影避免把同一层概念显示两次；新层字段恢复推荐与 Undo 基线分开；文件系统和簇大小候选贯穿计划、执行及后态；Popup 拖动改为固定 overlay 与有效 host 命中／释放。
+本条与本页同日“审阅修复”F1–F4 的工程及原生验收分开记录。本轮四项产品交互修复的实现范围见[归档 Plan §10.11](Archive/20261012-editor-ui-baseline/Plan.md#1011-产品交互回归修复2026-10-12)：真实投影避免把同一层概念显示两次；新层字段恢复推荐与 Undo 基线分开；文件系统和簇大小候选贯穿计划、执行及后态；Popup 拖动改为固定 overlay 与有效 host 命中／释放。
 
 写入实测使用的标准 Release 构建19.19秒、零警告／错误。终审另修复准确层选择后，[最终标准构建](../artifacts/test-results/20261012-product-parity/final-accurate-tier-release-build.log) **28.87 秒**，0 警告、0 错误、Union 合并0碰撞。定向最终有效组合 **901 项通过**：原862项，加最后67项直接回归，去除28项重叠；[组合证据及运行文件哈希](../artifacts/test-results/20261012-product-parity/engineering-summary.json)。这是跨运行组合，不是单次运行或全量测试。Backend 首轮526通过／10失败的证据保留；16项重跑覆盖9个原失败案例、1个替换错误独立分区簇字段夹具的缺卷簇案例及6个原已通过案例。最终有效集合不再计入被替换的旧夹具。
 
@@ -74,7 +86,7 @@ GUI 已分别核验真实与模拟拖入／取消及逐项恢复推荐按钮，�
 
 App 定向回归 11/11、Application 最终新增用例 13/13及23项既有相关用例通过，合计 **47 项不同用例通过、0 失败**；初始12项新增用例由最终13项替代，不重复计数。证据：[App](../artifacts/test-results/20261011-v059-editor-flow-unification/app-targeted.trx)、[初始 Application](../artifacts/test-results/20261011-v059-editor-flow-unification/application-targeted.trx)、[最终 Application](../artifacts/test-results/20261011-v059-editor-flow-unification/application-final-targeted.trx)。真实新池草稿、保存／撤销／重做／放弃以及 E: 格式化表单切至 ReFS+完整格式化（未提交）、格式按钮禁用后经快速重置重新启用、文件系统重置和簇大小重置均已按原生界面核验；模拟池 MSR 开／关、AutoPart 关的最终 GPT+MSR／GPT无MSR／RAW无分区结果通过截图及 simulation-document 核验，三个池通过原界面清理并保留原 DataPool。详细 UI 记录见[证据目录](../artifacts/test-results/20261011-v059-editor-flow-unification/)。
 
-初始标准 App／Agent Release 构建成功，用时25.77秒，0警告／0错误、Union merge 0碰撞；随后多项纯文案调整已包含于最终构建，17.87秒、0警告／0错误、0 collision。标准版本重启后原生 About 显示 V0.59，HelpText 与结构页已核对。原托盘退出时 App／Agent 均在15秒内退出，退出码不可用。最终只读审计确认真实操作三表319 plans、410 steps、2,479 events哈希与基线一致；Accepted299／CallIssued379不变，Samsung受保护关联对象15项比较PASS，WDC最终布局断言通过。见 [Plan §10.8](Plan.md) 中的证据链接。本轮无真实存储写入；其它阶段余项仍未关闭。
+初始标准 App／Agent Release 构建成功，用时25.77秒，0警告／0错误、Union merge 0碰撞；随后多项纯文案调整已包含于最终构建，17.87秒、0警告／0错误、0 collision。标准版本重启后原生 About 显示 V0.59，HelpText 与结构页已核对。原托盘退出时 App／Agent 均在15秒内退出，退出码不可用。最终只读审计确认真实操作三表319 plans、410 steps、2,479 events哈希与基线一致；Accepted299／CallIssued379不变，Samsung受保护关联对象15项比较PASS，WDC最终布局断言通过。见[归档 Plan §10.8](Archive/20261012-editor-ui-baseline/Plan.md)中的证据链接。本轮无真实存储写入；其它阶段余项仍未关闭。
 
 ## 2026-10-11 建池字段与确认摘要：局部验证
 

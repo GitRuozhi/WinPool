@@ -84,6 +84,101 @@ public sealed class WinPoolFactsTests
     }
 
     [Fact]
+    public void LocalScopedDocumentCopyRemapsCollectionAndCoverageWithoutChangingSourceEvidence()
+    {
+        var time = DateTimeOffset.UtcNow;
+        var local = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "local:scoped-copy",
+            StorageSystemKind.Local, "Local", TestSnapshotFactory.Create(), [], time);
+        var facts = WinPoolSimulationFacts.Create(local.Snapshot, local.SystemId) with { IsSimulation = false };
+        var disk = facts.Objects.First(item => item.ObjectType == FactObjectType.PhysicalDisk);
+        var target = new StorageObjectId(local.SystemId, StorageObjectKind.PhysicalDisk, disk.Id);
+        var scope = StorageInventoryScopeFactory.Create(facts, OperationId.New(), "verified-result", [target], generation: 7);
+        scope = scope with { BeforeObjectIds = scope.BeforeObjectIds.Append("absent-historical-object").ToArray() };
+        facts = facts with
+        {
+            Sources = facts.Sources.Select(source => source with
+            {
+                Origin = source.Purpose == CollectionPurpose.Storage ? FactOrigin.StorageCim : FactOrigin.Win32,
+                Coverage = source.Purpose == CollectionPurpose.Storage
+                    ? new(scope.Key, scope.BeforeObjectIds.ToImmutableArray(), true, scope.Generation) : null
+            }).ToImmutableArray(),
+            ScopedCollection = new(scope, time, time.AddSeconds(1), true),
+            IsMerged = true
+        };
+        local = local with { SourceFacts = facts };
+        local.ValidateCurrentFormat();
+
+        var copy = local.AsImportedSimulation("Copy");
+        copy.ValidateCurrentFormat();
+        var copiedFacts = WinPoolFactsCodec.Decode(WinPoolFactsCodec.Encode(copy.SourceFacts!));
+        var copiedScope = copiedFacts.ScopedCollection!.Scope;
+        var copiedTarget = Assert.Single(copiedScope.Targets);
+        Assert.Equal(copy.SystemId, copiedScope.SystemId);
+        Assert.Equal(copy.SystemId, copiedTarget.System);
+        Assert.NotEqual(target.ProviderKey, copiedTarget.ProviderKey);
+        Assert.Contains(copiedFacts.Objects, item => item.Id == copiedTarget.ProviderKey);
+        Assert.Equal(copiedTarget, Assert.Single(copiedScope.BeforeLocators).Target);
+        Assert.Equal(scope.BeforeLocators[0].IdentityValue, copiedScope.BeforeLocators[0].IdentityValue);
+        Assert.Equal(scope.OperationId, copiedScope.OperationId);
+        Assert.Equal(scope.Generation, copiedScope.Generation);
+        Assert.Equal(facts.ScopedCollection.StartedAt, copiedFacts.ScopedCollection.StartedAt);
+        Assert.Equal(facts.ScopedCollection.CompletedAt, copiedFacts.ScopedCollection.CompletedAt);
+        Assert.True(copiedFacts.ScopedCollection.Complete);
+        Assert.All(copiedFacts.Sources.Where(source => source.Coverage is not null), source =>
+        {
+            Assert.Equal(copiedScope.BeforeObjectIds, source.Coverage!.ObjectIds);
+            Assert.Equal(scope.Key, source.Coverage.ScopeKey);
+            Assert.True(source.Coverage.Complete);
+        });
+        Assert.DoesNotContain(copiedScope.BeforeObjectIds, id => scope.BeforeObjectIds.Contains(id));
+        Assert.Equal(scope, local.SourceFacts!.ScopedCollection!.Scope);
+        Assert.Equal(local.Snapshot.PhysicalDisks.Count, copy.Snapshot.PhysicalDisks.Count);
+        var edited = new SimulationOperationService().Apply(copy,
+            new(SimulationEditKind.Rename, copiedTarget.ProviderKey, Name: "Copied disk"));
+        Assert.True(edited.Succeeded);
+        Assert.NotEqual("Copied disk", local.Snapshot.PhysicalDisks.First(item => item.StableId == disk.Id).FriendlyName);
+    }
+
+    [Fact]
+    public void DissolveWithPreservedHardwareDoesNotRestoreSupersededPoolMembership()
+    {
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "simulation:hardware-dissolve",
+            StorageSystemKind.Simulation, "Hardware dissolve", SimulationLayouts.SingleDiskPool(), [], DateTimeOffset.UtcNow);
+        var facts = document.SourceFacts!;
+        var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var diskId = Assert.Single(pool.MemberPhysicalDiskIds);
+        var hardwareSource = new WinPoolSource("extra-hardware", FactOrigin.Win32, "root/cimv2", "Win32_DiskExtra",
+            DateTimeOffset.UtcNow, CollectionPurpose.Hardware);
+        var hardware = new WinPoolSourceObject("extra-hardware-object", FactObjectType.HardwareSupplement,
+            hardwareSource.Id, "extra-hardware-identity", true, []);
+        var supplement = new WinPoolFactRelationship(diskId, hardware.Id, "disk-supplement");
+        document = document with
+        {
+            SourceFacts = facts with
+            {
+                Sources = facts.Sources.Add(hardwareSource),
+                Objects = facts.Objects.Add(hardware),
+                Relationships = facts.Relationships.Add(supplement)
+            }
+        };
+        document.ValidateCurrentFormat();
+        var working = EditWorkspace.DissolvePoolInWorking(document.Snapshot, pool.StableId);
+        var plan = SimulationDraftPlanner.Build(document.Snapshot, working);
+        var result = new SimulationOperationService().ApplyPlan(document, plan);
+
+        Assert.True(result.Succeeded, result.Error);
+        var finalFacts = result.Document.SourceFacts!;
+        finalFacts.Validate();
+        Assert.Contains(finalFacts.Objects, item => item == hardware);
+        Assert.Contains(finalFacts.Relationships, edge => edge == supplement);
+        Assert.DoesNotContain(result.Document.Snapshot.StoragePools, item => item.StableId == pool.StableId);
+        var primordial = result.Document.Snapshot.StoragePools.Single(item => item.IsPrimordial);
+        Assert.Contains(diskId, primordial.MemberPhysicalDiskIds);
+        Assert.Equal(primordial.StableId, result.Document.Snapshot.PhysicalDisks.Single(item => item.StableId == diskId).PoolStableId);
+        Assert.Contains(document.Snapshot.StoragePools, item => item.StableId == pool.StableId);
+    }
+
+    [Fact]
     public void FailedOrLateCollectionDoesNotRemoveCachedDevices()
     {
         var now = DateTimeOffset.UtcNow;

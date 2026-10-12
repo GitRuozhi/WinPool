@@ -37,7 +37,9 @@ public partial class EditorPageBase : Page
     }
 
     private void SyncRealOperationActivity() => OnRealOperationActivityChanged(
-        ViewModel.IsRealOperationBusy, ViewModel.IsRealGraphObscured, ViewModel.RealOperationPhase);
+        ViewModel.IsRealOperationBusy,
+        ViewModel.IsRealGraphObscured && ViewModel.RealOperationOwner == GetType().FullName,
+        ViewModel.RealOperationPhase);
 
     protected virtual void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase) { }
     protected virtual bool OnRecoveredRealOperation(AgentRealOperationResponse status, bool inventoryRefreshed) => true;
@@ -50,22 +52,16 @@ public partial class EditorPageBase : Page
     }
     protected bool IsRealStructureApplyInProgress { get; private set; }
     protected AgentRealOperationResponse? LastRealOperationResponse { get; private set; }
-    private bool structureHasWritten;
-    private readonly string realProgressKey = "real:editor:" + Guid.NewGuid().ToString("N");
+    private int operationChainDepth;
 
-    private void ReportRealActivity(string phase, bool overlay = false)
+    private void ReportRealActivity(string phase)
     {
-        ViewModel.SetRealOperationActivity(true, overlay || structureHasWritten, phase);
-        ViewModel.NotificationService.Publish(GlobalNotificationSeverity.Info,
-            Text("真实磁盘操作", "Real storage operation"), phase, "real",
-            new GlobalNotificationOptions { OccurrenceKey = realProgressKey, IsProgress = true,
-                AutoDismiss = false, RecordInHistory = false });
+        ViewModel.SetRealOperationActivity(true, true, phase, GetType().FullName);
     }
 
     private void EndRealActivity()
     {
-        if (IsRealStructureApplyInProgress) return;
-        ViewModel.NotificationService.DismissByKey(realProgressKey);
+        if (IsRealStructureApplyInProgress || operationChainDepth > 0) return;
         ViewModel.SetRealOperationActivity(false, false, string.Empty);
     }
     private static readonly Guid MicrosoftReservedPartitionType =
@@ -269,8 +265,30 @@ public partial class EditorPageBase : Page
 
     protected Task<bool> SubmitRealAsync(RealOperationIntentRequest intent) => SubmitRealAsync(intent, null, null);
 
+    protected async Task<bool> SubmitRealPropertyAsync(RealOperationIntentRequest intent)
+    {
+        var system = ViewModel.ActiveDocument.SystemId;
+        var session = ViewModel.RealProductSessionId;
+        try
+        {
+            var authorization = new RealPropertyActionAuthorization(intent);
+            return await SubmitRealAsync(intent, authorization, () =>
+            {
+                if (!ViewModel.IsRealMode || !ViewModel.IsLocalSystem || ViewModel.ActiveDocument.SystemId != system
+                    || ViewModel.RealProductSessionId != session)
+                    throw new InvalidOperationException("The property action context changed.");
+            });
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            PublishOperationException(Text("属性修改未完成", "Property change incomplete"), "real", exception,
+                "real.property.incomplete");
+            return false;
+        }
+    }
+
     private async Task<bool> SubmitRealAsync(RealOperationIntentRequest intent,
-        RealStructureApplyAuthorization? authorization, Action? validateApplyContext,
+        IRealOperationAuthorization? authorization, Action? validateApplyContext,
         Action<AgentRealOperationResponse>? registerFrozenStage = null)
     {
         if (!ViewModel.CanSubmitRealOperation || ViewModel.AgentConnection is null)
@@ -309,7 +327,7 @@ public partial class EditorPageBase : Page
 
     private async Task<bool> SubmitReservedRealAsync(
         RealOperationIntentRequest intent, IAgentConnection connection, string productSessionId,
-        RealStructureApplyAuthorization? authorization, Action? validateApplyContext,
+        IRealOperationAuthorization? authorization, Action? validateApplyContext,
         Action<AgentRealOperationResponse>? registerFrozenStage = null)
     {
         var systemId = ViewModel.ActiveDocument.SystemId;
@@ -446,8 +464,7 @@ public partial class EditorPageBase : Page
             var hasWritten = current.Steps.Any(step => step.State is RealOperationStepState.CallIssued
                 or RealOperationStepState.WaitingForProvider or RealOperationStepState.Verifying
                 or RealOperationStepState.Verified or RealOperationStepState.OutcomeUnknown);
-            if (IsRealStructureApplyInProgress && hasWritten) structureHasWritten = true;
-            ReportRealActivity(Text("正在执行 / 核对", "Executing / verifying"), hasWritten);
+            ReportRealActivity(Text("正在执行 / 核对", "Executing / verifying"));
             if (current.State is RealOperationState.Accepted or RealOperationState.Running)
                 continue;
             var succeeded = current.State == RealOperationState.Succeeded && !current.RequiresReconciliation;
@@ -455,7 +472,7 @@ public partial class EditorPageBase : Page
                 || current.State is RealOperationState.Failed or RealOperationState.PartiallyCompleted;
             if (needsRefresh)
             {
-                ReportRealActivity(Text("正在刷新相关对象", "Refreshing related objects"), hasWritten);
+                ReportRealActivity(Text("正在刷新相关对象", "Refreshing related objects"));
                 await RefreshRealInventoryAsync(refreshScope);
             }
             if (!ViewModel.RealStructureResults.Owns(current)

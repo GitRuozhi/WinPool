@@ -65,6 +65,14 @@
             </Style>
             <Style TargetType="Button" BasedOn="{StaticResource WinPoolButtonBaseStyle}" />
 
+            <Style x:Key="WinPoolCardBorderStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+            <x:Double x:Key="WinPoolCardGap">8</x:Double>
+
             <Style
                 x:Key="WinPoolInlineIconButtonStyle"
                 TargetType="Button"

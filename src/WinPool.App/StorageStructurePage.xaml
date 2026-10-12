@@ -69,12 +69,6 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-            <Border x:Name="RealTopologyOverlay" Background="#B3000000" Visibility="Collapsed">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" Margin="16">
-                    <ProgressRing x:Name="RealTopologyProgress" IsActive="False" Width="36" Height="36" />
-                    <TextBlock x:Name="RealTopologyPhase" Foreground="White" TextWrapping="Wrap" TextAlignment="Center" />
-                </StackPanel>
-            </Border>
             </Grid>
         </Border>
         <Border
@@ -428,37 +422,76 @@
                 VerticalScrollBarVisibility="Auto"
                 HorizontalScrollBarVisibility="Disabled"
                 HorizontalScrollMode="Disabled">
-                <Border
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="4">
-                    <Grid
-                        x:Name="PoolFormGrid"
-                        Margin="8,8,8,8"
-                        ColumnSpacing="6"
-                        RowSpacing="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                    </Grid>
-                </Border>
+                <StackPanel
+                    x:Name="PoolSectionsPanel"
+                    Spacing="{StaticResource WinPoolCardGap}">
+                    <Border Style="{StaticResource WinPoolCardBorderStyle}">
+                        <Grid
+                            x:Name="PoolFormGrid"
+                            Margin="8,8,8,8"
+                            ColumnSpacing="6"
+                            RowSpacing="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                    </Border>
+                    <Border
+                        x:Name="DiskAndPartitionCard"
+                        Style="{StaticResource WinPoolCardBorderStyle}">
+                        <Grid
+                            x:Name="DiskAndPartitionFormGrid"
+                            Margin="8,8,8,8"
+                            ColumnSpacing="6"
+                            RowSpacing="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="2*" />
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                    </Border>
+                </StackPanel>
             </ScrollViewer>
             <controls:ContextHelpHost Grid.Row="1" Margin="0,8,0,0">
-            <Button
-                x:Name="SavePoolPropertiesButton"
-                Style="{StaticResource WinPoolButtonBaseStyle}"
-                HorizontalAlignment="Stretch"
-                VerticalAlignment="Center"
-                Click="SavePoolProperties_Click">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE74E;" FontSize="14" />
-                    <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
+                <Button
+                    x:Name="SavePoolPropertiesButton"
+                    Style="{StaticResource WinPoolButtonBaseStyle}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    Click="SavePoolProperties_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE74E;" FontSize="14" />
+                        <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </controls:ContextHelpHost>
         </Grid>
         </Grid>
+        <Border
+            x:Name="RealTopologyOverlay"
+            Grid.RowSpan="2"
+            Background="#B3000000"
+            Visibility="Collapsed">
+            <StackPanel
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="12"
+                Margin="16"
+                MaxWidth="520">
+                <ProgressRing
+                    x:Name="RealTopologyProgress"
+                    IsActive="False"
+                    Width="72"
+                    Height="72"
+                    HorizontalAlignment="Center" />
+                <TextBlock
+                    x:Name="RealTopologyPhase"
+                    Foreground="White"
+                    TextWrapping="Wrap"
+                    TextAlignment="Center" />
+            </StackPanel>
+        </Border>
     </Grid>
 </editors:EditorPageBase>

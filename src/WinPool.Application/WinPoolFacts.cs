@@ -184,17 +184,42 @@ public sealed record WinPoolFacts(
         if (targetSystemId.Value == Guid.Empty || targetSystemId == SystemId)
             throw new ArgumentException("A copy requires a different system identity.", nameof(targetSystemId));
         var map = Objects.ToDictionary(x => x.Id, x => WinPoolIdentityRegistry.ScopedId(targetSystemId, x.ObjectType, x.Id));
-        return this with
+        foreach (var identity in Identities)
+            map.TryAdd(identity.ObjectId, WinPoolIdentityRegistry.ScopedId(targetSystemId, identity.ObjectType, identity.ObjectId));
+        // Coverage can include objects already absent from the current facts.
+        // Keep those historical references in the copy's identity namespace too.
+        string CopyObjectId(string id) => map.GetValueOrDefault(id)
+            ?? "object:" + WinPoolIdentityRegistry.OpaqueSourceIdentity(targetSystemId.Value.ToString("N"), "copied-history", id);
+        StorageObjectId CopyTarget(StorageObjectId target) => new(targetSystemId, target.Kind, CopyObjectId(target.ProviderKey));
+        var copy = this with
         {
             SystemId = targetSystemId, Revision = 1, IsSimulation = true,
+            Sources = Sources.Select(source => source.Coverage is { } coverage ? source with
+            {
+                Coverage = coverage with { ObjectIds = coverage.ObjectIds.Select(CopyObjectId).ToImmutableArray() }
+            } : source).ToImmutableArray(),
             Objects = Objects.Select(x => x with { Id = map[x.Id] }).ToImmutableArray(),
             Relationships = Relationships.Select(x => x with { FromId = map[x.FromId], ToId = map[x.ToId] }).ToImmutableArray(),
             Identities = Identities.Select(x => x with
             {
-                ObjectId = map.GetValueOrDefault(x.ObjectId)
-                    ?? WinPoolIdentityRegistry.ScopedId(targetSystemId, x.ObjectType, x.ObjectId)
-            }).ToImmutableArray()
+                ObjectId = CopyObjectId(x.ObjectId)
+            }).ToImmutableArray(),
+            ScopedCollection = ScopedCollection is { } scoped ? scoped with
+            {
+                Scope = scoped.Scope with
+                {
+                    SystemId = targetSystemId,
+                    Targets = scoped.Scope.Targets.Select(CopyTarget).ToArray(),
+                    BeforeObjectIds = scoped.Scope.BeforeObjectIds.Select(CopyObjectId).ToArray(),
+                    BeforeLocators = scoped.Scope.BeforeLocators.Select(locator => locator with
+                    {
+                        Target = CopyTarget(locator.Target)
+                    }).ToArray()
+                }
+            } : null
         };
+        copy.Validate();
+        return copy;
     }
 }
 

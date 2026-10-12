@@ -54,6 +54,30 @@ public static class RealPartitionResizeUiRange
 
     public static bool IsWholeMib(long bytes) => bytes > 0 && bytes % Mib == 0;
 
+    public static bool TryClampResizeFormula(
+        long currentSizeBytes, long inputMib, bool inputIsDelta, bool extend,
+        long minimumTargetMib, long maximumTargetMib,
+        out long targetSizeBytes, out long deltaBytes)
+    {
+        targetSizeBytes = 0;
+        deltaBytes = 0;
+        if (!IsWholeMib(currentSizeBytes) || minimumTargetMib <= 0
+            || maximumTargetMib < minimumTargetMib || maximumTargetMib > long.MaxValue / Mib)
+            return false;
+        var currentMib = currentSizeBytes / Mib;
+        if (extend ? minimumTargetMib <= currentMib : maximumTargetMib >= currentMib)
+            return false;
+        var minimumInputMib = inputIsDelta
+            ? extend ? minimumTargetMib - currentMib : currentMib - maximumTargetMib
+            : minimumTargetMib;
+        var maximumInputMib = inputIsDelta
+            ? extend ? maximumTargetMib - currentMib : currentMib - minimumTargetMib
+            : maximumTargetMib;
+        return TryGetResizeFormula(currentSizeBytes,
+            Math.Clamp(inputMib, minimumInputMib, maximumInputMib), inputIsDelta, extend,
+            out targetSizeBytes, out deltaBytes);
+    }
+
     public static bool TryGetResizeFormula(
         long currentSizeBytes,
         long inputMib,

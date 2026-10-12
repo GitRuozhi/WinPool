@@ -20,11 +20,44 @@
                 Duration="0:0:0.24" />
         </Storyboard>
     </UserControl.Resources>
-    <InfoBar
-        x:Name="NotificationInfoBar"
-        Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
-        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-        BorderThickness="1"
-        IsClosable="False"
-        IsOpen="True" />
+    <Grid>
+        <InfoBar
+            x:Name="NotificationInfoBar"
+            Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            IsClosable="False"
+            IsIconVisible="True"
+            IsOpen="True" />
+
+        <Border
+            x:Name="ProgressSurface"
+            Padding="12"
+            Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
+            Style="{StaticResource WinPoolCardBorderStyle}"
+            Visibility="Collapsed">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ProgressRing
+                    x:Name="ProgressRing"
+                    Width="20"
+                    Height="20"
+                    IsActive="False"
+                    VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock
+                        x:Name="ProgressTitle"
+                        FontWeight="SemiBold"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="ProgressMessage"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
 </UserControl>

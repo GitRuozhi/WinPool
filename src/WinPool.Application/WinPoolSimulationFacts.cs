@@ -44,11 +44,12 @@ public static class WinPoolSimulationFacts
             .ToHashSet(StringComparer.Ordinal);
         var sources = generated.Sources.AddRange(previous.Sources.Where(x =>
             usedPreviousSourceIds.Contains(x.Id) && generated.Sources.All(candidateSource => candidateSource.Id != x.Id)));
+        var preservedIds = preservedObjects.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
         var relationships = generated.Relationships.AddRange(previous.Relationships.Where(x =>
-                objectIds.Contains(x.FromId) && objectIds.Contains(x.ToId))
+                objectIds.Contains(x.FromId) && objectIds.Contains(x.ToId)
+                && (preservedIds.Contains(x.FromId) || preservedIds.Contains(x.ToId)))
             .Where(x => generated.Relationships.All(candidateRelationship =>
                 candidateRelationship.FromId != x.FromId || candidateRelationship.ToId != x.ToId || candidateRelationship.Kind != x.Kind)));
-        var preservedIds = preservedObjects.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
         var identities = generated.Identities.AddRange(previous.Identities.Where(x => preservedIds.Contains(x.ObjectId))
             .Where(x => generated.Identities.All(candidateIdentity =>
                 candidateIdentity.ObjectType != x.ObjectType || candidateIdentity.SourceIdentity != x.SourceIdentity)));

@@ -6,7 +6,7 @@ using WinPool.Execution;
 namespace WinPool.App.Services;
 
 /// <summary>One confirmed structural goal, scoped to one Apply invocation. It is not a general real-mode grant.</summary>
-public sealed class RealStructureApplyAuthorization
+public sealed class RealStructureApplyAuthorization : IRealOperationAuthorization
 {
     private readonly SystemId systemId;
     private readonly long generation;

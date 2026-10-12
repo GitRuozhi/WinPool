@@ -24,10 +24,7 @@
             Grid.Row="0"
             Grid.Column="0"
             Padding="8"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <Grid>
                 <ListView
                     x:Name="MessageList"
@@ -142,10 +139,7 @@
             x:Name="RightTopEmptyArea"
             Grid.Row="0"
             Grid.Column="2"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4" />
+            Style="{StaticResource WinPoolCardBorderStyle}" />
 
         <toolkit:GridSplitter
             x:Name="TopBottomAreaSplitter"
@@ -161,10 +155,7 @@
             Grid.Row="2"
             Grid.ColumnSpan="3"
             Padding="16"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <TextBlock
                 x:Name="AiEntryHint"
                 HorizontalAlignment="Center"

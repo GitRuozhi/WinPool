@@ -29,7 +29,7 @@ public sealed partial class HardwarePage : Page
     };
     private readonly Button refresh = new();
     private readonly Button export = new();
-    private readonly StackPanel report = new() { Spacing = 20, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly StackPanel report = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ScrollViewer pageScroll = new()
     {
         HorizontalScrollMode = ScrollMode.Disabled,
@@ -50,6 +50,8 @@ public sealed partial class HardwarePage : Page
     public HardwarePage()
     {
         InitializeComponent();
+        var cardGap = (double)Application.Current.Resources["WinPoolCardGap"];
+        report.Spacing = cardGap;
         var buttonStyle = (Style)Application.Current.Resources["WinPoolButtonBaseStyle"];
         refresh.Style = buttonStyle;
         export.Style = buttonStyle;
@@ -66,11 +68,13 @@ public sealed partial class HardwarePage : Page
         var content = new StackPanel
         {
             Margin = new Thickness(12),
-            Spacing = 10,
+            Spacing = cardGap,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        content.Children.Add(actions);
-        content.Children.Add(status);
+        var actionContents = new StackPanel { Spacing = 8 };
+        actionContents.Children.Add(actions);
+        actionContents.Children.Add(status);
+        content.Children.Add(CreateCard(actionContents));
         content.Children.Add(report);
         pageScroll.Content = content;
         Content = pageScroll;
@@ -146,7 +150,11 @@ public sealed partial class HardwarePage : Page
         var categories = HardwareReportProjector.Project(viewModel.SelectedSystem, viewModel.Localization.IsChinese);
         if (categories.Count == 0)
         {
-            report.Children.Add(new TextBlock { Text = viewModel.Localization["HardwareEmpty"], TextWrapping = TextWrapping.Wrap });
+            report.Children.Add(CreateCard(new TextBlock
+            {
+                Text = viewModel.Localization["HardwareEmpty"],
+                TextWrapping = TextWrapping.Wrap
+            }));
             return;
         }
         for (var index = 0; index < categories.Count; index++)
@@ -255,8 +263,15 @@ public sealed partial class HardwarePage : Page
             tables.Add((labels, values, horizontal));
             panel.Children.Add(table);
         }
-        return panel;
+        return CreateCard(panel);
     }
+
+    private static Border CreateCard(UIElement content) => new()
+    {
+        Style = (Style)Application.Current.Resources["WinPoolCardBorderStyle"],
+        Padding = new Thickness(12),
+        Child = content
+    };
 
     private static Border BorderCell(UIElement child) => PropertyTableVisuals.CreateCell(
         child,

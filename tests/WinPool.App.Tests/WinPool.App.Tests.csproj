@@ -16,6 +16,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\..\src\WinPool.App\Services\IntegerInputPolicy.cs" Link="IntegerInputPolicy.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\IRealOperationAuthorization.cs" Link="IRealOperationAuthorization.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealDiskInitializationAuthorization.cs" Link="RealDiskInitializationAuthorization.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealPropertyActionAuthorization.cs" Link="RealPropertyActionAuthorization.cs" />
     <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\..\src\WinPool.Execution\WinPool.Execution.csproj" />
     <Compile Include="..\..\src\WinPool.App\Services\AgentRealModeSession.cs" Link="AgentRealModeSession.cs" />

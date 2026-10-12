@@ -17,15 +17,29 @@ public sealed partial class WorkspaceViewModel
     public bool IsRealOperationBusy { get; private set; }
     public bool IsRealGraphObscured { get; private set; }
     public string RealOperationPhase { get; private set; } = string.Empty;
+    public string? RealOperationOwner { get; private set; }
+    private const string EditorProgressKey = "editor:active-operation";
     public AgentRealOperationResponse? LastRealOperationStatus { get; private set; }
     public event Action? RealOperationActivityChanged;
     public event Func<AgentRealOperationResponse, bool, bool>? RealOperationRecovered;
 
-    public void SetRealOperationActivity(bool busy, bool obscure, string phase)
+    public void SetRealOperationActivity(bool busy, bool obscure, string phase, string? owner = null)
     {
         IsRealOperationBusy = busy;
-        IsRealGraphObscured = obscure;
-        RealOperationPhase = phase;
+        var retained = !busy && RealOperationSubmission.IsBlocked;
+        IsRealGraphObscured = obscure || retained;
+        var chinese = Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        RealOperationPhase = retained ? chinese ? "正在只读核对操作结果" : "Reconciling the operation result" : phase;
+        if (owner is not null) RealOperationOwner = owner;
+        if (!busy && !retained) RealOperationOwner = null;
+        if (busy || retained)
+            _notificationService.Publish(GlobalNotificationSeverity.Info,
+                IsUsingSimulatedInventory ? chinese ? "编辑操作" : "Editing operation"
+                    : chinese ? "真实磁盘操作" : "Real storage operation",
+                RealOperationPhase, "editor",
+                new GlobalNotificationOptions { OccurrenceKey = EditorProgressKey, IsProgress = true,
+                    AutoDismiss = false, RecordInHistory = false });
+        else _notificationService.DismissByKey(EditorProgressKey);
         RealOperationActivityChanged?.Invoke();
         if (!busy) EnsureRealOperationRecoveryPolling();
     }

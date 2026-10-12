@@ -9,12 +9,11 @@
     mc:Ignorable="d">
 
     <Page.Resources>
-        <Style x:Key="SettingsCardBorder" TargetType="Border">
+        <Style
+            x:Key="SettingsCardBorder"
+            TargetType="Border"
+            BasedOn="{StaticResource WinPoolCardBorderStyle}">
             <Setter Property="Padding" Value="20" />
-            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="4" />
         </Style>
         <Style x:Key="SettingsFieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="14" />
@@ -32,7 +31,7 @@
         <StackPanel
             Padding="24,20,24,40"
             HorizontalAlignment="Stretch"
-            Spacing="8">
+            Spacing="{StaticResource WinPoolCardGap}">
             <Border Style="{StaticResource SettingsCardBorder}">
                 <Grid ColumnSpacing="16" RowSpacing="16">
                     <Grid.RowDefinitions>
@@ -207,7 +206,6 @@
                             TextAlignment="Left"
                             GotFocus="NumericBox_GotFocus"
                             KeyDown="PartitionGapBox_KeyDown"
-                            TextChanged="PartitionGapBox_TextChanged"
                             LostFocus="PartitionGapBox_LostFocus" />
                         <TextBlock
                             VerticalAlignment="Center"

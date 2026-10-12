@@ -21,10 +21,7 @@
 
         <Border
             Padding="8"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <Grid>
                 <controls:DiskActivityGraphControl x:Name="ActivityGraph" />
                 <Border
@@ -58,10 +55,7 @@
             Padding="8"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <ScrollViewer
                 x:Name="TableScroll"
                 HorizontalAlignment="Stretch"
@@ -240,10 +234,7 @@
             Grid.Row="4"
             SizeChanged="ButtonsCard_SizeChanged"
             Padding="12,8"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4">
+            Style="{StaticResource WinPoolCardBorderStyle}">
             <Grid x:Name="ButtonsGrid" ColumnSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />

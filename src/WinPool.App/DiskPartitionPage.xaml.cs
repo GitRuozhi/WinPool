@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Navigation;
 using System.Text.Json;
 using WinPool.App.ViewModels;
 using WinPool.App.Services;
+using WinPool_App.Controls;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -42,6 +43,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         InitializeComponent();
         _formatModeControlsReady = true;
         SetFormatMode(quickFormat: true);
+        IntegerTextInput.Attach(SizeBox,
+            () => _working is null ? null : SelectedCreateGeometry()?.MaximumSizeBytes / BytesPerMiB,
+            fillMaximumOnLostFocus: true);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -136,12 +140,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         OpenExplorerButtonLabel.Text = Text("打开资源管理器", "Open in File Explorer");
         DiskLocationLabel.Text = Text("所在磁盘", "Disk");
         PartitionNumberLabel.Text = Text("分区编号", "Partition number");
-        StartOffsetLabel.Text = Text("起点", "Start");
-        EndOffsetLabel.Text = Text("终点", "End");
+        StartOffsetLabel.Text = Text("起点-终点", "Start–end");
+        EndOffsetLabel.Text = StartOffsetLabel.Text;
         PartitionTypeLabel.Text = Text("分区类型", "Partition type");
         DriveLetterLabel.Text = Text("盘符", "Drive letter");
         VolumeLabelCaption.Text = Text("卷标", "Volume label");
         SizeLabel.Text = Text("容量", "Capacity");
+        SizeAdaptiveLabel.Text = SizeLabel.Text;
+        ImmediatePropertiesTitle.Text = Text("即时属性", "Immediate properties");
+        FormattingPropertiesTitle.Text = Text("格式化属性", "Formatting properties");
         FileSystemLabel.Text = Text("文件系统", "File system");
         ClusterLabel.Text = Text("分配单元", "Allocation unit");
         QuickFormatLabel.Text = Text("快速格式化", "Quick format");
@@ -154,6 +161,17 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         AutomationProperties.SetName(MaximumSizeButton, Text("使用最大容量", "Use maximum capacity"));
         AutomationProperties.SetName(SizeBox, Text("容量", "Capacity"));
         AutomationProperties.SetName(SizeAdaptiveValue, Text("自适应容量单位", "Adaptive capacity unit"));
+        ToolTipService.SetToolTip(MaximumSizeButton, Text("使用最大容量", "Use maximum capacity"));
+        foreach (var button in new[] { UndoDriveLetterButton, UndoVolumeLabelButton })
+        {
+            AutomationProperties.SetName(button, Text("撤销此项修改", "Undo this property change"));
+            ToolTipService.SetToolTip(button, Text("恢复原值", "Restore the original value"));
+        }
+        foreach (var button in new[] { CommitDriveLetterButton, CommitVolumeLabelButton })
+        {
+            AutomationProperties.SetName(button, Text("应用此项修改", "Apply this property change"));
+            ToolTipService.SetToolTip(button, Text("应用此项修改", "Apply this property change"));
+        }
         ContextHelp.Set(DiskOnlineStateButton,
             Text("根据磁盘当前采集到的联机状态提供相反动作；只有真实操作完成且结果核对成功后才更新显示。",
                 "Offers the opposite of the collected disk online state; the display changes only after a real operation completes and its result is verified."));
@@ -178,9 +196,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(PartitionTypeBox,
             Text("在 GPT 未分配空间中选择固定分区类型。", "Choose a fixed partition type in GPT unallocated space."));
         ContextHelp.Set(DriveLetterBox,
-            Text("选择卷盘符；保留分区不能分配盘符。", "Choose a volume drive letter; reserved partitions cannot receive one."));
+            Text("选择盘符后点击右侧勾号应用；左侧撤销恢复原值。保留分区不能分配盘符。", "Choose a drive letter, then apply it with the check button; undo restores the original value. Reserved partitions cannot receive one."));
         ContextHelp.Set(VolumeLabelBox,
-            Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
+            Text("输入卷标后点击右侧勾号或按 Enter 应用；左侧撤销恢复原值。新分区使用此名称创建。", "Enter a volume label and apply with the check button or Enter; undo restores the original value. A new partition is created with this name."));
         ContextHelp.Set(SizeBox,
             Text(
                 "创建时输入 MiB 正整数；第二行显示同一容量的自适应单位。最大值按选中空隙的 1 MiB 对齐范围计算。",
@@ -251,7 +269,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         PropertiesPane.Visibility = showProperties ? Visibility.Visible : Visibility.Collapsed;
         EditorSplitter.Visibility = _narrowLayout ? Visibility.Collapsed : Visibility.Visible;
         TargetsColumn.MinWidth = _narrowLayout ? 0 : 120;
-        PropertiesColumn.MinWidth = _narrowLayout ? 0 : 240;
+        PropertiesColumn.MinWidth = _narrowLayout ? 0 : 280;
         TargetsColumn.Width = showTargets
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         SplitterColumn.Width = new GridLength(_narrowLayout ? 0 : 8);
@@ -485,6 +503,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             var disk = SelectedDisk();
             var gap = _selectedUnallocatedOffset is not null;
             var geometry = gap ? SelectedCreateGeometry() : null;
+            IntegerTextInput.Attach(SizeBox,
+                () => SelectedCreateGeometry()?.MaximumSizeBytes / BytesPerMiB,
+                minimum: gap ? 1 : 0, fillMaximumOnLostFocus: true);
             var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
             DiskLocationValue.Text = disk is null
                 ? string.Empty
@@ -524,7 +545,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             FillFileSystemChoices(partition);
             FillDriveLetters(partition, volume, autoAssign: gap);
             VolumeLabelBox.Text = volume?.FileSystemLabel
-                ?? (partition is null ? string.Empty : partition.FileSystemLabel);
+                ?? (partition is null ? gap ? DefaultVolumeLabel() : string.Empty : partition.FileSystemLabel);
             if (gap)
             {
                 SetSizeMib(geometry?.DefaultSizeBytes is long defaultSize
@@ -536,7 +557,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 }
                 else
                 {
-                    SizeAdaptiveValue.Text = "—";
+                    SetSizeAdaptiveValue(null);
                 }
                 FileSystemBox.SelectedIndex = 0;
                 FillClusterChoices("NTFS", null, 65536);
@@ -545,8 +566,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             }
             else if (partition is not null)
             {
-                SizeBox.Text = (partition.Size / (double)BytesPerMiB).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-                SizeAdaptiveValue.Text = TopologyProjector.FormatBytes(partition.Size);
+                SizeBox.Text = (partition.Size / BytesPerMiB).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                SetSizeAdaptiveValue(partition.Size);
                 var currentFileSystem = volume?.FileSystem ?? partition.FileSystem;
                 if (string.IsNullOrWhiteSpace(currentFileSystem)
                     || currentFileSystem.Equals("RAW", StringComparison.OrdinalIgnoreCase))
@@ -568,7 +589,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             else
             {
                 SizeBox.Text = string.Empty;
-                SizeAdaptiveValue.Text = "—";
+                SetSizeAdaptiveValue(null);
                 FileSystemBox.SelectedIndex = 0;
                 FillClusterChoices("NTFS", null, 65536);
                 SetFormatMode(quickFormat: true);
@@ -1095,6 +1116,64 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     "Real EFI and Recovery partition creation supports quick format only.")
                 : formatOptionsReason);
         UpdatePropertyResetState();
+        UpdatePropertyCommandState();
+    }
+
+    private void UpdatePropertyCommandState()
+    {
+        if (ViewModel is null) return;
+        var partition = SelectedPartition();
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        var isNew = _selectedUnallocatedOffset is not null;
+        var baselineLabel = volume?.FileSystemLabel ?? (isNew ? DefaultVolumeLabel() : partition?.FileSystemLabel ?? string.Empty);
+        var labelChanged = !string.Equals(VolumeLabelBox.Text, baselineLabel, StringComparison.Ordinal);
+        var baselineLetter = volume?.DriveLetter ?? (partition is null ? DefaultCreateDriveLetter() : _working.DriveLetterOf(partition));
+        var selected = SelectedDriveLetter();
+        var letterChanged = !string.Equals(selected, baselineLetter, StringComparison.OrdinalIgnoreCase);
+        UndoVolumeLabelButton.IsEnabled = VolumeLabelBox.IsEnabled && labelChanged;
+        CommitVolumeLabelButton.IsEnabled = VolumeLabelBox.IsEnabled && volume is not null && labelChanged;
+        UndoDriveLetterButton.IsEnabled = DriveLetterBox.IsEnabled && letterChanged;
+        CommitDriveLetterButton.IsEnabled = DriveLetterBox.IsEnabled && volume is not null && letterChanged;
+    }
+
+    private string DefaultCreateDriveLetter()
+    {
+        var used = UsedDriveLetters(null);
+        return ViewModel.CanSubmitRealOperation
+            ? "DEFGHIJKLMNOPQRSTUVWXYZ".Select(letter => letter.ToString()).FirstOrDefault(letter => !used.Contains(letter)) ?? string.Empty
+            : NextFreeDriveLetter(used);
+    }
+
+    private string SelectedDriveLetter() => DriveLetterBox.SelectedItem as string is { } selected
+        && selected != Text("无", "None") ? selected : NoneLetterValue;
+
+    private void UndoDriveLetter_Click(object sender, RoutedEventArgs e)
+    {
+        var partition = SelectedPartition();
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        var wasFilling = _filling;
+        _filling = true;
+        try { FillDriveLetters(partition, volume, autoAssign: _selectedUnallocatedOffset is not null); }
+        finally { _filling = wasFilling; }
+        UpdatePropertyCommandState();
+    }
+
+    private void UndoVolumeLabel_Click(object sender, RoutedEventArgs e)
+    {
+        var partition = SelectedPartition();
+        var volume = partition is null ? null : _working.VolumeForPartition(partition.StableId);
+        VolumeLabelBox.Text = volume?.FileSystemLabel
+            ?? (_selectedUnallocatedOffset is not null ? DefaultVolumeLabel() : partition?.FileSystemLabel ?? string.Empty);
+        UpdatePropertyCommandState();
+    }
+
+    private async void CommitDriveLetter_Click(object sender, RoutedEventArgs e) => await CommitDriveLetterAsync();
+
+    private async void CommitVolumeLabel_Click(object sender, RoutedEventArgs e) => await CommitVolumeLabelAsync();
+
+    private void VolumeLabelBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_filling) UpdatePropertyCommandState();
     }
 
     private void RestoreFieldHelp()
@@ -1102,9 +1181,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(PartitionTypeBox,
             Text("在 GPT 未分配空间中选择固定分区类型。", "Choose a fixed partition type in GPT unallocated space."));
         ContextHelp.Set(DriveLetterBox,
-            Text("选择卷盘符；保留分区不能分配盘符。", "Choose a volume drive letter; reserved partitions cannot receive one."));
+            Text("选择盘符后点击右侧勾号应用；左侧撤销恢复原值。保留分区不能分配盘符。", "Choose a drive letter, then apply it with the check button; undo restores the original value. Reserved partitions cannot receive one."));
         ContextHelp.Set(VolumeLabelBox,
-            Text("输入卷标后按 Enter 保存；离开焦点不会提交。", "Enter a volume label and press Enter to save; losing focus does not submit it."));
+            Text("输入卷标后点击右侧勾号或按 Enter 应用；左侧撤销恢复原值。新分区使用此名称创建。", "Enter a volume label and apply with the check button or Enter; undo restores the original value. A new partition is created with this name."));
         ContextHelp.Set(SizeBox,
             SelectedPartition() is null
                 ? Text("以 MiB 正整数输入新分区大小；下一行显示自适应单位。", "Enter the new partition size as a whole number of MiB; the next line shows an adaptive unit.")
@@ -1156,7 +1235,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 out maximumMib))
             return false;
 
-        suggestedMib = extend ? minimumMib : maximumMib;
+        suggestedMib = extend ? maximumMib : minimumMib;
         return true;
     }
 
@@ -1398,6 +1477,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                         break;
                 }
             }
+            if (SelectedPartitionKind() != PartitionKind.MicrosoftReserved
+                && string.IsNullOrEmpty(VolumeLabelBox.Text))
+                VolumeLabelBox.Text = DefaultVolumeLabel();
             UpdateSizeAdaptiveValue();
         }
         finally
@@ -1434,6 +1516,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             UpdateButtonState();
         }
     }
+
+    private string DefaultVolumeLabel() => Text("新卷", "New Volume");
 
     private void ClusterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -1639,9 +1723,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void UpdateSizeAdaptiveValue()
     {
-        SizeAdaptiveValue.Text = TryGetSizeBytes(out var sizeBytes)
-            ? TopologyProjector.FormatBytes(sizeBytes)
-            : Text("请输入 MiB 正整数", "Enter a whole number of MiB");
+        SetSizeAdaptiveValue(TryGetSizeBytes(out var sizeBytes) ? sizeBytes : null);
+    }
+
+    private void SetSizeAdaptiveValue(long? bytes)
+    {
+        var text = bytes is long size ? TopologyProjector.FormatBytes(size) : string.Empty;
+        var separator = text.LastIndexOf(' ');
+        SizeAdaptiveValue.Text = separator < 0 ? text : text[..separator];
+        SizeAdaptiveUnit.Text = separator < 0 ? string.Empty : text[(separator + 1)..];
     }
 
     private void SetOffsetValues(long? startBytes, long? endBytes)
@@ -1674,7 +1764,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         var culture = OffsetDisplayCulture();
-        mibValue.Text = $"{FormatExactMib(value, culture)} MiB";
+        mibValue.Text = $"{(value / BytesPerMiB).ToString("N0", culture)} MiB";
         adaptiveValue.Text = FormatAdaptiveBytes(value, culture);
     }
 
@@ -1739,7 +1829,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _ => geometry.UnavailableReason ?? Text("该未分配区域不可创建分区。", "A partition cannot be created in this unallocated region.")
     };
 
-    private async void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void DriveLetterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_filling) UpdatePropertyCommandState();
+    }
+
+    private async Task CommitDriveLetterAsync()
     {
         if (_filling || (!ViewModel.IsUsingSimulatedInventory && !ViewModel.CanSubmitRealOperation))
         {
@@ -1753,8 +1848,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        var selected = DriveLetterBox.SelectedItem as string ?? string.Empty;
-        var next = selected == Text("无", "None") ? NoneLetterValue : selected;
+        var next = SelectedDriveLetter();
         if (string.Equals(next, volume.DriveLetter, StringComparison.OrdinalIgnoreCase)
             || (next.Length == 0 && volume.DriveLetter.Length == 0))
         {
@@ -1770,7 +1864,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 partition.StableId, volume.StableId,
                 RealDriveLetterSelectionRecovery.ResolvePhysicalDiskStableId(_working, partition.StableId));
             var previousResponse = LastRealOperationResponse;
-            var succeeded = await SubmitRealAsync(RealPartitionIntent(OperationIntent.SetDriveLetter,
+            var succeeded = await SubmitRealPropertyAsync(RealPartitionIntent(OperationIntent.SetDriveLetter,
                 partition, new SetDriveLetterCommand(PartitionReference(partition),
                     previous, requested),
                 $"Drive letter changes from {previous?.ToString() ?? "none"} to {requested?.ToString() ?? "none"}",
@@ -1852,7 +1946,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             {
                 var target = new StorageObjectId(ViewModel.ActiveDocument.SystemId,
                     StorageObjectKind.Volume, volume.StableId);
-                await SubmitRealAsync(RealOneTargetIntent(OperationIntent.SetVolumeLabel,
+                await SubmitRealPropertyAsync(RealOneTargetIntent(OperationIntent.SetVolumeLabel,
                     target, new RenameVolumeCommand(RealTargetReference.ForExisting(target), next),
                     $"Volume label becomes {next}", "No file data loss expected"));
                 return;
@@ -1927,22 +2021,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         {
             if (ViewModel.CanSubmitRealOperation)
             {
-                var target = new StorageObjectId(system, StorageObjectKind.OsDisk, disk.StableId);
-                if (!await SubmitRealAsync(RealOperationProposalFactory.InitializeGpt(system, target))
-                    || !LastRealInventoryRefreshSucceeded)
-                    return;
-
-                var refreshedDisk = _working.OsDisks.FirstOrDefault(item =>
-                    item.StableId.Equals(disk.StableId, StringComparison.OrdinalIgnoreCase));
-                if (refreshedDisk is null)
-                {
-                    await ShowMessageAsync(Text("磁盘初始化后无法继续", "Cannot continue after disk initialization"),
-                        Text("新扫描中找不到已初始化的目标磁盘；已停止后续分区设置。",
-                            "The initialized target disk was not found in the fresh scan. Further partition setup was stopped."));
-                    return;
-                }
-
-                await SubmitInitializedDiskLayoutAsync(refreshedDisk,
+                await SubmitInitializeDiskAndLayoutAsync(disk,
                     ViewModel.CurrentPreferences.CreateMsrOnInitialize);
                 return;
             }
@@ -2236,286 +2315,203 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async void Shrink_Click(object sender, RoutedEventArgs e) => await ResizeAsync(extend: false);
 
-    private async Task<long?> PromptResizeTargetAsync(
-        PartitionInfo partition,
-        PartitionResizeCapability capability,
-        bool extend)
+    private async Task<(long SizeBytes, bool Extend)?> PromptResizeTargetAsync(
+        PartitionInfo partition, bool extend)
     {
-        if (!TryGetResizeTargetRange(
-                partition,
-                capability,
-                extend,
-                out var minimumMib,
-                out var maximumMib,
-                out var suggestedMib))
+        (long Minimum, long Maximum)? GetBounds(bool direction)
         {
-            var reason = !RealPartitionResizeUiRange.IsWholeMib(partition.Size)
-                ? Text(
-                    $"当前容量为 {partition.Size} bytes，不是整 MiB。保留该原始容量；不能用舍入值计算扩缩公式。",
-                    $"The current size is {partition.Size} bytes, not a whole MiB. The exact size is preserved; a rounded value cannot be used in the resize formula.")
-                : extend
-                    ? Text(
-                        "分区右侧没有足够的连续未分配空间，无法形成更大的 1 MiB 对齐目标容量。",
-                        "There is not enough contiguous unallocated space immediately after the partition for a larger 1 MiB-aligned target capacity.")
-                    : Text(
-                        "当前已用数据和几何没有可用的更小 1 MiB 对齐目标容量。",
-                        "The modeled used data and geometry have no smaller 1 MiB-aligned target capacity.");
-            await ShowMessageAsync(
-                extend
-                    ? Text("无法扩展分区", "Cannot extend partition")
-                    : Text("无法压缩分区", "Cannot shrink partition"),
-                reason);
-            return null;
+            var capability = StorageEditRules.GetPartitionResizeCapability(_working,
+                partition.StableId, direction ? SimulationEditKind.ExtendPartition : SimulationEditKind.ShrinkPartition);
+            return TryGetResizeTargetRange(partition, capability, direction,
+                out var minimum, out var maximum, out _) ? (minimum, maximum) : null;
         }
-
-        return await PromptResizeFormulaAsync(
-            partition.Size,
-            minimumMib,
-            maximumMib,
-            suggestedMib,
-            extend,
-            Text(
-                $"可用目标总容量：{minimumMib}–{maximumMib} MiB。确认后只提交精确目标 bytes。",
-                $"Allowed total target size: {minimumMib}–{maximumMib} MiB. Confirmation submits only the exact target bytes."),
-            extend ? Text("模拟扩展分区", "Extend simulated partition")
-                : Text("模拟压缩分区", "Shrink simulated partition"),
-            extend ? Text("确认扩展", "Confirm extend") : Text("确认压缩", "Confirm shrink"));
+        var extendBounds = GetBounds(true);
+        var shrinkBounds = GetBounds(false);
+        return await PromptResizeFormulaAsync(partition.Size, extendBounds, shrinkBounds,
+            extend, Text("模拟分区扩缩", "Resize simulated partition"),
+            Text("模拟范围按当前几何与已用数据估算。", "The simulated range models current geometry and used data."));
     }
 
-    private async Task<long?> PromptResizeFormulaAsync(
+    private async Task<(long SizeBytes, bool Extend)?> PromptResizeFormulaAsync(
         long currentSizeBytes,
-        long minimumTargetMib,
-        long maximumTargetMib,
-        long suggestedTargetMib,
-        bool extend,
-        string rangeDetails,
-        string title,
-        string confirmLabel)
+        (long Minimum, long Maximum)? extendBounds,
+        (long Minimum, long Maximum)? shrinkBounds,
+        bool initialExtend, string title, string rangeDetails)
     {
         if (!RealPartitionResizeUiRange.IsWholeMib(currentSizeBytes))
         {
-            await ShowMessageAsync(
-                extend ? Text("无法扩展分区", "Cannot extend partition")
-                    : Text("无法压缩分区", "Cannot shrink partition"),
-                Text(
-                    $"当前容量为 {currentSizeBytes} bytes，不是整 MiB。保留该原始容量；不能用舍入值计算扩缩公式。",
-                    $"The current size is {currentSizeBytes} bytes, not a whole MiB. The exact size is preserved; a rounded value cannot be used in the resize formula."));
+            await ShowMessageAsync(Text("无法调整分区", "Cannot resize partition"),
+                Text($"当前容量为 {currentSizeBytes} bytes，不是整 MiB；保留准确容量，不使用舍入值计算。",
+                    $"The current size is {currentSizeBytes} bytes, not a whole MiB. The exact size is preserved rather than calculating from a rounded value."));
             return null;
         }
-
-        var targetSizeBytes = suggestedTargetMib * BytesPerMiB;
-        if (!RealPartitionResizeUiRange.TryGetResizeFormula(
-                currentSizeBytes,
-                suggestedTargetMib,
-                false,
-                extend,
-                out targetSizeBytes,
-                out var initialDeltaBytes))
+        if (extendBounds is null && shrinkBounds is null)
+        {
+            await ShowMessageAsync(Text("当前没有可用目标", "No supported target"),
+                Text("当前范围没有可用的整 MiB 扩展或压缩目标。", "The current range has no whole-MiB extension or shrink target."));
             return null;
-
-        var currentValue = new TextBlock
+        }
+        var extend = initialExtend ? extendBounds is not null : shrinkBounds is null;
+        var currentMib = currentSizeBytes / BytesPerMiB;
+        var direction = new ToggleSwitch
         {
-            Text = $"{currentSizeBytes / BytesPerMiB} MiB",
-            VerticalAlignment = VerticalAlignment.Center,
-            TextAlignment = TextAlignment.Center,
-            TextWrapping = TextWrapping.Wrap
+            Header = Text("扩展 / 压缩", "Extend / shrink"),
+            OnContent = Text("扩展", "Extend"), OffContent = Text("压缩", "Shrink"),
+            IsOn = extend, IsEnabled = extendBounds is not null && shrinkBounds is not null
         };
-        var deltaInput = new TextBox
-        {
-            Text = (initialDeltaBytes / BytesPerMiB).ToString(
-                System.Globalization.CultureInfo.InvariantCulture),
-            MinWidth = 72,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        var targetInput = new TextBox
-        {
-            Text = (targetSizeBytes / BytesPerMiB).ToString(
-                System.Globalization.CultureInfo.InvariantCulture),
-            MinWidth = 72,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
+        AutomationProperties.SetName(direction, Text("扩缩方向", "Resize direction"));
+        var currentInput = new TextBox { IsReadOnly = true, Text = currentMib.ToString(System.Globalization.CultureInfo.InvariantCulture), MinWidth = 0, Height = 32 };
+        var deltaInput = new TextBox { MinWidth = 0, Height = 32 };
+        var targetInput = new TextBox { MinWidth = 0, Height = 32 };
+        AutomationProperties.SetName(currentInput, Text("当前容量（MiB）", "Current size (MiB)"));
         AutomationProperties.SetName(deltaInput, Text("扩缩量（MiB）", "Resize amount (MiB)"));
-        AutomationProperties.SetName(targetInput, Text("目标总容量（MiB）", "Total target size (MiB)"));
-
-        var currentAdaptive = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
-        var deltaAdaptive = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
-        var targetAdaptive = new TextBlock { TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
-        var formula = new Grid { ColumnSpacing = 8, RowSpacing = 4, HorizontalAlignment = HorizontalAlignment.Stretch };
-        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
-        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
-        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
-        formula.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        formula.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        var deltaGroup = CreateResizeInputGroup(deltaInput);
-        var targetGroup = CreateResizeInputGroup(targetInput);
-        AddResizeFormulaCell(formula, currentValue, 0, 0);
-        AddResizeFormulaCell(formula, CreateFormulaOperator(extend ? "+" : "−"), 1, 0);
-        AddResizeFormulaCell(formula, deltaGroup, 2, 0);
+        AutomationProperties.SetName(targetInput, Text("结果容量（MiB）", "Result size (MiB)"));
+        var deltaMaximum = new Button { Content = "Max", MinWidth = 0, Height = 32, Padding = new Thickness(2, 0, 2, 0) };
+        var targetExtreme = new Button { Content = "Max", MinWidth = 0, Height = 32, Padding = new Thickness(2, 0, 2, 0) };
+        var currentAdaptive = new TextBox { IsReadOnly = true, MinWidth = 0, Height = 32 };
+        var deltaAdaptive = new TextBox { IsReadOnly = true, MinWidth = 0, Height = 32 };
+        var targetAdaptive = new TextBox { IsReadOnly = true, MinWidth = 0, Height = 32 };
+        var currentUnit = new TextBlock();
+        var deltaUnit = new TextBlock();
+        var targetUnit = new TextBlock();
+        var firstOperator = CreateFormulaOperator(extend ? "+" : "−");
+        var secondOperator = CreateFormulaOperator(extend ? "+" : "−");
+        var formula = new Grid { Width = 516, ColumnSpacing = 6, RowSpacing = 4, HorizontalAlignment = HorizontalAlignment.Left };
+        foreach (var width in new[] { 148d, 24d, 148d, 24d, 148d })
+            formula.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
+        formula.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) });
+        formula.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) });
+        AddResizeFormulaCell(formula, CreateResizeInputGroup(currentInput, new TextBlock { Text = "MiB" }), 0, 0);
+        AddResizeFormulaCell(formula, firstOperator, 1, 0);
+        AddResizeFormulaCell(formula, CreateResizeInputGroup(deltaInput, new TextBlock { Text = "MiB" }, deltaMaximum), 2, 0);
         AddResizeFormulaCell(formula, CreateFormulaOperator("="), 3, 0);
-        AddResizeFormulaCell(formula, targetGroup, 4, 0);
-        AddResizeFormulaCell(formula, currentAdaptive, 0, 1);
-        AddResizeFormulaCell(formula, CreateFormulaOperator(extend ? "+" : "−"), 1, 1);
-        AddResizeFormulaCell(formula, deltaAdaptive, 2, 1);
+        AddResizeFormulaCell(formula, CreateResizeInputGroup(targetInput, new TextBlock { Text = "MiB" }, targetExtreme), 4, 0);
+        AddResizeFormulaCell(formula, CreateResizeInputGroup(currentAdaptive, currentUnit), 0, 1);
+        AddResizeFormulaCell(formula, secondOperator, 1, 1);
+        AddResizeFormulaCell(formula, CreateResizeInputGroup(deltaAdaptive, deltaUnit), 2, 1);
         AddResizeFormulaCell(formula, CreateFormulaOperator("="), 3, 1);
-        AddResizeFormulaCell(formula, targetAdaptive, 4, 1);
-
-        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var content = new StackPanel { Spacing = 10, MaxWidth = 680 };
-        content.Children.Add(new TextBlock
-        {
-            Text = Text(
-                "第一行为精确 MiB 整数，第二行为自适应单位。当前容量只读；扩缩量与目标总容量双向联动。",
-                "The first row uses exact whole MiB. The second row shows adaptive units. Current size is read-only; the amount and total target update each other."),
-            TextWrapping = TextWrapping.Wrap
-        });
-        content.Children.Add(new TextBlock { Text = rangeDetails, TextWrapping = TextWrapping.Wrap });
+        AddResizeFormulaCell(formula, CreateResizeInputGroup(targetAdaptive, targetUnit), 4, 1);
+        var maximumDetails = new TextBlock { TextWrapping = TextWrapping.Wrap, MinHeight = 40 };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap, MinHeight = 24 };
+        var content = new StackPanel { Spacing = 10, Width = 516 };
+        content.Children.Add(direction);
+        content.Children.Add(maximumDetails);
         content.Children.Add(formula);
         content.Children.Add(validation);
-
+        content.Children.Add(new TextBlock { Text = rangeDetails, TextWrapping = TextWrapping.Wrap });
         var dialog = new ContentDialog
         {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = new ScrollViewer { MaxHeight = 560, Content = content },
-            PrimaryButtonText = confirmLabel,
-            CloseButtonText = Text("取消", "Cancel"),
+            XamlRoot = XamlRoot, Title = title,
+            Content = new ScrollViewer { MaxHeight = 560, Content = content, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto },
+            PrimaryButtonText = Text("扩展", "Extend"), CloseButtonText = Text("取消", "Cancel"),
             DefaultButton = ContentDialogButton.Primary
         };
-
+        dialog.Resources["ContentDialogMaxWidth"] = 620d;
         long? authoritativeTargetBytes = null;
         var updatingInputs = false;
         var lastEditedIsDelta = true;
-        currentAdaptive.Text = TopologyProjector.FormatBytes(currentSizeBytes);
+        (long Minimum, long Maximum) Bounds() => (extend ? extendBounds : shrinkBounds)!.Value;
+        long MaximumDeltaMib() => extend ? Bounds().Maximum - currentMib : currentMib - Bounds().Minimum;
+        IntegerTextInput.Attach(deltaInput, () => MaximumDeltaMib(), fillMaximumOnLostFocus: true);
+        IntegerTextInput.Attach(targetInput, () => Bounds().Maximum, fillMaximumOnLostFocus: true);
 
-        void UpdateAdaptiveValues()
+        void SetAdaptive(TextBox input, TextBlock unit, long? bytes)
         {
-            if (authoritativeTargetBytes is not long targetBytes)
-            {
-                deltaAdaptive.Text = "—";
-                targetAdaptive.Text = "—";
-                return;
-            }
-
-            var deltaBytes = extend
-                ? targetBytes - currentSizeBytes
-                : currentSizeBytes - targetBytes;
-            deltaAdaptive.Text = TopologyProjector.FormatBytes(deltaBytes);
-            targetAdaptive.Text = TopologyProjector.FormatBytes(targetBytes);
+            var value = bytes is long amount ? TopologyProjector.FormatBytes(amount) : string.Empty;
+            var separator = value.LastIndexOf(' ');
+            input.Text = separator < 0 ? value : value[..separator];
+            unit.Text = separator < 0 ? string.Empty : value[(separator + 1)..];
         }
-
+        SetAdaptive(currentAdaptive, currentUnit, currentSizeBytes);
         void Validate(bool editedDelta)
         {
-            if (updatingInputs)
-                return;
-
+            if (updatingInputs) return;
             lastEditedIsDelta = editedDelta;
             authoritativeTargetBytes = null;
-            var editedInput = editedDelta ? deltaInput : targetInput;
-            var derivedInput = editedDelta ? targetInput : deltaInput;
-            string? error;
-            long candidateTargetBytes = 0;
-            long deltaBytes = 0;
-
-            if (!long.TryParse(
-                    editedInput.Text.Trim(),
-                    System.Globalization.NumberStyles.Integer,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out var inputMib))
+            var input = editedDelta ? deltaInput : targetInput;
+            if (long.TryParse(input.Text, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var inputMib)
+                && RealPartitionResizeUiRange.TryClampResizeFormula(currentSizeBytes, inputMib, editedDelta,
+                    extend, Bounds().Minimum, Bounds().Maximum, out var targetBytes, out var deltaBytes))
             {
-                error = Text("请输入正整数 MiB；不接受小数。", "Enter a positive whole number of MiB; fractions are not accepted.");
-            }
-            else if (inputMib <= 0)
-            {
-                error = Text("数值必须大于零。", "The value must be greater than zero.");
-            }
-            else if (inputMib > long.MaxValue / BytesPerMiB)
-            {
-                error = Text("容量超出可安全表示的范围。", "The size exceeds the safely representable range.");
-            }
-            else if (!RealPartitionResizeUiRange.TryGetResizeFormula(
-                         currentSizeBytes,
-                         inputMib,
-                         editedDelta,
-                         extend,
-                         out candidateTargetBytes,
-                         out deltaBytes))
-            {
-                var inputBytes = inputMib * BytesPerMiB;
-                error = editedDelta
-                    ? extend && currentSizeBytes > long.MaxValue - inputBytes
-                        ? Text("扩展结果超出可安全表示的范围。", "The extended size exceeds the safely representable range.")
-                        : Text("扩缩量必须小于当前容量，并产生正的目标容量。", "The change amount must be smaller than the current size and leave a positive target size.")
-                    : extend
-                        ? Text("扩展目标必须大于当前容量。", "An extension target must be larger than the current size.")
-                        : Text("压缩目标必须小于当前容量。", "A shrink target must be smaller than the current size.");
+                authoritativeTargetBytes = targetBytes;
+                updatingInputs = true;
+                deltaInput.Text = (deltaBytes / BytesPerMiB).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                targetInput.Text = (targetBytes / BytesPerMiB).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                updatingInputs = false;
+                SetAdaptive(deltaAdaptive, deltaUnit, deltaBytes);
+                SetAdaptive(targetAdaptive, targetUnit, targetBytes);
             }
             else
             {
-                var candidateTargetMib = candidateTargetBytes / BytesPerMiB;
-                if (candidateTargetMib < minimumTargetMib || candidateTargetMib > maximumTargetMib)
-                {
-                    error = Text(
-                        $"目标容量必须在 {minimumTargetMib} 到 {maximumTargetMib} MiB 之间。",
-                        $"The total target must be between {minimumTargetMib} and {maximumTargetMib} MiB.");
-                }
-                else
-                {
-                    error = null;
-                    authoritativeTargetBytes = candidateTargetBytes;
-                    var derivedMib = editedDelta
-                        ? candidateTargetMib
-                        : deltaBytes / BytesPerMiB;
-                    updatingInputs = true;
-                    derivedInput.Text = derivedMib.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    updatingInputs = false;
-                }
+                SetAdaptive(deltaAdaptive, deltaUnit, null);
+                SetAdaptive(targetAdaptive, targetUnit, null);
             }
-
-            if (error is not null)
-            {
-                updatingInputs = true;
-                derivedInput.Text = string.Empty;
-                updatingInputs = false;
-            }
-
-            validation.Text = error ?? string.Empty;
+            validation.Text = authoritativeTargetBytes is null
+                ? Text("请输入 MiB 正整数。", "Enter a positive whole number of MiB.") : string.Empty;
             dialog.IsPrimaryButtonEnabled = authoritativeTargetBytes is not null;
-            UpdateAdaptiveValues();
         }
-
-        deltaInput.TextChanged += (_, _) => Validate(editedDelta: true);
-        targetInput.TextChanged += (_, _) => Validate(editedDelta: false);
-        dialog.PrimaryButtonClick += (_, args) =>
+        void UseExtreme()
         {
-            Validate(lastEditedIsDelta);
-            args.Cancel = authoritativeTargetBytes is null;
-        };
-        Validate(editedDelta: true);
-        return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary
-            ? authoritativeTargetBytes
-            : null;
+            updatingInputs = true;
+            targetInput.Text = (extend ? Bounds().Maximum : Bounds().Minimum).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            updatingInputs = false;
+            Validate(false);
+        }
+        void RefreshDirection()
+        {
+            extend = direction.IsOn;
+            firstOperator.Text = secondOperator.Text = extend ? "+" : "−";
+            dialog.PrimaryButtonText = extend ? Text("扩展", "Extend") : Text("压缩", "Shrink");
+            targetExtreme.Content = extend ? "Max" : "Min";
+            var targetHint = extend ? Text("使用最大结果容量", "Use maximum result size") : Text("使用最小结果容量", "Use minimum result size");
+            AutomationProperties.SetName(targetExtreme, targetHint);
+            ToolTipService.SetToolTip(targetExtreme, targetHint);
+            var deltaHint = extend ? Text("使用最大扩展量", "Use maximum extension amount") : Text("使用最大压缩量", "Use maximum shrink amount");
+            AutomationProperties.SetName(deltaMaximum, deltaHint);
+            ToolTipService.SetToolTip(deltaMaximum, deltaHint);
+            string MaximumText((long Minimum, long Maximum)? bounds, bool growing) => bounds is { } available
+                ? $"{(growing ? available.Maximum - currentMib : currentMib - available.Minimum):N0} MiB"
+                : Text("不可用", "Unavailable");
+            maximumDetails.Text = Text($"最大扩展量：{MaximumText(extendBounds, true)}；最大压缩量：{MaximumText(shrinkBounds, false)}。",
+                $"Maximum extension: {MaximumText(extendBounds, true)}; maximum shrink: {MaximumText(shrinkBounds, false)}.")
+                + (direction.IsEnabled ? string.Empty : Text(" 当前仅支持所示方向。", " Only the displayed direction is currently supported."));
+            UseExtreme();
+            IntegerTextInput.RefreshBounds(deltaInput);
+            IntegerTextInput.RefreshBounds(targetInput);
+        }
+        deltaInput.TextChanged += (_, _) => Validate(true);
+        targetInput.TextChanged += (_, _) => Validate(false);
+        deltaMaximum.Click += (_, _) => UseExtreme();
+        targetExtreme.Click += (_, _) => UseExtreme();
+        direction.Toggled += (_, _) => RefreshDirection();
+        dialog.PrimaryButtonClick += (_, args) => { Validate(lastEditedIsDelta); args.Cancel = authoritativeTargetBytes is null; };
+        RefreshDirection();
+        return await DialogCoordinator.ShowAsync(dialog) == ContentDialogResult.Primary && authoritativeTargetBytes is long result
+            ? (result, extend) : null;
     }
 
-    private static FrameworkElement CreateResizeInputGroup(TextBox input)
+    private static FrameworkElement CreateResizeInputGroup(TextBox input, TextBlock unit, Button? extreme = null)
     {
-        var group = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 4,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        var group = new Grid { ColumnSpacing = 2, HorizontalAlignment = HorizontalAlignment.Stretch };
+        group.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        group.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        group.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
         group.Children.Add(input);
-        group.Children.Add(new TextBlock { Text = "MiB", VerticalAlignment = VerticalAlignment.Center });
+        unit.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(unit, 1);
+        group.Children.Add(unit);
+        if (extreme is not null)
+        {
+            Grid.SetColumn(extreme, 2);
+            group.Children.Add(extreme);
+        }
         return group;
     }
 
     private static TextBlock CreateFormulaOperator(string value) => new()
     {
-        Text = value,
-        VerticalAlignment = VerticalAlignment.Center,
+        Text = value, VerticalAlignment = VerticalAlignment.Center,
         HorizontalAlignment = HorizontalAlignment.Center
     };
 
@@ -2562,21 +2558,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
         var range = response.Range;
-        if (!RealPartitionResizeUiRange.TryGetWholeMibTargets(
-                range, extend, out var minimumMib, out var maximumMib))
-        {
-            var explanation = !RealPartitionResizeUiRange.IsWholeMib(range.CurrentSizeBytes)
-                ? Text(
-                    $"当前容量为 {range.CurrentSizeBytes} bytes，不是整 MiB。保留该原始容量；不能用舍入值计算扩缩公式。",
-                    $"The current size is {range.CurrentSizeBytes} bytes, not a whole MiB. The exact size is preserved; a rounded value cannot be used in the resize formula.")
-                : Text(
-                    "Agent 已读取 Windows 支持范围与当前几何交集，但所选方向没有 1 MiB 整数目标。",
-                    "The Agent read the Windows supported range and current geometry intersection, but there is no whole-MiB target in this direction.");
-            await ShowMessageAsync(Text("当前没有可用目标", "No supported target"),
-                explanation);
-            return;
-        }
-        var suggestedMib = extend ? minimumMib : maximumMib;
+        (long Minimum, long Maximum)? GetBounds(bool growing) =>
+            RealPartitionResizeUiRange.TryGetWholeMibTargets(range, growing, out var minimum, out var maximum)
+                ? (minimum, maximum) : null;
+        var extendBounds = GetBounds(true);
+        var shrinkBounds = GetBounds(false);
         var culture = OffsetDisplayCulture();
         var targetName = RealOperationConfirmationFormatter.FormatTarget(
             target,
@@ -2588,26 +2574,16 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             $"{Text("Windows 支持范围", "Windows supported range")}: " +
             $"{FormatExactMib(range.ProviderMinBytes, culture)}–{FormatExactMib(range.ProviderMaxBytes, culture)} MiB\n" +
             $"{Text("几何交集", "Geometry intersection")}: " +
-            $"{FormatExactMib(range.AllowedMinBytes, culture)}–{FormatExactMib(range.AllowedMaxBytes, culture)} MiB\n" +
-            $"{Text("本方向 1 MiB 目标范围", "Whole-MiB targets in this direction")}: " +
-            $"{minimumMib.ToString("N0", culture)}–{maximumMib.ToString("N0", culture)} MiB";
-        var targetSize = await PromptResizeFormulaAsync(
-            range.CurrentSizeBytes,
-            minimumMib,
-            maximumMib,
-            suggestedMib,
-            extend,
-            rangeDetails,
-            extend ? Text("扩展分区", "Extend partition")
-                : Text("压缩分区", "Shrink partition"),
-            extend ? Text("扩展", "Extend") : Text("压缩", "Shrink"));
+            $"{FormatExactMib(range.AllowedMinBytes, culture)}–{FormatExactMib(range.AllowedMaxBytes, culture)} MiB";
+        var targetSize = await PromptResizeFormulaAsync(range.CurrentSizeBytes,
+            extendBounds, shrinkBounds, extend, Text("分区扩缩", "Resize partition"), rangeDetails);
         if (targetSize is null)
             return;
         await SubmitRealAsync(RealPartitionIntent(OperationIntent.ResizePartition,
             partition, new ResizePartitionCommand(RealTargetReference.ForExisting(target),
-                targetSize.Value),
-            $"Partition total size becomes {targetSize.Value} bytes",
-            extend ? "No file data loss expected; capacity changes"
+                targetSize.Value.SizeBytes),
+            $"Partition total size becomes {targetSize.Value.SizeBytes} bytes",
+            targetSize.Value.Extend ? "No file data loss expected; capacity changes"
                 : "Shrinking may make data beyond the new boundary inaccessible"));
     }
 
@@ -2644,13 +2620,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        var targetSize = await PromptResizeTargetAsync(partition, capability, extend);
+        var targetSize = await PromptResizeTargetAsync(partition, extend);
         if (targetSize is null)
         {
             return;
         }
 
-        var request = new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize);
+        extend = targetSize.Value.Extend;
+        action = extend ? SimulationEditKind.ExtendPartition : SimulationEditKind.ShrinkPartition;
+        var request = new SimulationEditRequest(action, partition.StableId, SizeBytes: targetSize.Value.SizeBytes);
         var decision = StorageEditRules.Evaluate(_working, request);
         if (decision.Verdict != StorageRuleVerdict.Allow)
         {
@@ -2882,6 +2860,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         string successMessage,
         string? failTitle = null)
     {
+        if (ViewModel.IsRealOperationBusy || ViewModel.RealOperationSubmission.IsBlocked)
+            return false;
+
+        using var activity = BeginPageActivity(Text("正在应用分区修改", "Applying partition changes"));
         WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt> result;
         try
         {

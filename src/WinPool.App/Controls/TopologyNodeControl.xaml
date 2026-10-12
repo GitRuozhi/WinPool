@@ -52,12 +52,13 @@
     <Grid Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}" Background="Transparent">
         <Border
             x:Name="NodeBorder"
+            MinHeight="{x:Bind ViewModel.MinimumCardHeight, Mode=OneWay}"
             Margin="0"
             Padding="6"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource WinPoolTopologyRestStrokeBrush}"
             BorderThickness="1"
-            CornerRadius="2"
+            CornerRadius="4"
             Tapped="NodeBorder_Tapped"
             RightTapped="NodeBorder_RightTapped">
             <Grid>
