@@ -26,6 +26,7 @@ public partial class App : Application
     private static NamedPipeAgentConnection? s_agentConnection;
     private static EventWaitHandle? s_exitSignal;
     private static CancellationTokenSource? s_activationChannelCts;
+    private static readonly CancellationTokenSource s_initialAgentConnectionCancellation = new();
 
     internal static bool InitialAgentWarningPublished { get; private set; }
 
@@ -184,6 +185,7 @@ public partial class App : Application
     private static async Task ConnectAgentAsync()
     {
         const int attemptSeconds = 12;
+        var cancellationToken = s_initialAgentConnectionCancellation.Token;
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
         try
         {
@@ -192,13 +194,23 @@ public partial class App : Application
             {
                 try
                 {
-                    using var timeout = new CancellationTokenSource(
-                        TimeSpan.FromSeconds(attemptSeconds));
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(attemptSeconds));
                     var result = await connection.ConnectAsync(timeout.Token);
-                    if (result.IsSuccess
-                        && await IsAgentReadyAsync(connection, timeout.Token))
+                    var state = result.IsSuccess
+                        ? await GetAgentStartupStateAsync(connection, timeout.Token)
+                        : null;
+                    if (state == AgentLifecycleState.Running)
                     {
                         return;
+                    }
+
+                    if (state is AgentLifecycleState.Starting or AgentLifecycleState.Recovering)
+                    {
+                        // A live Agent explicitly reports recovery; do not turn
+                        // a slow read-only identity capture into a failed App
+                        // startup and then send workspace requests too early.
+                        deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
                     }
                 }
                 catch (Exception exception) when (
@@ -211,6 +223,8 @@ public partial class App : Application
                     // boot); keep retrying until the recovery window closes.
                 }
 
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var remaining = deadline - DateTimeOffset.UtcNow;
                 if (remaining <= TimeSpan.Zero)
                 {
@@ -220,12 +234,16 @@ public partial class App : Application
                 await Task.Delay(
                     remaining < TimeSpan.FromMilliseconds(500)
                         ? remaining
-                        : TimeSpan.FromMilliseconds(500));
+                        : TimeSpan.FromMilliseconds(500), cancellationToken);
             }
 
             PublishInitialAgentWarning(
                 "托盘 Agent 在启动恢复期后仍未就绪；后台监控暂不可用。",
                 "agent-connect-failed");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Closing the App cancels its startup wait without touching the Agent.
         }
         catch (Exception exception) when (
             exception is IOException
@@ -238,12 +256,15 @@ public partial class App : Application
         }
     }
 
+    internal static void CancelInitialAgentConnection() =>
+        s_initialAgentConnectionCancellation.Cancel();
+
     /// <summary>
     /// The Agent accepts connections while it is still recovering from its
     /// own startup; manage-data requests are only served once it is Running.
     /// Poll its snapshot so the workspace does not initialize too early.
     /// </summary>
-    private static async Task<bool> IsAgentReadyAsync(
+    private static async Task<AgentLifecycleState?> GetAgentStartupStateAsync(
         IAgentConnection connection,
         CancellationToken cancellationToken)
     {
@@ -257,9 +278,9 @@ public partial class App : Application
             var result = await connection.SendAsync(
                 new GetAgentSnapshotRequest(CorrelationId.New()),
                 linked.Token);
-            return result.IsSuccess
-                && result.Value is AgentSnapshotResponse response
-                && response.Snapshot.ShutdownStatus.State == AgentLifecycleState.Running;
+            return result.IsSuccess && result.Value is AgentSnapshotResponse response
+                ? response.Snapshot.ShutdownStatus.State
+                : null;
         }
         catch (Exception exception) when (
             exception is IOException
@@ -267,7 +288,7 @@ public partial class App : Application
                 or InvalidOperationException
                 or OperationCanceledException)
         {
-            return false;
+            return null;
         }
     }
 

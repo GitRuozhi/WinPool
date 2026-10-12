@@ -81,6 +81,10 @@ public sealed class MonitoringService : IDisposable
 
     public bool UsesAgent => _agentConnection is not null;
 
+    public bool HasStartupRecoveryFailure => UsesAgent && IsRemoteStateKnown
+        && GetRuntimeDiagnostics().SamplingFailure?.StartsWith(
+            "agent.monitoring.restore_failed:", StringComparison.Ordinal) == true;
+
     /// <summary>
     /// Whether this app-side service currently owns a polling loop. An Agent
     /// snapshot can report an active session before this process has attached

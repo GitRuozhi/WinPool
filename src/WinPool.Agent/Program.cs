@@ -211,6 +211,7 @@ internal static class Program
             var storageHealthEvents = new StorageHealthEventRepository(store, writeOwner);
             var initialStorageHealthEvents = AgentStartupTaskRunner.Complete(
                 () => storageHealthEvents.ListRecentAsync(200, CancellationToken.None));
+            using var startupRecovery = new AgentStartupRecovery();
             var runtime = new DesktopAgentRuntime(
                 context,
                 instanceId,
@@ -234,31 +235,29 @@ internal static class Program
                 initialStorageHealthEvents,
                 agentEvents,
                 lifecycle,
-                agentPreferencesStore);
+                agentPreferencesStore,
+                startupRecovery: startupRecovery);
             var shutdown = new AgentShutdownWorkflow(runtime, processRegistry);
             coordinator.AttachRuntime(runtime, shutdown);
             context.AttachCoordinator(coordinator);
-            using var recoveryCancellation = new CancellationTokenSource();
-            var recoveryTask = Task.Run(async () =>
-            {
-                try
+            startupRecovery.Start(
+                runtime.RestoreContinuousMonitoringAsync,
+                () =>
                 {
-                    await runtime.RestoreContinuousMonitoringAsync(
-                        recoveryCancellation.Token).ConfigureAwait(false);
                     lifecycle.MarkReady();
                     context.AttachCoordinator(coordinator);
                     runtime.StartStartupInventory();
-                }
-                catch (OperationCanceledException) when (recoveryCancellation.IsCancellationRequested)
+                },
+                exception =>
                 {
-                    // Shutdown won the race with non-critical monitoring recovery.
-                }
-                catch
-                {
-                    lifecycle.MarkFailed("agent.monitoring.restore_failed");
-                    context.AttachCoordinator(coordinator);
-                }
-            });
+                    runtime.RecordStartupMonitoringFailure(exception);
+                    Trace.TraceError("agent.monitoring.restore_failed: {0}", exception);
+                    DiagnosticLog.AppendFailure(
+                        dataRoot,
+                        "agent-monitoring.jsonl",
+                        "agent.monitoring.restore_failed",
+                        exception);
+                });
 
             try
             {
@@ -266,8 +265,7 @@ internal static class Program
             }
             finally
             {
-                recoveryCancellation.Cancel();
-                recoveryTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
+                startupRecovery.StopAsync(CancellationToken.None)
                     .GetAwaiter()
                     .GetResult();
                 var monitoringStopped = false;

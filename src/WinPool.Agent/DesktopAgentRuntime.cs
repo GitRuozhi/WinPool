@@ -29,6 +29,8 @@ internal sealed class DesktopAgentRuntime :
     private readonly AgentEventHub agentEvents;
     private readonly AgentLifecycleStateStore lifecycle;
     private readonly IAgentPreferencesStore agentPreferences;
+    private readonly AgentStartupRecovery? startupRecovery;
+    private string? startupMonitoringFailure;
     private readonly AgentStartupRegistration startupRegistration;
     private readonly IProcessIncarnationVerifier processIncarnationVerifier;
     private readonly string mainApplicationExecutablePath;
@@ -64,7 +66,8 @@ internal sealed class DesktopAgentRuntime :
         AgentLifecycleStateStore lifecycle,
         IAgentPreferencesStore agentPreferences,
         AgentStartupRegistration? startupRegistration = null,
-        IPhysicalDiskDeviceResolver? physicalDiskDeviceResolver = null)
+        IPhysicalDiskDeviceResolver? physicalDiskDeviceResolver = null,
+        AgentStartupRecovery? startupRecovery = null)
     {
         this.tray = tray ?? throw new ArgumentNullException(nameof(tray));
         this.instanceId = instanceId;
@@ -107,6 +110,7 @@ internal sealed class DesktopAgentRuntime :
         this.lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         this.agentPreferences = agentPreferences
             ?? throw new ArgumentNullException(nameof(agentPreferences));
+        this.startupRecovery = startupRecovery;
         this.startupRegistration = startupRegistration ?? new AgentStartupRegistration();
         ArgumentNullException.ThrowIfNull(initialStorageHealthEvents);
         foreach (var storageEvent in initialStorageHealthEvents.TakeLast(200))
@@ -122,6 +126,7 @@ internal sealed class DesktopAgentRuntime :
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var monitorDiagnostics = monitoring.CurrentDiagnostics;
         var snapshot = new AgentSnapshot(
             instanceId,
             tray.IsTrayVisible,
@@ -132,7 +137,11 @@ internal sealed class DesktopAgentRuntime :
                 .ToArray(),
             LatestMonitorSamples: monitoring.CurrentSamples,
             RecentStorageHealthEvents: GetRecentStorageHealthEvents(),
-            MonitorDiagnostics: monitoring.CurrentDiagnostics);
+            MonitorDiagnostics: monitorDiagnostics with
+            {
+                SamplingFailure = Volatile.Read(ref startupMonitoringFailure)
+                    ?? monitorDiagnostics.SamplingFailure
+            });
         return await SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
     }
 
@@ -213,8 +222,17 @@ internal sealed class DesktopAgentRuntime :
         if (!result.IsSuccess)
         {
             tray.SetMonitoringSession(null);
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException(
+                result.Messages.FirstOrDefault()?.DiagnosticText
+                ?? result.Messages.FirstOrDefault()?.Code
+                ?? "agent.monitoring.restore_failed");
         }
     }
+
+    internal void RecordStartupMonitoringFailure(Exception exception) =>
+        Volatile.Write(ref startupMonitoringFailure,
+            $"agent.monitoring.restore_failed: {exception.Message}");
 
     public Task<ApplicationResult<AgentResponse>> StopMonitoringAsync(
         StopAgentMonitoringRequest request,
@@ -457,7 +475,9 @@ internal sealed class DesktopAgentRuntime :
 
         try
         {
-            var saved = await agentPreferences.SaveAsync(updated, cancellationToken);
+            var saved = await SaveAgentPreferenceAsync(
+                agentPreferences, updated, request.Field,
+                () => Volatile.Write(ref startupMonitoringFailure, null), cancellationToken);
             agentEvents.Publish(new AgentPreferencesChangedEvent(DateTimeOffset.UtcNow));
             return await SuccessAsync(
                 new AgentPreferenceSavedResponse(saved),
@@ -492,6 +512,23 @@ internal sealed class DesktopAgentRuntime :
 
             return Reject(request.CorrelationId, "agent.preference.save_failed");
         }
+    }
+
+    internal static async Task<AgentPreferences> SaveAgentPreferenceAsync(
+        IAgentPreferencesStore preferencesStore,
+        AgentPreferences updated,
+        AgentPreferenceField field,
+        Action clearStartupMonitoringFailure,
+        CancellationToken cancellationToken)
+    {
+        var saved = await preferencesStore.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
+        if (field == AgentPreferenceField.ContinuousMonitoringEnabled && saved.ContinuousMonitoringEnabled)
+        {
+            // A successful explicit On is the existing product retry action.
+            // A failed save must retain the original recovery diagnostic.
+            clearStartupMonitoringFailure();
+        }
+        return saved;
     }
 
     public async Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
@@ -564,6 +601,10 @@ internal sealed class DesktopAgentRuntime :
 
     public async Task StopMonitoringAsync(CancellationToken cancellationToken)
     {
+        if (startupRecovery is not null)
+        {
+            await startupRecovery.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
         await StopInventoryAsync(cancellationToken);
         var session = monitoring.CurrentSession;
         if (session is not null)
@@ -772,6 +813,10 @@ internal sealed class DesktopAgentRuntime :
         var result = await monitoring.StartAsync(
             request.MonitorRequest,
             cancellationToken);
+        if (result.IsSuccess)
+        {
+            Volatile.Write(ref startupMonitoringFailure, null);
+        }
         tray.SetMonitoringSession(result.Value);
         if (result.Value is { } session)
         {

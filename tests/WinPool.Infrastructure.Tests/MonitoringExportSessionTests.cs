@@ -25,6 +25,27 @@ public sealed class MonitoringExportSessionTests
     }
 
     [Fact]
+    public async Task StartupRecoveryFailureRemainsVisibleUntilExplicitStartSucceeds()
+    {
+        const string failure = "agent.monitoring.restore_failed: Identity capture timed out.";
+        var connection = new Connection { SamplingFailure = failure };
+        using var service = new MonitoringService(connection);
+        await service.RefreshRemoteStateAsync();
+
+        Assert.True(service.HasStartupRecoveryFailure);
+        Assert.False(service.IsRunning);
+        Assert.Equal(failure, service.GetRuntimeDiagnostics().SamplingFailure);
+
+        Assert.True(await service.StartAsync(5));
+        await service.RefreshRemoteStateAsync();
+
+        Assert.True(service.IsRunning);
+        Assert.False(service.HasStartupRecoveryFailure);
+        Assert.Null(service.GetRuntimeDiagnostics().SamplingFailure);
+        await service.StopAsync();
+    }
+
+    [Fact]
     public async Task NewSessionReplacesExportTargetAndErrorsAreNotReportedAsEmpty()
     {
         var connection = new Connection();
@@ -49,6 +70,7 @@ public sealed class MonitoringExportSessionTests
         public ExportAgentMonitorCsvRequest? LastExport { get; private set; }
         public long Rows { get; set; } = 2;
         public bool ExportFails { get; set; }
+        public string? SamplingFailure { get; set; }
         private readonly AgentInstanceId instance = new(Guid.NewGuid());
 
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) =>
@@ -64,9 +86,11 @@ public sealed class MonitoringExportSessionTests
             {
                 case GetAgentSnapshotRequest:
                     result = new AgentSnapshotResponse(new(instance, true, Session,
-                        new(AgentLifecycleState.Running, null, [], [], false), []));
+                        new(AgentLifecycleState.Running, null, [], [], false), [],
+                        MonitorDiagnostics: new(0, 0, SamplingFailure: SamplingFailure)));
                     break;
                 case StartAgentMonitoringRequest start:
+                    SamplingFailure = null;
                     Session = new(start.MonitorRequest.SessionId, start.MonitorRequest, MonitoringSessionState.Running, DateTimeOffset.UtcNow, null);
                     result = new MonitoringSessionResponse(Session);
                     break;

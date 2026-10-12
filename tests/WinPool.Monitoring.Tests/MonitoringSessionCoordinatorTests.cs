@@ -300,6 +300,23 @@ public sealed class MonitoringSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task IdentityTimeoutBeforeSessionCreationLeavesNoSessionOrPersistenceWriter()
+    {
+        var fixture = new Fixture();
+        var persistence = new RecordingPersistence();
+        var factory = new FixedPersistenceFactory(persistence);
+        var coordinator = new MonitoringSessionCoordinator(
+            new ControlledSource(), factory, targetIdentityResolver: new TimedOutIdentityResolver());
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => coordinator.StartAsync(fixture.Request, CancellationToken.None));
+
+        Assert.Equal(0, coordinator.TrackedSessionCount);
+        Assert.Null(coordinator.CurrentSession);
+        Assert.Equal(0, factory.CreateCount);
+    }
+
+    [Fact]
     public async Task SubscriberBackpressureDropsOldestAndReportsQueuePressure()
     {
         var fixture = new Fixture();
@@ -627,7 +644,20 @@ public sealed class MonitoringSessionCoordinatorTests
     private sealed class FixedPersistenceFactory(RecordingPersistence persistence)
         : IMonitorSessionPersistenceFactory
     {
-        public IMonitorSessionPersistence Create(SessionId sessionId) => persistence;
+        public int CreateCount { get; private set; }
+
+        public IMonitorSessionPersistence Create(SessionId sessionId)
+        {
+            CreateCount++;
+            return persistence;
+        }
+    }
+
+    private sealed class TimedOutIdentityResolver : IMonitorTargetIdentityResolver
+    {
+        public Task<MonitorTargetResolution> ResolveAsync(
+            MonitorRequest request, StorageInventoryScope? scope, CancellationToken cancellationToken) =>
+            Task.FromException<MonitorTargetResolution>(new TimeoutException("Identity capture timed out."));
     }
 
     private sealed class BackgroundDiagnosticsFactory(RecordingPersistence persistence)

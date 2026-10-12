@@ -407,9 +407,11 @@ public sealed class AgentSessionCoordinator
     private async Task<ApplicationResult<AgentResponse>> BeginShutdownAsync(
         RequestAgentShutdownRequest request)
     {
-        if (recoveringSnapshotFactory is not null
-            && lifecycle.State is AgentLifecycleState.Starting or AgentLifecycleState.Recovering)
+        if (shutdownWorkflow is null)
         {
+            // Before runtime attachment there is nothing safe to shut down.
+            // Once attached, its shutdown actions cancel and drain optional
+            // monitoring recovery even while normal work remains unavailable.
             return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
         }
 

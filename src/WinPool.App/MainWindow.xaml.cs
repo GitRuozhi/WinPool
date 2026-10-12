@@ -595,6 +595,7 @@ public sealed partial class MainWindow : Window
         ActiveSystemSelector.IsEnabled = false;
         LocalRealOperationsSwitch.IsEnabled = false;
         _startupCancellation.Cancel();
+        App.CancelInitialAgentConnection();
         StopCloseTimeUiSources();
 
         // Close the separate welcome window and stop UI producers synchronously

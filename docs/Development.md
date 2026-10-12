@@ -1,5 +1,11 @@
 # WinPool 开发约定
 
+2026-10-12 启动／退出修复：Agent 已挂接 runtime 后，恢复监控期间也允许有序退出；退出先取消并等待恢复任务结束，再停止采集和监控，不允许迟到恢复重新发布 Ready 或启动 inventory。正常业务仍等待恢复完成。App 收到明确 Starting／Recovering 时继续等待，关闭窗口取消初始连接等待；不能把慢于 60 秒的只读身份采集误判成启动完成并提前加载工作区。
+
+可选监控恢复失败不使整个 Agent Failed：保留异常诊断并发布现有采样错误，恢复工作终结后进入 Ready。App 不自动重复已失败的启动恢复，不自动关闭用户监控偏好；用户通过原监控开关重试。不得把本机非管理员身份采集超时误写为存储结构故障。
+
+构建守卫通过 `PROCESS_QUERY_LIMITED_INFORMATION` 查询准确进程映像和退出状态，避免跨权限读取 `Process.Path` 失败；仅确认退出或 PID 已不存在时跳过。目标运行树中的存活进程继续阻止替换，无法确认的进程仍拒绝替换，并保留底层错误。关闭主窗口不等于托盘 Agent 已退出；正常重编译前应从托盘退出 WinPool。
+
 2026-10-12 编辑交互修复：结构页按介质呈现模板／实际层这一业务概念，编辑投影可使用准确 `template-pool-member` eligibility 分组未用模板成员，但不创建 allocated tier-member 来源关系；管理和原始对象不变。逐项复原恢复推荐值，未应用变更比较使用 observed baseline／最早草稿，不能在保存本地草稿时清掉差异。簇的候选集合与默认值共用 Domain `FormatAllocationUnitPolicy`；非默认簇及 ReFS 的真实格式化还须按准确卷调用 [GetSupportedClusterSizes](https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-volume-getsupportedclustersizes)，传入本次文件系统。新分区在准备阶段保留待核验事实，创建后、格式化前针对准确 RAW 卷核验；不能借未创建对象提前伪造 provider 成功。所选值贯穿计划、受控 PowerShell 和后态。默认64 KiB与实际能力是不同事实。
 
 表单保存、模拟规划与模拟更新共用唯一业务层选择：同介质actual优先，无actual才选唯一模板；每次修改按准确StableId落到该对象，不按介质覆盖所有来源层。多个actual或无actual的多个模板无法由当前每介质一组的参数请求唯一表达时，拒绝其歧义参数修改；不因此锁掉模板＋唯一actual的正常导入模拟路径。

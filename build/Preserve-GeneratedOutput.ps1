@@ -1,5 +1,64 @@
 Set-StrictMode -Version Latest
 
+if (-not ('WinPoolBuildProcessProbe' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class WinPoolBuildProcessProbe
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags,
+        StringBuilder path, ref int length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetExitCodeProcess(IntPtr process, out uint code);
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private static bool HasExited(IntPtr process)
+    {
+        uint code;
+        if (!GetExitCodeProcess(process, out code))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return code != 259; // STILL_ACTIVE; an ambiguous state remains blocked.
+    }
+
+    public static string GetRunningImagePath(int processId)
+    {
+        // Unlike Process.Path/MainModule, this does not request module-memory
+        // access. The same handle binds the image and exit-state observations.
+        IntPtr process = OpenProcess(0x1000, false, processId); // QUERY_LIMITED_INFORMATION
+        if (process == IntPtr.Zero)
+        {
+            int error = Marshal.GetLastWin32Error();
+            if (error == 87 && processId > 0) return null; // PID no longer exists.
+            throw new Win32Exception(error);
+        }
+        try
+        {
+            if (HasExited(process)) return null;
+            var path = new StringBuilder(32768);
+            int length = path.Capacity;
+            if (!QueryFullProcessImageName(process, 0, path, ref length))
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (HasExited(process)) return null;
+                throw new Win32Exception(error);
+            }
+            if (HasExited(process)) return null;
+            if (length == 0) throw new InvalidOperationException("Running process returned an empty image path.");
+            return path.ToString();
+        }
+        finally { CloseHandle(process); }
+    }
+}
+'@
+}
+
 function Assert-WinPoolCheckoutPath([string]$Path) {
     $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\', '/')
     $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
@@ -69,10 +128,13 @@ function Move-WinPoolGeneratedOutput([string]$Path) {
 function Assert-WinPoolRuntimeStopped([string]$RuntimeRoot) {
     $root = [IO.Path]::GetFullPath($RuntimeRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     foreach ($process in @(Get-Process -Name 'WinPool.App', 'WinPool.Agent' -ErrorAction SilentlyContinue)) {
-        try { $imagePath = $process.Path } catch { throw "Cannot verify running WinPool process $($process.Id)." }
-        if ([string]::IsNullOrWhiteSpace($imagePath)) { throw "Cannot verify running WinPool process $($process.Id)." }
+        try { $imagePath = [WinPoolBuildProcessProbe]::GetRunningImagePath($process.Id) }
+        catch {
+            throw "Cannot verify running WinPool process $($process.Id): $($_.Exception.GetBaseException().Message) Exit WinPool from its tray icon before rebuilding; if access is denied, use an elevated PowerShell. No runtime replacement was allowed."
+        }
+        if ($null -eq $imagePath) { continue } # Positively confirmed exited/missing.
         if ([IO.Path]::GetFullPath($imagePath).StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Exit WinPool before replacing its runtime tree: PID $($process.Id), $imagePath"
+            throw "Exit WinPool from its tray icon before replacing its runtime tree: PID $($process.Id), $imagePath. Closing only the App window leaves the Agent running."
         }
     }
 }

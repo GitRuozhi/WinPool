@@ -138,6 +138,14 @@ internal sealed class MonitorAlertObserver : IDisposable
             return;
         }
 
+        // The Agent already completed an automatic recovery attempt. Preserve
+        // the preference and its existing sampling-error notification; the
+        // Monitor page's Off/On preference action remains available to retry.
+        if (monitoring.HasStartupRecoveryFailure)
+        {
+            return;
+        }
+
         var rateHz = Math.Clamp(preferences.MonitoringSampleRateHz, 0.2, 20);
         if (Math.Abs(monitoring.SampleRateHz - rateHz) >= 0.000_001)
         {
@@ -173,19 +181,6 @@ internal sealed class MonitorAlertObserver : IDisposable
 
         _startFailureBlocksCurrentPreference = true;
         PublishStartFailure(monitoring.LastError);
-        try
-        {
-            // Match the Monitor page's previous behavior: a failed automatic
-            // start disables the preference so the App does not retry forever.
-            await _viewModel.SetContinuousMonitoringAsync(false);
-        }
-        catch (Exception exception) when (
-            exception is IOException
-                or InvalidOperationException
-                or UnauthorizedAccessException)
-        {
-            LogFailure("DisableAfterStartFailure", exception);
-        }
     }
 
     private void UpdateIssueStates()

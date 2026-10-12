@@ -182,6 +182,68 @@ public sealed class AgentSessionCoordinatorTests
         Assert.Equal(1, operations.RequestCount);
     }
 
+    [Theory]
+    [InlineData(ShutdownReason.TrayExit)]
+    [InlineData(ShutdownReason.ElevationRestart)]
+    public async Task AttachedRuntimeCanShutDownBeforeMonitoringRecoveryFinishes(ShutdownReason reason)
+    {
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(registry, AgentLifecycleState.Recovering);
+        var coordinator = new AgentSessionCoordinator(
+            registry,
+            lifecycle,
+            () => new AgentSnapshot(
+                new AgentInstanceId(Guid.NewGuid()), false, null, lifecycle.Snapshot(), [], [], [],
+                new MonitorRuntimeDiagnostics(0, 0)));
+        var request = new RequestAgentShutdownRequest(reason, CorrelationId.New());
+
+        var beforeAttachment = await coordinator.HandleAsync(request);
+        Assert.Equal(ApplicationStatus.Rejected, beforeAttachment.Status);
+        Assert.Equal("agent.request.recovering", Assert.Single(beforeAttachment.Messages).Code);
+
+        var actions = new RecordingShutdownActions();
+        coordinator.AttachRuntime(
+            new RecordingRequestOperations(),
+            new AgentShutdownWorkflow(actions, registry));
+
+        var result = await coordinator.HandleAsync(request);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(Assert.IsType<ShutdownResponse>(result.Value).Result.Completed);
+        Assert.Contains(AgentShutdownStep.StopMonitoring, actions.Calls);
+        Assert.Contains(AgentShutdownStep.ExitAgent, actions.Calls);
+        Assert.Equal(AgentLifecycleState.Stopped, lifecycle.State);
+    }
+
+    [Fact]
+    public async Task OptionalMonitoringRecoveryFailureIsReportedBeforeReadyAndDoesNotBlockBusiness()
+    {
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(registry, AgentLifecycleState.Recovering);
+        var operations = new RecordingRequestOperations();
+        var coordinator = new AgentSessionCoordinator(
+            operations, new AgentShutdownWorkflow(new RecordingShutdownActions(), registry), registry, lifecycle);
+        using var recovery = new AgentStartupRecovery();
+        var original = new TimeoutException("Fresh monitoring identity collection timed out.");
+        Exception? reported = null;
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        recovery.Start(_ => Task.FromException(original), () =>
+        {
+            Assert.Same(original, reported);
+            lifecycle.MarkReady();
+            ready.SetResult();
+        }, exception => reported = exception);
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var result = await coordinator.HandleAsync(new OpenMainWindowRequest(null, CorrelationId.New()));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AgentLifecycleState.Running, lifecycle.State);
+        Assert.Same(original, reported);
+        Assert.Equal(1, operations.RequestCount);
+        await recovery.StopAsync(CancellationToken.None);
+    }
+
     [Fact]
     public async Task FailedStepDoesNotSkipLaterSafetyAndEvidenceSteps()
     {

@@ -2,6 +2,18 @@
 
 日期：2026-10-12。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-12 启动／退出与构建守卫：限定修复
+
+现场确认两条启动故障：监控恢复约65秒超过App固定60秒等待，且Recovering拒绝退出；另一次普通权限身份采集60,037毫秒超时后，整个Agent被标为Failed，106秒时界面仍未就绪。修复恢复期有序取消／排空、明确恢复中继续等待，以及可选监控恢复失败保留诊断后正常Ready。自动失败不关闭监控偏好；原开关人工开启成功保存后可重试。
+
+最终定向回归 **31 Passed／0 Failed**（Agent26、Infrastructure3、Monitoring2），覆盖退出取消、迟到回调、恢复错误、超时无session／writer残留、诊断投影与人工重试。原2条失败复现保留。最终标准Release构建 **21.01秒、0警告／0错误、合并0碰撞**；源码清单核对一致。构建运行树保留脚本通过；普通PowerShell准确识别管理员Agent并拒绝替换占用目录，跨权限查询不再只报无法核实进程。
+
+原生验证恢复期托盘退出、启动中关窗后重开、就绪后的管理员重启交接、普通及管理员实例托盘退出；取得退出收据的App／Agent均exit0。最终构建普通冷启动54.18秒恢复可操作并正常退出，随后管理员交接、真实编辑on与Pool01界面已核验。最终构建本次没有再次发生原生采集超时，该失败分支由直接回归验证；恢复期提权交接没有成功原生收据，不计通过。采集耗时本身未优化。屏幕取证曾仅显示背景，调整窗口大小后取得完整画面，保留原采集文件。
+
+只读对账：420个真实操作、Accepted390／CallIssued493及完整操作／写入事件内容不变，App／Agent偏好相同；Pool01、两层来源、VD、OS磁盘及WDC六个对象相同。管理员刷新增加一个卷事实，缓存对象24→25，不声称全部快照字节相同。未运行全量测试或执行真实存储修改，版本保持V0.59。
+
+证据：[定向门](../artifacts/test-results/20261012-start-exit-repair/source/source-review-final.json)、[最终构建](../artifacts/test-results/20261012-start-exit-repair/final-release-build.log)、[原生超时现场](../artifacts/test-results/20261012-start-exit-repair/native/cold-start-failed-timing.json)、[恢复期退出](../artifacts/test-results/20261012-product-parity/Native/lifecycle-recovering-exit-result.json)、[关窗后重开](../artifacts/test-results/20261012-start-exit-repair/native/titlebar-close.json)、[最终冷启动](../artifacts/test-results/20261012-start-exit-repair/native/final-cold-timeline.json)、[管理员界面](../artifacts/test-results/20261012-start-exit-repair/native/final-admin-repaint.png)、[跨权限守卫](../artifacts/test-results/20261012-build-process-guard/nonadmin-live-guard.json)、[只读对账](../artifacts/test-results/20261012-start-exit-repair/final-readonly-verification.json)。
+
 ## 2026-10-12 产品交互回归修复：限定验收完成（V0.59）
 
 本条与本页同日“审阅修复”F1–F4 的工程及原生验收分开记录。本轮四项产品交互修复的实现范围见 [Plan §10.11](Plan.md#1011-产品交互回归修复2026-10-12)：真实投影避免把同一层概念显示两次；新层字段恢复推荐与 Undo 基线分开；文件系统和簇大小候选贯穿计划、执行及后态；Popup 拖动改为固定 overlay 与有效 host 命中／释放。
