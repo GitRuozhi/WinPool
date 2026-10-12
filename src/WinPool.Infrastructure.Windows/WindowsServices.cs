@@ -99,7 +99,12 @@ public sealed class WindowsElevationRestartService : IElevationRestartService
             startInfo.ArgumentList.Add(ApplicationStartupOptions.ElevationContinueEventArgument);
             startInfo.ArgumentList.Add(continueEventName);
 
-            using var process = Process.Start(startInfo);
+            LogElevationPhase("process_start_wait");
+            // ShellExecute waits for UAC consent. Keep the UI STA responsive
+            // while Windows completes or cancels the elevation request.
+            using var process = await StartProcessOffUiThreadAsync(
+                () => Process.Start(startInfo), cancellationToken).ConfigureAwait(false);
+            LogElevationPhase("process_start_complete", $"bootstrapPid={process?.Id}");
             if (process is null)
             {
                 return new ElevationRestartResult(
@@ -107,9 +112,11 @@ public sealed class WindowsElevationRestartService : IElevationRestartService
                     "Windows did not start the elevated WinPool process.");
             }
 
+            LogElevationPhase("ready_wait");
             var bootstrapReady = await Task.Run(
                 () => readyEvent.WaitOne(BootstrapReadyTimeout),
                 cancellationToken).ConfigureAwait(false);
+            LogElevationPhase("ready_complete", $"ready={bootstrapReady}");
             return bootstrapReady
                 ? new ElevationRestartResult(
                     ElevationRestartStatus.Started,
@@ -120,15 +127,33 @@ public sealed class WindowsElevationRestartService : IElevationRestartService
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
+            LogElevationPhase("process_start_cancelled", exception: ex);
             return new ElevationRestartResult(ElevationRestartStatus.Cancelled);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
+            LogElevationPhase("restart_exception", exception: ex);
             return new ElevationRestartResult(
                 ElevationRestartStatus.Failed,
                 ex.Message);
         }
     }
+
+    internal static Task<Process?> StartProcessOffUiThreadAsync(
+        Func<Process?> startProcess,
+        CancellationToken cancellationToken) =>
+        Task.Run(startProcess, cancellationToken);
+
+    private static void LogElevationPhase(
+        string phase,
+        string? diagnostic = null,
+        Exception? exception = null) =>
+        DiagnosticLog.AppendFailure(
+            StorageDataLocations.CurrentRoot,
+            "elevation-handoff.jsonl",
+            $"elevation.service.{phase}",
+            exception,
+            $"appPid={Environment.ProcessId};{diagnostic}");
 
     private static string CreateHandoffEventName(string stage, string userHash, Guid handoffId) =>
         $"Local\\WinPool.Elevation.{stage}.{userHash[..24]}.{handoffId:N}";

@@ -197,22 +197,79 @@ public sealed class AgentSessionCoordinatorTests
                 new MonitorRuntimeDiagnostics(0, 0)));
         var request = new RequestAgentShutdownRequest(reason, CorrelationId.New());
 
-        var beforeAttachment = await coordinator.HandleAsync(request);
-        Assert.Equal(ApplicationStatus.Rejected, beforeAttachment.Status);
-        Assert.Equal("agent.request.recovering", Assert.Single(beforeAttachment.Messages).Code);
+        var beforeAttachment = coordinator.HandleAsync(request);
+        Assert.False(beforeAttachment.IsCompleted);
+        Assert.Equal(AgentLifecycleState.Recovering, lifecycle.State);
 
         var actions = new RecordingShutdownActions();
         coordinator.AttachRuntime(
             new RecordingRequestOperations(),
             new AgentShutdownWorkflow(actions, registry));
 
-        var result = await coordinator.HandleAsync(request);
+        var result = await beforeAttachment.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.True(result.IsSuccess);
         Assert.True(Assert.IsType<ShutdownResponse>(result.Value).Result.Completed);
         Assert.Contains(AgentShutdownStep.StopMonitoring, actions.Calls);
         Assert.Contains(AgentShutdownStep.ExitAgent, actions.Calls);
         Assert.Equal(AgentLifecycleState.Stopped, lifecycle.State);
+    }
+
+    [Theory]
+    [InlineData(AgentLifecycleState.Starting)]
+    [InlineData(AgentLifecycleState.Recovering)]
+    public async Task CancelledShutdownBeforeRuntimeAttachmentDoesNotStartAfterLateAttachment(AgentLifecycleState state)
+    {
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(registry, state);
+        var coordinator = new AgentSessionCoordinator(registry, lifecycle, () => throw new NotSupportedException());
+        using var cancellation = new CancellationTokenSource();
+        var shutdown = coordinator.HandleAsync(new RequestAgentShutdownRequest(
+            ShutdownReason.ElevationRestart, CorrelationId.New(), BeginInBackground: true), cancellation.Token);
+        Assert.False(shutdown.IsCompleted);
+        Assert.Equal(state, coordinator.State);
+
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => shutdown);
+        var actions = new RecordingShutdownActions();
+        coordinator.AttachRuntime(new RecordingRequestOperations(), new AgentShutdownWorkflow(actions, registry));
+
+        Assert.Empty(actions.Calls);
+        Assert.Equal(state, coordinator.State);
+    }
+
+    [Theory]
+    [InlineData(AgentLifecycleState.Failed)]
+    [InlineData(AgentLifecycleState.Stopped)]
+    public async Task TerminalAgentWithoutRuntimeRejectsShutdownWithoutWaiting(AgentLifecycleState state)
+    {
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(registry, state);
+        var coordinator = new AgentSessionCoordinator(registry, lifecycle, () => throw new NotSupportedException());
+
+        var shutdown = coordinator.HandleAsync(new RequestAgentShutdownRequest(
+            ShutdownReason.ElevationRestart, CorrelationId.New(), BeginInBackground: true));
+
+        Assert.True(shutdown.IsCompleted);
+        Assert.Equal(ApplicationStatus.Rejected, (await shutdown).Status);
+        Assert.Equal(state, coordinator.State);
+    }
+
+    [Fact]
+    public async Task ShutdownAttachmentWaitExpiresWithoutLateShutdown()
+    {
+        var registry = new AgentProcessRegistry();
+        var lifecycle = new AgentLifecycleStateStore(registry, AgentLifecycleState.Recovering);
+        var coordinator = new AgentSessionCoordinator(registry, lifecycle, () => throw new NotSupportedException());
+
+        var result = await coordinator.HandleAsync(new RequestAgentShutdownRequest(
+            ShutdownReason.ElevationRestart, CorrelationId.New(), BeginInBackground: true)).WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
+        Assert.Equal("agent.request.recovering", Assert.Single(result.Messages).Code);
+        var actions = new RecordingShutdownActions();
+        coordinator.AttachRuntime(new RecordingRequestOperations(), new AgentShutdownWorkflow(actions, registry));
+        Assert.Empty(actions.Calls);
+        Assert.Equal(AgentLifecycleState.Recovering, coordinator.State);
     }
 
     [Fact]

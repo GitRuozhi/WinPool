@@ -90,6 +90,7 @@ public sealed class AgentSessionCoordinator
 {
     private readonly object stateLock = new();
     private readonly SemaphoreSlim shutdownGate = new(1, 1);
+    private readonly TaskCompletionSource runtimeAttached = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IAgentRequestOperations operations = null!;
     private AgentShutdownWorkflow shutdownWorkflow = null!;
     private readonly AgentLifecycleStateStore lifecycle;
@@ -172,7 +173,7 @@ public sealed class AgentSessionCoordinator
 
         if (request is RequestAgentShutdownRequest shutdownRequest)
         {
-            return BeginShutdownAsync(shutdownRequest);
+            return BeginShutdownAsync(shutdownRequest, cancellationToken);
         }
 
         if (request is EnterAgentRealModeRequest
@@ -405,15 +406,37 @@ public sealed class AgentSessionCoordinator
             Message(code, ApplicationMessageSeverity.Warning));
 
     private async Task<ApplicationResult<AgentResponse>> BeginShutdownAsync(
-        RequestAgentShutdownRequest request)
+        RequestAgentShutdownRequest request,
+        CancellationToken cancellationToken)
     {
-        if (shutdownWorkflow is null)
+        Task? attachmentWait = null;
+        lock (stateLock)
         {
-            // Before runtime attachment there is nothing safe to shut down.
-            // Once attached, its shutdown actions cancel and drain optional
-            // monitoring recovery even while normal work remains unavailable.
-            return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+            if (shutdownWorkflow is null)
+            {
+                if (lifecycle.State is not (AgentLifecycleState.Starting or AgentLifecycleState.Recovering))
+                {
+                    return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+                }
+                attachmentWait = runtimeAttached.Task;
+            }
         }
+        if (attachmentWait is not null)
+        {
+            try
+            {
+                // The endpoint precedes runtime attachment. Wait without
+                // closing admission or changing lifecycle state. The server's
+                // token covers its lifetime, so also bound this wait before
+                // the App's 12-second shutdown request can expire.
+                await attachmentWait.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (realOperationService is AgentRealOperationService realService
             && !await realService.TryCloseAdmissionForShutdownAsync())
@@ -502,6 +525,7 @@ public sealed class AgentSessionCoordinator
             operations = runtimeOperations;
             shutdownWorkflow = runtimeShutdownWorkflow;
         }
+        runtimeAttached.TrySetResult();
     }
 
     private static ApplicationResult<AgentResponse> ResultForExecution(

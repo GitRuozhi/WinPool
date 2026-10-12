@@ -786,14 +786,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await UpdateCurrentPreferencesAsync(preferences => preferences with { DeveloperMode = enabled });
     }
 
-    public async Task SetLastActivePageAsync(string page)
+    public async Task SetLastActivePageAsync(string page, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(page))
         {
             return;
         }
 
-        await UpdateCurrentPreferencesAsync(preferences => preferences with { LastActivePage = page });
+        await UpdateCurrentPreferencesAsync(preferences => preferences with { LastActivePage = page }, cancellationToken);
     }
 
     public async Task SetCreateMsrOnInitializeAsync(bool create)

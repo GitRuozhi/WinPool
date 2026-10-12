@@ -2,6 +2,18 @@
 
 日期：2026-10-12。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-12 打开后立即开启真实编辑：启动时序修复
+
+补齐上一轮未覆盖的早期点击：管理员确认后异步等待 Agent 就绪；普通权限的 UAC 启动移出界面线程；Agent 尚未挂接 runtime 的关停最多等待10秒，取消／超时后不迟到关停；交接不保存未初始化的工作区和默认偏好。交接各阶段、响应码及异常保留准确诊断。旧现场只有 `continuation_timeout`，不能唯一确定旧窗口的失败步骤。
+
+最终标准 Release 构建 **18.92秒、0警告／0错误、合并0碰撞**。直接回归 **25 Passed／0 Failed**（Agent23、Infrastructure2）；随后两行关闭后不触碰窗口、关闭入口后不因取消遗留关停的顺序保护经过审查及最终编译，未重复运行同一组测试。
+
+最终 GUI 冷启动 App27132：启动后0.94秒切换真实编辑、1.63秒确认，当时导航禁用、工作区尚未初始化；等待期间连续原生窗口响应检查全部通过，6.92秒内导航可用且真实编辑 On。原存储结构页、Pool01 与两块 Samsung 已目视核验，原 Agent 托盘退出后 App／Agent 均 exit0。此前几次驱动等待管理员标题后才点击，实际已就绪，不算早期时序通过；修正为查找初始标题后取得本次证据。普通权限 UAC 在安全桌面等待，本轮未取得批准后的完整早期交接收据，不声称该 GUI 路径已通过；worker 阻塞与 pre-attach 关停由直接回归覆盖。
+
+只读对账：420个真实操作、Accepted390／CallIssued493及完整操作／写入事件内容不变；App／Agent偏好恢复一致，Pool01和WDC六个对象相同。管理员采集增加一个卷事实，缓存对象24→25。未修改真实存储，未运行全量测试，版本保持V0.59。
+
+证据：[直接回归](../artifacts/test-results/20261012-early-real-handoff/source/source-review-final.json)、[最终构建](../artifacts/test-results/20261012-early-real-handoff/final-release-build-closed-guard.log)、[早期点击](../artifacts/test-results/20261012-early-real-handoff/final-admin-observed-click.json)、[等待期间响应](../artifacts/test-results/20261012-early-real-handoff/final-admin-observed-wait.json)、[最终界面](../artifacts/test-results/20261012-early-real-handoff/final-admin-startup-real-on.png)、[原生退出](../artifacts/test-results/20261012-product-parity/Native/early-real-final-observed-exit-exit-result.json)、[只读对账](../artifacts/test-results/20261012-early-real-handoff/final-readonly-verification.json)。
+
 ## 2026-10-12 启动／退出与构建守卫：限定修复
 
 现场确认两条启动故障：监控恢复约65秒超过App固定60秒等待，且Recovering拒绝退出；另一次普通权限身份采集60,037毫秒超时后，整个Agent被标为Failed，106秒时界面仍未就绪。修复恢复期有序取消／排空、明确恢复中继续等待，以及可选监控恢复失败保留诊断后正常Ready。自动失败不关闭监控偏好；原开关人工开启成功保存后可重试。

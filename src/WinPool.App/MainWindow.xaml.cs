@@ -1015,6 +1015,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     public async Task<bool> RequestExecutionModeAsync(ExecutionMode requestedMode)
     {
+        LogElevationPhase("request", $"mode={requestedMode};requesting={_requestingElevation};workspaceReady={_workspaceInitializationComplete};persistAllowed={ViewModel.CanPersistWorkspaceUiState}");
         if (requestedMode == ExecutionMode.Simulation)
         {
             var exitError = await ViewModel.ExitRealModeAsync();
@@ -1027,6 +1028,7 @@ public sealed partial class MainWindow : Window
         SyncModeSwitch();
         if (_requestingElevation || RootGrid.XamlRoot is null)
         {
+            LogElevationPhase("request_ignored", $"requesting={_requestingElevation};xamlRootAvailable={RootGrid.XamlRoot is not null}");
             return false;
         }
 
@@ -1046,7 +1048,9 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = localization["Cancel"],
                 DefaultButton = ContentDialogButton.Primary
             };
+            LogElevationPhase("confirmation_wait");
             var result = await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot);
+            LogElevationPhase("confirmation_complete", $"result={result};administrator={ViewModel.CanUseRealMode}");
             if (result != ContentDialogResult.Primary)
             {
                 return false;
@@ -1054,7 +1058,23 @@ public sealed partial class MainWindow : Window
 
             if (ViewModel.CanUseRealMode)
             {
+                LogElevationPhase("real_mode_ready_wait");
+                try
+                {
+                    await App.InitialAgentConnectionTask.WaitAsync(_startupCancellation.Token);
+                }
+                catch (OperationCanceledException) when (_startupCancellation.IsCancellationRequested)
+                {
+                    LogElevationPhase("real_mode_ready_cancelled");
+                    return false;
+                }
+                if (_closePreparationStarted || _windowClosed)
+                {
+                    return false;
+                }
+                LogElevationPhase("real_mode_ready_complete");
                 var enterError = await ViewModel.EnterRealModeAsync();
+                LogElevationPhase("real_mode_enter_complete", $"code={enterError}");
                 if (enterError is null)
                     PublishRealOperationsWarning();
                 else
@@ -1063,15 +1083,20 @@ public sealed partial class MainWindow : Window
                 return false;
             }
 
+            LogElevationPhase("witness_wait");
             var agentProcess = await GetCurrentAgentProcessForElevationAsync(localization);
+            LogElevationPhase("witness_complete", $"available={agentProcess is not null};agentPid={agentProcess?.ProcessId}");
             if (agentProcess is null)
             {
                 return false;
             }
 
+            LogElevationPhase("bootstrap_wait");
             var restart = await _elevationRestartService.RestartElevatedAsync(
                 ApplicationStartupOptions.ElevatedRealArgument,
-                agentProcess);
+                agentProcess,
+                _startupCancellation.Token);
+            LogElevationPhase("bootstrap_complete", $"status={restart.Status};handoffAvailable={restart.Handoff is not null};error={restart.ErrorMessage}");
             if (restart.Status == ElevationRestartStatus.Started)
             {
                 if (restart.Handoff is null
@@ -1080,13 +1105,16 @@ public sealed partial class MainWindow : Window
                     return false;
                 }
 
-                using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                using var shutdownTimeout = CancellationTokenSource.CreateLinkedTokenSource(_startupCancellation.Token);
+                shutdownTimeout.CancelAfter(TimeSpan.FromSeconds(12));
+                LogElevationPhase("shutdown_wait");
                 var shutdown = await ViewModel.AgentConnection!.SendAsync(
                     new RequestAgentShutdownRequest(
                         ShutdownReason.ElevationRestart,
                         CorrelationId.New(),
                         BeginInBackground: true),
                     shutdownTimeout.Token);
+                LogElevationPhase("shutdown_complete", $"status={shutdown.Status};acknowledged={shutdown.Value is AgentAcknowledgement};codes={string.Join(',', shutdown.Messages.Select(message => message.Code))}");
                 if (!shutdown.IsSuccess || shutdown.Value is not AgentAcknowledgement)
                 {
                     NotificationService.PublishError(
@@ -1101,7 +1129,9 @@ public sealed partial class MainWindow : Window
                 // now may the elevated bootstrap leave its waiting stage. If
                 // that signal cannot be sent, it times out without opening a
                 // business window; this window retains the explanatory error.
-                if (!TryContinueElevatedHandoff(restart.Handoff))
+                var continued = TryContinueElevatedHandoff(restart.Handoff);
+                LogElevationPhase("continuation_complete", $"signalled={continued}");
+                if (!continued)
                 {
                     NotificationService.PublishError(
                         localization["Error"],
@@ -1112,6 +1142,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 _closingForElevationHandoff = true;
+                LogElevationPhase("close_requested");
                 RequestClose();
                 return true;
             }
@@ -1125,10 +1156,22 @@ public sealed partial class MainWindow : Window
                     $"elevation:{DateTimeOffset.UtcNow.Ticks}");
             }
         }
+        catch (OperationCanceledException) when (_startupCancellation.IsCancellationRequested)
+        {
+            LogElevationPhase("request_cancelled_on_close");
+            return false;
+        }
+        catch (Exception exception) when (exception is not StackOverflowException
+            and not OutOfMemoryException and not AccessViolationException)
+        {
+            LogElevationPhase("request_exception", exception: exception);
+            throw;
+        }
         finally
         {
+            LogElevationPhase("request_complete", $"closing={_closingForElevationHandoff}");
             _requestingElevation = false;
-            if (!_closingForElevationHandoff)
+            if (!_closingForElevationHandoff && !_closePreparationStarted && !_windowClosed)
             {
                 SyncModeSwitch();
             }
@@ -1154,6 +1197,7 @@ public sealed partial class MainWindow : Window
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             var connected = await connection.ConnectAsync(timeout.Token);
+            LogElevationPhase("witness_connection_complete", $"status={connected.Status};codes={string.Join(',', connected.Messages.Select(message => message.Code))}");
             var handshake = connection.ActiveHandshake ?? connected.Value;
             if (!connected.IsSuccess
                 || handshake is null
@@ -1178,6 +1222,7 @@ public sealed partial class MainWindow : Window
                 or InvalidOperationException
                 or OperationCanceledException)
         {
+            LogElevationPhase("witness_exception", exception: exception);
             NotificationService.PublishError(
                 localization["Error"],
                 localization["ElevationAgentUnavailable"],
@@ -1192,21 +1237,37 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            LogElevationPhase("persist_begin", $"workspaceReady={_workspaceInitializationComplete};persistAllowed={ViewModel.CanPersistWorkspaceUiState}");
+            if (!_workspaceInitializationComplete)
+            {
+                // The preview and default preferences are not an authoritative
+                // workspace. Keep the last durable state for the replacement.
+                LogElevationPhase("persist_skipped_startup");
+                return true;
+            }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_startupCancellation.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(12));
             if (ViewModel.CanPersistWorkspaceUiState)
             {
+                LogElevationPhase("workspace_save_wait");
                 await _workspaceStateService.SaveAsync(
-                    ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+                    ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()), timeout.Token);
+                LogElevationPhase("workspace_save_complete");
             }
 
+            LogElevationPhase("last_page_save_wait");
             await ViewModel.SetLastActivePageAsync(
-                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString());
+                (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString(), timeout.Token);
+            LogElevationPhase("last_page_save_complete");
             return true;
         }
         catch (Exception exception) when (
             exception is IOException
                 or UnauthorizedAccessException
-                or InvalidOperationException)
+                or InvalidOperationException
+                or OperationCanceledException)
         {
+            LogElevationPhase("persist_exception", exception: exception);
             NotificationService.PublishError(
                 localization["Error"],
                 localization["ElevationHandoffFailed"],
@@ -1215,6 +1276,17 @@ public sealed partial class MainWindow : Window
             return false;
         }
     }
+
+    private static void LogElevationPhase(
+        string phase,
+        string? diagnostic = null,
+        Exception? exception = null) =>
+        DiagnosticLog.AppendFailure(
+            StorageDataLocations.CurrentRoot,
+            "elevation-handoff.jsonl",
+            $"elevation.app.{phase}",
+            exception,
+            $"appPid={Environment.ProcessId};{diagnostic}");
 
     private static bool TryContinueElevatedHandoff(ElevationHandoff handoff)
     {
