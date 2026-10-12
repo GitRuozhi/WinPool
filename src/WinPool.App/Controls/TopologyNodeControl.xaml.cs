@@ -28,7 +28,7 @@ public sealed partial class TopologyNodeControl : UserControl
     private bool _isDragging;
     private bool _suppressNextTap;
     private Popup? _dragPreview;
-    private double _dragSourceOpacity;
+    private TranslateTransform? _dragPreviewTransform;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -378,6 +378,10 @@ public sealed partial class TopologyNodeControl : UserControl
         root.KeyDown += DragRoot_KeyDown;
         _dragInteraction = viewModel.EditInteraction;
         s_activeDrag = this;
+        // This disk owns the captured gesture. Letting its press bubble to
+        // the ScrollViewer can hand the gesture to scrolling before a move.
+        // Tapped remains a separate routed event for an ordinary click.
+        e.Handled = true;
     }
 
     private void TopologyNodeControl_PointerMoved(object sender, PointerRoutedEventArgs e)
@@ -388,20 +392,24 @@ public sealed partial class TopologyNodeControl : UserControl
             CancelInternalDrag();
             return;
         }
-        var point = e.GetCurrentPoint(_dragRoot).Position;
+        var rootPoint = e.GetCurrentPoint(_dragRoot).Position;
+        var hostPoint = e.GetCurrentPoint(null).Position;
         if (!_isDragging)
         {
-            var dx = point.X - _dragStart.X;
-            var dy = point.Y - _dragStart.Y;
+            var dx = rootPoint.X - _dragStart.X;
+            var dy = rootPoint.Y - _dragStart.Y;
             if (dx * dx + dy * dy < 64) return; // Eight DIPs; clicks remain clicks.
             _isDragging = true;
             _suppressNextTap = true;
             Focus(FocusState.Programmatic); // Escape now belongs to this drag.
-            ShowDragPreview();
+            ShowDragPreview(hostPoint);
+        }
+        else
+        {
+            MoveDragPreview(hostPoint);
         }
         e.Handled = true;
-        MoveDragPreview(point);
-        var target = HitTestDropTarget(point);
+        var target = HitTestDropTarget(hostPoint);
         if (!ReferenceEquals(s_highlightedDropTarget, target))
         {
             s_highlightedDropTarget?.ShowDropTargetVisual(false);
@@ -410,10 +418,12 @@ public sealed partial class TopologyNodeControl : UserControl
         }
     }
 
+
     private TopologyNodeControl? HitTestDropTarget(Point point)
     {
         if (_dragRoot is null || !ReferenceEquals(XamlRoot?.Content, _dragRoot)) return null;
-        // Topmost hit only: never drop through overlays, panels or scrollbars.
+        // This API uses app-window coordinates even when a subtree is supplied.
+        // Keep overlays, panels and scrollbars in front of targets.
         var hit = VisualTreeHelper.FindElementsInHostCoordinates(point, _dragRoot).FirstOrDefault();
         var target = NearestTopologyNode(hit)?.FindPoolDropTargetControl();
         return target is { IsLoaded: true, IsEnabled: true, ViewModel: { } targetModel }
@@ -424,36 +434,85 @@ public sealed partial class TopologyNodeControl : UserControl
                 ? target : null;
     }
 
-    private void ShowDragPreview()
+    private void ShowDragPreview(Point hostPoint)
     {
+        if (XamlRoot is not { } xamlRoot)
+        {
+            return;
+        }
+
         var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        heading.Children.Add(new FontIcon { Glyph = ViewModel.TypeGlyph, FontSize = 14,
-            Foreground = Brush("TextFillColorPrimaryBrush") });
-        heading.Children.Add(new TextBlock { Text = ViewModel.Unit.DisplayName,
+        heading.Children.Add(new FontIcon
+        {
+            Glyph = ViewModel.TypeGlyph,
+            FontSize = 14,
+            Foreground = Brush("TextFillColorPrimaryBrush")
+        });
+        heading.Children.Add(new TextBlock
+        {
+            Text = ViewModel.Unit.DisplayName,
             MaxWidth = Math.Clamp(ActualWidth, 180, 300) - 52,
-            Foreground = Brush("TextFillColorPrimaryBrush"), TextWrapping = TextWrapping.Wrap });
+            Foreground = Brush("TextFillColorPrimaryBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
         var content = new StackPanel { Spacing = 4 };
         content.Children.Add(heading);
-        content.Children.Add(new TextBlock { Text = ViewModel.Summary,
-            Foreground = Brush("TextFillColorSecondaryBrush"), TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(new TextBlock
+        {
+            Text = ViewModel.Summary,
+            Foreground = Brush("TextFillColorSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        _dragPreviewTransform = new TranslateTransform
+        {
+            X = hostPoint.X + 14,
+            Y = hostPoint.Y + 14
+        };
         var card = new Border
         {
-            Child = content, Width = Math.Clamp(ActualWidth, 180, 300), Padding = new Thickness(10),
-            Background = Brush("LayerFillColorDefaultBrush"), BorderBrush = Brush("WinPoolAccentBorderBrush"),
-            BorderThickness = new Thickness(2), CornerRadius = new CornerRadius(2),
-            Opacity = 0.9, IsHitTestVisible = false
+            Child = content,
+            Width = Math.Clamp(ActualWidth, 180, 300),
+            Padding = new Thickness(10),
+            Background = Brush("LayerFillColorDefaultBrush"),
+            BorderBrush = Brush("WinPoolAccentBorderBrush"),
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(2),
+            Opacity = 0.9,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            RenderTransform = _dragPreviewTransform,
+            IsHitTestVisible = false
         };
-        _dragPreview = new Popup { XamlRoot = XamlRoot, Child = card, IsHitTestVisible = false };
-        _dragSourceOpacity = Opacity;
-        Opacity = 0.5;
+        var overlay = new Grid
+        {
+            Width = xamlRoot.Size.Width,
+            Height = xamlRoot.Size.Height,
+            IsHitTestVisible = false
+        };
+        overlay.Children.Add(card);
+        _dragPreview = new Popup
+        {
+            XamlRoot = xamlRoot,
+            Child = overlay,
+            IsHitTestVisible = false,
+            HorizontalOffset = 0,
+            VerticalOffset = 0
+        };
+        // Open once. Pointer movement below only translates the card, so the
+        // source subtree and the overlay's layout do not participate in drag.
+        _dragPreview.IsOpen = true;
     }
 
-    private void MoveDragPreview(Point point)
+    private void MoveDragPreview(Point hostPoint)
     {
-        if (_dragPreview is null) return;
-        _dragPreview.HorizontalOffset = point.X + 14;
-        _dragPreview.VerticalOffset = point.Y + 14;
-        _dragPreview.IsOpen = true;
+        if (_dragPreviewTransform is null)
+        {
+            return;
+        }
+
+        _dragPreviewTransform.X = hostPoint.X + 14;
+        _dragPreviewTransform.Y = hostPoint.Y + 14;
     }
 
     private void TopologyNodeControl_PointerReleased(object sender, PointerRoutedEventArgs e)
@@ -463,7 +522,7 @@ public sealed partial class TopologyNodeControl : UserControl
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         var dragging = _isDragging;
         var target = dragging && CanStartInternalDrag && _dragRoot is not null
-            ? HitTestDropTarget(e.GetCurrentPoint(_dragRoot).Position) : null;
+            ? HitTestDropTarget(e.GetCurrentPoint(null).Position) : null;
         var diskId = ViewModel.Unit.StableId;
         var targetId = target?.ViewModel?.Unit.StableId;
         var callback = _dragInteraction?.OnDiskDropped;
@@ -493,8 +552,8 @@ public sealed partial class TopologyNodeControl : UserControl
             _dragPreview.IsOpen = false;
             _dragPreview.Child = null;
             _dragPreview = null;
-            Opacity = _dragSourceOpacity;
         }
+        _dragPreviewTransform = null;
         if (_dragRoot is not null) _dragRoot.KeyDown -= DragRoot_KeyDown;
         _dragRoot = null;
         _dragInteraction = null;

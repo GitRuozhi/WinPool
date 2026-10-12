@@ -206,6 +206,16 @@ public sealed class SimulationEditingSession
         new Dictionary<string, PoolEditIntent>(PoolIntents, StringComparer.OrdinalIgnoreCase),
         new HashSet<string>(MaximumSizeFields, StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>Field comparisons survive saving and reselecting the local draft.
+    /// Existing tiers compare with observed facts; a new tier compares with
+    /// its first recorded values with members, never with hidden empty
+    /// placeholders or its latest saved values.</summary>
+    public StorageTierInfo? TierParameterReference(string tierId) =>
+        Baseline.StorageTiers.FirstOrDefault(tier => tier.StableId.Equals(tierId, StringComparison.OrdinalIgnoreCase))
+        ?? UndoStack.Reverse().SelectMany(state => state.Snapshot.StorageTiers)
+            .FirstOrDefault(tier => tier.StableId.Equals(tierId, StringComparison.OrdinalIgnoreCase)
+                && tier.MemberPhysicalDiskIds.Count > 0);
+
     public void Restore(EditorDraftState state)
     {
         MarkDraftContentChanged();

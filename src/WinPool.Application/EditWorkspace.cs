@@ -248,9 +248,10 @@ public static class EditWorkspace
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
         StorageSnapshot? committed = null,
         IReadOnlyCollection<string>? visibleSimulatedLayers = null,
-        bool showSourceTierTemplates = false)
+        bool showSourceTierTemplates = false,
+        WinPoolFacts? sourceFacts = null)
     {
-        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed, visibleSimulatedLayers, showSourceTierTemplates);
+        var children = ProjectPoolWorkspace(snapshot, minUnallocatedBytes, committed, visibleSimulatedLayers, showSourceTierTemplates, sourceFacts);
         return new TopologyNode(
             new StorageUnitRef(PoolRowStableId, StorageUnitKind.VirtualDiskGroup, string.Empty, false),
             string.Empty,
@@ -265,7 +266,8 @@ public static class EditWorkspace
         long minUnallocatedBytes = DefaultUnallocatedIgnoreBytes,
         StorageSnapshot? committed = null,
         IReadOnlyCollection<string>? visibleSimulatedLayers = null,
-        bool showSourceTierTemplates = false)
+        bool showSourceTierTemplates = false,
+        WinPoolFacts? sourceFacts = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var baseline = committed ?? snapshot;
@@ -279,7 +281,7 @@ public static class EditWorkspace
                      .ThenBy(pool => IsDraftPool(pool.StableId) ? 1 : 0)
                      .ThenBy(pool => pool.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
         {
-            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline, visibleSimulatedLayers, showSourceTierTemplates));
+            nodes.Add(CreateEditPoolNode(pool, snapshot, ignore, baseline, visibleSimulatedLayers, showSourceTierTemplates, sourceFacts));
         }
 
         // Single-draft rule: the plus-pool affordance is present only while
@@ -1127,7 +1129,8 @@ public sealed record StructureProblem(
         long minUnallocatedBytes,
         StorageSnapshot committed,
         IReadOnlyCollection<string>? visibleSimulatedLayers,
-        bool showSourceTierTemplates)
+        bool showSourceTierTemplates,
+        WinPoolFacts? sourceFacts)
     {
         var members = snapshot.PhysicalDisks
             .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
@@ -1161,20 +1164,42 @@ public sealed record StructureProblem(
 
         AddVirtualDisks(poolNode, pool, snapshot, minUnallocatedBytes);
 
-        // Source-backed pool templates have no allocated tier members yet.
-        // Show their own identities without treating template eligibility as
-        // allocated membership. Simulation/draft cards keep the member rule.
-        foreach (var tier in snapshot.StorageTiers
+        // The editor presents media layers. An unused creation template is
+        // represented by the allocated tier once that media has an instance.
+        // Source identities and all original records remain in the snapshot
+        // and in the management projection.
+        var displayedMembers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in snapshot.StorageTiers
                      .Where(item => item.PoolStableId == pool.StableId)
-                     .Where(item => item.MemberPhysicalDiskIds.Count > 0
-                         || (showSourceTierTemplates && !IsDraftPool(pool.StableId)))
-                     .OrderBy(item => TopologyProjector.TierSortOrder(item.MediaType)))
+                     .GroupBy(item => NormalizeMedia(item.MediaType))
+                     .OrderBy(group => TopologyProjector.TierSortOrder(group.Key)))
         {
-            poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, committed));
+            var instances = group.Where(item => !string.IsNullOrWhiteSpace(item.VirtualDiskStableId)).ToArray();
+            var tiers = instances.Length > 0 ? instances : group.ToArray();
+            foreach (var tier in tiers)
+            {
+                var tierMembers = members.Where(disk => !disk.IsHotSpare && !disk.IsRetired
+                    && tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)).ToList();
+                if (showSourceTierTemplates && instances.Length == 0 && tiers.Length == 1 && sourceFacts is not null)
+                {
+                    // Template eligibility is only a display grouping, never
+                    // an allocated tier-member fact or an editable record.
+                    var eligible = sourceFacts.Relationships.Where(edge => !edge.IsRetained
+                        && edge.Kind == "template-pool-member" && edge.FromId == tier.StableId)
+                        .Select(edge => edge.ToId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    tierMembers.AddRange(members.Where(disk => !disk.IsHotSpare && !disk.IsRetired
+                        && NormalizeMedia(disk.MediaType) == group.Key && eligible.Contains(disk.StableId)
+                        && !tierMembers.Any(item => item.StableId == disk.StableId)));
+                }
+                if (tierMembers.Count == 0 && (instances.Length == 0
+                    || !(showSourceTierTemplates && !IsDraftPool(pool.StableId)))) continue;
+                displayedMembers.UnionWith(tierMembers.Select(disk => disk.StableId));
+                poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, committed, tierMembers));
+            }
         }
 
         AddSimulatedLayers(poolNode, pool, members, snapshot, committed, visibleSimulatedLayers);
-        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed);
+        AddUnallocatedGroup(poolNode, pool, members, snapshot, committed, displayedMembers);
         return poolNode;
     }
 
@@ -1188,11 +1213,6 @@ public sealed record StructureProblem(
     {
         var tiers = snapshot.StorageTiers.Where(item =>
             string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase));
-        if (isSimulatedInventory)
-        {
-            return tiers.ToDictionary(item => NormalizeMedia(item.MediaType), StringComparer.OrdinalIgnoreCase);
-        }
-
         var result = new Dictionary<string, StorageTierInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in tiers.GroupBy(item => NormalizeMedia(item.MediaType), StringComparer.OrdinalIgnoreCase))
         {
@@ -1205,13 +1225,41 @@ public sealed record StructureProblem(
                     item.VirtualDiskStableId, selectedVirtualDiskId, StringComparison.OrdinalIgnoreCase)).ToArray();
             }
 
-            // Ambiguous media groups stay blank until an exact card/VD is selected.
+            // The single allocated media layer owns the form at pool level;
+            // its unused creation template must not make the form ambiguous.
+            if (selected.Length == 0 && string.IsNullOrWhiteSpace(selectedTierId)
+                && string.IsNullOrWhiteSpace(selectedVirtualDiskId))
+            {
+                var instances = candidates.Where(item => !string.IsNullOrWhiteSpace(item.VirtualDiskStableId)).ToArray();
+                if (instances.Length == 1) selected = instances;
+            }
+            // Multiple actual tiers still require an exact card/VD selection.
             if (selected.Length == 1) result.Add(group.Key, selected[0]);
             else if (selected.Length == 0 && candidates.Length == 1) result.Add(group.Key, candidates[0]);
         }
 
         return result;
     }
+
+    /// <summary>One business tier per media owns parameter updates. An
+    /// allocated instance takes precedence over unused creation templates;
+    /// multiple instances (or multiple templates without an instance) cannot
+    /// be represented by the editor's media-based update request.</summary>
+    public static Dictionary<string, StorageTierInfo> SelectPoolTiersForParameterUpdate(
+        StorageSnapshot snapshot, string poolId) => PoolBusinessTiers(snapshot, poolId)
+        .GroupBy(tier => NormalizeMedia(tier.MediaType), StringComparer.OrdinalIgnoreCase)
+        .Where(group => group.Count() == 1)
+        .ToDictionary(group => group.Key, group => group.Single(), StringComparer.OrdinalIgnoreCase);
+
+    public static IReadOnlyList<StorageTierInfo> PoolBusinessTiers(StorageSnapshot snapshot, string poolId) => snapshot.StorageTiers
+        .Where(tier => string.Equals(tier.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
+        .GroupBy(tier => NormalizeMedia(tier.MediaType), StringComparer.OrdinalIgnoreCase)
+        .SelectMany(group =>
+        {
+            var instances = group.Where(tier => !string.IsNullOrWhiteSpace(tier.VirtualDiskStableId)).ToArray();
+            return instances.Length > 0 ? instances : group.ToArray();
+        })
+        .ToArray();
 
     /// <summary>
     /// Manage-equivalent virtual-disk row: one disk stays a direct stack
@@ -1256,9 +1304,10 @@ public sealed record StructureProblem(
         StoragePoolInfo pool,
         StorageTierInfo tier,
         StorageSnapshot snapshot,
-        StorageSnapshot committed)
+        StorageSnapshot committed,
+        IReadOnlyList<PhysicalDiskInfo>? displayMembers = null)
     {
-        var members = snapshot.PhysicalDisks
+        var members = displayMembers ?? snapshot.PhysicalDisks
             .Where(disk => tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
             .ToList();
         // Only a new draft may use its planned member capacity before a
@@ -1301,9 +1350,11 @@ public sealed record StructureProblem(
         StoragePoolInfo pool,
         IReadOnlyList<PhysicalDiskInfo> members,
         StorageSnapshot snapshot,
-        StorageSnapshot committed)
+        StorageSnapshot committed,
+        IReadOnlySet<string>? displayedMembers = null)
     {
-        var directMembers = snapshot.DirectPoolMembers(pool.StableId);
+        var directMembers = snapshot.DirectPoolMembers(pool.StableId)
+            .Where(disk => displayedMembers?.Contains(disk.StableId) != true).ToList();
         if (directMembers.Count == 0)
         {
             return;

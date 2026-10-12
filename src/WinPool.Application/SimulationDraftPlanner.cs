@@ -398,15 +398,15 @@ public static class SimulationDraftPlanner
         {
             if (EditWorkspace.HasPoolPropertyChanges(working, committed, pool.StableId))
             {
-                var ssd = working.StorageTiers.FirstOrDefault(item =>
-                    item.PoolStableId == pool.StableId
-                    && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD");
-                var hdd = working.StorageTiers.FirstOrDefault(item =>
-                    item.PoolStableId == pool.StableId
-                    && EditWorkspace.NormalizeMedia(item.MediaType) == "HDD");
-                var scm = working.StorageTiers.FirstOrDefault(item =>
-                    item.PoolStableId == pool.StableId
-                    && EditWorkspace.NormalizeMedia(item.MediaType) == "SCM");
+                var parameterTiers = EditWorkspace.SelectPoolTiersForParameterUpdate(working, pool.StableId);
+                var ambiguousTiers = EditWorkspace.PoolBusinessTiers(working, pool.StableId)
+                    .Where(tier => !parameterTiers.ContainsKey(EditWorkspace.NormalizeMedia(tier.MediaType)));
+                if (ambiguousTiers.Any(tier => committed.StorageTiers.FirstOrDefault(original =>
+                    original.StableId == tier.StableId) is { } original && original != tier))
+                    throw new InvalidOperationException("Multiple tiers of the same media cannot be changed by this parameter editor.");
+                var ssd = parameterTiers.GetValueOrDefault("SSD");
+                var hdd = parameterTiers.GetValueOrDefault("HDD");
+                var scm = parameterTiers.GetValueOrDefault("SCM");
                 steps.Add(new SimulationEditRequest(
                     SimulationEditKind.UpdateStoragePool,
                     pool.StableId,

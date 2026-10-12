@@ -145,6 +145,62 @@ public sealed class WindowsRealPlanSafetyTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
+    [Theory]
+    [InlineData(RealFileSystem.Ntfs, 4096)]
+    [InlineData(RealFileSystem.ReFs, 4096)]
+    [InlineData(RealFileSystem.ReFs, 65536)]
+    public async Task NewBasicDataSelectedClusterReachesExactRawVolumePreflight(
+        RealFileSystem fileSystem, int clusterBytes)
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitions();
+        fixture.SetWorkstationSku();
+        fixture.Capabilities.RefsSupported = true;
+        var disk = fixture.Id(StorageObjectKind.OsDisk, DiskId);
+        var proposal = fixture.Proposal(OperationIntent.CreatePartition, [disk],
+            [Step("create", new CreatePartitionCommand(RealTargetReference.ForExisting(disk),
+                RealPartitionRole.BasicData, 145L << 20, 64L << 20)),
+             Step("format", new FormatVolumeCommand(RealTargetReference.FromStep(StorageObjectKind.Partition, "create"),
+                 fileSystem, clusterBytes, false, "SELECTED"), ["create"])], "Selected cluster data partition");
+        var plan = await fixture.Prepare(proposal);
+        var formatStep = plan.RealOperation!.Steps[1];
+        Assert.Equal(clusterBytes, Assert.IsType<FormatVolumeCommand>(formatStep.Command).ClusterBytes);
+        Assert.Contains("pending-exact-created-volume", formatStep.SupportEvidence);
+        fixture.SetCreatedRawDataVolume();
+        var outputs = new Dictionary<string, string> { ["create"] = await fixture.VerifiedEvidence("partition:new") };
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, formatStep, outputs, CancellationToken.None);
+        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        Assert.Equal("volume:raw", target.RelatedUniqueId);
+        Assert.True(target.CreatedInThisPlan);
+        fixture.Capabilities.ReturnValue = 1;
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Backend.PreflightStepAsync(
+            plan, formatStep, outputs, CancellationToken.None));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData("NTFS", RealFileSystem.Ntfs, 4096)]
+    [InlineData("NTFS", RealFileSystem.Ntfs, 16384)]
+    [InlineData("NTFS", RealFileSystem.Ntfs, 262144)]
+    [InlineData("RAW", RealFileSystem.ReFs, 4096)]
+    public async Task ExistingVolumeSelectedClusterRequiresExactProviderEvidence(
+        string currentFileSystem, RealFileSystem fileSystem, int clusterBytes)
+    {
+        var fixture = new Fixture();
+        fixture.SetGptPartitionWithRefsVolume(currentFileSystem);
+        fixture.Capabilities.RefsSupported = true;
+        var partition = fixture.Id(StorageObjectKind.Partition, "partition:data");
+        var proposal = fixture.Proposal(OperationIntent.FormatVolume, [partition],
+            [Step("format", new FormatVolumeCommand(RealTargetReference.ForExisting(partition),
+                fileSystem, clusterBytes, false, "SELECTED"))], "Selected cluster format");
+        var plan = await fixture.Prepare(proposal);
+        Assert.Contains(clusterBytes.ToString(), plan.RealOperation!.Steps[0].AfterCondition);
+        fixture.Capabilities.ReturnValue = 1;
+        await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Backend.PreflightStepAsync(
+            plan, plan.RealOperation.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
     [Fact]
     public async Task OmittedFormatLabelIsPreviewedAsEmpty()
     {
@@ -855,15 +911,32 @@ public sealed class WindowsRealPlanSafetyTests
             };
         }
 
-        public void SetGptPartitionWithRefsVolume()
+        public void SetGptPartitionWithRefsVolume(string fileSystem = "ReFS")
         {
             SetGptPartitions();
             snapshot = snapshot with
             {
                 Computer = snapshot.Computer with { WindowsProductName = "Windows 10 Pro for Workstations" },
                 Volumes = [new VolumeInfo("volume:refs", true, "partition:data",
-                    "ReFS", "", 128L << 20, 128L << 20, 65536,
+                    fileSystem, "", 128L << 20, 128L << 20, 65536,
                     "Healthy", "OK", [@"E:\"])]
+            };
+        }
+
+        public void SetWorkstationSku() => snapshot = snapshot with
+        {
+            Computer = snapshot.Computer with { WindowsProductName = "Windows 10 Pro for Workstations" }
+        };
+
+        public void SetCreatedRawDataVolume()
+        {
+            var partition = Partition("partition:new", 3, 145L << 20, 64L << 20,
+                "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
+            snapshot = snapshot with
+            {
+                Partitions = [..snapshot.Partitions, partition],
+                Volumes = [new VolumeInfo("volume:raw", true, partition.StableId, "RAW", "",
+                    64L << 20, 64L << 20, null, "Healthy", "OK", [])]
             };
         }
 
@@ -1037,7 +1110,11 @@ public sealed class WindowsRealPlanSafetyTests
         public int TierReadCount { get; private set; }
         public int TierSizeReadCount { get; private set; }
         public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
-            WindowsRealStorageTopology topology, StorageObjectId volume, CancellationToken token)
+            WindowsRealStorageTopology topology, StorageObjectId volume, CancellationToken token) =>
+            ReadVolumeFormatAsync(topology, volume, "ReFS", token);
+
+        public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
+            WindowsRealStorageTopology topology, StorageObjectId volume, string fileSystem, CancellationToken token)
         {
             var closure = topology.RequireSinglePhysicalClosure([volume]);
             var partition = topology.Snapshot.Volumes.Single(item => item.StableId == volume.ProviderKey).PartitionStableId;
@@ -1047,7 +1124,7 @@ public sealed class WindowsRealPlanSafetyTests
                 new WindowsCapabilityMethodResult("returned", ReturnValue,
                     new Dictionary<string, JsonElement?> { ["SupportedFileSystems"] = JsonSerializer.SerializeToElement(RefsSupported ? new[] { "NTFS", "ReFS" } : ["NTFS"]) }, null),
                 new WindowsCapabilityMethodResult("returned", ReturnValue,
-                    new Dictionary<string, JsonElement?> { ["SupportedClusterSizes"] = JsonSerializer.SerializeToElement(Has64KiB ? new[] { 4096, 65536 } : [4096]) }, null), null));
+                    new Dictionary<string, JsonElement?> { ["SupportedClusterSizes"] = JsonSerializer.SerializeToElement(Has64KiB ? new[] { 4096, 16384, 65536, 262144 } : [4096]) }, null), null) { RequestedFileSystem = fileSystem });
         }
         public Task<WindowsTierCapability> ReadTierAsync(WindowsRealStorageTopology topology,
             StorageObjectId physical, CancellationToken token)

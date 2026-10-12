@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using WinPool.Domain;
 
 namespace WinPool.Application.Tests;
@@ -12,7 +13,7 @@ public sealed class RealStorageTierWorkspaceTests
     private const string VirtualDiskId = "vdisk:uid:tiered";
 
     [Fact]
-    public void ReturnedZeroSizeTemplateIsSelectableWithoutInventingAllocatedMembers()
+    public void UnusedTemplateGroupsEligibleMembersForEditingWithoutInventingAllocatedFacts()
     {
         var facts = ProviderFacts(withInstance: false);
         var tierObject = Assert.Single(facts.Objects, item => item.Id == TemplateId);
@@ -29,28 +30,30 @@ public sealed class RealStorageTierWorkspaceTests
         Assert.Equal(0, tier.Size);
         Assert.Equal(0, tier.FootprintOnPool);
         var poolNode = EditWorkspace.ProjectPoolWorkspaceRoot(snapshot, 0,
-            showSourceTierTemplates: true).Children.Single(item => item.Unit.StableId == PoolId);
+            showSourceTierTemplates: true, sourceFacts: facts).Children.Single(item => item.Unit.StableId == PoolId);
         var templateNode = Assert.Single(poolNode.Children, item => item.Unit.Kind == StorageUnitKind.StorageTier);
         Assert.Equal(TemplateId, templateNode.Unit.StableId);
         Assert.True(templateNode.IsSelectable);
         Assert.Equal(PoolId, templateNode.Unit.ParentStableId);
-        Assert.Empty(templateNode.Children);
-        var directGroup = Assert.Single(poolNode.Children, item => item.Unit.Kind == StorageUnitKind.DirectDiskGroup);
-        Assert.Equal(PhysicalId, Assert.Single(directGroup.Children).Unit.StableId);
+        Assert.Equal(PhysicalId, Assert.Single(templateNode.Children).Unit.StableId);
+        Assert.DoesNotContain(poolNode.Children, item => item.Unit.Kind == StorageUnitKind.DirectDiskGroup);
+        Assert.Empty(tier.MemberPhysicalDiskIds);
+        var managed = TopologyProjector.Flatten(TopologyProjector.Project(snapshot));
+        Assert.Empty(managed.Single(item => item.Unit.StableId == TemplateId).Children);
+        Assert.Contains(managed, item => item.Unit.SyntheticName == SyntheticStorageName.UnallocatedLayer);
         Assert.Equal(TemplateId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId,
             TemplateId, null, isSimulatedInventory: false)["HDD"].StableId);
     }
 
     [Fact]
-    public void SameMediaTemplateAndInstanceRenderAndSelectTheirOwnStableIdentities()
+    public void EditorUsesAllocatedMediaLayerWhileManagementPreservesTemplateAndInstance()
     {
         var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: true));
         var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0, showSourceTierTemplates: true)
             .Single(item => item.Unit.StableId == PoolId);
         var tiers = pool.Children.Where(item => item.Unit.Kind == StorageUnitKind.StorageTier).ToArray();
-        Assert.Equal(2, tiers.Length);
+        Assert.Single(tiers);
         Assert.All(tiers, item => Assert.True(item.IsSelectable));
-        Assert.Empty(tiers.Single(item => item.Unit.StableId == TemplateId).Children);
         Assert.Equal(PhysicalId, Assert.Single(tiers.Single(item => item.Unit.StableId == InstanceId).Children).Unit.StableId);
         Assert.DoesNotContain(pool.Children, item => item.Unit.Kind == StorageUnitKind.DirectDiskGroup);
 
@@ -68,10 +71,15 @@ public sealed class RealStorageTierWorkspaceTests
         Assert.Equal(PhysicalId, Assert.Single(instance.MemberPhysicalDiskIds));
         Assert.Equal(InstanceId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null,
             VirtualDiskId, isSimulatedInventory: false)["HDD"].StableId);
+        Assert.Equal(InstanceId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null,
+            null, isSimulatedInventory: false)["HDD"].StableId);
+        var managed = TopologyProjector.Flatten(TopologyProjector.Project(snapshot));
+        Assert.Contains(managed, item => item.Unit.StableId == TemplateId);
+        Assert.Contains(managed, item => item.Unit.StableId == InstanceId);
+        Assert.Equal(2, snapshot.StorageTiers.Count);
     }
 
     [Theory]
-    [InlineData(null, null)]
     [InlineData("tier:wrong", null)]
     [InlineData(null, "vdisk:wrong")]
     public void AmbiguousMediaDoesNotChooseATemplateOrInstanceByName(string? selectedTier, string? selectedDisk)
@@ -82,6 +90,82 @@ public sealed class RealStorageTierWorkspaceTests
     }
 
     [Fact]
+    public void MissingTemplateEligibilityDoesNotMislabelUnknownMembersAsAllocated()
+    {
+        var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: false));
+        var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0, showSourceTierTemplates: true)
+            .Single(item => item.Unit.StableId == PoolId);
+        Assert.DoesNotContain(pool.Children, item => item.Unit.StableId == TemplateId);
+        Assert.Equal(PhysicalId, Assert.Single(pool.Children.Single(item =>
+            item.Unit.Kind == StorageUnitKind.DirectDiskGroup).Children).Unit.StableId);
+    }
+
+    [Fact]
+    public void RetainedTemplateEligibilityCannotGroupTheCurrentPoolMember()
+    {
+        var facts = ProviderFacts(withInstance: false);
+        facts = facts with { Relationships = facts.Relationships.Select(edge => edge.Kind == "template-pool-member"
+            ? edge with { IsRetained = true } : edge).ToImmutableArray() };
+        var snapshot = WinPoolStorageProjection.Project(facts);
+        var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0, showSourceTierTemplates: true, sourceFacts: facts)
+            .Single(item => item.Unit.StableId == PoolId);
+        Assert.DoesNotContain(pool.Children, item => item.Unit.StableId == TemplateId);
+        Assert.Equal(PhysicalId, Assert.Single(pool.Children.Single(item =>
+            item.Unit.Kind == StorageUnitKind.DirectDiskGroup).Children).Unit.StableId);
+    }
+
+    [Fact]
+    public void MultipleActualSameMediaLayersRemainVisibleAndRequireAnExactSelection()
+    {
+        var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: true));
+        var second = snapshot.StorageTiers.Single(item => item.StableId == InstanceId) with
+        {
+            StableId = "tier:second-instance", VirtualDiskStableId = "vdisk:second"
+        };
+        snapshot = snapshot with { StorageTiers = snapshot.StorageTiers.Append(second).ToArray() };
+        var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0, showSourceTierTemplates: true)
+            .Single(item => item.Unit.StableId == PoolId);
+        Assert.Equal(2, pool.Children.Count(item => item.Unit.Kind == StorageUnitKind.StorageTier));
+        Assert.DoesNotContain(pool.Children, item => item.Unit.StableId == TemplateId);
+        Assert.Empty(EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null, null, false));
+        Assert.Empty(EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null, null, true));
+        Assert.Equal(second.StableId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId,
+            second.StableId, null, true)["HDD"].StableId);
+    }
+
+    [Fact]
+    public void AnAllocatedHddLayerDoesNotHideAnEligibleUnusedSsdLayer()
+    {
+        var facts = ProviderFacts(withInstance: true);
+        var snapshot = WinPoolStorageProjection.Project(facts);
+        var ssd = snapshot.PhysicalDisks.Single() with { StableId = "physical:ssd", MediaType = "SSD" };
+        var ssdTemplate = snapshot.StorageTiers.Single(item => item.StableId == TemplateId) with
+        {
+            StableId = "tier:ssd-template", MediaType = "SSD"
+        };
+        snapshot = snapshot with
+        {
+            PhysicalDisks = snapshot.PhysicalDisks.Append(ssd).ToArray(),
+            StoragePools = snapshot.StoragePools.Select(pool => pool with
+            {
+                MemberPhysicalDiskIds = pool.MemberPhysicalDiskIds.Append(ssd.StableId).ToArray()
+            }).ToArray(),
+            StorageTiers = snapshot.StorageTiers.Append(ssdTemplate).ToArray()
+        };
+        facts = facts with { Relationships = facts.Relationships.Add(new WinPoolFactRelationship(
+            ssdTemplate.StableId, ssd.StableId, "template-pool-member", facts.InventoryCapturedAt)) };
+        var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0, showSourceTierTemplates: true, sourceFacts: facts)
+            .Single(item => item.Unit.StableId == PoolId);
+        Assert.Equal(2, pool.Children.Count(item => item.Unit.Kind == StorageUnitKind.StorageTier));
+        Assert.Equal(ssd.StableId, Assert.Single(pool.Children.Single(item =>
+            item.Unit.StableId == ssdTemplate.StableId).Children).Unit.StableId);
+        Assert.Contains(pool.Children, item => item.Unit.StableId == InstanceId);
+        Assert.DoesNotContain(pool.Children, item => item.Unit.StableId == TemplateId);
+        Assert.DoesNotContain(pool.Children, item => item.Unit.Kind == StorageUnitKind.DirectDiskGroup);
+        Assert.Empty(ssdTemplate.MemberPhysicalDiskIds);
+    }
+
+    [Fact]
     public void DefaultSimulationProjectionStillHidesAnEmptyTier()
     {
         var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: false));
@@ -89,6 +173,64 @@ public sealed class RealStorageTierWorkspaceTests
         Assert.DoesNotContain(pool.Children, item => item.Unit.Kind == StorageUnitKind.StorageTier);
         Assert.Equal(TemplateId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null,
             null, isSimulatedInventory: true)["HDD"].StableId);
+    }
+
+    [Fact]
+    public void ImportedTemplateAndUniqueActualTierUpdateOnlyTheActualTierThroughTheDraftPlan()
+    {
+        var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: true));
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:imported-tiers", StorageSystemKind.Simulation, "Imported tiers", snapshot, [], DateTimeOffset.Now);
+        var before = document.Snapshot;
+        var templateBefore = JsonSerializer.Serialize(before.StorageTiers.Single(tier => tier.StableId == TemplateId));
+        var selected = EditWorkspace.SelectPoolTiersForParameterUpdate(before, PoolId);
+        Assert.Equal(InstanceId, selected["HDD"].StableId);
+        const long requestedSize = 32L * 1024 * 1024 * 1024;
+        var working = before with
+        {
+            StorageTiers = before.StorageTiers.Select(tier => tier.StableId == InstanceId
+                ? tier with { Size = requestedSize, FootprintOnPool = requestedSize } : tier).ToArray()
+        };
+        var plan = SimulationDraftPlanner.Build(before, working);
+        var request = Assert.Single(plan.Steps, step => step.Kind == SimulationEditKind.UpdateStoragePool);
+        Assert.Equal(requestedSize, request.CapacitySizeBytes);
+        var result = new SimulationOperationService().ApplyPlan(document, plan);
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Equal(templateBefore, JsonSerializer.Serialize(result.Document.Snapshot.StorageTiers.Single(tier => tier.StableId == TemplateId)));
+        Assert.Equal(requestedSize, result.Document.Snapshot.StorageTiers.Single(tier => tier.StableId == InstanceId).Size);
+        Assert.Equal(requestedSize, result.Document.Snapshot.VirtualDisks.Single().Size);
+        Assert.Equal(2, result.Document.Snapshot.StorageTiers.Count);
+    }
+
+    [Fact]
+    public void MultipleActualTiersOnOneVirtualDiskRejectMediaParameterUpdatesWithoutChangingAnyTier()
+    {
+        var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: true));
+        var second = snapshot.StorageTiers.Single(tier => tier.StableId == InstanceId) with { StableId = "tier:second-actual" };
+        snapshot = snapshot with
+        {
+            StorageTiers = snapshot.StorageTiers.Append(second).ToArray(),
+            VirtualDisks = snapshot.VirtualDisks.Select(disk => disk with
+            {
+                TierStableIds = disk.TierStableIds.Append(second.StableId).ToArray()
+            }).ToArray()
+        };
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:multiple-actual-tiers", StorageSystemKind.Simulation, "Multiple actual tiers", snapshot, [], DateTimeOffset.Now);
+        Assert.Empty(EditWorkspace.SelectPoolTiersForParameterUpdate(document.Snapshot, PoolId));
+        var request = new SimulationEditRequest(SimulationEditKind.UpdateStoragePool, PoolId,
+            CapacitySizeBytes: 32L * 1024 * 1024 * 1024);
+        var decision = StorageEditRules.Evaluate(document.Snapshot, request);
+        Assert.Equal("storage.rule.update-pool.ambiguous-media-tier", decision.Code);
+        var result = new SimulationOperationService().Apply(document, request);
+        Assert.False(result.Succeeded);
+        Assert.Same(document, result.Document);
+        var working = document.Snapshot with
+        {
+            StorageTiers = document.Snapshot.StorageTiers.Select(tier => tier.StableId == second.StableId
+                ? tier with { Size = 32L * 1024 * 1024 * 1024 } : tier).ToArray()
+        };
+        Assert.Throws<InvalidOperationException>(() => SimulationDraftPlanner.Build(document.Snapshot, working));
     }
 
     private static WinPoolFacts ProviderFacts(bool withInstance)

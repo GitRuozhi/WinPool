@@ -571,19 +571,21 @@ public sealed class RealOperationUiFlowTests
             new StorageObjectId(system, StorageObjectKind.Partition, "provider-msr-id"),
             false)!;
         Assert.IsType<DeletePartitionCommand>(Assert.Single(reconcileOnly.Steps).Command);
-        Assert.Throws<ArgumentException>(() => RealOperationProposalFactory.CreatePartition(
+        var refsCreate = RealOperationProposalFactory.CreatePartition(
             system, disk, RealPartitionRole.BasicData, 1024 * 1024,
             1024L * 1024 * 1024, RealFileSystem.ReFs, 65536,
-            false, "Data", null));
+            false, "Data", null);
+        Assert.Equal(RealFileSystem.ReFs,
+            Assert.IsType<FormatVolumeCommand>(refsCreate.Steps.Single(step => step.Command is FormatVolumeCommand).Command).FileSystem);
     }
 
     [Fact]
-    public void ExistingRealFormatAllowsOnlyQuick64KiBRefsAndRejectsUnknown()
+    public void ExistingRealFormatAllowsSupportedRefsClustersQuickOnlyAndRejectsUnknown()
     {
         var system = SystemId.New();
         var partition = new StorageObjectId(system, StorageObjectKind.Partition,
             "partition-id");
-        Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
+        Assert.NotNull(RealOperationProposalFactory.TryFormatExistingData(
             system, partition, "ReFS", 4096, false, "Data"));
         Assert.Null(RealOperationProposalFactory.TryFormatExistingData(
             system, partition, "ReFS", 65536, true, "Data"));
@@ -597,10 +599,31 @@ public sealed class RealOperationUiFlowTests
             system, partition, "exFAT", 65536, false, "Data");
         Assert.Equal(RealFileSystem.ExFat,
             Assert.IsType<FormatVolumeCommand>(Assert.Single(exfat!.Steps).Command).FileSystem);
+        Assert.NotNull(RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "NTFS", 4096, false, "Data"));
+        Assert.NotNull(RealOperationProposalFactory.TryFormatExistingData(
+            system, partition, "exFAT", 33_554_432, false, "Data"));
         var refs = RealOperationProposalFactory.TryFormatExistingData(
             system, partition, "ReFS", 65536, false, "Data");
         Assert.Equal(RealFileSystem.ReFs,
             Assert.IsType<FormatVolumeCommand>(Assert.Single(refs!.Steps).Command).FileSystem);
+    }
+
+    [Theory]
+    [InlineData("NTFS", 4096)]
+    [InlineData("ReFS", 4096)]
+    public void AutomaticInitializationCarriesSelectedFilesystemAndCluster(string fileSystem, int clusterBytes)
+    {
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "disk-id");
+        var layout = RealOperationProposalFactory.ConfigureInitializedDisk(
+            system, disk, null, false, 16L * 1024 * 1024 * 1024,
+            formatNtfs: true, label: "Data", letter: 'E',
+            allocationUnitBytes: clusterBytes, formatFileSystem: fileSystem)!;
+        var format = Assert.IsType<FormatVolumeCommand>(layout.Steps.Single(step => step.Command is FormatVolumeCommand).Command);
+        Assert.Equal(Enum.Parse<RealFileSystem>(fileSystem, ignoreCase: true), format.FileSystem);
+        Assert.Equal(clusterBytes, format.ClusterBytes);
+        Assert.False(format.Full);
     }
 
     [Fact]

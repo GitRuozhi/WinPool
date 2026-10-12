@@ -291,6 +291,33 @@ public sealed class RealOperationContractTests
         Assert.Equal(OperationPlanHasher.Compute(plan), plan.PlanHash);
     }
 
+    [Theory]
+    [InlineData(RealFileSystem.Ntfs, 4096)]
+    [InlineData(RealFileSystem.Ntfs, 262144)]
+    [InlineData(RealFileSystem.ReFs, 4096)]
+    [InlineData(RealFileSystem.ReFs, 65536)]
+    public void InitializationContinuationRetainsSelectedDataFileSystemAndCluster(
+        RealFileSystem fileSystem, int clusterBytes)
+    {
+        var fixture = Fixture.Create();
+        var proposal = InitializationContinuation(fixture, true, true, true);
+        proposal = proposal with
+        {
+            Steps = proposal.Steps.Select(step => step.Command is FormatVolumeCommand format
+                ? step with { Command = format with { FileSystem = fileSystem, ClusterBytes = clusterBytes } }
+                : step).ToArray()
+        };
+        RealOperationValidator.Validate(proposal);
+        var plan = RealOperationPlanFactory.Create(proposal, OperationId.New(), fixture.Context.Environment,
+            fixture.Context.RealSession!, fixture.Context.CurrentInventoryVersion,
+            fixture.Context.CurrentTargetFingerprint!, fixture.Context.CurrentPhysicalMemberFingerprint!,
+            "selected explicit data format", Now, Now.AddMinutes(2));
+        var formatCommand = Assert.IsType<FormatVolumeCommand>(plan.RealOperation!.Steps[3].Command);
+        Assert.Equal(fileSystem, formatCommand.FileSystem);
+        Assert.Equal(clusterBytes, formatCommand.ClusterBytes);
+        Assert.True(RealOperationValidator.IsValid(plan));
+    }
+
     [Fact]
     public void InitializationWithoutNativeMsrAllowsMsrOrDataCreationOnlyOnExactDisk()
     {

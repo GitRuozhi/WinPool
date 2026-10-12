@@ -207,7 +207,9 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 target = target with { RelatedUniqueId = Text(owner, "UniqueId"), RelatedObjectId = Text(owner, "ObjectId") };
             }
         }
-        if (stored.Command is FormatVolumeCommand { FileSystem: RealFileSystem.ReFs }
+        if (stored.Command is FormatVolumeCommand formatCapability
+                && (formatCapability.FileSystem == RealFileSystem.ReFs || formatCapability.ClusterBytes != 65536
+                    && GuidEquals(target.PartitionTypeGuid, "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"))
             || stored.Command is ResizePartitionCommand && target.Kind == StorageObjectKind.Partition
                 && topology.Snapshot.Volumes.Any(volume => volume.PartitionStableId ==
                     WindowsRealStorageTargetBuilder.ResolveId(topology,

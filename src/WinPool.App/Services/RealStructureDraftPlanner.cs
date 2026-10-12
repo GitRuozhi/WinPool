@@ -203,10 +203,13 @@ public static class RealStructureDraftPlanner
                     }
                 }
                 if (intent.AutoCreatePartition && (!intent.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
-                    || !intent.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase)
-                    || intent.AllocationUnitSize != 65536 || !intent.QuickFormat
+                    || intent.FileSystem.ToUpperInvariant() is not ("NTFS" or "REFS" or "EXFAT")
+                    || intent.AllocationUnitSize > int.MaxValue
+                    || !FormatAllocationUnitPolicy.IsSupportedClusterSize(
+                        intent.FileSystem, (int)intent.AllocationUnitSize, after.Computer.OsBuild)
+                    || !intent.QuickFormat
                     || intent.DriveLetter is { } letter && (letter < 'D' || letter > 'Z')))
-                    blocks.Add(T("自动布局当前仅支持 GPT、NTFS/64 KiB、快速格式化及可用 D–Z 盘符。", "Automatic layout currently requires GPT, quick NTFS/64 KiB and an available D–Z letter."));
+                    blocks.Add(T("自动布局要求 GPT、Windows 支持的 NTFS/ReFS/exFAT 分配单元、快速格式化及可用 D–Z 盘符。", "Automatic layout requires GPT, a Windows-supported NTFS/ReFS/exFAT allocation unit, quick format and an available D–Z letter."));
             }
             members.Add(memberId);
             creations.Add(new(pool, memberId, intent, newPool, createVd, continueLayout, createTier));
@@ -240,8 +243,8 @@ public static class RealStructureDraftPlanner
                     }
                 }
                 if (intent.AutoCreatePartition)
-                    actions.Add(T($"自动 GPT 布局，{(intent.CreateMsr ? "规范 16 MiB MSR" : "无 MSR")}，NTFS/64 KiB，卷标 {intent.VolumeName}，盘符 {intent.DriveLetter?.ToString() ?? "无"}。",
-                        $"Automatic GPT layout, {(intent.CreateMsr ? "canonical 16 MiB MSR" : "no MSR")}, NTFS/64 KiB, label {intent.VolumeName}, letter {intent.DriveLetter?.ToString() ?? "none"}."));
+                    actions.Add(T($"自动 GPT 布局，{(intent.CreateMsr ? "规范 16 MiB MSR" : "无 MSR")}，{intent.FileSystem}/{FormatClusterSize(intent.AllocationUnitSize)}，卷标 {intent.VolumeName}，盘符 {intent.DriveLetter?.ToString() ?? "无"}。",
+                        $"Automatic GPT layout, {(intent.CreateMsr ? "canonical 16 MiB MSR" : "no MSR")}, {intent.FileSystem}/{FormatClusterSize(intent.AllocationUnitSize)}, label {intent.VolumeName}, letter {intent.DriveLetter?.ToString() ?? "none"}."));
             }
         }
         foreach (var old in before.StorageTiers.Where(t => removedPools.All(p => p.StableId != t.PoolStableId)
@@ -411,6 +414,12 @@ public static class RealStructureDraftPlanner
         && tier.ResiliencySettingName.Equals("Simple", StringComparison.OrdinalIgnoreCase)
         && tier.NumberOfColumns == 1 && tier.Interleave == 65536
         && tier.NumberOfDataCopies is null or 1 && tier.PhysicalDiskRedundancy is null or 0;
+
+    private static string FormatClusterSize(long bytes) => bytes < 1024
+        ? $"{bytes} B"
+        : bytes % (1024 * 1024) == 0
+            ? $"{bytes / (1024 * 1024)} MiB"
+            : $"{bytes / 1024} KiB";
 
     private static bool IsExactHddTemplateForMember(StorageTierInfo tier, string poolId, string memberId) =>
         tier.PoolStableId == poolId && tier.VirtualDiskStableId is null && SupportedHddTier(tier)

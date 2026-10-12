@@ -90,7 +90,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     }
 
     [Fact]
-    public async Task RefsFormatRequiresFrozenExistingVolumeAndOnlyAllowsQuick64KiB()
+    public async Task RefsFormatRequiresExactVolumeAndAllowsQuickFourOr64KiB()
     {
         var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
         var adapter = new WindowsRealStorageCommandAdapter(runner);
@@ -106,10 +106,36 @@ public sealed class WindowsRealStorageCommandAdapterTests
         var target = PartitionTarget() with { RelatedUniqueId = "volume-id", RelatedObjectId = "volume-object" };
         var command = new FormatVolumeCommand(partition, RealFileSystem.ReFs, 65536, false, "REFS");
         Assert.False((await adapter.ExecuteAsync(command with { Full = true }, target, CancellationToken.None)).ProviderReturned);
-        Assert.False((await adapter.ExecuteAsync(command with { ClusterBytes = 4096 }, target, CancellationToken.None)).ProviderReturned);
-        Assert.False((await adapter.ExecuteAsync(command, target with { CreatedInThisPlan = true }, CancellationToken.None)).ProviderReturned);
+        Assert.False((await adapter.ExecuteAsync(command with { ClusterBytes = 8192 }, target, CancellationToken.None)).ProviderReturned);
         Assert.Equal(0, runner.Calls);
         Assert.True((await adapter.ExecuteAsync(command, target, CancellationToken.None)).ProviderReturned);
+        Assert.True((await adapter.ExecuteAsync(command with { ClusterBytes = 4096 }, target,
+            CancellationToken.None)).ProviderReturned);
+        Assert.True((await adapter.ExecuteAsync(command with
+        {
+            Partition = RealTargetReference.FromStep(StorageObjectKind.Partition, "create"), ClusterBytes = 4096
+        }, target with { CreatedInThisPlan = true }, CancellationToken.None)).ProviderReturned);
+        Assert.Equal(3, runner.Calls);
+    }
+
+    [Theory]
+    [InlineData(4096)]
+    [InlineData(16384)]
+    [InlineData(262144)]
+    public async Task NtfsSelectedClusterIsPassedUnchangedWithExactVolumeTarget(int clusterBytes)
+    {
+        var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
+        var adapter = new WindowsRealStorageCommandAdapter(runner);
+        var partition = RealTargetReference.ForExisting(
+            new StorageObjectId(SystemId.New(), StorageObjectKind.Partition, "partition"));
+        var format = new FormatVolumeCommand(partition, RealFileSystem.Ntfs, clusterBytes, false, "Data");
+        Assert.False((await adapter.ExecuteAsync(format, PartitionTarget(), CancellationToken.None)).ProviderReturned);
+        Assert.True((await adapter.ExecuteAsync(format, PartitionTarget() with
+        {
+            RelatedUniqueId = "exact-volume", RelatedObjectId = "exact-volume-object"
+        }, CancellationToken.None)).ProviderReturned);
+        using var payload = JsonDocument.Parse(runner.Payload!);
+        Assert.Equal(clusterBytes, payload.RootElement.GetProperty("Command").GetProperty("ClusterBytes").GetInt32());
         Assert.Equal(1, runner.Calls);
     }
 
@@ -831,6 +857,70 @@ public sealed class WindowsRealStorageCommandAdapterTests
         Assert.Equal("exact-volume", evidence.RootElement.GetProperty("VolumeUniqueId").GetString());
         Assert.Equal(0U, evidence.RootElement.GetProperty("FileSystems").GetProperty("ReturnValue").GetUInt32());
         Assert.Equal(65536, evidence.RootElement.GetProperty("ReFsClusterSizes").GetProperty("SupportedClusterSizes")[1].GetInt32());
+    }
+
+    [Theory]
+    [InlineData("Ntfs", 4096, true, true)]
+    [InlineData("Ntfs", 16384, true, true)]
+    [InlineData("Ntfs", 262144, true, true)]
+    [InlineData("ReFs", 4096, true, true)]
+    [InlineData("ReFs", 65536, true, true)]
+    [InlineData("ReFs", 8192, true, false)]
+    [InlineData("Ntfs", 4096, false, false)]
+    [InlineData("ReFs", 4096, false, false)]
+    public async Task FixedFormatBranchQueriesSelectedFileSystemOnExactRawVolumeBeforeWriting(
+        string fileSystem, int clusterBytes, bool providerSupportsCluster, bool allowed)
+    {
+        var source = WindowsRealStoragePowerShellScript.Source;
+        var helpersStart = source.IndexOf("function Require-Refs", StringComparison.Ordinal);
+        var helpersEnd = source.IndexOf("function Require-TierCapability", helpersStart, StringComparison.Ordinal);
+        var readStart = source.IndexOf("function Read-Property", StringComparison.Ordinal);
+        var readEnd = source.IndexOf("function Exact-Subsystem", readStart, StringComparison.Ordinal);
+        var caseStart = source.IndexOf("'FormatVolume' {", StringComparison.Ordinal);
+        var caseEnd = source.IndexOf("'SetDriveLetter' {", caseStart, StringComparison.Ordinal);
+        var script = """
+            Set-StrictMode -Version Latest
+            $ErrorActionPreference='Stop'
+            $ProgressPreference='SilentlyContinue'
+            $inputData=[Console]::In.ReadToEnd() | ConvertFrom-Json
+            $script:formatCalls=0; $script:queryFileSystem=$null; $script:writtenCluster=$null
+            $partition=[pscustomobject]@{ Guid='exact-partition'; IsBoot=$false; IsSystem=$false; GptType='ebd0a0a2-b9e5-4433-87c0-68b6b72699c7' }
+            $t=[pscustomobject]@{ RelatedUniqueId='exact-raw-volume'; RelatedObjectId='exact-volume-object'; CreatedInThisPlan=$true }
+            $c=[pscustomobject]@{ FileSystem=$inputData.FileSystem; ClusterBytes=$inputData.ClusterBytes; Full=$false; Label='Data' }
+            $capabilityEvidence=$null; $invoked=$false; $outputObject=$null; $failure=$null
+            function Assert-One($values, $reason) { $items=@($values); if ($items.Count -ne 1) { throw $reason }; return $items[0] }
+            function Assert-Exact($actual, $expected, $reason) { if ($actual -cne $expected) { throw $reason } }
+            function Exact-Partition($target) { return $partition }
+            function Get-Volume { param($Partition, $ErrorAction) return [pscustomobject]@{ UniqueId='exact-raw-volume'; ObjectId='exact-volume-object'; FileSystem='RAW' } }
+            function Get-CimInstance { param($ClassName, $ErrorAction) return [pscustomobject]@{ Caption='Windows Server 2022' } }
+            function Invoke-CimMethod {
+                param($InputObject, $MethodName, $Arguments, $ErrorAction)
+                if ($InputObject.UniqueId -cne 'exact-raw-volume') { throw 'wrong-volume' }
+                if ($MethodName -eq 'GetSupportedFileSystems') { return [pscustomobject]@{ ReturnValue=[uint32]0; SupportedFileSystems=@('NTFS','ReFS') } }
+                $script:queryFileSystem=$Arguments.FileSystem
+                $sizes=if ($inputData.ProviderSupportsCluster) { [uint32[]]@($inputData.ClusterBytes) } else { [uint32[]]@(8192) }
+                return [pscustomobject]@{ ReturnValue=[uint32]0; SupportedClusterSizes=$sizes }
+            }
+            function Format-Volume {
+                param($Partition, $FileSystem, $AllocationUnitSize, $Full, $ErrorAction, $NewFileSystemLabel)
+                $script:formatCalls++; $script:writtenCluster=$AllocationUnitSize
+                if ($Partition.Guid -cne 'exact-partition' -or $FileSystem -cne $script:queryFileSystem) { throw 'wrong-write-target-or-filesystem' }
+            }
+            """ + "\n" + source[readStart..readEnd] + source[helpersStart..helpersEnd]
+            + "\ntry { switch ('FormatVolume') {\n" + source[caseStart..caseEnd]
+            + "\n} } catch { $failure=$_.Exception.Message }\n"
+            + "[pscustomobject]@{ Invoked=$invoked; FormatCalls=$script:formatCalls; QueryFileSystem=$script:queryFileSystem; WrittenCluster=$script:writtenCluster; Failure=$failure } | ConvertTo-Json -Compress";
+        var output = await RunCompressedFixedScriptWithFakesAsync(script, "",
+            JsonSerializer.Serialize(new { FileSystem = fileSystem, ClusterBytes = clusterBytes, ProviderSupportsCluster = providerSupportsCluster }), "");
+        using var parsed = JsonDocument.Parse(output);
+        Assert.Equal(allowed, parsed.RootElement.GetProperty("Invoked").GetBoolean());
+        Assert.Equal(allowed ? 1 : 0, parsed.RootElement.GetProperty("FormatCalls").GetInt32());
+        if (allowed)
+        {
+            Assert.Equal(fileSystem, parsed.RootElement.GetProperty("QueryFileSystem").GetString());
+            Assert.Equal(clusterBytes, parsed.RootElement.GetProperty("WrittenCluster").GetInt32());
+        }
+        else Assert.Equal(JsonValueKind.String, parsed.RootElement.GetProperty("Failure").ValueKind);
     }
 
     private static async Task<string> RunCompressedFixedScriptWithFakesAsync(string script,

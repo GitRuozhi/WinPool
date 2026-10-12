@@ -189,7 +189,8 @@ public partial class EditorPageBase
                     var layout = RealOperationProposalFactory.ConfigureInitializedDisk(session.SystemId,
                         Id(StorageObjectKind.OsDisk, osDisk.StableId), partitions.Length == 0 ? null
                             : Id(StorageObjectKind.Partition, partitions[0].StableId), intent.CreateMsr,
-                        osDisk.Size, true, intent.VolumeName, intent.DriveLetter)!;
+                        osDisk.Size, true, intent.VolumeName, intent.DriveLetter,
+                        checked((int)intent.AllocationUnitSize), intent.FileSystem)!;
                     progress = new RealAutomaticLayoutProgress(layout, vdId, currentIntent);
                     automaticLayoutProgress[session] = progress;
                 }

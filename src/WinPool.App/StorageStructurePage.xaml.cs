@@ -404,7 +404,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         PoolFormGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         FillCombo(_partitionStyleBox, ["GPT", "MBR"], 0);
         FillCombo(_fileSystemBox, ["NTFS", "ReFS"], 0);
-        FillCombo(_clusterBox, ["4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB"], 4);
+        RefreshClusterChoices();
         foreach (var group in TierGroups())
         {
             FillCombo(group.ResiliencyBox, ["Simple", "Mirror", "Parity"], 1);
@@ -1223,7 +1223,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             UnallocatedIgnoreBytes,
             EditingSession.Baseline,
             visible,
-            showSourceTierTemplates: !ViewModel.IsUsingSimulatedInventory);
+            showSourceTierTemplates: !ViewModel.IsUsingSimulatedInventory,
+            sourceFacts: EditingSession.BaselineSourceFacts);
         var rootViewModel = new TopologyNodeViewModel(
             EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
             ViewModel,
@@ -1813,6 +1814,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
             _partitionStyleBox.SelectedItem = "GPT";
             _fileSystemBox.SelectedItem = "NTFS";
+            RefreshClusterChoices();
             _clusterBox.SelectedItem = "64 KiB";
             if (partition is not null)
             {
@@ -1833,9 +1835,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     _fileSystemBox.SelectedItem = partition.FileSystem;
                 }
 
+                RefreshClusterChoices();
                 if (partition.AllocationUnitSize is long cluster)
                 {
-                    _clusterBox.SelectedItem = ClusterToken(cluster);
+                    SelectClusterSize(cluster);
                 }
             }
 
@@ -1848,7 +1851,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 {
                     _fileSystemBox.SelectedItem = intent.FileSystem;
                 }
-                _clusterBox.SelectedItem = ClusterToken(intent.AllocationUnitSize);
+                RefreshClusterChoices();
+                SelectClusterSize(intent.AllocationUnitSize);
                 if (intent.PendingAutomaticLayout || CommittedPrimaryPartition(pool.StableId) is null)
                 {
                     _volumeNameBox.Text = intent.VolumeName;
@@ -1914,6 +1918,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         SetNum(Capacity.CopiesBox, 1);
         _partitionStyleBox.SelectedItem = "GPT";
         _fileSystemBox.SelectedItem = "NTFS";
+        RefreshClusterChoices();
         _clusterBox.SelectedItem = "64 KiB";
         UpdateLinkedFields();
     }
@@ -2068,6 +2073,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         LinkResiliency(Performance);
         LinkResiliency(Capacity);
         LinkResiliency(Dedicated);
+        RefreshClusterChoices();
     }
 
     /// <summary>
@@ -2299,7 +2305,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 : step.FileSystem,
             AllocationUnitSize = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
                 ? intent?.AllocationUnitSize
-                    ?? (selected ? ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB") : (long?)null)
+                    ?? (selected ? SelectedClusterSize() : (long?)null)
                     ?? step.AllocationUnitSize
                 : step.AllocationUnitSize,
             VolumeName = step.Kind is SimulationEditKind.CreateTieredPool or SimulationEditKind.CreateVirtualDisk
@@ -2383,7 +2389,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
             ViewModel.CurrentPreferences.AutoCreatePartition,
             _fileSystemBox.SelectedItem as string ?? "NTFS",
-            ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB"),
+            SelectedClusterSize(),
             savedPartition is null ? _volumeNameBox.Text.Trim() : savedPartition.FileSystemLabel,
             layout,
             _virtualDiskNameBox.Text.Trim(), bytes, maximum,
@@ -2923,6 +2929,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var holdsData = EditWorkspace.PoolHoldsStoredData(_working, pool.StableId);
+        var parameterTiers = EditWorkspace.SelectPoolTiersForParameterUpdate(_working, pool.StableId);
         foreach (var group in TierGroups())
         {
             RestoreTierHelp(group);
@@ -2930,16 +2937,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var tierVisible = TierVisible(pool.StableId, group.Media);
             var realHddCreation = canConfigureCreation && tierVisible && tier is not null && group == Capacity;
             var draftTierEditable = formEnabled && isDraft && tierVisible && tier is not null && !holdsData;
-            var sizeEditable = realHddCreation || draftTierEditable || formEnabled && tierVisible && tier is not null && !holdsData && !real;
+            var exactParameterTier = tier is not null
+                && parameterTiers.GetValueOrDefault(group.Media)?.StableId == tier.StableId;
+            var sizeEditable = exactParameterTier
+                && (realHddCreation || draftTierEditable || formEnabled && tierVisible && tier is not null && !holdsData && !real);
             var specEditable = sizeEditable && (!real || isDraft);
             var maximumBytes = tierVisible && tier is not null ? TierCapacityMaxBytes(group.Media) : 0;
             var maximumSelected = _maximumSizeFields.Contains(MaximumKey(group));
             group.SizeBox.IsEnabled = sizeEditable;
-            group.MaximumButton.IsEnabled = realHddCreation || formEnabled && !real
+            group.MaximumButton.IsEnabled = exactParameterTier && (realHddCreation || formEnabled && !real
                 && tierVisible
                 && tier is not null
                 && maximumBytes > 0
-                && (!holdsData || maximumSelected || maximumBytes > tier.Size);
+                && (!holdsData || maximumSelected || maximumBytes > tier.Size));
             var provisioning = string.IsNullOrWhiteSpace(vdisk?.ProvisioningType)
                 ? "Fixed"
                 : vdisk.ProvisioningType;
@@ -2991,6 +3001,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     : Text("此层字段受当前层和复原类型限制。",
                         "This tier field is limited by the current tier and resiliency type."));
             SetTierDisabledReasons(group, disabledReason, supportedInterleave);
+            if (!exactParameterTier)
+                SetTierDisabledReasons(group, Text(
+                    "该介质包含多个实际层或多个未使用模板；当前参数编辑不能准确表达该目标。",
+                    "This media has multiple allocated tiers or unused templates; this parameter editor cannot represent an exact target."), supportedInterleave);
             if (real && formEnabled && !canConfigureCreation && !isDraft)
             {
                 var sizeReason = Text("已有真实虚拟磁盘和层的扩缩容当前不受支持。", "Resizing existing real virtual disks and tiers is currently unsupported.");
@@ -3807,13 +3821,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var holdsData = EditWorkspace.PoolHoldsStoredData(result, pool.StableId);
+        var selectedTiers = EditWorkspace.SelectPoolTiersForForm(result, pool.StableId,
+            _selectedPoolTierId, _selectedPoolVdiskId, ViewModel.IsUsingSimulatedInventory);
+        var parameterTiers = EditWorkspace.SelectPoolTiersForParameterUpdate(result, pool.StableId);
         foreach (var group in TierGroups())
         {
             if (!ViewModel.IsUsingSimulatedInventory && !isDraft) continue;
-            var tier = result.StorageTiers.FirstOrDefault(item =>
-                string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
-                && EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
-            if (tier is null || tier.MemberPhysicalDiskIds.Count == 0)
+            var tier = selectedTiers.GetValueOrDefault(group.Media);
+            if (tier is null || tier.MemberPhysicalDiskIds.Count == 0
+                || parameterTiers.GetValueOrDefault(group.Media)?.StableId != tier.StableId)
             {
                 continue;
             }
@@ -4050,7 +4066,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
-        var cluster = ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB");
+        var cluster = SelectedClusterSize();
         var fsChanged = !string.Equals(
             fileSystem,
             partition.FileSystem,
@@ -4066,15 +4082,44 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private static string InterleaveToken(long? bytes) =>
         $"{Math.Max(1, (bytes ?? 65536) / 1024)} KiB";
 
-    private static string ClusterToken(long? bytes) =>
-        bytes switch
+    private static string ClusterToken(long? bytes) => bytes is > 0 and < 1024
+        ? $"{bytes} B" : $"{(bytes ?? 65536) / 1024} KiB";
+
+    private long SelectedClusterSize() => _clusterBox.SelectedItem is string token
+        && token.EndsWith(" B", StringComparison.Ordinal)
+        && long.TryParse(token[..^2], out var bytes) ? bytes
+            : ParseSize(_clusterBox.SelectedItem as string ?? "64 KiB");
+
+    private void SelectClusterSize(long bytes)
+    {
+        var token = ClusterToken(bytes);
+        // Preserve an existing source value even when it is outside the
+        // current creation choices; provider validation still governs writes.
+        if (!_clusterBox.Items.Contains(token)) _clusterBox.Items.Add(token);
+        _clusterBox.SelectedItem = token;
+    }
+
+    private void RefreshClusterChoices()
+    {
+        var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
+        int? build = int.TryParse(_working.Computer.OsBuild, out var parsedBuild) ? parsedBuild : null;
+        var choices = FormatAllocationUnitPolicy.GetSupportedClusterSizes(fileSystem, build)
+            .Select(bytes => ClusterToken(bytes)).ToArray();
+        var selected = _clusterBox.SelectedItem as string;
+        var wasFilling = _filling;
+        _filling = true;
+        try
         {
-            4096 => "4 KiB",
-            8192 => "8 KiB",
-            16384 => "16 KiB",
-            32768 => "32 KiB",
-            _ => "64 KiB"
-        };
+            if (!_clusterBox.Items.Cast<string>().SequenceEqual(choices))
+            {
+                _clusterBox.Items.Clear();
+                foreach (var token in choices) _clusterBox.Items.Add(token);
+            }
+            _clusterBox.SelectedItem = selected is not null && choices.Contains(selected)
+                ? selected : ClusterToken(FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(fileSystem));
+        }
+        finally { _filling = wasFilling; }
+    }
     // ---- Field dirty dots, recommended resets, and change checks ------
 
     private enum TierFieldKind
@@ -4323,21 +4368,28 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return false;
         }
 
-        if (!ViewModel.IsUsingSimulatedInventory)
-            return field == TierFieldKind.Size && group == Capacity && group.SizeBox.IsEnabled
+        if (!ViewModel.IsUsingSimulatedInventory && field == TierFieldKind.Size)
+            return group == Capacity && group.SizeBox.IsEnabled
                 && TryReadCreationSize(out _, out var maximum) && !maximum;
+
+        tier = EditingSession.TierParameterReference(tier.StableId) ?? tier;
 
         return field switch
         {
-            TierFieldKind.Size => Math.Abs(((NumValue(group.SizeBox) ?? 0) * 1024d * 1024d * 1024d) - tier.Size) > 1,
-            TierFieldKind.Resiliency => !SameToken(group.ResiliencyBox, tier.ResiliencySettingName),
+            TierFieldKind.Size => group.SizeBox.IsEnabled
+                && (_maximumSizeFields.Contains(MaximumKey(group))
+                    ? Math.Abs(((NumValue(group.SizeBox) ?? 0) * 1024d * 1024d * 1024d) - tier.Size) > 1
+                    : Math.Abs((NumValue(group.SizeBox) ?? 0) - Math.Round(tier.Size / 1024d / 1024d / 1024d, 2)) > 0.000001),
+            TierFieldKind.Resiliency => group.ResiliencyBox.IsEnabled
+                && !SameToken(group.ResiliencyBox, tier.ResiliencySettingName),
             TierFieldKind.Copies => group.CopiesBox.IsEnabled
                 && !NumberEquals(NumValue(group.CopiesBox), tier.NumberOfDataCopies),
             TierFieldKind.Failures => group.FailuresBox.IsEnabled
                 && !NumberEquals(NumValue(group.FailuresBox), tier.PhysicalDiskRedundancy),
             TierFieldKind.Columns => group.ColumnsBox.IsEnabled
                 && !NumberEquals(NumValue(group.ColumnsBox), tier.NumberOfColumns),
-            TierFieldKind.Stripe => InterleaveToken(tier.Interleave) != (group.InterleaveBox.SelectedItem as string),
+            TierFieldKind.Stripe => group.InterleaveBox.IsEnabled
+                && InterleaveToken(tier.Interleave) != (group.InterleaveBox.SelectedItem as string),
             _ => false
         };
     }
@@ -4345,9 +4397,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     /// <summary>Restores one parameter field to its recommended value.</summary>
     private void ResetTierField(TierFields group, string kind)
     {
-        if (!ViewModel.IsUsingSimulatedInventory)
+        if (!ViewModel.IsUsingSimulatedInventory && kind == "Size")
         {
-            if (kind == "Size" && group == Capacity && group.SizeBox.IsEnabled)
+            if (group == Capacity && group.SizeBox.IsEnabled)
             {
                 _maximumSizeFields.Add(MaximumKey(group));
                 UpdateMaximumSizeText(group);
@@ -4404,19 +4456,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private bool PartitionStyleChanged()
     {
+        if (!_partitionStyleBox.IsEnabled) return false;
         var pool = SelectedPool();
         if (pool is null || pool.IsPrimordial)
         {
             return false;
         }
 
-        var vdisk = RealVdiskOf(_working, pool.StableId);
+        var vdisk = RealVdiskOf(EditingSession.Baseline, pool.StableId);
         if (vdisk is null)
         {
-            return false;
+            return !SameToken(_partitionStyleBox, "GPT");
         }
 
-        var osDisk = _working.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
+        var osDisk = EditingSession.Baseline.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
         if (osDisk is null)
         {
             return false;
@@ -4429,13 +4482,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private bool FileSystemChanged()
     {
+        if (!_fileSystemBox.IsEnabled) return false;
         var pool = SelectedPool();
         if (pool is null || pool.IsPrimordial)
         {
             return false;
         }
 
-        var partition = PrimaryPartition(pool.StableId);
+        var partition = CommittedPrimaryPartition(pool.StableId);
         var baseline = partition is not null && !string.IsNullOrWhiteSpace(partition.FileSystem)
             ? partition.FileSystem
             : "NTFS";
@@ -4447,13 +4501,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private bool AllocationUnitChanged()
     {
+        if (!_clusterBox.IsEnabled) return false;
         var pool = SelectedPool();
         if (pool is null || pool.IsPrimordial)
         {
             return false;
         }
 
-        var partition = PrimaryPartition(pool.StableId);
+        var partition = CommittedPrimaryPartition(pool.StableId);
         var baseline = partition?.AllocationUnitSize is { } bytes
             ? ClusterToken(bytes)
             : "64 KiB";
@@ -4484,7 +4539,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             case "AllocationUnit":
                 if (_clusterBox.IsEnabled)
                 {
-                    _clusterBox.SelectedItem = "64 KiB";
+                    _clusterBox.SelectedItem = ClusterToken(FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(
+                        _fileSystemBox.SelectedItem as string ?? "NTFS"));
                 }
 
                 break;

@@ -252,9 +252,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
                 value.OffsetBytes <= long.MaxValue - value.SizeBytes,
             ResizePartitionCommand value => value.SizeBytes > 0 && value.SizeBytes % mib == 0,
             FormatVolumeCommand value => Enum.IsDefined(value.FileSystem) &&
-                (value.ClusterBytes == 65536 ||
-                 (value.ClusterBytes == 4096 &&
-                  (value.FileSystem == RealFileSystem.Fat32 || value.FileSystem == RealFileSystem.Ntfs))) &&
+                FormatAllocationUnitPolicy.IsKnownClusterSize(value.FileSystem.ToString(), value.ClusterBytes) &&
                 !((value.FileSystem is RealFileSystem.Fat32 or RealFileSystem.ReFs) && value.Full),
             SetDriveLetterCommand value => (value.PreviousLetter is not null || value.NewLetter is not null) &&
                 value.PreviousLetter != value.NewLetter &&
@@ -301,10 +299,10 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         if (role == basic)
         {
             return (format.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat or RealFileSystem.ReFs) &&
-                format.ClusterBytes == 65536 && (format.FileSystem != RealFileSystem.ReFs
-                    || !format.Full && !target.CreatedInThisPlan
-                        && format.Partition.Existing is not null
-                        && !string.IsNullOrWhiteSpace(target.RelatedUniqueId)
+                FormatAllocationUnitPolicy.IsKnownClusterSize(format.FileSystem.ToString(), format.ClusterBytes)
+                && !(format.FileSystem == RealFileSystem.ReFs && format.Full)
+                && (format.ClusterBytes == 65536 && format.FileSystem != RealFileSystem.ReFs
+                    || !string.IsNullOrWhiteSpace(target.RelatedUniqueId)
                         && !string.IsNullOrWhiteSpace(target.RelatedObjectId));
         }
 

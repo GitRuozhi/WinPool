@@ -503,10 +503,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
         {
             throw new InvalidOperationException("The simulated file system must be NTFS, ReFS, or exFAT.");
         }
-        var allocationUnit = request.AllocationUnitSize ?? 4096;
-        if (allocationUnit <= 0)
+        var allocationUnit = request.AllocationUnitSize
+            ?? FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(fileSystem);
+        if (allocationUnit <= 0 || allocationUnit > int.MaxValue
+            || !FormatAllocationUnitPolicy.IsSupportedClusterSize(
+                fileSystem, (int)allocationUnit, snapshot.Computer.OsBuild))
         {
-            throw new InvalidOperationException("Allocation unit size must be positive.");
+            throw new InvalidOperationException(
+                $"Allocation unit size {allocationUnit} bytes is not supported for {fileSystem} on the simulated Windows build.");
         }
 
         var partition = snapshot.Partitions.FirstOrDefault(x => x.StableId == request.TargetProviderKey)
@@ -793,7 +797,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
             ? $"sim:partition:{Guid.NewGuid():N}"
             : request.AllocatedPartitionId;
         var label = request.Name?.Trim() ?? string.Empty;
-        long? cluster = format ? request.AllocationUnitSize ?? 4096 : null;
+        long? cluster = format
+            ? request.AllocationUnitSize ?? (kind == PartitionKind.BasicData
+                ? FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(fileSystem)
+                : 4096)
+            : null;
         var path = string.IsNullOrWhiteSpace(letter) ? string.Empty : $"{letter}:\\";
         var partition = new PartitionInfo(
             partitionId,
@@ -1283,10 +1291,12 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 "A simulated pool with more than one virtual disk cannot be modified.");
         }
 
+        var parameterTiers = EditWorkspace.SelectPoolTiersForParameterUpdate(snapshot, pool.StableId);
         var tiers = snapshot.StorageTiers
             .Select(tier =>
             {
-                if (tier.PoolStableId != pool.StableId)
+                if (tier.PoolStableId != pool.StableId
+                    || parameterTiers.GetValueOrDefault(EditWorkspace.NormalizeMedia(tier.MediaType))?.StableId != tier.StableId)
                 {
                     return tier;
                 }
@@ -1318,8 +1328,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
             .ToArray();
         var tierCapacityChanged = tiers.Where(item => item.PoolStableId == pool.StableId)
             .Any(item => snapshot.StorageTiers.First(original => original.StableId == item.StableId) != item);
-        var logicalSize = tiers.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.Size);
-        var physicalFootprint = tiers.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.FootprintOnPool);
+        var consumptionTiers = EditWorkspace.PoolBusinessTiers(snapshot with { StorageTiers = tiers }, pool.StableId);
+        var logicalSize = consumptionTiers.Sum(item => item.Size);
+        var physicalFootprint = consumptionTiers.Sum(item => item.FootprintOnPool);
         var virtualDisks = snapshot.VirtualDisks
             .Select(disk => disk.PoolStableId != pool.StableId
                 ? disk

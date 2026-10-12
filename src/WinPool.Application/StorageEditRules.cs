@@ -374,6 +374,16 @@ public static class StorageEditRules
                 $"File system {fileSystem} is outside the create range (NTFS, ReFS, exFAT).");
         }
 
+        var allocationUnit = request.AllocationUnitSize
+            ?? FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(fileSystem);
+        if (allocationUnit > int.MaxValue
+            || !FormatAllocationUnitPolicy.IsSupportedClusterSize(
+                fileSystem, (int)allocationUnit, snapshot.Computer.OsBuild))
+        {
+            return Deny("storage.rule.format.cluster-size",
+                $"Allocation unit {allocationUnit} bytes is not supported for {fileSystem} on the simulated Windows build.");
+        }
+
         return Allow("storage.rule.format", WindowsVolume);
     }
 
@@ -583,6 +593,27 @@ public static class StorageEditRules
             return Deny(
                 "storage.rule.create-partition.filesystem",
                 "A formatted basic data partition must use NTFS, ReFS, or exFAT.");
+        }
+
+        if (fileSystem.Length > 0)
+        {
+            var clusterBytes = request.AllocationUnitSize
+                ?? (kind == PartitionKind.BasicData
+                    ? FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(fileSystem)
+                    : 4096);
+            var roleMatches = kind switch
+            {
+                PartitionKind.BasicData => IsCreateFileSystem(fileSystem)
+                    && clusterBytes <= int.MaxValue
+                    && FormatAllocationUnitPolicy.IsSupportedClusterSize(
+                        fileSystem, (int)clusterBytes, snapshot.Computer.OsBuild),
+                PartitionKind.EfiSystem => fileSystem == "FAT32" && clusterBytes == 4096,
+                PartitionKind.WindowsRecovery => fileSystem == "NTFS" && clusterBytes == 4096,
+                _ => false
+            };
+            if (!roleMatches)
+                return Deny("storage.rule.create-partition.format-parameters",
+                    "The file system and allocation unit do not match the selected partition role or Windows support range.");
         }
 
         var geometry = EditWorkspace.GetPartitionCreateGeometry(
@@ -1144,7 +1175,13 @@ public static class StorageEditRules
                 "A pool with more than one virtual disk cannot be modified in this editor.");
         }
 
-        var tiers = snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId).ToArray();
+        var tiers = EditWorkspace.PoolBusinessTiers(snapshot, pool.StableId);
+        if (tiers.GroupBy(tier => EditWorkspace.NormalizeMedia(tier.MediaType))
+            .Any(group => group.Count() > 1 && group.Any(tier => TierLayoutChanges(tier, request))))
+        {
+            return Deny("storage.rule.update-pool.ambiguous-media-tier",
+                "Multiple tiers of the same media cannot be changed by a media-based parameter request.");
+        }
         var changesLayout = tiers.Any(tier => TierLayoutChanges(tier, request));
         if (changesLayout && EditWorkspace.PoolHoldsStoredData(snapshot, pool.StableId))
         {

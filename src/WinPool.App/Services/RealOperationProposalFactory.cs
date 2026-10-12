@@ -58,16 +58,26 @@ public static class RealOperationProposalFactory
     public static RealOperationIntentRequest? ConfigureInitializedDisk(
         SystemId systemId, StorageObjectId osDisk, StorageObjectId? existingMsr,
         bool createMsr, long? virtualDiskSizeBytes = null,
-        bool formatNtfs = false, string? label = null, char? letter = null)
+        bool formatNtfs = false, string? label = null, char? letter = null,
+        int allocationUnitBytes = 65536, string formatFileSystem = "NTFS")
     {
         const long mib = 1024L * 1024;
         const long msrOffset = mib;
         const long msrSize = 16 * mib;
         (long OffsetBytes, long SizeBytes)? dataGeometry = virtualDiskSizeBytes is long requestedSize
             ? GetAutomaticDataGeometry(requestedSize, createMsr) : null;
+        var realFileSystem = formatNtfs ? formatFileSystem.Trim().ToUpperInvariant() switch
+        {
+            "NTFS" => RealFileSystem.Ntfs,
+            "EXFAT" => RealFileSystem.ExFat,
+            "REFS" => RealFileSystem.ReFs,
+            _ => (RealFileSystem?)null
+        } : null;
         if ((formatNtfs && virtualDiskSizeBytes is null) ||
             ((formatNtfs || letter is not null) && virtualDiskSizeBytes is null) ||
-            (letter is { } driveLetter && (driveLetter < 'D' || driveLetter > 'Z')))
+            (letter is { } driveLetter && (driveLetter < 'D' || driveLetter > 'Z')) ||
+            (formatNtfs && (realFileSystem is null
+                || !FormatAllocationUnitPolicy.IsKnownClusterSize(realFileSystem.Value.ToString(), allocationUnitBytes))))
         {
             throw new ArgumentException("The initialized-disk layout needs a positive whole-MiB size and a valid local drive letter.");
         }
@@ -124,12 +134,12 @@ public static class RealOperationProposalFactory
             if (formatNtfs)
             {
                 steps.Add(new RealOperationStep("format-data",
-                    new FormatVolumeCommand(partition, RealFileSystem.Ntfs,
-                        65536, false, label), [previous],
+                    new FormatVolumeCommand(partition, realFileSystem!.Value,
+                        allocationUnitBytes, false, label), [previous],
                     "The new BasicData partition exists",
-                    "The partition is quickly formatted NTFS with 64 KiB clusters",
+                    $"The partition is quickly formatted {realFileSystem} with {FormatClusterSize(allocationUnitBytes)} clusters",
                     "Formatting erases all data in the new partition range",
-                    "Agent live NTFS support required"));
+                    $"Agent live {realFileSystem} file-system and allocation-unit support required"));
                 previous = "format-data";
             }
             if (letter is { } requestedLetter)
@@ -146,7 +156,7 @@ public static class RealOperationProposalFactory
 
         var expected = virtualDiskSizeBytes is null
             ? createMsr ? "Initialized GPT disk with one exact 16 MiB MSR at 1 MiB" : "Initialized GPT disk without an MSR"
-            : $"Initialized GPT disk with {(createMsr ? "an MSR and " : string.Empty)}BasicData partition; optional NTFS format and drive letter are explicit";
+            : $"Initialized GPT disk with {(createMsr ? "an MSR and " : string.Empty)}BasicData partition; optional {realFileSystem?.ToString() ?? "no"} format and drive letter are explicit";
         var request = new RealOperationIntentRequest(OperationIntent.InitializeDisk,
             systemId, targets, steps, expected);
         RealOperationValidator.Validate(request);
@@ -176,15 +186,21 @@ public static class RealOperationProposalFactory
         return (geometry.StartOffsetBytes!.Value, geometry.MaximumSizeBytes!.Value);
     }
 
+    private static string FormatClusterSize(int bytes) => bytes < 1024
+        ? $"{bytes} B"
+        : bytes % (1024 * 1024) == 0
+            ? $"{bytes / (1024 * 1024)} MiB"
+            : $"{bytes / 1024} KiB";
+
     public static RealOperationIntentRequest? TryFormatExistingData(
         SystemId systemId, StorageObjectId partition, string? fileSystem,
         int clusterBytes, bool fullFormat, string? label)
     {
         var format = fileSystem?.ToUpperInvariant() switch
         {
-            "NTFS" => RealFileSystem.Ntfs,
-            "EXFAT" => RealFileSystem.ExFat,
-            "REFS" when clusterBytes == 65536 && !fullFormat => RealFileSystem.ReFs,
+            "NTFS" when FormatAllocationUnitPolicy.IsKnownClusterSize("NTFS", clusterBytes) => RealFileSystem.Ntfs,
+            "EXFAT" when FormatAllocationUnitPolicy.IsKnownClusterSize("exFAT", clusterBytes) => RealFileSystem.ExFat,
+            "REFS" when FormatAllocationUnitPolicy.IsKnownClusterSize("ReFS", clusterBytes) && !fullFormat => RealFileSystem.ReFs,
             _ => (RealFileSystem?)null
         };
         if (format is null)
@@ -194,7 +210,7 @@ public static class RealOperationProposalFactory
                 format.Value, clusterBytes, fullFormat, label),
             $"Partition formatted as {format.Value}",
             format == RealFileSystem.ReFs
-                ? "All existing files and volume data on the selected partition are erased; ReFS has no long-run evidence equivalent to 64 KiB NTFS"
+                ? "All existing files and volume data on the selected partition are erased; ReFS has no long-run evidence equivalent to the current tested 64 KiB NTFS recommendation"
                 : "All existing files and volume data on the selected partition are erased");
         RealOperationValidator.Validate(request);
         return request;
@@ -206,10 +222,24 @@ public static class RealOperationProposalFactory
         RealFileSystem? fileSystem, int clusterBytes, bool fullFormat,
         string? label, char? letter)
     {
-        if (fileSystem == RealFileSystem.ReFs)
-            throw new ArgumentException(
-                "Real ReFS creation remains disabled until C01 has current provider evidence.",
-                nameof(fileSystem));
+        if (fileSystem is { } selectedFileSystem)
+        {
+            var supported = role switch
+            {
+                RealPartitionRole.BasicData => selectedFileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat or RealFileSystem.ReFs
+                    && FormatAllocationUnitPolicy.IsKnownClusterSize(selectedFileSystem.ToString(), clusterBytes)
+                    && (selectedFileSystem != RealFileSystem.ReFs || !fullFormat),
+                RealPartitionRole.Efi => selectedFileSystem == RealFileSystem.Fat32 && clusterBytes == 4096 && !fullFormat,
+                RealPartitionRole.Recovery => selectedFileSystem == RealFileSystem.Ntfs && clusterBytes == 4096 && !fullFormat,
+                _ => false
+            };
+            if (!supported)
+                throw new ArgumentException("The file system and allocation unit do not match the selected partition role or supported range.", nameof(fileSystem));
+        }
+        else if (role is RealPartitionRole.Efi or RealPartitionRole.Recovery)
+        {
+            throw new ArgumentException("A newly created EFI or Recovery partition requires its fixed filesystem format.", nameof(fileSystem));
+        }
         var steps = new List<RealOperationStep>
         {
             new("create-partition",

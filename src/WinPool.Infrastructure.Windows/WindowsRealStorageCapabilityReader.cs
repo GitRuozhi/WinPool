@@ -15,7 +15,10 @@ public sealed record WindowsVolumeFormatCapability(
     string? PhysicalDiskStableId, string? UniqueId, string? ObjectId,
     DateTimeOffset ObservedAtUtc, string? PhysicalMemberFingerprint,
     WindowsCapabilityMethodResult? FileSystems,
-    WindowsCapabilityMethodResult? ReFsClusterSizes, string? Error);
+    WindowsCapabilityMethodResult? ClusterSizes, string? Error)
+{
+    public string RequestedFileSystem { get; init; } = "ReFS";
+}
 
 public sealed record WindowsTierCapability(
     string Status, string PhysicalDiskStableId, string? SubsystemStableId,
@@ -32,6 +35,14 @@ public interface IWindowsRealStorageCapabilityReader
 {
     Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
         WindowsRealStorageTopology topology, StorageObjectId volume, CancellationToken cancellationToken);
+    Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
+        WindowsRealStorageTopology topology, StorageObjectId volume, string fileSystem,
+        CancellationToken cancellationToken) => fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase)
+            ? ReadVolumeFormatAsync(topology, volume, cancellationToken)
+            : Task.FromResult(new WindowsVolumeFormatCapability("unknown", volume.ProviderKey,
+                null, null, null, null, DateTimeOffset.UtcNow, null, null, null,
+                "The capability reader does not implement the requested file-system query.")
+                { RequestedFileSystem = fileSystem });
     Task<WindowsTierCapability> ReadTierAsync(
         WindowsRealStorageTopology topology, StorageObjectId physicalDisk, CancellationToken cancellationToken);
     Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(
@@ -50,7 +61,12 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
     public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
         WindowsRealStorageTopology topology, StorageObjectId volume,
         CancellationToken cancellationToken) => Task.Run(() =>
-            ReadVolumeFormat(topology, volume, cancellationToken), cancellationToken);
+            ReadVolumeFormat(topology, volume, "ReFS", cancellationToken), cancellationToken);
+
+    public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
+        WindowsRealStorageTopology topology, StorageObjectId volume, string fileSystem,
+        CancellationToken cancellationToken) => Task.Run(() =>
+            ReadVolumeFormat(topology, volume, fileSystem, cancellationToken), cancellationToken);
 
     public Task<WindowsTierCapability> ReadTierAsync(
         WindowsRealStorageTopology topology, StorageObjectId physicalDisk,
@@ -129,7 +145,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
         ? (long)number : throw new InvalidDataException("The tier template returned an invalid or overflowing UInt64 size.");
 
     private static WindowsVolumeFormatCapability ReadVolumeFormat(
-        WindowsRealStorageTopology topology, StorageObjectId volume,
+        WindowsRealStorageTopology topology, StorageObjectId volume, string fileSystem,
         CancellationToken cancellationToken)
     {
         string? partitionId = null, physicalId = null, uniqueId = null,
@@ -180,9 +196,10 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
                     foreach (var parent in parentCandidates) parent.Dispose();
                 }
                 var fileSystems = ReadMethod(exact, "GetSupportedFileSystems", cancellationToken);
-                var clusterSizes = ReadMethod(exact, "GetSupportedClusterSizes", cancellationToken);
+                var clusterSizes = ReadMethod(exact, "GetSupportedClusterSizes", cancellationToken, fileSystem);
                 return new("queried", source.Id, partitionId, physicalId, uniqueId,
-                    objectId, DateTimeOffset.UtcNow, fingerprint, fileSystems, clusterSizes, null);
+                    objectId, DateTimeOffset.UtcNow, fingerprint, fileSystems, clusterSizes, null)
+                    { RequestedFileSystem = fileSystem };
             }
             finally
             {
@@ -194,7 +211,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
         {
             return new("unknown", volume.ProviderKey, partitionId, physicalId,
                 uniqueId, objectId, DateTimeOffset.UtcNow, fingerprint, null, null,
-                Error(exception));
+                Error(exception)) { RequestedFileSystem = fileSystem };
         }
     }
 
@@ -264,7 +281,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
     }
 
     private static WindowsCapabilityMethodResult ReadMethod(
-        ManagementObject volume, string name, CancellationToken cancellationToken)
+        ManagementObject volume, string name, CancellationToken cancellationToken, string fileSystem = "ReFS")
     {
         var raw = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         uint? returnValue = null;
@@ -273,7 +290,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             cancellationToken.ThrowIfCancellationRequested();
             using var input = name == "GetSupportedClusterSizes"
                 ? volume.GetMethodParameters(name) : null;
-            if (input is not null) input["FileSystem"] = "ReFS";
+            if (input is not null) input["FileSystem"] = fileSystem;
             using var output = volume.InvokeMethod(name, input,
                 new InvokeMethodOptions { Timeout = TimeSpan.FromSeconds(10) });
             if (output is null)

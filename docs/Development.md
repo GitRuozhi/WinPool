@@ -1,5 +1,9 @@
 # WinPool 开发约定
 
+2026-10-12 编辑交互修复：结构页按介质呈现模板／实际层这一业务概念，编辑投影可使用准确 `template-pool-member` eligibility 分组未用模板成员，但不创建 allocated tier-member 来源关系；管理和原始对象不变。逐项复原恢复推荐值，未应用变更比较使用 observed baseline／最早草稿，不能在保存本地草稿时清掉差异。簇的候选集合与默认值共用 Domain `FormatAllocationUnitPolicy`；非默认簇及 ReFS 的真实格式化还须按准确卷调用 [GetSupportedClusterSizes](https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-volume-getsupportedclustersizes)，传入本次文件系统。新分区在准备阶段保留待核验事实，创建后、格式化前针对准确 RAW 卷核验；不能借未创建对象提前伪造 provider 成功。所选值贯穿计划、受控 PowerShell 和后态。默认64 KiB与实际能力是不同事实。
+
+表单保存、模拟规划与模拟更新共用唯一业务层选择：同介质actual优先，无actual才选唯一模板；每次修改按准确StableId落到该对象，不按介质覆盖所有来源层。多个actual或无actual的多个模板无法由当前每介质一组的参数请求唯一表达时，拒绝其歧义参数修改；不因此锁掉模板＋唯一actual的正常导入模拟路径。
+
 > 2026-10-09 当前实现：新建普通／分层 MAX 使用共享整数 GiB 算法，详见 [Plan §10.4](Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。原UI普通3725 GiB、单HDD分层3724 GiB及自动布局已独立核验；多层仅模拟及backend夹具。下文原生 MAX／拒绝门和旧工程门是历史证据，不能据此恢复旧行为。本轮冻结完整门为1999项／1996通过／0失败／3既有测量未执行，412源码hash稳定；WDC末态、Samsung限定结构比较、偏好及普通重启／退出均通过，准确证据见该节。
 
 本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 V0.59、迭代 9；本机单盘真实修改第一阶段 H01–H11 及其工程门已完成，历史结果见 [CHANGELOG](CHANGELOG.md) 和 [Quality](Quality.md)。真实编辑接回原界面、范围采集及监控联动按活动 [V0.59 Plan](Plan.md) 实施，整体仍有未完成工作，未归档；本轮五项审计残留的47项相关定向用例、限定原生流程、最终构建与只读末态核验已通过，见 [Plan §10.8](Plan.md)。前轮普通 VD 原生 `UseMaximumSize` 已通过创建及实际容量后的自动布局；单 HDD 分层明确 32 GiB 的历史成功不外推 MAX。准确模板加原生开关被本机拒绝，WindowsAutomaticHdd 则实际创建普通 VD 而无 actual tier；后者经严格只读 UnexpectedEffect 对账终结 Failed，并由原界面另行清理。当时的分层 MAX 临时写前拒绝现由用户指定整数 GiB 搜索替代；微软原生 MAX 的本机问题仍保留归因，不能泛化为所有 Windows 版本的永久限制。前轮原生 MAX 运行的物理末态、保护比较、解散后的准确成员返回及普通重启／退出已独立核验；旧末态及工程门仍只证明各自历史快照。

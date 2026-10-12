@@ -382,8 +382,8 @@ public static class RealOperationValidator
         if (index < steps.Count && steps[index].Command is FormatVolumeCommand format)
         {
             if (dataStep is null || format.Partition != RealTargetReference.FromStep(StorageObjectKind.Partition, dataStep) ||
-                format.FileSystem != RealFileSystem.Ntfs || format.ClusterBytes != 65536 || format.Full)
-                throw new ArgumentException("Automatic initialization formats only its new data partition with quick NTFS/64 KiB.");
+                (format.FileSystem is not (RealFileSystem.Ntfs or RealFileSystem.ReFs)) || !FormatAllocationUnitPolicy.IsKnownClusterSize(format.FileSystem.ToString(), format.ClusterBytes) || format.Full)
+                throw new ArgumentException("Automatic initialization formats only its new data partition with quick NTFS/ReFS and an explicit supported cluster size.");
             index++;
         }
         if (index < steps.Count && steps[index].Command is SetDriveLetterCommand letter)
@@ -415,8 +415,7 @@ public static class RealOperationValidator
                 throw new ArgumentException("Partition geometry must be explicit whole MiB and within representable bounds.");
             case ResizePartitionCommand value when value.SizeBytes <= 0 || value.SizeBytes % mebibyte != 0:
                 throw new ArgumentException("Partition size must be a positive whole MiB.");
-            case FormatVolumeCommand value when value.ClusterBytes != 65536 &&
-                !((value.FileSystem == RealFileSystem.Fat32 || value.FileSystem == RealFileSystem.Ntfs) && value.ClusterBytes == 4096) ||
+            case FormatVolumeCommand value when !FormatAllocationUnitPolicy.IsKnownClusterSize(value.FileSystem.ToString(), value.ClusterBytes) ||
                 (value.FileSystem == RealFileSystem.ReFs && value.Full) ||
                 (value.FileSystem == RealFileSystem.Fat32 && value.Full) ||
                 !Enum.IsDefined(value.FileSystem):
@@ -479,7 +478,7 @@ public static class RealOperationValidator
                 {
                     RealPartitionRole.BasicData =>
                         (format.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat or RealFileSystem.ReFs) &&
-                        format.ClusterBytes == 65536,
+                        FormatAllocationUnitPolicy.IsKnownClusterSize(format.FileSystem.ToString(), format.ClusterBytes),
                     RealPartitionRole.Efi => format.FileSystem == RealFileSystem.Fat32 && format.ClusterBytes == 4096 && !format.Full,
                     RealPartitionRole.Recovery => format.FileSystem == RealFileSystem.Ntfs && format.ClusterBytes == 4096 && !format.Full,
                     _ => false
@@ -490,7 +489,7 @@ public static class RealOperationValidator
                 }
             }
             else if (format.Partition.Existing is not null &&
-                     (format.FileSystem == RealFileSystem.Fat32 || format.ClusterBytes != 65536))
+                     format.FileSystem == RealFileSystem.Fat32)
             {
                 throw new ArgumentException("Existing EFI and Recovery formatting are outside this stage.");
             }

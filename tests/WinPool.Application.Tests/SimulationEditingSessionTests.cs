@@ -27,6 +27,99 @@ public sealed class SimulationEditingSessionTests
         [], DateTimeOffset.Now);
 
     [Fact]
+    public void ParameterReferenceSurvivesSavingReselectingAndUndoingAnExistingTierDraft()
+    {
+        var document = Document();
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        Assert.NotEmpty(document.Snapshot.StorageTiers);
+        var original = document.Snapshot.StorageTiers.First();
+        session.UndoStack.Push(session.Capture());
+        session.Working = session.Working with
+        {
+            StorageTiers = session.Working.StorageTiers.Select(tier => tier.StableId == original.StableId
+                ? tier with { Size = original.Size / 2, NumberOfColumns = 1 } : tier).ToArray()
+        };
+        session.Restore(session.Capture()); // A saved/reselected draft is not a new baseline.
+        Assert.Equal(original, session.TierParameterReference(original.StableId));
+        Assert.True(session.Undo());
+        Assert.Equal(original, session.TierParameterReference(original.StableId));
+    }
+
+    [Fact]
+    public void NewTierParameterReferenceKeepsItsInitialDraftValuesAfterLaterSaves()
+    {
+        var document = Document();
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        var initial = document.Snapshot.StorageTiers.First() with { StableId = "edit:draft:tier:new" };
+        session.Working = session.Working with { StorageTiers = session.Working.StorageTiers.Append(initial).ToArray() };
+        session.UndoStack.Push(session.Capture());
+        session.Working = session.Working with
+        {
+            StorageTiers = session.Working.StorageTiers.Select(tier => tier.StableId == initial.StableId
+                ? tier with { Size = initial.Size / 2 } : tier).ToArray()
+        };
+        session.UndoStack.Push(session.Capture());
+        Assert.Equal(initial, session.TierParameterReference(initial.StableId));
+        session.Discard();
+        Assert.Null(session.TierParameterReference(initial.StableId));
+    }
+
+    [Fact]
+    public void EmptyPoolPlaceholderDoesNotMarkTheFirstHddDefaultsChangedButSavedColumnEditsRemainDifferent()
+    {
+        var source = TestSnapshotFactory.Create();
+        var disk = source.PhysicalDisks.Single() with
+        {
+            PoolStableId = "pool:primordial", CanPool = true, Size = 4_000_000_000_000
+        };
+        var baseline = StorageSnapshot.Empty("Draft defaults") with
+        {
+            StorageSubsystems = source.StorageSubsystems,
+            PhysicalDisks = [disk],
+            StoragePools = [source.StoragePools.Single() with
+            {
+                StableId = "pool:primordial", IsPrimordial = true, MemberPhysicalDiskIds = [disk.StableId]
+            }]
+        };
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:draft-defaults", StorageSystemKind.Simulation, "Draft defaults",
+            baseline, [], DateTimeOffset.Now);
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        session.UndoStack.Push(session.Capture());
+        session.Working = EditWorkspace.InsertDraftPool(session.Working, "Pool01");
+        var poolId = session.Working.StoragePools.Single(pool => EditWorkspace.IsDraftPool(pool.StableId)).StableId;
+        var placeholder = session.Working.StorageTiers.Single(tier => tier.PoolStableId == poolId && tier.MediaType == "HDD");
+        Assert.Empty(placeholder.MemberPhysicalDiskIds);
+        Assert.Equal("Parity", placeholder.ResiliencySettingName);
+        Assert.Equal(5, placeholder.NumberOfColumns);
+
+        session.UndoStack.Push(session.Capture());
+        session.Working = EditWorkspace.MoveDiskToPool(session.Working, disk.StableId, poolId);
+        var active = session.Working.StorageTiers.Single(tier => tier.StableId == placeholder.StableId);
+        Assert.Equal("Simple", active.ResiliencySettingName);
+        Assert.Equal(1, active.NumberOfColumns);
+        Assert.Null(session.TierParameterReference(active.StableId));
+
+        // Save the first explicit parameter change, then restore the saved
+        // draft as selection does. The populated pre-save layer is retained.
+        session.UndoStack.Push(session.Capture());
+        session.Working = session.Working with
+        {
+            StorageTiers = session.Working.StorageTiers.Select(tier => tier.StableId == active.StableId
+                ? tier with { NumberOfColumns = 2 } : tier).ToArray()
+        };
+        session.Restore(session.Capture());
+        var reference = session.TierParameterReference(active.StableId);
+        Assert.NotNull(reference);
+        Assert.Equal("Simple", reference.ResiliencySettingName);
+        Assert.Equal(1, reference.NumberOfColumns);
+        Assert.Equal(2, session.Working.StorageTiers.Single(tier => tier.StableId == active.StableId).NumberOfColumns);
+    }
+
+    [Fact]
     public void ImmediateRenameSurvivesStructuralUndoRedoAndDiscard()
     {
         var document = Document();

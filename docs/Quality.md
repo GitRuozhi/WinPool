@@ -2,6 +2,22 @@
 
 日期：2026-10-12。当前产品版本为 V0.59／迭代 9。V0.58 本机真实磁盘修改第一阶段已完成并归档；V0.59 真实编辑流程计划仍有未完成工作。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-12 产品交互回归修复：限定验收完成（V0.59）
+
+本条与本页同日“审阅修复”F1–F4 的工程及原生验收分开记录。本轮四项产品交互修复的实现范围见 [Plan §10.11](Plan.md#1011-产品交互回归修复2026-10-12)：真实投影避免把同一层概念显示两次；新层字段恢复推荐与 Undo 基线分开；文件系统和簇大小候选贯穿计划、执行及后态；Popup 拖动改为固定 overlay 与有效 host 命中／释放。
+
+写入实测使用的标准 Release 构建19.19秒、零警告／错误。终审另修复准确层选择后，[最终标准构建](../artifacts/test-results/20261012-product-parity/final-accurate-tier-release-build.log) **28.87 秒**，0 警告、0 错误、Union 合并0碰撞。定向最终有效组合 **901 项通过**：原862项，加最后67项直接回归，去除28项重叠；[组合证据及运行文件哈希](../artifacts/test-results/20261012-product-parity/engineering-summary.json)。这是跨运行组合，不是单次运行或全量测试。Backend 首轮526通过／10失败的证据保留；16项重跑覆盖9个原失败案例、1个替换错误独立分区簇字段夹具的缺卷簇案例及6个原已通过案例。最终有效集合不再计入被替换的旧夹具。
+
+GUI 已分别核验真实与模拟拖入／取消及逐项恢复推荐按钮，检查了拖动帧和取消／恢复后的原字段。本次驱动使用 `SetCursorPos` 时，捕获期间的 WinUI 指针坐标没有更新；改用绝对 `mouse_event` 输入后，12帧拖入成功。移除临时诊断后的版本再次成功真实拖入：[稳定版界面证据](../artifacts/test-results/20261012-product-parity/final-real-stable-new-pool-release.png)。这些证据不表示模拟和真实的所有运行条件完全一致。
+
+原 Apply 一次确认在 WDC 单 HDD 上创建 `Pool01`、64 GiB VD 与 NTFS4096 `Parity4K`，8 个内部操作均为 Completed／Verified。随后对既有分区执行 ReFS4096 `ParityReFS4K` 格式化，操作 `b4bb9539a035441888547c6b035b0af1` 为 Completed／Verified；这条既有卷路径不要求 RAW。独立 NTFS 证明 33 项断言通过：[证明文件](../artifacts/test-results/20261012-product-parity/ntfs4k-independent-proof.json)、[ReFS 操作记录](../artifacts/test-results/20261012-product-parity/Native/refs4k-format/b4bb9539a035441888547c6b035b0af1.json)。这些只证明对应创建和格式化的短时路径成功，不证明长期耐久；多盘、SCM、exFAT 大簇尚无设备验收。
+
+普通物理 WDC 的 MAX 新建分区也实际完成NTFS4096及E:分配，随后原界面格式化回NTFS65536。终审：[16个新增真实操作全部Succeeded，23步全部Verified](../artifacts/test-results/20261012-product-parity/final-audit-runtime-ready/final-audit.json)，Accepted365→381、CallIssued459→482。释放池后的直接OS磁盘由前一已Verified操作的新鲜原始关系与准确硬件身份独立锚定；初次审计闭包缺口及后续快照移动失败均保留，没有放松目标限制。Samsung15个对象无差异，偏好恢复一致。WDC在线GPT，MSR起点1,048,576／大小16,777,216 bytes，数据起点17,825,792／大小4,000,767,279,104 bytes，NTFS65536、`WinPool_Test`／E:，无具体池或VD。末态部分截图受到桌面其它窗口遮挡，不将其作为完整视觉通过证据；末态以原界面字段、新鲜采集及回执交叉核验。
+
+[原托盘正常退出](../artifacts/test-results/20261012-product-parity/Native/final-clean-exit-exit-result.json)App／Agent均退出码0，重启存储／硬件采集均Returned、Real默认Off，[重启账本与末态对比](../artifacts/test-results/20261012-product-parity/verifications/final-restored-to-final-after-restart.json)无新增操作或写入事件。最后只读复查修复了表单保存按介质取第一个层的残留：模板＋唯一actual只改actual，多个actual的歧义参数更新拒绝且不改对象；[67项直接回归](../artifacts/test-results/20261012-product-parity/targeted-accurate-tier-summary.json)含2个新增用例，证据明确来自工具console、不是TRX，也不冒充多actual的GUI验收。版本维持V0.59，整体Plan其余未验范围保持原状态。
+
+最后准确层修补后的28.87秒构建已实际启动，原UIA核验Real开关、新池草稿创建／原确认放弃及回到RealOff；最终无待应用草稿、存储与硬件采集成功，[最终运行版本账本比较](../artifacts/test-results/20261012-product-parity/verifications/final-restored-to-final-runtime-ready.json)无自动写入。该构建额外拖拽复测因两次无法取得前台而未执行；没有绕过前台校验或将其记为通过。此前19.19秒构建的有效拖拽和真实写入证据保留，最后改动的验证范围另行列明。
+
 ## 2026-10-12 审阅修复：工程及限定原生验收完成
 
 本轮针对 F1–F4 修复真实提交恢复和编辑状态衔接。F1/F2 将接受操作的恢复上下文保留到准确结果及作用域刷新完成后再映射草稿，避免迟到结果覆盖用户后续编辑；生产恢复协调器自动化回归覆盖30个故障场景。F3 允许在同一池中按准确关系显式删除一个受支持的旧虚拟磁盘，再于删除验证和新鲜空池核对后创建替代项；未分配 HDD 层模板仅接受零个成员或唯一准确池成员，保留旧盘、附加第二个虚拟磁盘及不支持的结构仍拒绝。F4 在准确目标匹配、界面填充保护和可证实无写入终态下恢复事实盘符选项；未知结果及成功但尚未同步的结果继续保持只读。终态身份历史保留128项，防止同一身份的迟到非终态响应重开旧操作。

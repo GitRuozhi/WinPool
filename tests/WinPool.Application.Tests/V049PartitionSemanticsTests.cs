@@ -199,6 +199,40 @@ public sealed class V049PartitionSemanticsTests
     }
 
     [Theory]
+    [InlineData("NTFS", 4096)]
+    [InlineData("ReFS", 4096)]
+    [InlineData("exFAT", 33_554_432)]
+    public void FormatPartitionAcceptsOtherWindowsSupportedClusterSizes(string fileSystem, int clusterBytes)
+    {
+        var document = Apply(InitializedDisk(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition, "osdisk:ssd0", SizeBytes: 953 * MiB));
+        var partition = Assert.Single(document.Snapshot.Partitions, item => item.Type == "BasicData");
+
+        document = Apply(document, new SimulationEditRequest(
+            SimulationEditKind.FormatPartition, partition.StableId,
+            FileSystem: fileSystem, AllocationUnitSize: clusterBytes));
+
+        Assert.Equal(clusterBytes, Assert.Single(document.Snapshot.Volumes).AllocationUnitSize);
+    }
+
+    [Fact]
+    public void NewBasicDataNtfsPartitionAccepts4KiBAndUnsupportedClusterIsRejected()
+    {
+        var created = new SimulationOperationService().Apply(InitializedDisk(), new SimulationEditRequest(
+            SimulationEditKind.CreatePartition, "osdisk:ssd0", SizeBytes: 953 * MiB,
+            FileSystem: "NTFS", AllocationUnitSize: 4096));
+        Assert.True(created.Succeeded, created.Error);
+        Assert.Equal(4096, Assert.Single(created.Document.Snapshot.Volumes).AllocationUnitSize);
+
+        var partition = Assert.Single(created.Document.Snapshot.Partitions, item => item.Type == "BasicData");
+        var invalid = new SimulationEditRequest(SimulationEditKind.FormatPartition, partition.StableId,
+            FileSystem: "NTFS", AllocationUnitSize: 3072);
+        Assert.Equal("storage.rule.format.cluster-size",
+            StorageEditRules.Evaluate(created.Document.Snapshot, invalid).Code);
+        Assert.False(new SimulationOperationService().Apply(created.Document, invalid).Succeeded);
+    }
+
+    [Theory]
     [InlineData("VendorReserved")]
     [InlineData("EfiSystem")]
     [InlineData("WindowsRecovery")]

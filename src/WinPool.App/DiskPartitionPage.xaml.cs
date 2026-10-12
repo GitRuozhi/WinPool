@@ -299,14 +299,77 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void FillClusterBox()
     {
-        ClusterBox.Items.Clear();
-        foreach (var size in new[] { "4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB" })
-        {
-            ClusterBox.Items.Add(size);
-        }
-
-        ClusterBox.SelectedIndex = 4;
+        FillClusterChoices("NTFS", 65536, 65536);
     }
+
+    private void FillClusterChoices(
+        string? fileSystem, long? preferredBytes, long? defaultBytes, bool preserveUnlistedObservedValue = false)
+    {
+        var wasFilling = _filling;
+        _filling = true;
+        try
+        {
+            ClusterBox.Items.Clear();
+            var sizes = new List<int>();
+            if (!string.IsNullOrWhiteSpace(fileSystem))
+                sizes.AddRange(FormatAllocationUnitPolicy.GetSupportedClusterSizes(fileSystem, _working.Computer.OsBuild));
+            if (preserveUnlistedObservedValue && !string.IsNullOrWhiteSpace(fileSystem)
+                && preferredBytes is > 0 and <= int.MaxValue
+                && !sizes.Contains((int)preferredBytes.Value))
+                sizes.Add((int)preferredBytes.Value); // Keep the observed value visible; the real planner still verifies support.
+            foreach (var bytes in sizes.OrderBy(value => value))
+                ClusterBox.Items.Add(ClusterToken(bytes));
+
+            var selected = preferredBytes is > 0 and <= int.MaxValue
+                ? ClusterToken((int)preferredBytes.Value)
+                : defaultBytes is > 0 and <= int.MaxValue ? ClusterToken((int)defaultBytes.Value) : null;
+            if (selected is not null && ClusterBox.Items.Contains(selected))
+                ClusterBox.SelectedItem = selected;
+            else if (ClusterBox.Items.Count > 0)
+                ClusterBox.SelectedIndex = 0;
+        }
+        finally
+        {
+            _filling = wasFilling;
+        }
+    }
+
+    private static string ClusterToken(int bytes) => bytes < 1024
+        ? $"{bytes} B"
+        : bytes % (1024 * 1024) == 0
+            ? $"{bytes / (1024 * 1024)} MiB"
+            : $"{bytes / 1024} KiB";
+
+    private static int? ParseClusterToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var value = token.Trim();
+        var factor = value.EndsWith(" MiB", StringComparison.OrdinalIgnoreCase) ? 1024 * 1024
+            : value.EndsWith(" KiB", StringComparison.OrdinalIgnoreCase) ? 1024
+            : value.EndsWith(" B", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        if (factor == 0) return null;
+        var number = value[..^3].Trim();
+        if (factor == 1) number = value[..^2].Trim();
+        return int.TryParse(number, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var size)
+            && size > 0 && (long)size * factor <= int.MaxValue
+            ? (int)(size * factor) : null;
+    }
+
+    private long DefaultClusterForCurrentRole(string? fileSystem = null)
+    {
+        var kind = SelectedPartitionKind();
+        if (kind is PartitionKind.EfiSystem or PartitionKind.WindowsRecovery) return 4096;
+        return FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(
+            string.IsNullOrWhiteSpace(fileSystem) ? "NTFS" : fileSystem);
+    }
+
+    private static string RecommendedFileSystem(PartitionKind kind) => kind switch
+    {
+        PartitionKind.EfiSystem => "FAT32",
+        PartitionKind.MicrosoftReserved => string.Empty,
+        _ => "NTFS"
+    };
 
     private string? ResolveOsDiskId(string? stableId)
     {
@@ -476,7 +539,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                     SizeAdaptiveValue.Text = "—";
                 }
                 FileSystemBox.SelectedIndex = 0;
-                ClusterBox.SelectedIndex = 4;
+                FillClusterChoices("NTFS", null, 65536);
                 SetFormatMode(quickFormat: true);
                 PartitionTypeBox.SelectedIndex = 0;
             }
@@ -484,8 +547,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             {
                 SizeBox.Text = (partition.Size / (double)BytesPerMiB).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
                 SizeAdaptiveValue.Text = TopologyProjector.FormatBytes(partition.Size);
-                SelectFileSystem(volume?.FileSystem ?? partition.FileSystem);
-                SelectCluster(volume?.AllocationUnitSize ?? partition.AllocationUnitSize);
+                var currentFileSystem = volume?.FileSystem ?? partition.FileSystem;
+                if (string.IsNullOrWhiteSpace(currentFileSystem)
+                    || currentFileSystem.Equals("RAW", StringComparison.OrdinalIgnoreCase))
+                    SelectFileSystem("NTFS");
+                else
+                    SelectFileSystem(currentFileSystem);
+                FillClusterChoices(SelectedFileSystemToken(),
+                    volume?.AllocationUnitSize ?? partition.AllocationUnitSize,
+                    DefaultClusterForCurrentRole(SelectedFileSystemToken()), preserveUnlistedObservedValue: true);
                 SetFormatMode(quickFormat: true);
                 PartitionTypeBox.SelectedIndex = partition.Type switch
                 {
@@ -500,7 +570,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 SizeBox.Text = string.Empty;
                 SizeAdaptiveValue.Text = "—";
                 FileSystemBox.SelectedIndex = 0;
-                ClusterBox.SelectedIndex = 4;
+                FillClusterChoices("NTFS", null, 65536);
                 SetFormatMode(quickFormat: true);
                 PartitionTypeBox.SelectedIndex = 0;
             }
@@ -633,20 +703,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
         else
         {
-            FileSystemBox.SelectedIndex = 0;
+            FileSystemBox.SelectedIndex = -1;
         }
-    }
-
-    private void SelectCluster(long? bytes)
-    {
-        ClusterBox.SelectedIndex = bytes switch
-        {
-            4096 => 0,
-            8192 => 1,
-            16384 => 2,
-            32768 => 3,
-            _ => 4
-        };
     }
 
     private PartitionInfo? SelectedPartition() =>
@@ -733,15 +791,15 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private string SelectedFileSystemToken()
     {
-        var selected = FileSystemBox.SelectedItem as string ?? "NTFS";
+        var selected = FileSystemBox.SelectedItem as string ?? string.Empty;
         return selected == Text("不格式化", "Do not format") ? string.Empty : selected;
     }
 
     private bool IsInitialized(OsDiskInfo? disk) =>
         disk is not null && EditWorkspace.IsPartitionTableInitialized(disk);
 
-    private long SelectedClusterBytes() =>
-        ParseSize(ClusterBox.SelectedItem as string ?? "64 KiB");
+    private long SelectedClusterBytes() => ParseClusterToken(ClusterBox.SelectedItem as string)
+        ?? DefaultClusterForCurrentRole(SelectedFileSystemToken());
 
     private void UpdateButtonState()
     {
@@ -822,8 +880,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var canShrink = (realResizeCandidate && !realRefsResize) || (simulated && propertyEnabled
             && shrinkCapability?.Decision.Verdict == StorageRuleVerdict.Allow);
 
-        var realRefsUnsupported = real && createMode &&
-            SelectedFileSystemToken().Equals("ReFS", StringComparison.OrdinalIgnoreCase);
         DiskOnlineStateButtonLabel.Text = disk is null
             ? Text("联机/脱机", "Online/offline")
             : offlineState switch
@@ -900,13 +956,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             && !string.IsNullOrEmpty(SelectedFileSystemToken());
         var formatOptionsEnabled = propertyEnabled && canFormatSelection && kind != PartitionKind.MicrosoftReserved
             && !string.IsNullOrEmpty(SelectedFileSystemToken());
-        var realRefsExistingFormat = real && !createMode
+        var realRefsFormat = real
             && SelectedFileSystemToken().Equals("ReFS", StringComparison.OrdinalIgnoreCase);
         var realQuickOnlyRoleCreation = real && createMode
             && (kind == PartitionKind.EfiSystem || kind == PartitionKind.WindowsRecovery);
         QuickFormatSwitch.IsEnabled = formatOptionsEnabled && !realQuickOnlyRoleCreation;
         FullFormatSwitch.IsEnabled = formatOptionsEnabled
-            && !realRefsExistingFormat && !realQuickOnlyRoleCreation;
+            && !realRefsFormat && !realQuickOnlyRoleCreation;
         if (createMode && kind is PartitionKind.EfiSystem or PartitionKind.MicrosoftReserved or PartitionKind.WindowsRecovery)
         {
             DriveLetterBox.IsEnabled = false;
@@ -1000,7 +1056,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var selectedRealFileSystem = SelectedFileSystemToken();
         var realExistingFormatSupported = !realEditablePartition
             || (selectedRealFileSystem is "NTFS" or "exFAT" or "ReFS"
-                && SelectedClusterBytes() == 65536
+                && SelectedClusterBytes() <= int.MaxValue
+                && FormatAllocationUnitPolicy.IsSupportedClusterSize(
+                    selectedRealFileSystem, (int)SelectedClusterBytes(), _working.Computer.OsBuild)
                 && (!selectedRealFileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase)
                     || QuickFormatSwitch.IsOn));
         PartitionActionButtonLabel.Text = createActionSelected
@@ -1011,7 +1069,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             PartitionActionButton,
             createActionSelected ? Text("新建分区", "Create partition") : Text("格式化分区", "Format partition"));
         PartitionActionButton.IsEnabled = createActionSelected
-            ? canCreatePartition && !realRefsUnsupported
+            ? canCreatePartition
             : propertyEnabled && isPartitionSelection && formattablePartition
                 && realExistingFormatSupported;
         ContextHelp.Set(
@@ -1019,22 +1077,19 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             createActionSelected
                 ? Text("在选中的 GPT 未分配空间中创建分区；真实操作会显示目标空间和分区参数，确认后才提交。", "Create a partition in the selected GPT gap; a real operation shows the target space and partition settings for confirmation before submission.")
                 : Text("提交当前分区格式化设置；真实操作会清除目标分区的数据。", "Submit the partition format settings; a real operation erases data on the target partition."));
-        SetDisabledReason(PartitionActionButton, realRefsUnsupported
-            ? Text("ReFS 真实创建仍待 C01 现场能力证据，本阶段禁用。",
-                "Real ReFS creation requires C01 provider evidence and is disabled in this stage.")
-            : createActionSelected ? createReason
+        SetDisabledReason(PartitionActionButton, createActionSelected ? createReason
             : realExistingFormatSupported ? formatReason
-            : Text("现有真实数据分区仅支持 64 KiB NTFS/exFAT；ReFS 限快速格式化，且必须为 64 KiB。",
-                "Existing real data partitions support 64 KiB NTFS/exFAT; ReFS is limited to quick format with 64 KiB."));
+            : Text("当前文件系统与分配单元不在本机已知支持范围内，或 ReFS 未选择快速格式化。",
+                "The selected file system and allocation unit are outside the known Windows support range, or ReFS is not using quick format."));
         SetDisabledReason(FileSystemBox, formatOptionsReason);
         SetDisabledReason(ClusterBox, formatOptionsReason);
         SetDisabledReason(QuickFormatSwitch, realQuickOnlyRoleCreation
             ? Text("真实 EFI 和恢复分区仅支持快速格式化。",
                 "Real EFI and Recovery partition creation supports quick format only.")
             : formatOptionsReason);
-        SetDisabledReason(FullFormatSwitch, realRefsExistingFormat
-            ? Text("C01 本阶段仅开放 64 KiB 快速 ReFS 格式化。",
-                "C01 currently enables only quick ReFS format with 64 KiB allocation units.")
+        SetDisabledReason(FullFormatSwitch, realRefsFormat
+            ? Text("ReFS 仅支持快速格式化。",
+                "ReFS formatting is limited to quick format.")
             : realQuickOnlyRoleCreation
                 ? Text("真实 EFI 和恢复分区仅支持快速格式化。",
                     "Real EFI and Recovery partition creation supports quick format only.")
@@ -1286,6 +1341,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
+        var fileSystem = SelectedFileSystemToken();
+        var selectedCluster = ParseClusterToken(ClusterBox.SelectedItem as string);
+        var preserveCluster = selectedCluster is int bytes && !string.IsNullOrEmpty(fileSystem)
+            && FormatAllocationUnitPolicy.IsSupportedClusterSize(fileSystem, bytes, _working.Computer.OsBuild)
+            ? selectedCluster : null;
+        FillClusterChoices(fileSystem, preserveCluster,
+            string.IsNullOrEmpty(fileSystem) ? null : DefaultClusterForCurrentRole(fileSystem));
+
         UpdateButtonState();
     }
 
@@ -1306,13 +1369,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 {
                     case PartitionKind.EfiSystem:
                         FillFileSystemBoxFor("FAT32");
-                        ClusterBox.SelectedIndex = 0;
+                        FillClusterChoices("FAT32", null, 4096);
                         SetSizeMib(defaultMib);
                         DriveLetterBox.SelectedIndex = 0;
                         SetFormatMode(quickFormat: true);
                         break;
                     case PartitionKind.MicrosoftReserved:
                         FillFileSystemBoxFor(string.Empty);
+                        FillClusterChoices(null, null, null);
                         SetSizeMib(defaultMib);
                         DriveLetterBox.SelectedIndex = 0;
                         VolumeLabelBox.Text = string.Empty;
@@ -1320,14 +1384,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                         break;
                     case PartitionKind.WindowsRecovery:
                         FillFileSystemBoxFor("NTFS");
-                        ClusterBox.SelectedIndex = 0;
+                        FillClusterChoices("NTFS", null, 4096);
                         SetSizeMib(defaultMib);
                         DriveLetterBox.SelectedIndex = 0;
                         SetFormatMode(quickFormat: true);
                         break;
                     default:
                         FillFileSystemBox();
-                        ClusterBox.SelectedIndex = 4;
+                        FillClusterChoices("NTFS", null, 65536);
                         SetSizeMib(defaultMib);
                         FillDriveLetters(null, null, autoAssign: true);
                         SetFormatMode(quickFormat: true);
@@ -1430,17 +1494,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var gap = _selectedUnallocatedOffset is not null;
         var parameterEnabled = partition is not null || gap;
         var recommendedSizeMib = RecommendedCreateSizeMib();
+        var recommendedFileSystem = RecommendedFileSystem(SelectedPartitionKind());
         var baselineFileSystem = volume?.FileSystem ?? partition?.FileSystem;
-        if (string.IsNullOrWhiteSpace(baselineFileSystem))
-        {
-            baselineFileSystem = SelectedPartitionKind() switch
-            {
-                PartitionKind.EfiSystem => "FAT32",
-                PartitionKind.MicrosoftReserved => string.Empty,
-                _ => "NTFS"
-            };
-        }
-
+        if (gap || string.IsNullOrWhiteSpace(baselineFileSystem))
+            baselineFileSystem = recommendedFileSystem;
         var baselineCluster = volume?.AllocationUnitSize ?? partition?.AllocationUnitSize;
         var sizeChanged = gap
             && SizeBox.IsEnabled
@@ -1453,28 +1510,36 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 SelectedFileSystemToken(),
                 baselineFileSystem,
                 StringComparison.OrdinalIgnoreCase);
+        var resetFileSystem = parameterEnabled && FileSystemBox.IsEnabled
+            && !string.IsNullOrEmpty(recommendedFileSystem)
+            && !string.Equals(SelectedFileSystemToken(), recommendedFileSystem, StringComparison.OrdinalIgnoreCase);
+        var recommendedCluster = string.IsNullOrEmpty(SelectedFileSystemToken())
+            ? DefaultClusterForCurrentRole(recommendedFileSystem)
+            : DefaultClusterForCurrentRole(SelectedFileSystemToken());
+        var resetCluster = parameterEnabled && ClusterBox.IsEnabled
+            && SelectedClusterBytes() != recommendedCluster;
+        var comparisonCluster = baselineCluster ?? DefaultClusterForCurrentRole(baselineFileSystem);
         var clusterChanged = parameterEnabled
             && ClusterBox.IsEnabled
-            && SelectedClusterBytes() != (baselineCluster ??
-                (SelectedPartitionKind() == PartitionKind.BasicData ? 65536 : 4096));
+            && SelectedClusterBytes() != comparisonCluster;
         var quickFormatChanged = parameterEnabled
             && QuickFormatSwitch.IsEnabled
             && !QuickFormatSwitch.IsOn;
 
-        SetPropertyResetState(ResetSizeButton, SizeChangedIndicator, sizeChanged);
-        SetPropertyResetState(ResetFileSystemButton, FileSystemChangedIndicator, fileSystemChanged);
-        SetPropertyResetState(ResetClusterButton, ClusterChangedIndicator, clusterChanged);
-        SetPropertyResetState(ResetQuickFormatButton, QuickFormatChangedIndicator, quickFormatChanged);
+        SetPropertyResetState(ResetSizeButton, SizeChangedIndicator, sizeChanged, sizeChanged);
+        SetPropertyResetState(ResetFileSystemButton, FileSystemChangedIndicator, resetFileSystem, fileSystemChanged);
+        SetPropertyResetState(ResetClusterButton, ClusterChangedIndicator, resetCluster, clusterChanged);
+        SetPropertyResetState(ResetQuickFormatButton, QuickFormatChangedIndicator, quickFormatChanged, quickFormatChanged);
     }
 
     private static void SetPropertyResetState(
         Button button,
         FrameworkElement indicator,
+        bool canReset,
         bool changed)
     {
-        var visibility = changed ? Visibility.Visible : Visibility.Collapsed;
-        button.Visibility = visibility;
-        indicator.Visibility = visibility;
+        button.Visibility = canReset ? Visibility.Visible : Visibility.Collapsed;
+        indicator.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ResetSize_Click(object sender, RoutedEventArgs e)
@@ -1490,21 +1555,36 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void ResetFileSystem_Click(object sender, RoutedEventArgs e)
     {
-        FileSystemBox.SelectedItem = SelectedPartitionKind() switch
+        var recommended = RecommendedFileSystem(SelectedPartitionKind());
+        if (string.IsNullOrEmpty(recommended)) return;
+        var currentCluster = ParseClusterToken(ClusterBox.SelectedItem as string);
+        var wasFilling = _filling;
+        _filling = true;
+        try
         {
-            PartitionKind.EfiSystem => "FAT32",
-            PartitionKind.MicrosoftReserved => string.Empty,
-            _ => "NTFS"
-        };
+            FileSystemBox.SelectedItem = recommended;
+            var preserveCluster = currentCluster is int bytes
+                && FormatAllocationUnitPolicy.IsSupportedClusterSize(recommended, bytes, _working.Computer.OsBuild)
+                ? currentCluster : null;
+            FillClusterChoices(recommended, preserveCluster,
+                DefaultClusterForCurrentRole(recommended));
+        }
+        finally
+        {
+            _filling = wasFilling;
+        }
         UpdatePropertyResetState();
+        UpdateButtonState();
     }
 
     private void ResetCluster_Click(object sender, RoutedEventArgs e)
     {
-        ClusterBox.SelectedItem = SelectedPartitionKind() == PartitionKind.BasicData
-            ? "64 KiB"
-            : "4 KiB";
+        var fileSystem = SelectedFileSystemToken();
+        if (string.IsNullOrEmpty(fileSystem)) return;
+        var recommended = DefaultClusterForCurrentRole(fileSystem);
+        FillClusterChoices(fileSystem, recommended, recommended);
         UpdatePropertyResetState();
+        UpdateButtonState();
     }
 
     private void ResetQuickFormat_Click(object sender, RoutedEventArgs e)
@@ -2064,13 +2144,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var fileSystem = partitionKind == PartitionKind.MicrosoftReserved
             ? string.Empty
             : SelectedFileSystemToken();
-        if (fileSystem == "ReFS" && ViewModel.CanSubmitRealOperation)
-        {
-            await ShowMessageAsync(Text("真实 ReFS 未开放", "Real ReFS is unavailable"),
-                Text("C01 现场能力尚未证实，真实 ReFS 创建保持禁用。",
-                    "C01 provider capability is unverified, so real ReFS creation remains disabled."));
-            return;
-        }
         if (fileSystem == "ReFS")
         {
             PublishRefsNotice();
@@ -2730,8 +2803,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             if (proposal is null)
             {
                 await ShowMessageAsync(Text("真实文件系统未开放", "Real file system is unavailable"),
-                    Text("现有真实数据分区仅开放 64 KiB NTFS/exFAT，或 C01 条件下的 64 KiB 快速 ReFS；未知文件系统保持禁用，不会改用其它格式。",
-                        "Existing real data partitions allow 64 KiB NTFS/exFAT or C01's conditional quick ReFS with 64 KiB. Unknown file systems stay disabled and are never changed to another format."));
+                    Text("当前文件系统与分配单元组合不受支持；请选择 Windows 支持的组合。ReFS 仅支持快速格式化。",
+                        "This file-system and allocation-unit combination is unsupported; select a Windows-supported combination. ReFS is limited to quick format."));
                 return;
             }
             await SubmitRealAsync(proposal);

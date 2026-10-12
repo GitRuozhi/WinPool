@@ -276,21 +276,27 @@ internal static class WindowsRealStoragePowerShellScript
             }) 'volume-not-unique'
         }
         function Require-Refs($partition, $t, [ref]$evidence) {
-            $volume = Assert-One @(Get-Volume -Partition $partition -ErrorAction Stop) 'refs-volume-not-unique'
-            Assert-Exact $volume.UniqueId $t.RelatedUniqueId 'refs-volume-unique-id-changed'
-            Assert-Exact $volume.ObjectId $t.RelatedObjectId 'refs-volume-object-id-changed'
+            return Require-FormatCapability $partition $t 'ReFS' 65536 $evidence
+        }
+        function Require-FormatCapability($partition, $t, [string]$fileSystem, [uint32]$clusterBytes, [ref]$evidence) {
+            $volume = Assert-One @(Get-Volume -Partition $partition -ErrorAction Stop) 'format-volume-not-unique'
+            Assert-Exact $volume.UniqueId $t.RelatedUniqueId 'format-volume-unique-id-changed'
+            Assert-Exact $volume.ObjectId $t.RelatedObjectId 'format-volume-object-id-changed'
             $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
-            if ([string]$os.Caption -notmatch 'Pro for Workstations|Enterprise|Server') { throw 'refs-sku-not-enabled' }
+            if ($fileSystem -eq 'ReFS' -and [string]$os.Caption -notmatch 'Pro for Workstations|Enterprise|Server') { throw 'refs-sku-not-enabled' }
             $formats = Invoke-CimMethod -InputObject $volume -MethodName GetSupportedFileSystems -ErrorAction Stop
-            $clusters = Invoke-CimMethod -InputObject $volume -MethodName GetSupportedClusterSizes -Arguments @{ FileSystem = 'ReFS' } -ErrorAction Stop
+            $clusters = Invoke-CimMethod -InputObject $volume -MethodName GetSupportedClusterSizes -Arguments @{ FileSystem = $fileSystem } -ErrorAction Stop
             $evidence.Value = [ordered]@{
                 VolumeUniqueId = [string]$volume.UniqueId; VolumeObjectId = [string]$volume.ObjectId;
                 PartitionGuid = [string]$partition.Guid; OperatingSystemCaption = [string]$os.Caption;
-                FileSystems = $formats; ReFsClusterSizes = $clusters
+                RequestedFileSystem = $fileSystem; RequestedClusterBytes = $clusterBytes;
+                FileSystems = $formats; ClusterSizes = $clusters
             }
-            if ((Read-Property $formats 'ReturnValue') -ne 0 -or (Read-Property $clusters 'ReturnValue') -ne 0 -or
-                'ReFS' -notin @(Read-Property $formats 'SupportedFileSystems') -or
-                65536 -notin @(Read-Property $clusters 'SupportedClusterSizes')) { throw 'refs-live-capability-not-verified' }
+            if ($fileSystem -eq 'ReFS') { $evidence.Value.ReFsClusterSizes = $clusters }
+            if ($null -eq (Read-Property $formats 'ReturnValue') -or $null -eq (Read-Property $clusters 'ReturnValue') -or
+                (Read-Property $formats 'ReturnValue') -ne 0 -or (Read-Property $clusters 'ReturnValue') -ne 0 -or
+                $fileSystem -notin @(Read-Property $formats 'SupportedFileSystems') -or
+                $clusterBytes -notin @(Read-Property $clusters 'SupportedClusterSizes')) { throw 'format-live-capability-not-verified' }
             return $volume
         }
         function Require-TierCapability($t, $field, [ref]$evidence) {
@@ -407,14 +413,16 @@ internal static class WindowsRealStoragePowerShellScript
                     $basic = [Guid]'ebd0a0a2-b9e5-4433-87c0-68b6b72699c7'
                     $efi = [Guid]'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'
                     $recovery = [Guid]'de94bba4-06d1-4d40-a16a-bfd50179d6ac'
-                    $validFormat = ($role -eq $basic -and $fs -in @('Ntfs','ExFat','ReFs') -and $cluster -eq 65536 -and
+                    $validFormat = ($role -eq $basic -and $fs -in @('Ntfs','ExFat','ReFs') -and
+                        (($fs -eq 'Ntfs' -and $cluster -ge 512 -and $cluster -le 2097152 -and ($cluster -band ($cluster - 1)) -eq 0) -or
+                         ($fs -eq 'ExFat' -and $cluster -ge 512 -and $cluster -le 33554432 -and ($cluster -band ($cluster - 1)) -eq 0) -or
+                         ($fs -eq 'ReFs' -and $cluster -in @(4096,65536))) -and
                         -not ($fs -eq 'ReFs' -and [bool]$c.Full)) -or
                         ($role -eq $efi -and [bool]$t.CreatedInThisPlan -and $fs -eq 'Fat32' -and $cluster -eq 4096 -and -not [bool]$c.Full) -or
                         ($role -eq $recovery -and [bool]$t.CreatedInThisPlan -and $fs -eq 'Ntfs' -and $cluster -eq 4096 -and -not [bool]$c.Full)
                     if (-not $validFormat) { throw 'format-parameters-unsupported' }
-                    if ($fs -eq 'ReFs') {
-                        if ([bool]$t.CreatedInThisPlan -or $null -eq $c.Partition.Existing) { throw 'refs-existing-volume-required' }
-                        $null = Require-Refs $partition $t ([ref]$capabilityEvidence)
+                    if ($role -eq $basic -and ($fs -eq 'ReFs' -or $cluster -ne 65536)) {
+                        $null = Require-FormatCapability $partition $t $fs $cluster ([ref]$capabilityEvidence)
                     }
                     $formatArgs = @{ Partition=$partition; FileSystem=$fs; AllocationUnitSize=$cluster; Full=[bool]$c.Full; ErrorAction='Stop' }
                     if ($null -ne $c.Label) { $formatArgs.NewFileSystemLabel = [string]$c.Label }

@@ -521,16 +521,30 @@ public sealed partial class WindowsRealOperationPlanner
             {
                 var partition = CurrentPartition(topology, value.Partition,
                     verifiedStepOutputs);
+                if (!FormatAllocationUnitPolicy.IsSupportedClusterSize(value.FileSystem.ToString(),
+                    value.ClusterBytes, snapshot.Computer.OsBuild))
+                    throw new NotSupportedException("The requested cluster size is not supported on this Windows version.");
                 if (value.FileSystem == RealFileSystem.ReFs)
                 {
-                    if (value.Partition.Existing is null || partition is null || value.Full
-                        || value.ClusterBytes != 65536)
-                        throw new NotSupportedException("ReFS requires a separately prepared existing BasicData volume and 64 KiB quick format.");
-                    supportEvidence = await RequireRefsCapabilityAsync(topology, partition, cancellationToken).ConfigureAwait(false);
+                    RequireRefsSku(topology);
+                    if (value.Full)
+                        throw new NotSupportedException("ReFS full format is outside the enabled format scope.");
                 }
                 if (partition is not null && (partition.IsBoot || partition.IsSystem
                     || !IsValidFormatRole(partition, value)))
                     throw new InvalidDataException("This existing partition/file-system combination is not enabled.");
+                if (value.FileSystem == RealFileSystem.ReFs || value.ClusterBytes != 65536
+                    && value.FileSystem != RealFileSystem.Fat32 && (partition is null || IsBasicData(partition)))
+                {
+                    // A proposed partition has no MSFT_Volume yet. Its exact RAW
+                    // volume must be queried after the verified create output,
+                    // and again inside the fixed script before Format-Volume.
+                    supportEvidence += partition is null
+                        ? ";format-capability-pending-exact-created-volume; fileSystem=" + value.FileSystem
+                            + ";clusterBytes=" + value.ClusterBytes.ToString(CultureInfo.InvariantCulture)
+                        : ";" + await RequireFormatCapabilityAsync(topology, partition,
+                            value.FileSystem, value.ClusterBytes, cancellationToken).ConfigureAwait(false);
+                }
                 ValidateLabel(value.Label, value.FileSystem);
                 break;
             }
@@ -768,40 +782,60 @@ public sealed partial class WindowsRealOperationPlanner
         return supportEvidence;
     }
 
-    private async Task<string> RequireRefsCapabilityAsync(
-        WindowsRealStorageTopology topology, PartitionInfo partition, CancellationToken token)
+    private Task<string> RequireRefsCapabilityAsync(
+        WindowsRealStorageTopology topology, PartitionInfo partition, CancellationToken token) =>
+        RequireFormatCapabilityAsync(topology, partition, RealFileSystem.ReFs, 65536, token);
+
+    private static string RequireRefsSku(WindowsRealStorageTopology topology)
     {
-        if (partition.IsBoot || partition.IsSystem || partition.IsHidden || !IsBasicData(partition))
-            throw new InvalidDataException("ReFS requires an ordinary unprotected BasicData partition.");
         var product = topology.Snapshot.Computer.WindowsProductName;
         if (!product.Contains("Pro for Workstations", StringComparison.OrdinalIgnoreCase)
             && !product.Contains("Enterprise", StringComparison.OrdinalIgnoreCase)
             && !product.Contains("Server", StringComparison.OrdinalIgnoreCase))
             throw new NotSupportedException("The current Windows SKU has no verified ReFS creation applicability.");
+        return product;
+    }
+
+    private async Task<string> RequireFormatCapabilityAsync(
+        WindowsRealStorageTopology topology, PartitionInfo partition, RealFileSystem fileSystem,
+        int clusterBytes, CancellationToken token)
+    {
+        if (partition.IsBoot || partition.IsSystem || partition.IsHidden || !IsBasicData(partition))
+            throw new InvalidDataException("Formatting requires an ordinary unprotected BasicData partition.");
+        var product = fileSystem == RealFileSystem.ReFs ? RequireRefsSku(topology)
+            : topology.Snapshot.Computer.WindowsProductName;
         var volumes = topology.Snapshot.Volumes.Where(item => item.PartitionStableId == partition.StableId).ToArray();
         if (volumes.Length != 1)
-            throw new NotSupportedException("A uniquely associated current volume is required for ReFS capability queries.");
+            throw new NotSupportedException("Format capability is unknown: the exact partition has no unique current MSFT_Volume (RAW volumes are eligible).");
         var volume = new StorageObjectId(topology.SystemId, StorageObjectKind.Volume, volumes[0].StableId);
         var closure = topology.RequireSinglePhysicalClosure([volume]);
-        var evidence = await capabilities.ReadVolumeFormatAsync(topology, volume, token).ConfigureAwait(false);
+        var evidence = await capabilities.ReadVolumeFormatAsync(topology, volume,
+            fileSystem.ToString(), token).ConfigureAwait(false);
+        var source = topology.RequireObject(volume);
         var fs = evidence.FileSystems;
-        var clusters = evidence.ReFsClusterSizes;
+        var clusters = evidence.ClusterSizes;
         if (evidence.Status != "queried" || evidence.VolumeStableId != volume.ProviderKey
             || evidence.PartitionStableId != partition.StableId
             || evidence.PhysicalDiskStableId != closure.PhysicalDiskId
             || evidence.PhysicalMemberFingerprint != closure.PhysicalMemberFingerprint
+            || evidence.UniqueId != source.Field("UniqueId")?.DisplayValue()
+            || evidence.ObjectId != source.Field("ObjectId")?.DisplayValue()
+            || !evidence.RequestedFileSystem.Equals(fileSystem.ToString(), StringComparison.OrdinalIgnoreCase)
+            || evidence.ObservedAtUtc == default
             || fs is not { ReturnValue: 0, Status: "returned" }
             || clusters is not { ReturnValue: 0, Status: "returned" }
             || !fs.Output.TryGetValue("SupportedFileSystems", out var supportedFs)
-            || supportedFs is not { ValueKind: System.Text.Json.JsonValueKind.Array } names
-            || !names.EnumerateArray().Any(item => item.ValueKind == System.Text.Json.JsonValueKind.String
-                && item.GetString()!.Equals("ReFS", StringComparison.OrdinalIgnoreCase))
+            || supportedFs is not { ValueKind: JsonValueKind.Array } names
+            || !names.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String
+                && item.GetString()!.Equals(fileSystem.ToString(), StringComparison.OrdinalIgnoreCase))
             || !clusters.Output.TryGetValue("SupportedClusterSizes", out var supportedClusters)
-            || supportedClusters is not { ValueKind: System.Text.Json.JsonValueKind.Array } sizes
-            || !sizes.EnumerateArray().Any(item => item.ValueKind == System.Text.Json.JsonValueKind.Number
-                && item.TryGetInt32(out var bytes) && bytes == 65536))
-            throw new NotSupportedException("The exact current volume did not verify ReFS and 65536-byte clusters: " + evidence.Error);
-        return "live-refs-capability; SKU=" + product + "; " + System.Text.Json.JsonSerializer.Serialize(evidence);
+            || supportedClusters is not { ValueKind: JsonValueKind.Array } sizes
+            || !sizes.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Number
+                && item.TryGetInt32(out var bytes) && bytes == clusterBytes))
+            throw new NotSupportedException("The exact current volume did not verify " + fileSystem
+                + " and " + clusterBytes.ToString(CultureInfo.InvariantCulture) + "-byte clusters: " + evidence.Error);
+        return (fileSystem == RealFileSystem.ReFs ? "live-refs-capability" : "live-format-capability")
+            + "; SKU=" + product + "; " + JsonSerializer.Serialize(evidence);
     }
 
     private async Task<string> RequireTierCapabilityAsync(WindowsRealStorageTopology topology,
@@ -1292,7 +1326,8 @@ public sealed partial class WindowsRealOperationPlanner
         if (!Guid.TryParse(partition.PartitionTypeId, out var kind)) return false;
         if (IsBasicData(partition))
             return (command.FileSystem is RealFileSystem.Ntfs or RealFileSystem.ExFat or RealFileSystem.ReFs)
-                && command.ClusterBytes == 65536 && !(command.FileSystem == RealFileSystem.ReFs && command.Full);
+                && FormatAllocationUnitPolicy.IsKnownClusterSize(command.FileSystem.ToString(), command.ClusterBytes)
+                && !(command.FileSystem == RealFileSystem.ReFs && command.Full);
         if (command.Partition.CreatedByStep is null || command.Full)
             return false;
         return kind == Guid.Parse("c12a7328-f81f-11d2-ba4b-00a0c93ec93b")

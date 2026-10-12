@@ -39,7 +39,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         ObjectId = node.Id;
         Role = node.Role;
         Unit = unit with { DisplayName = LocalizeName(unit, owner) };
-        Summary = LocalizeSummary(node, owner, snapshot);
+        Summary = LocalizeSummary(node, owner, snapshot, isEditingSurface: edit is not null);
         TypeLabel = LocalizeType(unit, owner, snapshot);
         IsReference = node.IsReference;
         IsSelectable = node.IsSelectable;
@@ -548,7 +548,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     private static string LocalizeSummary(
         ManageTopologyNodeView node,
         WorkspaceViewModel owner,
-        StorageSnapshot snapshot)
+        StorageSnapshot snapshot,
+        bool isEditingSurface)
     {
         var unit = ToStorageUnit(node, snapshot);
         if (unit.Kind == StorageUnitKind.System)
@@ -634,7 +635,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 ? $"{tier.ResiliencySettingName} {interleave / 1024}K"
                 : tier.ResiliencySettingName;
             return TopologyProjector.JoinSummary(
-                !owner.IsUsingSimulatedInventory
+                !isEditingSurface && !owner.IsUsingSimulatedInventory
                     ? owner.Localization[tier.VirtualDiskStableId is null
                         ? "PoolTierTemplate" : "VirtualDiskTierInstance"]
                     : null,

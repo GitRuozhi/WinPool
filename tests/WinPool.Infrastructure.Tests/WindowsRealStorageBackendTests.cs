@@ -1954,6 +1954,50 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Theory]
+    [InlineData(RealFileSystem.Ntfs, 4096, "selected", true)]
+    [InlineData(RealFileSystem.Ntfs, 262144, "selected", true)]
+    [InlineData(RealFileSystem.ReFs, 4096, "selected", true)]
+    [InlineData(RealFileSystem.Ntfs, 4096, "volume-missing-cluster", false)]
+    [InlineData(RealFileSystem.Ntfs, 4096, "volume-default64", false)]
+    [InlineData(RealFileSystem.ReFs, 4096, "volume-default64", false)]
+    public async Task FormatPostconditionRequiresSelectedClusterOnPartitionAndVolume(
+        RealFileSystem fileSystem, int clusterBytes, string observed, bool verified)
+    {
+        var fixture = new Fixture();
+        StorageSnapshot FormatSnapshot(StorageSnapshot snapshot, string fs, int? volumeCluster) => snapshot with
+        {
+            OsDisks = [snapshot.OsDisks[0] with { PartitionStyle = "GPT" }],
+            Partitions = [new PartitionInfo("partition:format", true, 7, 1, "BasicData", 1048576, 128L << 20,
+                false, false, "", "Data", fs, clusterBytes, 128L << 20, "Healthy", "OK", "", DiskId,
+                PartitionTypeId: "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+                Guid: "2f8ae502-1e4e-4d94-b190-6284ccb62bea", GptType: "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7")],
+            Volumes = [new VolumeInfo("volume:format", true, "partition:format", fs, "Data", 128L << 20,
+                128L << 20, volumeCluster, "Healthy", "OK", [])]
+        };
+        fixture.SnapshotTransform = snapshot => FormatSnapshot(snapshot, "RAW", null);
+        var before = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        // MSFT_Partition does not own AllocationUnitSize. Its displayed cluster
+        // is rebuilt from the associated MSFT_Volume, so exercise an incorrect
+        // or missing authoritative volume value rather than a stale display DTO.
+        int? observedCluster = observed == "volume-missing-cluster" ? null
+            : observed == "volume-default64" ? 65536 : clusterBytes;
+        fixture.SnapshotTransform = snapshot => FormatSnapshot(snapshot, fileSystem.ToString(), observedCluster);
+        var after = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        Assert.Equal(observedCluster, after.Snapshot.Volumes.Single().AllocationUnitSize);
+        Assert.Equal(observedCluster, after.Snapshot.Partitions.Single().AllocationUnitSize);
+        var target = new WindowsStorageCommandTarget(StorageObjectKind.Partition, "partition:format", "partition:format",
+            "", DiskId, @"\\.\PHYSICALDRIVE7", 7, 1, "2f8ae502-1e4e-4d94-b190-6284ccb62bea", 1048576,
+            128L << 20, DiskId, PhysicalId, "subsystem:synthetic", "before");
+        var command = new FormatVolumeCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.Partition,
+            "partition:format")), fileSystem, clusterBytes, false, "Data");
+        var result = WindowsRealStorageBackend.VerifyAfter(command, target,
+            new WindowsStorageCommandResult(true, "provider.returned", "volume:format", "volume:format", null, 7, 1, null, null),
+            before, after);
+        Assert.Equal(verified, result is not null);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
     [InlineData("unchanged", true)]
     [InlineData("missing-volume", false)]
     [InlineData("new-volume-id", false)]

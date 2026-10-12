@@ -289,7 +289,7 @@ public sealed class RealStructureApplyAuthorization
                 && RealOperationProposalFactory.ConfigureInitializedDisk(systemId, Id(StorageObjectKind.OsDisk, osDiskId), null, intent.CreateMsr, osDiskSize)!
                     .Steps.Any(step => step.Command == value),
             FormatVolumeCommand value => intent is { AutoCreatePartition: true } && value.Partition.Existing is { } partition && dataPartitions.Contains(partition.ProviderKey)
-                && value.FileSystem == RealFileSystem.Ntfs && intent.FileSystem == "NTFS" && value.ClusterBytes == intent.AllocationUnitSize
+                && value.FileSystem == ParseFileSystem(intent.FileSystem) && value.ClusterBytes == intent.AllocationUnitSize
                 && value.Full == !intent.QuickFormat && value.Label == intent.VolumeName,
             SetDriveLetterCommand value => intent is { AutoCreatePartition: true } && value.Partition.Existing is { } partition && dataPartitions.Contains(partition.ProviderKey)
                 && value.PreviousLetter is null && value.NewLetter == intent.DriveLetter && value.NewLetter is not null,
@@ -319,6 +319,13 @@ public sealed class RealStructureApplyAuthorization
     }
 
     private StorageObjectId Id(StorageObjectKind kind, string key) => new(systemId, kind, key);
+    private static RealFileSystem? ParseFileSystem(string? value) => value?.Trim().ToUpperInvariant() switch
+    {
+        "NTFS" => RealFileSystem.Ntfs,
+        "REFS" => RealFileSystem.ReFs,
+        "EXFAT" => RealFileSystem.ExFat,
+        _ => null
+    };
     private static string Key(RealStorageCommand command) => JsonSerializer.Serialize(command);
     private static string? Read(JsonElement element, string property) => element.ValueKind == JsonValueKind.Object
         && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

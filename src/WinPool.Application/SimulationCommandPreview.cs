@@ -1,4 +1,5 @@
 using System.Globalization;
+using WinPool.Domain;
 
 namespace WinPool.Application;
 
@@ -152,7 +153,10 @@ public static class SimulationCommandPreview
     private static string Format(SimulationEditRequest step, string? target) => "Format-Volume"
         + (target is null ? "" : " -InputObject " + target)
         + " -FileSystem " + Quote(step.FileSystem ?? (step.PartitionKind == PartitionKind.EfiSystem ? "FAT32" : "NTFS"))
-        + " -AllocationUnitSize " + Number(step.AllocationUnitSize ?? 4096)
+        + " -AllocationUnitSize " + Number(step.AllocationUnitSize
+            ?? (step.PartitionKind is PartitionKind.EfiSystem or PartitionKind.WindowsRecovery
+                ? 4096
+                : FormatAllocationUnitPolicy.GetDefaultAllocationUnitBytes(step.FileSystem ?? "NTFS")))
         + (step.QuickFormat == false ? " -Full" : "")
         + (step.VolumeName is not null ? " -NewFileSystemLabel " + Quote(step.VolumeName) : "") + " -Confirm:$false";
 

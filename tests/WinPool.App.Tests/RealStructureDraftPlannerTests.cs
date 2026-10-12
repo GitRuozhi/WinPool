@@ -259,6 +259,29 @@ public sealed class RealStructureDraftPlannerTests
         Assert.DoesNotContain(plan.Preview.Actions, action => action.Contains("MovePhysicalDisk", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("NTFS", 4096, "4 KiB")]
+    [InlineData("ReFS", 4096, "4 KiB")]
+    [InlineData("ReFS", 65536, "64 KiB")]
+    [InlineData("exFAT", 33554432, "32 MiB")]
+    public void AutomaticLayoutPreservesSupportedFilesystemAndClusterChoices(
+        string fileSystem, int clusterBytes, string clusterText)
+    {
+        var session = Draft(PoolVirtualDiskLayout.Ordinary, maximum: false);
+        var pool = session.Working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
+        { FileSystem = fileSystem, AllocationUnitSize = clusterBytes };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        var creation = Assert.Single(plan.Creations);
+        Assert.Equal(fileSystem, creation.Intent.FileSystem);
+        Assert.Equal(clusterBytes, creation.Intent.AllocationUnitSize);
+        Assert.Contains(plan.Preview.Actions,
+            action => action.Contains($"{fileSystem}/{clusterText}", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void EmptyRealPoolDraftRetainsItsInputAndHasNoCreationPlan()
     {
@@ -714,7 +737,7 @@ public sealed class RealStructureDraftPlannerTests
         {
             "missing-vd" => intent with { VerifiedVirtualDiskId = null },
             "different-vd" => intent with { VerifiedVirtualDiskId = "another:vd" },
-            "unsupported-format" => intent with { FileSystem = "exFAT" },
+            "unsupported-format" => intent with { FileSystem = "FAT32" },
             _ => intent with { DriveLetter = 'C' }
         };
         session.PoolIntents[pool.StableId] = intent;
