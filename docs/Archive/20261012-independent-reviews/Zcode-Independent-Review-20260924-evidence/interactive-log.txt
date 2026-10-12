@@ -1,0 +1,12 @@
+[11:42:23] launched app pid=15980
+[11:43:09] PHASE1_IDLE: app alive at 45s
+[11:43:09] PHASE2_INTERACT: starting uia-nav Ó²¼þ
+[11:43:12] PHASE2_INTERACT: nav1 done t=49s out=Window | id='' | name='WinPool' | p=WindowPatternIdentifiers.,TransformPatternIdentifiers.
+  Pane | id='' | name='Non Client Input Sink Window' | p=
+  Pane | id='' | name='AppWindow Custom Title Bar' | p=
+[11:43:12] PHASE2b: starting uia-nav ¼à¿Ø
+[11:43:15] PHASE2b: nav2 done t=52s out=Window | id='' | name='WinPool' | p=WindowPatternIdentifiers.,TransformPatternIdentifiers.
+  Pane | id='' | name='Non Client Input Sink Window' | p=
+  Pane | id='' | name='AppWindow Custom Title Bar' | p=
+[11:47:24] PHASE3: app alive at 300s
+[11:47:24] EXPERIMENT_DONE

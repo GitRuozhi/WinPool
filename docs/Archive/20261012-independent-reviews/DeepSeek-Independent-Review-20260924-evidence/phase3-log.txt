@@ -1,0 +1,100 @@
+[11:03:04.098] ===== PHASE 3 =====
+[11:03:04.106] --- A. hardware page ---
+[11:03:21.138] snapshot 'hardware': nodes=204 shot=64344 bytes
+[11:03:21.160] visible text count: 54
+[11:03:21.170]   [ 0] WinPool
+[11:03:21.176]   [ 1] 硬件
+[11:03:21.181]   [ 2] 管理
+[11:03:21.187]   [ 3] 存储结构编辑
+[11:03:21.192]   [ 4] 磁盘分区编辑
+[11:03:21.198]   [ 5] 测试
+[11:03:21.203]   [ 6] 监控
+[11:03:21.207]   [ 7] 开发
+[11:03:21.213]   [ 8] 设置
+[11:03:21.218]   [ 9] 真实编辑
+[11:03:21.222]   [10] 刷新
+[11:03:21.228]   [11] 导出
+[11:03:21.235]   [12] Computer
+[11:03:21.241]   [13] 主机名
+[11:03:21.246]   [14] 制造商
+[11:03:21.252]   [15] 型号
+[11:03:21.257]   [16] 架构
+[11:03:21.262]   [17] Computer, 主机名, 超多分区系统盘
+[11:03:21.268]   [18] Computer, 制造商, 
+[11:03:21.274]   [19] Computer, 型号, 
+[11:03:21.279]   [20] Computer, 架构, 
+[11:03:21.284]   [21] System
+[11:03:21.290]   [22] 名称
+[11:03:21.295]   [23] 版本
+[11:03:21.302]   [24] 内部版本
+[11:03:21.307]   [25] 激活状态
+[11:03:21.312]   [26] 语言
+[11:03:21.318]   [27] 当前用户
+[11:03:21.323]   [28] 本地超级管理员
+[11:03:21.329]   [29] 电源计划
+[11:03:21.336]   [30] System, 名称, Windows 10 Pro
+[11:03:21.341]   [31] System, 版本, 22H2
+[11:03:21.347]   [32] System, 内部版本, 19045.7463
+[11:03:21.352]   [33] System, 激活状态, 
+[11:03:21.358]   [34] System, 语言, 
+[11:03:21.363]   [35] System, 当前用户, 
+[11:03:21.369]   [36] System, 本地超级管理员, 
+[11:03:21.374]   [37] System, 电源计划, 
+[11:03:21.380]   [38] Mainboard
+[11:03:21.385]   [39] 型号
+[11:03:21.391]   [40] 主板厂商
+[11:03:21.397]   [41] BIOS 模式
+[11:03:21.403]   [42] BIOS 版本
+[11:03:21.409]   [43] BIOS 厂商
+[11:03:21.414]   [44] Mainboard, 型号, 
+[11:03:21.428]   [45] Mainboard, 主板厂商, 
+[11:03:21.434]   [46] Mainboard, BIOS 模式, 
+[11:03:21.439]   [47] Mainboard, BIOS 版本, 
+[11:03:21.445]   [48] Mainboard, BIOS 厂商, 
+[11:03:21.450]   [49] CPU
+[11:03:21.456]   [50] 型号
+[11:03:21.461]   [51] 基准速度
+[11:03:21.466]   [52] CPU, 型号, 
+[11:03:21.471]   [53] CPU, 基准速度, 
+[11:03:21.478] --- accessibility: report rows/values with automation names ---
+[11:03:21.495] visible Text nodes with EMPTY accessible name: 0
+[11:03:21.513]   ctl [Button] 'Minimize' id='Minimize' en=True 48x48
+[11:03:21.519]   ctl [Button] 'Maximize' id='Maximize' en=True 48x48
+[11:03:21.524]   ctl [Button] 'Close' id='Close' en=True 48x48
+[11:03:21.530]   ctl [ComboBox] '存储系统' id='ActiveSystemSelector' en=True 268x40
+[11:03:21.536]   ctl [Button] '真实编辑' id='LocalRealOperationsSwitch' en=True 52x40
+[11:03:21.541]   ctl [Button] '刷新' id='HardwareRefresh' en=False 75x32
+[11:03:21.547]   ctl [Button] '导出' id='HardwareExport' en=True 75x32
+[11:03:21.554]   ctl [Button] '垂直小幅下降' id='VerticalSmallDecrease' en=True 12x12
+[11:03:21.560]   ctl [Button] '垂直大幅增长' id='VerticalLargeIncrease' en=True 12x569
+[11:03:21.566]   ctl [Button] '垂直小幅增长' id='VerticalSmallIncrease' en=True 12x12
+[11:03:21.572] --- B. settings / language + theme ---
+[11:03:24.797] snapshot 'settings-zh': nodes=91 shot=87950 bytes
+[11:03:24.811]   ctl [Button] 'Minimize' id='Minimize' en=True 48x48 help=''
+[11:03:24.816]   ctl [Button] 'Maximize' id='Maximize' en=True 48x48 help=''
+[11:03:24.822]   ctl [Button] 'Close' id='Close' en=True 48x48 help=''
+[11:03:24.828]   ctl [ComboBox] '存储系统' id='ActiveSystemSelector' en=True 268x40 help='切换当前查看或编辑的本机、导入或模拟存储系统。'
+[11:03:24.834]   ctl [Button] '真实编辑' id='LocalRealOperationsSwitch' en=True 52x40 help=''
+[11:03:24.839]   ctl [ComboBox] '' id='ThemeOptions' en=True 228x40 help='选择系统、浅色或深色主题。'
+[11:03:24.846]   ctl [ComboBox] '' id='AccentOptions' en=True 228x40 help='选择应用强调色。'
+[11:03:24.851]   ctl [ComboBox] '' id='LanguageOptions' en=True 228x40 help='立即切换界面语言。'
+[11:03:24.859]   ctl [Button] '' id='WelcomeButton' en=True 130x32 help='打开欢迎内容。'
+[11:03:24.865]   ctl [Button] '' id='StartupAgentSwitch' en=True 52x40 help='控制登录时是否启动 WinPool Agent。'
+[11:03:24.871]   ctl [Button] '开发者模式' id='DeveloperModeSwitch' en=True 52x40 help='显示硬件、测试和开发页面。'
+[11:03:24.877]   ctl [Button] '真实编辑' id='SettingsExecutionModeSwitch' en=True 52x40 help='点击后可选择以管理员身份重新启动 WinPool。'
+[11:03:24.883]   ctl [Button] '' id='MsrSwitch' en=True 52x40 help='仅影响模拟磁盘初始化时是否创建 Microsoft 保留分区。'
+[11:03:24.889]   ctl [Edit] '' id='PartitionGapBox' en=True 120x32 help='以 MiB 输入隐藏小分区缝隙的阈值；按 Enter 保存。'
+[11:03:24.894]   ctl [ComboBox] '' id='DataLocationOptions' en=True 188x40 help='迁移 WinPool 数据位置；会停止 Agent 和后台监控，并在校验后重启。'
+[11:03:24.901]   ctl [Button] '打开路径' id='OpenDataLocationButton' en=True 32x32 help='打开当前 WinPool 数据位置。'
+[11:03:24.907]   ctl [Button] '' id='ResetAllButton' en=True 130x32 help='恢复 WinPool 设置默认值；请先阅读确认内容。'
+[11:03:24.913]   ctl [ComboBox] '7Z' id='SevenZipOptions' en=True 188x40 help='默认使用便携目录中的 7Z 组件；自定义路径必须是存在的绝对 .exe 文件。
+D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\Tools\7zip\7za.exe'
+[11:03:24.919]   ctl [Button] '打开路径' id='OpenSevenZipLocationButton' en=True 32x32 help='打开当前 7-Zip 可执行文件所在文件夹。'
+[11:03:24.925] --- language combo expand ---
+[11:03:25.111] --- C. narrow window layout (480 DIP) ---
+[11:03:28.770] snapshot 'narrow480': nodes=79 shot=49304 bytes
+[11:03:28.785] narrow: visible nodes=51
+[11:03:28.802] elements extending beyond 480-wide client area: 1
+[11:03:28.809]   beyond: [ComboBox] '存储系统' x=1339 w=260 right=1599
+[11:03:30.855] window restored to 1440x900
+[11:03:30.861] ===== PHASE 3 END =====

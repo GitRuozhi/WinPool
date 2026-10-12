@@ -1,0 +1,265 @@
+"TimeCreated","ProviderName","Id","LevelDisplayName","Message"
+"2026/9/24 11:17:14","Windows Error Reporting","1001","信息","故障存储段 1515373318444793443，类型 4
+事件名称: APPCRASH
+响应: 不可用
+Cab ID: 0
+
+问题签名:
+P1: WinPool.App.exe
+P2: 0.5.6.0
+P3: 6a890000
+P4: combase.dll
+P5: 10.0.19041.7725
+P6: 7b3ed5fa
+P7: 80004003
+P8: 00000000000261d2
+P9: 
+P10: 
+
+附加文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERD5B2.tmp.dmp
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERD6DC.tmp.WERInternalMetadata.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERD72B.tmp.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERD729.tmp.csv
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERD74A.tmp.txt
+
+可在此处获取这些文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_WinPool.App.exe_c2349d91b43637e87cc9b6a3caa7b7ad51625692_0e700249_a9596e65-70c7-4481-a33a-460934161e5e
+
+分析符号: 
+重新检查解决方案: 0
+报告 ID: 9fef0290-837d-4d92-9b11-699a58ed4e91
+报告状态: 268435456
+哈希存储段: 575b8f4275f9df767507b0011c01be63
+Cab GUID: 0"
+"2026/9/24 11:17:12","Application Error","1000","错误","错误应用程序名称: WinPool.App.exe，版本: 0.5.6.0，时间戳: 0x6a890000
+错误模块名称: CoreMessagingXP.dll，版本: 10.0.27200.1048，时间戳: 0x329c7542
+异常代码: 0xc000027b
+错误偏移量: 0x0000000000097de6
+错误进程 ID: 0x5a30
+错误应用程序启动时间: 0x01dd4bd3110f4bb2
+错误应用程序路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.App.exe
+错误模块路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\CoreMessagingXP.dll
+报告 ID: 9fef0290-837d-4d92-9b11-699a58ed4e91
+错误程序包全名: 
+错误程序包相对应用程序 ID: "
+"2026/9/24 10:14:08","Windows Error Reporting","1001","信息","故障存储段 2107795057917570728，类型 4
+事件名称: APPCRASH
+响应: 不可用
+Cab ID: 0
+
+问题签名:
+P1: WinPool.App.exe
+P2: 0.5.5.0
+P3: 6a890000
+P4: combase.dll
+P5: 10.0.19041.7725
+P6: 7b3ed5fa
+P7: 80004003
+P8: 00000000000261d2
+P9: 
+P10: 
+
+附加文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER12E5.tmp.dmp
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER144D.tmp.WERInternalMetadata.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER149C.tmp.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER149A.tmp.csv
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER14BA.tmp.txt
+
+可在此处获取这些文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_WinPool.App.exe_1b37243234db7434cf823b1e0cc54c1218989a9_b70e37c3_31003599-2dac-4de3-8ed5-4fae731a4bbd
+
+分析符号: 
+重新检查解决方案: 0
+报告 ID: eece1052-6bea-4876-a945-41982bf32667
+报告状态: 268435456
+哈希存储段: 3412c41e2fbb86a78d40647006802ea8
+Cab GUID: 0"
+"2026/9/24 10:14:06","Application Error","1000","错误","错误应用程序名称: WinPool.App.exe，版本: 0.5.5.0，时间戳: 0x6a890000
+错误模块名称: CoreMessagingXP.dll，版本: 10.0.27200.1048，时间戳: 0x329c7542
+异常代码: 0xc000027b
+错误偏移量: 0x0000000000097de6
+错误进程 ID: 0x2274
+错误应用程序启动时间: 0x01dd4bc8b5852fbd
+错误应用程序路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.App.exe
+错误模块路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\CoreMessagingXP.dll
+报告 ID: eece1052-6bea-4876-a945-41982bf32667
+错误程序包全名: 
+错误程序包相对应用程序 ID: "
+"2026/9/23 20:17:02","Windows Error Reporting","1001","信息","故障存储段 1482826739237290118，类型 4
+事件名称: APPCRASH
+响应: 不可用
+Cab ID: 0
+
+问题签名:
+P1: WinPool.App.exe
+P2: 0.5.5.0
+P3: 6a890000
+P4: combase.dll
+P5: 10.0.19041.7725
+P6: 7b3ed5fa
+P7: 802b000a
+P8: 00000000000261d2
+P9: 
+P10: 
+
+附加文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERB08F.tmp.dmp
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERB14B.tmp.WERInternalMetadata.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERB19A.tmp.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERB198.tmp.csv
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERB1C8.tmp.txt
+
+可在此处获取这些文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_WinPool.App.exe_96dae3bd34f2fbcd8d1da8646998436eb6c6841_b70e37c3_f97172d3-a03e-4667-a442-b44236494afd
+
+分析符号: 
+重新检查解决方案: 0
+报告 ID: 97aebfdc-288f-48fe-a5c0-31e32cead45e
+报告状态: 268435456
+哈希存储段: 6c1f360dd1c7af7eb4940f101fb08086
+Cab GUID: 0"
+"2026/9/23 20:17:01","Application Error","1000","错误","错误应用程序名称: WinPool.App.exe，版本: 0.5.5.0，时间戳: 0x6a890000
+错误模块名称: Microsoft.UI.Xaml.dll，版本: 3.2.3.0，时间戳: 0x013b7243
+异常代码: 0xc000027b
+错误偏移量: 0x00000000003a9c5d
+错误进程 ID: 0x7b40
+错误应用程序启动时间: 0x01dd4b556e3a99eb
+错误应用程序路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\verification-control-size-20260923-195807-10b39158\Release\WinPool.App.exe
+错误模块路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\verification-control-size-20260923-195807-10b39158\Release\Microsoft.UI.Xaml.dll
+报告 ID: 97aebfdc-288f-48fe-a5c0-31e32cead45e
+错误程序包全名: 
+错误程序包相对应用程序 ID: "
+"2026/9/23 14:43:04","Windows Error Reporting","1001","信息","故障存储段 2107795057917570728，类型 4
+事件名称: APPCRASH
+响应: 不可用
+Cab ID: 0
+
+问题签名:
+P1: WinPool.App.exe
+P2: 0.5.5.0
+P3: 6a890000
+P4: combase.dll
+P5: 10.0.19041.7725
+P6: 7b3ed5fa
+P7: 80004003
+P8: 00000000000261d2
+P9: 
+P10: 
+
+附加文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE192.tmp.dmp
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE2EB.tmp.WERInternalMetadata.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE33A.tmp.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE338.tmp.csv
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE358.tmp.txt
+
+可在此处获取这些文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_WinPool.App.exe_1b37243234db7434cf823b1e0cc54c1218989a9_b70e37c3_b3ea68bb-459f-47de-ac9c-fe9e4215004a
+
+分析符号: 
+重新检查解决方案: 0
+报告 ID: bc02fa86-906a-437a-8997-3e9df174ed8c
+报告状态: 268435456
+哈希存储段: 3412c41e2fbb86a78d40647006802ea8
+Cab GUID: 0"
+"2026/9/23 14:43:03","Application Error","1000","错误","错误应用程序名称: WinPool.App.exe，版本: 0.5.5.0，时间戳: 0x6a890000
+错误模块名称: CoreMessagingXP.dll，版本: 10.0.27200.1048，时间戳: 0x329c7542
+异常代码: 0xc000027b
+错误偏移量: 0x0000000000097de6
+错误进程 ID: 0x4680
+错误应用程序启动时间: 0x01dd4b26931206b7
+错误应用程序路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\verification-20260923-final-r1\Release\WinPool.App.exe
+错误模块路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\verification-20260923-final-r1\Release\CoreMessagingXP.dll
+报告 ID: bc02fa86-906a-437a-8997-3e9df174ed8c
+错误程序包全名: 
+错误程序包相对应用程序 ID: "
+"2026/9/23 13:27:09","Windows Error Reporting","1001","信息","故障存储段 2107795057917570728，类型 4
+事件名称: APPCRASH
+响应: 不可用
+Cab ID: 0
+
+问题签名:
+P1: WinPool.App.exe
+P2: 0.5.5.0
+P3: 6a890000
+P4: combase.dll
+P5: 10.0.19041.7725
+P6: 7b3ed5fa
+P7: 80004003
+P8: 00000000000261d2
+P9: 
+P10: 
+
+附加文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER4D60.tmp.dmp
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER4EE8.tmp.WERInternalMetadata.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER4F37.tmp.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER4F35.tmp.csv
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WER4F55.tmp.txt
+
+可在此处获取这些文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_WinPool.App.exe_1b37243234db7434cf823b1e0cc54c1218989a9_b70e37c3_5f1c9aef-3d7e-4b6a-b776-8690aca6d0ba
+
+分析符号: 
+重新检查解决方案: 0
+报告 ID: ac935cc6-e8e2-46d7-bb1c-709789fea747
+报告状态: 268435456
+哈希存储段: 3412c41e2fbb86a78d40647006802ea8
+Cab GUID: 0"
+"2026/9/23 13:27:03","Application Error","1000","错误","错误应用程序名称: WinPool.App.exe，版本: 0.5.5.0，时间戳: 0x6a890000
+错误模块名称: CoreMessagingXP.dll，版本: 10.0.27200.1048，时间戳: 0x329c7542
+异常代码: 0xc000027b
+错误偏移量: 0x0000000000097de6
+错误进程 ID: 0x7468
+错误应用程序启动时间: 0x01dd4b19114a3580
+错误应用程序路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.App.exe
+错误模块路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\CoreMessagingXP.dll
+报告 ID: ac935cc6-e8e2-46d7-bb1c-709789fea747
+错误程序包全名: 
+错误程序包相对应用程序 ID: "
+"2026/9/22 11:44:05","Windows Error Reporting","1001","信息","故障存储段 2107795057917570728，类型 4
+事件名称: APPCRASH
+响应: 不可用
+Cab ID: 0
+
+问题签名:
+P1: WinPool.App.exe
+P2: 0.5.5.0
+P3: 6a890000
+P4: combase.dll
+P5: 10.0.19041.7725
+P6: 7b3ed5fa
+P7: 80004003
+P8: 00000000000261d2
+P9: 
+P10: 
+
+附加文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE3BB.tmp.dmp
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE513.tmp.WERInternalMetadata.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE563.tmp.xml
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE561.tmp.csv
+\\?\C:\ProgramData\Microsoft\Windows\WER\Temp\WERE581.tmp.txt
+
+可在此处获取这些文件:
+\\?\C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_WinPool.App.exe_1b37243234db7434cf823b1e0cc54c1218989a9_b70e37c3_d308f482-ebf1-49cd-8ade-f361eaaa938b
+
+分析符号: 
+重新检查解决方案: 0
+报告 ID: 5d4e5086-760b-4630-9cc9-1cc68154d5b0
+报告状态: 268435456
+哈希存储段: 3412c41e2fbb86a78d40647006802ea8
+Cab GUID: 0"
+"2026/9/22 11:44:03","Application Error","1000","错误","错误应用程序名称: WinPool.App.exe，版本: 0.5.5.0，时间戳: 0x6a890000
+错误模块名称: CoreMessagingXP.dll，版本: 10.0.27200.1048，时间戳: 0x329c7542
+异常代码: 0xc000027b
+错误偏移量: 0x0000000000097de6
+错误进程 ID: 0xb78
+错误应用程序启动时间: 0x01dd4a410420a714
+错误应用程序路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.App.exe
+错误模块路径: D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\CoreMessagingXP.dll
+报告 ID: 5d4e5086-760b-4630-9cc9-1cc68154d5b0
+错误程序包全名: 
+错误程序包相对应用程序 ID: "

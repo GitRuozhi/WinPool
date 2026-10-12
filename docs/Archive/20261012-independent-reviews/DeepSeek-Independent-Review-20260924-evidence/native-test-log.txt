@@ -1,0 +1,68 @@
+[10:59:46.355] === harness start; evidence=D:\Coding\Research03_WinPool\Temp\20260924_deepseek-review\evidence\native
+[10:59:46.368] log: D:\Coding\Research03_WinPool\Temp\20260924_deepseek-review\evidence\native\native-test-log.txt
+[10:59:46.383] pre-existing WinPool processes: 2
+[10:59:46.399]   pid=42768 WinPool.Agent D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.Agent.exe
+[10:59:46.405]   pid=8788 WinPool.App D:\Coding\Research03_WinPool\Program\WinPool\artifacts\Release\WinPool.App.exe
+[10:59:46.418] crash-log entries before: 1
+[10:59:46.426] --- launching WinPool.App.exe
+[10:59:46.472] spawned pid=42420
+[10:59:46.630] PROCESS EXITED during startup, code=0
+[10:59:46.635] WINDOW NOT FOUND within 45 s
+[10:59:52.653] --- window inventory
+[10:59:52.711] window name='欢迎使用 WinPool ！' handle=12391486 pid=8788 rect=1360,480 720x480
+[10:59:52.717] window name='WinPool' handle=1770526 pid=8788 rect=1000,270 1440x900
+[10:59:52.732] main window selected: '欢迎使用 WinPool ！' pid=8788
+[10:59:52.739] --- dumping UIA tree
+[10:59:52.842] tree nodes: 11
+[10:59:52.848] window size: 720 x 480
+[10:59:52.872] visible (non-offscreen) nodes: 11
+[10:59:52.878] --- top-level container nodes (depth proxy: Nodes with children)
+
+Type   Name                                                                                                                                                    AutomationId       Enabled Offscreen   W   H
+----   ----                                                                                                                                                    ------------       ------- ---------   -   -
+Text   欢迎使用 WinPool ！                                                                                                                                     WelcomeTitleText      True     False 312  38
+Text   最好的 开源免费的 Win 平台存储系统工具。…                                                                                                               WelcomeMessageText    True     False 312 130
+Button 随机切换                                                                                                                                                CycleButton           True     False 100  32
+Text   随机切换                                                                                                                                                                      True     False  56  19
+Button 我知道啦                                                                                                                                                ConfirmButton         True     False 100  32
+Text   我知道啦                                                                                                                                                                      True     False  56  19
+
+
+[10:59:52.931]   [Text] '欢迎使用 WinPool ！' id='WelcomeTitleText' enabled=True offscreen=False 312x38
+[10:59:52.937]   [Text] '最好的 开源免费的 Win 平台存储系统工具。
+原生 WinUI 应用，旨在替代 Windows 老旧的磁盘管理和存储空间的图形界面，支持win 原生软 Raid 和高性能分层存储池。' id='WelcomeMessageText' enabled=True offscreen=False 312x130
+[10:59:52.943]   [Button] '随机切换' id='CycleButton' enabled=True offscreen=False 100x32
+[10:59:52.950]   [Text] '随机切换' id='' enabled=True offscreen=False 56x19
+[10:59:52.956]   [Button] '我知道啦' id='ConfirmButton' enabled=True offscreen=False 100x32
+[10:59:52.963]   [Text] '我知道啦' id='' enabled=True offscreen=False 56x19
+[10:59:52.968] --- screenshot
+[10:59:53.499] screenshot output: {
+  "filePath": "D:\\Coding\\Research03_WinPool\\Temp\\20260924_deepseek-review\\evidence\\native\\shot-00-initial.png",
+  "width": 2168,
+  "height": 928,
+  "processId": 8788,
+  "windowTitle": "WinPool",
+  "hwnd": 1770526,
+  "windows": [
+    {
+      "hwnd": 1770526,
+      "title": "WinPool",
+      "label": "window",
+      "width": 1440,
+      "height": 900,
+      "captured": true
+    },
+    {
+      "hwnd": 12391486,
+      "title": "\u6B22\u8FCE\u4F7F\u7528 WinPool \uFF01",
+      "label": "window",
+      "width": 720,
+      "height": 480,
+      "captured": true
+    }
+  ]
+}
+
+[10:59:53.508] screenshot bytes: 683701
+[10:59:53.516] crash-log entries after: 1 (delta 0)
+[10:59:53.522] === harness end (phase 1)

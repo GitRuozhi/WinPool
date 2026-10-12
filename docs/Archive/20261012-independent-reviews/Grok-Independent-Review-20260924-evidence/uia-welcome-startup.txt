@@ -1,0 +1,13 @@
+WINDOW Name='欢迎使用 WinPool ！' AutomationId='' Class='WinUIDesktopWin32WindowClass' hwnd=12391486 bounds=1360,480,720,480 pid=8788
+   1 Type=ControlType.Pane             Name="Non Client Input Sink Window"           AutoId=""                               Enabled=True Offscreen=False Bounds=1360,480,720,480 Patterns=
+   2 Type=ControlType.Pane             Name=""                                       AutoId=""                               Enabled=True Offscreen=False Bounds=1360,480,720,480 Patterns=
+   3 Type=ControlType.Pane             Name=""                                       AutoId=""                               Enabled=True Offscreen=False Bounds=1360,480,720,480 Patterns=
+   4 Type=ControlType.Image            Name="Welcome mascot"                         AutoId="MascotImage"                    Enabled=True Offscreen=False Bounds=1360,480,345,480 Patterns=ScrollItemPatternIdentifiers.Pattern
+   5 Type=ControlType.Button           Name=""                                       AutoId="CloseButton"                    Enabled=True Offscreen=False Bounds=2038,490,32,32 Patterns=InvokePatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern
+   6 Type=ControlType.Text             Name="欢迎使用 WinPool ！"                         AutoId="WelcomeTitleText"               Enabled=True Offscreen=False Bounds=1714,617,312,38 Patterns=TextPatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern
+   7 Type=ControlType.Text             Name="最好的 开源免费的 Win 平台存储系统工具。
+原生 WinUI 应用，旨在替代 Windows 老旧的磁盘管理和存储空间的图形界面，支持win 原生软 Raid 和高性能分层存储池。" AutoId="WelcomeMessageText"             Enabled=True Offscreen=False Bounds=1714,679,312,130 Patterns=TextPatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern
+   8 Type=ControlType.Button           Name="随机切换"                                   AutoId="CycleButton"                    Enabled=True Offscreen=False Bounds=1388,900,100,32 Patterns=InvokePatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern
+   9 Type=ControlType.Text             Name="随机切换"                                   AutoId=""                               Enabled=True Offscreen=False Bounds=1420,907,56,19 Patterns=TextPatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern
+  10 Type=ControlType.Button           Name="我知道啦"                                   AutoId="ConfirmButton"                  Enabled=True Offscreen=False Bounds=1950,900,100,32 Patterns=InvokePatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern
+  11 Type=ControlType.Text             Name="我知道啦"                                   AutoId=""                               Enabled=True Offscreen=False Bounds=1982,907,56,19 Patterns=TextPatternIdentifiers.Pattern,ScrollItemPatternIdentifiers.Pattern

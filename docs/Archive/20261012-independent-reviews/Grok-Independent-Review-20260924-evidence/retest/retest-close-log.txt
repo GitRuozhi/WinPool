@@ -1,0 +1,23 @@
+close-path retest
+11:36:38.992 start 
+11:36:39.047 no existing app; skip detail attach
+11:36:39.090 launch1 pid=20072
+11:36:48.435 agent1=25708
+11:36:48.802 launch1 welcome-count=1
+11:36:49.098 dismiss1 2000,916
+11:36:50.264 dev1 1686,295
+11:36:51.463 launch1-msgs 采集成功 | 监控异常 | 采集成功
+11:36:51.833 win 'WinPool' bounds=1000,270,1440,900
+11:36:52.459 click Close at 2408,294
+11:36:52.949 app 20072 exited after 0.4s
+11:36:55.065 after launch1 close agent=25708 same=True app-left=0
+11:36:55.076 launch2 pid=11500 reusing-agent
+11:37:04.250 agent-during-launch2=25708 count=1
+11:37:06.424 launch2-msgs 监控异常
+11:37:06.436 launch2-new-monitor-warning-rows=1
+11:37:06.771 win 'WinPool' bounds=1000,270,1440,900
+11:37:07.403 click Close at 2408,294
+11:37:07.863 app 11500 exited after 0.4s
+11:37:08.933 before-cleanup 25708 WinPool.Agent.exe
+11:37:09.493 after-cleanup 
+11:37:09.498 DONE

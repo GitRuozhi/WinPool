@@ -1,0 +1,442 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="d5a53fc8-8a21-4392-b46b-bde87b760c10" name="Admin@DESKTOP-BLE6H18 2026-09-24 10:58:58" runUser="DESKTOP-BLE6H18\Admin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-24T10:58:58.8232615+08:00" queuing="2026-09-24T10:58:58.8232619+08:00" start="2026-09-24T10:58:58.0134469+08:00" finish="2026-09-24T10:58:58.9928591+08:00" />
+  <TestSettings name="default" id="5e96452e-0d20-4625-baf0-7c3e5287fe2e">
+    <Deployment runDeploymentRoot="Admin_DESKTOP-BLE6H18_2026-09-24_10_58_58" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="e7ef9615-e827-43ba-a336-0e2f02f3cb9b" testId="57b184d6-994f-6bb4-a0cf-b3a345929e3f" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SoftwareAssetsAreRepositoryContentAndOriginArtworkStaysLocal" computerName="DESKTOP-BLE6H18" duration="00:00:00.0007940" startTime="2026-09-24T10:58:58.8964394+08:00" endTime="2026-09-24T10:58:58.8964397+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e7ef9615-e827-43ba-a336-0e2f02f3cb9b" />
+    <UnitTestResult executionId="9218afcb-be50-46f9-bdf1-a5c825f9f983" testId="08b8347d-64e6-2300-76c6-cba6a012ad8c" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SolutionDoesNotContainRetiredProjects" computerName="DESKTOP-BLE6H18" duration="00:00:00.0005080" startTime="2026-09-24T10:58:58.9055847+08:00" endTime="2026-09-24T10:58:58.9055849+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9218afcb-be50-46f9-bdf1-a5c825f9f983" />
+    <UnitTestResult executionId="fd959357-2169-432b-9004-d010ed9731e6" testId="97fcdd38-736f-5310-dea7-90a68db70ec6" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TestAndDevelopmentPagesRemainBehindDeveloperModeNavigationGate" computerName="DESKTOP-BLE6H18" duration="00:00:00.0008146" startTime="2026-09-24T10:58:58.7924885+08:00" endTime="2026-09-24T10:58:58.7924886+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fd959357-2169-432b-9004-d010ed9731e6" />
+    <UnitTestResult executionId="31fe0322-f020-40b7-9478-4f1440a26587" testId="0d87b38b-953a-a6dd-69ce-595b4d9fb38e" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DesktopAgentRuntimeDelegatesToFocusedAgentWorkflows" computerName="DESKTOP-BLE6H18" duration="00:00:00.0007654" startTime="2026-09-24T10:58:58.7332741+08:00" endTime="2026-09-24T10:58:58.7332742+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="31fe0322-f020-40b7-9478-4f1440a26587" />
+    <UnitTestResult executionId="31cc4868-df33-4802-b9ef-bfd61e71310b" testId="f0b48a2a-b89e-52fd-10bb-c7625d144544" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.StructureEditorNeverCreatesASecondVirtualDisk" computerName="DESKTOP-BLE6H18" duration="00:00:00.0015388" startTime="2026-09-24T10:58:58.8665736+08:00" endTime="2026-09-24T10:58:58.8665744+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="31cc4868-df33-4802-b9ef-bfd61e71310b" />
+    <UnitTestResult executionId="eef8346b-4709-452b-9e3a-e5e664bd6c04" testId="4cde26b3-e4e2-14f0-9618-90e63dfa4724" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.CurrentInternalDocumentsAreChineseAuthoritativeAndOnlyRootReadmeIsPaired" computerName="DESKTOP-BLE6H18" duration="00:00:00.0079051" startTime="2026-09-24T10:58:58.7925540+08:00" endTime="2026-09-24T10:58:58.7925541+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="eef8346b-4709-452b-9e3a-e5e664bd6c04" />
+    <UnitTestResult executionId="b0df2950-b91b-4b58-8644-a2344b02012c" testId="fa31c005-21ed-452c-4e5c-1647ffb814d3" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.MainWindowPreviewsSavedWorkspaceBeforeAgentRestore" computerName="DESKTOP-BLE6H18" duration="00:00:00.0005439" startTime="2026-09-24T10:58:58.7926494+08:00" endTime="2026-09-24T10:58:58.7926494+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b0df2950-b91b-4b58-8644-a2344b02012c" />
+    <UnitTestResult executionId="cd4cf22e-d878-467a-bd14-277133e1a3f2" testId="4ffcf0f5-e90e-50ac-c80b-b7ae22486e7c" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.V032AcceptanceRecordCarriesTheV02CompatibilityAuditAsExplicitDebt" computerName="DESKTOP-BLE6H18" duration="00:00:00.0004487" startTime="2026-09-24T10:58:58.8993345+08:00" endTime="2026-09-24T10:58:58.8993347+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cd4cf22e-d878-467a-bd14-277133e1a3f2" />
+    <UnitTestResult executionId="a37a0a23-4a54-4053-a420-80655df22301" testId="b1c06a04-2e89-8a6b-4cee-954b3d7e9b2e" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesOwnTheirSurfacesWithoutSectionTitles" computerName="DESKTOP-BLE6H18" duration="00:00:00.0018004" startTime="2026-09-24T10:58:58.7610920+08:00" endTime="2026-09-24T10:58:58.7610923+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a37a0a23-4a54-4053-a420-80655df22301">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "&lt;?xml version="1.0" encoding="utf-8"?&gt;\n&lt;e"···&#xD;
+Not found: "StackPanel MinWidth="412""</Message>
+          <StackTrace>   at WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesOwnTheirSurfacesWithoutSectionTitles() in D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs:line 547&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="9ceb44c7-369c-44a7-aecc-cf59947ba072" testId="14154f90-783d-3979-a24e-acd9aafea143" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NormalManageInventoryRunsThroughAgentInsteadOfUiPowerShell" computerName="DESKTOP-BLE6H18" duration="00:00:00.0090449" startTime="2026-09-24T10:58:58.8573823+08:00" endTime="2026-09-24T10:58:58.8573831+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9ceb44c7-369c-44a7-aecc-cf59947ba072" />
+    <UnitTestResult executionId="ace83ce0-8823-40d2-a183-9b7e1e57457d" testId="8fa30d39-3035-5d35-7a77-0ab222270919" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WorkspaceOperationsUseApplicationNotificationContracts" computerName="DESKTOP-BLE6H18" duration="00:00:00.0029347" startTime="2026-09-24T10:58:58.7940583+08:00" endTime="2026-09-24T10:58:58.7940584+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ace83ce0-8823-40d2-a183-9b7e1e57457d" />
+    <UnitTestResult executionId="a8d21ff0-3d1e-484c-a4c5-4680cfe8d23a" testId="a6230163-13c0-7ba9-1eeb-58f9606dff60" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.CoreProjectsAreRetiredAndProductionUsesApplicationContracts" computerName="DESKTOP-BLE6H18" duration="00:00:00.0651922" startTime="2026-09-24T10:58:58.8466973+08:00" endTime="2026-09-24T10:58:58.8466979+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a8d21ff0-3d1e-484c-a4c5-4680cfe8d23a" />
+    <UnitTestResult executionId="91e18926-fa68-4b2c-b2ee-fe637c3683c6" testId="ddeab157-c1d2-77cc-4309-4283e73b8455" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.AppAndAgentShareTheLocalRunTreeRoot" computerName="DESKTOP-BLE6H18" duration="00:00:00.0011080" startTime="2026-09-24T10:58:58.8797359+08:00" endTime="2026-09-24T10:58:58.8797363+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="91e18926-fa68-4b2c-b2ee-fe637c3683c6" />
+    <UnitTestResult executionId="04de01a1-fc36-42e2-99bf-aaff0a996c50" testId="f0401bec-0ce0-194e-8ac3-5bddb794eef4" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DiskPartitionFormRestoresFileSystemChoicesForEachSelection" computerName="DESKTOP-BLE6H18" duration="00:00:00.0005019" startTime="2026-09-24T10:58:58.7335712+08:00" endTime="2026-09-24T10:58:58.7335712+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="04de01a1-fc36-42e2-99bf-aaff0a996c50" />
+    <UnitTestResult executionId="bb7aae72-e960-48cd-b643-6a368be38f19" testId="da0a4b53-829a-8050-153c-8cffc34c55b0" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.ManageSelectionRulesPreserveFrozenCategoryMapping" computerName="DESKTOP-BLE6H18" duration="00:00:00.0025938" startTime="2026-09-24T10:58:58.7925942+08:00" endTime="2026-09-24T10:58:58.7925942+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bb7aae72-e960-48cd-b643-6a368be38f19" />
+    <UnitTestResult executionId="5658b071-1419-44cc-a575-cfe85c136cd1" testId="7b45d5cd-a245-fa87-cc9a-9cdd8e0b027d" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.FreshWorkspaceDefaultsToTheLocalSystem" computerName="DESKTOP-BLE6H18" duration="00:00:00.0004417" startTime="2026-09-24T10:58:58.9060784+08:00" endTime="2026-09-24T10:58:58.9060785+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5658b071-1419-44cc-a575-cfe85c136cd1" />
+    <UnitTestResult executionId="dc8fdc16-adb2-4311-a9fd-237d872278da" testId="cea0abd1-89e5-8804-bcdf-f70fe216406b" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.IpcProtocolCurrentVersionIsEleven" computerName="DESKTOP-BLE6H18" duration="00:00:00.0002513" startTime="2026-09-24T10:58:58.7335234+08:00" endTime="2026-09-24T10:58:58.7335234+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dc8fdc16-adb2-4311-a9fd-237d872278da" />
+    <UnitTestResult executionId="6208d8d9-d8ef-4b5b-bf74-8bc0e4f46880" testId="d1b91626-4375-e2c9-d914-67a03c24122c" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SettingsKeepDeveloperModeOutOfTheAppearanceCardAndStopUpdatingAfterElevationHandoff" computerName="DESKTOP-BLE6H18" duration="00:00:00.0006824" startTime="2026-09-24T10:58:58.8987597+08:00" endTime="2026-09-24T10:58:58.8987599+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6208d8d9-d8ef-4b5b-bf74-8bc0e4f46880" />
+    <UnitTestResult executionId="d7283eca-212c-433f-b800-7b91466034b2" testId="c19e8140-896e-a952-1185-020b1baf178b" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WindowsTargetedProjectsShareThe26100Tfm" computerName="DESKTOP-BLE6H18" duration="00:00:00.0268966" startTime="2026-09-24T10:58:58.7584295+08:00" endTime="2026-09-24T10:58:58.7584303+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d7283eca-212c-433f-b800-7b91466034b2" />
+    <UnitTestResult executionId="de600903-26c9-498d-b8a8-b3cb917e8bd5" testId="2ed2a9e2-e0af-0790-a11f-2e948c1b8168" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.AppAlignsWindowsDesktopRuntimeWithoutWinFormsUi" computerName="DESKTOP-BLE6H18" duration="00:00:00.0047025" startTime="2026-09-24T10:58:58.9040796+08:00" endTime="2026-09-24T10:58:58.9040798+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="de600903-26c9-498d-b8a8-b3cb917e8bd5" />
+    <UnitTestResult executionId="4610ab6e-6eda-432c-ad17-94cdc56f686c" testId="3141e3f1-0177-ef7b-1b23-2c7de1fcd6a5" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NormalWorkspacePersistenceUsesAgentAndJsonRemainsDeveloperFallbackOnly" computerName="DESKTOP-BLE6H18" duration="00:00:00.0003772" startTime="2026-09-24T10:58:58.7926223+08:00" endTime="2026-09-24T10:58:58.7926223+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4610ab6e-6eda-432c-ad17-94cdc56f686c" />
+    <UnitTestResult executionId="54e1d3c4-f0eb-4324-a9f6-f8c28e92b69c" testId="c5270ecc-0e9f-9fa3-6733-7a36afe3b76d" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PreferenceFilesHaveExactlyOneWriterProcessEach" computerName="DESKTOP-BLE6H18" duration="00:00:00.0063435" startTime="2026-09-24T10:58:58.8730189+08:00" endTime="2026-09-24T10:58:58.8730193+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="54e1d3c4-f0eb-4324-a9f6-f8c28e92b69c" />
+    <UnitTestResult executionId="32a60e90-f0d3-4e45-847d-5e76816e48c0" testId="4f02db75-3720-81eb-d448-65b960369dd0" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesSubmitCanonicalApplicationSimulationOperations" computerName="DESKTOP-BLE6H18" duration="00:00:00.0017010" startTime="2026-09-24T10:58:58.9078684+08:00" endTime="2026-09-24T10:58:58.9078688+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="32a60e90-f0d3-4e45-847d-5e76816e48c0" />
+    <UnitTestResult executionId="64c47446-e673-483d-b5d9-9379e4586a38" testId="a07f53ea-b459-ae8d-974a-10354373f305" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SettingsDataLocationSwitchUsesVerifiedMigrationInsteadOfLegacyDirectCopy" computerName="DESKTOP-BLE6H18" duration="00:00:00.0011447" startTime="2026-09-24T10:58:58.8785532+08:00" endTime="2026-09-24T10:58:58.8785538+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="64c47446-e673-483d-b5d9-9379e4586a38" />
+    <UnitTestResult executionId="edcd0fd0-cf91-44b1-b5fb-f5c7e9677fa1" testId="0f3c8ccd-b785-93d5-1d39-e7581efcea98" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.MainWindowExposesStableKeyboardShortcutsForAllSixPages" computerName="DESKTOP-BLE6H18" duration="00:00:00.0157477" startTime="2026-09-24T10:58:58.8955632+08:00" endTime="2026-09-24T10:58:58.8955635+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="edcd0fd0-cf91-44b1-b5fb-f5c7e9677fa1" />
+    <UnitTestResult executionId="e8a94eb0-f5cd-4288-84b7-c83bf0b4c74a" testId="482e4bbd-946f-51b0-5109-c6ddf0ddefde" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NativeDiskPropertiesDoesNotRunAFullInventoryScan" computerName="DESKTOP-BLE6H18" duration="00:00:00.0006129" startTime="2026-09-24T10:58:58.8473510+08:00" endTime="2026-09-24T10:58:58.8473512+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e8a94eb0-f5cd-4288-84b7-c83bf0b4c74a" />
+    <UnitTestResult executionId="d331eb6b-0dc1-464c-9a8a-38f556093fd7" testId="df0729b2-5bd3-c944-cb5e-318dfd9971f5" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.ManageTopologyConsumesApplicationProjectionContract" computerName="DESKTOP-BLE6H18" duration="00:00:00.0011819" startTime="2026-09-24T10:58:58.7334793+08:00" endTime="2026-09-24T10:58:58.7334793+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d331eb6b-0dc1-464c-9a8a-38f556093fd7" />
+    <UnitTestResult executionId="84603dde-3015-4971-a1f9-2c26ca5efb7c" testId="1dbea775-74a8-9be7-642c-6c3616046204" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NoProductionProjectReferencesRetiredSubsystems" computerName="DESKTOP-BLE6H18" duration="00:00:00.0018474" startTime="2026-09-24T10:58:58.9125757+08:00" endTime="2026-09-24T10:58:58.9125761+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="84603dde-3015-4971-a1f9-2c26ca5efb7c" />
+    <UnitTestResult executionId="f68b1932-a210-4251-9912-df6cb268cf1e" testId="6ae88376-f923-7fca-fca0-d441f44405a2" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.MonitorPageBackgroundModeHasStableKeyboardAccessKey" computerName="DESKTOP-BLE6H18" duration="00:00:00.0006593" startTime="2026-09-24T10:58:58.8979290+08:00" endTime="2026-09-24T10:58:58.8979292+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f68b1932-a210-4251-9912-df6cb268cf1e">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "using System.Collections.ObjectModel;\nusi"···&#xD;
+Not found: "SetRateAsync"</Message>
+          <StackTrace>   at WinPool.Architecture.Tests.ArchitectureBoundaryTests.MonitorPageBackgroundModeHasStableKeyboardAccessKey() in D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs:line 1171&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b52d3882-97c1-468c-8f8e-fa47079645c3" testId="fce20087-7457-bbb0-617d-36cbd07f62a6" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TopologySurfacesKeepPerSurfaceViewportState" computerName="DESKTOP-BLE6H18" duration="00:00:00.0041702" startTime="2026-09-24T10:58:58.8772882+08:00" endTime="2026-09-24T10:58:58.8772889+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b52d3882-97c1-468c-8f8e-fa47079645c3" />
+    <UnitTestResult executionId="eb4c49e1-13ed-4a83-83b1-95e52147877f" testId="6f300d98-aa43-c6ba-e7ef-16bfa8e75bb1" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SqliteStoreSchemaVersionIsSeventeen" computerName="DESKTOP-BLE6H18" duration="00:00:00.0004803" startTime="2026-09-24T10:58:58.9102347+08:00" endTime="2026-09-24T10:58:58.9102351+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="eb4c49e1-13ed-4a83-83b1-95e52147877f" />
+    <UnitTestResult executionId="0204c493-2a29-42b9-b993-e424cf27d26b" testId="1b32840a-db14-32c8-aeab-d3afb6839b37" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DeploymentPublishIncludesEveryProcessRuntime" computerName="DESKTOP-BLE6H18" duration="00:00:00.0004453" startTime="2026-09-24T10:58:58.8482730+08:00" endTime="2026-09-24T10:58:58.8482731+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0204c493-2a29-42b9-b993-e424cf27d26b" />
+    <UnitTestResult executionId="4ce6bc8b-0591-47f7-b217-139b11c64b8e" testId="7b99184e-bf7c-6c6f-200d-4f0d520cbe7c" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PropertyTablesExposeOnlyExplicitCopyAndRawFieldContextActions" computerName="DESKTOP-BLE6H18" duration="00:00:00.0065892" startTime="2026-09-24T10:58:58.7000336+08:00" endTime="2026-09-24T10:58:58.7000634+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4ce6bc8b-0591-47f7-b217-139b11c64b8e" />
+    <UnitTestResult executionId="89f198b5-a876-4bd1-afd2-eff3a1443b51" testId="036f2939-f776-1b01-a1ef-73bd9582a790" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DeveloperNavigationIsDisabledByDefaultAndGatesAllThreePages" computerName="DESKTOP-BLE6H18" duration="00:00:00.0008405" startTime="2026-09-24T10:58:58.7336021+08:00" endTime="2026-09-24T10:58:58.7336021+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="89f198b5-a876-4bd1-afd2-eff3a1443b51" />
+    <UnitTestResult executionId="486fd948-51e7-4a8d-a5cd-44e438ba3429" testId="f4dbd1c3-79c5-0185-5926-082394588f51" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis(projectName: &quot;WinPool.Application&quot;)" computerName="DESKTOP-BLE6H18" duration="00:00:00.0059602" startTime="2026-09-24T10:58:58.8634200+08:00" endTime="2026-09-24T10:58:58.8634203+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="486fd948-51e7-4a8d-a5cd-44e438ba3429" />
+    <UnitTestResult executionId="7c923b86-a869-443b-8712-c0dc32d3dd91" testId="4d6e1d25-83e8-b3a0-10b8-1529ecc2b83d" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages" computerName="DESKTOP-BLE6H18" duration="00:00:00.0197277" startTime="2026-09-24T10:58:58.7324345+08:00" endTime="2026-09-24T10:58:58.7324347+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7c923b86-a869-443b-8712-c0dc32d3dd91">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Equal() Failure: Strings differ&#xD;
+           ↓ (pos 0)&#xD;
+Expected: "TextBox"&#xD;
+Actual:   "Border"&#xD;
+           ↑ (pos 0)</Message>
+          <StackTrace>   at WinPool.Architecture.Tests.ArchitectureBoundaryTests.DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages() in D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs:line 1313&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="15e420ad-2ec3-4c5f-9a54-c0043dfc6b68" testId="593404d3-ef70-7f31-9e29-5a47f6d5dbfd" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DocumentationArchitectureSupportsAnOptionalActivePlanAndACompleteV02Archive" computerName="DESKTOP-BLE6H18" duration="00:00:00.0008762" startTime="2026-09-24T10:58:58.9050188+08:00" endTime="2026-09-24T10:58:58.9050191+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="15e420ad-2ec3-4c5f-9a54-c0043dfc6b68" />
+    <UnitTestResult executionId="21afd058-f6dd-4fdb-b33c-61e7ea12df4a" testId="2c4ffb24-eda8-5668-0d05-b4b224b48124" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis(projectName: &quot;WinPool.Execution&quot;)" computerName="DESKTOP-BLE6H18" duration="00:00:00.0006434" startTime="2026-09-24T10:58:58.8649837+08:00" endTime="2026-09-24T10:58:58.8649841+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="21afd058-f6dd-4fdb-b33c-61e7ea12df4a" />
+    <UnitTestResult executionId="0761fdff-1f33-4f16-8f8d-9ce2976c7c46" testId="61adb9cd-e6cb-b148-8e47-ee90b87ac5eb" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.CustomAccentColorDoesNotMutateWinUiThemeDictionaries" computerName="DESKTOP-BLE6H18" duration="00:00:00.0006451" startTime="2026-09-24T10:58:58.8979975+08:00" endTime="2026-09-24T10:58:58.8979975+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0761fdff-1f33-4f16-8f8d-9ce2976c7c46" />
+    <UnitTestResult executionId="02876801-e370-4093-8758-60f79d3abc8f" testId="75119493-8129-9042-b0b4-9c4dbe5e904c" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WelcomeDialogUsesKeyboardAccessibleNativePrimaryButton" computerName="DESKTOP-BLE6H18" duration="00:00:00.0004603" startTime="2026-09-24T10:58:58.7929974+08:00" endTime="2026-09-24T10:58:58.7929974+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="02876801-e370-4093-8758-60f79d3abc8f" />
+    <UnitTestResult executionId="0f777fc5-f5fb-4f0d-b900-d54f4eb54e40" testId="9bd2df38-030f-9a2e-78d7-840b156d3940" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NewDomainAndApplicationProjectsFollowApprovedDependencyDirection" computerName="DESKTOP-BLE6H18" duration="00:00:00.0032149" startTime="2026-09-24T10:58:58.7925253+08:00" endTime="2026-09-24T10:58:58.7925254+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0f777fc5-f5fb-4f0d-b900-d54f4eb54e40" />
+    <UnitTestResult executionId="9e7ff71a-3414-45a3-b2ca-6d39a9fdc310" testId="ac864fc2-31c1-bd7d-507b-3d505cf86f2c" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.ProductFacingVersionUsesTheRepositoryVersionSource" computerName="DESKTOP-BLE6H18" duration="00:00:00.0008956" startTime="2026-09-24T10:58:58.7922687+08:00" endTime="2026-09-24T10:58:58.7922689+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9e7ff71a-3414-45a3-b2ca-6d39a9fdc310">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "&lt;Project&gt;\r\n  &lt;PropertyGroup&gt;\r\n    &lt;!-- Va"···&#xD;
+Not found: "&lt;WinPoolVersionIteration&gt;5&lt;/WinPoolVersio"···</Message>
+          <StackTrace>   at WinPool.Architecture.Tests.ArchitectureBoundaryTests.ProductFacingVersionUsesTheRepositoryVersionSource() in D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs:line 866&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e4155bf2-9264-465a-9a49-4e1e4e5ec1b2" testId="07c0810e-169d-4a2c-558c-84fe87bb0311" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails" computerName="DESKTOP-BLE6H18" duration="00:00:00.0016534" startTime="2026-09-24T10:58:58.9099971+08:00" endTime="2026-09-24T10:58:58.9099973+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e4155bf2-9264-465a-9a49-4e1e4e5ec1b2">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "using System.Collections.ObjectModel;\nusi"···&#xD;
+Not found: "UpdateIssueStates("</Message>
+          <StackTrace>   at WinPool.Architecture.Tests.ArchitectureBoundaryTests.NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails() in D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs:line 1408&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="cd04d3a9-fcac-4a2a-911f-5aa1bfe8ebba" testId="7bad7595-df2d-03bc-2095-8d68c012c90f" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TestPageIsAWinPoolTwoRoadmapPlaceholder" computerName="DESKTOP-BLE6H18" duration="00:00:00.0003576" startTime="2026-09-24T10:58:58.8477733+08:00" endTime="2026-09-24T10:58:58.8477734+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="cd04d3a9-fcac-4a2a-911f-5aa1bfe8ebba" />
+    <UnitTestResult executionId="73b08484-0dca-40dc-b469-8108e92434a0" testId="93c00700-233a-d3e4-2985-b50d70f7a64d" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WindowsAppSdkIs24Stable" computerName="DESKTOP-BLE6H18" duration="00:00:00.0003387" startTime="2026-09-24T10:58:58.9106454+08:00" endTime="2026-09-24T10:58:58.9106455+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="73b08484-0dca-40dc-b469-8108e92434a0" />
+    <UnitTestResult executionId="e3653d7c-7f99-4f40-bc32-dec462b34757" testId="1bacb716-4e9d-42e1-5035-df9addf7574a" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis(projectName: &quot;WinPool.Domain&quot;)" computerName="DESKTOP-BLE6H18" duration="00:00:00.0007662" startTime="2026-09-24T10:58:58.8642532+08:00" endTime="2026-09-24T10:58:58.8642534+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e3653d7c-7f99-4f40-bc32-dec462b34757" />
+    <UnitTestResult executionId="4eaf7709-2f9e-4c1f-848e-4fb889f33aba" testId="9f3b80c0-7e55-4466-73b2-958d405c271d" testName="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TitleBarProvidesStorageSystemSelector" computerName="DESKTOP-BLE6H18" duration="00:00:00.0004110" startTime="2026-09-24T10:58:58.7929556+08:00" endTime="2026-09-24T10:58:58.7929559+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4eaf7709-2f9e-4c1f-848e-4fb889f33aba">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "&lt;?xml version="1.0" encoding="utf-8" ?&gt;\n&lt;"···&#xD;
+Not found: "Width="320""</Message>
+          <StackTrace>   at WinPool.Architecture.Tests.ArchitectureBoundaryTests.TitleBarProvidesStorageSystemSelector() in D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs:line 1013&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NewDomainAndApplicationProjectsFollowApprovedDependencyDirection" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="9bd2df38-030f-9a2e-78d7-840b156d3940">
+      <Execution id="0f777fc5-f5fb-4f0d-b900-d54f4eb54e40" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="NewDomainAndApplicationProjectsFollowApprovedDependencyDirection" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DiskPartitionFormRestoresFileSystemChoicesForEachSelection" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="f0401bec-0ce0-194e-8ac3-5bddb794eef4">
+      <Execution id="04de01a1-fc36-42e2-99bf-aaff0a996c50" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="DiskPartitionFormRestoresFileSystemChoicesForEachSelection" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PropertyTablesExposeOnlyExplicitCopyAndRawFieldContextActions" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="7b99184e-bf7c-6c6f-200d-4f0d520cbe7c">
+      <Execution id="4ce6bc8b-0591-47f7-b217-139b11c64b8e" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="PropertyTablesExposeOnlyExplicitCopyAndRawFieldContextActions" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.V032AcceptanceRecordCarriesTheV02CompatibilityAuditAsExplicitDebt" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="4ffcf0f5-e90e-50ac-c80b-b7ae22486e7c">
+      <Execution id="cd4cf22e-d878-467a-bd14-277133e1a3f2" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="V032AcceptanceRecordCarriesTheV02CompatibilityAuditAsExplicitDebt" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WindowsAppSdkIs24Stable" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="93c00700-233a-d3e4-2985-b50d70f7a64d">
+      <Execution id="73b08484-0dca-40dc-b469-8108e92434a0" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="WindowsAppSdkIs24Stable" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DeveloperNavigationIsDisabledByDefaultAndGatesAllThreePages" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="036f2939-f776-1b01-a1ef-73bd9582a790">
+      <Execution id="89f198b5-a876-4bd1-afd2-eff3a1443b51" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="DeveloperNavigationIsDisabledByDefaultAndGatesAllThreePages" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.AppAndAgentShareTheLocalRunTreeRoot" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="ddeab157-c1d2-77cc-4309-4283e73b8455">
+      <Execution id="91e18926-fa68-4b2c-b2ee-fe637c3683c6" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="AppAndAgentShareTheLocalRunTreeRoot" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.FreshWorkspaceDefaultsToTheLocalSystem" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="7b45d5cd-a245-fa87-cc9a-9cdd8e0b027d">
+      <Execution id="5658b071-1419-44cc-a575-cfe85c136cd1" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="FreshWorkspaceDefaultsToTheLocalSystem" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.ProductFacingVersionUsesTheRepositoryVersionSource" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="ac864fc2-31c1-bd7d-507b-3d505cf86f2c">
+      <Execution id="9e7ff71a-3414-45a3-b2ca-6d39a9fdc310" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="ProductFacingVersionUsesTheRepositoryVersionSource" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SolutionDoesNotContainRetiredProjects" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="08b8347d-64e6-2300-76c6-cba6a012ad8c">
+      <Execution id="9218afcb-be50-46f9-bdf1-a5c825f9f983" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="SolutionDoesNotContainRetiredProjects" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TopologySurfacesKeepPerSurfaceViewportState" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="fce20087-7457-bbb0-617d-36cbd07f62a6">
+      <Execution id="b52d3882-97c1-468c-8f8e-fa47079645c3" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="TopologySurfacesKeepPerSurfaceViewportState" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.MainWindowExposesStableKeyboardShortcutsForAllSixPages" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="0f3c8ccd-b785-93d5-1d39-e7581efcea98">
+      <Execution id="edcd0fd0-cf91-44b1-b5fb-f5c7e9677fa1" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="MainWindowExposesStableKeyboardShortcutsForAllSixPages" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesSubmitCanonicalApplicationSimulationOperations" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="4f02db75-3720-81eb-d448-65b960369dd0">
+      <Execution id="32a60e90-f0d3-4e45-847d-5e76816e48c0" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="EditorPagesSubmitCanonicalApplicationSimulationOperations" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DeploymentPublishIncludesEveryProcessRuntime" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="1b32840a-db14-32c8-aeab-d3afb6839b37">
+      <Execution id="0204c493-2a29-42b9-b993-e424cf27d26b" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="DeploymentPublishIncludesEveryProcessRuntime" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="07c0810e-169d-4a2c-558c-84fe87bb0311">
+      <Execution id="e4155bf2-9264-465a-9a49-4e1e4e5ec1b2" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.ManageTopologyConsumesApplicationProjectionContract" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="df0729b2-5bd3-c944-cb5e-318dfd9971f5">
+      <Execution id="d331eb6b-0dc1-464c-9a8a-38f556093fd7" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="ManageTopologyConsumesApplicationProjectionContract" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NoProductionProjectReferencesRetiredSubsystems" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="1dbea775-74a8-9be7-642c-6c3616046204">
+      <Execution id="84603dde-3015-4971-a1f9-2c26ca5efb7c" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="NoProductionProjectReferencesRetiredSubsystems" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SettingsKeepDeveloperModeOutOfTheAppearanceCardAndStopUpdatingAfterElevationHandoff" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="d1b91626-4375-e2c9-d914-67a03c24122c">
+      <Execution id="6208d8d9-d8ef-4b5b-bf74-8bc0e4f46880" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="SettingsKeepDeveloperModeOutOfTheAppearanceCardAndStopUpdatingAfterElevationHandoff" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NativeDiskPropertiesDoesNotRunAFullInventoryScan" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="482e4bbd-946f-51b0-5109-c6ddf0ddefde">
+      <Execution id="e8a94eb0-f5cd-4288-84b7-c83bf0b4c74a" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="NativeDiskPropertiesDoesNotRunAFullInventoryScan" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WorkspaceOperationsUseApplicationNotificationContracts" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="8fa30d39-3035-5d35-7a77-0ab222270919">
+      <Execution id="ace83ce0-8823-40d2-a183-9b7e1e57457d" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="WorkspaceOperationsUseApplicationNotificationContracts" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TestPageIsAWinPoolTwoRoadmapPlaceholder" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="7bad7595-df2d-03bc-2095-8d68c012c90f">
+      <Execution id="cd04d3a9-fcac-4a2a-911f-5aa1bfe8ebba" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="TestPageIsAWinPoolTwoRoadmapPlaceholder" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WindowsTargetedProjectsShareThe26100Tfm" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="c19e8140-896e-a952-1185-020b1baf178b">
+      <Execution id="d7283eca-212c-433f-b800-7b91466034b2" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="WindowsTargetedProjectsShareThe26100Tfm" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesOwnTheirSurfacesWithoutSectionTitles" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="b1c06a04-2e89-8a6b-4cee-954b3d7e9b2e">
+      <Execution id="a37a0a23-4a54-4053-a420-80655df22301" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="EditorPagesOwnTheirSurfacesWithoutSectionTitles" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SettingsDataLocationSwitchUsesVerifiedMigrationInsteadOfLegacyDirectCopy" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="a07f53ea-b459-ae8d-974a-10354373f305">
+      <Execution id="64c47446-e673-483d-b5d9-9379e4586a38" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="SettingsDataLocationSwitchUsesVerifiedMigrationInsteadOfLegacyDirectCopy" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.WelcomeDialogUsesKeyboardAccessibleNativePrimaryButton" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="75119493-8129-9042-b0b4-9c4dbe5e904c">
+      <Execution id="02876801-e370-4093-8758-60f79d3abc8f" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="WelcomeDialogUsesKeyboardAccessibleNativePrimaryButton" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis(projectName: &quot;WinPool.Application&quot;)" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="f4dbd1c3-79c5-0185-5926-082394588f51">
+      <Execution id="486fd948-51e7-4a8d-a5cd-44e438ba3429" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DesktopAgentRuntimeDelegatesToFocusedAgentWorkflows" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="0d87b38b-953a-a6dd-69ce-595b4d9fb38e">
+      <Execution id="31fe0322-f020-40b7-9478-4f1440a26587" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="DesktopAgentRuntimeDelegatesToFocusedAgentWorkflows" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SqliteStoreSchemaVersionIsSeventeen" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="6f300d98-aa43-c6ba-e7ef-16bfa8e75bb1">
+      <Execution id="eb4c49e1-13ed-4a83-83b1-95e52147877f" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="SqliteStoreSchemaVersionIsSeventeen" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DocumentationArchitectureSupportsAnOptionalActivePlanAndACompleteV02Archive" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="593404d3-ef70-7f31-9e29-5a47f6d5dbfd">
+      <Execution id="15e420ad-2ec3-4c5f-9a54-c0043dfc6b68" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="DocumentationArchitectureSupportsAnOptionalActivePlanAndACompleteV02Archive" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PreferenceFilesHaveExactlyOneWriterProcessEach" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="c5270ecc-0e9f-9fa3-6733-7a36afe3b76d">
+      <Execution id="54e1d3c4-f0eb-4324-a9f6-f8c28e92b69c" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="PreferenceFilesHaveExactlyOneWriterProcessEach" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.ManageSelectionRulesPreserveFrozenCategoryMapping" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="da0a4b53-829a-8050-153c-8cffc34c55b0">
+      <Execution id="bb7aae72-e960-48cd-b643-6a368be38f19" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="ManageSelectionRulesPreserveFrozenCategoryMapping" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="4d6e1d25-83e8-b3a0-10b8-1529ecc2b83d">
+      <Execution id="7c923b86-a869-443b-8712-c0dc32d3dd91" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.MainWindowPreviewsSavedWorkspaceBeforeAgentRestore" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="fa31c005-21ed-452c-4e5c-1647ffb814d3">
+      <Execution id="b0df2950-b91b-4b58-8644-a2344b02012c" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="MainWindowPreviewsSavedWorkspaceBeforeAgentRestore" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.StructureEditorNeverCreatesASecondVirtualDisk" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="f0b48a2a-b89e-52fd-10bb-c7625d144544">
+      <Execution id="31cc4868-df33-4802-b9ef-bfd61e71310b" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="StructureEditorNeverCreatesASecondVirtualDisk" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis(projectName: &quot;WinPool.Execution&quot;)" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="2c4ffb24-eda8-5668-0d05-b4b224b48124">
+      <Execution id="21afd058-f6dd-4fdb-b33c-61e7ea12df4a" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TestAndDevelopmentPagesRemainBehindDeveloperModeNavigationGate" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="97fcdd38-736f-5310-dea7-90a68db70ec6">
+      <Execution id="fd959357-2169-432b-9004-d010ed9731e6" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="TestAndDevelopmentPagesRemainBehindDeveloperModeNavigationGate" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis(projectName: &quot;WinPool.Domain&quot;)" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="1bacb716-4e9d-42e1-5035-df9addf7574a">
+      <Execution id="e3653d7c-7f99-4f40-bc32-dec462b34757" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="PureLayersDoNotReferenceUiDatabasePowershellOrProcessApis" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.MonitorPageBackgroundModeHasStableKeyboardAccessKey" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="6ae88376-f923-7fca-fca0-d441f44405a2">
+      <Execution id="f68b1932-a210-4251-9912-df6cb268cf1e" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="MonitorPageBackgroundModeHasStableKeyboardAccessKey" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NormalWorkspacePersistenceUsesAgentAndJsonRemainsDeveloperFallbackOnly" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="3141e3f1-0177-ef7b-1b23-2c7de1fcd6a5">
+      <Execution id="4610ab6e-6eda-432c-ad17-94cdc56f686c" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="NormalWorkspacePersistenceUsesAgentAndJsonRemainsDeveloperFallbackOnly" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.TitleBarProvidesStorageSystemSelector" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="9f3b80c0-7e55-4466-73b2-958d405c271d">
+      <Execution id="4eaf7709-2f9e-4c1f-848e-4fb889f33aba" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="TitleBarProvidesStorageSystemSelector" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.CustomAccentColorDoesNotMutateWinUiThemeDictionaries" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="61adb9cd-e6cb-b148-8e47-ee90b87ac5eb">
+      <Execution id="0761fdff-1f33-4f16-8f8d-9ce2976c7c46" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="CustomAccentColorDoesNotMutateWinUiThemeDictionaries" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.IpcProtocolCurrentVersionIsEleven" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="cea0abd1-89e5-8804-bcdf-f70fe216406b">
+      <Execution id="dc8fdc16-adb2-4311-a9fd-237d872278da" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="IpcProtocolCurrentVersionIsEleven" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.CurrentInternalDocumentsAreChineseAuthoritativeAndOnlyRootReadmeIsPaired" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="4cde26b3-e4e2-14f0-9618-90e63dfa4724">
+      <Execution id="eef8346b-4709-452b-9e3a-e5e664bd6c04" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="CurrentInternalDocumentsAreChineseAuthoritativeAndOnlyRootReadmeIsPaired" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.NormalManageInventoryRunsThroughAgentInsteadOfUiPowerShell" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="14154f90-783d-3979-a24e-acd9aafea143">
+      <Execution id="9ceb44c7-369c-44a7-aecc-cf59947ba072" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="NormalManageInventoryRunsThroughAgentInsteadOfUiPowerShell" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.CoreProjectsAreRetiredAndProductionUsesApplicationContracts" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="a6230163-13c0-7ba9-1eeb-58f9606dff60">
+      <Execution id="a8d21ff0-3d1e-484c-a4c5-4680cfe8d23a" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="CoreProjectsAreRetiredAndProductionUsesApplicationContracts" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.AppAlignsWindowsDesktopRuntimeWithoutWinFormsUi" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="2ed2a9e2-e0af-0790-a11f-2e948c1b8168">
+      <Execution id="de600903-26c9-498d-b8a8-b3cb917e8bd5" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="AppAlignsWindowsDesktopRuntimeWithoutWinFormsUi" />
+    </UnitTest>
+    <UnitTest name="WinPool.Architecture.Tests.ArchitectureBoundaryTests.SoftwareAssetsAreRepositoryContentAndOriginArtworkStaysLocal" storage="d:\coding\research03_winpool\program\winpool\artifacts\build\winpool.architecture.tests\release\net10.0\winpool.architecture.tests.dll" id="57b184d6-994f-6bb4-a0cf-b3a345929e3f">
+      <Execution id="e7ef9615-e827-43ba-a336-0e2f02f3cb9b" />
+      <TestMethod codeBase="D:\Coding\Research03_WinPool\Program\WinPool\artifacts\build\WinPool.Architecture.Tests\Release\net10.0\WinPool.Architecture.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="WinPool.Architecture.Tests.ArchitectureBoundaryTests" name="SoftwareAssetsAreRepositoryContentAndOriginArtworkStaysLocal" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="57b184d6-994f-6bb4-a0cf-b3a345929e3f" executionId="e7ef9615-e827-43ba-a336-0e2f02f3cb9b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="08b8347d-64e6-2300-76c6-cba6a012ad8c" executionId="9218afcb-be50-46f9-bdf1-a5c825f9f983" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="97fcdd38-736f-5310-dea7-90a68db70ec6" executionId="fd959357-2169-432b-9004-d010ed9731e6" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0d87b38b-953a-a6dd-69ce-595b4d9fb38e" executionId="31fe0322-f020-40b7-9478-4f1440a26587" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f0b48a2a-b89e-52fd-10bb-c7625d144544" executionId="31cc4868-df33-4802-b9ef-bfd61e71310b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4cde26b3-e4e2-14f0-9618-90e63dfa4724" executionId="eef8346b-4709-452b-9e3a-e5e664bd6c04" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fa31c005-21ed-452c-4e5c-1647ffb814d3" executionId="b0df2950-b91b-4b58-8644-a2344b02012c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4ffcf0f5-e90e-50ac-c80b-b7ae22486e7c" executionId="cd4cf22e-d878-467a-bd14-277133e1a3f2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b1c06a04-2e89-8a6b-4cee-954b3d7e9b2e" executionId="a37a0a23-4a54-4053-a420-80655df22301" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="14154f90-783d-3979-a24e-acd9aafea143" executionId="9ceb44c7-369c-44a7-aecc-cf59947ba072" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="8fa30d39-3035-5d35-7a77-0ab222270919" executionId="ace83ce0-8823-40d2-a183-9b7e1e57457d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a6230163-13c0-7ba9-1eeb-58f9606dff60" executionId="a8d21ff0-3d1e-484c-a4c5-4680cfe8d23a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ddeab157-c1d2-77cc-4309-4283e73b8455" executionId="91e18926-fa68-4b2c-b2ee-fe637c3683c6" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f0401bec-0ce0-194e-8ac3-5bddb794eef4" executionId="04de01a1-fc36-42e2-99bf-aaff0a996c50" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="da0a4b53-829a-8050-153c-8cffc34c55b0" executionId="bb7aae72-e960-48cd-b643-6a368be38f19" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7b45d5cd-a245-fa87-cc9a-9cdd8e0b027d" executionId="5658b071-1419-44cc-a575-cfe85c136cd1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="cea0abd1-89e5-8804-bcdf-f70fe216406b" executionId="dc8fdc16-adb2-4311-a9fd-237d872278da" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d1b91626-4375-e2c9-d914-67a03c24122c" executionId="6208d8d9-d8ef-4b5b-bf74-8bc0e4f46880" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c19e8140-896e-a952-1185-020b1baf178b" executionId="d7283eca-212c-433f-b800-7b91466034b2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2ed2a9e2-e0af-0790-a11f-2e948c1b8168" executionId="de600903-26c9-498d-b8a8-b3cb917e8bd5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="3141e3f1-0177-ef7b-1b23-2c7de1fcd6a5" executionId="4610ab6e-6eda-432c-ad17-94cdc56f686c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c5270ecc-0e9f-9fa3-6733-7a36afe3b76d" executionId="54e1d3c4-f0eb-4324-a9f6-f8c28e92b69c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4f02db75-3720-81eb-d448-65b960369dd0" executionId="32a60e90-f0d3-4e45-847d-5e76816e48c0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a07f53ea-b459-ae8d-974a-10354373f305" executionId="64c47446-e673-483d-b5d9-9379e4586a38" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0f3c8ccd-b785-93d5-1d39-e7581efcea98" executionId="edcd0fd0-cf91-44b1-b5fb-f5c7e9677fa1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="482e4bbd-946f-51b0-5109-c6ddf0ddefde" executionId="e8a94eb0-f5cd-4288-84b7-c83bf0b4c74a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="df0729b2-5bd3-c944-cb5e-318dfd9971f5" executionId="d331eb6b-0dc1-464c-9a8a-38f556093fd7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1dbea775-74a8-9be7-642c-6c3616046204" executionId="84603dde-3015-4971-a1f9-2c26ca5efb7c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6ae88376-f923-7fca-fca0-d441f44405a2" executionId="f68b1932-a210-4251-9912-df6cb268cf1e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fce20087-7457-bbb0-617d-36cbd07f62a6" executionId="b52d3882-97c1-468c-8f8e-fa47079645c3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6f300d98-aa43-c6ba-e7ef-16bfa8e75bb1" executionId="eb4c49e1-13ed-4a83-83b1-95e52147877f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1b32840a-db14-32c8-aeab-d3afb6839b37" executionId="0204c493-2a29-42b9-b993-e424cf27d26b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7b99184e-bf7c-6c6f-200d-4f0d520cbe7c" executionId="4ce6bc8b-0591-47f7-b217-139b11c64b8e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="036f2939-f776-1b01-a1ef-73bd9582a790" executionId="89f198b5-a876-4bd1-afd2-eff3a1443b51" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f4dbd1c3-79c5-0185-5926-082394588f51" executionId="486fd948-51e7-4a8d-a5cd-44e438ba3429" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4d6e1d25-83e8-b3a0-10b8-1529ecc2b83d" executionId="7c923b86-a869-443b-8712-c0dc32d3dd91" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="593404d3-ef70-7f31-9e29-5a47f6d5dbfd" executionId="15e420ad-2ec3-4c5f-9a54-c0043dfc6b68" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2c4ffb24-eda8-5668-0d05-b4b224b48124" executionId="21afd058-f6dd-4fdb-b33c-61e7ea12df4a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="61adb9cd-e6cb-b148-8e47-ee90b87ac5eb" executionId="0761fdff-1f33-4f16-8f8d-9ce2976c7c46" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="75119493-8129-9042-b0b4-9c4dbe5e904c" executionId="02876801-e370-4093-8758-60f79d3abc8f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9bd2df38-030f-9a2e-78d7-840b156d3940" executionId="0f777fc5-f5fb-4f0d-b900-d54f4eb54e40" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ac864fc2-31c1-bd7d-507b-3d505cf86f2c" executionId="9e7ff71a-3414-45a3-b2ca-6d39a9fdc310" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="07c0810e-169d-4a2c-558c-84fe87bb0311" executionId="e4155bf2-9264-465a-9a49-4e1e4e5ec1b2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7bad7595-df2d-03bc-2095-8d68c012c90f" executionId="cd04d3a9-fcac-4a2a-911f-5aa1bfe8ebba" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="93c00700-233a-d3e4-2985-b50d70f7a64d" executionId="73b08484-0dca-40dc-b469-8108e92434a0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1bacb716-4e9d-42e1-5035-df9addf7574a" executionId="e3653d7c-7f99-4f40-bc32-dec462b34757" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9f3b80c0-7e55-4466-73b2-958d405c271d" executionId="4eaf7709-2f9e-4c1f-848e-4fb889f33aba" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="列表中未列出的结果" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="所有已加载的结果" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="47" executed="47" passed="41" failed="6" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 10.0.12)&#xD;
+[xUnit.net 00:00:00.08]   Discovering: WinPool.Architecture.Tests&#xD;
+[xUnit.net 00:00:00.14]   Discovered:  WinPool.Architecture.Tests&#xD;
+[xUnit.net 00:00:00.14]   Starting:    WinPool.Architecture.Tests&#xD;
+[xUnit.net 00:00:00.23]       Assert.Equal() Failure: Strings differ&#xD;
+[xUnit.net 00:00:00.23]                  ↓ (pos 0)&#xD;
+[xUnit.net 00:00:00.23]       Expected: "TextBox"&#xD;
+[xUnit.net 00:00:00.23]       Actual:   "Border"&#xD;
+[xUnit.net 00:00:00.23]                  ↑ (pos 0)&#xD;
+[xUnit.net 00:00:00.23]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.23]         D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs(1313,0): at WinPool.Architecture.Tests.ArchitectureBoundaryTests.DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages()&#xD;
+[xUnit.net 00:00:00.23]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.23]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.26]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:00.26]       String:    "&lt;?xml version="1.0" encoding="utf-8"?&gt;\n&lt;e"···&#xD;
+[xUnit.net 00:00:00.26]       Not found: "StackPanel MinWidth="412""&#xD;
+[xUnit.net 00:00:00.26]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.26]         D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs(547,0): at WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesOwnTheirSurfacesWithoutSectionTitles()&#xD;
+[xUnit.net 00:00:00.26]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.26]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.29]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:00.29]       String:    "&lt;Project&gt;\r\n  &lt;PropertyGroup&gt;\r\n    &lt;!-- Va"···&#xD;
+[xUnit.net 00:00:00.29]       Not found: "&lt;WinPoolVersionIteration&gt;5&lt;/WinPoolVersio"···&#xD;
+[xUnit.net 00:00:00.29]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.29]         D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs(866,0): at WinPool.Architecture.Tests.ArchitectureBoundaryTests.ProductFacingVersionUsesTheRepositoryVersionSource()&#xD;
+[xUnit.net 00:00:00.29]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.29]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.29]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:00.29]       String:    "&lt;?xml version="1.0" encoding="utf-8" ?&gt;\n&lt;"···&#xD;
+[xUnit.net 00:00:00.29]       Not found: "Width="320""&#xD;
+[xUnit.net 00:00:00.29]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.29]         D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs(1013,0): at WinPool.Architecture.Tests.ArchitectureBoundaryTests.TitleBarProvidesStorageSystemSelector()&#xD;
+[xUnit.net 00:00:00.29]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.29]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.40]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:00.40]       String:    "using System.Collections.ObjectModel;\nusi"···&#xD;
+[xUnit.net 00:00:00.40]       Not found: "SetRateAsync"&#xD;
+[xUnit.net 00:00:00.40]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.40]         D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs(1171,0): at WinPool.Architecture.Tests.ArchitectureBoundaryTests.MonitorPageBackgroundModeHasStableKeyboardAccessKey()&#xD;
+[xUnit.net 00:00:00.40]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.40]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.41]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:00.41]       String:    "using System.Collections.ObjectModel;\nusi"···&#xD;
+[xUnit.net 00:00:00.41]       Not found: "UpdateIssueStates("&#xD;
+[xUnit.net 00:00:00.41]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.41]         D:\Coding\Research03_WinPool\Program\WinPool\tests\WinPool.Architecture.Tests\ArchitectureBoundaryTests.cs(1408,0): at WinPool.Architecture.Tests.ArchitectureBoundaryTests.NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails()&#xD;
+[xUnit.net 00:00:00.41]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.41]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.42]   Finished:    WinPool.Architecture.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="DESKTOP-BLE6H18" outcome="Error" timestamp="2026-09-24T10:58:58.7303570+08:00">
+        <Text>[xUnit.net 00:00:00.23]     WinPool.Architecture.Tests.ArchitectureBoundaryTests.DevelopmentPageRemainsGatedAndShowsOnlyInMemoryMessages [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="DESKTOP-BLE6H18" outcome="Error" timestamp="2026-09-24T10:58:58.7609520+08:00">
+        <Text>[xUnit.net 00:00:00.26]     WinPool.Architecture.Tests.ArchitectureBoundaryTests.EditorPagesOwnTheirSurfacesWithoutSectionTitles [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="DESKTOP-BLE6H18" outcome="Error" timestamp="2026-09-24T10:58:58.8325344+08:00">
+        <Text>[xUnit.net 00:00:00.29]     WinPool.Architecture.Tests.ArchitectureBoundaryTests.ProductFacingVersionUsesTheRepositoryVersionSource [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="DESKTOP-BLE6H18" outcome="Error" timestamp="2026-09-24T10:58:58.8325809+08:00">
+        <Text>[xUnit.net 00:00:00.29]     WinPool.Architecture.Tests.ArchitectureBoundaryTests.TitleBarProvidesStorageSystemSelector [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="DESKTOP-BLE6H18" outcome="Error" timestamp="2026-09-24T10:58:58.8975847+08:00">
+        <Text>[xUnit.net 00:00:00.40]     WinPool.Architecture.Tests.ArchitectureBoundaryTests.MonitorPageBackgroundModeHasStableKeyboardAccessKey [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="DESKTOP-BLE6H18" outcome="Error" timestamp="2026-09-24T10:58:58.9100772+08:00">
+        <Text>[xUnit.net 00:00:00.41]     WinPool.Architecture.Tests.ArchitectureBoundaryTests.NotificationShellKeepsThreeSimpleCardsAndDeveloperOnlyDetails [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

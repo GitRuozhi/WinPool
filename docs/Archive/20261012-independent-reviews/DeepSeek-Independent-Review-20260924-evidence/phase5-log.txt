@@ -1,0 +1,13 @@
+[11:04:51.227] ===== PHASE 5 =====
+[11:04:51.237] --- A. system selection vs hardware page ---
+[11:04:51.357]   selector value='' name='存储系统'
+[11:04:51.695]   hardware Computer/主机名 = '<not found>'
+[11:04:54.401]   local item click failed
+[11:04:54.406] --- B. developer mode gate ---
+[11:04:58.040]   dev-gated nav labels before: 
+[11:04:58.081]   DeveloperModeSwitch toggle=On enabled=True
+[11:05:15.149]   after toggle: switch=Off dev-gated nav labels: 
+[11:05:21.861]   restored: switch=Off dev-gated nav labels: 
+[11:05:21.867] --- C. restore simulated selection ---
+[11:05:28.018]   simulated selection restored
+[11:05:28.023] ===== PHASE 5 END =====

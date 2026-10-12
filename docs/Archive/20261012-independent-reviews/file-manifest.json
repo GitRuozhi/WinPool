@@ -1,0 +1,452 @@
+[
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/deepseek-arch-review.trx",
+    "Bytes": 82927,
+    "SHA256": "B2BAE1754CDA252E93CDA0D02B5669A64039268EBC44002B1C93EA47D340E606"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/native-test-log.txt",
+    "Bytes": 4542,
+    "SHA256": "64CA6865675F7BF3C76EA33B5F176AACAA6C3EFE72E15D84FA58C2DD96252E4D"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/navcheck-log.txt",
+    "Bytes": 4221,
+    "SHA256": "9EBFF5088E1230B3D7E2A7E5912FA1827C4C45998B15FD34EEF9AA142E964971"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p3-hardware.csv",
+    "Bytes": 14380,
+    "SHA256": "B81443277BE2C7B8BBE080DDF372A684B70E6D062A862163FBA4BEB907D54DDB"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p3-hardware.png",
+    "Bytes": 64344,
+    "SHA256": "9E7F41A6F734B16113B395D72689C5BF8F3AE72D96304C975FDA589ABA8717FD"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p4-english-settings.png",
+    "Bytes": 111805,
+    "SHA256": "E1D2598A7543ADE4D3A2C9F54A5845D993EA4A0604FB9E41A8553ED8339D2ED8"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p4-language-open.png",
+    "Bytes": 163195,
+    "SHA256": "531E7FE4C4A5396BA831C89E88C395BF511ADB1A4CEB741F01401784085DFFF5"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p4-settings.csv",
+    "Bytes": 9124,
+    "SHA256": "EB6830F2F6E9DFDC097544100701B12D17BB535A60D84B132C71FF51E441D60A"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p4-system-selector-open.png",
+    "Bytes": 127074,
+    "SHA256": "A3B857D54B88227665EB55AD8B337DC2BFD1F73C1C10A23F1E816DD0A19BC276"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p6-devmode-off.png",
+    "Bytes": 291546,
+    "SHA256": "624ECD68EF4E9FF624863B22512AF9EB21113555E667572DC3BE430104A245C7"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/p6-devmode-on.png",
+    "Bytes": 360003,
+    "SHA256": "7F99EDB1344682AE69742A2F0EEEE4095CD755E58E19BC83E407A9A2C3C78FF5"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/phase3-log.txt",
+    "Bytes": 6220,
+    "SHA256": "7E5FEA8403F1D72E622687145C5E03DCF343CA8870BAAEA46DAD841F0EBEA5F3"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/phase4-log.txt",
+    "Bytes": 6052,
+    "SHA256": "7AD18905EAD6CEB52A30E2495C6F7A71C3B783F83989094F594752B31D9B3C2A"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/phase5-log.txt",
+    "Bytes": 683,
+    "SHA256": "CACD0E48A0689196D7AC82F45C97FA56389D6AAA39433AC856775FFF9692C8D4"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-00-initial.png",
+    "Bytes": 683701,
+    "SHA256": "1A41A208C27C0B53D0CE1FFF90FC1BDF0E40ACE966823886C29481986654DEBF"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-dev.png",
+    "Bytes": 99205,
+    "SHA256": "C9B8D29FE76DACCDBBD5B4B2224FF9C8A106228EAACBB3A8E025871C8E644B99"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-manage.png",
+    "Bytes": 164910,
+    "SHA256": "AD96CC3D8684FC8BB59A063F066F498FEE6E711B33A412EA32EE3D03DFC9CAFF"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-monitor.png",
+    "Bytes": 168006,
+    "SHA256": "9F4CFF963EEDE698A245278F6FE78E95669920AFF865BFC8A5C2CCDCB7BE994D"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-partition.png",
+    "Bytes": 136566,
+    "SHA256": "990D41D329E7CC80F89F57244DDB4E330B151ACEA30479F76DA24ED8B7667D93"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-settings.png",
+    "Bytes": 140775,
+    "SHA256": "E7E8B804FDE2AACBCD42C764B2C1AE0AAA402B1751CC11E2E66158679C5BBDD2"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-structure.png",
+    "Bytes": 155250,
+    "SHA256": "D7BAF31519EC39D32AADF92909BAD5488F8D3B9D6EEE8973D26144CD46BD583A"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/shot-page-test.png",
+    "Bytes": 111816,
+    "SHA256": "CB1E41C674B51EBC6C1D44C19CE917F5753CE8063523D0FB7616ED6643A88BD5"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/test-run-full.log",
+    "Bytes": 6199,
+    "SHA256": "0ABC2D09A2E14F2B1047313012805F17D78DB76EE915FD3BFA3AC8A185475E4A"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/tree-main.csv",
+    "Bytes": 29500,
+    "SHA256": "DF0699D694CC019B6B4B7E6A8E2502D31D49FE2C495CD99FAD5C2C67D9F8177B"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/01_20260922-114405_WinPool-Report.wer",
+    "Bytes": 39806,
+    "SHA256": "568F9CB2771D2703D375D5D41E59F31EA8B1A39E2DFE5944239525FAFC25549C"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/02_20260923-132709_WinPool-Report.wer",
+    "Bytes": 43238,
+    "SHA256": "1DB7E396A388C2EFD47EF07735CCDC1552D52DAE9AEF002E8A831608551DBD46"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/03_20260923-144304_WinPool-Report.wer",
+    "Bytes": 45572,
+    "SHA256": "82A630DDFE43ED7E29D708F29FEE9655FC687A58F1DC63C2B25BD5498CB582CB"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/04_20260923-201702_WinPool-Report.wer",
+    "Bytes": 33866,
+    "SHA256": "2CF6B0DFE061E82EB528852355EE40FF782BCEF2779FA99290CAD5F4914EF688"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/05_20260924-101408_WinPool-Report.wer",
+    "Bytes": 40004,
+    "SHA256": "93E42585E81CBBB7A9D451AD032CDD064CF420C9859B2E7B16C78D60DF7BB49A"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/06_20260924-111714_WinPool-Report.wer",
+    "Bytes": 39376,
+    "SHA256": "76F74039F59CC5D13E9DB9CCFBA6902A3C460316BA87343F28F4FB11B421841C"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924-evidence/wer-and-eventlog/application-eventlog-WinPool.csv",
+    "Bytes": 10850,
+    "SHA256": "1F8D08E7814CA2F95773B09266C392A2BCE8047359EBDE409C4FCCE3A8AB6D33"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/01-startup-main-behind-welcome.png",
+    "Bytes": 440581,
+    "SHA256": "FC420AE61C983DA56F48454F5ADDBDF1D17737BEBF199200EB4DEC8CB1BC882C"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/01-startup-welcome.png",
+    "Bytes": 304478,
+    "SHA256": "00B24CE1F5D9A31DA3F940A7B707D7D8F8C3A362D3908890752F0BF69D92CC3B"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/01-startup.png",
+    "Bytes": 440581,
+    "SHA256": "FC420AE61C983DA56F48454F5ADDBDF1D17737BEBF199200EB4DEC8CB1BC882C"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/02-manage.png",
+    "Bytes": 151743,
+    "SHA256": "6D1B3B7E5F34F0AF134ED9740D3A3E4D7C307D04668951B9152523444CA84002"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/02b-manage-after-nav.png",
+    "Bytes": 151743,
+    "SHA256": "6D1B3B7E5F34F0AF134ED9740D3A3E4D7C307D04668951B9152523444CA84002"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/03-hardware.png",
+    "Bytes": 41044,
+    "SHA256": "93F116A76954AF7F0BD54235D05A7369BE6C6B82F1ADEDDE423CC28A0DF9430A"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/03b-hardware-scrolled.png",
+    "Bytes": 57957,
+    "SHA256": "9B10553A765EDD49F67928A926803F5C8876F712FEC4C45C60A88CC00BBD6752"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/03c-hardware-local.png",
+    "Bytes": 75828,
+    "SHA256": "5D0BAA674598624AC4D84E724C416EB20A40996957F4C60BF32C5539377BE49B"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/04-storage-structure.png",
+    "Bytes": 146688,
+    "SHA256": "C030D5533ABD82EFFA09EBB92A47E7852F69C4B79233A7C950A71C169A6F7573"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/05-disk-partition.png",
+    "Bytes": 64171,
+    "SHA256": "B6F43308C84E350E332E227F9B88305334BD0A22B971D768AC9BE75C2AEADE38"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/06-test.png",
+    "Bytes": 112079,
+    "SHA256": "603B44B7D348B8BEE84CE2962B517C47426E427710C18439668506BE4C91A66F"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/07-monitor.png",
+    "Bytes": 172974,
+    "SHA256": "E59DEF872D9DA9274A96D585B707FEF693E9FD84F2CF510F7F6247973C153359"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/08-development.png",
+    "Bytes": 110081,
+    "SHA256": "C38EF1678DA72A1248FC02FA447292E687258BAAD0B4B9470CDE87F0585C871F"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/09-settings.png",
+    "Bytes": 124836,
+    "SHA256": "778894B4AA4833EF01B0AEFD1634AD65C74FB3CEB1B66B974D8E0A4B4115FB09"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/09b-settings-language-restore.png",
+    "Bytes": 54946,
+    "SHA256": "2D65693020F917703368EABB1DA7B75F722BD640DEE4EE7BA2164B4AD4772368"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/10-manage-refresh-notification.png",
+    "Bytes": 127021,
+    "SHA256": "1B2EB85835083FBFE47892C48C82084B20F498EE45C89621D4EA3CBC538B229B"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/10a-system-local.png",
+    "Bytes": 92298,
+    "SHA256": "D44543D62E90CF671E56EBAC92D4C720A69F79EE6B5E04FC153E1458F3A989F4"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/11-hardware-refresh-disabled-hover.png",
+    "Bytes": 58656,
+    "SHA256": "B93CE5D36F60C8F1E8455BABE636BD2D0EE1BB79C1B1324BB49A2F1AA10B9DF7"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/11b-hardware-refresh-notification.png",
+    "Bytes": 81697,
+    "SHA256": "F7F7BB540FCCB253B2CBE0AC06A633B183AB4D1147173CCEFA5115225D8AACAC"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/12-disk-partition-gap.png",
+    "Bytes": 86372,
+    "SHA256": "97D671EAC7C90DBEB26DFA7FFE1F5FC17C2C59B7519B3BA1FC04A4DA2AC5A318"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/13-disk-partition-existing.png",
+    "Bytes": 86652,
+    "SHA256": "330DB67B61A4479DA4021FDD2BB2262DC6C95695C4BB5F28088AFA4A53134400"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/14-development-detail.png",
+    "Bytes": 77579,
+    "SHA256": "403096E42E904695DC95A7FAA285F0A2F3448FF326761054EC8E9F186D1C43A6"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/14b-development-detail-closed.png",
+    "Bytes": 68078,
+    "SHA256": "DA83EF0D21A494C4B8C1684FC30BB4CCF4AFFC4AF551305F6AEAE74ECB355EF6"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/15-narrow-window.png",
+    "Bytes": 76815,
+    "SHA256": "D557CFC81214991FF38BE9BA3DD399EBEC5E583D5B22D3C9399DE36F55CBCBB9"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/16-window-restored.png",
+    "Bytes": 68074,
+    "SHA256": "A633B1CED13EB25FD7D534026DFCD5126A75C463607C1E0E06D6BE7B506FF6B9"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/17-developer-mode-off.png",
+    "Bytes": 83600,
+    "SHA256": "829BF4DE193F180708376FAFC0A0BF20097EB438EFFFCA851FA7BBEBAA220835"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/18-developer-mode-on.png",
+    "Bytes": 84538,
+    "SHA256": "55BB9315C9C1FBDF3E323977DA05EE33506477AA466695EC2DEEB2E7A3B5F1F0"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/19-restored-settings.png",
+    "Bytes": 76574,
+    "SHA256": "BD12D87EE7580587BD493A1A4EEE5FE2B8ECA518C001F95A164ACDE0929DBA79"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/app-settings-at-end.json",
+    "Bytes": 350,
+    "SHA256": "30578920EAC37DAB474A9A577B104F436193121C3E51230EA045C5AE98A7B529"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/app-settings-at-start.json",
+    "Bytes": 348,
+    "SHA256": "06FDD980659D1F005050E360B749AF9B00D33B1B0913E3DC92F6C0B7BF321906"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/current-state.png",
+    "Bytes": 115274,
+    "SHA256": "55F05738F90DDBA2D57073C92F44C641DDD613126E2D07EE740186A92B730A1C"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/index.json",
+    "Bytes": 3368,
+    "SHA256": "5AC5CFCF91468205AAE8C38A0F42374971A15784A12D985EE74E91F7B2730965"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/session-log.txt",
+    "Bytes": 19120,
+    "SHA256": "0CA2EE57C0C39FCC001FBD0FA123AE1B1C6D33790C6CAF21C0C25DD1F06F2D8E"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/uia-main-startup.txt",
+    "Bytes": 55627,
+    "SHA256": "35A9234B8A47F9521FA146ED29F10D6695DC23C2AA97A7C7B886FDE10212D794"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/uia-main-window.txt",
+    "Bytes": 17003,
+    "SHA256": "3C7421F6A404CFEC796827CC39C1954F6C798289D401046201BE75F3B19A6B00"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/uia-welcome-startup.txt",
+    "Bytes": 2935,
+    "SHA256": "2297DF5578CE788BEE26BA13541A6FB1DE034A0953C43B8919D63D3583DB7F13"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/app-settings-after.json",
+    "Bytes": 350,
+    "SHA256": "30578920EAC37DAB474A9A577B104F436193121C3E51230EA045C5AE98A7B529"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/app-settings-before.json",
+    "Bytes": 350,
+    "SHA256": "30578920EAC37DAB474A9A577B104F436193121C3E51230EA045C5AE98A7B529"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-01-welcome.png",
+    "Bytes": 304457,
+    "SHA256": "D1CA70A772395BE67C37E10E7D0D0859AB02A6CC00B295E2717D5B0A54AF9CDB"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-02-after-dismiss.png",
+    "Bytes": 80287,
+    "SHA256": "8A79E08AABCD007ADB59EE3A9C1442258FC03FD85B609EC14B212501C4952DA0"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-03-development.png",
+    "Bytes": 61347,
+    "SHA256": "3C8651D405A11EA95494558F8CAE7F94CBF17F8E43EF09B513BEDDDFE3F93B48"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-04-after-idle.png",
+    "Bytes": 58976,
+    "SHA256": "A042BAC6046358A58EE3C9FC32D4D801B415C61A3EA893EBED5B8A6C703C5473"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-05-devmode-off.png",
+    "Bytes": 71748,
+    "SHA256": "90516F5D6EF8E3315861B82913D2FFB8AB88ACC0EFC085C275595DB405EAECBE"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-06-devmode-restored.png",
+    "Bytes": 73394,
+    "SHA256": "50F69D094ED8FED48B182A0EBAFA73AEDB4228B370617675F9A4FF6ACE7BF0BF"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-close-log.txt",
+    "Bytes": 935,
+    "SHA256": "2C82731E0997EA93DC5F1274C375838FCF0260D4A05D54458E6A10ACC88B2B03"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-log-attempt1.txt",
+    "Bytes": 778,
+    "SHA256": "9D5B8E858443003BD1D4FE08BDEDA68D5E77448FB582BD42242C8FFA742CEDC8"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924-evidence/retest/retest-log.txt",
+    "Bytes": 3052,
+    "SHA256": "2FF43809B14440DD38C2465BFF8045D346368A4F9761506C82AFC822DA9CBDD1"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/evidence-ledger.md",
+    "Bytes": 11858,
+    "SHA256": "DE752D80FF16170096715CDC5917B601C3BDFA4CD649F2F44D83AC736AB27753"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/interactive-log.txt",
+    "Bytes": 741,
+    "SHA256": "6D3598C212833BA1E1C63B4619C32E852171E6FC489868C909F6C7F99E73E497"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/shot-02-main.png",
+    "Bytes": 88337,
+    "SHA256": "07EC42C9FDD99C510C7A1FADE06BA6BEE6279F25756EE64D4DADCB704A0CAB21"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/shot-03-manage.png",
+    "Bytes": 115993,
+    "SHA256": "8A7882FBC5B2B144E00A0DDF9F725517A9DDC6DDBA1A879E93AB0BFCF7E4E6A8"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/shot-04-hardware.png",
+    "Bytes": 57995,
+    "SHA256": "A87FB796654329EA99C550372D873BBBF03D2AFC155CA5914BF88198EB26BDC9"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/shot-05-monitor.png",
+    "Bytes": 152007,
+    "SHA256": "FEB63292FAA3EB3572237E527071C79E7D47D0560D949AF7A597D357A016986D"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/shot-06-test.png",
+    "Bytes": 56255,
+    "SHA256": "9A0E86891695F775B3A13AF9F9D7466987C470880933B67D34F176871B57FF68"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924-evidence/shot-07-partition.png",
+    "Bytes": 79376,
+    "SHA256": "9D27FB4A3D5386C70093B693B8DBE949272CC66D0BC043D50A065981C698791F"
+  },
+  {
+    "RelativePath": "DeepSeek-Independent-Review-20260924.md",
+    "Bytes": 96417,
+    "SHA256": "859196918F8748F877E047C58EBC25BC28E4D987CE4C6DA119C4E88BDA031F17"
+  },
+  {
+    "RelativePath": "GPT-Independent-Review-20260924.md",
+    "Bytes": 26329,
+    "SHA256": "ACF20387C88026DD6188BCF42FEFAF403311BC8BC01A7482D1D8EA1A0FDB7609"
+  },
+  {
+    "RelativePath": "Grok-Independent-Review-20260924.md",
+    "Bytes": 30316,
+    "SHA256": "D0674DB06786D08DD24C9749367947B736827A09C7EBE3BF7768624C05260D17"
+  },
+  {
+    "RelativePath": "Zcode-Independent-Review-20260924.md",
+    "Bytes": 35977,
+    "SHA256": "996D1F56AB52BC90A7623D3773C5971947BB6A310356F437DA7FDFE50AC7D00D"
+  }
+]

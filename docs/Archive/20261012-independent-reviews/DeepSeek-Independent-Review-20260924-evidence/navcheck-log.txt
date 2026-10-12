@@ -1,0 +1,43 @@
+[11:01:59.481] ===== NAVIGATION CORRECTNESS TEST =====
+[11:02:01.849] 管理             -> OK after 250ms (markers: 存储池,虚拟磁盘,刷新本机信息)
+[11:02:02.085]                body texts: [模拟] 超多分区系统盘 | 系统 | 1 存储池  2 物理磁盘  5.46 TiB | Primordial | 原始池 | 2 物理磁盘  5.46 TiB | 8-partition NVMe | 物理磁盘 | SSD  1.82 TiB | EFI 系统分区 | 未格式化  100 MiB | 微软保留分区 | 未格式化  16 MiB | C:
+[11:02:03.414] 存储结构编辑         -> OK after 250ms (markers: 待应用动作,创建池,解散池,新建池)
+[11:02:03.555]                body texts: Primordial | 原始池 | 2 物理磁盘  5.46 TiB | 8-partition NVMe | 物理磁盘 | SSD  1.82 TiB | Empty-HDD | 物理磁盘 | HDD  3.64 TiB | + | 新建池 | 待应用动作 | 暂无待应用动作 | 撤销
+[11:02:04.805] 磁盘分区编辑         -> OK after 250ms (markers: 联机,脱机,新建分区,扩展分区)
+[11:02:04.901]                body texts: 8-partition NVMe | 物理磁盘  GPT  1.82 TiB | EFI 系统分区 | 未格式化  100 MiB | 微软保留分区 | 未格式化  16 MiB | C: | 主分区 | NTFS  200 GiB | D: Data1 | 主分区 | NTFS  80 GiB | E: Data2 | 主分区
+[11:02:05.824] 测试             -> OK after 250ms (markers: 磁盘测试 / Disk tests,WinPool 2.0)
+[11:02:06.078]                body texts: 磁盘测试 / Disk tests | WinPool 2.0 | 完整测试工作区不属于 WinPool 1.x，计划作为 WinPool 2.0 功能推出。
+The complete Test workspace is outside WinPool 1.x and is planned for WinPool 2.0.
+
+WinPool 1.x 聚焦存储管理、监控、稳定性和尽快完成正式发布。
+WinPool 1.x focuses on storage management, monitoring, reliability, and reaching a formal release quickly.
+[11:02:07.696] 监控             -> OK after 500ms (markers: 读取速度,写入速度,图例)
+[11:02:07.996]                body texts: 100% | 2984.9 MiB/s | 运行时长：00:03:32 | 图例 | 名称 | 池 | 卷 | 介质 | 容量 | 活动 | 读取速度 | 写入速度 | WDC WD40EZAZ-00SF3B0 | E:
+[11:02:22.360] 开发             -> NO MARKER after 10000ms
+[11:02:22.467]                body texts: 10:58:49 | 信息 | inventory | 采集成功 | 10:58:39 | 信息 | inventory | 采集成功 | 10:58:37 | 警告 | monitor | 监控异常 | 人工智能入口，功能正在开发中。
+[11:02:23.393] 设置             -> OK after 250ms (markers: 语言,主题,数据存储位置,7Z,开发者模式)
+[11:02:24.284]                body texts: 主题 | 主题色 | 语言 | 欢迎页面 | 打开欢迎内容 | 开机启动 | 开发者模式 | 真实编辑 | 创建微软保留分区 | 分区缝隙隐藏阈值 | MiB | 数据存储位置 | C:\Users\Admin\AppData\Local\WinPool | 恢复默认
+[11:02:25.526] 硬件             -> OK after 250ms (markers: Computer,System,Mainboard,CPU)
+[11:02:25.675]                body texts: 刷新 | 导出 | Computer | 主机名 | 制造商 | 型号 | 架构 | Computer, 主机名, 超多分区系统盘 | Computer, 制造商,  | Computer, 型号,  | Computer, 架构,  | System | 名称 | 版本
+[11:02:25.680] ===== SUMMARY =====
+
+Label           Ok WaitMs Markers
+-----           -- ------ -------
+管理          True    250 存储池,虚拟磁盘,刷新本机信息
+存储结构编辑  True    250 待应用动作,创建池,解散池,新建池
+磁盘分区编辑  True    250 联机,脱机,新建分区,扩展分区
+测试          True    250 磁盘测试 / Disk tests,WinPool 2.0
+监控          True    500 读取速度,写入速度,图例
+开发         False  10000 
+设置          True    250 语言,主题,数据存储位置,7Z,开发者模式
+硬件          True    250 Computer,System,Mainboard,CPU
+
+
+[11:02:25.708]   管理             ok=True wait=250ms
+[11:02:25.712]   存储结构编辑         ok=True wait=250ms
+[11:02:25.718]   磁盘分区编辑         ok=True wait=250ms
+[11:02:25.722]   测试             ok=True wait=250ms
+[11:02:25.727]   监控             ok=True wait=500ms
+[11:02:25.732]   开发             ok=False wait=10000ms
+[11:02:25.736]   设置             ok=True wait=250ms
+[11:02:25.743]   硬件             ok=True wait=250ms
