@@ -1150,6 +1150,24 @@ public sealed class SimulationOperationService : ISimulationOperationService
             }
         }
 
+        var memberUsages = request.MemberDiskUsages ?? [];
+        if (memberUsages.Count > 0)
+        {
+            var usageByDiskId = memberUsages.ToDictionary(
+                item => item.DiskId,
+                item => PhysicalDiskUsage.FromSimulatedLayer(
+                    PhysicalDiskUsage.IsRetired(item.Usage) ? "Retired" : "HotSpare"),
+                StringComparer.OrdinalIgnoreCase);
+            snapshot = snapshot with
+            {
+                PhysicalDisks = snapshot.PhysicalDisks
+                    .Select(disk => usageByDiskId.TryGetValue(disk.StableId, out var usage)
+                        ? disk with { Usage = usage }
+                        : disk)
+                    .ToArray()
+            };
+        }
+
         var created = CreateStoragePool(snapshot, request);
         var pool = created.StoragePools.First(item =>
             !item.IsPrimordial
@@ -1157,14 +1175,19 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var members = created.PhysicalDisks
             .Where(disk => pool.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase))
             .ToArray();
+        var layerMemberIds = memberUsages
+            .Select(item => item.DiskId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var showScm = members.Any(disk => EditWorkspace.NormalizeMedia(disk.MediaType) == "SCM");
         var tiers = new List<StorageTierInfo>
         {
             BuildTier(pool.StableId, "SSD", "Performance", members, request.PerformanceResiliency,
                 request.PerformanceInterleaveBytes, request.PerformanceDataCopies, request.PerformanceToleratedFailures,
+                layerMemberIds,
                 request.PerformanceUseMaximum ? null : request.PerformanceSizeBytes, request.PerformanceColumns),
             BuildTier(pool.StableId, "HDD", "Capacity", members, request.CapacityResiliency,
                 request.CapacityInterleaveBytes, request.CapacityDataCopies, request.CapacityToleratedFailures,
+                layerMemberIds,
                 request.CapacityUseMaximum ? null : request.CapacitySizeBytes,
                 request.CapacityColumns)
         };
@@ -1172,6 +1195,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         {
             tiers.Add(BuildTier(pool.StableId, "SCM", "Dedicated", members, request.ScmResiliency,
                 request.ScmInterleaveBytes, request.ScmDataCopies, request.ScmToleratedFailures,
+                layerMemberIds,
                 request.ScmUseMaximum ? null : request.ScmSizeBytes, request.ScmColumns));
         }
 
@@ -1228,6 +1252,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         long? interleave,
         int? dataCopies,
         int? toleratedFailures,
+        IReadOnlySet<string> layerMemberIds,
         long? sizeBytes,
         int? columns = null)
     {
@@ -1268,7 +1293,9 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 string.Equals(setting, "Parity", StringComparison.OrdinalIgnoreCase) ? Math.Max(1, tolerated) : 0),
             poolId,
             null,
-            members.Select(item => item.StableId).ToArray(),
+            members.Where(item => !layerMemberIds.Contains(item.StableId))
+                .Select(item => item.StableId)
+                .ToArray(),
             columnCount,
             interleave ?? 65536,
             copies,

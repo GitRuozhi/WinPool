@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using WinPool.App.Services;
 using WinPool.Application;
+using WinPool.Domain;
 
 namespace WinPool.App.Tests;
 
@@ -296,6 +297,28 @@ public sealed class RealStructureDraftPlannerTests
         Assert.Empty(plan.Creations);
         Assert.Same(prior.Snapshot, session.Working);
         Assert.Equal(prior.PoolIntents[pool.StableId], session.PoolIntents[pool.StableId]);
+    }
+
+    [Theory]
+    [InlineData("HotSpare")]
+    [InlineData("Retired")]
+    public void DraftMemberRolesRemainEditableWithoutEnablingUnsupportedRealWrites(string usage)
+    {
+        var session = Draft(PoolVirtualDiskLayout.HddTiered, maximum: true);
+        var member = session.Working.PhysicalDisks.Single();
+        session.Working = EditWorkspace.SetDiskUsage(session.Working, member.StableId, usage);
+        var prior = session.Capture();
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply);
+        Assert.Empty(plan.Creations);
+        Assert.Empty(plan.Preview.Actions);
+        Assert.Same(prior.Snapshot, session.Working);
+        Assert.Equal(PhysicalDiskUsage.Normalize(usage),
+            PhysicalDiskUsage.Normalize(session.Working.PhysicalDisks.Single().Usage));
+        Assert.Equal(prior.PoolIntents.Single().Value, session.PoolIntents.Single().Value);
+        Assert.Contains(plan.Preview.BlockingReasons, reason => reason.Contains("real execution", StringComparison.Ordinal));
     }
 
     [Theory]

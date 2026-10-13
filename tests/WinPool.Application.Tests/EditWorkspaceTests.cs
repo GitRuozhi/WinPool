@@ -639,16 +639,19 @@ public sealed class EditWorkspaceTests
     }
 
     [Fact]
-    public void DraftPoolWithDataBearingMemberIsUnsupported()
+    public void DraftPoolWithDataBearingSourceMemberStaysEditableAndSourceFactsRemainVisible()
     {
-        var snapshot = TieredPoolSnapshot(withVirtualDisk: false);
+        var snapshot = TieredPoolSnapshot(withVirtualDisk: true);
         var drafted = EditWorkspace.InsertDraftPool(snapshot, "Pool X");
         var draftId = drafted.StoragePools.Last(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
 
         // Empty draft stays supported.
         Assert.True(EditWorkspace.PoolSupportsStructureModification(drafted, draftId));
+        // The committed pool still owns a virtual disk with stored data.
+        Assert.False(EditWorkspace.PoolSupportsStructureModification(drafted, "pool:t1"));
 
-        // Dragging in a data-bearing physical disk locks the draft.
+        // Dragging in a data-bearing physical disk must not make the new pool
+        // look like it already owns committed data.
         var dataDisk = new PhysicalDiskInfo(
             "physical:data", true, "Data Disk", "Model", "DA0001", "SATA", "HDD",
             1_000_000_000, 512, 4096, "Healthy", "OK", true, string.Empty, 9,
@@ -669,20 +672,24 @@ public sealed class EditWorkspaceTests
                 "osdisk:data")).ToArray()
         };
         var withDisk = EditWorkspace.MoveDiskToPool(withDiskSource, "physical:data", draftId);
-        Assert.False(EditWorkspace.PoolSupportsStructureModification(withDisk, draftId));
+        Assert.True(EditWorkspace.PoolSupportsStructureModification(withDisk, draftId));
         var node = EditWorkspace.ProjectPoolWorkspace(withDisk, 0, snapshot).Single(
             item => item.Unit.StableId == draftId);
-        Assert.True(node.HasStoredData);
+        Assert.False(node.HasStoredData);
         Assert.False(node.CannotLeave);
+        Assert.Contains(withDisk.Partitions, item => item.StableId == "partition:data");
+        Assert.True(EditWorkspace.DiskHoldsStoredData(withDisk, "physical:data"));
         var dataMember = node.Children
             .SelectMany(child => child.Children.Append(child))
             .Single(item => item.Unit.StableId == "physical:data");
         Assert.True(dataMember.HasStoredData);
         Assert.False(dataMember.CannotLeave);
 
-        // Dragging the data disk back out unlocks the draft (no deadlock).
+        // Dragging the source disk back out preserves the facts and leaves the
+        // draft usable for other members.
         var recovered = EditWorkspace.MoveDiskToPool(withDisk, "physical:data", "pool:primordial");
         Assert.True(EditWorkspace.PoolSupportsStructureModification(recovered, draftId));
+        Assert.Contains(recovered.Partitions, item => item.StableId == "partition:data");
     }
 
     private static StorageSnapshot TieredPoolSnapshot(bool withVirtualDisk)
@@ -807,6 +814,55 @@ public sealed class EditWorkspaceTests
 
 public sealed class EditWorkspaceLayerTests
 {
+    [Fact]
+    public void DraftMemberRoleChangesRecalculateCapacityAndReturnToItsMediaTier()
+    {
+        var snapshot = TestSnapshotFactory.Create();
+        const long sourceDiskSize = 10L * MaximumCapacityAlgorithm.GiB;
+        snapshot = snapshot with
+        {
+            PhysicalDisks = snapshot.PhysicalDisks
+                .Select(item => item.StableId == "physical:1" ? item with { Size = sourceDiskSize } : item)
+                .ToArray(),
+            StoragePools = snapshot.StoragePools
+                .Select(item => item.StableId == "pool:1" ? item with { Size = sourceDiskSize } : item)
+                .ToArray()
+        };
+        var working = EditWorkspace.InsertDraftPool(snapshot, "Pool A");
+        var draftId = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId)).StableId;
+        working = EditWorkspace.MoveDiskToPool(working, "physical:1", draftId);
+
+        var initialTier = Assert.Single(working.StorageTiers, tier =>
+            tier.PoolStableId == draftId && EditWorkspace.NormalizeMedia(tier.MediaType) == "HDD");
+        Assert.True(initialTier.Size > 0);
+        Assert.Contains("physical:1", initialTier.MemberPhysicalDiskIds);
+
+        working = EditWorkspace.SetDiskUsage(working, "physical:1", "Retired");
+        var retired = working.PhysicalDisks.Single(item => item.StableId == "physical:1");
+        var retiredTier = working.StorageTiers.Single(tier => tier.StableId == initialTier.StableId);
+        Assert.True(retired.IsRetired);
+        Assert.False(EditWorkspace.DiskIsAssignedToTier(working, retired.StableId));
+        Assert.Contains(retired.StableId, working.StoragePools.Single(item => item.StableId == draftId).MemberPhysicalDiskIds);
+        Assert.Empty(retiredTier.MemberPhysicalDiskIds);
+        Assert.Equal(0, retiredTier.Size);
+        Assert.Equal(0, retiredTier.FootprintOnPool);
+
+        working = EditWorkspace.SetDiskUsage(working, "physical:1", "HotSpare");
+        Assert.True(working.PhysicalDisks.Single(item => item.StableId == "physical:1").IsHotSpare);
+        Assert.Equal(0, working.StorageTiers.Single(tier => tier.StableId == initialTier.StableId).Size);
+
+        working = EditWorkspace.MoveDiskToPool(working, "physical:1", draftId);
+        var returnedDisk = working.PhysicalDisks.Single(item => item.StableId == "physical:1");
+        var returnedTier = working.StorageTiers.Single(tier => tier.StableId == initialTier.StableId);
+        Assert.False(returnedDisk.IsHotSpare);
+        Assert.False(returnedDisk.IsRetired);
+        Assert.True(EditWorkspace.DiskIsAssignedToTier(working, returnedDisk.StableId));
+        Assert.Equal("HDD", EditWorkspace.NormalizeMedia(returnedTier.MediaType));
+        Assert.Equal("Simple", returnedTier.ResiliencySettingName);
+        Assert.Equal(1, returnedTier.NumberOfDataCopies);
+        Assert.True(returnedTier.Size > 0);
+    }
+
     [Fact]
     public void SetDiskUsageMovesPooledDiskBetweenSimulatedLayers()
     {

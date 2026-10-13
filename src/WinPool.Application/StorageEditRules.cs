@@ -1061,6 +1061,24 @@ public static class StorageEditRules
             return members;
         }
 
+        var memberIds = (request.MemberDiskIds ?? [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var layeredMembers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var assignment in request.MemberDiskUsages ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(assignment.DiskId)
+                || !memberIds.Contains(assignment.DiskId)
+                || (!PhysicalDiskUsage.IsRetired(assignment.Usage)
+                    && !PhysicalDiskUsage.IsHotSpare(assignment.Usage))
+                || !layeredMembers.Add(assignment.DiskId))
+            {
+                return Deny(
+                    "storage.rule.create-tiered-pool.member-usage",
+                    "A draft member can only be assigned once to the Retired or Hot Spare layer.",
+                    assignment.DiskId);
+            }
+        }
+
         if (request.MemberDiskIds is null || request.MemberDiskIds.Count == 0)
         {
             return request.CreateVirtualDisk == true
@@ -1071,7 +1089,11 @@ public static class StorageEditRules
         var disks = snapshot.PhysicalDisks
             .Where(item => (request.MemberDiskIds ?? []).Contains(item.StableId, StringComparer.OrdinalIgnoreCase))
             .ToArray();
-        foreach (var group in disks.GroupBy(item => EditWorkspace.NormalizeMedia(item.MediaType)))
+        var dataDisks = disks
+            .Where(item => !layeredMembers.Contains(item.StableId)
+                && PhysicalDiskUsage.ContributesDataCapacity(item.Usage))
+            .ToArray();
+        foreach (var group in dataDisks.GroupBy(item => EditWorkspace.NormalizeMedia(item.MediaType)))
         {
             var ids = group.Select(item => item.StableId).ToArray();
             var setting = group.Key switch

@@ -210,6 +210,117 @@ public sealed class V048SimulationSemanticsTests
     }
 
     [Fact]
+    public void DraftPoolRejectsMirrorWhenHotSpareIsTheOnlySecondMember()
+    {
+        var result = new SimulationOperationService().Apply(
+            Primordial(ssdCount: 2, hddCount: 0),
+            new SimulationEditRequest(
+                SimulationEditKind.CreateTieredPool,
+                "pool:primordial",
+                Name: "PoolA",
+                MemberDiskIds: ["physical:ssd0", "physical:ssd1"],
+                PerformanceResiliency: "Mirror",
+                PerformanceDataCopies: 2,
+                MemberDiskUsages: [new("physical:ssd1", "HotSpare")],
+                CreateVirtualDisk: false));
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("needs at least 2 data disks", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DraftPoolWithOnlyRetiredMemberAppliesMembershipWithoutFakeCapacity()
+    {
+        var document = Primordial(ssdCount: 1, hddCount: 0);
+        var committed = document.Snapshot;
+        var working = EditWorkspace.InsertDraftPool(committed, "PoolRetiredOnly");
+        var draft = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd0", draft.StableId);
+        working = EditWorkspace.SetDiskUsage(working, "physical:ssd0", "Retired");
+
+        var plan = SimulationDraftPlanner.Build(committed, working);
+        var create = Assert.Single(plan.Steps, item => item.Kind == SimulationEditKind.CreateTieredPool);
+        Assert.Equal(new SimulationMemberDiskUsage("physical:ssd0", "Retired"),
+            Assert.Single(create.MemberDiskUsages!));
+
+        var applied = new SimulationOperationService().ApplyPlan(document, plan);
+        Assert.True(applied.Succeeded, applied.Error);
+        var pool = Assert.Single(applied.Document.Snapshot.StoragePools, item => item.FriendlyName == "PoolRetiredOnly");
+        Assert.Contains("physical:ssd0", pool.MemberPhysicalDiskIds);
+        var disk = applied.Document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd0");
+        Assert.Equal(pool.StableId, disk.PoolStableId);
+        Assert.True(disk.IsRetired);
+        var tier = Assert.Single(applied.Document.Snapshot.StorageTiers, item =>
+            item.PoolStableId == pool.StableId && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD");
+        Assert.Empty(tier.MemberPhysicalDiskIds);
+        Assert.Equal(0, tier.Size);
+        Assert.Equal(0, tier.FootprintOnPool);
+    }
+
+    [Fact]
+    public void DraftPoolApplyKeepsHotSpareOutOfCapacityAndPreservesItsRole()
+    {
+        var document = Primordial(ssdCount: 2, hddCount: 0);
+        var committed = document.Snapshot with
+        {
+            Partitions =
+            [
+                new PartitionInfo(
+                    "partition:ssd1", true, 2, 1, "Primary", 1_048_576, 10L * MaximumCapacityAlgorithm.GiB,
+                    false, false, "D", "Source data", "NTFS", 65536, 5L * MaximumCapacityAlgorithm.GiB,
+                    "Healthy", "OK", string.Empty, "osdisk:ssd1")
+            ],
+            Volumes =
+            [
+                new VolumeInfo(
+                    "volume:ssd1", true, "partition:ssd1", "NTFS", "Source data",
+                    10L * MaximumCapacityAlgorithm.GiB, 5L * MaximumCapacityAlgorithm.GiB,
+                    65536, "Healthy", "OK", ["D:\\"], "volume-identity:ssd1")
+            ]
+        };
+        document = document.WithCandidate(committed);
+        var working = EditWorkspace.InsertDraftPool(committed, "PoolMixed");
+        var draft = working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd0", draft.StableId);
+        working = EditWorkspace.MoveDiskToPool(working, "physical:ssd1", draft.StableId);
+        working = EditWorkspace.SetDiskUsage(working, "physical:ssd1", "HotSpare");
+        Assert.True(EditWorkspace.PoolSupportsStructureModification(working, draft.StableId));
+        Assert.True(EditWorkspace.DiskHoldsStoredData(working, "physical:ssd1"));
+        Assert.Contains(working.Partitions, item => item.StableId == "partition:ssd1");
+        working = EditWorkspace.InsertDraftVirtualDisk(working, draft.StableId, "SpaceMixed", "Simple", 65536);
+
+        var plan = SimulationDraftPlanner.Build(committed, working);
+        var create = Assert.Single(plan.Steps, item => item.Kind == SimulationEditKind.CreateTieredPool);
+        Assert.Equal(2, create.MemberDiskIds!.Count);
+        Assert.Equal(new SimulationMemberDiskUsage("physical:ssd1", "HotSpare"),
+            Assert.Single(create.MemberDiskUsages!));
+
+        var applied = new SimulationOperationService().ApplyPlan(document, plan);
+        Assert.True(applied.Succeeded, applied.Error);
+        var pool = Assert.Single(applied.Document.Snapshot.StoragePools, item => item.FriendlyName == "PoolMixed");
+        Assert.Equal(2, pool.MemberPhysicalDiskIds.Count);
+        var dataDisk = applied.Document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd0");
+        var spareDisk = applied.Document.Snapshot.PhysicalDisks.Single(item => item.StableId == "physical:ssd1");
+        Assert.Equal(pool.StableId, dataDisk.PoolStableId);
+        Assert.Equal(pool.StableId, spareDisk.PoolStableId);
+        Assert.False(dataDisk.IsHotSpare);
+        Assert.True(spareDisk.IsHotSpare);
+        var tier = Assert.Single(applied.Document.Snapshot.StorageTiers, item =>
+            item.PoolStableId == pool.StableId && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD");
+        Assert.Equal(working.StorageTiers.Single(item => item.PoolStableId == draft.StableId
+            && EditWorkspace.NormalizeMedia(item.MediaType) == "SSD").Size, tier.Size);
+        Assert.Contains("physical:ssd0", tier.MemberPhysicalDiskIds);
+        Assert.DoesNotContain("physical:ssd1", tier.MemberPhysicalDiskIds);
+        Assert.Single(applied.Document.Snapshot.VirtualDisks);
+        Assert.Contains(applied.Document.Snapshot.Partitions, item => item.StableId == "partition:ssd1");
+        var preservedSourcePartition = Assert.Single(applied.Document.Snapshot.Partitions,
+            item => item.StableId == "partition:ssd1");
+        Assert.Equal("NTFS", preservedSourcePartition.FileSystem);
+        Assert.True(preservedSourcePartition.SizeRemaining < preservedSourcePartition.Size);
+        Assert.True(EditWorkspace.DiskHoldsStoredData(applied.Document.Snapshot, "physical:ssd1"));
+    }
+
+    [Fact]
     public void ExistingPoolMemberMovesThroughPrimordialBeforeDraftPoolCreation()
     {
         var service = new SimulationOperationService();

@@ -411,8 +411,8 @@ public sealed class LocalizationService : ObservableObject
                 "This disk leaves the data tiers and becomes a hot spare; it no longer carries data. Continue?"),
             ["SimulatedLayerRestrictedTitle"] = ("无法操作", "Not available"),
             ["SimulatedLayerRestrictedMessage"] = (
-                "退役与热备模拟层仅对已提交池的成员可用。",
-                "Retired and hot-spare layers are available only to members of a committed pool."),
+                "请选择当前池的成员磁盘后再设置退役或热备用途。",
+                "Select a member disk in the current pool before assigning retired or hot-spare usage."),
             ["DraftPoolDiscardConfirmTitle"] = ("放弃草稿池", "Discard draft pool"),
             ["DraftPoolDiscardConfirmMessage"] = (
                 "将丢弃当前草稿池及其中的拖入磁盘。确定继续？",

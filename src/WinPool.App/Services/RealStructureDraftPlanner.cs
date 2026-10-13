@@ -112,7 +112,7 @@ public static class RealStructureDraftPlanner
             if (!newPool && draftVds.Length == 0 && !continueLayout && !pendingTier) continue;
             if (pool.MemberPhysicalDiskIds.Count != 1)
             {
-                blocks.Add(T("真实池草稿必须且只能包含一块准确成员；无成员不能应用。", "A real pool draft requires exactly one identified physical member."));
+                blocks.Add(T("当前真实建池执行仅支持一块准确成员；可继续编辑草稿，无成员或多成员目标暂不能应用。", "Real pool creation currently supports one identified physical member. The draft remains editable; empty or multi-member targets cannot yet be applied."));
                 continue;
             }
             var memberId = pool.MemberPhysicalDiskIds[0];
@@ -152,8 +152,8 @@ public static class RealStructureDraftPlanner
                     || plannedTiers[0].VirtualDiskStableId is not null
                     || plannedTiers[0].MemberPhysicalDiskIds.Count != 1
                     || plannedTiers[0].MemberPhysicalDiskIds[0] != memberId)
-                    blocks.Add(T("新池的自动层草稿仅支持准确单 HDD、Simple、Fixed、1 列、64 KiB；其余媒体或规格保留草稿但不能应用。",
-                        "The automatic tier draft requires one exact HDD, Simple, Fixed, one column and 64 KiB; other media or specifications remain in the draft and cannot be applied."));
+                    blocks.Add(T("当前真实分层执行仅支持单 HDD、Simple、Fixed、1 列、64 KiB；草稿成员和属性可继续编辑，其余配置暂不能应用。",
+                        "Real tiered execution currently supports one HDD, Simple, Fixed, one column and 64 KiB. Draft members and properties remain editable; other configurations cannot yet be applied."));
                 if (createVd && !intent.VirtualDiskUseMaximum && plannedTiers.Length == 1
                     && plannedTiers[0].Size != intent.VirtualDiskSizeBytes)
                     blocks.Add(T("层容量与已保存的虚拟磁盘创建目标不一致，请保存原层属性。",
@@ -311,11 +311,13 @@ public static class RealStructureDraftPlanner
                 || (disk with { PoolStableId = old.PoolStableId, CanPool = old.CanPool, Usage = old.Usage }) != old
                 || disk.Usage != old.Usage && (disk.PoolStableId == old.PoolStableId
                     || PhysicalDiskUsage.Normalize(disk.Usage) != PhysicalDiskUsage.AutoSelect)))
-            blocks.Add(T("成员硬件身份或角色不能在结构草稿中修改。", "Member hardware identities or roles cannot be edited in a structure draft."));
+                blocks.Add(T("成员硬件身份不能修改；草稿中的热备／退役角色暂不支持真实执行，可继续编辑。", "Member hardware identities cannot change. Draft hot-spare or retired roles are not yet supported by real execution; the draft remains editable."));
         if (members.Count > 1 || creations.Count > 1)
             blocks.Add(T("本阶段每次 Apply 仅支持一个准确物理成员及一个目标池。", "Each Apply supports one exact physical member and one target pool."));
         var unblocked = blocks.Count == 0;
-        return new(new(actions.Count > 0 && unblocked, actions, blocks.Distinct().ToArray()),
+        // Unsupported drafts remain editable, but must not describe a different
+        // supported layout as if it were the user's executable target.
+        return new(new(actions.Count > 0 && unblocked, unblocked ? actions : [], blocks.Distinct().ToArray()),
             unblocked ? removedPools : [], unblocked ? removedVds : [],
             unblocked ? removedTiers : [], unblocked ? creations : []);
     }

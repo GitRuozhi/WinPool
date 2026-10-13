@@ -150,6 +150,14 @@ public static class SimulationDraftPlanner
             }
 
             var poolId = NewId("sim:pool", allocated, draft.StableId);
+            var memberDiskUsages = draft.MemberPhysicalDiskIds
+                .Select(memberId => working.PhysicalDisks.FirstOrDefault(item =>
+                    item.StableId.Equals(memberId, StringComparison.OrdinalIgnoreCase)))
+                .Where(item => item is { IsRetired: true } or { IsHotSpare: true })
+                .Select(item => new SimulationMemberDiskUsage(
+                    item!.StableId,
+                    EditWorkspace.DiskUsage(item)))
+                .ToArray();
             var vdisk = working.VirtualDisks.FirstOrDefault(item => item.PoolStableId == draft.StableId);
             string? vdiskId = null;
             string? osDiskId = null;
@@ -199,6 +207,7 @@ public static class SimulationDraftPlanner
                 "primordial",
                 Name: draft.FriendlyName,
                 MemberDiskIds: draft.MemberPhysicalDiskIds.ToArray(),
+                MemberDiskUsages: memberDiskUsages.Length == 0 ? null : memberDiskUsages,
                 VirtualDiskName: vdisk?.FriendlyName ?? draft.FriendlyName,
                 FileSystem: volume?.FileSystem ?? partition?.FileSystem,
                 AllocationUnitSize: volume?.AllocationUnitSize ?? partition?.AllocationUnitSize,

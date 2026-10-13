@@ -2,6 +2,16 @@
 
 日期：2026-10-13。当前产品版本为 V0.59／迭代 9。25项编辑界面任务的原限定验收及按用户授权完成的WDC实机破坏性补验证均已结束，详见下方2026-10-13记录；历史计划的多盘、SCM与长期耐久范围不因此通过。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-13 新池草稿成员和属性限制清理
+
+新池草稿不再继承来源盘的含数据属性锁；真实／模拟共用逐层容量、MAX、保存及复原交互，新池可设置和撤销热备／退役。模拟应用携带成员角色并排除特殊角色的数据容量；现有真实执行能力范围保留，不支持的配置仍可编辑，只限制Apply并说明原因，不显示伪造的HDD执行动作。
+
+最终标准Release构建19.90秒、0警告／0错误。10项有效定点回归通过（Application 5、App 5）；首轮夹具缺少足够容量／canonical卷事实、角色拼写及测试using错误均已修正，原失败日志保留，不计为通过。未跑全量。GUI实际验证含数据真实SSD拖入草稿后容量／MAX／列数／交错可编辑，64 GiB／32 KiB保存重选保持，热备及Undo有效；模拟双HDD草稿Simple／2列、热备／退役与Undo有效。模拟Apply保留角色及容量的后态由窄回归验证；GUI只改草稿，全部Discard。最终运行版本再次核验真实SSD能力说明，只有拒绝原因、无错误HDD创建动作；WGC截图为黑帧，不计视觉证据，保留UIA及此前实际桌面截图。
+
+只读核验21个非Computer存储／映射对象及15个Samsung保护对象结构不变，关联排序后相同；完整采集改变Computer根key，仅按同一SystemId及主机名规范化其引用，未忽略存储身份或关联。原未规范化、未排序的失败比较保留。真实操作463、Accepted 432／CallIssued 548及完整操作和写入边界行均不变，偏好恢复；WDC保持本轮基线脱机状态，未对其联机或写入。App20788／Agent24340从原托盘正常退出，均exit0；最终版本App22128已打开，本机磁盘分区页、Real On、无草稿，供用户继续测试。版本保持V0.59。
+
+证据：[说明与定点TRX／日志](../artifacts/test-results/20261013-draft-restrictions/README.md)、[存储及偏好核验](../artifacts/test-results/20261013-draft-restrictions/storage-verification-sorted.json)、[托盘退出收据](../artifacts/test-results/20261012-product-parity/Native/draft-cleanup-after-gui-20261013-exit-result.json)。
+
 ## 2026-10-13 用户指定前端交互与视觉阶段收口（V0.59）
 
 Plan §8的23项已按本阶段范围完成构建、窄回归与定向GUI验收，范围及截图见[证据说明](../artifacts/test-results/20261013-editor-refinement/README.md)。D盘当前为整数953,868 MiB；provider范围517060.078125–953868.69482421875 MiB，对应目标517061–953868 MiB、最大压缩436,807 MiB，当前不能扩展。查询曾被错误套用的Resize mutation安全检查在provider读取前拦截；修复仅移除只读查询的该项检查，保留身份／关系、本机来源、拓扑与provider边界核验。用户确认的Resize运行路径例外仅移出`MayInterruptRuntime`；Delete、Format、Offline及其余写入核验不变。synthetic Prepare/Preflight验证通过，未真实写入。

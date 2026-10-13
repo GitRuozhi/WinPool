@@ -325,6 +325,20 @@ public static class EditWorkspace
 
     public static bool PoolSupportsStructureModification(StorageSnapshot snapshot, string poolId)
     {
+        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == poolId);
+        if (pool is null)
+        {
+            return true;
+        }
+
+        // A draft pool has no committed storage contents yet. Its members may
+        // still carry real partition facts from their source disks, which stay
+        // visible on those disk nodes and in the working snapshot.
+        if (IsDraftPool(pool.StableId))
+        {
+            return true;
+        }
+
         // Every virtual disk must be data-free...
         if (!snapshot.VirtualDisks
                 .Where(item => item.PoolStableId == poolId)
@@ -333,16 +347,7 @@ public static class EditWorkspace
             return false;
         }
 
-        // ...and so must every member disk: a draft pool into which a
-        // data-bearing disk was dragged can never be executed, and the pool
-        // icon must say so instead of hiding behind the (empty) virtual-disk
-        // check.
-        var pool = snapshot.StoragePools.FirstOrDefault(item => item.StableId == poolId);
-        if (pool is null)
-        {
-            return true;
-        }
-
+        // ...and so must every member disk in an existing pool.
         return !snapshot.PhysicalDisks
             .Where(item => pool.MemberPhysicalDiskIds.Contains(item.StableId, StringComparer.OrdinalIgnoreCase))
             .Any(item => snapshot.OsDisks
@@ -492,12 +497,6 @@ public static class EditWorkspace
             throw new InvalidOperationException("Primordial disks cannot enter a simulated layer.");
         }
 
-        if (IsDraftPool(pool.StableId))
-        {
-            throw new InvalidOperationException(
-                "Draft pool members cannot enter a simulated layer; apply the pool first.");
-        }
-
         var current = DiskUsage(disk);
         if (current == usage)
         {
@@ -505,7 +504,7 @@ public static class EditWorkspace
         }
 
         var wantLayer = usage.Length > 0;
-        return snapshot with
+        var updated = snapshot with
         {
             PhysicalDisks = snapshot.PhysicalDisks
                 .Select(item => item.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase)
@@ -526,6 +525,9 @@ public static class EditWorkspace
                     .ToArray()
                 : snapshot.StorageTiers
         };
+        return IsDraftPool(pool.StableId)
+            ? RefreshDraftRecommendations(updated, pool.StableId)
+            : updated;
     }
 
     /// <summary>

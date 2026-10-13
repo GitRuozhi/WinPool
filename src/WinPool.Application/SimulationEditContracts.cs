@@ -95,7 +95,11 @@ public sealed record SimulationEditRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? PerformanceToleratedFailures = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    int? ScmToleratedFailures = null);
+    int? ScmToleratedFailures = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<SimulationMemberDiskUsage>? MemberDiskUsages = null);
+
+public sealed record SimulationMemberDiskUsage(string DiskId, string Usage);
 
 public sealed record SimulationPlanItem(
     string Id,

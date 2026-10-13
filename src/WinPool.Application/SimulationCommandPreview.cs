@@ -77,7 +77,20 @@ public static class SimulationCommandPreview
                 }
                 lines.Add("$targetPool = New-StoragePool -InputObject $targetStorageSubsystem -FriendlyName " + Quote(step.Name) + " -PhysicalDisks $memberDisks");
                 if (step.Kind == SimulationEditKind.CreateTieredPool)
+                {
+                    foreach (var assignment in step.MemberDiskUsages ?? [])
+                    {
+                        var role = PhysicalDiskUsage.IsRetired(assignment.Usage)
+                            ? "Retired"
+                            : PhysicalDiskUsage.IsHotSpare(assignment.Usage) ? "Hot Spare" : "unsupported";
+                        var diskId = assignment.DiskId
+                            .Replace("\r", "\\r", StringComparison.Ordinal)
+                            .Replace("\n", "\\n", StringComparison.Ordinal);
+                        lines.Add($"# Simulated WinPool layer assignment for {Quote(diskId)}: {role}; no Windows command is bound.");
+                    }
+
                     foreach (var disk in after.VirtualDisks.Where(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId))) AddVirtualDisk(lines, disk, after, step.QuickFormat);
+                }
                 break;
             case SimulationEditKind.CreateVirtualDisk:
                 var created = after.VirtualDisks.FirstOrDefault(x => !before.VirtualDisks.Any(old => old.StableId == x.StableId));
