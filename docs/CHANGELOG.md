@@ -1,5 +1,11 @@
 # WinPool 变更记录
 
+## 2026-10-13：WDC实机破坏性GUI验收收口与Apply刷新修复（V0.59）
+
+用户纠正此前擅自增加的Pool01／ReFS数据保留限制后，按已确认授权完成WDC真实GUI全链：32 GiB NTFS／4 KiB分区实测压缩与扩展各1 GiB、快速格式化64 KiB，拖盘创建单HDD层及3724 GiB MAX VD，并恢复授权的GPT／canonical 16 MiB MSR／NTFS 64 KiB `WinPool_Test` E:末态。Samsung 15对象保护闭包结构零差异；27个新增操作Completed、37步Verified。4 KiB仅为短时实测，不代表长期耐久或推荐，多盘、SCM等仍未设备验收。
+
+修复首次Primordial拖盘建池后Apply按钮未立即刷新的问题，保持原安全校验、偏好及MAX语义；最终Release重建后真实AutoVD／AutoPart开关关闭和开启的拖入均立即启用Apply，模拟Expand-HDD-1亦通过。标准Release构建56.15秒、0警告／错误；未运行新增自动测试或全量测试。恢复态、prefs、保护闭包、正常重启无自动写入和原托盘App／Agent exit 0均核验通过。版本保持V0.59，不推送。详细现场和证据见[Quality](Quality.md#2026-10-13-wdc真实界面破坏性补验与最终收口)及[活动计划](Plan.md)。
+
 ## 2026-10-12：编辑界面、整数输入与操作反馈统一（V0.59）
 
 完成本轮25项要求：分区两行起止／容量、默认最大与前端整数过滤夹紧、同窗扩缩Switch和固定公式极值、上下属性卡、Undo／Check、RAW卡高度、结构分组卡及创建文案、全页忙碌遮罩与跨页持续进度、各页卡片和分类通知图标。名称／盘符Check仅提交该单项；禁用MSR时初始化与本次provider MSR核验清理连续执行。保留既定整数GiB MAX搜索意图。

@@ -2910,12 +2910,23 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void UpdateButtonState()
     {
-        RefreshPendingActions();
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
-        var hasUnapplied = HasUncommittedChanges();
         var poolOffline = pool is not null
             && StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]);
+        var (poolVdisks, deleteTarget) = PoolVirtualDiskState(pool);
+        var realVdisk = poolVdisks.FirstOrDefault(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId));
+        var formEnabled = CanEditDraft
+            && pool is { IsPrimordial: false }
+            && !poolOffline
+            && poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)) <= 1;
+
+        // Capacity validation reads field availability. Refresh it for the
+        // current selection before evaluating the plan and action buttons.
+        UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
+        RefreshTierVisibility();
+        RefreshPendingActions();
+        var hasUnapplied = HasUncommittedChanges();
 
         UndoButton.IsEnabled = CanEditDraft && _undoStack.Count > 0;
         RedoButton.IsEnabled = CanEditDraft && _redoStack.Count > 0;
@@ -2954,8 +2965,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RetireButton.IsEnabled = canLayerDisk && !selectedDisk!.IsRetired;
         HotSpareButton.IsEnabled = canLayerDisk && !selectedDisk!.IsHotSpare;
 
-        var (poolVdisks, deleteTarget) = PoolVirtualDiskState(pool);
-        var realVdisk = poolVdisks.FirstOrDefault(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId));
         var canEditPool = simulated
             && pool is { IsPrimordial: false }
             && !EditWorkspace.IsDraftPool(pool.StableId)
@@ -2972,10 +2981,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DeleteVdiskButton.IsEnabled = CanEditDraft && (canEditPool || CanUseRealSingleMemberPool(pool)
             || pool is { IsPrimordial: false } && EditWorkspace.IsDraftPool(pool.StableId))
             && deleteTarget is not null && !virtualDiskOffline;
-        var formEnabled = CanEditDraft
-            && pool is { IsPrimordial: false }
-            && !poolOffline
-            && poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)) <= 1;
         var structureReason = ResolveStructureDisabledReason(
             simulated,
             pool,
@@ -3058,8 +3063,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         SetDisabledReason(
             ShowRetiredSwitch,
             Text("退役图层开关仅支持模拟系统。", "The retired layer switch is available only in simulated systems."));
-        UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
-        RefreshTierVisibility();
         UpdateFieldResets();
         UpdateNameActionStates();
     }

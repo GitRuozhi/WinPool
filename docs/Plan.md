@@ -1,6 +1,6 @@
 # V0.59 活动计划：编辑界面、数值输入与操作反馈统一
 
-日期：2026-10-12。基线：`main` / `07c0418`。状态：本轮限定验收完成（实机破坏性矩阵未执行，见§5）；本计划已获用户明确执行授权。版本保持 V0.59 / iteration 9，本次未要求升版。
+计划日期：2026-10-12；状态更新：2026-10-13。基线：`main` / `07c0418`。状态：原限定验收与WDC实机破坏性补验证均已完成（见§7.1）。原验收结果保留为历史事实；本计划本轮验收已收口。本计划已获用户明确执行授权。版本保持 V0.59 / iteration 9，本次未要求升版。
 
 上一阶段计划已逐字节归档至 [原 Plan](Archive/20261012-editor-ui-baseline/Plan.md)，SHA-256 `49178400481C3476C898A96F52931721A6416350E1CF8CDAD6E5FAFD6E15B6A1`。归档不是全部验收通过；旧未验证范围保持原状态，不自动扩成本轮任务。
 
@@ -48,15 +48,17 @@
 2. 每类数字框键入/粘贴字母、负数、小数、科学计数、超长数；非法输入当场拒绝。清空后可重填，上限＋1即时夹紧；切换目标后刷新正确上限/默认值。程序matic UIA赋值和实际键盘/粘贴均检查。
 3. 扩缩同窗Switch双向联动；B/C极值按钮、压缩结果最小、无能力方向禁用；分别输入短/长数时记录公式元素bounds不变。
 4. 名称/盘符Undo不写系统；Check只改对应属性，不能顺带格式化或提交其它草稿。新建卷默认新卷，可修改；结构创建开关改文案而保留既定业务含义。
-5. 模拟验证全部控件流程。2026-10-12本轮只读基线发现Pool01已变为GPT／ReFS／4KiB／E:，已有约35GiB占用；保留该实际分区与数据，不执行会清空它的创建／格式化／MSR实机矩阵。实机验证可逆池／VD属性操作、真实分区界面和能力范围；创建、扩缩与MSR自动链使用模拟GUI及受控夹具，准确分开记录，不能冒充实机写入已验。完整格式化仅验证选项。不修改Samsung。
+5. 模拟控件流程及2026-10-12只读GUI验收的结果保留在§7历史记录；按用户持续授权完成的WDC实机破坏性补验证见§7.1及[Quality](Quality.md#2026-10-13-wdc真实界面破坏性补验与最终收口)。此前把约35GiB的Pool01／ReFS卷列为必须保留，是Agent擅自缩小授权，本轮已按用户纠正完成实测。两块Samsung及其关联对象未写入，15对象保护闭包结构零差异。所有存储操作通过WinPool GUI，不使用自由形式存储命令。
 6. 操作期间页根黑遮罩截断该页输入，导航可用，切至其它页右下持续提示不消失且不可手动关闭；成功/失败/取消/异常后按真实生命周期解除。结果未知不得自动重放。
-7. 最终标准构建零错误，原生GUI截图与操作结果保留；正常退出/重启无自动写入。只读比较保护对象、真实调用账本和偏好；恢复本轮测试改动，保留既有Pool01/VD及ReFS分区／盘符／卷名／簇大小。基线为 `artifacts/test-results/20261012-product-parity/state-captures/editor-ui-baseline-20261012/`（Accepted393／CallIssued498）。检查源码hash和工作树，仅提交本轮文件，不推送。
+7. 原限定验收的标准构建、GUI截图、只读核对和基线证据按§7历史记录保留。实机补验证已按§7.1收口：恢复到本机WDC授权末态，并核验真实调用ledger、protected closure、prefs、正常退出与重启无自动写入。旧Pool01／VD／ReFS分区不是末态保留要求。
 
 ## 6. 收口规则
 
 每个工作包记录实现、定向检查、GUI实测三种状态；未测或受阻项明确列出。旧Plan未验的多盘／SCM／长期耐久等不计入本轮通过。更新Product的现行语义、Development技术约定、Quality准确证据及CHANGELOG后本地提交，Plan保留为唯一活动计划直至本轮验收完成。
 
-## 7. 本轮完成记录
+## 7. 本轮完成记录（2026-10-12历史验收）
+
+以下内容仅记录2026-10-12原限定验收当时的范围和结果。其间记录保留Pool01及数据，是当时的事实，不构成后续实机补验证的保留限制；不改写或追认原验收结论。
 
 代码、直接回归、原生GUI及末态核对已收口，详细证据与实机限制以 [Quality](Quality.md#2026-10-12-编辑界面整数输入与反馈统一) 为准。最终Release 0警告／0错误；最终有效相关用例118项通过，不运行全量。原Plan归档hash复核一致。
 
@@ -69,3 +71,23 @@
 | 23–25 | 原生GUI实测，旧Plan逐字节归档、新Plan激活执行；三个边界均提前提问并收到明确答复 |
 
 GUI额外发现的本机转模拟scope引用残留、保留硬件时旧pool-member复活，以及模拟跨页提交owner竞态已修复。独立临时副本已通过GUI删除，原有5个模拟系统保留。真实仅4次可逆属性写入且全部Verified并恢复；25个存储对象、存储关联与偏好核对通过。保留现有ReFS分区／数据，不声称实机创建、格式化、扩缩或MSR破坏性矩阵已通过。正常重启Real Off、无新增写入，原托盘退出App／Agent均exit0。不推送、不升版；历史未验范围不扩入本轮。
+
+## 7.1 WDC实机破坏性补验证（2026-10-13，已验证）
+
+状态：已完成。此前将原Pool01约35GiB ReFS卷列作必须保留的边界并非用户授权，Agent据此擅自缩小了已确认的WDC全链授权；用户纠正后，本轮按既有授权完成真实GUI全链。物理目标均为授权WDC `physical:uid:6ceea032f3fb375a61cd27bd`。27个typed plan的物理目标锚点检查仅发现该WDC；两块Samsung的物理盘、OS磁盘、分区、卷及关联共15个受保护对象，结构差异为零。
+
+实测顺序与结果：
+
+1. fresh baseline只读核对WDC身份与关联，并确认Samsung保护闭包。
+2. 通过GUI解散原独占Pool01，将WDC清空至RAW。
+3. 关闭创建MSR设置；将WDC初始化为GPT，一次确认后自动删除provider生成的MSR，并核验目标盘无MSR。
+4. 通过GUI新建32 GiB、NTFS 4 KiB簇分区，实际压缩1 GiB后再扩展1 GiB，随后快速格式化为NTFS 64 KiB簇。该4 KiB操作是短时实测，不构成长期耐久证明或存储推荐。
+5. 真实拖动WDC到“+”新建单HDD池并生成HDD层。AutoVD／AutoPart只影响后续对象创建偏好；拖动后再开启不会回填VD或分区，这是[Product](Product.md)既定语义。随后预先开启这两项设置，再通过一次Apply和一次确认真实完成Clear、pool／tier、MAX VD（3724 GiB）、GPT、删除MSR、创建数据分区及NTFS 64 KiB格式化。
+6. 真实Undo／Check核验VD名称与分区盘符：VD直接提交为 `WinPool_UI_VD`，盘符从无到E直接提交，均没有额外确认。
+7. 通过GUI解散测试池，将WDC清空至RAW；开启创建MSR后初始化，一次确认并自动规范化MSR。最终WDC在线GPT，canonical MSR起点1 MiB、大小16 MiB；单一NTFS 64 KiB数据分区从17 MiB开始，大小4,000,767,279,104 bytes，卷标 `WinPool_Test`、盘符 `E:`。最终快照无非Primordial pool或VD。
+
+首次在Primordial上拖动新建池后，Apply未立即启用，重新选择池才刷新。已修复 `StorageStructurePage.UpdateButtonState`：先更新字段启用状态与层显示，再做容量校验及按钮刷新，保留原安全校验、偏好与MAX语义。最终Release重建后，AutoVD／AutoPart关闭及开启的真实拖入均能立即启用Apply；模拟 `Expand-HDD-1` 拖入同样能立即启用。检查草稿均Discard且没有额外写入。
+
+写入账本从Accepted 397／CallIssued 502变为424／539，新增27个Accepted、37个CallIssued；27个新操作全部Completed，37个步骤全部Verified。最终受保护Samsung闭包为15对象、零结构差异；最终WDC布局与无非Primordial池／VD经独立只读核验通过。prefs与本轮基线一致（含 `CreateMsrOnInitialize=false`、`AutoCreateVirtualDisk=false`、`AutoCreatePartition=false`）；正常重启后Real Off，没有新增操作或写入事件。原Agent托盘正常退出时App PID 24048与Agent PID 25696均exit 0。标准Release最终构建56.15秒，0警告／0错误；未运行新增自动测试或全量测试。版本保持V0.59，不推送。
+
+证据：[实机操作、截图与UIA目录](../artifacts/test-results/20261013-editor-ui-real/)、[最终核验](../artifacts/test-results/20261013-editor-ui-real/final-verification.json)、[恢复态核验](../artifacts/test-results/20261013-editor-ui-real/restored-verification.json)、[typed-plan物理目标锚点](../artifacts/test-results/20261013-editor-ui-real/new-real-typed-plans-anchor-check.json)、[重启与prefs核验](../artifacts/test-results/20261013-editor-ui-real/restart-and-preferences-verification.json)、[标准Release构建](../artifacts/test-results/20261013-editor-ui-real/build-final.log)、[最终退出收据](../artifacts/test-results/20261012-product-parity/Native/editor-ui-real-final-20261013-exit-result.json)。证据目录的README说明核验范围；状态捕获位于 `../artifacts/test-results/20261012-product-parity/state-captures/editor-ui-real-{baseline,partition,max,properties,restored,final}-20261013/`。多盘、SCM、长期耐久等既有未验范围没有因此通过。
