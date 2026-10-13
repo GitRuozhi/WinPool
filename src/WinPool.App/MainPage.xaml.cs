@@ -1458,7 +1458,8 @@ public sealed partial class MainPage : Page
         {
             Text = currentName,
             Header = Text("新名称", "New name"),
-            MinWidth = 320
+            MinWidth = 320,
+            MinHeight = 32
         };
         var dialog = new ContentDialog
         {
@@ -1691,7 +1692,7 @@ public sealed partial class MainPage : Page
 
     private const double MinTopologyWidth = 320;
 
-    private const double TopologyWidthMargin = 20;
+    private const double TopologyWidthMargin = 28;
 
     private void TopologyScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {

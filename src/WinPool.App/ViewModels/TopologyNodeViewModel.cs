@@ -1,6 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using WinPool.App.Services;
 using WinPool.Application;
 
 namespace WinPool.App.ViewModels;
@@ -11,7 +14,8 @@ public sealed record TopologyEditInteraction(
     bool AllowDiskDrag,
     Action<string, string>? OnDiskDropped = null,
     Func<bool>? CanEditNow = null,
-    Func<string, string, bool>? CanDropDisk = null);
+    Func<string, string, bool>? CanDropDisk = null,
+    Func<TopologyNodeViewModel, MenuFlyout?>? ContextMenuFactory = null);
 
 public sealed partial class TopologyNodeViewModel : ObservableObject
 {
@@ -54,7 +58,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         NoWrapChildren = node.NoWrapChildren;
         DistributeByCapacity = node.DistributeByCapacity;
         CapacityWeights = node.CapacityWeights;
-        ShowsEditStatus = node.ShowsEditStatus;
+        ShowsEditStatus = node.ShowsEditStatus || edit is not null
+            && unit.Kind is StorageUnitKind.StoragePool or StorageUnitKind.StorageTier
+                or StorageUnitKind.PhysicalDisk or StorageUnitKind.VirtualDisk;
         HasStoredData = node.HasStoredData;
         CannotLeave = node.CannotLeave;
         AdaptiveHeaderEnabled = node.AdaptiveHeaderEnabled;
@@ -68,6 +74,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
                 or StorageUnitKind.VirtualDisk
                 or StorageUnitKind.OsDisk
             && StorageEditRules.TouchesOfflineDisk(snapshot, [unit.StableId]);
+        Availability = TopologyAvailability.Resolve(unit, snapshot, owner.ActiveDocument.SourceFacts);
         (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit);
         IsWindowsBacked = ComputeIsWindowsBacked(snapshot, unit);
         var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == unit.StableId);
@@ -102,6 +109,22 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public bool BadgeIsWarning { get; }
 
     public bool IsOffline { get; }
+
+    public TopologyAvailabilityKind Availability { get; }
+
+    public Visibility UnavailableVisibility => Availability == TopologyAvailabilityKind.Available
+        ? Visibility.Collapsed : Visibility.Visible;
+
+    public string UnavailableIcon => $"ms-appx:///Assets/StorageStatus/{(Availability == TopologyAvailabilityKind.Available ? "offline" : Availability.ToString().ToLowerInvariant())}.svg";
+
+    public string UnavailableName => Availability switch
+    {
+        TopologyAvailabilityKind.Offline => _owner.Localization["Offline"],
+        TopologyAvailabilityKind.ReadOnly => _owner.Localization["ReadOnly"],
+        TopologyAvailabilityKind.Fault => _owner.Localization["Error"],
+        TopologyAvailabilityKind.Disconnected => _owner.Localization.IsChinese ? "连接丢失" : "Disconnected",
+        _ => string.Empty
+    };
 
     public bool IsWindowsBacked { get; }
 
@@ -233,6 +256,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     public Visibility PendingModificationVisibility =>
         ShowsEditStatus && _hasPendingModifications ? Visibility.Visible : Visibility.Collapsed;
 
+    public bool HasPendingModifications => ShowsEditStatus && _hasPendingModifications;
+
     public Visibility OfflineVisibility =>
         IsOffline ? Visibility.Visible : Visibility.Collapsed;
 
@@ -254,6 +279,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
         _hasPendingModifications = value;
         OnPropertyChanged(nameof(PendingModificationVisibility));
+        OnPropertyChanged(nameof(HasPendingModifications));
     }
 
     /// <summary>
@@ -482,6 +508,14 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     {
         if (_edit is not null)
         {
+            if (EditWorkspace.IsPlus(Unit.StableId)) return;
+            // Selection can rebuild the editor topology and detach this card.
+            // Anchor the menu to the stable XamlRoot rather than the old card.
+            var anchor = target.XamlRoot?.Content as FrameworkElement ?? target;
+            var position = target.TransformToVisual(anchor).TransformPoint(pointerPosition);
+            SelectCommand.Execute(null);
+            _edit.ContextMenuFactory?.Invoke(this)?.ShowAt(anchor,
+                new FlyoutShowOptions { Position = position });
             return;
         }
 

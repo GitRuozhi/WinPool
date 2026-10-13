@@ -10,7 +10,7 @@
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     mc:Ignorable="d">
 
-    <Grid Padding="12,4,12,12">
+    <Grid Padding="24">
         <Grid.RowDefinitions>
             <RowDefinition MinHeight="250" Height="3*" />
             <RowDefinition Height="8" />
@@ -28,7 +28,7 @@
             Style="{StaticResource WinPoolCardBorderStyle}">
             <ScrollViewer
                 x:Name="TopologyScrollViewer"
-                Padding="8"
+                Padding="12"
                 HorizontalScrollBarVisibility="Auto"
                 HorizontalScrollMode="Enabled"
                 SizeChanged="TopologyScrollViewer_SizeChanged"
@@ -45,7 +45,7 @@
                     </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical" Spacing="6" />
+                            <StackPanel Orientation="Vertical" Spacing="8" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
@@ -81,7 +81,7 @@
                 <ListView
                     x:Name="VerticalCategoryList"
                     Grid.Column="0"
-                    Padding="6"
+                    Padding="12"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="0,0,1,0"
                     ItemsSource="{x:Bind ViewModel.Categories}"
@@ -93,6 +93,7 @@
                         <DataTemplate>
                             <StackPanel
                                 Padding="10,8"
+                                MinHeight="40"
                                 Orientation="Horizontal"
                                 Spacing="8">
                                 <FontIcon
@@ -111,7 +112,7 @@
                 <ScrollViewer
                     x:Name="TableOuterScrollViewer"
                     Grid.Column="1"
-                    Padding="8"
+                    Padding="12"
                     HorizontalScrollBarVisibility="Disabled"
                     HorizontalScrollMode="Disabled"
                     VerticalScrollBarVisibility="Auto"

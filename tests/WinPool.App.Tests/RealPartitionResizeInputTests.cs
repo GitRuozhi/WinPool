@@ -40,10 +40,14 @@ public sealed class RealPartitionResizeInputTests
     }
 
     [Fact]
-    public void FractionalCurrentAndWrongDirectionBoundsRemainRejected()
+    public void FractionalCurrentKeepsExactBytesAndWrongDirectionBoundsRemainRejected()
     {
-        Assert.False(RealPartitionResizeUiRange.TryClampResizeFormula(
-            1000 * Mib + 1, 50, true, true, 1050, 2000, out _, out _));
+        const long currentBytes = 1000 * Mib + 1;
+        Assert.True(RealPartitionResizeUiRange.TryClampResizeFormula(
+            currentBytes, 50, true, true, 1050, 2000, out var targetBytes, out var deltaBytes));
+        Assert.Equal(1050 * Mib, targetBytes);
+        Assert.Equal(50 * Mib - 1, deltaBytes);
+        Assert.Equal(currentBytes, targetBytes - deltaBytes);
         Assert.False(RealPartitionResizeUiRange.TryClampResizeFormula(
             1000 * Mib, 50, true, true, 950, 2000, out _, out _));
         Assert.False(RealPartitionResizeUiRange.TryClampResizeFormula(

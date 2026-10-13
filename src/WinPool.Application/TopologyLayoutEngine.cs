@@ -22,7 +22,7 @@ public static class TopologyLayoutEngine
 {
     public const int LeafMinWidth = 112;
     public const int AncestorChrome = 26;
-    public const int SiblingSpacing = 6;
+    public const int SiblingSpacing = 8;
     public const int MinimumSiblingUnitWidth = 2;
     public const int MinimumRelaxedRowHeight = 5;
 

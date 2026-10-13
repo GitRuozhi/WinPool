@@ -284,8 +284,8 @@ public sealed partial class MonitorPage : Page
             return;
         }
 
-        var panel = new StackPanel { Spacing = 10 };
-        var grid = new Grid { ColumnSpacing = 6, RowSpacing = 6 };
+        var panel = new StackPanel { Spacing = 8 };
+        var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
         for (var i = 0; i < 6; i++)
         {
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -298,6 +298,7 @@ public sealed partial class MonitorPage : Page
         var input = new TextBox
         {
             Width = 130,
+            MinHeight = 32,
             Text = $"#{row.SeriesColor.R:X2}{row.SeriesColor.G:X2}{row.SeriesColor.B:X2}"
         };
         var sorted = SeriesPalette

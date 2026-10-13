@@ -67,7 +67,7 @@ public sealed partial class HardwarePage : Page
         actions.Children.Add(ContextHelp.Wrap(export));
         var content = new StackPanel
         {
-            Margin = new Thickness(12),
+            Margin = new Thickness(24),
             Spacing = cardGap,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
@@ -275,12 +275,11 @@ public sealed partial class HardwarePage : Page
 
     private static Border BorderCell(UIElement child) => PropertyTableVisuals.CreateCell(
         child,
-        (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
-        minHeight: 34);
+        (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]);
 
     private static void SetButtonContent(Button button, string glyph, string text)
     {
-        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         content.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
         content.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
         button.Content = content;

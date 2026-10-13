@@ -387,7 +387,7 @@ public sealed class LocalizationService : ObservableObject
             ["NotCreatedVirtualDisk"] = ("暂未创建", "Not created"),
             ["ShowHotSpareLayer"] = ("显示热备层", "Show hot-spare layer"),
             ["ShowRetiredLayer"] = ("显示退役层", "Show retired layer"),
-            ["TierSize"] = ("容量（GiB）", "Size (GiB)"),
+            ["TierSize"] = ("容量", "Size"),
             ["UseMaximumSize"] = ("使用最大容量", "Use maximum size"),
             ["PendingActions"] = ("待应用动作", "Pending actions"),
             ["NoPendingActions"] = ("暂无待应用动作", "No pending actions"),

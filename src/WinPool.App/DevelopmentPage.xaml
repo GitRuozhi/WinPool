@@ -23,7 +23,7 @@
             x:Name="MessageListArea"
             Grid.Row="0"
             Grid.Column="0"
-            Padding="8"
+            Padding="12"
             Style="{StaticResource WinPoolCardBorderStyle}">
             <Grid>
                 <ListView
@@ -37,9 +37,9 @@
                     ScrollViewer.VerticalScrollMode="Enabled">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
-                            <Setter Property="Margin" Value="0,1" />
+                            <Setter Property="Margin" Value="0,2" />
                             <Setter Property="Padding" Value="0" />
-                            <Setter Property="MinHeight" Value="28" />
+                            <Setter Property="MinHeight" Value="32" />
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                             <Setter Property="VerticalContentAlignment" Value="Stretch" />
                         </Style>
@@ -65,7 +65,7 @@
                                     Background="Transparent"
                                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                     BorderThickness="0,0,0,1">
-                                    <Grid ColumnSpacing="10">
+                                    <Grid ColumnSpacing="8">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="64" />
                                             <ColumnDefinition Width="68" />
@@ -154,7 +154,7 @@
             x:Name="LowerEmptyArea"
             Grid.Row="2"
             Grid.ColumnSpan="3"
-            Padding="16"
+            Padding="12"
             Style="{StaticResource WinPoolCardBorderStyle}">
             <TextBlock
                 x:Name="AiEntryHint"
@@ -182,7 +182,8 @@
                 VerticalAlignment="Center"
                 Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1">
+                BorderThickness="1"
+                CornerRadius="4">
                 <TextBox
                     x:Name="MessageDetailText"
                     AcceptsReturn="True"

@@ -25,6 +25,9 @@
     <Content Include="Assets\CAppIcon.ico"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\StorageStatus\*.svg"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\assets\welcome\00-随机切换.png" Link="Assets\Welcome\00.png"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\assets\welcome\01-气笑了.png" Link="Assets\Welcome\01.png"

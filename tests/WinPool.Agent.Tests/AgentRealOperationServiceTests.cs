@@ -688,6 +688,25 @@ public sealed class AgentRealOperationServiceTests
             session, CancellationToken.None);
         Assert.False(wrongSession.IsSuccess);
         Assert.Equal(1, backend.RangeReadCalls);
+
+        foreach (var failure in new Exception[]
+        {
+            new InvalidDataException("Synthetic exact partition identity changed."),
+            new System.Management.ManagementException("Synthetic supported-size provider failed."),
+            new TimeoutException("Synthetic supported-size query timed out.")
+        })
+        {
+            backend.RangeException = failure;
+            var failed = await service.QueryPartitionResizeRangeAsync(
+                request with { CorrelationId = CorrelationId.New() }, session, CancellationToken.None);
+            Assert.False(failed.IsSuccess);
+            var message = Assert.Single(failed.Messages);
+            Assert.Equal("agent.real_resize.range_unavailable", message.Code);
+            Assert.Contains(failure.GetType().Name, message.DiagnosticText);
+            Assert.Contains(failure.Message, message.DiagnosticText);
+            Assert.Equal(0, backend.PreflightCalls);
+            Assert.Equal(0, backend.ExecuteCalls);
+        }
     }
 
     [Fact]
@@ -1542,6 +1561,7 @@ public sealed class AgentRealOperationServiceTests
         public int PreflightFailureCall { get; init; }
         public Exception? PreflightException { get; init; }
         public Exception? PreparationException { get; set; }
+        public Exception? RangeException { get; set; }
         public bool PauseRunnerPreflight { get; init; }
         public bool PauseAcceptPreflight { get; init; }
         public bool PauseExecution { get; init; }
@@ -1584,6 +1604,7 @@ public sealed class AgentRealOperationServiceTests
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref rangeReadCalls);
+            if (RangeException is { } exception) throw exception;
             return Task.FromResult(new RealPartitionResizeRange(
                 partition, 1024L * 1024 * 1024,
                 512L * 1024 * 1024, 4L * 1024 * 1024 * 1024,

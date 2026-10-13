@@ -42,7 +42,7 @@
             <Grid>
             <ScrollViewer
                 x:Name="TopologyScrollViewer"
-                Padding="8"
+                Padding="12"
                 HorizontalScrollBarVisibility="Auto"
                 HorizontalScrollMode="Enabled"
                 SizeChanged="TopologyScrollViewer_SizeChanged"
@@ -57,7 +57,7 @@
                     </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical" Spacing="6" />
+                            <StackPanel Orientation="Vertical" Spacing="8" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
@@ -75,12 +75,12 @@
             x:Name="PendingActionsBorder"
             Grid.Row="1"
             Margin="0,8,0,0"
-            Padding="8"
+            Padding="12"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <StackPanel Spacing="6">
+            <StackPanel Spacing="8">
                 <TextBlock x:Name="PendingActionsTitle" FontWeight="SemiBold" />
                 <ScrollViewer MaxHeight="96" VerticalScrollBarVisibility="Auto">
                     <StackPanel x:Name="PendingActionsPanel" Spacing="4">
@@ -93,312 +93,91 @@
             x:Name="StructureChromeBorder"
             Grid.Row="2"
             Margin="0,8,0,0"
-            Padding="8"
+            Padding="12"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="4">
-            <StackPanel Spacing="6">
-                <ScrollViewer
-                    x:Name="StructureActionsScrollViewer"
-                    HorizontalScrollBarVisibility="Auto"
-                    HorizontalScrollMode="Enabled"
-                    MaxHeight="220"
-                    SizeChanged="StructureActionsScrollViewer_SizeChanged"
-                    VerticalScrollBarVisibility="Auto"
-                    VerticalScrollMode="Enabled">
-                    <controls:FixedWrapPanel
-                        x:Name="StructureActionsPanel"
-                        Width="176"
-                        ItemWidth="176"
-                        MinimumItemHeight="44"
-                        ItemsPerColumn="2"
-                        Spacing="6">
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="UndoButton"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="Undo_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE7A7;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="UndoButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+            <Grid x:Name="StructureActionsPanel" ColumnSpacing="8" RowSpacing="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="40" />
+                    <RowDefinition Height="Auto" MinHeight="40" />
+                </Grid.RowDefinitions>
+                <controls:ContextHelpHost Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="UndoButton" Width="32" MinWidth="32" Height="32" Padding="0" Style="{StaticResource WinPoolButtonBaseStyle}" Click="Undo_Click">
+                        <FontIcon Glyph="&#xE7A7;" FontSize="14" />
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="RedoButton"
-                    Grid.Row="1"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="Redo_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE7A6;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="RedoButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="RedoButton" Width="32" MinWidth="32" Height="32" Padding="0" Style="{StaticResource WinPoolButtonBaseStyle}" Click="Redo_Click">
+                        <FontIcon Glyph="&#xE7A6;" FontSize="14" />
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="DiscardAllButton"
-                    Grid.Column="1"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="DiscardAll_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE711;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="DiscardAllButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="DiscardAllButton" Width="32" MinWidth="32" Height="32" Padding="0" Style="{StaticResource WinPoolButtonBaseStyle}" Click="DiscardAll_Click">
+                        <FontIcon Glyph="&#xE711;" FontSize="14" />
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="ApplyAllButton"
-                    Grid.Row="1"
-                    Grid.Column="1"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="ApplyAll_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="ApplyAllButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="ApplyAllButton" Width="32" MinWidth="32" Height="32" Padding="0" Style="{StaticResource WinPoolButtonBaseStyle}" Click="ApplyAll_Click">
+                        <FontIcon Glyph="&#xE73E;" FontSize="14" />
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="CreatePoolButton"
-                    Grid.Column="2"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="CreatePool_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="CreatePoolButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Row="1" Grid.Column="0" VerticalAlignment="Center">
+                    <Button x:Name="DissolveButton" MinHeight="32" HorizontalAlignment="Stretch" Style="{StaticResource WinPoolButtonBaseStyle}" Click="Dissolve_Click">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="DissolveButtonIcon" Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" x:Name="DissolveButtonLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </Grid>
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="DissolveButton"
-                    Grid.Row="1"
-                    Grid.Column="2"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="Dissolve_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="DissolveButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Row="1" Grid.Column="1" VerticalAlignment="Center">
+                    <Button x:Name="CreateVdiskButton" MinHeight="32" HorizontalAlignment="Stretch" Style="{StaticResource WinPoolButtonBaseStyle}" Click="VirtualDiskAction_Click">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="CreateVdiskButtonIcon" Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" x:Name="CreateVdiskButtonLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </Grid>
+                    </Button>
                 </controls:ContextHelpHost>
-                <Grid
-                    Grid.Column="5"
-                    MinHeight="36"
-                    ColumnSpacing="4"
-                    VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="ShowHotSpareLabel"
-                        VerticalAlignment="Center"
-                        TextWrapping="Wrap" />
-                    <controls:ContextHelpHost Grid.Column="1">
-                        <ToggleSwitch
-                            x:Name="ShowHotSpareSwitch"
-                            MinWidth="0"
-                            Margin="0"
-                            VerticalAlignment="Center"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="ShowHotSpareSwitch_Toggled" />
-                    </controls:ContextHelpHost>
-                </Grid>
-                <Grid
-                    Grid.Row="1"
-                    Grid.Column="5"
-                    MinHeight="36"
-                    ColumnSpacing="4"
-                    VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="ShowRetiredLabel"
-                        VerticalAlignment="Center"
-                        TextWrapping="Wrap" />
-                    <controls:ContextHelpHost Grid.Column="1">
-                        <ToggleSwitch
-                            x:Name="ShowRetiredSwitch"
-                            MinWidth="0"
-                            Margin="0"
-                            VerticalAlignment="Center"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="ShowRetiredSwitch_Toggled" />
-                    </controls:ContextHelpHost>
-                </Grid>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="RetireButton"
-                    Grid.Column="4"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="Retire_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE7E8;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="RetireButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Row="1" Grid.Column="2" VerticalAlignment="Center">
+                    <Button x:Name="RetireButton" MinHeight="32" HorizontalAlignment="Stretch" Style="{StaticResource WinPoolButtonBaseStyle}" Click="Retire_Click">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="RetireButtonIcon" Glyph="&#xE7E8;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" x:Name="RetireButtonLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </Grid>
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="HotSpareButton"
-                    Grid.Row="1"
-                    Grid.Column="4"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="HotSpare_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE72C;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="HotSpareButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
+                <controls:ContextHelpHost Grid.Row="1" Grid.Column="3" VerticalAlignment="Center">
+                    <Button x:Name="HotSpareButton" MinHeight="32" HorizontalAlignment="Stretch" Style="{StaticResource WinPoolButtonBaseStyle}" Click="HotSpare_Click">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="HotSpareButtonIcon" Glyph="&#xE72C;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" x:Name="HotSpareButtonLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </Grid>
+                    </Button>
                 </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="CreateVdiskButton"
-                    Grid.Column="3"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="CreateVdisk_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE710;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="CreateVdiskButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                <controls:ContextHelpHost>
-                <Button
-                    x:Name="DeleteVdiskButton"
-                    Grid.Row="1"
-                    Grid.Column="3"
-                    Style="{StaticResource WinPoolButtonBaseStyle}"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Center"
-                    Click="DeleteVdisk_Click">
-                    <Grid ColumnSpacing="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE74D;" FontSize="14" VerticalAlignment="Center" />
-                        <TextBlock
-                            x:Name="DeleteVdiskButtonLabel"
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            MaxWidth="130"
-                            TextWrapping="Wrap" />
-                    </Grid>
-                </Button>
-                </controls:ContextHelpHost>
-                    </controls:FixedWrapPanel>
-                </ScrollViewer>
-            </StackPanel>
+            </Grid>
         </Border>
         <toolkit:GridSplitter
             x:Name="EditorSplitter"
@@ -428,9 +207,9 @@
                     <Border Style="{StaticResource WinPoolCardBorderStyle}">
                         <Grid
                             x:Name="PoolFormGrid"
-                            Margin="8,8,8,8"
-                            ColumnSpacing="6"
-                            RowSpacing="0">
+                            Margin="12"
+                            ColumnSpacing="4"
+                            RowSpacing="4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -442,9 +221,9 @@
                         Style="{StaticResource WinPoolCardBorderStyle}">
                         <Grid
                             x:Name="DiskAndPartitionFormGrid"
-                            Margin="8,8,8,8"
-                            ColumnSpacing="6"
-                            RowSpacing="0">
+                            Margin="12"
+                            ColumnSpacing="4"
+                            RowSpacing="4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="32" />
@@ -461,7 +240,7 @@
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Center"
                     Click="SavePoolProperties_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE74E;" FontSize="14" />
                         <TextBlock x:Name="SavePoolPropertiesButtonLabel" VerticalAlignment="Center" />
                     </StackPanel>

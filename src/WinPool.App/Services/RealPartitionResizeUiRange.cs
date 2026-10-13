@@ -36,7 +36,7 @@ public static class RealPartitionResizeUiRange
     {
         minimumMib = 0;
         maximumMib = -1;
-        if (!IsWholeMib(currentSizeBytes)
+        if (currentSizeBytes <= 0
             || allowedMinBytes <= 0
             || allowedMaxBytes < allowedMinBytes)
             return false;
@@ -61,11 +61,11 @@ public static class RealPartitionResizeUiRange
     {
         targetSizeBytes = 0;
         deltaBytes = 0;
-        if (!IsWholeMib(currentSizeBytes) || minimumTargetMib <= 0
+        if (currentSizeBytes <= 0 || minimumTargetMib <= 0
             || maximumTargetMib < minimumTargetMib || maximumTargetMib > long.MaxValue / Mib)
             return false;
         var currentMib = currentSizeBytes / Mib;
-        if (extend ? minimumTargetMib <= currentMib : maximumTargetMib >= currentMib)
+        if (extend ? minimumTargetMib * Mib <= currentSizeBytes : maximumTargetMib * Mib >= currentSizeBytes)
             return false;
         var minimumInputMib = inputIsDelta
             ? extend ? minimumTargetMib - currentMib : currentMib - maximumTargetMib
@@ -88,27 +88,30 @@ public static class RealPartitionResizeUiRange
     {
         targetSizeBytes = 0;
         deltaBytes = 0;
-        if (!IsWholeMib(currentSizeBytes)
-            || inputMib <= 0
+        if (currentSizeBytes <= 0
+            || inputMib < (inputIsDelta ? 0 : 1)
             || inputMib > long.MaxValue / Mib)
             return false;
 
         var inputBytes = inputMib * Mib;
         if (inputIsDelta)
         {
-            deltaBytes = inputBytes;
+            // A is an integer-MiB display. C remains a whole-MiB target,
+            // while the authoritative change is computed from the exact current bytes.
+            var displayedCurrentBytes = currentSizeBytes / Mib * Mib;
             if (extend)
             {
-                if (currentSizeBytes > long.MaxValue - deltaBytes)
+                if (displayedCurrentBytes > long.MaxValue - inputBytes)
                     return false;
-                targetSizeBytes = currentSizeBytes + deltaBytes;
+                targetSizeBytes = displayedCurrentBytes + inputBytes;
             }
             else
             {
-                if (deltaBytes >= currentSizeBytes)
+                if (inputBytes >= displayedCurrentBytes)
                     return false;
-                targetSizeBytes = currentSizeBytes - deltaBytes;
+                targetSizeBytes = displayedCurrentBytes - inputBytes;
             }
+            deltaBytes = extend ? targetSizeBytes - currentSizeBytes : currentSizeBytes - targetSizeBytes;
         }
         else
         {

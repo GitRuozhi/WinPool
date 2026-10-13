@@ -49,7 +49,7 @@
     </VisualStateManager.VisualStateGroups>
 
     <!-- Keep the whole card a pointer surface, including empty header space. -->
-    <Grid Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}" Background="Transparent">
+    <Grid x:Name="NodeSurface" Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}" Background="Transparent" SizeChanged="NodeSurface_SizeChanged">
         <Border
             x:Name="NodeBorder"
             MinHeight="{x:Bind ViewModel.MinimumCardHeight, Mode=OneWay}"
@@ -327,7 +327,7 @@
                 </ItemsControl.ItemContainerStyle>
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <controls:SurfaceStackPanel Spacing="6" />
+                        <controls:SurfaceStackPanel Spacing="8" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
@@ -368,37 +368,56 @@
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Visibility="{x:Bind ViewModel.HasStoredDataVisibility, Mode=OneWay}"
                     AutomationProperties.Name="{x:Bind ViewModel.HasStoredDataName, Mode=OneWay}" />
-                <Border
-                    Width="16"
-                    Height="16"
-                    Background="{StaticResource WinPoolAccentBrush}"
-                    CornerRadius="3"
-                    Visibility="{x:Bind ViewModel.OfflineVisibility, Mode=OneWay}"
-                    AutomationProperties.Name="{x:Bind ViewModel.OfflineName, Mode=OneWay}">
-                    <FontIcon
-                        x:Name="OfflineMark"
-                        FontSize="10"
-                        Foreground="{StaticResource WinPoolAccentForegroundBrush}"
-                        Glyph="&#xE8CD;" />
-                </Border>
             </StackPanel>
 
             </Grid>
         </Border>
 
+        <Canvas
+            IsHitTestVisible="False"
+            Visibility="{x:Bind ViewModel.UnavailableVisibility, Mode=OneWay}"
+            AutomationProperties.Name="{x:Bind ViewModel.UnavailableName, Mode=OneWay}">
+        <Border x:Name="UnavailableOverlay" Background="#80000000" CornerRadius="4">
+            <Grid>
+                <Image Source="ms-appx:///Assets/StorageStatus/chains.svg" Stretch="Fill" Opacity="0.38" />
+                <Border Width="48" Height="48" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="#B0000000" CornerRadius="24">
+                    <Image Width="36" Height="36" Source="{x:Bind ViewModel.UnavailableIcon, Mode=OneWay}" />
+                </Border>
+            </Grid>
+        </Border>
+        </Canvas>
         <Border
             x:Name="DropTargetBorder"
             BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
             BorderThickness="2"
-            CornerRadius="2"
+            CornerRadius="4"
             IsHitTestVisible="False"
             Visibility="Collapsed" />
         <Border
             x:Name="InteractionBorder"
             BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
             BorderThickness="2"
-            CornerRadius="2"
+            CornerRadius="4"
             IsHitTestVisible="False"
             Visibility="Collapsed" />
+        <shapes:Rectangle
+            Margin="1"
+            RadiusX="4"
+            RadiusY="4"
+            Stroke="{ThemeResource WinPoolTopologyRestStrokeBrush}"
+            StrokeThickness="2"
+            IsHitTestVisible="False"
+            Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}" />
+        <shapes:Rectangle
+            x:Name="PendingOutline"
+            Margin="1"
+            RadiusX="4"
+            RadiusY="4"
+            Stroke="{StaticResource WinPoolAccentBrush}"
+            StrokeThickness="2"
+            IsHitTestVisible="False"
+            Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}"
+            AutomationProperties.Name="{x:Bind ViewModel.PendingModificationName, Mode=OneWay}" />
     </Grid>
 </UserControl>

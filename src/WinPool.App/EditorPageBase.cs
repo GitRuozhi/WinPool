@@ -72,7 +72,7 @@ public partial class EditorPageBase : Page
     protected StorageSnapshot _working { get => EditingSession.Working; set => EditingSession.Working = value; }
 
     protected const double MinTopologyWidth = 320;
-    protected const double TopologyWidthMargin = 20;
+    protected const double TopologyWidthMargin = 28;
     protected const long BytesPerMiB = 1024L * 1024;
 
     protected long UnallocatedIgnoreBytes =>

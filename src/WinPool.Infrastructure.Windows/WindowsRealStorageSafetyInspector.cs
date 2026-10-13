@@ -763,7 +763,7 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
 
     private static bool MayInterruptRuntime(RealStorageCommand command) => command is
         ClearDiskCommand or DeletePartitionCommand or FormatVolumeCommand
-        or ResizePartitionCommand or DeleteVirtualDiskCommand or DeletePoolCommand
+        or DeleteVirtualDiskCommand or DeletePoolCommand
         or SetDiskOnlineCommand { Online: false }
         or SetDriveLetterCommand { PreviousLetter: not null };
 

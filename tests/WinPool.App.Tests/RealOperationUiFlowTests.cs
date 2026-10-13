@@ -797,12 +797,21 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
-    public void ResizeFormulaRejectsFractionalCurrentOverflowZeroAndWrongDirection()
+    public void ResizeFormulaKeepsFractionalCurrentBytesAndRejectsOverflowZeroAndWrongDirection()
     {
         const long mib = 1024L * 1024;
 
-        Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
-            100 * mib + 1, 1, true, true, out _, out _));
+        const long exactCurrentBytes = 100 * mib + 1;
+        Assert.True(RealPartitionResizeUiRange.TryGetResizeFormula(
+            exactCurrentBytes, 1, true, true, out var targetBytes, out var deltaBytes));
+        Assert.Equal(101 * mib, targetBytes);
+        Assert.Equal(mib - 1, deltaBytes);
+        Assert.Equal(exactCurrentBytes, targetBytes - deltaBytes);
+        Assert.True(RealPartitionResizeUiRange.TryGetResizeFormula(
+            exactCurrentBytes, 99, false, false, out targetBytes, out deltaBytes));
+        Assert.Equal(99 * mib, targetBytes);
+        Assert.Equal(mib + 1, deltaBytes);
+        Assert.Equal(exactCurrentBytes, targetBytes + deltaBytes);
         Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
             100 * mib, 0, true, true, out _, out _));
         Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
@@ -813,8 +822,14 @@ public sealed class RealOperationUiFlowTests
             100 * mib, 101, false, false, out _, out _));
         Assert.False(RealPartitionResizeUiRange.TryGetResizeFormula(
             long.MaxValue - mib + 1, long.MaxValue / mib, true, true, out _, out _));
-        Assert.False(RealPartitionResizeUiRange.TryGetWholeMibTargets(
-            100 * mib + 1, 1, 200 * mib, true, out _, out _));
+        Assert.True(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            exactCurrentBytes, 1, 200 * mib, true, out var minimum, out var maximum));
+        Assert.Equal(101, minimum);
+        Assert.Equal(200, maximum);
+        Assert.True(RealPartitionResizeUiRange.TryGetWholeMibTargets(
+            exactCurrentBytes, mib, 200 * mib, false, out minimum, out maximum));
+        Assert.Equal(1, minimum);
+        Assert.Equal(100, maximum);
     }
 
     [Fact]

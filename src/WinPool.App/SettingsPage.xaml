@@ -13,7 +13,7 @@
             x:Key="SettingsCardBorder"
             TargetType="Border"
             BasedOn="{StaticResource WinPoolCardBorderStyle}">
-            <Setter Property="Padding" Value="20" />
+            <Setter Property="Padding" Value="12" />
         </Style>
         <Style x:Key="SettingsFieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="14" />
@@ -29,15 +29,15 @@
 
     <ScrollViewer HorizontalContentAlignment="Stretch">
         <StackPanel
-            Padding="24,20,24,40"
+            Padding="24"
             HorizontalAlignment="Stretch"
             Spacing="{StaticResource WinPoolCardGap}">
             <Border Style="{StaticResource SettingsCardBorder}">
-                <Grid ColumnSpacing="16" RowSpacing="16">
+                <Grid ColumnSpacing="8" RowSpacing="4">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="160" />
@@ -90,16 +90,16 @@
             </Border>
 
             <Border Style="{StaticResource SettingsCardBorder}">
-                <Grid ColumnSpacing="16" RowSpacing="16">
+                <Grid ColumnSpacing="8" RowSpacing="4">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="160" />
@@ -117,7 +117,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="WelcomeButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE8A7;" />
                             <TextBlock
                                 x:Name="WelcomeButtonText"
@@ -203,7 +203,7 @@
                             MinHeight="32"
                             MaxLength="4"
                             InputScope="Number"
-                            TextAlignment="Left"
+                            TextAlignment="Right"
                             GotFocus="NumericBox_GotFocus"
                             KeyDown="PartitionGapBox_KeyDown"
                             LostFocus="PartitionGapBox_LostFocus" />
@@ -271,7 +271,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="ResetAllButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE74E;" />
                             <TextBlock
                                 x:Name="ResetAllButtonText"
@@ -284,7 +284,7 @@
             </Border>
 
             <Border Style="{StaticResource SettingsCardBorder}">
-                <Grid ColumnSpacing="16" RowSpacing="16">
+                <Grid ColumnSpacing="8" RowSpacing="4" MinHeight="40">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
@@ -336,15 +336,15 @@
             </Border>
 
             <Border Style="{StaticResource SettingsCardBorder}">
-                <Grid ColumnSpacing="16" RowSpacing="16">
+                <Grid ColumnSpacing="8" RowSpacing="4">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
-                        <RowDefinition Height="Auto" MinHeight="32" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
+                        <RowDefinition Height="Auto" MinHeight="40" />
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="160" />
@@ -393,7 +393,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="WebsiteLink_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE774;" />
                             <TextBlock x:Name="WebsiteButtonText" VerticalAlignment="Center" FontSize="14" Text="访问官网" />
                         </StackPanel>
@@ -412,7 +412,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="UpdateLink_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE777;" />
                             <TextBlock x:Name="UpdateButtonText" VerticalAlignment="Center" FontSize="14" Text="查看更新" />
                         </StackPanel>
@@ -431,7 +431,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="FeedbackLink_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE8F2;" />
                             <TextBlock x:Name="FeedbackButtonText" VerticalAlignment="Center" FontSize="14" Text="提交反馈" />
                         </StackPanel>
@@ -450,7 +450,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Click="CommunityButton_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="14" Glyph="&#xE8F2;" />
                             <TextBlock
                                 x:Name="CommunityButtonText"

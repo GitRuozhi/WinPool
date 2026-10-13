@@ -10,7 +10,7 @@
     mc:Ignorable="d">
     <Grid
         x:Name="MonitorRoot"
-        Padding="24,16,24,16">
+        Padding="24">
         <Grid.RowDefinitions>
             <RowDefinition x:Name="GraphRow" Height="*" MinHeight="160" />
             <RowDefinition Height="8" />
@@ -20,7 +20,7 @@
         </Grid.RowDefinitions>
 
         <Border
-            Padding="8"
+            Padding="12"
             Style="{StaticResource WinPoolCardBorderStyle}">
             <Grid>
                 <controls:DiskActivityGraphControl x:Name="ActivityGraph" />
@@ -52,7 +52,7 @@
 
         <Border
             Grid.Row="2"
-            Padding="8"
+            Padding="12"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
             Style="{StaticResource WinPoolCardBorderStyle}">
@@ -138,6 +138,7 @@
                                     <Grid
                                         Padding="0,4"
                                         HorizontalAlignment="Stretch"
+                                        MinHeight="32"
                                         ColumnSpacing="8"
                                         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                         BorderThickness="0,0,0,1">
@@ -233,9 +234,9 @@
             x:Name="ButtonsCard"
             Grid.Row="4"
             SizeChanged="ButtonsCard_SizeChanged"
-            Padding="12,8"
+            Padding="12"
             Style="{StaticResource WinPoolCardBorderStyle}">
-            <Grid x:Name="ButtonsGrid" ColumnSpacing="12">
+            <Grid x:Name="ButtonsGrid" ColumnSpacing="8" RowSpacing="4">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -249,7 +250,8 @@
                     Grid.Row="0"
                     Grid.Column="0"
                     VerticalAlignment="Center"
-                    ColumnSpacing="12">
+                    ColumnSpacing="8"
+                    RowSpacing="4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -292,6 +294,7 @@
                         <ComboBox
                             x:Name="RateOptions"
                             MinWidth="100"
+                            MinHeight="32"
                             VerticalAlignment="Center"
                             DropDownClosed="RateOptions_DropDownClosed"
                             SelectionChanged="RateOptions_SelectionChanged" />

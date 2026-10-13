@@ -2,6 +2,12 @@
 
 日期：2026-10-13。当前产品版本为 V0.59／迭代 9。25项编辑界面任务的原限定验收及按用户授权完成的WDC实机破坏性补验证均已结束，详见下方2026-10-13记录；历史计划的多盘、SCM与长期耐久范围不因此通过。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
 
+## 2026-10-13 用户指定前端交互与视觉阶段收口（V0.59）
+
+Plan §8的23项已按本阶段范围完成构建、窄回归与定向GUI验收，范围及截图见[证据说明](../artifacts/test-results/20261013-editor-refinement/README.md)。D盘当前为整数953,868 MiB；provider范围517060.078125–953868.69482421875 MiB，对应目标517061–953868 MiB、最大压缩436,807 MiB，当前不能扩展。查询曾被错误套用的Resize mutation安全检查在provider读取前拦截；修复仅移除只读查询的该项检查，保留身份／关系、本机来源、拓扑与provider边界核验。用户确认的Resize运行路径例外仅移出`MayInterruptRuntime`；Delete、Format、Offline及其余写入核验不变。synthetic Prepare/Preflight验证通过，未真实写入。
+
+最终Release构建21.89秒、0警告／错误；有效窄测6项（Infrastructure 5项含替换的Resize boundary 1/1，Agent 1项），不跑全量。App两项fractional断言仅更新并编译，未执行。GUI覆盖MAX切换、拖动建单HDD层、Apply刷新、草稿撤销和三页离线遮罩；readonly／fault／lost映射及SVG仅作源码／资源核对，未伪造故障。只读[末态核验](../artifacts/test-results/20261013-editor-refinement/verified-final-state.json)通过：对完整GUI基线15个Samsung保护对象及全机22对象结构差异为零。最初普通权限基线只有14个保护对象，后续完整采集补入EFI FAT32/1024及一个volume，因此不声称14与15集合完全一致，原失败比较保留。`realOperations=461`、Accepted 430／CallIssued 545不变；偏好恢复任务基线、草稿Discard、模拟offline恢复online、真实开关Off，WDC保持Pool01及单HDD模板无VD。App 25700与Agent 4836正常退出（exit 0），见[收据](../artifacts/test-results/20261012-product-parity/Native/editor-refinement-final-exit-20261013-exit-result.json)。版本保持V0.59。
+
 ## 2026-10-13 WDC真实界面破坏性补验与最终收口
 
 此前把约35GiB的原Pool01／ReFS卷列为必须保留，没有用户授权依据，是Agent擅自缩小已确认的WDC全链授权。用户纠正后，本轮按持续授权通过WinPool真实GUI完成补验。所有新增typed plan的物理目标均为授权WDC `physical:uid:6ceea032f3fb375a61cd27bd`；两块Samsung的物理盘、OS磁盘、分区、卷及关联共15个保护闭包对象，结构比较零差异。

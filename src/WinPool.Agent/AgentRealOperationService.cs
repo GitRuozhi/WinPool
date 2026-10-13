@@ -314,11 +314,17 @@ public sealed class AgentRealOperationService : IRealOperationService
                 new AgentRealPartitionResizeRangeResponse(range),
                 request.CorrelationId);
         }
-        catch (Exception exception) when (exception is InvalidDataException
-            or ArgumentException or UnauthorizedAccessException
-            or InvalidOperationException or NotSupportedException)
+        catch (Exception exception) when (IsExpectedFailure(exception)
+            || exception is System.Management.ManagementException
+                or System.Runtime.InteropServices.COMException or TimeoutException)
         {
-            return Reject(request.CorrelationId, "agent.real_resize.range_unavailable");
+            const string code = "agent.real_resize.range_unavailable";
+            var diagnostic = $"{exception.GetType().Name}: {exception.Message}";
+            if (diagnostic.Length > 2048) diagnostic = diagnostic[..2048];
+            DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot,
+                "agent-control.jsonl", code, exception,
+                $"correlation={request.CorrelationId.Value}; partition={request.Partition}; {diagnostic}");
+            return Reject(request.CorrelationId, code, diagnostic);
         }
     }
 

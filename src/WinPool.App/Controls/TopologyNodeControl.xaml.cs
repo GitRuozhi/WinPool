@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Foundation;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
@@ -29,6 +30,8 @@ public sealed partial class TopologyNodeControl : UserControl
     private bool _suppressNextTap;
     private Popup? _dragPreview;
     private TranslateTransform? _dragPreviewTransform;
+    private Storyboard? _pendingAnimation;
+    private double _pendingPerimeter;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -41,14 +44,14 @@ public sealed partial class TopologyNodeControl : UserControl
         InitializeComponent();
         ContextHelp.Set(ExpandButton, "展开或折叠此结构节点。 / Expand or collapse this structure node.");
         ContextHelp.SetDisabledReason(ExpandButton, "当前节点没有可展开的子项。 / This node has no child items to expand.");
-        Loaded += (_, _) => UpdateSelectionVisual();
+        Loaded += (_, _) => { UpdateSelectionVisual(); UpdateAvailabilityGeometry(); UpdatePendingOutline(); };
         ActualThemeChanged += (_, _) => UpdateSelectionVisual();
         PointerPressed += TopologyNodeControl_PointerPressed;
         PointerMoved += TopologyNodeControl_PointerMoved;
         PointerReleased += TopologyNodeControl_PointerReleased;
         PointerCanceled += (_, _) => CancelInternalDrag();
         PointerCaptureLost += (_, _) => CancelInternalDrag();
-        Unloaded += (_, _) => CancelInternalDrag();
+        Unloaded += (_, _) => { CancelInternalDrag(); StopPendingAnimation(); };
     }
 
     public TopologyNodeViewModel ViewModel
@@ -61,6 +64,7 @@ public sealed partial class TopologyNodeControl : UserControl
     {
         var control = (TopologyNodeControl)dependencyObject;
         control.CancelInternalDrag();
+        control.StopPendingAnimation();
         if (args.OldValue is TopologyNodeViewModel oldValue)
         {
             oldValue.PropertyChanged -= control.ViewModel_PropertyChanged;
@@ -75,15 +79,74 @@ public sealed partial class TopologyNodeControl : UserControl
         control.CanDrag = false;
         control.AllowDrop = false;
         control.UpdateSelectionVisual();
+        control.UpdatePendingOutline();
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(TopologyNodeViewModel.HasPendingModifications))
+            UpdatePendingOutline();
         if (e.PropertyName is nameof(TopologyNodeViewModel.IsSelected)
             or nameof(TopologyNodeViewModel.IsExpanded))
         {
             UpdateSelectionVisual();
         }
+    }
+
+    private void NodeSurface_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateAvailabilityGeometry();
+        UpdatePendingOutline();
+    }
+
+    private void UpdateAvailabilityGeometry()
+    {
+        // Decorations use the measured card size and never enlarge its layout.
+        if (UnavailableOverlay is null) return;
+        UnavailableOverlay.Width = Math.Max(0, NodeSurface.ActualWidth);
+        UnavailableOverlay.Height = Math.Max(0, NodeSurface.ActualHeight);
+    }
+
+    private void StopPendingAnimation()
+    {
+        _pendingAnimation?.Stop();
+        _pendingAnimation = null;
+        _pendingPerimeter = 0;
+    }
+
+    private void UpdatePendingOutline()
+    {
+        if (PendingOutline is null || !IsLoaded || ViewModel?.HasPendingModifications != true
+            || ViewModel.IsInvisibleLayoutContainer)
+        {
+            StopPendingAnimation();
+            return;
+        }
+        // A single theme-colour half travels around the original fixed-colour
+        // outline. Dash lengths are in stroke-width units, not pixels.
+        var width = Math.Max(0, NodeSurface.ActualWidth - 2);
+        var height = Math.Max(0, NodeSurface.ActualHeight - 2);
+        var perimeter = 2 * (width + height) - 8 * 4 + 2 * Math.PI * 4;
+        if (width <= 8 || height <= 8 || Math.Abs(perimeter - _pendingPerimeter) < 0.5) return;
+        StopPendingAnimation();
+        _pendingPerimeter = perimeter;
+        var half = perimeter / (2 * PendingOutline.StrokeThickness);
+        PendingOutline.StrokeDashArray = new DoubleCollection { half, half };
+        PendingOutline.StrokeDashOffset = 0;
+        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
+        var movement = new DoubleAnimation
+        {
+            From = 0,
+            To = half * 2,
+            Duration = new Duration(TimeSpan.FromSeconds(10)),
+            RepeatBehavior = RepeatBehavior.Forever,
+            EnableDependentAnimation = true
+        };
+        Storyboard.SetTarget(movement, PendingOutline);
+        Storyboard.SetTargetProperty(movement, "StrokeDashOffset");
+        _pendingAnimation = new Storyboard();
+        _pendingAnimation.Children.Add(movement);
+        _pendingAnimation.Begin();
     }
 
     private void UpdateSelectionVisual()
@@ -139,7 +202,7 @@ public sealed partial class TopologyNodeControl : UserControl
 
         NodeBorder.BorderThickness = new Thickness(1);
         NodeBorder.Padding = new Thickness(6);
-        NodeBorder.CornerRadius = new CornerRadius(2);
+        NodeBorder.CornerRadius = new CornerRadius(4);
 
         if (ViewModel.IsSelected)
         {

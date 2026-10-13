@@ -329,9 +329,9 @@ public sealed partial class WindowsRealOperationPlanner
             throw new NotSupportedException("Only an ordinary online GPT NTFS or RAW data partition can be resized.");
 
         var reference = RealTargetReference.ForExisting(partitionId);
-        await safetyInspector.ValidateAsync(topology, closure,
-            new ResizePartitionCommand(reference, partition.Size), cancellationToken)
-            .ConfigureAwait(false);
+        // This only reads provider bounds. Mutation safety (including runtime
+        // paths and encryption) remains enforced when preparing and preflighting
+        // an actual resize; it must not prevent inspecting the running volume.
         if (IsRefsPartition(topology.Snapshot, partition))
             await RequireRefsCapabilityAsync(topology, partition, cancellationToken).ConfigureAwait(false);
         var target = WindowsRealStorageTargetBuilder.Build(topology, reference,

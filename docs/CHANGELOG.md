@@ -1,5 +1,9 @@
 # WinPool 变更记录
 
+## 2026-10-13：用户指定前端交互与视觉阶段收口（V0.59）
+
+完成Plan §8的23项界面与状态呈现验收，修正只读D盘range查询误用Resize mutation检查，并按用户确认解除真实Resize运行路径限制；Delete／Format／Offline及其他核验保持原状。最终Release构建21.89秒、0警告／错误，6项有效窄测及定向GUI核验通过；未跑全量或真实存储写入。末态对完整GUI基线只读核验通过，App与Agent正常退出。D盘当前容量为整数MiB；此前查询因运行路径检查而被拒绝，provider边界带小数不代表当前容量带小数。详细范围、限制和证据见[Quality](Quality.md#2026-10-13-用户指定前端交互与视觉阶段收口-v059)及[Plan §8](Plan.md#8-2026-10-13用户指定前端阶段23项已验证)。版本保持V0.59，不推送。
+
 ## 2026-10-13：WDC实机破坏性GUI验收收口与Apply刷新修复（V0.59）
 
 用户纠正此前擅自增加的Pool01／ReFS数据保留限制后，按已确认授权完成WDC真实GUI全链：32 GiB NTFS／4 KiB分区实测压缩与扩展各1 GiB、快速格式化64 KiB，拖盘创建单HDD层及3724 GiB MAX VD，并恢复授权的GPT／canonical 16 MiB MSR／NTFS 64 KiB `WinPool_Test` E:末态。Samsung 15对象保护闭包结构零差异；27个新增操作Completed、37步Verified。4 KiB仅为短时实测，不代表长期耐久或推荐，多盘、SCM等仍未设备验收。

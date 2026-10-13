@@ -966,6 +966,52 @@ public sealed class WindowsRealStorageSafetyInspectorTests
     }
 
     [Fact]
+    public async Task ResizeRuntimeVolumeAllowsPrepareAndPreflightButDestructiveWritesRemainBlocked()
+    {
+        var fixture = new Fixture();
+        fixture.RemoveSibling();
+        var encryptionCalls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector([@"E:\WinPool"], (_, _) => encryptionCalls++);
+        var planner = new WindowsRealOperationPlanner(fixture.Reader, new SyntheticPartitionSizeReader(),
+            new AdministratorPrivilege(), new FixedTimeProvider(), inspector);
+        var partition = fixture.Id(StorageObjectKind.Partition, DataId);
+        var session = new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
+            1234, Now.AddMinutes(-1), @"E:\WinPool\WinPool.Agent.exe", true);
+
+        var range = await planner.ReadPartitionResizeRangeAsync(partition, session, CancellationToken.None);
+        Assert.Equal(64L << 20, range.AllowedMinBytes);
+        Assert.Equal(256L << 20, range.AllowedMaxBytes);
+        Assert.Equal(0, encryptionCalls);
+
+        var step = new RealOperationStep("resize", new ResizePartitionCommand(
+            RealTargetReference.ForExisting(partition), 96L << 20), [],
+            "Exact partition", "Requested size", "Synthetic shrink", "Synthetic provider");
+        var proposal = new RealOperationIntentRequest(OperationIntent.ResizePartition,
+            partition.System, [partition], [step], "Selected partition resized");
+        var plan = await planner.PrepareAsync(proposal, session, OperationId.New(), CancellationToken.None);
+        Assert.Equal(step.Command, Assert.Single(plan.RealOperation!.Steps).Command);
+
+        var topology = await fixture.Capture();
+        _ = await planner.ValidateCurrentStepAsync(
+            topology, fixture.Closure(topology), proposal, step, CancellationToken.None);
+        Assert.Equal(2, encryptionCalls);
+
+        foreach (var destructive in new RealStorageCommand[]
+        {
+            fixture.Delete(DataId),
+            new FormatVolumeCommand(RealTargetReference.ForExisting(partition),
+                RealFileSystem.Ntfs, 65536, false, "Data"),
+            new SetDiskOnlineCommand(RealTargetReference.ForExisting(
+                fixture.Id(StorageObjectKind.OsDisk, DiskId)), false)
+        })
+        {
+            var failure = await Assert.ThrowsAsync<InvalidDataException>(() => inspector.ValidateAsync(
+                topology, fixture.Closure(topology), destructive, CancellationToken.None));
+            Assert.Contains("active WinPool path", failure.Message);
+        }
+    }
+
+    [Fact]
     public async Task A05StillRejectsTargetBitLockerUnknownRuntimeUseAndProtectedPhysicalMember()
     {
         var fixture = new Fixture();
@@ -1022,6 +1068,7 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         public DeletePartitionCommand Delete(string id) => new(
             RealTargetReference.ForExisting(Id(StorageObjectKind.Partition, id)));
         public Task<WindowsRealStorageTopology> Capture() => reader.CaptureAsync(CancellationToken.None);
+        public WindowsRealStorageTopologyReader Reader => reader;
         public RealTargetClosure Closure(WindowsRealStorageTopology topology) =>
             topology.RequireSinglePhysicalClosure([Id(StorageObjectKind.Partition, DataId)]);
         public void ProtectPhysicalMember() => snapshot = snapshot with
@@ -1272,6 +1319,15 @@ public sealed class WindowsRealStorageSafetyInspectorTests
     private sealed class SyntheticMachineIdentity : IRealMachineIdentityProvider
     {
         public Task<string> ReadBindingAsync(CancellationToken token) => Task.FromResult("synthetic-machine-binding");
+    }
+    private sealed class AdministratorPrivilege : IPrivilegeService
+    {
+        public PrivilegeState Current => PrivilegeState.Administrator;
+    }
+    private sealed class SyntheticPartitionSizeReader : IPartitionSupportedSizeReader
+    {
+        public Task<PartitionSupportedSize> ReadAsync(WindowsStorageCommandTarget target, CancellationToken token) =>
+            Task.FromResult(new PartitionSupportedSize(64L << 20, 256L << 20));
     }
     private sealed class FixedTimeProvider : TimeProvider
     {
