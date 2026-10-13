@@ -85,17 +85,18 @@ public static class RealOperationConfirmationFormatter
                 ? $"最大可用容量查找（起始候选 {Capacity(policy.InitialCandidateBytes)}）"
                 : $"maximum-capacity search (starting candidate {Capacity(policy.InitialCandidateBytes)})";
         }
-        string TierSearch(IReadOnlyList<MaximumCapacityTier>? tiers)
+        string TierDetails(CreateTieredVirtualDiskCommand command)
         {
-            if (tiers is not { Count: > 1 }) return string.Empty;
-            var details = tiers.Select(item => item.MaximumCapacity is { } policy
-                ? $"{target(item.Tier)}: {MaxSize(true, 0, policy)}"
-                : target(item.Tier));
+            var tiers = command.CapacityTiers ?? [new MaximumCapacityTier(command.Tier, command.MaximumCapacity,
+                command.UseMaximumSize ? null : command.SizeBytes, command.UseMaximumSize, command.Layout)];
+            var details = tiers.Select(item => $"{(item.MediaType is { } media ? media + " · " : "")}{target(item.Tier)}: "
+                + $"{MaxSize(item.UsesMaximumSize(command.UseMaximumSize), item.SizeBytes ?? command.SizeBytes, item.MaximumCapacity ?? command.MaximumCapacity)}; "
+                + Layout(item.Layout ?? command.EffectiveLayout));
             return (chinese ? "；各层目标：" : "; tier targets: ") + string.Join("；", details);
         }
-        string Layout(int interleave, int columns) => chinese
-            ? $"Simple/Fixed 布局，{Bytes(interleave)} 交错大小，{columns} 列"
-            : $"Simple/Fixed layout, {Bytes(interleave)} interleave, {columns} column(s)";
+        string Layout(StorageLayoutParameters layout) => chinese
+            ? $"{layout.ResiliencySettingName}/Fixed 布局，{Bytes(layout.InterleaveBytes)} 交错大小，{layout.NumberOfColumns} 列，{layout.NumberOfDataCopies} 个数据副本，物理磁盘冗余 {layout.PhysicalDiskRedundancy}"
+            : $"{layout.ResiliencySettingName}/Fixed layout, {Bytes(layout.InterleaveBytes)} interleave, {layout.NumberOfColumns} column(s), {layout.NumberOfDataCopies} data copy/copies, physical-disk redundancy {layout.PhysicalDiskRedundancy}";
 
         return command switch
         {
@@ -127,8 +128,11 @@ public static class RealOperationConfirmationFormatter
                 ? $"将 {target(value.Volume)} 的卷标改为 {Q(value.Label)}。"
                 : $"Rename the volume label on {target(value.Volume)} to {Q(value.Label)}.",
             CreatePoolCommand value => chinese
-                ? $"在 {target(value.PhysicalDisk)} 上创建存储池 {Q(value.Name)}。"
-                : $"Create storage pool {Q(value.Name)} on {target(value.PhysicalDisk)}.",
+                ? $"在 {string.Join("；", value.EffectiveMembers.Select(target))} 上创建存储池 {Q(value.Name)}。"
+                : $"Create storage pool {Q(value.Name)} on {string.Join("; ", value.EffectiveMembers.Select(target))}.",
+            SetPhysicalDiskUsageCommand value => chinese
+                ? $"将 {target(value.PhysicalDisk)} 的成员角色设为 {Usage(value.Usage, true)}。"
+                : $"Set the member usage of {target(value.PhysicalDisk)} to {Usage(value.Usage, false)}.",
             DeletePoolCommand value => chinese
                 ? $"删除存储池 {target(value.Pool)}。"
                 : $"Delete storage pool {target(value.Pool)}.",
@@ -136,8 +140,8 @@ public static class RealOperationConfirmationFormatter
                 ? $"将存储池 {target(value.Pool)} 改名为 {Q(value.Name)}。"
                 : $"Rename storage pool {target(value.Pool)} to {Q(value.Name)}.",
             CreateVirtualDiskCommand value => chinese
-                ? $"在存储池 {target(value.Pool)} 中创建虚拟磁盘 {Q(value.Name)}，容量 {MaxSize(value.UseMaximumSize, value.SizeBytes, value.MaximumCapacity)}；{Layout(value.InterleaveBytes, value.DataColumns)}。"
-                : $"Create virtual disk {Q(value.Name)} in {target(value.Pool)}, capacity {MaxSize(value.UseMaximumSize, value.SizeBytes, value.MaximumCapacity)}; {Layout(value.InterleaveBytes, value.DataColumns)}.",
+                ? $"在存储池 {target(value.Pool)} 中创建虚拟磁盘 {Q(value.Name)}，容量 {MaxSize(value.UseMaximumSize, value.SizeBytes, value.MaximumCapacity)}；{Layout(value.EffectiveLayout)}。"
+                : $"Create virtual disk {Q(value.Name)} in {target(value.Pool)}, capacity {MaxSize(value.UseMaximumSize, value.SizeBytes, value.MaximumCapacity)}; {Layout(value.EffectiveLayout)}.",
             DeleteVirtualDiskCommand value => chinese
                 ? $"删除虚拟磁盘 {target(value.VirtualDisk)}。"
                 : $"Delete virtual disk {target(value.VirtualDisk)}.",
@@ -148,11 +152,11 @@ public static class RealOperationConfirmationFormatter
                 ? $"将虚拟磁盘 {target(value.VirtualDisk)} 改名为 {Q(value.Name)}。"
                 : $"Rename virtual disk {target(value.VirtualDisk)} to {Q(value.Name)}.",
             CreateTierCommand value => chinese
-                ? $"在存储池 {target(value.Pool)} 中创建存储层 {Q(value.Name)}；{Layout(value.InterleaveBytes, value.DataColumns)}。"
-                : $"Create storage tier {Q(value.Name)} in {target(value.Pool)}; {Layout(value.InterleaveBytes, value.DataColumns)}.",
+                ? $"在存储池 {target(value.Pool)} 中创建 {value.EffectiveMediaType} 存储层 {Q(value.Name)}；{Layout(value.EffectiveLayout)}。"
+                : $"Create {value.EffectiveMediaType} storage tier {Q(value.Name)} in {target(value.Pool)}; {Layout(value.EffectiveLayout)}.",
             CreateTieredVirtualDiskCommand value => chinese
-                ? $"在存储池 {target(value.Pool)} 中创建 Simple/Fixed 虚拟磁盘 {Q(value.Name)}，容量 {MaxSize(value.UseMaximumSize, value.SizeBytes, value.MaximumCapacity)}，目标层 {target(value.Tier)}{TierSearch(value.CapacityTiers)}。"
-                : $"Create a Simple/Fixed virtual disk {Q(value.Name)} in {target(value.Pool)}, capacity {MaxSize(value.UseMaximumSize, value.SizeBytes, value.MaximumCapacity)}, using target tier {target(value.Tier)}{TierSearch(value.CapacityTiers)}.",
+                ? $"在存储池 {target(value.Pool)} 中创建 Fixed 虚拟磁盘 {Q(value.Name)}，总容量按各层目标确定{TierDetails(value)}。"
+                : $"Create a Fixed virtual disk {Q(value.Name)} in {target(value.Pool)}, with total capacity determined by its tier targets{TierDetails(value)}.",
             DeleteTierCommand value => chinese
                 ? $"删除存储层 {target(value.Tier)}。"
                 : $"Delete storage tier {target(value.Tier)}.",
@@ -210,6 +214,9 @@ public static class RealOperationConfirmationFormatter
             CreatePoolCommand => chinese
                 ? "物理磁盘上的现有分区和数据将无法继续访问。"
                 : "Existing partitions and data on the physical disk will no longer be accessible.",
+            SetPhysicalDiskUsageCommand => chinese
+                ? "成员使用角色会改变，可用数据容量可能随之变化。"
+                : "Member usage will change; available data capacity may change.",
             DeletePoolCommand => chinese
                 ? "存储池元数据将被移除；池内数据可能无法恢复。"
                 : "Storage pool metadata will be removed; data in the pool may become inaccessible.",
@@ -226,8 +233,8 @@ public static class RealOperationConfirmationFormatter
                 ? "所请求的容量将从存储池分配。"
                 : "The requested capacity will be allocated from the storage pool.",
             CreateTierCommand => chinese
-                ? "存储池容量将用于新存储层。"
-                : "Storage pool capacity will be used by the new tier.",
+                ? "创建尚未分配容量的存储层模板。"
+                : "An unallocated storage tier template will be created.",
             _ when dataLoss.Contains("No ", StringComparison.OrdinalIgnoreCase) => chinese
                 ? "不预期造成额外数据丢失。"
                 : "No additional data loss is expected.",
@@ -416,6 +423,14 @@ public static class RealOperationConfirmationFormatter
     private static string Letter(char? letter, bool chinese) => letter is { } value
         ? $"{char.ToUpperInvariant(value)}:"
         : chinese ? "无" : "none";
+
+    private static string Usage(string value, bool chinese) => PhysicalDiskUsage.Normalize(value) switch
+    {
+        PhysicalDiskUsage.AutoSelect => chinese ? "自动选择" : PhysicalDiskUsage.AutoSelect,
+        PhysicalDiskUsage.HotSpare => chinese ? "热备" : PhysicalDiskUsage.HotSpare,
+        PhysicalDiskUsage.Retired => chinese ? "已停用" : PhysicalDiskUsage.Retired,
+        _ => value
+    };
 
     private static string? First(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));

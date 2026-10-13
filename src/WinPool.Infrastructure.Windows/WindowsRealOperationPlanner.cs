@@ -55,11 +55,11 @@ public sealed partial class WindowsRealOperationPlanner
 
         if (proposal.Intent == OperationIntent.ClearDisk &&
             (proposal.Targets is null || proposal.Steps is null ||
-             proposal.Targets.Count != 1 ||
-             proposal.Targets[0].Kind != StorageObjectKind.OsDisk ||
+             proposal.Targets.Count(item => item.Kind == StorageObjectKind.OsDisk) != 1 ||
+             proposal.Targets.Any(item => item.Kind is not (StorageObjectKind.OsDisk or StorageObjectKind.PhysicalDisk)) ||
              proposal.Steps.Count != 1 ||
              proposal.Steps[0].Command is not ClearDiskCommand clear ||
-             clear.Disk.Existing != proposal.Targets[0] ||
+             clear.Disk.Existing != proposal.Targets.Single(item => item.Kind == StorageObjectKind.OsDisk) ||
              proposal.ExpectedFinalState != RealOperationValidator.ClearDiskExpectedFinalState))
             throw new ArgumentException("A standalone clear requires one exact existing OS disk and the fixed RAW end state.");
 
@@ -81,6 +81,9 @@ public sealed partial class WindowsRealOperationPlanner
         if (proposal.Intent == OperationIntent.InitializeDisk
             && !proposal.Steps.Any(item => item.Command is InitializeGptCommand))
             ValidateInitializationContinuation(topology, proposal);
+
+        if (UsesExactMemberSet(proposal))
+            return await PrepareExactMemberSetAsync(proposal, session, operationId, topology, cancellationToken).ConfigureAwait(false);
 
         if (proposal.Steps.Count == 1 && proposal.Steps[0].Command is CreateTieredVirtualDiskCommand { UseMaximumSize: true, CapacityTiers.Count: > 1 })
             return await PrepareMultiMaximumCapacityAsync(proposal, session, operationId, topology, cancellationToken).ConfigureAwait(false);
@@ -147,15 +150,17 @@ public sealed partial class WindowsRealOperationPlanner
         if (targetId.Kind is not (StorageObjectKind.StoragePool or StorageObjectKind.StorageTier))
             throw new InvalidDataException("An exact pool or unused HDD template is required.");
         var topology = await topologyReader.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        var closure = topology.RequireSinglePhysicalClosure([targetId]);
-        var target = WindowsRealStorageTargetBuilder.Build(topology,
-            RealTargetReference.ForExisting(targetId), new Dictionary<string, string>());
+        var rangePool = topology.FindConcretePoolForTarget(targetId) ?? throw new InvalidDataException("The creation range requires a concrete pool.");
+        var memberSet = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, rangePool.StableId),
+            rangePool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
+        var closure = memberSet.AsComponentClosure();
+        var target = WindowsRealStorageTargetBuilder.BuildForMemberSet(topology,
+            RealTargetReference.ForExisting(targetId), new Dictionary<string, string>(), memberSet);
         VirtualDiskCreationSize range;
         if (targetId.Kind == StorageObjectKind.StoragePool)
         {
             var pool = ExistingPool(topology.Snapshot, RealTargetReference.ForExisting(targetId));
-            if (pool.IsPrimordial || pool.MemberPhysicalDiskIds.Count != 1
-                || pool.MemberPhysicalDiskIds[0] != closure.PhysicalDiskId
+            if (pool.IsPrimordial
                 || topology.Snapshot.VirtualDisks.Any(item => item.PoolStableId == pool.StableId)
                 || topology.Snapshot.StorageTiers.Any(item => item.PoolStableId == pool.StableId))
                 throw new InvalidDataException("Ordinary creation requires an empty exact single-member pool.");
@@ -164,13 +169,13 @@ public sealed partial class WindowsRealOperationPlanner
         else
         {
             var tier = topology.Snapshot.StorageTiers.Single(item => item.StableId == targetId.ProviderKey);
-            var pool = RequireTierPool(topology.Snapshot, closure, tier.PoolStableId);
-            _ = RequireHddTier(topology.Snapshot, pool, tier.StableId);
+            var pool = rangePool;
+            ValidateDataLayout(topology, memberSet, LayoutOf(tier), tier.MediaType);
             if (tier.VirtualDiskStableId is not null
                 || topology.Snapshot.VirtualDisks.Any(item => item.PoolStableId == pool.StableId)
-                || topology.Snapshot.StorageTiers.Count(item => item.PoolStableId == pool.StableId) != 1)
-                throw new InvalidDataException("The sole unused HDD template is required.");
-            await RequireTierCapabilityAsync(topology, closure,
+                || tier.Size != 0 || tier.FootprintOnPool != 0)
+                throw new InvalidDataException("An exact unused template is required.");
+            await RequireExactMemberCapabilityAsync(topology, memberSet,
                 "SupportsStorageTieredVirtualDiskCreation", cancellationToken).ConfigureAwait(false);
             range = await capabilities.ReadTierCreationSizeAsync(topology, targetId,
                 cancellationToken).ConfigureAwait(false);
@@ -198,7 +203,8 @@ public sealed partial class WindowsRealOperationPlanner
         if (physicalTarget.System != topology.SystemId)
             throw new InvalidDataException("The physical disk does not belong to the current local system.");
         var physicalSource = topology.RequireObject(physicalTarget);
-        var closure = topology.RequireSinglePhysicalClosure([physicalTarget]);
+        var supportSet = ResolveSupportMemberSet(topology, physicalTarget);
+        var closure = supportSet.AsComponentClosure(physicalTarget.ProviderKey);
         var physical = topology.Snapshot.PhysicalDisks.SingleOrDefault(item =>
             item.StableId == closure.PhysicalDiskId)
             ?? throw new InvalidDataException("The exact physical member is absent from the fresh snapshot.");
@@ -207,9 +213,6 @@ public sealed partial class WindowsRealOperationPlanner
 
         var subsystem = RequireCreationSubsystem(topology, physicalSource, physical);
         var currentPool = RequireCurrentCreationPool(topology, physical);
-        if (tiered && (!physical.MediaType.Equals("HDD", StringComparison.OrdinalIgnoreCase)
-            || RequireFactUInt64(physicalSource, "MediaType") != 3))
-            throw new NotSupportedException("Tiered creation is enabled only for one exact HDD member.");
 
         VirtualDiskCreationSupportProbe? ordinaryProbe = null;
         WindowsTierCapability capabilityEvidence;
@@ -228,13 +231,11 @@ public sealed partial class WindowsRealOperationPlanner
             {
                 var poolId = new StorageObjectId(topology.SystemId,
                     StorageObjectKind.StoragePool, currentPool.Id);
-                var target = WindowsRealStorageTargetBuilder.Build(topology,
-                    RealTargetReference.ForExisting(poolId), new Dictionary<string, string>());
+                var target = WindowsRealStorageTargetBuilder.BuildForMemberSet(topology,
+                    RealTargetReference.ForExisting(poolId), new Dictionary<string, string>(), supportSet);
                 if (target.Kind != StorageObjectKind.StoragePool
                     || target.UniqueId != currentPool.UniqueId
                     || target.ObjectId != currentPool.ObjectId
-                    || target.PhysicalMemberUniqueId != subsystem.PhysicalUniqueId
-                    || target.PhysicalMemberObjectId != subsystem.PhysicalObjectId
                     || target.StorageSubsystemUniqueId != subsystem.UniqueId
                     || target.StorageSubsystemObjectId != subsystem.ObjectId)
                     throw new InvalidDataException("The current pool target does not preserve the exact physical/subsystem identities.");
@@ -252,7 +253,7 @@ public sealed partial class WindowsRealOperationPlanner
         var after = await topologyReader.CaptureAsync(cancellationToken).ConfigureAwait(false);
         if (!StringComparer.Ordinal.Equals(after.MachineBinding, topology.MachineBinding))
             throw new InvalidDataException("The local machine binding changed while creation support was being checked.");
-        var afterClosure = after.RequireSinglePhysicalClosure([physicalTarget]);
+        var afterClosure = ResolveSupportMemberSet(after, physicalTarget).AsComponentClosure(physicalTarget.ProviderKey);
         var afterPhysical = after.RequireObject(physicalTarget);
         var afterSubsystem = RequireCreationSubsystem(after, afterPhysical,
             after.Snapshot.PhysicalDisks.Single(item => item.StableId == afterClosure.PhysicalDiskId));
@@ -316,7 +317,8 @@ public sealed partial class WindowsRealOperationPlanner
             .ConfigureAwait(false);
         if (partitionId.System != topology.SystemId)
             throw new InvalidDataException("The partition does not belong to the current local system.");
-        var closure = topology.RequireSinglePhysicalClosure([partitionId]);
+        var members = ResolveCurrentPoolMemberSet(topology, partitionId);
+        var closure = members?.AsComponentClosure() ?? topology.RequireSinglePhysicalClosure([partitionId]);
         var partition = ExistingPartition(topology.Snapshot,
             RealTargetReference.ForExisting(partitionId));
         var disk = topology.Snapshot.OsDisks.SingleOrDefault(item =>
@@ -334,15 +336,17 @@ public sealed partial class WindowsRealOperationPlanner
         // an actual resize; it must not prevent inspecting the running volume.
         if (IsRefsPartition(topology.Snapshot, partition))
             await RequireRefsCapabilityAsync(topology, partition, cancellationToken).ConfigureAwait(false);
-        var target = WindowsRealStorageTargetBuilder.Build(topology, reference,
-            new Dictionary<string, string>());
+        var target = members is null ? WindowsRealStorageTargetBuilder.Build(topology, reference,
+            new Dictionary<string, string>()) : WindowsRealStorageTargetBuilder.BuildForMemberSet(topology, reference,
+            new Dictionary<string, string>(), members);
         var provider = await partitionSizes.ReadAsync(target, cancellationToken)
             .ConfigureAwait(false);
         var afterLookup = await topologyReader.CaptureAsync(cancellationToken)
             .ConfigureAwait(false);
         if (!StringComparer.Ordinal.Equals(afterLookup.MachineBinding, topology.MachineBinding)
             || !StringComparer.Ordinal.Equals(
-                afterLookup.RequireSinglePhysicalClosure([partitionId]).Fingerprint,
+                (ResolveCurrentPoolMemberSet(afterLookup, partitionId)?.AsComponentClosure()
+                    ?? afterLookup.RequireSinglePhysicalClosure([partitionId])).Fingerprint,
                 closure.Fingerprint))
             throw new InvalidDataException("The partition topology changed while reading supported sizes.");
 
@@ -384,7 +388,8 @@ public sealed partial class WindowsRealOperationPlanner
         RealOperationStep step,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string>? verifiedStepOutputs = null,
-        bool readOnlyRenameReconciliation = false)
+        bool readOnlyRenameReconciliation = false,
+        RealExactPhysicalMemberSetClosure? exactMemberSet = null)
     {
         var snapshot = topology.Snapshot;
         if (step.Command is CreateVirtualDiskCommand { UseMaximumSize: true, MaximumCapacity: null }
@@ -393,7 +398,11 @@ public sealed partial class WindowsRealOperationPlanner
         var supportEvidence = "fresh-msft-storage:" + closure.Fingerprint;
         verifiedStepOutputs ??= new Dictionary<string, string>();
         WindowsRealStorageSafetyEvidence? safetyEvidence;
-        if (step.Command is FormatVolumeCommand { Partition.Existing: null,
+        if (exactMemberSet is not null)
+        {
+            safetyEvidence = await safetyInspector.InspectAsync(topology, exactMemberSet, step.Command, cancellationToken).ConfigureAwait(false);
+        }
+        else if (step.Command is FormatVolumeCommand { Partition.Existing: null,
                 Partition.CreatedByStep: { Length: > 0 } createdBy } createdFormat
             && verifiedStepOutputs.ContainsKey(createdBy)
             && CurrentPartition(topology, createdFormat.Partition, verifiedStepOutputs) is { } createdPartition
@@ -445,8 +454,11 @@ public sealed partial class WindowsRealOperationPlanner
                 if (value.RemoveOem)
                     throw new NotSupportedException("Removing OEM partitions is outside this stage.");
                 var disk = ExistingDisk(snapshot, value.Disk);
-                var physical = snapshot.PhysicalDisks.Single(item =>
-                    item.StableId == closure.PhysicalDiskId);
+                var directPhysicalId = exactMemberSet is null ? closure.PhysicalDiskId : disk.PhysicalDiskStableId;
+                var physical = snapshot.PhysicalDisks.SingleOrDefault(item => item.StableId == directPhysicalId)
+                    ?? throw new InvalidDataException("Clear requires one exact directly attached physical parent for the selected OS disk.");
+                if (exactMemberSet is not null && !exactMemberSet.Members.Any(item => item.PhysicalDiskId == physical.StableId))
+                    throw new InvalidDataException("The exact clear OS disk must bind to one approved physical member.");
                 if (disk.PhysicalDiskStableId != physical.StableId
                     || disk.VirtualDiskStableId is not null || disk.IsOffline
                     || disk.IsBoot || disk.IsSystem
@@ -506,8 +518,9 @@ public sealed partial class WindowsRealOperationPlanner
                         throw new InvalidDataException("ReFS supports only separately verified extension in this stage.");
                     supportEvidence = await RequireRefsCapabilityAsync(topology, partition, cancellationToken).ConfigureAwait(false);
                 }
-                var target = WindowsRealStorageTargetBuilder.Build(
-                    topology, value.Partition, new Dictionary<string, string>());
+                var target = exactMemberSet is null ? WindowsRealStorageTargetBuilder.Build(
+                    topology, value.Partition, new Dictionary<string, string>())
+                    : BuildExactMemberTarget(topology, exactMemberSet, value, verifiedStepOutputs);
                 var range = await partitionSizes.ReadAsync(target, cancellationToken)
                     .ConfigureAwait(false);
                 var (minimum, maximum) = AllowedResizeRange(snapshot, partition, range);
@@ -808,7 +821,7 @@ public sealed partial class WindowsRealOperationPlanner
         if (volumes.Length != 1)
             throw new NotSupportedException("Format capability is unknown: the exact partition has no unique current MSFT_Volume (RAW volumes are eligible).");
         var volume = new StorageObjectId(topology.SystemId, StorageObjectKind.Volume, volumes[0].StableId);
-        var closure = topology.RequireSinglePhysicalClosure([volume]);
+        var closure = topology.RequireCapabilityClosure(volume);
         var evidence = await capabilities.ReadVolumeFormatAsync(topology, volume,
             fileSystem.ToString(), token).ConfigureAwait(false);
         var source = topology.RequireObject(volume);
@@ -849,7 +862,7 @@ public sealed partial class WindowsRealOperationPlanner
             || supported is not { ReadState: FieldReadState.Returned,
                 Value: { ValueKind: System.Text.Json.JsonValueKind.True } }
             || minimum is not { ReadState: FieldReadState.Returned, Value: { } min }
-            || !min.TryGetUInt64(out var count) || count != 1)
+            || !min.TryGetUInt64(out var count) || count == 0)
             throw new NotSupportedException("The exact subsystem has not verified the single-HDD capability " + field + ": " + evidence.Error);
         return "live-tier-capability:" + System.Text.Json.JsonSerializer.Serialize(evidence);
     }
@@ -900,8 +913,8 @@ public sealed partial class WindowsRealOperationPlanner
                 { ValueType: FactValueType.UInt64, ReadState: FieldReadState.Returned,
                     Value: { } minimumValue }
             || minimumFields[0].SourceRef != subsystem.StableId
-            || !minimumValue.TryGetUInt64(out var minimum) || minimum != 1)
-            throw new NotSupportedException("The exact subsystem has not verified one physical disk per storage pool: "
+            || !minimumValue.TryGetUInt64(out var minimum) || minimum == 0)
+            throw new NotSupportedException("The exact subsystem has not verified its physical disk minimum: "
                 + evidence.Error);
         return evidence;
     }
@@ -953,9 +966,6 @@ public sealed partial class WindowsRealOperationPlanner
             if (!primordial)
             {
                 factConcretePools.Add(poolSource.Id);
-                if (projectedPool.MemberPhysicalDiskIds.Count != 1
-                    || projectedPool.MemberPhysicalDiskIds[0] != physical.StableId)
-                    throw new NotSupportedException("Creation support requires a single-member concrete pool.");
             }
 
             var subsystemParents = relations.Where(item => item.Kind == "subsystem-pool"
@@ -1019,8 +1029,7 @@ public sealed partial class WindowsRealOperationPlanner
         var uniqueId = RequireFactText(source, "UniqueId");
         var objectId = RequireFactText(source, "ObjectId");
         if (RequireFactBoolean(source, "IsPrimordial")
-            || pool.MemberPhysicalDiskIds.Count != 1
-            || pool.MemberPhysicalDiskIds[0] != physical.StableId)
+            || !pool.MemberPhysicalDiskIds.Contains(physical.StableId))
             throw new InvalidDataException("The exact current concrete pool identity or physical member is incomplete.");
         return new CreationPoolEvidence(pool.StableId, uniqueId, objectId);
     }

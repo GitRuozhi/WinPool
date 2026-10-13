@@ -59,8 +59,12 @@ public static class RealOperationPlanFactory
             proposal.Steps.Select(step => step with
             {
                 DependsOn = step.DependsOn.ToArray(),
-                Command = step.Command is CreateTieredVirtualDiskCommand { CapacityTiers: { } tiers } tiered
-                    ? tiered with { CapacityTiers = tiers.ToArray() } : step.Command
+                Command = step.Command switch
+                {
+                    CreateTieredVirtualDiskCommand { CapacityTiers: { } tiers } tiered => tiered with { CapacityTiers = tiers.ToArray() },
+                    CreatePoolCommand { Members: { } members } pool => pool with { Members = members.ToArray() },
+                    _ => step.Command
+                }
             }).ToArray());
         plan = plan with { RealOperation = real };
         return plan with { PlanHash = OperationPlanHasher.Compute(plan) };
@@ -78,11 +82,8 @@ public static class RealOperationValidator
             request.Intent is OperationIntent.RepairStorageObject or OperationIntent.RawDeviceWrite ||
             request.Targets is null || request.Targets.Count == 0 ||
             request.Targets.Any(target => target.System != request.SystemId) ||
-            (request.Targets.Count(target => target.Kind == StorageObjectKind.PhysicalDisk) > 1 &&
-                request.Steps?.Any(step => step.Command is CreateTieredVirtualDiskCommand
-                    { UseMaximumSize: true, CapacityTiers.Count: > 1 }) != true) ||
             request.Targets.Distinct().Count() != request.Targets.Count ||
-            request.Steps is null || request.Steps.Count == 0 ||
+            request.Steps is null || request.Steps.Count == 0 || request.Steps.Any(step => step is null) ||
             string.IsNullOrWhiteSpace(request.ExpectedFinalState))
         {
             throw new ArgumentException("The real operation proposal has an unsupported intent, target or expected state.");
@@ -91,7 +92,7 @@ public static class RealOperationValidator
         if (request.Intent == OperationIntent.ClearDisk)
         {
             var diskTargets = request.Targets.Where(target => target.Kind == StorageObjectKind.OsDisk).ToArray();
-            if (diskTargets.Length != 1 || request.Targets.Count is < 1 or > 2 ||
+            if (diskTargets.Length != 1 || request.Targets.Count < 1 ||
                 request.Targets.Any(target => target != diskTargets[0] && target.Kind != StorageObjectKind.PhysicalDisk) ||
                 request.Steps.Count != 1 ||
                 request.Steps[0].Command is not ClearDiskCommand
@@ -111,7 +112,9 @@ public static class RealOperationValidator
         // is prepared separately after its verified identities and final capacity.
         if (request.Steps.Count != 1 && request.Steps.Any(step => step.Command is
                 CreateVirtualDiskCommand { MaximumCapacity: not null } or
-                CreateTieredVirtualDiskCommand { MaximumCapacity: not null }))
+                CreateTieredVirtualDiskCommand { MaximumCapacity: not null } ||
+                step.Command is CreateTieredVirtualDiskCommand { CapacityTiers: { } tiers } &&
+                tiers.Any(tier => tier?.MaximumCapacity is not null)))
             throw new ArgumentException("A maximum-capacity search must be its own confirmed plan.");
 
         var prior = new Dictionary<string, HashSet<StorageObjectKind>>(StringComparer.Ordinal);
@@ -140,19 +143,50 @@ public static class RealOperationValidator
 
             var (reference, expectedKind) = GetTarget(step.Command);
             ValidateTarget(reference, expectedKind, request, step, prior);
+            if (step.Command is CreatePoolCommand pool)
+            {
+                var members = pool.EffectiveMembers;
+                if (members.Count == 0 || members[0] != pool.PhysicalDisk ||
+                    members.Any(member => member is null || member.Existing is null || member.CreatedByStep is not null) ||
+                    members.Distinct().Count() != members.Count ||
+                    !members.Select(member => member.Existing!.Value).ToHashSet().SetEquals(
+                        request.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk)))
+                    throw new ArgumentException("Pool creation requires the distinct complete declared existing physical member set and its first-member anchor.");
+                foreach (var member in members)
+                    ValidateTarget(member, StorageObjectKind.PhysicalDisk, request, step, prior);
+            }
             if (step.Command is CreateTieredVirtualDiskCommand tiered)
             {
                 ValidateTarget(tiered.Tier, StorageObjectKind.StorageTier, request, step, prior);
                 if (tiered.CapacityTiers is { } tiers)
                 {
-                    if (!tiered.UseMaximumSize || tiers.Count < 2 || tiers[0].Tier != tiered.Tier ||
+                    if (tiers.Count < 1 || tiers.Any(item => item is null) || tiers[0].Tier != tiered.Tier ||
                         tiers.Select(item => item.Tier).Distinct().Count() != tiers.Count)
-                        throw new ArgumentException("Multi-tier MAX needs distinct ordered exact templates and an agreeing first template.");
+                        throw new ArgumentException("Tiered creation needs distinct ordered exact templates and an agreeing first template.");
+                    var anySearch = tiers.Any(item => item.UsesMaximumSize(tiered.UseMaximumSize));
+                    if (anySearch != tiered.UseMaximumSize)
+                        throw new ArgumentException("The parent maximum-size intent must agree with the per-tier intents.");
+                    long explicitTotal = 0;
                     foreach (var item in tiers)
                     {
                         ValidateTarget(item.Tier, StorageObjectKind.StorageTier, request, step, prior);
-                        ValidateMaximumCapacityPolicy(item.MaximumCapacity, true);
+                        var search = item.UsesMaximumSize(tiered.UseMaximumSize);
+                        ValidateMaximumCapacityPolicy(item.MaximumCapacity, search);
+                        item.Layout?.Validate();
+                        ValidateMediaType(item.MediaType);
+                        if (search ? item.SizeBytes is not null and not 0 :
+                            item.SizeBytes is null or <= 0 || item.SizeBytes.Value % MaximumCapacityAlgorithm.GiB != 0)
+                            throw new ArgumentException("Each tier needs exclusive MAX or an explicit positive whole-GiB capacity.");
+                        if (!search)
+                        {
+                            try { explicitTotal = checked(explicitTotal + item.SizeBytes!.Value); }
+                            catch (OverflowException exception) { throw new ArgumentException("The tier capacity total exceeds the supported byte range.", exception); }
+                        }
                     }
+                    if (!anySearch && tiered.SizeBytes != explicitTotal)
+                        throw new ArgumentException("An explicit tiered virtual disk total must equal its ordered layer capacities.");
+                    if (tiers.Count == 1 && tiered.Layout is not null && tiers[0].Layout is { } firstLayout && tiered.Layout != firstLayout)
+                        throw new ArgumentException("The single-tier expected layout must agree with its layer layout.");
                 }
             }
             ValidateCommand(step.Command);
@@ -165,14 +199,12 @@ public static class RealOperationValidator
         if (request.Steps.Count(step => step.Command is CreatePoolCommand) > 1 ||
             request.Steps.Count(step => step.Command is CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand) > 1 ||
             request.Steps.Count(step => step.Command is DeletePoolCommand) > 1 ||
-            (request.Steps.Any(step => step.Command is CreatePoolCommand) &&
-             request.Targets.Count(target => target.Kind == StorageObjectKind.PhysicalDisk) != 1) ||
             (request.Intent == OperationIntent.DeleteStoragePool &&
              request.Steps.Count(step => step.Command is DeletePoolCommand) != 1) ||
             (request.Intent == OperationIntent.RebuildStoragePool &&
              !request.Steps.Any(step => step.Command is ClearDiskCommand or DeletePoolCommand or DeleteVirtualDiskCommand or DeleteTierCommand)))
         {
-            throw new ArgumentException("This stage allows one physical member, one new virtual disk and explicit listed removal steps only.");
+            throw new ArgumentException("One new pool and virtual disk and explicit listed removal steps are permitted per sealed operation.");
         }
 
         if (request.Intent == OperationIntent.RebuildStoragePool)
@@ -278,6 +310,7 @@ public static class RealOperationValidator
         SetDriveLetterCommand value => (value.Partition, StorageObjectKind.Partition),
         RenameVolumeCommand value => (value.Volume, StorageObjectKind.Volume),
         CreatePoolCommand value => (value.PhysicalDisk, StorageObjectKind.PhysicalDisk),
+        SetPhysicalDiskUsageCommand value => (value.PhysicalDisk, StorageObjectKind.PhysicalDisk),
         DeletePoolCommand value => (value.Pool, StorageObjectKind.StoragePool),
         RenamePoolCommand value => (value.Pool, StorageObjectKind.StoragePool),
         CreateVirtualDiskCommand value => (value.Pool, StorageObjectKind.StoragePool),
@@ -317,7 +350,7 @@ public static class RealOperationValidator
         OperationIntent.FormatVolume => command is FormatVolumeCommand,
         OperationIntent.SetDriveLetter => command is SetDriveLetterCommand,
         OperationIntent.SetVolumeLabel => command is RenameVolumeCommand,
-        OperationIntent.CreateStoragePool => command is CreatePoolCommand or CreateVirtualDiskCommand or InitializeGptCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
+        OperationIntent.CreateStoragePool => command is CreatePoolCommand or SetPhysicalDiskUsageCommand or CreateTierCommand or CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand or InitializeGptCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
         OperationIntent.DeleteStoragePool => command is DeleteVirtualDiskCommand or DeleteTierCommand or DeletePoolCommand,
         OperationIntent.CreateVirtualDisk => command is CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand or InitializeGptCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
         OperationIntent.DeleteVirtualDisk => command is DeleteVirtualDiskCommand,
@@ -326,7 +359,8 @@ public static class RealOperationValidator
         OperationIntent.DeleteStorageTier => command is DeleteTierCommand,
         OperationIntent.ResizeStorageTier => command is ResizeTierCommand,
         OperationIntent.RenameStorageObject => command is RenamePoolCommand or RenameVirtualDiskCommand or RenameTierCommand,
-        OperationIntent.RebuildStoragePool => command is ClearDiskCommand or DeleteVirtualDiskCommand or DeleteTierCommand or DeletePoolCommand or CreatePoolCommand or CreateTierCommand or CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand or InitializeGptCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
+        OperationIntent.RebuildStoragePool => command is ClearDiskCommand or DeleteVirtualDiskCommand or DeleteTierCommand or DeletePoolCommand or CreatePoolCommand or SetPhysicalDiskUsageCommand or CreateTierCommand or CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand or InitializeGptCommand or CreatePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand,
+        OperationIntent.SetPhysicalDiskUsage => command is SetPhysicalDiskUsageCommand,
         _ => false
     };
 
@@ -382,8 +416,8 @@ public static class RealOperationValidator
         if (index < steps.Count && steps[index].Command is FormatVolumeCommand format)
         {
             if (dataStep is null || format.Partition != RealTargetReference.FromStep(StorageObjectKind.Partition, dataStep) ||
-                (format.FileSystem is not (RealFileSystem.Ntfs or RealFileSystem.ReFs)) || !FormatAllocationUnitPolicy.IsKnownClusterSize(format.FileSystem.ToString(), format.ClusterBytes) || format.Full)
-                throw new ArgumentException("Automatic initialization formats only its new data partition with quick NTFS/ReFS and an explicit supported cluster size.");
+                (format.FileSystem is not (RealFileSystem.Ntfs or RealFileSystem.ReFs or RealFileSystem.ExFat)) || !FormatAllocationUnitPolicy.IsKnownClusterSize(format.FileSystem.ToString(), format.ClusterBytes) || format.Full)
+                throw new ArgumentException("Automatic initialization formats only its new data partition with a supported quick filesystem and an explicit supported cluster size.");
             index++;
         }
         if (index < steps.Count && steps[index].Command is SetDriveLetterCommand letter)
@@ -401,9 +435,20 @@ public static class RealOperationValidator
     {
         const long mebibyte = 1024L * 1024;
         if (command is CreateVirtualDiskCommand ordinary)
+        {
             ValidateMaximumCapacityPolicy(ordinary.MaximumCapacity, ordinary.UseMaximumSize);
+            ValidateLayout(ordinary.EffectiveLayout, ordinary.DataColumns, ordinary.InterleaveBytes);
+        }
+        if (command is CreateTierCommand tier)
+        {
+            ValidateLayout(tier.EffectiveLayout, tier.DataColumns, tier.InterleaveBytes);
+            ValidateMediaType(tier.EffectiveMediaType);
+        }
         if (command is CreateTieredVirtualDiskCommand tiered)
+        {
             ValidateMaximumCapacityPolicy(tiered.MaximumCapacity, tiered.UseMaximumSize);
+            tiered.EffectiveLayout.Validate();
+        }
         switch (command)
         {
             case ClearDiskCommand { RemoveOem: true }:
@@ -426,12 +471,14 @@ public static class RealOperationValidator
                 (value.NewLetter is { } next && (next < 'D' || next > 'Z')) ||
                 (value.PreviousLetter is not null && value.PreviousLetter == value.NewLetter):
                 throw new ArgumentException("The exact previous and requested drive letters must differ and be valid local letters.");
-            case CreateVirtualDiskCommand value when (value.UseMaximumSize ? value.SizeBytes != 0 : value.SizeBytes <= 0) || value.InterleaveBytes != 65536 || value.DataColumns != 1 || string.IsNullOrWhiteSpace(value.Name):
-                throw new ArgumentException("Only single-column 64 KiB Simple/Fixed virtual disks are enabled.");
+            case CreateVirtualDiskCommand value when (value.UseMaximumSize ? value.SizeBytes != 0 : value.SizeBytes <= 0) || string.IsNullOrWhiteSpace(value.Name):
+                throw new ArgumentException("A virtual disk needs an exclusive explicit size or maximum search intent and a name.");
             case ResizeVirtualDiskCommand value when value.SizeBytes <= 0:
                 throw new ArgumentException("The virtual disk size is required.");
-            case CreateTierCommand value when value.InterleaveBytes != 65536 || value.DataColumns != 1 || string.IsNullOrWhiteSpace(value.Name):
-                throw new ArgumentException("Only single-column 64 KiB HDD tiers are enabled.");
+            case CreateTierCommand value when string.IsNullOrWhiteSpace(value.Name):
+                throw new ArgumentException("A tier template name is required.");
+            case SetPhysicalDiskUsageCommand value when value.Usage is not (PhysicalDiskUsage.AutoSelect or PhysicalDiskUsage.HotSpare or PhysicalDiskUsage.Retired):
+                throw new ArgumentException("Physical disk usage must be canonical Auto-Select, Hot Spare or Retired.");
             case CreateTieredVirtualDiskCommand value when (value.UseMaximumSize ? value.SizeBytes != 0 : value.SizeBytes <= 0) || string.IsNullOrWhiteSpace(value.Name)
                 || !Enum.IsDefined(value.CreationMechanism)
                 || value.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd && !value.UseMaximumSize:
@@ -449,6 +496,19 @@ public static class RealOperationValidator
             case RenameVolumeCommand value when value.Label is null:
                 throw new ArgumentException("A volume label is required.");
         }
+    }
+
+    private static void ValidateLayout(StorageLayoutParameters layout, int columns, int interleave)
+    {
+        layout.Validate();
+        if (layout.NumberOfColumns != columns || layout.InterleaveBytes != interleave)
+            throw new ArgumentException("The exact layout must agree with the legacy columns and interleave fields.");
+    }
+
+    private static void ValidateMediaType(string? mediaType)
+    {
+        if (mediaType is not (null or "HDD" or "SSD" or "SCM"))
+            throw new ArgumentException("The tier media type must be HDD, SSD or SCM.");
     }
 
     private static void ValidateMaximumCapacityPolicy(MaximumCapacityPolicy? policy, bool useMaximumSize)

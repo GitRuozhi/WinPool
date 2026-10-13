@@ -83,8 +83,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             var source = topology.RequireObject(tier);
             var projected = topology.Snapshot.StorageTiers.Single(item => item.StableId == source.Id);
             var pool = topology.Snapshot.StoragePools.Single(item => item.StableId == projected.PoolStableId && !item.IsPrimordial);
-            if (pool.MemberPhysicalDiskIds.Count == 1) _ = topology.RequireSinglePhysicalClosure([tier]);
-            else _ = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
+            _ = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
                 pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
             if (projected.VirtualDiskStableId is not null)
                 throw new NotSupportedException("Tier size lookup is for an unused creation template, not existing-object expansion.");
@@ -95,7 +94,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             {
                 var exact = RequireExact(candidates, RequiredText(source, "UniqueId"), RequiredText(source, "ObjectId"));
                 using var input = exact.GetMethodParameters("GetSupportedSize");
-                input["ResiliencySettingName"] = "Simple";
+                input["ResiliencySettingName"] = projected.ResiliencySettingName;
                 using var output = exact.InvokeMethod("GetSupportedSize", input,
                     new InvokeMethodOptions { Timeout = TimeSpan.FromSeconds(10) });
                 if (output is null)
@@ -156,7 +155,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             if (volume.Kind != StorageObjectKind.Volume)
                 throw new InvalidDataException("An exact captured volume is required.");
             var source = topology.RequireObject(volume);
-            var closure = topology.RequireSinglePhysicalClosure([volume]);
+            var closure = topology.RequireCapabilityClosure(volume);
             physicalId = closure.PhysicalDiskId;
             fingerprint = closure.PhysicalMemberFingerprint;
             var projected = topology.Snapshot.Volumes.Single(item =>
@@ -227,7 +226,10 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             if (physicalDisk.Kind != StorageObjectKind.PhysicalDisk)
                 throw new InvalidDataException("An exact captured physical disk is required.");
             _ = topology.RequireObject(physicalDisk);
-            _ = topology.RequireSinglePhysicalClosure([physicalDisk]);
+            var concretePool = topology.Snapshot.StoragePools.SingleOrDefault(item => !item.IsPrimordial && item.MemberPhysicalDiskIds.Contains(physicalDisk.ProviderKey));
+            if (concretePool is null) _ = topology.RequireSinglePhysicalClosure([physicalDisk]);
+            else _ = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, concretePool.StableId),
+                concretePool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
             var members = topology.Facts.Relationships.Where(item => !item.IsRetained
                 && item.Kind == "pool-member" && item.ToId == physicalDisk.ProviderKey).ToArray();
             if (members.Length == 0)

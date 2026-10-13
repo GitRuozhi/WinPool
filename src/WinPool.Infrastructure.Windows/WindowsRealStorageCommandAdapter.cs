@@ -39,7 +39,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         ArgumentNullException.ThrowIfNull(target);
         token.ThrowIfCancellationRequested();
 
-        if (command is CreateVirtualDiskCommand { UseMaximumSize: true } or CreateTieredVirtualDiskCommand { UseMaximumSize: true })
+        if (WindowsRealStorageBackend.IsMaximumCapacityMacro(command))
             return Rejected("adapter.maximum-requires-journaled-explicit-attempt");
 
         var kind = GetCommandKind(command);
@@ -132,6 +132,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         SetDriveLetterCommand => "SetDriveLetter",
         RenameVolumeCommand => "RenameVolume",
         CreatePoolCommand => "CreatePool",
+        SetPhysicalDiskUsageCommand => "SetPhysicalDiskUsage",
         DeletePoolCommand => "DeletePool",
         RenamePoolCommand => "RenamePool",
         CreateVirtualDiskCommand => "CreateVirtualDisk",
@@ -158,7 +159,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             SetDiskOnlineCommand or InitializeGptCommand or ClearDiskCommand or CreatePartitionCommand => StorageObjectKind.OsDisk,
             DeletePartitionCommand or ResizePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand => StorageObjectKind.Partition,
             RenameVolumeCommand => StorageObjectKind.Volume,
-            CreatePoolCommand => StorageObjectKind.PhysicalDisk,
+            CreatePoolCommand or SetPhysicalDiskUsageCommand => StorageObjectKind.PhysicalDisk,
             DeletePoolCommand or RenamePoolCommand or CreateVirtualDiskCommand or CreateTieredVirtualDiskCommand or CreateTierCommand => StorageObjectKind.StoragePool,
             DeleteVirtualDiskCommand or ResizeVirtualDiskCommand or RenameVirtualDiskCommand => StorageObjectKind.VirtualDisk,
             DeleteTierCommand or ResizeTierCommand or RenameTierCommand => StorageObjectKind.StorageTier,
@@ -170,7 +171,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
              (tiered.Tier.Kind != StorageObjectKind.StorageTier ||
               string.IsNullOrWhiteSpace(target.RelatedUniqueId) ||
               string.IsNullOrWhiteSpace(target.RelatedObjectId))) ||
-            !IsPartitionRoleCompatible(command, target))
+            !IsPartitionRoleCompatible(command, target) || !ExactCreationInputsMatch(command, target))
         {
             return false;
         }
@@ -227,6 +228,7 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         SetDriveLetterCommand value => value.Partition,
         RenameVolumeCommand value => value.Volume,
         CreatePoolCommand value => value.PhysicalDisk,
+        SetPhysicalDiskUsageCommand value => value.PhysicalDisk,
         DeletePoolCommand value => value.Pool,
         RenamePoolCommand value => value.Pool,
         CreateVirtualDiskCommand value => value.Pool,
@@ -257,13 +259,14 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             SetDriveLetterCommand value => (value.PreviousLetter is not null || value.NewLetter is not null) &&
                 value.PreviousLetter != value.NewLetter &&
                 IsLetter(value.PreviousLetter) && IsLetter(value.NewLetter),
-            CreateVirtualDiskCommand value => (value.UseMaximumSize ? value.SizeBytes == 0 : value.SizeBytes > 0) && value.InterleaveBytes == 65536 &&
-                value.DataColumns == 1 && !string.IsNullOrWhiteSpace(value.Name),
+            CreateVirtualDiskCommand value => (value.UseMaximumSize ? value.SizeBytes == 0 : value.SizeBytes > 0) && ValidLayout(value.EffectiveLayout) && !string.IsNullOrWhiteSpace(value.Name),
             CreateTieredVirtualDiskCommand value => (value.UseMaximumSize ? value.SizeBytes == 0 : value.SizeBytes > 0) && !string.IsNullOrWhiteSpace(value.Name)
+                && ValidLayout(value.EffectiveLayout) && (value.CapacityTiers is null || value.CapacityTiers.All(item => item.Layout is null || ValidLayout(item.Layout)))
                 && Enum.IsDefined(value.CreationMechanism)
                 && (value.CreationMechanism != TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd || value.UseMaximumSize),
-            CreateTierCommand value => value.InterleaveBytes == 65536 && value.DataColumns == 1 &&
+            CreateTierCommand value => ValidLayout(value.EffectiveLayout) && value.EffectiveMediaType is "HDD" or "SSD" or "SCM" &&
                 !string.IsNullOrWhiteSpace(value.Name),
+            SetPhysicalDiskUsageCommand value => value.Usage is PhysicalDiskUsage.AutoSelect or PhysicalDiskUsage.HotSpare or PhysicalDiskUsage.Retired,
             ResizeVirtualDiskCommand value => value.SizeBytes > 0,
             ResizeTierCommand value => value.SizeBytes > 0,
             CreatePoolCommand value => !string.IsNullOrWhiteSpace(value.Name),
@@ -273,6 +276,45 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             RenameVolumeCommand value => value.Label is not null,
             _ => true
         };
+    }
+
+    private static bool ValidLayout(StorageLayoutParameters layout)
+    {
+        try { layout.Validate(); return true; }
+        catch (ArgumentException) { return false; }
+    }
+
+    private static bool ExactCreationInputsMatch(RealStorageCommand command, WindowsStorageCommandTarget target)
+    {
+        if (target.PhysicalMembers is { } members && (members.Count == 0
+            || members.Any(item => string.IsNullOrWhiteSpace(item.StableId) || string.IsNullOrWhiteSpace(item.UniqueId)
+                || string.IsNullOrWhiteSpace(item.ObjectId) || string.IsNullOrWhiteSpace(item.SerialNumber))
+            || members.Select(item => item.StableId).Distinct(StringComparer.Ordinal).Count() != members.Count
+            || members.Select(item => item.UniqueId).Distinct(StringComparer.Ordinal).Count() != members.Count
+            || members.Select(item => item.ObjectId).Distinct(StringComparer.Ordinal).Count() != members.Count)) return false;
+        if (command is CreatePoolCommand pool && pool.Members is not null)
+            return target.PhysicalMembers is { } exact && pool.EffectiveMembers.All(item => item.Existing is { Kind: StorageObjectKind.PhysicalDisk })
+                && pool.EffectiveMembers.Count == exact.Count && pool.EffectiveMembers.Select(item => item.Existing!.Value.ProviderKey).Order(StringComparer.Ordinal)
+                    .SequenceEqual(exact.Select(item => item.StableId).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+        if (command is SetPhysicalDiskUsageCommand usage)
+            return target.PhysicalMembers is { Count: > 0 } usageMembers && !string.IsNullOrWhiteSpace(target.ParentUniqueId)
+                && usage.PhysicalDisk.Existing is { } usageId && usageMembers.SingleOrDefault(item => item.StableId == usageId.ProviderKey) is { } usageMember
+                && usageMember.UniqueId == target.UniqueId && usageMember.ObjectId == target.ObjectId && usageMember.SerialNumber == target.SerialNumber;
+        if (command is CreateVirtualDiskCommand ordinary && target.Layout is { } layout && layout != ordinary.EffectiveLayout) return false;
+        if (command is CreateTierCommand tier && target.Layout is { } tierLayout && tierLayout != tier.EffectiveLayout) return false;
+        if (command is CreateTieredVirtualDiskCommand { CapacityTiers: { } inputs } vd)
+        {
+            if (target.TierInputs is not { } bound || bound.Count != inputs.Count || bound.Count == 0
+                || bound.Select(item => item.TemplateStableId).Distinct(StringComparer.Ordinal).Count() != bound.Count
+                || bound.Select(item => item.UniqueId).Distinct(StringComparer.Ordinal).Count() != bound.Count) return false;
+            for (var i = 0; i < inputs.Count; i++)
+                if (inputs[i].Tier.Existing?.ProviderKey != bound[i].TemplateStableId || inputs[i].Layout is { } requested && requested != bound[i].Layout
+                    || inputs[i].MediaType is { } media && media != bound[i].MediaType
+                    || inputs[i].SizeBytes is { } bytes && bytes != bound[i].SizeBytes || bound[i].SizeBytes <= 0) return false;
+            try { if (bound.Aggregate(0L, (sum, item) => checked(sum + item.SizeBytes)) != vd.SizeBytes) return false; }
+            catch (OverflowException) { return false; }
+        }
+        return true;
     }
 
     private static bool IsLetter(char? letter) => letter is null || letter is >= 'D' and <= 'Z';
@@ -358,7 +400,7 @@ internal sealed class WindowsPowerShellStorageWriteRunner : IWindowsStorageWrite
         process.StartInfo.ArgumentList.Add("-ExecutionPolicy");
         process.StartInfo.ArgumentList.Add("Bypass");
         process.StartInfo.ArgumentList.Add("-EncodedCommand");
-        process.StartInfo.ArgumentList.Add(EncodeFixedCompressedScript(fixedScript));
+        process.StartInfo.ArgumentList.Add(EncodeFixedScriptLoader());
 
         if (!process.Start())
         {
@@ -369,6 +411,7 @@ internal sealed class WindowsPowerShellStorageWriteRunner : IWindowsStorageWrite
         // The Agent persists CallIssued before this point and reconciles on lost output.
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.WriteLineAsync(CompressFixedScript(fixedScript).AsMemory(), CancellationToken.None).ConfigureAwait(false);
         await process.StandardInput.WriteAsync(payloadJson.AsMemory(), CancellationToken.None).ConfigureAwait(false);
         process.StandardInput.Close();
         await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -376,7 +419,7 @@ internal sealed class WindowsPowerShellStorageWriteRunner : IWindowsStorageWrite
             await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
     }
 
-    internal static string EncodeFixedCompressedScript(string script)
+    internal static string CompressFixedScript(string script)
     {
         using var buffer = new MemoryStream();
         using (var gzip = new GZipStream(buffer, CompressionLevel.SmallestSize, leaveOpen: true))
@@ -384,11 +427,29 @@ internal sealed class WindowsPowerShellStorageWriteRunner : IWindowsStorageWrite
             gzip.Write(Encoding.UTF8.GetBytes(script));
         }
 
-        var compressed = Convert.ToBase64String(buffer.ToArray());
-        var bootstrap = "$b=[Convert]::FromBase64String('" + compressed +
-            "');$m=[IO.MemoryStream]::new($b);$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);" +
-            "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));" +
-            "$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
+        return Convert.ToBase64String(buffer.ToArray());
+    }
+
+    internal static string EncodeFixedScriptLoader()
+    {
+        // Only this fixed loader travels on the command line. RunAsync supplies the
+        // assembly-validated script as the first stdin line, then typed JSON data.
+        // Byte reads avoid buffering JSON before the script resets InputEncoding.
+        const string bootstrap = "$i=[Console]::OpenStandardInput();$l=[IO.MemoryStream]::new();"
+            + "while(($n=$i.ReadByte()) -ge 0 -and $n -ne 10){$l.WriteByte([byte]$n)};"
+            + "$b=[Convert]::FromBase64String([Text.Encoding]::ASCII.GetString($l.ToArray()));$m=[IO.MemoryStream]::new($b);"
+            + "$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
+            + "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
+        return Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap));
+    }
+
+    // Small read-only test harnesses still use a self-contained command line.
+    // Production writes use the bounded loader and framed stdin above.
+    internal static string EncodeFixedCompressedScript(string script)
+    {
+        var bootstrap = "$b=[Convert]::FromBase64String('" + CompressFixedScript(script)
+            + "');$m=[IO.MemoryStream]::new($b);$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
+            + "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
         return Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap));
     }
 }

@@ -91,11 +91,37 @@ internal static class WindowsRealStoragePowerShellScript
                 [string]$disk.PartitionStyle -ne 'RAW' -or
                 [uint64]$disk.Size -ne [uint64]$vd.Size -or @(Get-ExactDiskPartitions $disk).Count -ne 0) { throw 'resize-requires-safe-raw-disk' }
         }
+        function Read-Layout($command) {
+            $layout = Read-Property $command 'Layout'
+            if ($null -eq $layout) {
+                $layout = [pscustomobject]@{ ResiliencySettingName='Simple'; NumberOfColumns=[int]$command.DataColumns; InterleaveBytes=[int]$command.InterleaveBytes; NumberOfDataCopies=1; PhysicalDiskRedundancy=0 }
+            }
+            if ([string]$layout.ResiliencySettingName -notin @('Simple','Mirror','Parity') -or
+                [int]$layout.NumberOfColumns -lt 1 -or [int]$layout.NumberOfDataCopies -lt 1 -or
+                [int]$layout.PhysicalDiskRedundancy -lt 0 -or [int]$layout.InterleaveBytes -notin @(16384,32768,65536,131072,262144)) { throw 'layout-invalid' }
+            return $layout
+        }
+        function Test-LayoutMatches($object, $layout) {
+            if ($null -eq $layout) { $layout = [pscustomobject]@{ ResiliencySettingName='Simple'; NumberOfColumns=1; InterleaveBytes=65536; NumberOfDataCopies=1; PhysicalDiskRedundancy=0 } }
+            $copies = Read-Property $object 'NumberOfDataCopies'; $redundancy = Read-Property $object 'PhysicalDiskRedundancy'
+            if ([string]$layout.ResiliencySettingName -eq 'Simple') {
+                if ($null -eq $copies) { $copies = 1 }; if ($null -eq $redundancy) { $redundancy = 0 }
+            }
+            return [string]$object.ResiliencySettingName -eq [string]$layout.ResiliencySettingName -and
+                [int]$object.NumberOfColumns -eq [int]$layout.NumberOfColumns -and [long]$object.Interleave -eq [long]$layout.InterleaveBytes -and
+                $null -ne $copies -and [int]$copies -eq [int]$layout.NumberOfDataCopies -and
+                $null -ne $redundancy -and [int]$redundancy -eq [int]$layout.PhysicalDiskRedundancy
+        }
+        function Layout-Arguments($layout) {
+            $arguments = @{ ResiliencySettingName=[string]$layout.ResiliencySettingName; NumberOfColumns=[uint16]$layout.NumberOfColumns; Interleave=[uint64]$layout.InterleaveBytes }
+            if ([string]$layout.ResiliencySettingName -eq 'Mirror') { $arguments.NumberOfDataCopies=[uint16]$layout.NumberOfDataCopies }
+            if ([string]$layout.ResiliencySettingName -eq 'Parity') { $arguments.PhysicalDiskRedundancy=[uint16]$layout.PhysicalDiskRedundancy }
+            return $arguments
+        }
         function Require-MaximumGrow($object, [long]$bytes, $t) {
             if (-not [bool](Read-Property $t 'MaximumCapacityAttempt') -or $bytes -le 0 -or
                 $bytes % 1073741824 -ne 0 -or $bytes -le [long]$object.Size -or
-                [string]$object.ResiliencySettingName -ne 'Simple' -or
-                [uint16]$object.NumberOfColumns -ne 1 -or [uint64]$object.Interleave -ne 65536) { throw 'resize-not-approved-integer-gib-grow' }
+                -not (Test-LayoutMatches $object (Read-Property $t 'Layout'))) { throw 'resize-not-approved-integer-gib-grow' }
             if ([string]$t.Kind -eq 'VirtualDisk') {
                 if ([string]$object.ProvisioningType -ne 'Fixed') { throw 'resize-provisioning-changed' }
                 Require-MaximumRawDisk $object
@@ -177,9 +203,9 @@ internal static class WindowsRealStoragePowerShellScript
             return $physical
         }
         function Require-ExactMemberSet($members, $t) {
-            $approved = @((Read-Property $t 'PhysicalMembers'))
-            if ($approved.Count -gt 1) {
-                if (-not [bool](Read-Property $t 'MaximumCapacityAttempt') -or $members.Count -ne $approved.Count -or
+            $approved = @((Read-Property $t 'PhysicalMembers') | Where-Object { $null -ne $_ })
+            if ($approved.Count -gt 0) {
+                if ($members.Count -ne $approved.Count -or
                     @($approved.UniqueId | Sort-Object -Unique).Count -ne $approved.Count -or
                     @($approved.ObjectId | Sort-Object -Unique).Count -ne $approved.Count) { throw 'exact-approved-member-set-invalid' }
                 foreach ($expected in $approved) {
@@ -314,7 +340,8 @@ internal static class WindowsRealStoragePowerShellScript
                 PhysicalMemberUniqueId = [string]$member.UniqueId; PhysicalMemberObjectId = [string]$member.ObjectId
             }
             if ((Read-Property $subsystem $field) -ne $true -or
-                (Read-Property $subsystem 'PhysicalDisksPerStoragePoolMin') -ne 1) { throw 'single-hdd-tier-capability-not-verified' }
+                [int](Read-Property $subsystem 'PhysicalDisksPerStoragePoolMin') -lt 1 -or
+                [int](Read-Property $subsystem 'PhysicalDisksPerStoragePoolMin') -gt [Math]::Max(1,@((Read-Property $t 'PhysicalMembers')).Count)) { throw 'single-hdd-tier-capability-not-verified' }
         }
 
         try {
@@ -474,9 +501,35 @@ internal static class WindowsRealStoragePowerShellScript
                 'CreatePool' {
                     $physical = Exact-Physical $t
                     $subsystem = Exact-Subsystem $t
-                    if (-not $physical.CanPool) { throw 'physical-disk-cannot-pool' }
+                    $approved = @((Read-Property $t 'PhysicalMembers') | Where-Object { $null -ne $_ })
+                    $members = @($physical)
+                    if ($approved.Count -gt 0) {
+                        $all = @(Get-PhysicalDisk -StorageSubsystem $subsystem -ErrorAction Stop)
+                        $members = @($approved | ForEach-Object {
+                            $expected = $_
+                            Assert-One @($all | Where-Object { [string]::Equals([string]$_.UniqueId,[string]$expected.UniqueId,[StringComparison]::Ordinal) }) 'create-member-not-unique'
+                        })
+                        Require-ExactMemberSet $members $t
+                    }
+                    if (@($members | Where-Object { -not $_.CanPool }).Count -ne 0) { throw 'physical-disk-cannot-pool' }
                     $invoked = $true
-                    $outputObject = New-StoragePool -InputObject $subsystem -FriendlyName ([string]$c.Name) -PhysicalDisks @($physical) -ErrorAction Stop
+                    $outputObject = New-StoragePool -InputObject $subsystem -FriendlyName ([string]$c.Name) -PhysicalDisks $members -ErrorAction Stop
+                    break
+                }
+                'SetPhysicalDiskUsage' {
+                    $physical = Exact-Physical $t
+                    $pools = @(Get-StoragePool -PhysicalDisk $physical -ErrorAction Stop | Where-Object { -not $_.IsPrimordial })
+                    $pool = Assert-One $pools 'usage-pool-not-unique'
+                    Assert-Exact $pool.UniqueId $t.ParentUniqueId 'usage-pool-changed'
+                    Require-ExactMemberSet @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop) $t
+                    if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'usage-pool-already-allocated' }
+                    $usage = [string]$c.Usage
+                    if ($usage -eq 'Auto-Select') { $usage = 'AutoSelect' }
+                    if ($usage -eq 'Hot Spare') { $usage = 'HotSpare' }
+                    if ($usage -notin @('AutoSelect','HotSpare','Retired')) { throw 'usage-invalid' }
+                    $invoked = $true
+                    Set-PhysicalDisk -InputObject $physical -Usage $usage -ErrorAction Stop | Out-Null
+                    $outputObject = $physical
                     break
                 }
                 'DeletePool' {
@@ -496,80 +549,87 @@ internal static class WindowsRealStoragePowerShellScript
                     break
                 }
                 'CreateVirtualDisk' {
+                    if ([bool](Read-Property $c 'UseMaximumSize') -or [long]$c.SizeBytes -le 0) { throw 'maximum-requires-journaled-explicit-attempt' }
                     $pool = Exact-Pool $t
-                    if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0 -or
-                        [int]$c.InterleaveBytes -ne 65536 -or [int]$c.DataColumns -ne 1) { throw 'vd-layout-not-enabled' }
-                    $useMaximumSize = [bool](Read-Property $c 'UseMaximumSize')
-                    if ($useMaximumSize -or [long]$c.SizeBytes -le 0) { throw 'maximum-requires-journaled-explicit-attempt' }
+                    if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0 -or @(Get-StorageTier -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'vd-pool-not-empty' }
+                    $layout = Read-Layout $c
+                    $arguments = Layout-Arguments $layout
                     if ([bool](Read-Property $t 'MaximumCapacityAttempt') -and [long]$c.SizeBytes % 1073741824 -ne 0) { throw 'maximum-candidate-grid-invalid' }
                     $invoked = $true
-                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ProvisioningType Fixed @arguments -ErrorAction Stop
                     break
                 }
                 'CreateTieredVirtualDisk' {
                     if ([bool](Read-Property $c 'UseMaximumSize')) { throw 'tiered-native-maximum-pending' }
-                    switch -CaseSensitive ([string](Read-Property $c 'CreationMechanism')) {
-                        '' { }
-                        '0' { }
-                        'ExactTemplate' { }
-                        default { throw 'tier-creation-mechanism-invalid' }
-                    }
+                    if ([string](Read-Property $c 'CreationMechanism') -notin @('','0','ExactTemplate')) { throw 'tier-creation-mechanism-invalid' }
                     $pool = Exact-Pool $t
-                    $multiInputs = @((Read-Property $t 'TierInputs'))
-                    if ($multiInputs.Count -gt 1) {
-                        if (-not [bool](Read-Property $t 'MaximumCapacityAttempt') -or
-                            @(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'multi-maximum-pool-not-empty' }
-                        $subsystem = Exact-Subsystem $t
-                        if ((Read-Property $subsystem 'SupportsStorageTieredVirtualDiskCreation') -ne $true) { throw 'multi-tier-capability-unverified' }
-                        $templates = @(Get-StorageTier -StoragePool $pool -ErrorAction Stop)
-                        if ($templates.Count -ne $multiInputs.Count) { throw 'multi-template-set-changed' }
-                        $boundTemplates = @(); $boundSizes = @(); $seenMedia = @(); $total = [decimal]0
-                        foreach ($inputTier in $multiInputs) {
-                            $template = Assert-One @($templates | Where-Object { [string]::Equals([string]$_.UniqueId,[string]$inputTier.UniqueId,[StringComparison]::Ordinal) }) 'multi-template-not-unique'
-                            Assert-Exact $template.ObjectId $inputTier.ObjectId 'multi-template-object-id-changed'
-                            Assert-Exact $template.MediaType $inputTier.MediaType 'multi-template-media-changed'
-                            if ([string]$template.MediaType -notin @('HDD','SSD') -or $seenMedia -contains [string]$template.MediaType -or
-                                [uint64]$template.Size -ne 0 -or [uint64]$template.AllocatedSize -ne 0 -or
-                                [string]$template.ResiliencySettingName -ne 'Simple' -or [uint16]$template.NumberOfColumns -ne 1 -or
-                                [uint64]$template.Interleave -ne 65536 -or @(Get-VirtualDisk -StorageTier $template -ErrorAction Stop).Count -ne 0 -or
-                                [long]$inputTier.SizeBytes -le 0 -or [long]$inputTier.SizeBytes % 536870912 -ne 0) { throw 'multi-seed-layout-or-grid-invalid' }
-                            $seenMedia += [string]$template.MediaType
-                            $boundTemplates += $template; $boundSizes += [uint64]$inputTier.SizeBytes; $total += [decimal]$inputTier.SizeBytes
-                        }
-                        if ($total -ne [decimal]$c.SizeBytes) { throw 'multi-seed-total-mismatch' }
-                        $capabilityEvidence = [ordered]@{ RequiredCapability='SupportsStorageTieredVirtualDiskCreation'; RequiredValue=$true; TierInputs=$multiInputs }
-                        $invoked = $true
-                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers $boundTemplates -StorageTierSizes $boundSizes -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
-                        break
-                    }
                     Require-TierCapability $t 'SupportsStorageTieredVirtualDiskCreation' ([ref]$capabilityEvidence)
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'tiered-pool-not-empty' }
+                    $inputs = @((Read-Property $t 'TierInputs') | Where-Object { $null -ne $_ })
+                    if ($inputs.Count -eq 0) {
+                        $layout = Read-Property $c 'Layout'
+                        if ($null -eq $layout) { $layout = [pscustomobject]@{ ResiliencySettingName='Simple'; NumberOfColumns=1; InterleaveBytes=65536; NumberOfDataCopies=1; PhysicalDiskRedundancy=0 } }
+                        $inputs = @([pscustomobject]@{ UniqueId=$t.RelatedUniqueId; ObjectId=$t.RelatedObjectId; MediaType='HDD'; SizeBytes=$c.SizeBytes; Layout=$layout })
+                    }
                     $templates = @(Get-StorageTier -StoragePool $pool -ErrorAction Stop)
-                    if ($templates.Count -ne 1) { throw 'tier-template-not-sole' }
-                    $tier = Assert-One @($templates | Where-Object {
-                        [string]::Equals([string]$_.UniqueId, [string]$t.RelatedUniqueId, [StringComparison]::Ordinal) -and
-                        [string]::Equals([string]$_.ObjectId, [string]$t.RelatedObjectId, [StringComparison]::Ordinal)
-                    }) 'tier-not-unique'
-                    if ($null -eq (Read-Property $tier 'Size') -or [uint64]$tier.Size -ne 0 -or
-                        $null -eq (Read-Property $tier 'AllocatedSize') -or [uint64]$tier.AllocatedSize -ne 0 -or
-                        [string]$tier.MediaType -ne 'HDD' -or [string]$tier.ResiliencySettingName -ne 'Simple' -or
-                        [uint64]$tier.Interleave -ne 65536 -or [uint16]$tier.NumberOfColumns -ne 1 -or
-                        @(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop).Count -ne 0) { throw 'tier-layout-not-enabled' }
-                    if ([long]$c.SizeBytes -le 0) { throw 'vd-capacity-mode-invalid' }
-                    $range = Invoke-CimMethod -InputObject $tier -MethodName GetSupportedSize -Arguments @{ ResiliencySettingName = 'Simple' } -ErrorAction Stop
-                    $capabilityEvidence['CreationSize'] = $range
-                    if ([bool](Read-Property $t 'MaximumCapacityAttempt')) {
-                        if ([long]$c.SizeBytes -le 0 -or [long]$c.SizeBytes % 1073741824 -ne 0) { throw 'maximum-candidate-grid-invalid' }
-                    } elseif (-not (Test-TierCreationSize $range ([long]$c.SizeBytes))) { throw 'tier-creation-size-not-supported' }
-                    $tieredCreationInput = [ordered]@{
-                        TemplateUniqueId = [string]$tier.UniqueId;
-                        TemplateObjectId = [string]$tier.ObjectId;
-                        PoolUniqueId = [string]$pool.UniqueId; PhysicalMemberUniqueId = [string]$t.PhysicalMemberUniqueId;
-                        MediaType = [string]$tier.MediaType; ResiliencySettingName = 'Simple'; ProvisioningType = 'Fixed';
-                        NumberOfColumns = 1; Interleave = 65536; SizeBytes = [long]$c.SizeBytes; UseMaximumSize = $false
+                    if ($templates.Count -ne $inputs.Count) { throw 'tier-template-set-changed' }
+                    $boundTemplates = @(); $boundSizes = @(); $seenMedia = @(); $total = [decimal]0
+                    foreach ($inputTier in $inputs) {
+                        $template = Assert-One @($templates | Where-Object { [string]::Equals([string]$_.UniqueId,[string]$inputTier.UniqueId,[StringComparison]::Ordinal) }) 'tier-template-not-unique'
+                        Assert-Exact $template.ObjectId $inputTier.ObjectId 'tier-template-object-id-changed'
+                        $layout = Read-Property $inputTier 'Layout'
+                        if ([string]$template.MediaType -notin @('HDD','SSD','SCM') -or [string]$template.MediaType -ne [string]$inputTier.MediaType -or
+                            $seenMedia -contains [string]$template.MediaType -or -not (Test-LayoutMatches $template $layout) -or
+                            $null -eq (Read-Property $template 'Size') -or [long]$template.Size -ne 0 -or
+                            $null -eq (Read-Property $template 'AllocatedSize') -or [long]$template.AllocatedSize -ne 0 -or
+                            @(Get-VirtualDisk -StorageTier $template -ErrorAction Stop).Count -ne 0) { throw 'tier-template-layout-changed' }
+                        $bytes = [long]$inputTier.SizeBytes
+                        if ($bytes -le 0) { throw 'tier-size-invalid' }
+                        if ([bool](Read-Property $t 'MaximumCapacityAttempt')) {
+                            if ($bytes % 536870912 -ne 0) { throw 'maximum-seed-grid-invalid' }
+                        } else {
+                            $range = Invoke-CimMethod -InputObject $template -MethodName GetSupportedSize -Arguments @{ ResiliencySettingName=[string]$template.ResiliencySettingName } -ErrorAction Stop
+                            $capabilityEvidence['CreationSize'] = $range
+                            if (-not (Test-TierCreationSize $range $bytes)) { throw 'tier-creation-size-not-supported' }
+                        }
+                        $seenMedia += [string]$template.MediaType; $boundTemplates += $template; $boundSizes += [uint64]$bytes; $total += [decimal]$bytes
+                    }
+                    if ($total -ne [decimal]$c.SizeBytes) { throw 'tier-size-sum-changed' }
+                    if ($inputs.Count -eq 1) {
+                        $first=$inputs[0]; $template=$boundTemplates[0]
+                        $tieredCreationInput = [ordered]@{
+                            TemplateUniqueId=[string]$template.UniqueId; TemplateObjectId=[string]$template.ObjectId;
+                            PoolUniqueId=[string]$pool.UniqueId; PhysicalMemberUniqueId=[string]$t.PhysicalMemberUniqueId;
+                            MediaType=[string]$template.MediaType; ResiliencySettingName=[string]$template.ResiliencySettingName; ProvisioningType='Fixed';
+                            NumberOfColumns=[int]$template.NumberOfColumns; Interleave=[long]$template.Interleave; SizeBytes=[long]$first.SizeBytes; UseMaximumSize=$false
+                        }
+                    }
+                    # Override pool defaults for each common requested dimension.
+                    # A differing interleave must not restore a default Mirror
+                    # resiliency for two otherwise Simple templates.
+                    $layouts = @($inputs | ForEach-Object {
+                        $requested = Read-Property $_ 'Layout'
+                        if ($null -eq $requested) { $requested = [pscustomobject]@{ ResiliencySettingName='Simple'; NumberOfColumns=1; InterleaveBytes=65536; NumberOfDataCopies=1; PhysicalDiskRedundancy=0 } }
+                        $requested
+                    })
+                    $sharedArguments = @{}
+                    foreach ($dimension in @('ResiliencySettingName','NumberOfColumns','InterleaveBytes')) {
+                        $values = @($layouts | ForEach-Object { Read-Property $_ $dimension } | Select-Object -Unique)
+                        if ($values.Count -eq 1) {
+                            $parameter = if ($dimension -eq 'InterleaveBytes') { 'Interleave' } else { $dimension }
+                            $sharedArguments[$parameter] = $values[0]
+                        }
+                    }
+                    if ($sharedArguments['ResiliencySettingName'] -eq 'Mirror') {
+                        $copies = @($layouts | ForEach-Object { $_.NumberOfDataCopies } | Select-Object -Unique)
+                        if ($copies.Count -eq 1) { $sharedArguments.NumberOfDataCopies = [uint16]$copies[0] }
+                    }
+                    if ($sharedArguments['ResiliencySettingName'] -eq 'Parity') {
+                        $redundancy = @($layouts | ForEach-Object { $_.PhysicalDiskRedundancy } | Select-Object -Unique)
+                        if ($redundancy.Count -eq 1) { $sharedArguments.PhysicalDiskRedundancy = [uint16]$redundancy[0] }
                     }
                     $invoked = $true
-                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers @($tier) -StorageTierSizes @([uint64]$c.SizeBytes) -ResiliencySettingName Simple -ProvisioningType Fixed -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers $boundTemplates -StorageTierSizes $boundSizes -ProvisioningType Fixed @sharedArguments -ErrorAction Stop
                     break
                 }
                 'DeleteVirtualDisk' {
@@ -598,13 +658,14 @@ internal static class WindowsRealStoragePowerShellScript
                 'CreateTier' {
                     $pool = Exact-Pool $t
                     Require-TierCapability $t 'SupportsStorageTierCreation' ([ref]$capabilityEvidence)
-                    $member = Assert-One @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop) 'tier-member-count-changed'
-                    if ([int]$c.InterleaveBytes -ne 65536 -or [int]$c.DataColumns -ne 1 -or
-                        [string]$member.MediaType -ne 'HDD' -or
-                        @(Get-StorageTier -StoragePool $pool -ErrorAction Stop).Count -ne 0 -or
+                    $layout = Read-Layout $c; $arguments = Layout-Arguments $layout
+                    $media = Read-Property $c 'MediaType'; if ($null -eq $media) { $media = 'HDD' }
+                    $members = @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop | Where-Object { [string]$_.MediaType -eq $media -and [string]$_.Usage -in @('Auto-Select','AutoSelect','Manual-Select','ManualSelect') })
+                    if ($media -notin @('HDD','SSD','SCM') -or $members.Count -eq 0 -or
+                        @(Get-StorageTier -StoragePool $pool -ErrorAction Stop | Where-Object { [string]$_.MediaType -eq $media }).Count -ne 0 -or
                         @(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'tier-layout-not-enabled' }
                     $invoked = $true
-                    $outputObject = New-StorageTier -InputObject $pool -FriendlyName ([string]$c.Name) -MediaType HDD -ResiliencySettingName 'Simple' -NumberOfColumns 1 -Interleave 65536 -ErrorAction Stop
+                    $outputObject = New-StorageTier -InputObject $pool -FriendlyName ([string]$c.Name) -MediaType $media @arguments -ErrorAction Stop
                     break
                 }
                 'DeleteTier' {

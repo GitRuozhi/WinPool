@@ -766,7 +766,58 @@ public sealed class WindowsRealStorageSafetyInspectorTests
     }
 
     [Fact]
-    public async Task H07VirtualMsrMultiplePhysicalMembersRemainRejected()
+    public async Task ExactMultiMemberVirtualMsrUsesCompleteNativeBackingIdentity()
+    {
+        var fixture = new Fixture();
+        fixture.NativeNullVirtualMsr();
+        fixture.AddSecondPoolMember();
+        var topology = await fixture.Capture();
+        var pool = topology.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var closure = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, pool.StableId),
+            pool.MemberPhysicalDiskIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray());
+        var calls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector(null, (_, _) => { }, (identity, _) =>
+        {
+            calls++;
+            Assert.Equal(2, identity.PhysicalMembers!.Count);
+            Assert.Equal("ProviderPathGptGuidAndVirtualDiskPoolExactMemberAssociations", identity.NativeBindingMethod);
+            return WindowsNativeMsrAttributesReader.ParseLayout(NativeLayout(identity), identity);
+        });
+        var safety = await inspector.InspectAsync(topology, closure, fixture.Delete(DataId), CancellationToken.None);
+        Assert.Equal(2, safety!.NativePartitionAttributes!.PhysicalMembers!.Count);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task ExactMultiMemberObservedOfflineStateRequiresAllRolesAndExactNativeProof()
+    {
+        var fixture = new Fixture();
+        fixture.RemoveSibling();
+        fixture.NativeNullVirtualMsr();
+        fixture.AddSecondPoolMember();
+        fixture.SetOfflineState(true, true);
+        foreach (var field in new[] { "IsHidden", "IsOffline", "IsReadOnly", "IsShadowCopy", "AccessPaths", "DriveLetter" })
+            fixture.SetRawTargetField(field, null);
+        var topology = await fixture.Capture();
+        var pool = topology.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var closure = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, pool.StableId),
+            pool.MemberPhysicalDiskIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray());
+        var command = new SetDiskOnlineCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.OsDisk, DiskId)), false);
+        var inspector = new WindowsRealStorageSafetyInspector(null, (volumes, _) => Assert.Empty(volumes), (identity, _) =>
+        {
+            Assert.True(identity.ExpectedDiskOffline);
+            Assert.Equal(2, identity.PhysicalMembers!.Count);
+            return new(identity, 0);
+        });
+        var evidence = await inspector.InspectObservedDiskStateAsync(topology, closure, command, default);
+        Assert.Equal(2, evidence!.PhysicalMemberRoleEvidence!.Count);
+        Assert.True(Assert.Single(evidence.OfflinePartitionAttributes!).DiskIsOffline);
+        await Assert.ThrowsAsync<InvalidDataException>(() => inspector.InspectAsync(topology, closure, command, default));
+        await Assert.ThrowsAsync<InvalidDataException>(() => inspector.InspectObservedDiskStateAsync(topology, closure, command with { Online = true }, default));
+    }
+
+    [Fact]
+    public async Task LegacySinglePhysicalClosureRejectsMultipleMembers()
     {
         var fixture = new Fixture();
         fixture.NativeNullVirtualMsr();
@@ -1267,11 +1318,29 @@ public sealed class WindowsRealStorageSafetyInspectorTests
             {
                 Fields = item.Fields.Where(field => !removedObjectFields.Contains((item.Id, field.Name))).ToImmutableArray()
             }).ToImmutableArray();
+            var relationships = facts.Relationships;
+            // Simulation also exposes primordial members as synthetic OS disks;
+            // every observed OS disk needs its own complete native role receipt.
+            foreach (var disk in objects.Where(item => item.ObjectType == FactObjectType.Disk).ToArray())
+            {
+                var sourceId = "native-role-source:" + disk.Id;
+                var objectId = "native-role:" + disk.Id;
+                var physical = snapshot.PhysicalDisks.SingleOrDefault(item => facts.Relationships.Any(edge =>
+                    edge.Kind == "same-device" && edge.FromId == item.StableId && edge.ToId == disk.Id));
+                sources = sources.Add(new(sourceId, FactOrigin.Native, "winpool/native", "Windows.DiskRoles", Now, CollectionPurpose.Storage));
+                objects = objects.Add(new(objectId, FactObjectType.HardwareSupplement, sourceId, objectId, true,
+                    new[] {
+                        WinPoolSourceField.Returned("DiskNumber", disk.Field("Number")!.Value!.Value.GetInt64(), FactValueType.Int64, sourceId),
+                        WinPoolSourceField.Returned("IsPageFile", physical?.IsPageFile ?? false, FactValueType.Boolean, sourceId),
+                        WinPoolSourceField.Returned("IsCrashDump", physical?.IsCrashDump ?? false, FactValueType.Boolean, sourceId)
+                    }.ToImmutableArray()));
+                relationships = relationships.Add(new(disk.Id, objectId, "disk-supplement", Now));
+            }
             facts = facts with
             {
                 IsSimulation = false, InventoryVersion = "synthetic-inventory",
                 InventoryCapturedAt = Now, Sources = sources, Objects = objects,
-                Relationships = facts.Relationships.Where(item => !removedRelationshipKinds.Contains(item.Kind)).ToImmutableArray()
+                Relationships = relationships.Where(item => !removedRelationshipKinds.Contains(item.Kind)).ToImmutableArray()
             };
             return new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
                 "local:synthetic", StorageSystemKind.Local, "Synthetic Storage", facts, [], Now)

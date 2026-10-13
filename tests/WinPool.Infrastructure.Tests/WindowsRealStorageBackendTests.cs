@@ -1840,6 +1840,90 @@ public sealed partial class WindowsRealStorageBackendTests
         Assert.Equal(1, fixture.Adapter.CallCount);
     }
 
+    [Theory]
+    [InlineData("Auto-Select", "AutoSelect")]
+    [InlineData("Hot Spare", "HotSpare")]
+    [InlineData("Retired", "Retired")]
+    public async Task ExactMemberUsageVerifiesCanonicalProviderSpelling(string requested, string providerValue)
+    {
+        var fixture = new Fixture();
+        var observedUsage = requested == "Auto-Select" ? "HotSpare" : "AutoSelect";
+        fixture.SnapshotTransform = snapshot =>
+        {
+            var pool = CreatedPoolSnapshot(snapshot);
+            return pool with { PhysicalDisks = pool.PhysicalDisks.Select(disk => disk.StableId == PhysicalId
+                ? disk with { Usage = observedUsage } : disk).ToArray() };
+        };
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+        var command = new SetPhysicalDiskUsageCommand(RealTargetReference.ForExisting(physical), requested);
+        var step = new RealOperationStep("set-usage", command, [], "Exact member", "Requested usage", "", "Fresh role evidence");
+        var plan = await fixture.Backend.PrepareAsync(new RealOperationIntentRequest(OperationIntent.SetPhysicalDiskUsage,
+            physical.System, [physical], [step], "Set exact member usage"), fixture.Session, OperationId.New(), default);
+        step = Assert.Single(plan.RealOperation!.Steps);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        fixture.Adapter.OnExecute = () => observedUsage = providerValue;
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, default);
+        Assert.True(result.Outcome == RealStepOutcome.Verified, result.ResultEvidenceJson);
+        Assert.Equal(1, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
+    [InlineData("current", true)]
+    [InlineData("legacy-missing-parent", true)]
+    [InlineData("foreign-plan", false)]
+    [InlineData("foreign-step", false)]
+    [InlineData("wrong-member", false)]
+    [InlineData("wrong-target", false)]
+    [InlineData("changed-current", false)]
+    [InlineData("call-not-excluded", false)]
+    [InlineData("mismatched-step", false)]
+    [InlineData("missing-step", false)]
+    [InlineData("extra-step", false)]
+    public async Task ExactNoCallRecoveryReleasesOnlyBoundUnchangedReceipts(string scenario, bool releases)
+    {
+        var fixture = new Fixture();
+        var currentUsage = "AutoSelect";
+        fixture.SnapshotTransform = snapshot =>
+        {
+            var pool = CreatedPoolSnapshot(snapshot);
+            return pool with { PhysicalDisks = pool.PhysicalDisks.Select(disk => disk.StableId == PhysicalId
+                ? disk with { Usage = currentUsage } : disk).ToArray() };
+        };
+        var physical = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+        var step = new RealOperationStep("set-usage", new SetPhysicalDiskUsageCommand(RealTargetReference.ForExisting(physical), "Hot Spare"),
+            [], "Exact member", "Requested usage", "", "Fresh role evidence");
+        var plan = await fixture.Backend.PrepareAsync(new RealOperationIntentRequest(OperationIntent.SetPhysicalDiskUsage,
+            physical.System, [physical], [step], "Set exact member usage"), fixture.Session, OperationId.New(), default);
+        step = Assert.Single(plan.RealOperation!.Steps);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        var receipt = new WindowsNoEffectStepEvidence(true, "adapter.closed-command-or-target-required", plan.RealOperation.PhysicalMemberFingerprint)
+            { PlanHash = plan.PlanHash, StepId = step.Id };
+        switch (scenario)
+        {
+            case "legacy-missing-parent": receipt = receipt with { PlanHash = null, StepId = null }; target = target with { ParentUniqueId = "" }; break;
+            case "foreign-plan": receipt = receipt with { PlanHash = "another-plan" }; break;
+            case "foreign-step": receipt = receipt with { StepId = "another-step" }; break;
+            case "wrong-member": receipt = receipt with { PhysicalMemberFingerprint = "another-member" }; break;
+            case "wrong-target": target = target with { ObjectId = "another-provider-object" }; break;
+            case "changed-current": currentUsage = "Retired"; break;
+            case "call-not-excluded": receipt = receipt with { NoWindowsCall = false }; break;
+        }
+        var row = new RealOperationStepProgress(step.Id, RealOperationStepState.Failed, receipt.Code,
+            JsonSerializer.Serialize(target), JsonSerializer.Serialize(receipt));
+        RealOperationStepProgress[] progress = scenario switch
+        {
+            "mismatched-step" => [row with { StepId = "another-step" }],
+            "missing-step" => [],
+            "extra-step" => [row, row with { StepId = "extra-step" }],
+            _ => [row]
+        };
+        var result = await fixture.Backend.ReconcileAsync(plan, progress, default);
+        Assert.Equal(releases, result.CanReleaseWriteBarrier);
+        Assert.Equal(releases ? RealOperationState.Failed : RealOperationState.OutcomeUnknown, result.State);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
     private static StorageSnapshot CreatedPoolSnapshot(StorageSnapshot snapshot) => snapshot with
     {
         PhysicalDisks = snapshot.PhysicalDisks.Select(disk => disk.StableId != PhysicalId ? disk : disk with
@@ -3244,6 +3328,18 @@ public sealed partial class WindowsRealStorageBackendTests
                 PhysicalMemberRoleEvidence: MultiRolesTransform?.Invoke(roles) ?? roles));
         }
 
+        public Task<WindowsRealStorageSafetyEvidence?> InspectObservedAsync(WindowsRealStorageTopology topology,
+            RealExactPhysicalMemberSetClosure closure, CancellationToken cancellationToken)
+        {
+            ObservedCallCount++;
+            if (ObservedFailure is not null) throw ObservedFailure;
+            if (ProbeFailure is not null) throw ProbeFailure;
+            if (Reject) throw new InvalidDataException("Synthetic observed member-set safety facts are unsafe.");
+            IReadOnlyList<WindowsPoolMemberRoleEvidence> roles = closure.Members.Select(item => item.PoolMemberRoleEvidence).ToArray();
+            return Task.FromResult<WindowsRealStorageSafetyEvidence?>(new(null, [],
+                PhysicalMemberRoleEvidence: MultiRolesTransform?.Invoke(roles) ?? roles));
+        }
+
         public Task<WindowsRealStorageSafetyEvidence?> ValidateObservedDiskStateWithEvidenceAsync(
             WindowsRealStorageTopology topology, RealTargetClosure closure,
             SetDiskOnlineCommand command, CancellationToken cancellationToken)
@@ -3252,6 +3348,13 @@ public sealed partial class WindowsRealStorageBackendTests
             if (ObservedFailure is not null) throw ObservedFailure;
             return ObservedEvidence is not null ? Task.FromResult<WindowsRealStorageSafetyEvidence?>(ObservedEvidence)
                 : ValidateWithEvidenceAsync(topology, closure, command, cancellationToken);
+        }
+
+        public async Task<WindowsRealStorageSafetyEvidence?> InspectObservedDiskStateAsync(WindowsRealStorageTopology topology,
+            RealExactPhysicalMemberSetClosure closure, SetDiskOnlineCommand command, CancellationToken cancellationToken)
+        {
+            var evidence = await InspectObservedAsync(topology, closure, cancellationToken);
+            return ObservedEvidence is null ? evidence : ObservedEvidence with { PhysicalMemberRoleEvidence = evidence!.PhysicalMemberRoleEvidence };
         }
 
         public Task<WindowsRealStorageSafetyEvidence?> ValidateCreatedPartitionFormatWithEvidenceAsync(

@@ -274,6 +274,104 @@ public sealed class WindowsPoolMemberRoleEvidenceTests
         Assert.Throws<InvalidDataException>(() => fixture.Closure());
     }
 
+    [Fact]
+    public void SelectedFreeSetPreservesCompleteArrayAndStableIdentitiesAcrossPoolCreation()
+    {
+        var fixture = new Fixture(physicalCount: 2);
+        var approved = fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
+        var pooled = fixture.Topology().RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, Pool), approved);
+        fixture.SetField(Pool, "IsPrimordial", true);
+        foreach (var id in fixture.PhysicalIds) fixture.SetField(id, "CanPool", true);
+        var topology = fixture.Topology();
+        var free = topology.RequireSelectedPhysicalMemberSet(approved.Reverse().ToArray());
+        Assert.True(free.IsSelectedFreeSet);
+        Assert.Equal(pooled.PhysicalMemberFingerprint, free.PhysicalMemberFingerprint);
+        Assert.NotEqual(pooled.Fingerprint, free.Fingerprint);
+        Assert.Equal("subsystem:local", free.SubsystemStableId);
+        var target = WindowsRealStorageTargetBuilder.BuildForMemberSet(topology, RealTargetReference.ForExisting(approved[0]),
+            new Dictionary<string, string>(), free);
+        Assert.Equal(approved.Select(item => item.ProviderKey).Order(StringComparer.Ordinal), target.PhysicalMembers!.Select(item => item.StableId));
+        Assert.False(target.MaximumCapacityAttempt);
+    }
+
+    [Fact]
+    public void SelectedFreeSetRejectsDuplicateUnpoolableProtectedAndMissingSubsystem()
+    {
+        var fixture = new Fixture(physicalCount: 2);
+        var approved = fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
+        Assert.Throws<InvalidDataException>(() => fixture.Topology().RequireSelectedPhysicalMemberSet(approved));
+        fixture.SetField(Pool, "IsPrimordial", true);
+        foreach (var id in fixture.PhysicalIds) fixture.SetField(id, "CanPool", true);
+        Assert.Throws<InvalidDataException>(() => fixture.Topology().RequireSelectedPhysicalMemberSet([approved[0], approved[0]]));
+        fixture.SetField(fixture.PhysicalIds[1], "IsBoot", true);
+        Assert.Throws<InvalidDataException>(() => fixture.Topology().RequireSelectedPhysicalMemberSet(approved));
+        fixture.SetField(fixture.PhysicalIds[1], "IsBoot", false);
+        fixture.RemoveRelationship("subsystem-pool");
+        Assert.Throws<InvalidDataException>(() => fixture.Topology().RequireSelectedPhysicalMemberSet(approved));
+    }
+
+    [Fact]
+    public async Task ExactSingleMemberClosureAndNondataRolesRetainSafetyProof()
+    {
+        var fixture = new Fixture(physicalCount: 2);
+        var before = fixture.Topology().RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, Pool),
+            fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray());
+        fixture.SetTextField(fixture.PhysicalIds[1], "Usage", PhysicalDiskUsage.HotSpare);
+        var topology = fixture.Topology();
+        var closure = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, Pool),
+            fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray());
+        Assert.Equal(before.PhysicalMemberFingerprint, closure.PhysicalMemberFingerprint);
+        Assert.NotEqual(before.Fingerprint, closure.Fingerprint);
+        Assert.Single(WindowsRealOperationPlanner.DataMembers(topology, closure));
+        var proof = await new WindowsRealStorageSafetyInspector(null, (volumes, _) => Assert.Empty(volumes)).InspectAsync(topology, closure,
+            new RenamePoolCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.StoragePool, Pool)), "Renamed"), CancellationToken.None);
+        Assert.Equal(2, proof!.PhysicalMemberRoleEvidence!.Count);
+        var one = new Fixture();
+        Assert.Single(one.Topology().RequireExactPhysicalMemberSet(one.Id(StorageObjectKind.StoragePool, Pool),
+            [one.Id(StorageObjectKind.PhysicalDisk, Physical)]).Members);
+    }
+
+    [Fact]
+    public void SimpleTierNeutralNullFactsDoNotBlockExactClosureButMirrorNullFactsDo()
+    {
+        var fixture = new Fixture(withVirtualDisk: true, physicalCount: 2, tierCount: 1);
+        fixture.Facts = fixture.Facts with
+        {
+            Objects = fixture.Facts.Objects.Select(item => item.Id != Tier ? item : item with
+            {
+                Fields = item.Fields.Where(field => field.Name is not ("NumberOfDataCopies" or "PhysicalDiskRedundancy"))
+                    .Concat(new[] {
+                        WinPoolSourceField.Returned<ulong?>("NumberOfDataCopies", null, FactValueType.UInt64, item.SourceRef),
+                        WinPoolSourceField.Returned<ulong?>("PhysicalDiskRedundancy", null, FactValueType.UInt64, item.SourceRef)
+                    }).ToImmutableArray()
+            }).ToImmutableArray()
+        };
+        var topology = fixture.Topology();
+        var members = fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
+        _ = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, Pool), members);
+        var layout = WindowsRealOperationPlanner.LayoutOf(topology.Snapshot.StorageTiers.Single());
+        Assert.Equal(1, layout.NumberOfDataCopies);
+        Assert.Equal(0, layout.PhysicalDiskRedundancy);
+        fixture.SetTextField(Tier, "ResiliencySettingName", "Mirror");
+        Assert.Throws<InvalidDataException>(() => WindowsRealOperationPlanner.LayoutOf(fixture.Topology().Snapshot.StorageTiers.Single()));
+    }
+
+    [Fact]
+    public void MemberTargetCarriesRequestedMirrorLayoutWithoutMaximumFlag()
+    {
+        var fixture = new Fixture(physicalCount: 2);
+        var topology = fixture.Topology();
+        var pool = fixture.Id(StorageObjectKind.StoragePool, Pool);
+        var closure = topology.RequireExactPhysicalMemberSet(pool,
+            fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray());
+        var layout = new StorageLayoutParameters("Mirror", 1, 16384, 2, 1);
+        var command = new CreateVirtualDiskCommand(RealTargetReference.ForExisting(pool), "Mirror", 1L << 30, 16384, 1, Layout: layout);
+        var target = WindowsRealOperationPlanner.BuildExactMemberTarget(topology, closure, command, new Dictionary<string, string>());
+        Assert.Equal(layout, target.Layout);
+        Assert.Equal(2, target.PhysicalMembers!.Count);
+        Assert.False(target.MaximumCapacityAttempt);
+    }
+
     private sealed class Fixture
     {
         private readonly SystemId system = SystemId.New();
@@ -369,6 +467,11 @@ public sealed class WindowsPoolMemberRoleEvidenceTests
         public RealTargetClosure Closure() => Topology().RequireSinglePhysicalClosure([Id(StorageObjectKind.StoragePool, Pool)]);
         public void RemoveRelationship(string kind) => Facts = Facts with
         { Relationships = Facts.Relationships.Where(item => item.Kind != kind).ToImmutableArray() };
+        public void SetTextField(string id, string name, string value) => Facts = Facts with
+        {
+            Objects = Facts.Objects.Select(item => item.Id != id ? item : item with
+            { Fields = item.Fields.Where(field => field.Name != name).Append(WinPoolSourceField.Returned(name, value, FactValueType.String, item.SourceRef)).ToImmutableArray() }).ToImmutableArray()
+        };
         public void ChangeSource(string className, bool failed = false, bool stale = false) => Facts = Facts with
         { Sources = Facts.Sources.Select(item => item.ClassName == className ? item with
             { ReadState = failed ? FieldReadState.Failed : item.ReadState, CapturedAt = stale ? Now.AddSeconds(-1) : item.CapturedAt } : item).ToImmutableArray() };

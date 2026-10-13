@@ -12,6 +12,62 @@ public sealed class RealStructureDraftPlannerTests
     private const long MiB = 1024L * 1024;
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualMirrorTierCanUseALegalSubsetOfItsCompletePoolMembers(bool extentMemberIsHotSpare)
+    {
+        var baseline = NativeTierSession(keepUnusedTemplate: false).Baseline;
+        var original = baseline.PhysicalDisks.Single();
+        var members = Enumerable.Range(0, 4).Select(index => original with
+        {
+            StableId = index == 0 ? original.StableId : original.StableId + ":" + index,
+            SerialNumber = original.SerialNumber + index,
+            Usage = extentMemberIsHotSpare && index == 1 ? PhysicalDiskUsage.HotSpare : PhysicalDiskUsage.AutoSelect
+        }).ToArray();
+        var pool = baseline.StoragePools.Single(item => !item.IsPrimordial) with
+        { MemberPhysicalDiskIds = members.Select(item => item.StableId).ToArray() };
+        var vd = baseline.VirtualDisks.Single() with { FootprintOnPool = 64 * GiB };
+        var tier = baseline.StorageTiers.Single() with
+        {
+            ResiliencySettingName = "Mirror", NumberOfColumns = 1, Interleave = 16384,
+            NumberOfDataCopies = 2, PhysicalDiskRedundancy = 1,
+            MemberPhysicalDiskIds = members.Take(2).Select(item => item.StableId).ToArray(), FootprintOnPool = 64 * GiB
+        };
+        var snapshot = baseline with { PhysicalDisks = members,
+            StoragePools = baseline.StoragePools.Select(item => item.IsPrimordial ? item : pool).ToArray(),
+            VirtualDisks = [vd], StorageTiers = [tier] };
+        var document = Document(snapshot);
+        var facts = WinPoolSimulationFacts.Create(snapshot, document.SystemId);
+        facts = facts with
+        {
+            IsSimulation = false,
+            Sources = facts.Sources.Select(source => source with { Origin = FactOrigin.StorageCim }).ToImmutableArray(),
+            Objects = facts.Objects.Select(item => item.Id == vd.StableId ? item with
+            {
+                Fields = item.Fields.Select(field => field.Name is "ResiliencySettingName" or "ProvisioningType"
+                    or "NumberOfColumns" or "Interleave" or "NumberOfDataCopies" or "PhysicalDiskRedundancy"
+                    ? field with { Value = JsonSerializer.SerializeToElement<object?>(null) } : field).ToImmutableArray()
+            } : item.Id == tier.StableId ? item with
+            {
+                Fields = item.Fields.Add(WinPoolSourceField.Returned("ProvisioningType", 2, FactValueType.UInt64, item.SourceRef))
+                    .Add(WinPoolSourceField.Returned("AllocatedSize", tier.Size, FactValueType.UInt64, item.SourceRef, "bytes"))
+            } : item).ToImmutableArray()
+        };
+        document = document with { SourceFacts = facts };
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working, vd.StableId);
+        var plan = RealStructureDraftPlanner.Build(session);
+        Assert.Equal(!extentMemberIsHotSpare, plan.Preview.CanApply);
+        if (!extentMemberIsHotSpare)
+        {
+            Assert.Equal(vd.StableId, Assert.Single(plan.RemovedVirtualDisks).StableId);
+            Assert.Equal(4, session.Baseline.StoragePools.Single(item => !item.IsPrimordial).MemberPhysicalDiskIds.Count);
+            Assert.Equal(2, session.Baseline.StorageTiers.Single().MemberPhysicalDiskIds.Count);
+        }
+    }
+
+    [Theory]
     [InlineData("replacement-explicit")]
     [InlineData("continuation")]
     [InlineData("delete-vd")]
@@ -62,7 +118,6 @@ public sealed class RealStructureDraftPlannerTests
     [InlineData("conflicting-aggregate")]
     [InlineData("thin-tier")]
     [InlineData("failed-tier-provisioning")]
-    [InlineData("tier-interleave")]
     [InlineData("tier-columns")]
     [InlineData("tier-copies")]
     [InlineData("tier-media")]
@@ -95,7 +150,6 @@ public sealed class RealStructureDraftPlannerTests
             "conflicting-aggregate" => ChangeField(vdId, "NumberOfColumns", 2),
             "thin-tier" => ChangeField(tierId, "ProvisioningType", 1),
             "failed-tier-provisioning" => ChangeField(tierId, "ProvisioningType", 2, FieldReadState.Unavailable),
-            "tier-interleave" => ChangeField(tierId, "Interleave", 262144),
             "tier-columns" => ChangeField(tierId, "NumberOfColumns", 2),
             "tier-copies" => ChangeField(tierId, "NumberOfDataCopies", 2),
             "tier-media" => ChangeField(tierId, "MediaType", 4),
@@ -302,23 +356,67 @@ public sealed class RealStructureDraftPlannerTests
     [Theory]
     [InlineData("HotSpare")]
     [InlineData("Retired")]
-    public void DraftMemberRolesRemainEditableWithoutEnablingUnsupportedRealWrites(string usage)
+    public void HotSpareAndRetiredRolesCanCreateAPoolWithoutADataDiskOrVirtualDisk(string usage)
     {
         var session = Draft(PoolVirtualDiskLayout.HddTiered, maximum: true);
         var member = session.Working.PhysicalDisks.Single();
         session.Working = EditWorkspace.SetDiskUsage(session.Working, member.StableId, usage);
+        session.Working = SimulationEditingSession.RemoveRealVirtualDiskDraft(session.Working,
+            session.Working.VirtualDisks.Single().StableId);
+        var pool = session.Working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        var role = usage == "HotSpare" ? PhysicalDiskUsage.HotSpare : PhysicalDiskUsage.Retired;
+        session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
+        {
+            AutoCreateVirtualDisk = false,
+            AutoCreatePartition = false,
+            Tiers = [],
+            MemberUsages = [new(member.StableId, role)]
+        };
         var prior = session.Capture();
 
         var plan = RealStructureDraftPlanner.Build(session);
 
-        Assert.False(plan.Preview.CanApply);
-        Assert.Empty(plan.Creations);
-        Assert.Empty(plan.Preview.Actions);
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        var creation = Assert.Single(plan.Creations);
+        Assert.True(creation.CreatePool);
+        Assert.False(creation.CreateVirtualDisk);
+        Assert.Empty(creation.TierGoals);
+        Assert.Contains(plan.Preview.Actions, action => action.Contains(role, StringComparison.Ordinal));
         Assert.Same(prior.Snapshot, session.Working);
         Assert.Equal(PhysicalDiskUsage.Normalize(usage),
             PhysicalDiskUsage.Normalize(session.Working.PhysicalDisks.Single().Usage));
         Assert.Equal(prior.PoolIntents.Single().Value, session.PoolIntents.Single().Value);
-        Assert.Contains(plan.Preview.BlockingReasons, reason => reason.Contains("real execution", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MixedMediaTierGoalsAllowLegalMirrorParityAndSixteenKiBLayouts()
+    {
+        var session = MixedMediaTieredDraft();
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        var creation = Assert.Single(plan.Creations);
+        Assert.Equal(7, creation.PhysicalDiskIds.Count);
+        Assert.Equal(3, creation.TierGoals.Count);
+        Assert.Contains(plan.Preview.Actions, action => action.Contains("SSD", StringComparison.Ordinal)
+            && action.Contains("Mirror", StringComparison.Ordinal) && action.Contains("16 KiB", StringComparison.Ordinal));
+        Assert.Contains(plan.Preview.Actions, action => action.Contains("HDD", StringComparison.Ordinal)
+            && action.Contains("Parity", StringComparison.Ordinal));
+        Assert.Contains(plan.Preview.Actions, action => action.Contains("SCM", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void InvalidMirrorCopiesForTheActualMemberCountBlockTheWholePlan()
+    {
+        var session = MixedMediaTieredDraft(invalidSsdCopies: true);
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply);
+        Assert.NotEmpty(plan.Preview.BlockingReasons);
+        Assert.Empty(plan.Creations);
+        Assert.Empty(plan.Preview.Actions);
     }
 
     [Theory]
@@ -463,7 +561,9 @@ public sealed class RealStructureDraftPlannerTests
         var snapshot = ExistingSnapshot(withVirtualDisk: true);
         var oldVd = snapshot.VirtualDisks.Single();
         if (defect == "unsupported-old")
-            snapshot = snapshot with { VirtualDisks = [oldVd with { Interleave = 262144 }] };
+            // 256 KiB is supported geometry now; use an out-of-range value to
+            // keep this as a meaningful unsupported-source test.
+            snapshot = snapshot with { VirtualDisks = [oldVd with { Interleave = 524288 }] };
         else if (defect == "two-source-vds")
             snapshot = snapshot with { VirtualDisks = [oldVd, oldVd with { StableId = "vd:second", FriendlyName = "Second VD" }] };
 
@@ -602,14 +702,99 @@ public sealed class RealStructureDraftPlannerTests
     [Fact]
     public void UnusedAccurateTemplateDeletionIsOneStagedAction()
     {
-        var session = Session(ExistingSnapshot(withTemplate: true));
+        var session = NativeSession(ExistingSnapshot(withTemplate: true));
         var tier = Assert.Single(session.Working.StorageTiers);
         session.Working = session.Working with { StorageTiers = [] };
         var plan = RealStructureDraftPlanner.Build(session);
-        Assert.True(plan.Preview.CanApply);
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
         Assert.Equal(tier.StableId, Assert.Single(plan.RemovedTiers).StableId);
         Assert.Empty(plan.RemovedPools);
         Assert.Empty(plan.Creations);
+    }
+
+    [Fact]
+    public void RoleResetCanReuseVerifiedUnusedTemplateWithItsCurrentMemberProjection()
+    {
+        var session = EmptyPoolWithUnusedTemplate(baselineHotSpare: true);
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        var member = session.Working.PhysicalDisks.Single();
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        Assert.Empty(plan.RemovedTiers);
+        Assert.Empty(plan.RemovedPools);
+        var creation = Assert.Single(plan.Creations);
+        Assert.False(creation.CreatePool);
+        Assert.False(creation.CreateVirtualDisk);
+        Assert.False(creation.CreateTier);
+        Assert.Equal(pool.StableId, creation.Pool.StableId);
+        Assert.Equal(member.StableId, Assert.Single(creation.PhysicalDiskIds));
+        Assert.Equal("tier:existing", Assert.Single(creation.TierGoals).VerifiedTemplateId);
+        Assert.Contains(plan.Preview.Actions, action => action.Contains(member.StableId, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EmptyPoolCanCreateVdUsingVerifiedUnusedTemplateProjectionWithoutRoleChange()
+    {
+        var session = EmptyPoolWithUnusedTemplate(baselineHotSpare: false);
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "First");
+        session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
+        { AutoCreateVirtualDisk = true, AutoCreatePartition = false };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        var creation = Assert.Single(plan.Creations);
+        Assert.True(creation.CreateVirtualDisk);
+        Assert.False(creation.CreateTier);
+        Assert.Equal("tier:existing", Assert.Single(creation.TierGoals).VerifiedTemplateId);
+    }
+
+    [Fact]
+    public void RoleResetCannotChangeVerifiedUnusedTemplateGeometry()
+    {
+        var session = EmptyPoolWithUnusedTemplate(baselineHotSpare: true);
+        session.Working = session.Working with
+        {
+            StorageTiers = session.Working.StorageTiers.Select(tier => tier with { Interleave = 16384 }).ToArray()
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply);
+        Assert.Empty(plan.Creations);
+        Assert.Contains(plan.Preview.BlockingReasons,
+            reason => reason.Contains("tier specifications/usage", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExistingVdStillBlocksMemberRoleChanges()
+    {
+        var session = NativeSession(ExistingSnapshot(withVirtualDisk: true));
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        var member = session.Working.PhysicalDisks.Single();
+        session.Working = session.Working with
+        {
+            PhysicalDisks = session.Working.PhysicalDisks.Select(item => item.StableId == member.StableId
+                ? item with { Usage = PhysicalDiskUsage.HotSpare } : item).ToArray()
+        };
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            Layout = PoolVirtualDiskLayout.Ordinary,
+            AutoCreateVirtualDisk = false,
+            AutoCreatePartition = false,
+            Tiers = [],
+            MemberUsages = [new(member.StableId, PhysicalDiskUsage.HotSpare)]
+        };
+
+        var plan = RealStructureDraftPlanner.Build(session);
+
+        Assert.False(plan.Preview.CanApply);
+        Assert.Empty(plan.Creations);
+        Assert.Contains(plan.Preview.BlockingReasons,
+            reason => reason.Contains("usage changes must be saved as pool member goals", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -625,7 +810,7 @@ public sealed class RealStructureDraftPlannerTests
             "identity" => tier with { IsStable = false },
             _ => tier with { NumberOfColumns = 2 }
         }).ToArray() };
-        var document = Document(before);
+        var document = NativeDocument(before);
         if (defect == "identity") document = document with
         {
             SourceFacts = document.SourceFacts! with
@@ -708,7 +893,16 @@ public sealed class RealStructureDraftPlannerTests
         var creation = Assert.Single(plan.Creations);
         Assert.False(creation.CreatePool);
         Assert.Equal(realPool.StableId, creation.Pool.StableId);
-        Assert.Equal(intent, creation.Intent);
+        Assert.Equal(intent.Layout, creation.Intent.Layout);
+        Assert.Equal(intent.VirtualDiskSizeBytes, creation.Intent.VirtualDiskSizeBytes);
+        Assert.Equal(intent.VirtualDiskUseMaximum, creation.Intent.VirtualDiskUseMaximum);
+        Assert.True(creation.CreateVirtualDisk);
+        Assert.True(creation.CreateTier);
+        var tierGoal = Assert.Single(creation.TierGoals);
+        Assert.Equal("HDD", tierGoal.MediaType);
+        Assert.Equal(StorageLayoutParameters.LegacyDefault, tierGoal.Layout);
+        Assert.Equal(32 * GiB, tierGoal.SizeBytes);
+        Assert.Equal(intent.VirtualDiskUseMaximum, tierGoal.UseMaximumSize);
         Assert.DoesNotContain(plan.Creations, c => c.Pool.StableId == draftPool.StableId);
     }
 
@@ -927,7 +1121,12 @@ public sealed class RealStructureDraftPlannerTests
         session.Working = session.Working with { StorageTiers = layout == PoolVirtualDiskLayout.Ordinary
             ? session.Working.StorageTiers.Where(tier => tier.PoolStableId != pool.StableId).ToArray()
             : session.Working.StorageTiers.Select(tier => tier.PoolStableId == pool.StableId && tier.MediaType == "HDD"
-                ? tier with { Size = maximum ? 0 : 32L * GiB } : tier).ToArray() };
+                ? tier with
+                {
+                    ResiliencySettingName = "Simple", NumberOfColumns = 1, Interleave = 65536,
+                    NumberOfDataCopies = 1, PhysicalDiskRedundancy = 0,
+                    Size = maximum ? 0 : 32L * GiB, FootprintOnPool = maximum ? 0 : 32L * GiB
+                } : tier).ToArray() };
         session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "User VD");
         session.PoolIntents[pool.StableId] = Intent() with
         {
@@ -935,6 +1134,82 @@ public sealed class RealStructureDraftPlannerTests
             VirtualDiskUseMaximum = maximum,
             VirtualDiskSizeBytes = maximum ? null : 32L * GiB
         };
+    }
+
+    private static SimulationEditingSession MixedMediaTieredDraft(bool invalidSsdCopies = false)
+    {
+        var source = SimulationLayouts.TripleTier();
+        var selected = new[]
+        {
+            source.PhysicalDisks.Where(item => item.MediaType == "SSD").Take(2),
+            source.PhysicalDisks.Where(item => item.MediaType == "HDD").Take(3),
+            source.PhysicalDisks.Where(item => item.MediaType == "SCM").Take(2)
+        }.SelectMany(items => items).Select(item => item with
+        {
+            PoolStableId = source.StoragePools.Single(pool => pool.IsPrimordial).StableId,
+            CanPool = true,
+            Usage = PhysicalDiskUsage.AutoSelect,
+            IsBoot = false,
+            IsSystem = false,
+            IsPageFile = false,
+            IsCrashDump = false
+        }).ToArray();
+        var ids = selected.Select(item => item.StableId).ToArray();
+        var primordial = source.StoragePools.Single(pool => pool.IsPrimordial) with
+        { MemberPhysicalDiskIds = ids, Size = selected.Sum(item => item.Size) };
+        var snapshot = source with
+        {
+            PhysicalDisks = selected,
+            StoragePools = [primordial],
+            VirtualDisks = [],
+            StorageTiers = [],
+            OsDisks = [],
+            Partitions = [],
+            Volumes = [],
+            Relationships = [],
+            FieldIssues = []
+        };
+        var session = Session(snapshot);
+        session.Working = EditWorkspace.InsertDraftPool(session.Working, "Mixed media");
+        var pool = session.Working.StoragePools.Single(item => EditWorkspace.IsDraftPool(item.StableId));
+        foreach (var memberId in ids)
+            session.Working = EditWorkspace.MoveDiskToPool(session.Working, memberId, pool.StableId);
+        var goals = new[]
+        {
+            new PoolTierEditIntent("SSD", new("Mirror", 1, 16384, invalidSsdCopies ? 3 : 2, invalidSsdCopies ? 2 : 1), 8 * GiB, false),
+            new PoolTierEditIntent("HDD", new("Parity", 3, 16384, 1, 1), 8 * GiB, false),
+            new PoolTierEditIntent("SCM", new("Mirror", 1, 16384, 2, 1), 8 * GiB, false)
+        };
+        var goalByMedia = goals.ToDictionary(item => item.MediaType, StringComparer.OrdinalIgnoreCase);
+        session.Working = session.Working with
+        {
+            StorageTiers = session.Working.StorageTiers.Select(tier =>
+            {
+                var goal = goalByMedia[tier.MediaType];
+                return tier with
+                {
+                    ResiliencySettingName = goal.Layout.ResiliencySettingName,
+                    NumberOfColumns = goal.Layout.NumberOfColumns,
+                    Interleave = goal.Layout.InterleaveBytes,
+                    NumberOfDataCopies = goal.Layout.NumberOfDataCopies,
+                    PhysicalDiskRedundancy = goal.Layout.PhysicalDiskRedundancy,
+                    Size = goal.SizeBytes,
+                    FootprintOnPool = goal.SizeBytes
+                };
+            }).ToArray()
+        };
+        session.Working = SimulationEditingSession.InsertRealDraftVirtualDisk(session.Working, pool.StableId, "Mixed VD");
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            Layout = PoolVirtualDiskLayout.HddTiered,
+            VirtualDiskName = "Mixed VD",
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = true,
+            VirtualDiskSizeBytes = null,
+            Tiers = goals,
+            MemberUsages = ids.Select(id => new PoolMemberEditIntent(id, PhysicalDiskUsage.AutoSelect)).ToArray()
+        };
+        return session;
     }
 
     private static PoolEditIntent Intent() => new(true, true, "NTFS", 65536, "User label",
@@ -946,6 +1221,63 @@ public sealed class RealStructureDraftPlannerTests
         var document = Document(snapshot);
         session.Bind(document, document.Snapshot);
         return session;
+    }
+
+    private static SimulationEditingSession NativeSession(StorageSnapshot snapshot)
+    {
+        var document = NativeDocument(snapshot);
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        return session;
+    }
+
+    private static SimulationEditingSession EmptyPoolWithUnusedTemplate(bool baselineHotSpare)
+    {
+        var snapshot = ExistingSnapshot(withTemplate: true);
+        var member = snapshot.PhysicalDisks.Single();
+        var tier = snapshot.StorageTiers.Single();
+        snapshot = snapshot with
+        {
+            PhysicalDisks = [member with
+            {
+                Usage = baselineHotSpare ? PhysicalDiskUsage.HotSpare : PhysicalDiskUsage.AutoSelect
+            }],
+            StorageTiers = [tier with { MemberPhysicalDiskIds = [] }]
+        };
+        var session = NativeSession(snapshot);
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        session.Working = session.Working with
+        {
+            PhysicalDisks = session.Working.PhysicalDisks.Select(item => item.StableId == member.StableId
+                ? item with { Usage = PhysicalDiskUsage.AutoSelect } : item).ToArray(),
+            StorageTiers = session.Working.StorageTiers.Select(item => item.StableId == tier.StableId
+                ? item with { MemberPhysicalDiskIds = [member.StableId] } : item).ToArray()
+        };
+        session.PoolIntents[pool.StableId] = Intent() with
+        {
+            Layout = PoolVirtualDiskLayout.HddTiered,
+            AutoCreateVirtualDisk = false,
+            AutoCreatePartition = false,
+            VirtualDiskUseMaximum = true,
+            VirtualDiskSizeBytes = null,
+            Tiers = [new("HDD", StorageLayoutParameters.LegacyDefault, 0, true, tier.StableId)],
+            MemberUsages = [new(member.StableId, PhysicalDiskUsage.AutoSelect)]
+        };
+        return session;
+    }
+
+    private static StorageSystemDocument NativeDocument(StorageSnapshot snapshot)
+    {
+        var document = Document(snapshot);
+        var generated = WinPoolSimulationFacts.Create(snapshot, document.SystemId);
+        var facts = generated with
+        {
+            IsSimulation = false,
+            Sources = generated.Sources
+                .Select(source => source with { Origin = FactOrigin.StorageCim })
+                .ToImmutableArray()
+        };
+        return document with { SourceFacts = facts };
     }
 
     private static StorageSystemDocument Document(StorageSnapshot snapshot) => new(

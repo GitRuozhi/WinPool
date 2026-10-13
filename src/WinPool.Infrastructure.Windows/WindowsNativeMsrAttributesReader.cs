@@ -19,8 +19,10 @@ internal sealed record WindowsNativeMsrIdentity(
 {
     internal string[] AccessPaths { get; init; } = [];
     internal bool ExpectedDiskOffline { get; init; }
+    internal IReadOnlyList<WindowsStoragePhysicalMemberTarget>? PhysicalMembers { get; init; }
     internal string NativeBindingMethod => VirtualDiskUniqueId is null
         ? "ProviderPathGptGuidAndPhysicalSerial"
+        : PhysicalMembers is { Count: > 1 } ? "ProviderPathGptGuidAndVirtualDiskPoolExactMemberAssociations"
         : "ProviderPathGptGuidAndVirtualDiskPoolSingleMemberAssociations";
 }
 
@@ -54,8 +56,8 @@ internal static class WindowsNativeMsrAttributesReader
     internal static WindowsNativeMsrIdentity Identify(WindowsRealStorageTopology topology,
         PartitionInfo partition, bool expectedDiskOffline = false)
     {
-        var closure = topology.RequireSinglePhysicalClosure([
-            new StorageObjectId(topology.SystemId, StorageObjectKind.Partition, partition.StableId)]);
+        var closure = topology.RequireCapabilityClosure(new StorageObjectId(topology.SystemId, StorageObjectKind.Partition, partition.StableId));
+        IReadOnlyList<WindowsStoragePhysicalMemberTarget>? exactPhysicalMembers = null;
         var disk = topology.Snapshot.OsDisks.Single(item => item.StableId == partition.OsDiskStableId);
         if (disk.PartitionStyle != "GPT")
             throw new InvalidDataException("Native MSR evidence requires an exact basic GPT disk.");
@@ -69,14 +71,21 @@ internal static class WindowsNativeMsrAttributesReader
             RequireFactParent(topology, "same-device", disk.StableId, virtualId);
             var vd = topology.Snapshot.VirtualDisks.Single(item => item.StableId == virtualId);
             var pool = topology.Snapshot.StoragePools.Single(item => item.StableId == vd.PoolStableId);
-            if (pool.IsPrimordial || pool.MemberPhysicalDiskIds.Count != 1
-                || pool.MemberPhysicalDiskIds[0] != closure.PhysicalDiskId)
-                throw new InvalidDataException("The native MSR virtual disk requires one exact non-primordial pool member.");
+            if (pool.IsPrimordial || pool.MemberPhysicalDiskIds.Count == 0)
+                throw new InvalidDataException("The native MSR virtual disk requires its complete exact concrete pool member set.");
             RequireFactParent(topology, "pool-virtual-disk", vd.StableId, pool.StableId);
             var members = topology.Facts.Relationships.Where(item => !item.IsRetained
                 && item.Kind == "pool-member" && item.FromId == pool.StableId).ToArray();
-            if (members.Length != 1 || members[0].ToId != closure.PhysicalDiskId)
+            if (members.Length != pool.MemberPhysicalDiskIds.Count || members.Select(item => item.ToId).Distinct().Count() != members.Length
+                || !members.Select(item => item.ToId).ToHashSet(StringComparer.Ordinal).SetEquals(pool.MemberPhysicalDiskIds))
                 throw new InvalidDataException("The native MSR virtual disk pool-member evidence is not exact.");
+            if (members.Length > 1)
+            {
+                var memberSet = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
+                    pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
+                exactPhysicalMembers = memberSet.Members.Select(item => new WindowsStoragePhysicalMemberTarget(item.PhysicalDiskId,
+                    item.UniqueId, item.ObjectId, item.SerialNumber)).ToArray();
+            }
             rawVirtual = topology.RequireObject(new(topology.SystemId, StorageObjectKind.VirtualDisk, vd.StableId));
             rawPool = topology.RequireObject(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId));
         }
@@ -133,7 +142,7 @@ internal static class WindowsNativeMsrAttributesReader
             rawVirtual is null ? null : Text(rawVirtual, "ObjectId"),
             rawPool is null ? null : Text(rawPool, "UniqueId"),
             rawPool is null ? null : Text(rawPool, "ObjectId"))
-        { AccessPaths = accessPaths, ExpectedDiskOffline = expectedDiskOffline };
+        { AccessPaths = accessPaths, ExpectedDiskOffline = expectedDiskOffline, PhysicalMembers = exactPhysicalMembers };
     }
 
     private static void RequireFactParent(WindowsRealStorageTopology topology,
@@ -222,9 +231,10 @@ internal static class WindowsNativeMsrAttributesReader
                 RequireVirtualBacking(item, expected, token);
             return exact;
         }, token);
-        RequireUnique("MSFT_PhysicalDisk", item => Same(item["UniqueId"]?.ToString(), expected.PhysicalUniqueId), item =>
-            Same(item["ObjectId"]?.ToString(), expected.PhysicalObjectId)
-            && Same(item["SerialNumber"]?.ToString(), expected.SerialNumber), token);
+        foreach (var physical in expected.PhysicalMembers ?? [new("", expected.PhysicalUniqueId, expected.PhysicalObjectId, expected.SerialNumber)])
+            RequireUnique("MSFT_PhysicalDisk", item => Same(item["UniqueId"]?.ToString(), physical.UniqueId), item =>
+                Same(item["ObjectId"]?.ToString(), physical.ObjectId)
+                && Same(item["SerialNumber"]?.ToString(), physical.SerialNumber), token);
         RequireUnique("MSFT_Partition", item => Same(item["DiskId"]?.ToString(), expected.DiskPath)
             && Guid.TryParse(item["Guid"]?.ToString(), out var guid) && guid == expected.PartitionGuid, item =>
             Guid.TryParse(item["GptType"]?.ToString(), out var type) && type == expected.PartitionType
@@ -261,15 +271,31 @@ internal static class WindowsNativeMsrAttributesReader
                     || !Same(pool["UniqueId"]?.ToString(), expected.PoolUniqueId!)
                     || !Same(pool["ObjectId"]?.ToString(), expected.PoolObjectId!))
                     throw new InvalidDataException("The exact native MSR virtual disk pool changed.");
-                RequireSingleRelated(pool, "MSFT_PhysicalDisk", "MSFT_StoragePoolToPhysicalDisk", "PhysicalDisk", "StoragePool", physical =>
-                {
-                    if (!Same(physical["UniqueId"]?.ToString(), expected.PhysicalUniqueId)
-                        || !Same(physical["ObjectId"]?.ToString(), expected.PhysicalObjectId)
-                        || !Same(physical["SerialNumber"]?.ToString(), expected.SerialNumber))
-                        throw new InvalidDataException("The exact native MSR virtual disk single physical member changed.");
-                }, token);
+                RequireRelatedPhysicalMembers(pool, expected, token);
             }, token);
         }, token);
+    }
+
+    private static void RequireRelatedPhysicalMembers(ManagementObject pool, WindowsNativeMsrIdentity expected, CancellationToken token)
+    {
+        var approved = expected.PhysicalMembers ?? [new("", expected.PhysicalUniqueId, expected.PhysicalObjectId, expected.SerialNumber)];
+        using var related = pool.GetRelated("MSFT_PhysicalDisk", "MSFT_StoragePoolToPhysicalDisk", null, null,
+            "PhysicalDisk", "StoragePool", false, new System.Management.EnumerationOptions { Timeout = TimeSpan.FromSeconds(10) });
+        var current = related.Cast<ManagementObject>().ToArray();
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            if (current.Length != approved.Count || approved.Select(item => item.UniqueId).Distinct(StringComparer.Ordinal).Count() != approved.Count)
+                throw new InvalidDataException("The exact native MSR virtual disk pool member count changed.");
+            foreach (var physical in approved)
+            {
+                var matches = current.Where(item => Same(item["UniqueId"]?.ToString(), physical.UniqueId)).ToArray();
+                if (matches.Length != 1 || !Same(matches[0]["ObjectId"]?.ToString(), physical.ObjectId)
+                    || !Same(matches[0]["SerialNumber"]?.ToString(), physical.SerialNumber))
+                    throw new InvalidDataException("An exact native MSR virtual disk physical member changed.");
+            }
+        }
+        finally { foreach (var item in current) item.Dispose(); }
     }
 
     private static void RequireSingleRelated(ManagementObject source, string resultClass,

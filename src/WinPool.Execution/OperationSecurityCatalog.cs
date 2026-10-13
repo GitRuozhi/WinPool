@@ -35,6 +35,7 @@ public static class OperationSecurityCatalog
             [OperationIntent.SetDriveLetter] = Mutation(RiskLevel.R4StorageStructureMutation, "Partition access path"),
             [OperationIntent.RenameStorageObject] = Mutation(RiskLevel.R4StorageStructureMutation, "Storage object name"),
             [OperationIntent.SetVolumeLabel] = Mutation(RiskLevel.R4StorageStructureMutation, "Volume label"),
+            [OperationIntent.SetPhysicalDiskUsage] = Mutation(RiskLevel.R4StorageStructureMutation, "Physical disk usage in its exact pool"),
 
             [OperationIntent.DeleteStoragePool] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Storage pool removal"),
             [OperationIntent.RepairStorageObject] = Mutation(RiskLevel.R5IrreversibleOrBroadDestruction, "Storage object repair"),

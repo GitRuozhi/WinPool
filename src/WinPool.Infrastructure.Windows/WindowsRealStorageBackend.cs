@@ -46,7 +46,11 @@ public sealed record WindowsNoEffectStepEvidence(
     bool NoWindowsCall,
     string Code,
     string PhysicalMemberFingerprint,
-    string? Diagnostic = null);
+    string? Diagnostic = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? PlanHash { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? StepId { get; init; }
+}
 
 public sealed record WindowsObservedNoEffectStepEvidence(
     bool WindowsCallIssued, string Code, string PhysicalMemberFingerprint,
@@ -140,6 +144,8 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         if (!StringComparer.Ordinal.Equals(topology.MachineBinding,
                 plan.RealOperation!.MachineBinding))
             throw new InvalidDataException("The machine identity changed after preparation.");
+        if (WindowsRealOperationPlanner.UsesExactMemberSet(plan))
+            return await PreflightExactMembersAsync(plan, stored, topology, verifiedStepOutputs, cancellationToken).ConfigureAwait(false);
         if (stored.Command is CreateTieredVirtualDiskCommand { UseMaximumSize: true, CapacityTiers.Count: > 1 })
             return await PreflightMultiMaximumCapacityAsync(plan, stored, topology, cancellationToken).ConfigureAwait(false);
         var physicalId = plan.Targets.SingleOrDefault(target =>
@@ -247,6 +253,8 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(
             preflight.TargetEvidenceJson)
             ?? throw new InvalidDataException("The persisted exact target is unreadable.");
+        if (WindowsRealOperationPlanner.UsesExactMemberSet(plan))
+            return await ExecuteExactMembersAsync(plan, stored, preflight, target, cancellationToken).ConfigureAwait(false);
         var physical = plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk);
         WindowsRealStorageTopology before;
         RealTargetClosure beforeClosure;
@@ -464,6 +472,9 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             || !persistedSteps.Select(item => item.StepId)
                 .SequenceEqual(frozen.Steps.Select(item => item.Id), StringComparer.Ordinal))
             return Unknown(persistedSteps, "real.reconciliation_invalid_record");
+
+        if (WindowsRealOperationPlanner.UsesExactMemberSet(plan))
+            return await ReconcileExactMembersAsync(plan, persistedSteps, cancellationToken).ConfigureAwait(false);
 
         WindowsRealStorageTopology topology;
         RealTargetClosure closure;
@@ -1589,6 +1600,8 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         WindowsRealStorageTopology before,
         WindowsRealStorageTopology after)
     {
+        if (target.PhysicalMembers is { Count: > 0 } && command is CreatePoolCommand or SetPhysicalDiskUsageCommand or CreateTierCommand or CreateTieredVirtualDiskCommand or CreateVirtualDiskCommand or DeletePoolCommand)
+            return VerifyExactMemberAfter(command, target, result, before, after);
         var snapshot = after.Snapshot;
         var exact = FindExact(after, target.Kind, target.UniqueId, target.ObjectId,
             target.PartitionGuid);

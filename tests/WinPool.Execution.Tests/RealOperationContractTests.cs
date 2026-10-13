@@ -99,9 +99,10 @@ public sealed class RealOperationContractTests
     }
 
     [Theory]
-    [InlineData(32768)]
-    [InlineData(262144)]
-    public void VirtualDisk_RejectsUnverifiedInterleave(int interleave)
+    [InlineData(0)]
+    [InlineData(8192)]
+    [InlineData(49152)]
+    public void VirtualDisk_RejectsUnsupportedInterleave(int interleave)
     {
         var fixture = Fixture.Create();
         var pool = new StorageObjectId(fixture.SystemId, StorageObjectKind.StoragePool, "pool-id");

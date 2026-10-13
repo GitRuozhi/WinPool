@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Text;
@@ -10,6 +9,41 @@ namespace WinPool.Infrastructure.Tests;
 
 public sealed class WindowsRealStorageCommandAdapterTests
 {
+    [Theory]
+    [InlineData("Simple", 1, 16384, 1, 0)]
+    [InlineData("Mirror", 2, 32768, 2, 1)]
+    [InlineData("Parity", 3, 262144, 1, 1)]
+    public async Task RequestedCreationLayoutReachesTypedPayloadUnchanged(string resiliency, int columns, int interleave, int copies, int redundancy)
+    {
+        var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
+        var adapter = new WindowsRealStorageCommandAdapter(runner);
+        var pool = RealTargetReference.ForExisting(new StorageObjectId(SystemId.New(), StorageObjectKind.StoragePool, "pool"));
+        var layout = new StorageLayoutParameters(resiliency, columns, interleave, copies, redundancy);
+        var command = new CreateVirtualDiskCommand(pool, "VD", 16L << 30, interleave, columns, Layout: layout);
+        var result = await adapter.ExecuteAsync(command, PoolTarget() with { Layout = layout }, default);
+        Assert.True(result.ProviderReturned);
+        using var payload = JsonDocument.Parse(runner.Payload!);
+        Assert.Equal(layout, payload.RootElement.GetProperty("Command").GetProperty("Layout").Deserialize<StorageLayoutParameters>());
+        Assert.False((await adapter.ExecuteAsync(command, PoolTarget() with { Layout = layout with { InterleaveBytes = 65536 } }, default)).ProviderReturned);
+        Assert.Equal(1, runner.Calls);
+    }
+
+    [Fact]
+    public async Task PoolMemberSetMismatchAndDuplicateProviderIdentityNeverReachRunner()
+    {
+        var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
+        var adapter = new WindowsRealStorageCommandAdapter(runner);
+        var system = SystemId.New();
+        var first = RealTargetReference.ForExisting(new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "first"));
+        var second = RealTargetReference.ForExisting(new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "second"));
+        var command = new CreatePoolCommand(first, "Pool", [first, second]);
+        var target = PhysicalTarget() with { PhysicalMembers = [new("first", "physical-unique", "physical-object", "serial"), new("second", "unique2", "object2", "serial2")] };
+        Assert.False((await adapter.ExecuteAsync(command, target with { PhysicalMembers = target.PhysicalMembers!.Take(1).ToArray() }, default)).ProviderReturned);
+        Assert.False((await adapter.ExecuteAsync(command, target with { PhysicalMembers = [target.PhysicalMembers![0], target.PhysicalMembers![1] with { UniqueId = "physical-unique" }] }, default)).ProviderReturned);
+        Assert.Equal(0, runner.Calls);
+        Assert.True((await adapter.ExecuteAsync(command, target, default)).ProviderReturned);
+    }
+
     [Fact]
     public async Task TypedCommandUsesFixedScriptAndJsonDataOnly()
     {
@@ -55,7 +89,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         var runner = new FakeRunner(new WindowsStorageProcessResult(0, SuccessJson, ""));
         var adapter = new WindowsRealStorageCommandAdapter(runner);
         var pool = RealTargetReference.ForExisting(new StorageObjectId(SystemId.New(), StorageObjectKind.StoragePool, "pool"));
-        var invalid = new CreateVirtualDiskCommand(pool, "VD", 16L << 30, 262144, 1);
+        var invalid = new CreateVirtualDiskCommand(pool, "VD", 16L << 30, 8192, 1);
 
         var result = await adapter.ExecuteAsync(invalid, PoolTarget(), CancellationToken.None);
 
@@ -252,8 +286,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [Fact]
     public void CompressedFixedScriptFitsWindowsCommandLine()
     {
-        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(
-            WindowsRealStoragePowerShellScript.Source);
+        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedScriptLoader();
 
         Assert.InRange(encoded.Length, 1, 30000);
     }
@@ -619,6 +652,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [Theory]
     [InlineData("range", true, null)]
     [InlineData("list", true, null)]
+    [InlineData("layout-16k", true, null)]
     [InlineData("size-outside-range", false, "tier-creation-size-not-supported")]
     [InlineData("method-failed", false, "tier-creation-size-method-failed")]
     [InlineData("capability-false", false, "single-hdd-tier-capability-not-verified")]
@@ -641,6 +675,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         // local fakes, including Import-Module; no Windows storage API is loaded.
         var fakeCommands = """
             $script:fixtureShape = '__SHAPE__'
+            $script:expectedInterleave = if ($script:fixtureShape -eq 'layout-16k') { 16384 } else { 65536 }
             $script:nativeMaximum = $script:fixtureShape -like 'native-*'
             $script:expectedSize = switch ($script:fixtureShape) {
                 'tier-only-max' { [long]3999956729856 }
@@ -660,7 +695,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
             $script:fakePhysical = [pscustomobject]@{ UniqueId='physical-unique'; ObjectId='physical-object'; SerialNumber='serial'; MediaType='HDD' }
             $script:fakeTemplate = [pscustomobject]@{
                 UniqueId='template-unique'; ObjectId='template-object'; Size=[uint64]0; AllocatedSize=[uint64]0;
-                MediaType='HDD'; ResiliencySettingName='Simple'; Interleave=[uint64]65536; NumberOfColumns=[uint16]1
+                MediaType='HDD'; ResiliencySettingName='Simple'; Interleave=[uint64]$script:expectedInterleave; NumberOfColumns=[uint16]1
             }
             function Import-Module { param($Name, $ErrorAction) if ($Name -ne 'Storage') { throw 'unexpected-fake-module' } }
             function Get-StorageSubSystem { param($ErrorAction) return $script:fakeSubsystem }
@@ -687,8 +722,8 @@ public sealed class WindowsRealStorageCommandAdapterTests
             function New-VirtualDisk {
                 param($InputObject, $FriendlyName, $StorageTiers, $StorageTierSizes, $ResiliencySettingName,
                     $ProvisioningType, $NumberOfColumns, $Interleave, [switch]$UseMaximumSize, $Size, $MediaType, $ErrorAction)
-                if ($InputObject.UniqueId -ne 'pool-unique' -or $ResiliencySettingName -ne 'Simple' -or
-                    $ProvisioningType -ne 'Fixed' -or $NumberOfColumns -ne 1 -or $Interleave -ne 65536) {
+                if ($InputObject.UniqueId -ne 'pool-unique' -or $ProvisioningType -ne 'Fixed' -or
+                    $ResiliencySettingName -ne 'Simple' -or $NumberOfColumns -ne 1 -or $Interleave -ne $script:expectedInterleave) {
                     throw 'unexpected-fake-create-parameters'
                 }
                 if ($script:nativeMaximum) {
@@ -734,6 +769,8 @@ public sealed class WindowsRealStorageCommandAdapterTests
                 automaticHdd ? TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd : TieredVirtualDiskCreationMechanism.ExactTemplate);
         if (shape == "unknown-mechanism") command = ((CreateTieredVirtualDiskCommand)command) with
             { CreationMechanism = (TieredVirtualDiskCreationMechanism)99 };
+        if (shape == "layout-16k") command = ((CreateTieredVirtualDiskCommand)command) with
+            { Layout = new("Simple", 1, 16384) };
         // Obtain payload through the real adapter, including its private
         // JsonStringEnumConverter options, then execute that exact payload in
         // the complete production compressed script with all storage calls fake.
@@ -923,6 +960,27 @@ public sealed class WindowsRealStorageCommandAdapterTests
         else Assert.Equal(JsonValueKind.String, parsed.RootElement.GetProperty("Failure").ValueKind);
     }
 
+    [Theory]
+    [InlineData("InterleaveBytes", "Interleave")]
+    [InlineData("NumberOfColumns", "NumberOfColumns")]
+    public async Task TieredCommonResiliencyOverridesPoolDefaultWhenAnotherDimensionDiffers(string dimension, string parameter)
+    {
+        var first = new StorageLayoutParameters("Simple", 1, 16384);
+        var second = dimension == "InterleaveBytes" ? first with { InterleaveBytes = 65536 } : first with { NumberOfColumns = 2 };
+        var inputJson = JsonSerializer.Serialize(new[] { new { Layout = first }, new { Layout = second } });
+        var source = WindowsRealStoragePowerShellScript.Source;
+        var begin = source.IndexOf("$layouts = @($inputs", StringComparison.Ordinal);
+        var end = source.IndexOf("$invoked = $true", begin, StringComparison.Ordinal);
+        var script = "$ProgressPreference='SilentlyContinue'\nfunction Read-Property($item, $name) { $item.$name }\n$inputs = '" + inputJson
+            + "' | ConvertFrom-Json\n" + source[begin..end] + "\n$sharedArguments | ConvertTo-Json -Compress";
+        using var result = JsonDocument.Parse(await RunCompressedFixedScriptWithFakesAsync(script, "", "", ""));
+        Assert.Equal("Simple", result.RootElement.GetProperty("ResiliencySettingName").GetString());
+        Assert.False(result.RootElement.TryGetProperty(parameter, out _));
+        Assert.False(result.RootElement.TryGetProperty("NumberOfDataCopies", out _));
+        Assert.False(result.RootElement.TryGetProperty("PhysicalDiskRedundancy", out _));
+        Assert.True(result.RootElement.TryGetProperty(parameter == "Interleave" ? "NumberOfColumns" : "Interleave", out _));
+    }
+
     private static async Task<string> RunCompressedFixedScriptWithFakesAsync(string script,
         string fakeCommands, string payload, string suffix)
     {
@@ -940,21 +998,11 @@ public sealed class WindowsRealStorageCommandAdapterTests
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        // Read the first line byte by byte: Console.In.ReadLine can buffer typed
-        // JSON ahead of the encoding reset performed by the fixed script.
-        const string loader = "$i=[Console]::OpenStandardInput();$l=[IO.MemoryStream]::new();"
-            + "while(($n=$i.ReadByte()) -ge 0 -and $n -ne 10){$l.WriteByte([byte]$n)};"
-            + "$b=[Convert]::FromBase64String([Text.Encoding]::ASCII.GetString($l.ToArray()));$m=[IO.MemoryStream]::new($b);"
-            + "$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
-            + "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
-        start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
-        using var buffer = new MemoryStream();
-        using (var gzip = new GZipStream(buffer, CompressionLevel.Optimal, leaveOpen: true))
-            gzip.Write(Encoding.UTF8.GetBytes(fixtureScript));
+        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedScriptLoader());
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteLineAsync(Convert.ToBase64String(buffer.ToArray()));
+        await process.StandardInput.WriteLineAsync(WindowsPowerShellStorageWriteRunner.CompressFixedScript(fixtureScript));
         await process.StandardInput.WriteAsync(payload);
         process.StandardInput.Close();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -967,7 +1015,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [Fact]
     public void ProductionFixedScriptEncodedCommandFitsTheWindowsProcessCommandLine()
     {
-        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(WindowsRealStoragePowerShellScript.Source);
+        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedScriptLoader();
         const string arguments = " -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ";
         var completeLengthWithTerminator = WindowsPowerShellRunner.ExecutablePath.Length + 2 + arguments.Length + encoded.Length + 1;
         Assert.True(completeLengthWithTerminator <= 32767,

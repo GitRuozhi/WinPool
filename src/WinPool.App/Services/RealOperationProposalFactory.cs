@@ -12,7 +12,8 @@ public static class RealOperationProposalFactory
 {
     public sealed record VirtualDiskOptions(
         string Name, long SizeBytes, bool InitializeAndPartition,
-        bool CreateMsr, bool FormatNtfs, string? Label, char? Letter, bool UseMaximumSize = false);
+        bool CreateMsr, bool FormatNtfs, string? Label, char? Letter, bool UseMaximumSize = false,
+        StorageLayoutParameters? Layout = null);
 
     public static RealOperationIntentRequest OneStep(
         SystemId systemId, OperationIntent intent, StorageObjectId target,
@@ -23,6 +24,49 @@ public static class RealOperationProposalFactory
                 "Agent live target verification required", expectedState,
                 dataLoss, "Agent live Windows preflight required")], expectedState);
         return request;
+    }
+
+    public static RealOperationIntentRequest DeclareCurrentPropertyPoolMembers(
+        RealOperationIntentRequest request, StorageSnapshot snapshot) => DeclareCurrentPoolMembers(request, snapshot);
+
+    public static RealOperationIntentRequest DeclareCurrentPoolMembers(
+        RealOperationIntentRequest request, StorageSnapshot snapshot)
+    {
+        if (!OperationSecurityCatalog.IsStorageStructureMutation(request.Intent)) return request;
+        string? DiskPool(string? diskId)
+        {
+            var disk = snapshot.OsDisks.SingleOrDefault(item => item.StableId == diskId);
+            return snapshot.VirtualDisks.SingleOrDefault(item => item.StableId == disk?.VirtualDiskStableId)?.PoolStableId;
+        }
+        string? PartitionPool(string? partitionId) => DiskPool(snapshot.Partitions.SingleOrDefault(item => item.StableId == partitionId)?.OsDiskStableId);
+        string? TargetPool(StorageObjectId target) => target.Kind switch
+        {
+            StorageObjectKind.StoragePool => target.ProviderKey,
+            StorageObjectKind.VirtualDisk => snapshot.VirtualDisks.Single(item => item.StableId == target.ProviderKey).PoolStableId,
+            StorageObjectKind.StorageTier => snapshot.StorageTiers.Single(item => item.StableId == target.ProviderKey).PoolStableId,
+            StorageObjectKind.Volume => PartitionPool(snapshot.Volumes.Single(item => item.StableId == target.ProviderKey).PartitionStableId),
+            StorageObjectKind.Partition => PartitionPool(target.ProviderKey),
+            StorageObjectKind.OsDisk => DiskPool(target.ProviderKey),
+            _ => null
+        };
+        var poolIds = request.Targets.Where(item => item.Kind != StorageObjectKind.PhysicalDisk)
+            .Select(TargetPool).Where(id => id is not null).Distinct(StringComparer.Ordinal).ToArray();
+        if (poolIds.Length == 0) return request;
+        if (poolIds.Length != 1) throw new InvalidDataException("One typed storage operation cannot span concrete pools.");
+        var poolId = poolIds[0]!;
+        var pool = snapshot.StoragePools.Single(item => item.StableId == poolId);
+        if (pool.IsPrimordial || !pool.IsStable || pool.MemberPhysicalDiskIds.Count == 0
+            || pool.MemberPhysicalDiskIds.Distinct(StringComparer.Ordinal).Count() != pool.MemberPhysicalDiskIds.Count)
+            throw new InvalidDataException("The storage target lacks a complete current concrete pool member set.");
+        var members = pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(request.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray();
+        var declared = request.Targets.Where(item => item.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+        if (declared.Length > 0 && !declared.ToHashSet().SetEquals(members))
+            throw new InvalidDataException("The declared storage member set differs from its current pool.");
+        var related = request.Targets.Any(item => item.Kind == StorageObjectKind.StorageTier)
+            ? new[] { new StorageObjectId(request.SystemId, StorageObjectKind.StoragePool, poolId) } : [];
+        var result = request with { Targets = request.Targets.Concat(related).Concat(members).Distinct().ToArray() };
+        RealOperationValidator.Validate(result);
+        return result;
     }
 
     public static RealOperationIntentRequest ClearToRaw(
@@ -291,12 +335,121 @@ public static class RealOperationProposalFactory
         AppendVirtualDiskSteps(steps, RealTargetReference.ForExisting(pool), options);
         var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk,
             systemId, [pool], steps,
-            $"Simple Fixed one-column virtual disk {options.Name} ({CreationCapacity(options.SizeBytes, options.UseMaximumSize)})" +
+            $"{(options.Layout ?? StorageLayoutParameters.LegacyDefault).ResiliencySettingName} Fixed virtual disk {options.Name} ({CreationCapacity(options.SizeBytes, options.UseMaximumSize)})" +
             (options.InitializeAndPartition
                 ? "; GPT metadata only, with provider-created MSR and data layout handled after a fresh read"
                 : "; virtual disk remains RAW without partitions"));
         RealOperationValidator.Validate(request);
         return request;
+    }
+
+    public static RealOperationIntentRequest CreateFirstVirtualDisk(
+        SystemId systemId, StorageObjectId pool, IReadOnlyList<StorageObjectId> members, VirtualDiskOptions options)
+    {
+        var request = CreateFirstVirtualDisk(systemId, pool, options) with
+        {
+            Targets = PoolTargets(systemId, pool, members)
+        };
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    public static RealOperationIntentRequest CreatePoolWithMembers(
+        SystemId systemId, IReadOnlyList<StorageObjectId> members, string name)
+    {
+        ValidateMembers(systemId, members);
+        var references = members.Select(RealTargetReference.ForExisting).ToArray();
+        var request = new RealOperationIntentRequest(OperationIntent.CreateStoragePool, systemId, members.ToArray(),
+            [new RealOperationStep("create-pool", new CreatePoolCommand(references[0], name, references), [],
+                "Every exact declared physical member is freshly verified RAW, unpartitioned and poolable",
+                $"Pool {name} has exactly the declared physical member set",
+                "Existing data on the declared physical members becomes inaccessible",
+                "Agent live identity, safety, association and poolability verification required")],
+            $"Pool {name} contains exactly {members.Count} approved physical members");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    public static RealOperationIntentRequest CreateTierTemplate(
+        SystemId systemId, StorageObjectId pool, IReadOnlyList<StorageObjectId> members,
+        string name, string mediaType, StorageLayoutParameters layout)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        var request = new RealOperationIntentRequest(OperationIntent.CreateStorageTier, systemId,
+            PoolTargets(systemId, pool, members),
+            [new RealOperationStep("create-tier", new CreateTierCommand(RealTargetReference.ForExisting(pool),
+                name, layout.InterleaveBytes, layout.NumberOfColumns, mediaType, layout), [],
+                "The complete approved pool member set and the media-specific data members are verified",
+                $"Exact {mediaType} template {name} has the requested layout in the pool",
+                "Pool-level template metadata is created",
+                "Agent live provider media, resiliency, columns, copies, redundancy and interleave support required")],
+            $"Exact {mediaType} template {name} with {layout.ResiliencySettingName} layout exists");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    public static RealOperationIntentRequest SetPhysicalDiskUsage(
+        SystemId systemId, StorageObjectId physical, StorageObjectId pool,
+        IReadOnlyList<StorageObjectId> members, string usage)
+    {
+        var targets = PoolTargets(systemId, pool, members);
+        if (!members.Contains(physical))
+            throw new ArgumentException("The physical usage target must belong to the complete declared pool member set.", nameof(physical));
+        var request = new RealOperationIntentRequest(OperationIntent.SetPhysicalDiskUsage, systemId, targets,
+            [new RealOperationStep("set-member-usage", new SetPhysicalDiskUsageCommand(RealTargetReference.ForExisting(physical), usage), [],
+                "The exact physical member, complete pool membership and remaining data members are verified",
+                $"The exact physical member has Usage {usage}",
+                "The physical member's allocation role changes",
+                "Agent live usage and pool identity verification required")],
+            $"The approved physical member has Usage {usage} in the exact pool");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    public static RealOperationIntentRequest CreateTieredVirtualDisk(
+        SystemId systemId, StorageObjectId pool, IReadOnlyList<StorageObjectId> members,
+        IReadOnlyList<MaximumCapacityTier> tiers, string name)
+    {
+        ArgumentNullException.ThrowIfNull(tiers);
+        if (tiers.Count == 0 || tiers.Any(tier => tier is null || tier.Tier is null || tier.Tier.Existing is null))
+            throw new ArgumentException("Tiered creation needs ordered exact existing templates.", nameof(tiers));
+        // Callers can omit the flag for a MAX layer. A sized layer with no flag
+        // is made explicitly sized here so a mixed parent cannot change its intent.
+        var inputs = tiers.Select(tier => tier.UseMaximumSize is null && tier.SizeBytes is > 0
+            ? tier with { UseMaximumSize = false } : tier).ToArray();
+        var maximum = inputs.Any(tier => tier.UseMaximumSize ?? true);
+        long size;
+        try { size = maximum ? 0 : inputs.Sum(tier => tier.SizeBytes ?? 0); }
+        catch (OverflowException exception) { throw new ArgumentException("The tier capacities exceed the supported byte range.", nameof(tiers), exception); }
+        var targets = PoolTargets(systemId, pool, members).Concat(inputs.Select(tier => tier.Tier.Existing!.Value)).ToArray();
+        var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk, systemId, targets,
+            [new RealOperationStep("create-tiered-vdisk", new CreateTieredVirtualDiskCommand(
+                RealTargetReference.ForExisting(pool), inputs[0].Tier, name, size, maximum,
+                TieredVirtualDiskCreationMechanism.ExactTemplate, CapacityTiers: inputs,
+                Layout: inputs.Length == 1 ? inputs[0].Layout : null), [],
+                "Every exact template, complete pool membership and per-layer layout and capacity intent are verified",
+                "One virtual disk uses the ordered exact templates with each requested explicit or proven MAX layer capacity",
+                "Successful allocations remain in effect if a later layer fails",
+                "Agent fresh provider support, frozen MAX origins, durable attempts and exact postconditions required")],
+            $"One Fixed virtual disk {name} is bound to the ordered approved templates with the requested layer capacities");
+        RealOperationValidator.Validate(request);
+        return request;
+    }
+
+    private static StorageObjectId[] PoolTargets(SystemId systemId, StorageObjectId pool, IReadOnlyList<StorageObjectId> members)
+    {
+        ValidateMembers(systemId, members);
+        if (pool.System != systemId || pool.Kind != StorageObjectKind.StoragePool)
+            throw new ArgumentException("The exact pool must belong to the requested system.", nameof(pool));
+        return new[] { pool }.Concat(members).ToArray();
+    }
+
+    private static void ValidateMembers(SystemId systemId, IReadOnlyList<StorageObjectId> members)
+    {
+        ArgumentNullException.ThrowIfNull(members);
+        if (members.Count == 0 || members.Any(member => member.System != systemId || member.Kind != StorageObjectKind.PhysicalDisk) ||
+            members.Distinct().Count() != members.Count)
+            throw new ArgumentException("The complete pool member set must contain distinct physical identities in the requested system.", nameof(members));
     }
 
     public static RealOperationIntentRequest CreateHddTierTemplate(
@@ -333,12 +486,14 @@ public static class RealOperationProposalFactory
     }
 
     public static RealOperationIntentRequest RenameHddTier(
-        SystemId systemId, StorageObjectId tier, string name)
+        SystemId systemId, StorageObjectId tier, string name,
+        StorageObjectId? pool = null, IReadOnlyList<StorageObjectId>? members = null)
     {
         var request = OneStep(systemId, OperationIntent.RenameStorageObject, tier,
             new RenameTierCommand(RealTargetReference.ForExisting(tier), name),
             $"The exact HDD tier retains its identity and associations with name {name}",
             "No data loss expected");
+        request = DeclarePoolMembers(request, pool, members);
         RealOperationValidator.Validate(request);
         return request;
     }
@@ -365,19 +520,31 @@ public static class RealOperationProposalFactory
     }
 
     public static RealOperationIntentRequest DeleteHddTierTemplate(
-        SystemId systemId, StorageObjectId tier)
+        SystemId systemId, StorageObjectId tier,
+        StorageObjectId? pool = null, IReadOnlyList<StorageObjectId>? members = null)
     {
         var request = OneStep(systemId, OperationIntent.DeleteStorageTier, tier,
             new DeleteTierCommand(RealTargetReference.ForExisting(tier)),
             "The exact unused HDD tier template is absent",
             "The pool-level HDD template metadata is removed; no virtual disk or data volume is deleted");
+        request = DeclarePoolMembers(request, pool, members);
         RealOperationValidator.Validate(request);
         return request;
     }
 
+    private static RealOperationIntentRequest DeclarePoolMembers(RealOperationIntentRequest request,
+        StorageObjectId? pool, IReadOnlyList<StorageObjectId>? members)
+    {
+        if (pool is null && members is null) return request;
+        if (pool is null || members is null)
+            throw new ArgumentException("An explicit pool and its complete physical member set must be supplied together.");
+        return request with { Targets = request.Targets.Concat(PoolTargets(request.SystemId, pool.Value, members)).ToArray() };
+    }
+
     public static RealOperationIntentRequest DissolveSingleMemberPool(
         SystemId systemId, StorageObjectId pool, StorageObjectId? virtualDisk,
-        IReadOnlyList<StorageObjectId>? poolTierTemplates = null)
+        IReadOnlyList<StorageObjectId>? poolTierTemplates = null,
+        IReadOnlyList<StorageObjectId>? members = null)
     {
         poolTierTemplates ??= [];
         if (pool.System != systemId || pool.Kind != StorageObjectKind.StoragePool
@@ -389,6 +556,11 @@ public static class RealOperationProposalFactory
             throw new ArgumentException("Dissolve targets must be unique exact existing children of the requested pool.");
 
         var targets = new List<StorageObjectId> { pool };
+        if (members is not null)
+        {
+            ValidateMembers(systemId, members);
+            targets.AddRange(members);
+        }
         var steps = new List<RealOperationStep>();
         string? previous = null;
         if (virtualDisk is { } existingVdisk)
@@ -468,7 +640,8 @@ public static class RealOperationProposalFactory
         SystemId systemId, StorageObjectId physicalDisk,
         StorageObjectId oldPool, StorageObjectId oldVirtualDisk,
         string newPoolName, VirtualDiskOptions options,
-        IReadOnlyList<StorageObjectId>? oldTierTemplates = null)
+        IReadOnlyList<StorageObjectId>? oldTierTemplates = null,
+        IReadOnlyList<StorageObjectId>? members = null)
     {
         oldTierTemplates ??= [];
         if (oldTierTemplates.Any(tier => tier.System != systemId
@@ -505,6 +678,13 @@ public static class RealOperationProposalFactory
                 "All old pool metadata is lost",
                 "Agent live Windows removal check required"));
         var targets = new List<StorageObjectId> { physicalDisk, oldPool, oldVirtualDisk };
+        if (members is not null)
+        {
+            ValidateMembers(systemId, members);
+            if (!members.Contains(physicalDisk))
+                throw new ArgumentException("The physical anchor must belong to the complete approved rebuild member set.", nameof(members));
+            targets.AddRange(members.Where(member => member != physicalDisk));
+        }
         targets.AddRange(oldTierTemplates);
         var request = new RealOperationIntentRequest(OperationIntent.RebuildStoragePool,
             systemId, targets, steps,
@@ -523,12 +703,13 @@ public static class RealOperationProposalFactory
         VirtualDiskOptions options)
     {
         var previous = steps.Count == 0 ? null : steps[^1].Id;
+        var layout = options.Layout ?? StorageLayoutParameters.LegacyDefault;
         steps.Add(new RealOperationStep("create-vdisk",
             new CreateVirtualDiskCommand(pool, options.Name, options.SizeBytes,
-                65536, 1, options.UseMaximumSize), previous is null ? [] : [previous],
-            options.UseMaximumSize ? "The exact single-member empty pool and fixed layout are verified; Agent freezes the whole-GiB MAX search from fresh facts"
-                : "The exact single-member pool and supported creation size are verified",
-            "One Simple Fixed virtual disk exists in the pool",
+                layout.InterleaveBytes, layout.NumberOfColumns, options.UseMaximumSize, Layout: options.Layout), previous is null ? [] : [previous],
+            options.UseMaximumSize ? "The exact complete pool member set and requested layout are verified; Agent freezes the whole-GiB MAX search from fresh facts"
+                : "The exact complete pool member set, requested layout and supported creation size are verified",
+            $"One {layout.ResiliencySettingName} Fixed virtual disk exists in the pool",
             "The requested capacity is allocated from the pool",
             options.UseMaximumSize ? "Journaled explicit-size creation and growth; verified unchanged capacity rejection proves the maximum boundary"
                 : "Agent live pool size support required"));

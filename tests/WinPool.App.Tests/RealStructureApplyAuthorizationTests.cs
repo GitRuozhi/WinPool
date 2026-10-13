@@ -259,6 +259,213 @@ public sealed class RealStructureApplyAuthorizationTests
         }
     }
 
+    [Fact]
+    public void CompleteMemberGoalAuthorizesRolesPerMediaLayoutsAndMixedMaximumWithFreshProof()
+    {
+        var f = new GeneralFixture();
+        f.Authorization.Confirm();
+        f.VerifyPoolAndTemplates();
+        var proposal = f.CreateVd();
+        f.Authorization.ValidateProposal(proposal);
+        f.Authorization.ValidateFrozen(proposal, f.Freeze(proposal, addMaximum: true));
+        var command = Assert.IsType<CreateTieredVirtualDiskCommand>(proposal.Steps.Single().Command);
+        Assert.True(command.CapacityTiers![0].UsesMaximumSize(command.UseMaximumSize));
+        Assert.False(command.CapacityTiers[1].UsesMaximumSize(command.UseMaximumSize));
+        Assert.Equal("Mirror", command.CapacityTiers[0].Layout!.ResiliencySettingName);
+        Assert.Equal("Parity", command.CapacityTiers[1].Layout!.ResiliencySettingName);
+        Assert.Equal(1, command.CapacityTiers[1].Layout!.NumberOfDataCopies);
+    }
+
+    [Theory]
+    [InlineData("wrong-media")]
+    [InlineData("dropped-member")]
+    [InlineData("explicit-size")]
+    [InlineData("dropped-explicit-flag")]
+    [InlineData("unexpected-role")]
+    public void GeneralGoalRejectsChangedMembersMediaCapacityIntentAndRole(string defect)
+    {
+        var f = new GeneralFixture();
+        f.Authorization.Confirm();
+        f.VerifyPoolAndTemplates();
+        var request = f.CreateVd();
+        var command = Assert.IsType<CreateTieredVirtualDiskCommand>(request.Steps.Single().Command);
+        if (defect == "dropped-member") request = request with { Targets = request.Targets.Where(item => item != f.Members[^1]).ToArray() };
+        else if (defect == "unexpected-role") request = RealOperationProposalFactory.SetPhysicalDiskUsage(f.Session.SystemId,
+            f.Members[0], f.Pool, f.Members, PhysicalDiskUsage.Retired);
+        else
+        {
+            var inputs = command.CapacityTiers!.ToArray();
+            if (defect == "wrong-media") inputs[0] = inputs[0] with { MediaType = "HDD" };
+            if (defect == "explicit-size") inputs[1] = inputs[1] with { SizeBytes = 33L << 30 };
+            if (defect == "dropped-explicit-flag") inputs[1] = inputs[1] with { UseMaximumSize = null };
+            request = request with { Steps = [request.Steps[0] with { Command = command with { CapacityTiers = inputs } }] };
+        }
+        var rejection = Record.Exception(() => f.Authorization.ValidateProposal(request));
+        Assert.True(rejection is InvalidDataException or ArgumentException);
+    }
+
+    [Theory]
+    [InlineData("hash")]
+    [InlineData("foreign-maximum-source")]
+    [InlineData("frozen-media")]
+    public void GeneralGoalRejectsTamperedFrozenHashOrTierEvidence(string defect)
+    {
+        var f = new GeneralFixture();
+        f.Authorization.Confirm();
+        f.VerifyPoolAndTemplates();
+        var proposal = f.CreateVd();
+        var frozen = f.Freeze(proposal, addMaximum: true);
+        var plan = frozen.Plan;
+        if (defect == "hash") plan = plan with { PlanHash = "tampered" };
+        else
+        {
+            var command = Assert.IsType<CreateTieredVirtualDiskCommand>(plan.RealOperation!.Steps[0].Command);
+            var inputs = command.CapacityTiers!.ToArray();
+            inputs[0] = defect == "frozen-media" ? inputs[0] with { MediaType = "HDD" }
+                : inputs[0] with { MaximumCapacity = inputs[0].MaximumCapacity! with { SourceFingerprint = "foreign" } };
+            var changed = command with { CapacityTiers = inputs };
+            plan = plan with { RealOperation = plan.RealOperation with { Steps = [plan.RealOperation.Steps[0] with { Command = changed }] } };
+            plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) };
+        }
+        Assert.Throws<InvalidDataException>(() => f.Authorization.ValidateFrozen(proposal, frozen with { Plan = plan }));
+    }
+
+    [Fact]
+    public void DistinctConfirmedPoolScopesAndNewSubsetKeepSeparateStorageProofs()
+    {
+        var source = new GeneralFixture().Session.Baseline;
+        var system = SystemId.New();
+        var firstIds = source.PhysicalDisks.Take(3).Select(item => item.StableId).ToArray();
+        var secondIds = source.PhysicalDisks.Skip(3).Select(item => item.StableId).ToArray();
+        var a = new StoragePoolInfo("pool:a", true, "A", false, "Healthy", "OK", 3L << 40, 0, null, firstIds);
+        var b = a with { StableId = "pool:b", FriendlyName = "B", MemberPhysicalDiskIds = secondIds };
+        var snapshot = source with { StoragePools = [a, b], PhysicalDisks = source.PhysicalDisks.Select(item => item with
+            { PoolStableId = firstIds.Contains(item.StableId) ? a.StableId : b.StableId }).ToArray() };
+        StorageSystemDocument Project() => new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "local:scoped-auth", StorageSystemKind.Local, "Scope auth",
+            snapshot, [], DateTimeOffset.UtcNow) with { SystemId = system, SourceFacts = WinPoolSimulationFacts.Create(snapshot, system) with { IsSimulation = false } };
+        var session = new SimulationEditingSession();
+        session.Bind(Project(), snapshot);
+        var subsetPool = a with { StableId = "draft:subset", IsStable = false, FriendlyName = "Subset", MemberPhysicalDiskIds = [firstIds[0]] };
+        var draft = new RealStructureDraftPlan(new(true, [], []), [a, b], [], [],
+            [new(subsetPool, firstIds[0], new(false, false, "NTFS", 65536, "Subset"), true, false)]);
+        var authorization = new RealStructureApplyAuthorization(draft, session, "scope-session");
+        authorization.Confirm();
+        var now = DateTimeOffset.UtcNow;
+        var trusted = new TrustedRealSession(SessionId.New(), "scope-session", "scope-process", 42, now, Path.GetFullPath("WinPool.App.exe"), true);
+        var environment = new EnvironmentProfile(EnvironmentId.New(), EnvironmentKind.LocalMachine, "scope-machine",
+            ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, now);
+        AgentRealOperationResponse FreezeScope(RealOperationIntentRequest request, string before, string physical)
+        {
+            var plan = RealOperationPlanFactory.Create(request, OperationId.New(), environment, trusted, before, before, physical, "scope-support", now, now.AddMinutes(2));
+            return new(plan, RealOperationState.Prepared, [], null, false);
+        }
+        foreach (var pool in new[] { a, b })
+        {
+            var members = pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(system, StorageObjectKind.PhysicalDisk, id)).ToArray();
+            var request = RealOperationProposalFactory.DissolveSingleMemberPool(system, new(system, StorageObjectKind.StoragePool, pool.StableId), null, members: members);
+            var frozen = FreezeScope(request, "before-" + pool.StableId, "physical-" + pool.StableId);
+            authorization.ValidateFrozen(request, frozen);
+            snapshot = snapshot with { StoragePools = snapshot.StoragePools.Where(item => item.StableId != pool.StableId).ToArray(),
+                PhysicalDisks = snapshot.PhysicalDisks.Select(item => item.PoolStableId == pool.StableId ? item with { PoolStableId = null } : item).ToArray() };
+            var terminal = frozen with { State = RealOperationState.Succeeded, Steps = [new(request.Steps[0].Id, RealOperationStepState.Verified, null, null,
+                JsonSerializer.Serialize(new { PostFingerprint = "after-" + pool.StableId, PhysicalMemberFingerprint = "physical-" + pool.StableId }))] };
+            authorization.ObserveVerified(request, terminal, Project());
+        }
+        var subset = RealOperationProposalFactory.CreatePoolWithMembers(system, [new(system, StorageObjectKind.PhysicalDisk, firstIds[0])], "Subset");
+        authorization.ValidateFrozen(subset, FreezeScope(subset, "before-new-subset", "physical-new-subset"));
+    }
+
+    private sealed class GeneralFixture
+    {
+        private readonly SystemId system = SystemId.New();
+        private readonly TrustedRealSession trusted;
+        private readonly EnvironmentProfile environment;
+        private StorageSnapshot snapshot;
+        private string fingerprint = "general-before";
+        public SimulationEditingSession Session { get; } = new();
+        public RealStructureApplyAuthorization Authorization { get; }
+        public IReadOnlyList<StorageObjectId> Members { get; }
+        public StorageObjectId Pool => new(system, StorageObjectKind.StoragePool, "pool:general");
+        public PoolEditIntent Intent { get; }
+
+        public GeneralFixture()
+        {
+            var source = SimulationLayouts.StandardTiered();
+            var first = source.PhysicalDisks[0] with { IsBoot = false, IsSystem = false, IsPageFile = false, IsCrashDump = false,
+                PoolStableId = null, CanPool = true, Usage = PhysicalDiskUsage.AutoSelect };
+            var physicals = Enumerable.Range(0, 6).Select(index => first with { StableId = "physical:general-" + index,
+                SerialNumber = "GENERAL-" + index, DeviceId = 10 + index, MediaType = index < 2 ? "SSD" : "HDD" }).ToArray();
+            snapshot = source with { PhysicalDisks = physicals, StoragePools = [], StorageTiers = [], VirtualDisks = [], OsDisks = [], Partitions = [], Volumes = [] };
+            var document = Project();
+            Session.Bind(document, document.Snapshot);
+            Members = physicals.Select(item => new StorageObjectId(system, StorageObjectKind.PhysicalDisk, item.StableId)).ToArray();
+            var pool = new StoragePoolInfo("draft:general", false, "General", false, "Healthy", "OK", physicals.Sum(item => item.Size), 0, null,
+                Members.Select(item => item.ProviderKey).ToArray());
+            Intent = new(true, true, "NTFS", 65536, "General label", Layout: PoolVirtualDiskLayout.HddTiered, VirtualDiskName: "General VD",
+                Tiers: [new("SSD", new("Mirror", 1, 16384, 2, 1), 0, true), new("HDD", new("Parity", 3, 32768, 1, 1), 32L << 30, false)],
+                MemberUsages: Members.Select((member, index) => new PoolMemberEditIntent(member.ProviderKey, index == 5 ? PhysicalDiskUsage.HotSpare : PhysicalDiskUsage.AutoSelect)).ToArray());
+            var draft = new RealStructureDraftPlan(new(true, [], []), [], [], [], [new(pool, Members[0].ProviderKey, Intent, true, true)]);
+            Authorization = new(draft, Session, "general-session");
+            var now = DateTimeOffset.UtcNow;
+            trusted = new(SessionId.New(), "general-session", "general-process", 42, now, Path.GetFullPath("WinPool.App.exe"), true);
+            environment = new(EnvironmentId.New(), EnvironmentKind.LocalMachine, "general-machine", ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, now);
+        }
+
+        public void VerifyPoolAndTemplates()
+        {
+            var pool = RealOperationProposalFactory.CreatePoolWithMembers(system, Members, "General");
+            snapshot = snapshot with { StoragePools = [new(Pool.ProviderKey, true, "General", false, "Healthy", "OK", snapshot.PhysicalDisks.Sum(item => item.Size), 0, null,
+                Members.Select(item => item.ProviderKey).ToArray())], PhysicalDisks = snapshot.PhysicalDisks.Select(item => item with { PoolStableId = Pool.ProviderKey }).ToArray() };
+            Complete(pool, Pool.ProviderKey);
+            var usage = RealOperationProposalFactory.SetPhysicalDiskUsage(system, Members[^1], Pool, Members, PhysicalDiskUsage.HotSpare);
+            snapshot = snapshot with { PhysicalDisks = snapshot.PhysicalDisks.Select(item => item.StableId == Members[^1].ProviderKey ? item with { Usage = PhysicalDiskUsage.HotSpare } : item).ToArray() };
+            Complete(usage);
+            foreach (var goal in Intent.Tiers!)
+            {
+                var proposal = RealOperationProposalFactory.CreateTierTemplate(system, Pool, Members, "General_" + goal.MediaType, goal.MediaType, goal.Layout);
+                var id = "tier:general-" + goal.MediaType;
+                snapshot = snapshot with { StorageTiers = snapshot.StorageTiers.Append(new(id, true, "General_" + goal.MediaType, goal.MediaType,
+                    goal.Layout.ResiliencySettingName, 0, 0, Pool.ProviderKey, null, [], goal.Layout.NumberOfColumns, goal.Layout.InterleaveBytes,
+                    goal.Layout.NumberOfDataCopies, goal.Layout.PhysicalDiskRedundancy)).ToArray() };
+                Complete(proposal, id);
+            }
+        }
+
+        public RealOperationIntentRequest CreateVd() => RealOperationProposalFactory.CreateTieredVirtualDisk(system, Pool, Members,
+            Intent.Tiers!.Select(goal => new MaximumCapacityTier(RealTargetReference.ForExisting(new(system, StorageObjectKind.StorageTier, "tier:general-" + goal.MediaType)),
+                null, goal.UseMaximumSize ? null : goal.SizeBytes, goal.UseMaximumSize, goal.Layout, goal.MediaType)).ToArray(), "General VD");
+
+        public AgentRealOperationResponse Freeze(RealOperationIntentRequest proposal, bool addMaximum = false)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (addMaximum)
+            {
+                var command = (CreateTieredVirtualDiskCommand)proposal.Steps[0].Command;
+                var policy = new MaximumCapacityPolicy(MaximumCapacityAlgorithm.Version, 64L << 30,
+                    MaximumCapacityAlgorithm.InitialCandidateBytes(64L << 30), 2L << 40, 100, "provider", fingerprint, now);
+                proposal = proposal with { Steps = [proposal.Steps[0] with { Command = command with { MaximumCapacity = policy,
+                    CapacityTiers = command.CapacityTiers!.Select(item => item.UsesMaximumSize(command.UseMaximumSize) ? item with { MaximumCapacity = policy } : item).ToArray() } }] };
+            }
+            var plan = RealOperationPlanFactory.Create(proposal, OperationId.New(), environment, trusted, fingerprint, fingerprint, "general-physical",
+                "general-fresh-support", now, now.AddMinutes(2));
+            return new(plan, RealOperationState.Prepared, [], null, false);
+        }
+
+        private void Complete(RealOperationIntentRequest proposal, string? output = null)
+        {
+            var frozen = Freeze(proposal);
+            Authorization.ValidateFrozen(proposal, frozen);
+            fingerprint += ":next";
+            var terminal = frozen with { State = RealOperationState.Succeeded, Steps = [new(proposal.Steps[0].Id, RealOperationStepState.Verified,
+                null, null, JsonSerializer.Serialize(new { CreatedObjectId = output, PostFingerprint = fingerprint, PhysicalMemberFingerprint = "general-physical" }))] };
+            Authorization.ObserveVerified(proposal, terminal, Project());
+        }
+
+        private StorageSystemDocument Project() => new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, "local:general-auth", StorageSystemKind.Local,
+            "General auth", snapshot, [], DateTimeOffset.UtcNow) with { SystemId = system,
+                SourceFacts = WinPoolSimulationFacts.Create(snapshot, system) with { IsSimulation = false } };
+    }
+
     private sealed class Fixture
     {
         private readonly StorageSystemDocument document;
@@ -274,7 +481,8 @@ public sealed class RealStructureApplyAuthorizationTests
         public Fixture(bool hdd = false, bool maximum = true)
         {
             var source = SimulationLayouts.StandardTiered();
-            var physical = source.PhysicalDisks.First() with { PoolStableId = null, IsBoot = false, IsSystem = false };
+            var physical = source.PhysicalDisks.First() with { PoolStableId = null, IsBoot = false, IsSystem = false,
+                IsPageFile = false, IsCrashDump = false, IsStable = true };
             var direct = new OsDiskInfo("os:direct", physical.FriendlyName, 7, "RAW", physical.Size, false, false, false, physical.StableId, null);
             source = source with { PhysicalDisks = [physical], StoragePools = [], StorageTiers = [], VirtualDisks = [], OsDisks = [direct], Partitions = [], Volumes = [] };
             document = Project(source);

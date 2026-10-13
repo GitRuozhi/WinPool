@@ -55,8 +55,10 @@ function Resolve-OsDiskDeviceParents($disk) {
         var source = AddOsDiskParentBinding(AddCompleteProviderAssociations(AddTierAssociations(AddPhysicalDiskAssociationFallback(reader.ReadToEnd()))));
         if (purpose == WinPool.Application.CollectionPurpose.Storage && discoverProviderCache)
             source = AddStorageProviderCacheDiscovery(source);
-        return "$WinPoolIncludeHardware = " + (purpose == WinPool.Application.CollectionPurpose.Hardware ? "$true" : "$false") + "\n" + source;
+        return NormalizeLineEndings("$WinPoolIncludeHardware = " + (purpose == WinPool.Application.CollectionPurpose.Hardware ? "$true" : "$false") + "\n" + source);
     }
+
+    private static string NormalizeLineEndings(string source) => source.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     private static string AddOsDiskParentBinding(string source)
     {
@@ -105,11 +107,13 @@ function Resolve-OsDiskDeviceParents($disk) {
             $virtualDiskKeyByOsDisk[[int]$mappedDisk.Number] = $virtualKey
         }
 """;
-        if (!source.Contains(memberQuery, StringComparison.Ordinal) || !source.Contains(diskMapping, StringComparison.Ordinal))
+        source = NormalizeLineEndings(source);
+        var mappingAnchor = NormalizeLineEndings(diskMapping);
+        if (!source.Contains(memberQuery, StringComparison.Ordinal) || !source.Contains(mappingAnchor, StringComparison.Ordinal))
             throw new InvalidDataException("The embedded pool or virtual-disk association anchors were not found.");
         return source.Replace(memberQuery,
                 "$members = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop })", StringComparison.Ordinal)
-            .Replace(diskMapping, completeDiskMapping, StringComparison.Ordinal);
+            .Replace(mappingAnchor, NormalizeLineEndings(completeDiskMapping), StringComparison.Ordinal);
     }
 
     private static string AddStorageProviderCacheDiscovery(string source)
@@ -262,11 +266,11 @@ function Test-SupportedSingleHddTierLayout($tier, $virtual) {
     return (Test-ExactNullableLayoutString $virtual 'ResiliencySettingName' 'Simple') -and
         (Test-ExactNullableProvisioningType $virtual) -and
         (Test-ExactNullableLayoutValue $virtual 'NumberOfColumns' 1) -and
-        (Test-ExactNullableLayoutValue $virtual 'Interleave' 65536) -and
+        (Test-ExactNullableLayoutValue $virtual 'Interleave' ([uint64]$tier.Interleave)) -and
         (Test-ExactNullableLayoutValue $virtual 'NumberOfDataCopies' 1) -and
         (Test-ExactNullableLayoutValue $virtual 'PhysicalDiskRedundancy' 0) -and
         (Test-ExactLayoutValue $tier 'NumberOfColumns' 1) -and
-        (Test-ExactLayoutValue $tier 'Interleave' 65536) -and
+        ($tier.Interleave -is [uint64] -and $tier.Interleave -in @(16384,32768,65536,131072,262144)) -and
         (Test-ExactLayoutValue $tier 'NumberOfDataCopies' 1) -and
         (Test-ExactLayoutValue $tier 'PhysicalDiskRedundancy' 0)
 }
@@ -359,7 +363,7 @@ function Get-ExactTierMemberKeys($tier, $virtual, $pool, $virtualTiers) {
 }
 """;
 
-    private static string AddPhysicalDiskAssociationFallback(string source)
+    internal static string AddPhysicalDiskAssociationFallback(string source)
     {
         const string existing = """
 $diskPhysicalMap = @{}
@@ -432,8 +436,9 @@ foreach ($disk in $diskObjects) {
 }
 
 """;
-        var normalized = source.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (!normalized.Contains(existing, StringComparison.Ordinal))
+        var normalized = NormalizeLineEndings(source);
+        var associationAnchor = NormalizeLineEndings(existing);
+        if (!normalized.Contains(associationAnchor, StringComparison.Ordinal))
         {
             throw new InvalidDataException("The embedded physical-disk association block was not found.");
         }
@@ -442,7 +447,7 @@ foreach ($disk in $diskObjects) {
             throw new InvalidDataException("The embedded physical-disk mapping insertion anchor was not found.");
         // Resolve physical candidates after every provider VD-to-Disk mapping,
         // so virtual OS disks never enter the physical-number fallback.
-        return normalized.Replace(existing, "", StringComparison.Ordinal)
-            .Replace(collectionAnchor, corrected + collectionAnchor, StringComparison.Ordinal);
+        return normalized.Replace(associationAnchor, "", StringComparison.Ordinal)
+            .Replace(collectionAnchor, NormalizeLineEndings(corrected) + collectionAnchor, StringComparison.Ordinal);
     }
 }

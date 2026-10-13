@@ -263,7 +263,8 @@ public partial class EditorPageBase : Page
         await DialogCoordinator.ShowAsync(dialog);
     }
 
-    protected Task<bool> SubmitRealAsync(RealOperationIntentRequest intent) => SubmitRealAsync(intent, null, null);
+    protected Task<bool> SubmitRealAsync(RealOperationIntentRequest intent) => SubmitRealAsync(
+        RealOperationProposalFactory.DeclareCurrentPoolMembers(intent, ViewModel.ActiveDocument.Snapshot), null, null);
 
     protected async Task<bool> SubmitRealPropertyAsync(RealOperationIntentRequest intent)
     {
@@ -271,6 +272,7 @@ public partial class EditorPageBase : Page
         var session = ViewModel.RealProductSessionId;
         try
         {
+            intent = RealOperationProposalFactory.DeclareCurrentPropertyPoolMembers(intent, ViewModel.ActiveDocument.Snapshot);
             var authorization = new RealPropertyActionAuthorization(intent);
             return await SubmitRealAsync(intent, authorization, () =>
             {

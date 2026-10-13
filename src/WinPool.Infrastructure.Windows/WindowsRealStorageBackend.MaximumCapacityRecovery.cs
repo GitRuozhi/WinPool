@@ -17,15 +17,16 @@ public sealed partial class WindowsRealStorageBackend
         try
         {
             _ = RequireFrozenStep(plan, step);
-            if (step.Command is CreateTieredVirtualDiskCommand { CapacityTiers.Count: > 1 })
-                return await ReconcileMultiTierMaximumReadOnlyAsync(plan, step, parent, attempts, cancellationToken).ConfigureAwait(false);
+            if (step.Command is CreateTieredVirtualDiskCommand tieredMacro
+                && (tieredMacro.CapacityTiers is not null || WindowsRealOperationPlanner.UsesExactMemberSet(plan)))
+                return await ReconcileMultiTierMaximumReadOnlyAsync(plan, step with { Command = tieredMacro with { CapacityTiers = WindowsRealOperationPlanner.TierInputs(tieredMacro) } }, parent, attempts, cancellationToken).ConfigureAwait(false);
             var policy = step.Command switch
             {
                 CreateVirtualDiskCommand { MaximumCapacity: { } value } => value,
                 CreateTieredVirtualDiskCommand { MaximumCapacity: { } value } => value,
                 _ => throw new InvalidDataException("Frozen MAX policy absent.")
             };
-            var physical = plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk);
+            var physical = plan.Targets.First(item => item.Kind == StorageObjectKind.PhysicalDisk);
             var state = MaximumCapacitySearchState.Start(policy.InitialCandidateBytes);
             var searchKey = step.Command is CreateTieredVirtualDiskCommand tiered
                 ? tiered.Tier.Existing?.ProviderKey ?? throw new InvalidDataException("Exact template absent.") : "virtual-disk";
@@ -118,18 +119,17 @@ public sealed partial class WindowsRealStorageBackend
                 lastReceipt = receipt;
             }
             var first = await CaptureOperationTopologyAsync(plan, step.Id + ":max-recovery-first", cancellationToken).ConfigureAwait(false);
-            var firstClosure = first.RequireSinglePhysicalClosure([physical]);
+            var firstClosure = MaximumComponentClosure(plan, first);
             if (pendingCreation is null) RequireMaximumInitialIdentity(plan, first, firstClosure, fingerprint);
             else RequireMaximumPendingOrdinaryCreation(plan, (CreateVirtualDiskCommand)step.Command, pendingCreation,
                 pendingCreationReceipt!, first, firstClosure);
             RequireMaximumRawComponent(first, firstClosure);
-            var firstSafety = await planner.ValidatePartitionSafetyWithEvidenceAsync(first, firstClosure, step.Command, cancellationToken).ConfigureAwait(false);
-            RequirePoolMemberRoleProof(first, firstClosure, firstSafety);
+            await ValidateMaximumSafetyAsync(plan, first, firstClosure, step.Command, cancellationToken).ConfigureAwait(false);
             var jobs1 = await storageJobReader.ReadAsync(cancellationToken).ConfigureAwait(false);
             if (!MaximumTerminalJobs(jobs1)) return Unknown("real.maximum.recovery_jobs_unproven");
             await Task.Delay(TimeSpan.FromSeconds(2), timeProvider, cancellationToken).ConfigureAwait(false);
             var second = await CaptureOperationTopologyAsync(plan, step.Id + ":max-recovery-second", cancellationToken).ConfigureAwait(false);
-            var secondClosure = second.RequireSinglePhysicalClosure([physical]);
+            var secondClosure = MaximumComponentClosure(plan, second);
             if (pendingCreation is null) RequireMaximumInitialIdentity(plan, second, secondClosure, fingerprint);
             else
             {
@@ -139,8 +139,7 @@ public sealed partial class WindowsRealStorageBackend
                     return Unknown("real.maximum.recovery_pending_creation_changed");
             }
             RequireMaximumRawComponent(second, secondClosure);
-            var secondSafety = await planner.ValidatePartitionSafetyWithEvidenceAsync(second, secondClosure, step.Command, cancellationToken).ConfigureAwait(false);
-            RequirePoolMemberRoleProof(second, secondClosure, secondSafety);
+            await ValidateMaximumSafetyAsync(plan, second, secondClosure, step.Command, cancellationToken).ConfigureAwait(false);
             var jobs2 = await storageJobReader.ReadAsync(cancellationToken).ConfigureAwait(false);
             if (!MaximumTerminalJobs(jobs2)) return Unknown("real.maximum.recovery_jobs_unproven");
             if (capacityReceipts.Any(item => !IsExplicitMaximumCapacityRejection(item.Command, item.Provider,
@@ -169,7 +168,7 @@ public sealed partial class WindowsRealStorageBackend
                     WindowsCallIssued = attempts.Any(item => item.State != MaximumCapacityAttemptState.PreparingCall
                         && item.State != MaximumCapacityAttemptState.FailedWithoutCall),
                     NotVerified = true, MaximumFound = false, LastVerified = lastVerified, LastReceipt = lastReceipt,
-                    Attempts = attempts, First = MaximumObservation(first, firstClosure), Second = MaximumObservation(second, secondClosure),
+                    Attempts = attempts, First = MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), Second = MaximumObservation(second, secondClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)),
                     StorageJobQueries = new[] { jobs1, jobs2 }, OriginalResultEvidence = parent.ResultEvidence,
                     AutomaticContinuation = false
                 }) };
@@ -196,9 +195,10 @@ public sealed partial class WindowsRealStorageBackend
         var os = topology.Snapshot.OsDisks.SingleOrDefault(item => item.StableId == evidence.CreatedOsDiskId);
         if (vd is null || os is null || bytes <= 0 || bytes % MaximumCapacityAlgorithm.GiB != 0
             || vd.Size != bytes || os.Size != bytes || os.VirtualDiskStableId != vd.StableId) return false;
-        if (command is CreateVirtualDiskCommand)
-            return vd.TierStableIds.Count == 0 && vd.ResiliencySettingName == "Simple" && vd.ProvisioningType == "Fixed"
-                && vd.NumberOfColumns == 1 && vd.Interleave == 65536;
+        if (command is CreateVirtualDiskCommand ordinary)
+            return vd.TierStableIds.Count == 0 && vd.ProvisioningType == "Fixed"
+                && SourceLayoutMatches(topology.RequireObject(new(topology.SystemId, StorageObjectKind.VirtualDisk, vd.StableId)), ordinary.EffectiveLayout)
+                && FootprintMatchesLayout(vd.Size, vd.FootprintOnPool, ordinary.EffectiveLayout);
         var mapping = evidence.TieredCreation;
         if (mapping is null || vd.TierStableIds.Count != 1 || vd.TierStableIds[0] != mapping.TierInstanceStableId) return false;
         var tier = topology.Snapshot.StorageTiers.SingleOrDefault(item => item.StableId == mapping.TierInstanceStableId);
@@ -222,13 +222,13 @@ public sealed partial class WindowsRealStorageBackend
         && observation.MachineBinding == plan.RealOperation!.MachineBinding
         && observation.PhysicalMemberFingerprint == plan.RealOperation.PhysicalMemberFingerprint
         && observation.Fingerprint == fingerprint
-        && MaximumRecordedFingerprintMatches(observation.MachineBinding, observation.Objects, observation.Associations, fingerprint);
+        && MaximumRecordedFingerprintMatches(observation.MachineBinding, observation.Objects, observation.Associations, fingerprint, multi: WindowsRealOperationPlanner.UsesExactMemberSet(plan), subsystemIdentity: observation.SubsystemIdentity);
 
     private static bool MaximumRecordedFingerprintMatches(string machine, IReadOnlyList<WinPoolSourceObject> objects,
-        IReadOnlyList<WinPoolFactRelationship> associations, string fingerprint, bool multi = false) =>
+        IReadOnlyList<WinPoolFactRelationship> associations, string fingerprint, bool multi = false, string? subsystemIdentity = null) =>
         new[] { true, false }.Any(nullAsJson => new[] { false, true }.Any(powerShellStrings =>
             new[] { true, false }.Any(normalizeCounter => MaximumRecordedComponentFingerprint(machine, objects,
-                associations, multi, nullAsJson, powerShellStrings, normalizeCounter) == fingerprint)));
+                associations, multi, nullAsJson, powerShellStrings, normalizeCounter, subsystemIdentity) == fingerprint)));
 
     // Recompute the complete canonical component used by fresh preflight. Receipt
     // serialization can change PowerShell's \" string escapes to \u0022 and
@@ -239,12 +239,12 @@ public sealed partial class WindowsRealStorageBackend
     private static string MaximumRecordedComponentFingerprint(string machine,
         IReadOnlyList<WinPoolSourceObject> objects, IReadOnlyList<WinPoolFactRelationship> associations,
         bool multi = false, bool returnedNullAsJsonNull = true, bool powerShellStrings = false,
-        bool normalizePhysicalAllocationCounter = true)
+        bool normalizePhysicalAllocationCounter = true, string? subsystemIdentity = null)
     {
         if (objects.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count() != objects.Count) return "";
         var component = (multi ? "real-exact-physical-member-set-v1\n" : "")
             + WindowsRealStorageTopology.CanonicalComponent(machine, objects, associations, returnedNullAsJsonNull,
-                powerShellStrings, normalizePhysicalAllocationCounter);
+                powerShellStrings, normalizePhysicalAllocationCounter) + (subsystemIdentity ?? "");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(component))).ToLowerInvariant();
     }
 
@@ -253,9 +253,15 @@ public sealed partial class WindowsRealStorageBackend
     {
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(attempt.TargetEvidenceJson);
         if (target is null || target.ExpectedFingerprint != attempt.BeforeFingerprint || !target.MaximumCapacityAttempt) return false;
-        var physical = receipt.Before.Objects.Single(item => item.ObjectType == FactObjectType.PhysicalDisk);
-        if (target.PhysicalMemberUniqueId != Text(physical, "UniqueId") || target.PhysicalMemberObjectId != Text(physical, "ObjectId")
-            || target.SerialNumber != Text(physical, "SerialNumber")) return false;
+        var physicals = receipt.Before.Objects.Where(item => item.ObjectType == FactObjectType.PhysicalDisk).ToArray();
+        if (target.PhysicalMembers is { Count: > 0 } members)
+        {
+            if (members.Count != physicals.Length || members.Select(item => item.StableId).Distinct().Count() != members.Count
+                || members.Any(member => physicals.SingleOrDefault(item => item.Id == member.StableId) is not { } source
+                    || Text(source, "UniqueId") != member.UniqueId || Text(source, "ObjectId") != member.ObjectId || Text(source, "SerialNumber") != member.SerialNumber)) return false;
+        }
+        else if (physicals.Length != 1 || target.PhysicalMemberUniqueId != Text(physicals[0], "UniqueId")
+            || target.PhysicalMemberObjectId != Text(physicals[0], "ObjectId") || target.SerialNumber != Text(physicals[0], "SerialNumber")) return false;
         var first = receipt.First!;
         var vd = first.Objects.SingleOrDefault(item => item.Id == verified.CreatedObjectId && item.ObjectType == FactObjectType.VirtualDisk);
         var os = first.Objects.SingleOrDefault(item => item.Id == verified.CreatedOsDiskId && item.ObjectType == FactObjectType.Disk);
@@ -271,7 +277,11 @@ public sealed partial class WindowsRealStorageBackend
         if (beforeTarget is null || target.UniqueId != Text(beforeTarget, "UniqueId") || target.ObjectId != Text(beforeTarget, "ObjectId")) return false;
         if (attempt.Phase == MaximumCapacityAttemptPhase.Resize
             && (target.UniqueId != receipt.Provider.UniqueId || target.ObjectId != receipt.Provider.ObjectId)) return false;
-        if (macro is not CreateTieredVirtualDiskCommand tiered) return verified.TieredCreation is null;
+        if (macro is CreateVirtualDiskCommand ordinaryMacro)
+            return verified.TieredCreation is null && (target.Layout ?? StorageLayoutParameters.LegacyDefault) == ordinaryMacro.EffectiveLayout
+                && ReturnedNumber(vd, "Size", attempt.CandidateBytes) && ReturnedNumber(os, "Size", attempt.CandidateBytes)
+                && SourceLayoutMatches(vd, ordinaryMacro.EffectiveLayout);
+        if (macro is not CreateTieredVirtualDiskCommand tiered) return false;
         if (verified.TieredCreation is not { } mapping || mapping.TemplateStableId != tiered.Tier.Existing?.ProviderKey
             || mapping.VirtualDiskStableId != vd.Id || mapping.PoolStableId != tiered.Pool.Existing?.ProviderKey
             || mapping.PhysicalDiskStableId != first.Objects.Single(item => item.ObjectType == FactObjectType.PhysicalDisk).Id

@@ -134,7 +134,7 @@ public sealed class RealAutomaticLayoutProgress
             if (step.Command is FormatVolumeCommand format)
             {
                 var partition = RequirePartition(format.Partition);
-                if (!partition.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase)
+                if (!partition.FileSystem.Equals(format.FileSystem.ToString(), StringComparison.OrdinalIgnoreCase)
                     || partition.AllocationUnitSize != format.ClusterBytes || partition.FileSystemLabel != (format.Label ?? ""))
                     throw new InvalidDataException("The verified format no longer matches fresh facts; it will not be replayed.");
             }

@@ -31,6 +31,10 @@ public partial class EditorPageBase
             session.RealApplyMessage = string.Join(Environment.NewLine, draft.Preview.BlockingReasons);
             return false;
         }
+        // Retain the planner's complete normalized goal across pool/tier identity
+        // remapping, including drafts saved before per-media goals were explicit.
+        foreach (var creation in draft.Creations)
+            session.PoolIntents[creation.Pool.StableId] = creation.Intent;
         RealStructureApplyAuthorization authorization;
         try
         {
@@ -51,14 +55,17 @@ public partial class EditorPageBase
             foreach (var creation in draft.Creations.Where(item => item.CreatePool || item.CreateVirtualDisk || item.CreateTier))
             {
                 ReportRealActivity(Text("正在核对目标布局支持", "Checking the target layout support"));
-                var target = Id(StorageObjectKind.PhysicalDisk, creation.PhysicalDiskId);
                 var tiered = (creation.CreateTier || creation.CreateVirtualDisk) && creation.Intent.Layout == PoolVirtualDiskLayout.HddTiered;
-                var support = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealStructureCreationSupportRequest(
-                    target, tiered, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
-                if (!support.IsSuccess || support.Value is not AgentRealStructureCreationSupportResponse actual
-                    || actual.Support.PhysicalTarget != target || actual.Support.Tiered != tiered)
-                    throw new InvalidDataException(support.Messages.FirstOrDefault()?.DiagnosticText
-                        ?? support.Messages.FirstOrDefault()?.Code ?? "The requested layout is unsupported.");
+                foreach (var memberId in creation.PhysicalDiskIds)
+                {
+                    var target = Id(StorageObjectKind.PhysicalDisk, memberId);
+                    var support = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealStructureCreationSupportRequest(
+                        target, tiered, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
+                    if (!support.IsSuccess || support.Value is not AgentRealStructureCreationSupportResponse actual
+                        || actual.Support.PhysicalTarget != target || actual.Support.Tiered != tiered)
+                        throw new InvalidDataException(support.Messages.FirstOrDefault()?.DiagnosticText
+                            ?? support.Messages.FirstOrDefault()?.Code ?? "The requested layout is unsupported.");
+                }
             }
             ValidateApplyContext();
             if (!await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"),
@@ -72,7 +79,8 @@ public partial class EditorPageBase
                 var tiers = session.Baseline.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId
                     && tier.VirtualDiskStableId is null).Select(tier => Id(StorageObjectKind.StorageTier, tier.StableId)).ToArray();
                 if (!await Stage(RealOperationProposalFactory.DissolveSingleMemberPool(session.SystemId,
-                    Id(StorageObjectKind.StoragePool, pool.StableId), vds.Length == 0 ? null : Id(StorageObjectKind.VirtualDisk, vds.Single().StableId), tiers),
+                    Id(StorageObjectKind.StoragePool, pool.StableId), vds.Length == 0 ? null : Id(StorageObjectKind.VirtualDisk, vds.Single().StableId), tiers,
+                    pool.MemberPhysicalDiskIds.Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray()),
                     Text($"已解散 {pool.FriendlyName}", $"Dissolved {pool.FriendlyName}"))) return false;
             }
             foreach (var vd in draft.RemovedVirtualDisks)
@@ -90,42 +98,62 @@ public partial class EditorPageBase
             {
                 var intent = creation.Intent;
                 var poolId = creation.Pool.StableId;
+                var members = creation.PhysicalDiskIds.Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
                 if (creation.CreatePool)
                 {
-                    var snapshot = ViewModel.ActiveDocument.Snapshot;
-                    if (snapshot.StoragePools.Any(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Contains(creation.PhysicalDiskId)))
-                        throw new InvalidDataException("The exact member still belongs to a concrete pool.");
-                    var direct = snapshot.OsDisks.SingleOrDefault(disk => disk.PhysicalDiskStableId == creation.PhysicalDiskId
-                        && disk.VirtualDiskStableId is null);
-                    if (direct is not null && (!direct.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
-                        || snapshot.Partitions.Any(partition => partition.OsDiskStableId == direct.StableId)))
+                    foreach (var member in members)
                     {
-                        if (!await Stage(RealOperationProposalFactory.ClearToRaw(session.SystemId,
-                            Id(StorageObjectKind.OsDisk, direct.StableId)), Text("已核对清空至 RAW", "Verified clear to RAW"))) return false;
+                        var snapshot = ViewModel.ActiveDocument.Snapshot;
+                        if (snapshot.StoragePools.Any(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Contains(member.ProviderKey)))
+                            throw new InvalidDataException("An exact member still belongs to a concrete pool.");
+                        var direct = snapshot.OsDisks.SingleOrDefault(disk => disk.PhysicalDiskStableId == member.ProviderKey
+                            && disk.VirtualDiskStableId is null);
+                        if (direct is not null && (!direct.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
+                            || snapshot.Partitions.Any(partition => partition.OsDiskStableId == direct.StableId)))
+                        {
+                            var clear = RealOperationProposalFactory.ClearToRaw(session.SystemId,
+                                Id(StorageObjectKind.OsDisk, direct.StableId));
+                            clear = clear with { Targets = clear.Targets.Concat(members).Distinct().ToArray() };
+                            if (!await Stage(clear, Text("已核对清空至 RAW", "Verified clear to RAW"))) return false;
+                        }
                     }
                     var temporaryPoolId = poolId;
-                    if (!await Stage(RealOperationProposalFactory.CreateSingleMemberPool(session.SystemId,
-                        Id(StorageObjectKind.PhysicalDisk, creation.PhysicalDiskId), creation.Pool.FriendlyName, null),
+                    if (!await Stage(RealOperationProposalFactory.CreatePoolWithMembers(session.SystemId,
+                        members, creation.Pool.FriendlyName),
                         Text("已核对新池", "Verified new pool"),
                         new(StorageObjectKind.StoragePool, temporaryPoolId, "create-pool"))) return false;
                     poolId = session.PoolIntents.Keys.Single(id => ViewModel.ActiveDocument.Snapshot.StoragePools
-                        .Any(pool => pool.StableId == id && pool.MemberPhysicalDiskIds.Contains(creation.PhysicalDiskId)));
+                        .Any(pool => pool.StableId == id && pool.MemberPhysicalDiskIds.ToHashSet(StringComparer.Ordinal)
+                            .SetEquals(creation.PhysicalDiskIds)));
                 }
-                var sizeTarget = Id(StorageObjectKind.StoragePool, poolId);
+                foreach (var goal in intent.MemberUsages ?? [])
+                {
+                    var actual = ViewModel.ActiveDocument.Snapshot.PhysicalDisks.Single(item => item.StableId == goal.PhysicalDiskId);
+                    if (PhysicalDiskUsage.Normalize(actual.Usage) == PhysicalDiskUsage.Normalize(goal.Usage)) continue;
+                    if (!await Stage(RealOperationProposalFactory.SetPhysicalDiskUsage(session.SystemId,
+                        Id(StorageObjectKind.PhysicalDisk, goal.PhysicalDiskId), Id(StorageObjectKind.StoragePool, poolId), members, goal.Usage),
+                        Text("已核对成员角色", "Verified member usage"))) return false;
+                }
+                var tierTargets = new Dictionary<string, StorageObjectId>(StringComparer.Ordinal);
                 if ((creation.CreateTier || creation.CreateVirtualDisk) && intent.Layout == PoolVirtualDiskLayout.HddTiered)
                 {
-                    var existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
-                        && tier.VirtualDiskStableId is null).ToArray();
-                    if (existing.Length == 0)
+                    foreach (var goal in creation.TierGoals)
                     {
-                        if (!await Stage(RealOperationProposalFactory.CreateHddTierTemplate(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), creation.Pool.FriendlyName + "_HDD"),
-                            Text("已核对自动 HDD 容量层", "Verified automatic HDD capacity tier"))) return false;
-                        existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
-                            && tier.VirtualDiskStableId is null).ToArray();
+                        var existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
+                            && tier.VirtualDiskStableId is null && tier.MediaType == goal.MediaType).ToArray();
+                        if (existing.Length == 0)
+                        {
+                            if (!await Stage(RealOperationProposalFactory.CreateTierTemplate(session.SystemId,
+                                Id(StorageObjectKind.StoragePool, poolId), members, creation.Pool.FriendlyName + "_" + goal.MediaType,
+                                goal.MediaType, goal.Layout), Text($"已核对 {goal.MediaType} 层模板", $"Verified {goal.MediaType} tier template"),
+                                new(StorageObjectKind.StorageTier, poolId, "create-tier", goal.MediaType))) return false;
+                            existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
+                                && tier.VirtualDiskStableId is null && tier.MediaType == goal.MediaType).ToArray();
+                        }
+                        if (existing.Length != 1 || goal.VerifiedTemplateId is not null && goal.VerifiedTemplateId != existing[0].StableId)
+                            throw new InvalidDataException("One exact unused template is required for each requested media type.");
+                        tierTargets.Add(goal.MediaType, Id(StorageObjectKind.StorageTier, existing[0].StableId));
                     }
-                    if (existing.Length != 1) throw new InvalidDataException("One exact unused HDD template is required.");
-                    sizeTarget = Id(StorageObjectKind.StorageTier, existing[0].StableId);
                 }
                 if (!creation.CreateVirtualDisk && !creation.ContinueLayout) continue;
                 string? vdId = intent.VerifiedVirtualDiskId;
@@ -140,9 +168,9 @@ public partial class EditorPageBase
                         throw new InvalidDataException("The fresh exact pool must be empty before preparing its first virtual disk.");
                     if (intent.VirtualDiskUseMaximum)
                         ReportRealActivity(Text("正在确定最大可用容量", "Determining maximum available capacity"));
-                    var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(
-                        intent.VirtualDiskUseMaximum, intent.VirtualDiskSizeBytes,
-                        intent.AutoCreatePartition, intent.CreateMsr, async () =>
+                    async Task<RealVirtualDiskCreationCapacity> Capacity(StorageObjectId sizeTarget, bool maximum, long? size, bool autoPartition)
+                        => await RealVirtualDiskCreationCapacityResolver.ResolveAsync(maximum, size,
+                        autoPartition, intent.CreateMsr, async () =>
                         {
                             ReportRealActivity(Text("正在核对创建容量", "Checking creation capacity"));
                             var result = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealVirtualDiskCreationRangeRequest(
@@ -153,13 +181,28 @@ public partial class EditorPageBase
                                     ?? result.Messages.FirstOrDefault()?.Code ?? "The exact provider creation range is unavailable.");
                             return sizeResponse.Range;
                         });
-                    var proposal = intent.Layout == PoolVirtualDiskLayout.HddTiered
-                        ? RealOperationProposalFactory.CreateTieredVirtualDisk(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), sizeTarget, intent.VirtualDiskName!,
-                            capacity.SizeBytes, capacity.UseMaximumSize)
-                        : RealOperationProposalFactory.CreateFirstVirtualDisk(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), new(intent.VirtualDiskName!, capacity.SizeBytes, false,
+                    RealOperationIntentRequest proposal;
+                    if (intent.Layout == PoolVirtualDiskLayout.HddTiered)
+                    {
+                        var inputs = new List<MaximumCapacityTier>();
+                        foreach (var goal in creation.TierGoals)
+                        {
+                            var target = tierTargets[goal.MediaType];
+                            var capacity = await Capacity(target, goal.UseMaximumSize, goal.SizeBytes, false);
+                            inputs.Add(new(RealTargetReference.ForExisting(target), null,
+                                capacity.UseMaximumSize ? null : capacity.SizeBytes, capacity.UseMaximumSize, goal.Layout, goal.MediaType));
+                        }
+                        proposal = RealOperationProposalFactory.CreateTieredVirtualDisk(session.SystemId,
+                            Id(StorageObjectKind.StoragePool, poolId), members, inputs, intent.VirtualDiskName!);
+                    }
+                    else
+                    {
+                        var capacity = await Capacity(Id(StorageObjectKind.StoragePool, poolId), intent.VirtualDiskUseMaximum,
+                            intent.VirtualDiskSizeBytes, intent.AutoCreatePartition);
+                        proposal = RealOperationProposalFactory.CreateFirstVirtualDisk(session.SystemId,
+                            Id(StorageObjectKind.StoragePool, poolId), members, new(intent.VirtualDiskName!, capacity.SizeBytes, false,
                                 intent.CreateMsr, true, intent.VolumeName, intent.DriveLetter, capacity.UseMaximumSize));
+                    }
                     if (!await Stage(proposal, Text("已核对新 VD", "Verified new VD"),
                         new(StorageObjectKind.VirtualDisk, poolId,
                             intent.Layout == PoolVirtualDiskLayout.HddTiered ? "create-tiered-vdisk" : "create-vdisk"))) return false;
@@ -241,6 +284,31 @@ public partial class EditorPageBase
             RealStructureResultSynchronization.OutputMapping? mapping = null, RealAutomaticLayoutProgress? layout = null)
         {
             ValidateApplyContext();
+            if (!proposal.Targets.Any(target => target.Kind == StorageObjectKind.PhysicalDisk))
+            {
+                var snapshot = ViewModel.ActiveDocument.Snapshot;
+                IEnumerable<string> PoolMembers(string? id) => snapshot.StoragePools.SingleOrDefault(pool => pool.StableId == id)?.MemberPhysicalDiskIds ?? [];
+                IEnumerable<string> DiskMembers(string? id)
+                {
+                    var disk = snapshot.OsDisks.SingleOrDefault(item => item.StableId == id);
+                    if (disk?.PhysicalDiskStableId is { } physical) return [physical];
+                    var vd = snapshot.VirtualDisks.SingleOrDefault(item => item.StableId == disk?.VirtualDiskStableId);
+                    return PoolMembers(vd?.PoolStableId);
+                }
+                IEnumerable<string> TargetMembers(StorageObjectId target) => target.Kind switch
+                {
+                    StorageObjectKind.StoragePool => PoolMembers(target.ProviderKey),
+                    StorageObjectKind.StorageTier => PoolMembers(snapshot.StorageTiers.SingleOrDefault(item => item.StableId == target.ProviderKey)?.PoolStableId),
+                    StorageObjectKind.VirtualDisk => PoolMembers(snapshot.VirtualDisks.SingleOrDefault(item => item.StableId == target.ProviderKey)?.PoolStableId),
+                    StorageObjectKind.OsDisk => DiskMembers(target.ProviderKey),
+                    StorageObjectKind.Partition => DiskMembers(snapshot.Partitions.SingleOrDefault(item => item.StableId == target.ProviderKey)?.OsDiskStableId),
+                    _ => []
+                };
+                var physicals = proposal.Targets.SelectMany(TargetMembers).Distinct(StringComparer.Ordinal)
+                    .Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
+                if (physicals.Length == 0) throw new InvalidDataException("The structural action has no exact physical member closure.");
+                proposal = proposal with { Targets = proposal.Targets.Concat(physicals).Distinct().ToArray() };
+            }
             var succeeded = await SubmitRealAsync(proposal, authorization, ValidateApplyContext,
                 frozen => ViewModel.RealStructureResults.Register(session, frozen, proposal, mapping, layout));
             if (LastRealOperationResponse is { } response)

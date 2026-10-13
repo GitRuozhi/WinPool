@@ -17,7 +17,7 @@ namespace WinPool_App;
 /// Storage structure editor: left pool topology, bottom-left wrapping
 /// structure operations, and a right-hand property card that sizes to its
 /// grouped pool / tier / disk-and-partition fields plus one Save row.
-/// Simulation editing and the Agent-confirmed single-member real entry.
+/// Simulation editing and controlled real structure editing.
 /// </summary>
 public sealed partial class StorageStructurePage : EditorPageBase
 {
@@ -258,26 +258,25 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var priorPool = SelectedPool();
-        var priorMemberId = _selectedPoolDiskId
-            ?? (priorPool?.MemberPhysicalDiskIds.Count == 1
-                ? priorPool.MemberPhysicalDiskIds[0] : null);
+        var priorMemberIds = priorPool?.MemberPhysicalDiskIds.ToArray();
+        var priorSelectedDiskId = _selectedPoolDiskId;
         var fresh = ViewModel.EffectiveActiveSnapshot;
         EditingSession.Bind(ViewModel.SelectedSystem, fresh);
         NormalizeSelection();
 
-        if (_selectedPoolId is null && priorMemberId is not null)
+        if (_selectedPoolId is null && priorMemberIds is { Length: > 0 })
         {
             var replacementPools = _working.StoragePools.Where(pool =>
-                !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Count == 1
-                && pool.MemberPhysicalDiskIds[0].Equals(priorMemberId,
-                    StringComparison.OrdinalIgnoreCase)).ToArray();
+                !pool.IsPrimordial && SamePhysicalMemberSet(pool.MemberPhysicalDiskIds, priorMemberIds)).ToArray();
             if (replacementPools.Length == 1)
             {
                 _selectedPoolId = replacementPools[0].StableId;
-                _selectedPoolDiskId = null;
+                _selectedPoolDiskId = priorSelectedDiskId is not null
+                    && replacementPools[0].MemberPhysicalDiskIds.Contains(priorSelectedDiskId, StringComparer.OrdinalIgnoreCase)
+                    ? priorSelectedDiskId : null;
             }
-            else if (_working.PhysicalDisks.SingleOrDefault(disk =>
-                         disk.StableId.Equals(priorMemberId, StringComparison.OrdinalIgnoreCase)) is { } disk)
+            else if (priorSelectedDiskId is not null && _working.PhysicalDisks.SingleOrDefault(disk =>
+                         disk.StableId.Equals(priorSelectedDiskId, StringComparison.OrdinalIgnoreCase)) is { } disk)
             {
                 _selectedPoolDiskId = disk.StableId;
                 _selectedPoolId = disk.PoolStableId
@@ -902,7 +901,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             if (ViewModel.CanSubmitRealOperation)
             {
-                if (!CanUseRealSingleMemberPool(pool))
+                if (!CanUseRealPool(pool))
                     return;
                 var system = ViewModel.ActiveDocument.SystemId;
                 StorageObjectKind kind;
@@ -1678,6 +1677,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (!CanEditDraft || IsPhysicalDiskOffline(diskId)) return false;
         var disk = _working.PhysicalDisks.FirstOrDefault(item => item.StableId == diskId);
         if (disk is not { IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false }) return false;
+        var sourcePoolId = disk.PoolStableId;
+        var originalRealMember = IsOriginalConcreteRealMember(diskId, sourcePoolId);
+        var samePoolRoleTarget = EditWorkspace.IsSimulatedLayer(targetId)
+            && sourcePoolId is not null
+            && targetId.EndsWith(sourcePoolId, StringComparison.OrdinalIgnoreCase);
+        if (originalRealMember && !samePoolRoleTarget && (EditWorkspace.IsPlus(targetId)
+            || !string.Equals(ResolvePoolDropTarget(targetId), sourcePoolId, StringComparison.OrdinalIgnoreCase)))
+            return false;
         if (EditWorkspace.IsPlus(targetId))
             return !_working.StoragePools.Any(pool => EditWorkspace.IsDraftPool(pool.StableId))
                 && !EditWorkspace.DiskCannotLeave(_working, EditingSession.Baseline, disk);
@@ -1689,10 +1696,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var poolId = ResolvePoolDropTarget(targetId);
         var pool = _working.StoragePools.FirstOrDefault(item => item.StableId == poolId);
         if (pool is null || StorageEditRules.TouchesOfflineDisk(_working, [poolId])) return false;
+        var samePool = string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase);
+        if (!ViewModel.IsUsingSimulatedInventory && !pool.IsPrimordial
+            && !EditWorkspace.IsDraftPool(poolId) && !samePool)
+            return false;
+        var hasSpecialRole = disk.IsHotSpare || disk.IsRetired;
+        if (!ViewModel.IsUsingSimulatedInventory && hasSpecialRole && !samePool
+            && !EditWorkspace.IsDraftPool(disk.PoolStableId ?? string.Empty)) return false;
         if (targetId.StartsWith("group:direct:", StringComparison.OrdinalIgnoreCase))
-            return disk.PoolStableId == poolId
+            return samePool
                 && (ViewModel.IsUsingSimulatedInventory || !EditWorkspace.IsDraftPool(poolId)
                     || CanStageRealMemberRelationship(diskId, poolId))
+                && (!hasSpecialRole || CanStageDiskSpecialRole(disk))
                 && (EditWorkspace.DiskIsAssignedToTier(_working, diskId) || EditWorkspace.DiskUsage(disk).Length > 0);
         var tier = _working.StorageTiers.FirstOrDefault(item => item.StableId == targetId);
         if (tier is not null && EditWorkspace.NormalizeMedia(tier.MediaType) != EditWorkspace.NormalizeMedia(disk.MediaType))
@@ -1700,7 +1715,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (tier?.MemberPhysicalDiskIds.Contains(diskId, StringComparer.OrdinalIgnoreCase) == true) return false;
         if (tier is null && disk.PoolStableId == poolId && EditWorkspace.DiskIsAssignedToTier(_working, diskId)) return false;
         if (disk.PoolStableId != poolId && EditWorkspace.DiskCannotLeave(_working, EditingSession.Baseline, disk)) return false;
-        return ViewModel.IsUsingSimulatedInventory || CanStageRealMemberRelationship(diskId, poolId);
+        return (!hasSpecialRole || CanStageDiskSpecialRole(disk))
+            && (ViewModel.IsUsingSimulatedInventory || CanStageRealMemberRelationship(diskId, poolId));
     }
 
     private void OnDiskDropped(string diskId, string targetId)
@@ -1778,15 +1794,25 @@ public sealed partial class StorageStructurePage : EditorPageBase
             { IsStable: true, IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false }
         && _working.StoragePools.Any(pool => pool.StableId == poolId);
 
+    private bool IsOriginalConcreteRealMember(string diskId, string? poolId) =>
+        !ViewModel.IsUsingSimulatedInventory && poolId is not null
+        && !EditWorkspace.IsDraftPool(poolId)
+        && EditingSession.Baseline.StoragePools.Any(pool => pool.StableId == poolId && !pool.IsPrimordial)
+        && EditingSession.Baseline.PhysicalDisks.Any(disk => disk.StableId.Equals(diskId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(disk.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase));
+
     private bool CanStageDiskSpecialRole(PhysicalDiskInfo disk) =>
         CanEditDraft
-        && disk is { IsBoot: false, IsSystem: false }
+        && disk is { IsStable: true, IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false }
         && !IsPhysicalDiskOffline(disk.StableId)
-        && _working.StoragePools.Any(pool => pool.StableId == disk.PoolStableId && !pool.IsPrimordial)
+        && _working.StoragePools.FirstOrDefault(pool => pool.StableId == disk.PoolStableId && !pool.IsPrimordial) is { } pool
         && !StorageEditRules.TouchesOfflineDisk(_working, [disk.PoolStableId!])
         && (ViewModel.IsUsingSimulatedInventory
             || EditWorkspace.IsDraftPool(disk.PoolStableId ?? string.Empty)
-                && CanStageRealMemberRelationship(disk.StableId, disk.PoolStableId!));
+                && CanStageRealMemberRelationship(disk.StableId, disk.PoolStableId!)
+            || CanUseRealPool(pool)
+                && !EditWorkspace.PoolHoldsStoredData(_working, pool.StableId)
+                && !_working.VirtualDisks.Any(vdisk => vdisk.PoolStableId == pool.StableId));
 
     private async Task DropDiskIntoSimulatedLayerAsync(string diskId, string usage, string targetLayerId)
     {
@@ -1852,6 +1878,22 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _selectedPoolVdiskId = null;
         if (!ViewModel.IsUsingSimulatedInventory && !EditWorkspace.IsDraftPool(groupPoolId))
         {
+            if ((workingDisk.IsHotSpare || workingDisk.IsRetired) && CanStageDiskSpecialRole(workingDisk))
+            {
+                try
+                {
+                    CommitWorkingStep(EditWorkspace.SetDiskUsage(_working, diskId, string.Empty));
+                }
+                catch (InvalidOperationException exception)
+                {
+                    PublishOperationException(
+                        ViewModel.Localization["OperationFailed"],
+                        "storage-structure-editor",
+                        exception,
+                        "structure.edit.exception");
+                }
+                return;
+            }
             if (EditWorkspace.DiskIsAssignedToTier(_working, diskId))
                 CommitWorkingStep(EditWorkspace.EvictDiskToUnallocated(_working, diskId));
             return;
@@ -1922,6 +1964,32 @@ public sealed partial class StorageStructurePage : EditorPageBase
         // in during this session can always be dragged back out.
         var workingDisk = _working.PhysicalDisks.FirstOrDefault(disk => disk.StableId == diskId);
         var sourcePoolId = workingDisk?.PoolStableId;
+        if (!ViewModel.IsUsingSimulatedInventory && !EditWorkspace.IsDraftPool(poolId)
+            && _working.StoragePools.Any(pool => pool.StableId == poolId && !pool.IsPrimordial)
+            && !string.Equals(sourcePoolId, poolId, StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync(
+                ViewModel.Localization["StructureChangeBlockedTitle"],
+                Text("现有池成员关系不能在此更改；请先解散原池后再重建。", "Existing pool membership cannot change here; dissolve the pool before rebuilding it."));
+            return;
+        }
+        var originalRealMember = IsOriginalConcreteRealMember(diskId, sourcePoolId);
+        if (originalRealMember && !string.Equals(sourcePoolId, poolId, StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync(
+                ViewModel.Localization["StructureChangeBlockedTitle"],
+                Text("现有真实池成员需先解散原池后才能加入其他池。", "An existing real pool member can join another pool after its current pool is dissolved."));
+            return;
+        }
+        if (!ViewModel.IsUsingSimulatedInventory && (workingDisk is { IsHotSpare: true } or { IsRetired: true })
+            && !string.Equals(sourcePoolId, poolId, StringComparison.OrdinalIgnoreCase)
+            && sourcePoolId is not null && !EditWorkspace.IsDraftPool(sourcePoolId))
+        {
+            await ShowMessageAsync(
+                Text("成员关系不受支持", "Member relationship unsupported"),
+                Text("现有池成员只能在原池内恢复用途；不能在此迁移到其他池。", "An existing pool member can have its usage restored in its current pool, but cannot migrate to another pool here."));
+            return;
+        }
         if (!string.IsNullOrEmpty(sourcePoolId)
             && !EditWorkspace.IsDraftPool(sourcePoolId)
             && _working.StoragePools.FirstOrDefault(candidate =>
@@ -1971,8 +2039,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     return;
                 }
 
-                next = EditWorkspace.MoveDiskToPool(next, diskId, poolId);
-                if (targetTierId is not null)
+                var restoresExistingRealMember = !ViewModel.IsUsingSimulatedInventory
+                    && !EditWorkspace.IsDraftPool(poolId)
+                    && string.Equals(sourcePoolId, poolId, StringComparison.OrdinalIgnoreCase);
+                // Restoring usage in the same real pool does not move a member
+                // or allocate tier extents. Preserve the provider's pool size
+                // and unused template facts until the role write is verified.
+                next = restoresExistingRealMember
+                    ? workingDisk.IsHotSpare || workingDisk.IsRetired
+                        ? EditWorkspace.SetDiskUsage(next, diskId, string.Empty) : next
+                    : EditWorkspace.MoveDiskToPool(next, diskId, poolId);
+                if (targetTierId is not null && !restoresExistingRealMember)
                     next = next with { StorageTiers = next.StorageTiers.Select(tier => tier.PoolStableId != poolId
                         ? tier : tier with { MemberPhysicalDiskIds = tier.MemberPhysicalDiskIds
                             .Where(id => id != diskId).Concat(tier.StableId == targetTierId ? new[] { diskId } : Array.Empty<string>()).ToArray() }).ToArray() };
@@ -2216,21 +2293,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             if (!ViewModel.IsUsingSimulatedInventory && !EditWorkspace.IsDraftPool(pool.StableId)
                 && (vdisk is null || EditWorkspace.IsDraftVirtualDisk(vdisk.StableId)))
             {
-                // The original HDD layer field owns the requested capacity;
-                // the numeric text remains separate from maximum-search intent.
-                if (TierVisible(pool.StableId, "HDD"))
-                {
-                    if (intent?.VirtualDiskUseMaximum != false)
-                    {
-                        _maximumSizeFields.Add(MaximumKey(Capacity));
-                        UpdateMaximumSizeText(Capacity);
-                    }
-                    else
-                    {
-                        _maximumSizeFields.Remove(MaximumKey(Capacity));
-                        SetCapacityText(Capacity, CreationGigabytes(intent.VirtualDiskSizeBytes));
-                    }
-                }
+                RestoreRealCreationTierGoals(pool, intent);
             }
 
             _lastVirtualDiskName = _virtualDiskNameBox.Text;
@@ -2331,16 +2394,80 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdateMaximumSizeText(group);
     }
 
+    private void RestoreRealCreationTierGoals(StoragePoolInfo pool, PoolEditIntent? intent)
+    {
+        var savedGoals = intent?.Tiers;
+        foreach (var group in TierGroups().Where(item => TierVisible(pool.StableId, item.Media)))
+        {
+            var goal = savedGoals?.FirstOrDefault(item =>
+                EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
+            if (goal is not null)
+            {
+                // A verified source template is immutable. Keep its actual
+                // parameters from FillTierForm while restoring the saved size.
+                var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
+                var immutableRealTemplate = tier is not null && IsBaselineRealTemplate(pool, tier);
+                if (goal.VerifiedTemplateId is null && !immutableRealTemplate)
+                {
+                    SetResiliency(group.ResiliencyBox, goal.Layout.ResiliencySettingName);
+                    SetInterleave(group.InterleaveBox, goal.Layout.InterleaveBytes);
+                    SetNum(group.ColumnsBox, goal.Layout.NumberOfColumns);
+                    SetNum(group.CopiesBox, goal.Layout.NumberOfDataCopies);
+                    SetNum(group.FailuresBox, goal.Layout.PhysicalDiskRedundancy);
+                }
+
+                if (goal.UseMaximumSize)
+                {
+                    _maximumSizeFields.Add(MaximumKey(group));
+                    UpdateMaximumSizeText(group);
+                }
+                else
+                {
+                    _maximumSizeFields.Remove(MaximumKey(group));
+                    SetCapacityText(group, CreationGigabytes(goal.SizeBytes));
+                }
+
+                continue;
+            }
+
+            // An explicit empty tier list represents a role-only pool or a
+            // deliberately unfinished tier goal. Do not invent capacities.
+            if (savedGoals is not null)
+            {
+                continue;
+            }
+
+            // Old saved intents had one aggregate size field. Keep that value
+            // on HDD for compatibility and use per-media MAX for other tiers.
+            if (group.Media == "HDD" && intent?.VirtualDiskUseMaximum == false)
+            {
+                _maximumSizeFields.Remove(MaximumKey(group));
+                SetCapacityText(group, CreationGigabytes(intent.VirtualDiskSizeBytes));
+            }
+            else
+            {
+                _maximumSizeFields.Add(MaximumKey(group));
+                UpdateMaximumSizeText(group);
+            }
+        }
+    }
+
     private Dictionary<string, StorageTierInfo> TierMap(string poolId) =>
         EditWorkspace.SelectPoolTiersForForm(
             _working, poolId, _selectedPoolTierId, _selectedPoolVdiskId,
             ViewModel.IsUsingSimulatedInventory);
 
+    private bool IsBaselineRealTemplate(StoragePoolInfo pool, StorageTierInfo tier) =>
+        !EditWorkspace.IsDraftPool(pool.StableId)
+        && EditingSession.Baseline.StorageTiers.Any(item =>
+            item.StableId.Equals(tier.StableId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
+            && item.VirtualDiskStableId is null);
+
     private int DataDiskCount(StoragePoolInfo pool, string media) =>
         _working.PhysicalDisks.Count(disk =>
             string.Equals(disk.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)
-            && !disk.IsRetired
-            && !disk.IsHotSpare
+            && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage)
             && EditWorkspace.NormalizeMedia(disk.MediaType) == media);
 
     /// <summary>Source templates remain visible before any space is allocated.</summary>
@@ -2351,7 +2478,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     /// <summary>Member disk count of the tier (0 when the tier does not exist).</summary>
     private int TierMemberCount(string poolId, string media) =>
-        TierMap(poolId).GetValueOrDefault(media)?.MemberPhysicalDiskIds.Count ?? 0;
+        TierDataDisks(media).Count;
 
     private PartitionInfo? PrimaryPartition(string poolId)
     {
@@ -2731,38 +2858,58 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private bool TryReadCreationSize(out long? bytes, out bool maximum)
     {
-        if (_selectedPoolId is not null && !TierVisible(_selectedPoolId, "HDD"))
-        {
-            bytes = null;
-            maximum = true;
-            return true;
-        }
-        if (_maximumSizeFields.Contains(MaximumKey(Capacity)))
+        var pool = SelectedPool();
+        var creatingRealVirtualDisk = !ViewModel.IsUsingSimulatedInventory
+            && pool is { IsPrimordial: false }
+            && !EditWorkspace.IsDraftPool(pool.StableId)
+            && !_working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId
+                && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
+        var groups = creatingRealVirtualDisk
+            ? TierGroups().Where(group => TierVisible(pool!.StableId, group.Media)).ToArray()
+            : _selectedPoolId is not null && !TierVisible(_selectedPoolId, "HDD")
+                ? Array.Empty<TierFields>()
+                : new[] { Capacity };
+        if (groups.Length == 0)
         {
             bytes = null;
             maximum = true;
             return true;
         }
 
-        bytes = null;
+        long totalBytes = 0;
         maximum = false;
-        var text = Capacity.SizeBox.Text.Trim();
-        if (!IntegerInputPolicy.ContainsOnlyDigits(text)
-            || !long.TryParse(text, System.Globalization.NumberStyles.None,
-                System.Globalization.CultureInfo.InvariantCulture, out var gigabytes)
-            || gigabytes <= 0
-            || gigabytes > CapacityMaximumIntegerGiB(Capacity))
-            return false;
+        foreach (var group in groups)
+        {
+            if (_maximumSizeFields.Contains(MaximumKey(group)))
+            {
+                maximum = true;
+                continue;
+            }
 
-        try
-        {
-            bytes = checked(gigabytes * 1024L * 1024L * 1024L);
-            return true;
+            var text = group.SizeBox.Text.Trim();
+            if (!IntegerInputPolicy.ContainsOnlyDigits(text)
+                || !long.TryParse(text, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var gigabytes)
+                || gigabytes <= 0
+                || gigabytes > CapacityMaximumIntegerGiB(group))
+            {
+                bytes = null;
+                return false;
+            }
+
+            try
+            {
+                totalBytes = checked(totalBytes + checked(gigabytes * MaximumCapacityAlgorithm.GiB));
+            }
+            catch (OverflowException)
+            {
+                bytes = null;
+                return false;
+            }
         }
-        catch (OverflowException)
-        {
-            return false;
-        }
+
+        bytes = maximum ? null : totalBytes;
+        return true;
     }
 
     private PoolVirtualDiskLayout CreationLayout(string? poolId) => CreationLayout(_working, poolId);
@@ -2791,6 +2938,88 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (prior is { PendingAutomaticLayout: true }) return prior;
         var layout = CreationLayout(_selectedPoolId);
         TryReadCreationSize(out var bytes, out var maximum);
+        IReadOnlyList<PoolTierEditIntent>? tierGoals = null;
+        IReadOnlyList<PoolMemberEditIntent>? memberGoals = null;
+        if (!ViewModel.IsUsingSimulatedInventory && SelectedPool() is { } pool)
+        {
+            var poolMembers = _working.PhysicalDisks.Where(disk => pool.MemberPhysicalDiskIds.Contains(
+                disk.StableId, StringComparer.OrdinalIgnoreCase)).ToArray();
+            memberGoals = poolMembers
+                .Select(disk => new PoolMemberEditIntent(disk.StableId, PhysicalDiskUsage.Normalize(disk.Usage))).ToArray();
+            if (layout == PoolVirtualDiskLayout.HddTiered)
+            {
+                var dataMedia = poolMembers.Where(disk => PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
+                    .Select(disk => EditWorkspace.NormalizeMedia(disk.MediaType))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var capturedGoals = new List<PoolTierEditIntent>();
+                var tierMap = TierMap(pool.StableId);
+                foreach (var group in TierGroups().Where(group => dataMedia.Contains(group.Media)
+                    && TierVisible(pool.StableId, group.Media)))
+                {
+                    if (!tierMap.TryGetValue(group.Media, out var tier)) continue;
+                    var savedGoal = prior?.Tiers?.FirstOrDefault(item =>
+                        EditWorkspace.NormalizeMedia(item.MediaType) == group.Media);
+                    var useActualLayout = IsBaselineRealTemplate(pool, tier);
+                    var resiliency = useActualLayout
+                        ? tier.ResiliencySettingName
+                        : group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
+                    int copies;
+                    int redundancy;
+                    if (resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase))
+                    {
+                        copies = useActualLayout
+                            ? tier.NumberOfDataCopies ?? savedGoal?.Layout.NumberOfDataCopies ?? 2
+                            : (int)(NumValue(group.CopiesBox) ?? tier.NumberOfDataCopies ?? 2);
+                        redundancy = copies - 1;
+                    }
+                    else if (resiliency.Equals("Parity", StringComparison.OrdinalIgnoreCase))
+                    {
+                        copies = 1;
+                        redundancy = useActualLayout
+                            ? tier.PhysicalDiskRedundancy ?? savedGoal?.Layout.PhysicalDiskRedundancy ?? 1
+                            : (int)(NumValue(group.FailuresBox) ?? tier.PhysicalDiskRedundancy ?? 1);
+                    }
+                    else
+                    {
+                        copies = 1;
+                        redundancy = 0;
+                    }
+
+                    var columns = useActualLayout
+                        ? tier.NumberOfColumns ?? savedGoal?.Layout.NumberOfColumns
+                        : (int?)(NumValue(group.ColumnsBox) ?? tier.NumberOfColumns);
+                    var interleave = useActualLayout
+                        ? tier.Interleave ?? savedGoal?.Layout.InterleaveBytes ?? 65536
+                        : ParseSize(group.InterleaveBox.SelectedItem as string ?? "64 KiB");
+                    if (columns is null)
+                    {
+                        if (savedGoal is not null) capturedGoals.Add(savedGoal);
+                        continue;
+                    }
+
+                    var spec = new StorageLayoutParameters(resiliency, columns.Value,
+                        checked((int)interleave), copies, redundancy);
+                    var isMaximum = _maximumSizeFields.Contains(MaximumKey(group));
+                    var requestedBytes = isMaximum ? 0 : long.TryParse(group.SizeBox.Text.Trim(), out var integerGiB)
+                        ? checked(integerGiB * MaximumCapacityAlgorithm.GiB) : 0;
+                    var verifiedTemplateId = useActualLayout ? tier.StableId : null;
+                    capturedGoals.Add(new PoolTierEditIntent(group.Media, spec, requestedBytes, isMaximum,
+                        verifiedTemplateId));
+                }
+
+                // Keep a saved per-media goal if the refreshed provider view
+                // temporarily omitted its source template after pool remapping.
+                capturedGoals.AddRange((prior?.Tiers ?? []).Where(goal => dataMedia.Contains(
+                        EditWorkspace.NormalizeMedia(goal.MediaType))
+                    && capturedGoals.All(current => !current.MediaType.Equals(
+                        EditWorkspace.NormalizeMedia(goal.MediaType), StringComparison.OrdinalIgnoreCase))));
+                tierGoals = capturedGoals;
+                if (dataMedia.Count == 0 && !ViewModel.CurrentPreferences.AutoCreateVirtualDisk)
+                    tierGoals = [];
+                maximum = tierGoals.Any(tier => tier.UseMaximumSize);
+                bytes = maximum ? null : tierGoals.Sum(tier => tier.SizeBytes);
+            }
+        }
         return new PoolEditIntent(
             ViewModel.CurrentPreferences.AutoCreateVirtualDisk,
             ViewModel.CurrentPreferences.AutoCreatePartition,
@@ -2804,7 +3033,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _partitionStyleBox.SelectedItem as string ?? "GPT",
             prior?.QuickFormat ?? true,
             prior?.VerifiedVirtualDiskId,
-            prior?.PendingAutomaticLayout ?? false);
+            prior?.PendingAutomaticLayout ?? false, tierGoals, memberGoals);
     }
 
     private void CaptureSelectedIntent()
@@ -2992,15 +3221,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool HasInvalidSizeInput()
     {
         var pool = SelectedPool();
-        if (!ViewModel.IsUsingSimulatedInventory && pool is { IsPrimordial: false }
-            && !EditWorkspace.IsDraftPool(pool.StableId))
-        {
-            var hasExistingVdisk = _working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId
-                && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
-            return !hasExistingVdisk
-                && TierVisible(pool.StableId, "HDD")
-                && (!Capacity.SizeBox.IsEnabled || !TryReadCreationSize(out _, out _));
-        }
         return pool is not null && TierGroups().Any(group =>
             TierVisible(pool.StableId, group.Media)
             && group.SizeBox.IsEnabled
@@ -3060,7 +3280,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !HasInvalidSizeInput()
             && !_outcomeUnknown;
         DissolveButton.IsEnabled = CanEditDraft
-            && (simulated || EditWorkspace.IsDraftPool(pool?.StableId ?? "") || CanDissolveRealSingleMemberPool(pool))
+            && (simulated || EditWorkspace.IsDraftPool(pool?.StableId ?? "") || CanDissolveRealPool(pool))
             && pool is { IsPrimordial: false } && !poolOffline;
         SavePoolPropertiesButton.IsEnabled = CanEditDraft
             && _formDirty
@@ -3079,16 +3299,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && pool is { IsPrimordial: false }
             && !EditWorkspace.IsDraftPool(pool.StableId)
             && !poolOffline;
-        var canCreateVirtualDisk = CanEditDraft && (canEditPool || CanUseRealSingleMemberPool(pool)
+        var canCreateVirtualDisk = CanEditDraft && (canEditPool || CanCreateRealVirtualDisk(pool)
                 || pool is { IsPrimordial: false } && EditWorkspace.IsDraftPool(pool.StableId))
             && poolVdisks.Count == 0 && !HasInvalidSizeInput()
-            && (CanUseRealSingleMemberPool(pool)
+            && (CanCreateRealVirtualDisk(pool)
                 || pool!.MemberPhysicalDiskIds.Count > 0
                 || DataDiskCount(pool!, "SSD") + DataDiskCount(pool!, "HDD")
                     + DataDiskCount(pool!, "SCM") > 0);
         var virtualDiskOffline = deleteTarget is not null && _working.OsDisks.Any(item =>
             item.VirtualDiskStableId == deleteTarget.StableId && item.IsOffline);
-        var canDeleteVirtualDisk = CanEditDraft && (canEditPool || CanUseRealSingleMemberPool(pool)
+        var canDeleteVirtualDisk = CanEditDraft && (canEditPool || CanDeleteRealVirtualDisk(pool)
             || pool is { IsPrimordial: false } && EditWorkspace.IsDraftPool(pool.StableId))
             && deleteTarget is not null && !virtualDiskOffline;
         _virtualDiskActionDeletes = poolVdisks.Count > 0;
@@ -3106,7 +3326,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             poolOffline,
             poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)));
         RestoreStructureActionHelp();
-        var canPreviewSpecialRoles = simulated || pool is not null && EditWorkspace.IsDraftPool(pool.StableId);
+        var canPreviewSpecialRoles = simulated || pool is not null
+            && (EditWorkspace.IsDraftPool(pool.StableId) || CanUseRealPool(pool));
         ShowHotSpareSwitch.IsEnabled = canPreviewSpecialRoles;
         ShowRetiredSwitch.IsEnabled = canPreviewSpecialRoles;
         SetDisabledReason(
@@ -3137,9 +3358,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         SetDisabledReason(
             DissolveButton,
             structureReason
-                ?? (!simulated && pool is not null && !CanDissolveRealSingleMemberPool(pool)
-                    ? Text("该池含多个虚拟磁盘或不受支持的层关联；当前阶段不能解散。",
-                        "This pool has multiple virtual disks or unsupported tier associations and cannot be dissolved in the current stage.")
+                ?? (!simulated && pool is not null && !CanDissolveRealPool(pool)
+                    ? Text("该池包含数据或无法核实的成员、布局或关联；当前不能解散。",
+                        "This pool contains data or has members, layouts, or associations that cannot be verified for dissolution.")
                     : Text("请选择可解散的普通存储池。", "Select a normal storage pool to dissolve.")));
         SetDisabledReason(
             SavePoolPropertiesButton,
@@ -3156,7 +3377,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
                         : !string.Equals(selectedDisk.PoolStableId, pool?.StableId, StringComparison.OrdinalIgnoreCase)
                             ? Text("请选择当前池中的成员磁盘。", "Select a member disk in the current pool.")
                             : !simulated && !EditWorkspace.IsDraftPool(pool?.StableId ?? string.Empty)
-                                ? Text("已有真实池成员的用途更改当前不受支持。", "Changing member usage in an existing real pool is currently unsupported.")
+                                && (!CanUseRealPool(pool) || _working.VirtualDisks.Any(item => item.PoolStableId == pool?.StableId))
+                                ? Text("现有空池中的用途可更改；含虚拟磁盘的池保持不变。", "Usage can change in an existing empty pool; pools with a virtual disk stay unchanged.")
                                 : null);
         SetDisabledReason(
             RetireButton,
@@ -3173,10 +3395,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 : Text("该池需要至少一块数据磁盘后才能创建虚拟磁盘。", "This pool needs at least one data disk before a virtual disk can be created.")));
         SetDisabledReason(
             ShowHotSpareSwitch,
-            Text("热备图层可在模拟池或新建草稿池中预览。", "Preview the hot-spare layer in a simulated pool or a new draft pool."));
+            Text("热备图层可在模拟池、新建草稿池或可编辑的现有空池中预览。", "Preview the hot-spare layer in a simulated pool, a new draft pool, or an eligible existing empty pool."));
         SetDisabledReason(
             ShowRetiredSwitch,
-            Text("退役图层可在模拟池或新建草稿池中预览。", "Preview the retired layer in a simulated pool or a new draft pool."));
+            Text("退役图层可在模拟池、新建草稿池或可编辑的现有空池中预览。", "Preview the retired layer in a simulated pool, a new draft pool, or an eligible existing empty pool."));
         UpdateFieldResets();
         UpdateNameActionStates();
         if (TopologyControl.ItemsSource is IEnumerable<TopologyNodeViewModel> roots)
@@ -3296,9 +3518,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             isDraft
                 ? Text("名称将在创建时生效。", "The name takes effect when the object is created.")
                 : Text("点击名称旁的勾选按钮直接提交池名；Enter 也可提交。", "Click the checkmark beside the name to submit the pool name; Enter also submits it."));
-        var realSingleMember = CanEditDraft && CanUseRealSingleMemberPool(pool);
-        _poolNameBox.IsEnabled = formEnabled || realSingleMember;
-        _virtualDiskNameBox.IsEnabled = formEnabled || (realSingleMember && vdisk is not null);
+        var realPool = CanEditDraft && CanUseRealPool(pool);
+        _poolNameBox.IsEnabled = formEnabled || realPool;
+        _virtualDiskNameBox.IsEnabled = formEnabled || (realPool && vdisk is not null);
         var formDisabledReason = ResolveStructureDisabledReason(
             ViewModel.IsUsingSimulatedInventory,
             pool,
@@ -3325,7 +3547,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 : Text("点击名称旁的勾选按钮直接提交卷标；Enter 也可提交。", "Click the checkmark beside the name to submit the volume label; Enter also submits it."));
         _volumeNameBox.IsEnabled = (formEnabled
             && (vdisk is null || volumePartition is not null || canConfigureCreation))
-            || (realSingleMember && volumePartition is not null);
+            || (realPool && volumePartition is not null);
         SetDisabledReason(_virtualDiskNameBox, formDisabledReason);
         SetDisabledReason(
             _volumeNameBox,
@@ -3363,19 +3585,20 @@ public sealed partial class StorageStructurePage : EditorPageBase
             RestoreTierHelp(group);
             var tier = TierMap(pool.StableId).GetValueOrDefault(group.Media);
             var tierVisible = TierVisible(pool.StableId, group.Media);
-            var realHddCreation = canConfigureCreation && !isDraft && tierVisible && tier is not null && group == Capacity;
+            var realTierCreation = canConfigureCreation && !isDraft && tierVisible && tier is not null;
             var draftTierEditable = formEnabled && isDraft && tierVisible && tier is not null && !holdsData;
+            var immutableSourceTemplate = tier is not null && IsBaselineRealTemplate(pool, tier);
             var exactParameterTier = tier is not null
                 && parameterTiers.GetValueOrDefault(group.Media)?.StableId == tier.StableId;
             var sizeEditable = exactParameterTier
-                && (realHddCreation || draftTierEditable || formEnabled && tierVisible && tier is not null && !holdsData && !real);
-            var specEditable = sizeEditable && (!real || isDraft);
+                && (realTierCreation || draftTierEditable || formEnabled && tierVisible && tier is not null && !holdsData && !real);
+            var specEditable = sizeEditable && (!real || isDraft || !immutableSourceTemplate);
             var maximumBytes = tierVisible && tier is not null ? TierCapacityMaxBytes(group.Media) : 0;
             var maximumIntegerGiB = CapacityMaximumIntegerGiB(group);
             var maximumSelected = _maximumSizeFields.Contains(MaximumKey(group));
             group.SizeBox.IsEnabled = sizeEditable && maximumIntegerGiB > 0;
             group.MaximumButton.IsEnabled = exactParameterTier && maximumIntegerGiB > 0
-                && (realHddCreation || draftTierEditable || formEnabled && !real
+                && (realTierCreation || draftTierEditable || formEnabled && !real
                     && tierVisible
                     && tier is not null
                     && maximumBytes > 0
@@ -3410,8 +3633,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var isMirror = resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase);
             var isSimple = resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase);
             LinkResiliency(group);
-            group.DiskCountBox.Text = (realHddCreation
-                ? pool.MemberPhysicalDiskIds.Count : TierMemberCount(pool.StableId, group.Media)).ToString();
+            group.DiskCountBox.Text = TierMemberCount(pool.StableId, group.Media).ToString();
             group.CopiesBox.IsEnabled = specEditable && isMirror;
             group.FailuresBox.IsEnabled = specEditable && !isMirror && !isSimple;
             group.ColumnsBox.IsEnabled = specEditable;
@@ -3423,9 +3645,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]),
                 _working.VirtualDisks.Count(item => item.PoolStableId == pool.StableId
                     && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))
-                ?? (real && !isDraft
-                    ? Text("真实新建目前仅支持 Simple、Fixed、1 列、64 KiB 交错；已有层规格不支持原地修改。",
-                        "Real creation currently supports Simple, Fixed, one column and 64 KiB interleave; existing tier specifications cannot change in place.")
+                ?? (immutableSourceTemplate
+                    ? Text("现有源层的实际布局保持不变；可为每个介质层指定容量。",
+                        "Existing source-tier layouts stay as reported; set a capacity for each media tier.")
                     : holdsData
                     ? Text("池含有已存储数据；会改变结构的字段已锁定。",
                         "The pool holds stored data, so structure-changing fields are locked.")
@@ -3701,14 +3923,50 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     /// <summary>Keeps only selection ids that still exist in the working copy.</summary>
-    private void RestoreRealSelection(string? memberId)
+    private void RestoreRealSelection(string? memberId) => RestoreRealSelection(null, memberId);
+
+    private void RestoreRealSelection(IReadOnlyCollection<string>? memberIds, string? memberId)
     {
         NormalizeSelection();
-        if (_selectedPoolId is not null || memberId is null) return;
+        var selectedPool = _selectedPoolId is null ? null : _working.StoragePools.FirstOrDefault(pool =>
+            pool.StableId.Equals(_selectedPoolId, StringComparison.OrdinalIgnoreCase));
+        if (selectedPool is not null)
+        {
+            if (_selectedPoolDiskId is not null
+                && !selectedPool.MemberPhysicalDiskIds.Contains(_selectedPoolDiskId, StringComparer.OrdinalIgnoreCase))
+                _selectedPoolDiskId = null;
+            return;
+        }
+
+        if (memberIds is { Count: > 0 })
+        {
+            var matches = _working.StoragePools.Where(pool => !pool.IsPrimordial
+                && SamePhysicalMemberSet(pool.MemberPhysicalDiskIds, memberIds)).ToArray();
+            if (matches.Length == 1)
+            {
+                _selectedPoolId = matches[0].StableId;
+                _selectedPoolDiskId = memberId is not null
+                    && matches[0].MemberPhysicalDiskIds.Contains(memberId, StringComparer.OrdinalIgnoreCase)
+                    ? memberId : null;
+                return;
+            }
+        }
+
+        if (memberId is null) return;
         var pools = _working.StoragePools.Where(pool => !pool.IsPrimordial
             && pool.MemberPhysicalDiskIds.Contains(memberId, StringComparer.OrdinalIgnoreCase)).ToArray();
-        if (pools.Length == 1) _selectedPoolId = pools[0].StableId;
+        if (pools.Length == 1)
+        {
+            _selectedPoolId = pools[0].StableId;
+            _selectedPoolDiskId = memberId;
+        }
     }
+
+    private static bool SamePhysicalMemberSet(IReadOnlyCollection<string> left, IReadOnlyCollection<string> right) =>
+        left.Count == right.Count
+        && left.Distinct(StringComparer.OrdinalIgnoreCase).Count() == left.Count
+        && right.Distinct(StringComparer.OrdinalIgnoreCase).Count() == right.Count
+        && left.All(id => right.Contains(id, StringComparer.OrdinalIgnoreCase));
 
     private void NormalizeSelection()
     {
@@ -3743,49 +4001,99 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void CreatePool_Click(object sender, RoutedEventArgs e) => CreateDraftPoolAndSelect();
 
-    private bool CanUseRealSingleMemberPool(StoragePoolInfo? pool) =>
-        ViewModel.CanSubmitRealOperation && pool is
+    private bool CanUseRealPool(StoragePoolInfo? pool)
+    {
+        if (!ViewModel.CanSubmitRealOperation || pool is not { IsStable: true, IsPrimordial: false }
+            || EditWorkspace.IsDraftPool(pool.StableId)
+            || pool.MemberPhysicalDiskIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != pool.MemberPhysicalDiskIds.Count)
+            return false;
+
+        var baselinePool = EditingSession.Baseline.StoragePools.FirstOrDefault(item =>
+            item.StableId.Equals(pool.StableId, StringComparison.OrdinalIgnoreCase));
+        if (baselinePool is not { IsStable: true, IsPrimordial: false }
+            || !SamePhysicalMemberSet(pool.MemberPhysicalDiskIds, baselinePool.MemberPhysicalDiskIds)
+            || StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]))
+            return false;
+
+        foreach (var memberId in pool.MemberPhysicalDiskIds)
         {
-            IsPrimordial: false,
-            MemberPhysicalDiskIds.Count: 1
-        } && !EditWorkspace.IsDraftPool(pool.StableId)
-        && _working.PhysicalDisks.Any(disk =>
-            disk.StableId == pool.MemberPhysicalDiskIds[0]
-            && !disk.IsBoot && !disk.IsSystem && !disk.IsPageFile
-            && !disk.IsCrashDump);
+            var members = _working.PhysicalDisks.Where(disk =>
+                disk.StableId.Equals(memberId, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var baselineMembers = EditingSession.Baseline.PhysicalDisks.Where(disk =>
+                disk.StableId.Equals(memberId, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (members.Length != 1 || baselineMembers.Length != 1
+                || members[0] is not { IsStable: true, IsBoot: false, IsSystem: false, IsPageFile: false, IsCrashDump: false }
+                || baselineMembers[0].IsBoot || baselineMembers[0].IsSystem
+                || baselineMembers[0].IsPageFile || baselineMembers[0].IsCrashDump
+                || EditWorkspace.NormalizeMedia(members[0].MediaType) == "Unknown"
+                || PhysicalDiskUsage.IsUnknown(members[0].Usage))
+                return false;
+        }
+
+        return true;
+    }
 
     private StorageTierInfo[] RealPoolTiers(StoragePoolInfo pool) =>
         _working.StorageTiers.Where(tier =>
-            tier.PoolStableId == pool.StableId)
-            .ToArray();
+            string.Equals(tier.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)).ToArray();
 
-    private static bool IsSupportedRealHddTier(StoragePoolInfo pool, StorageTierInfo tier) =>
-        tier.IsStable
-        && tier.PoolStableId == pool.StableId
-        && tier.MediaType.Equals("HDD", StringComparison.OrdinalIgnoreCase)
-        && tier.ResiliencySettingName.Equals("Simple", StringComparison.OrdinalIgnoreCase)
-        && tier.Interleave == 65536
-        && tier.NumberOfColumns == 1;
-
-    private bool HasOnlySupportedRealHddTiers(StoragePoolInfo pool,
-        IReadOnlyList<VirtualDiskInfo> virtualDisks)
+    private bool CanDissolveRealPool(StoragePoolInfo? pool)
     {
-        var tiers = RealPoolTiers(pool);
-        if (tiers.Any(tier => !IsSupportedRealHddTier(pool, tier)))
+        if (!CanUseRealPool(pool)) return false;
+        var targetPool = pool!;
+        var vdisks = _working.VirtualDisks.Where(item =>
+            string.Equals(item.PoolStableId, targetPool.StableId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (vdisks.Length > 1) return false;
+
+        var vdiskIds = vdisks.Select(item => item.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tiers = RealPoolTiers(targetPool);
+        if (tiers.Select(tier => tier.StableId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != tiers.Length)
             return false;
-        var vdiskIds = virtualDisks.Select(item => item.StableId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return tiers.All(tier => tier.VirtualDiskStableId is null
-            || vdiskIds.Contains(tier.VirtualDiskStableId));
+        foreach (var tier in tiers)
+        {
+            if (!tier.IsStable || !string.Equals(tier.PoolStableId, targetPool.StableId, StringComparison.OrdinalIgnoreCase)
+                || EditWorkspace.NormalizeMedia(tier.MediaType) == "Unknown"
+                || tier.VirtualDiskStableId is not null && !vdiskIds.Contains(tier.VirtualDiskStableId))
+                return false;
+
+            var resiliency = tier.ResiliencySettingName.Equals("Simple", StringComparison.OrdinalIgnoreCase) ? "Simple"
+                : tier.ResiliencySettingName.Equals("Mirror", StringComparison.OrdinalIgnoreCase) ? "Mirror"
+                : tier.ResiliencySettingName.Equals("Parity", StringComparison.OrdinalIgnoreCase) ? "Parity"
+                : string.Empty;
+            if (resiliency.Length == 0 || tier.NumberOfColumns is not { } columns
+                || tier.Interleave is not { } interleave || interleave is < 16384 or > 262144
+                || interleave > int.MaxValue)
+                return false;
+            var copies = tier.NumberOfDataCopies ?? (resiliency == "Simple" ? 1 : resiliency == "Mirror" ? 2 : 1);
+            var redundancy = tier.PhysicalDiskRedundancy ?? (resiliency == "Simple" ? 0 : resiliency == "Mirror" ? copies - 1 : 0);
+            try
+            {
+                var layout = new StorageLayoutParameters(resiliency, columns, checked((int)interleave), copies, redundancy);
+                layout.Validate();
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    private bool CanDissolveRealSingleMemberPool(StoragePoolInfo? pool)
-    {
-        if (!CanUseRealSingleMemberPool(pool))
-            return false;
-        var vdisks = _working.VirtualDisks.Where(item => item.PoolStableId == pool!.StableId).ToArray();
-        return vdisks.Length <= 1 && HasOnlySupportedRealHddTiers(pool!, vdisks);
-    }
+    private bool CanCreateRealVirtualDisk(StoragePoolInfo? pool) =>
+        CanDissolveRealPool(pool)
+        && !_working.VirtualDisks.Any(item => string.Equals(item.PoolStableId, pool!.StableId, StringComparison.OrdinalIgnoreCase))
+        && pool!.MemberPhysicalDiskIds.Any(memberId => _working.PhysicalDisks.Any(disk =>
+            disk.StableId.Equals(memberId, StringComparison.OrdinalIgnoreCase)
+            && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage)));
+
+    private bool CanDeleteRealVirtualDisk(StoragePoolInfo? pool) =>
+        CanDissolveRealPool(pool)
+        && _working.VirtualDisks.Count(item => string.Equals(item.PoolStableId, pool!.StableId, StringComparison.OrdinalIgnoreCase)) == 1;
 
     private void Dissolve_Click(object sender, RoutedEventArgs e)
     {
@@ -3793,7 +4101,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (!CanEditDraft || pool is null || pool.IsPrimordial
             || (!ViewModel.IsUsingSimulatedInventory
                 && !EditWorkspace.IsDraftPool(pool.StableId)
-                && !CanDissolveRealSingleMemberPool(pool))) return;
+                && !CanDissolveRealPool(pool))) return;
 
         MergeFormIntoWorking();
         try
@@ -3875,7 +4183,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             || !ViewModel.IsUsingSimulatedInventory && HasInvalidSizeInput()
             || (!ViewModel.IsUsingSimulatedInventory
                 && !EditWorkspace.IsDraftPool(pool.StableId)
-                && !CanDissolveRealSingleMemberPool(pool))) return;
+                && !CanCreateRealVirtualDisk(pool))) return;
 
         var priorState = CaptureDraftState();
         CaptureSelectedIntent();
@@ -3939,7 +4247,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (!CanEditDraft || pool is null || pool.IsPrimordial
             || (!ViewModel.IsUsingSimulatedInventory
                 && !EditWorkspace.IsDraftPool(pool.StableId)
-                && !CanDissolveRealSingleMemberPool(pool))) return;
+                && !CanDeleteRealVirtualDisk(pool))) return;
 
         MergeFormIntoWorking();
         var (_, deleteTarget) = PoolVirtualDiskState(pool);
@@ -3977,8 +4285,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (!ViewModel.IsUsingSimulatedInventory)
         {
             if (!CanEditDraft || !HasUncommittedChanges() || HasInvalidSizeInput()) return;
-            var selectedMember = SelectedPool() is { MemberPhysicalDiskIds.Count: 1 } selected
-                ? selected.MemberPhysicalDiskIds[0] : null;
+            var selectedPoolMembers = SelectedPool()?.MemberPhysicalDiskIds.ToArray();
+            var selectedMember = _selectedPoolDiskId;
             MergeFormIntoWorking();
             CaptureSelectedIntent();
             _applyingRealDraft = true;
@@ -3989,14 +4297,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 {
                     EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
                     _formDirty = false;
-                    RestoreRealSelection(selectedMember);
+                    RestoreRealSelection(selectedPoolMembers, selectedMember);
                     RefreshAll();
                 }
                 else
                 {
                     // Verified stages may have advanced the session. Keep the
                     // remaining input and surface the new baseline and actions.
-                    RestoreRealSelection(selectedMember);
+                    RestoreRealSelection(selectedPoolMembers, selectedMember);
                     RefreshTopology();
                 }
             }
@@ -4657,8 +4965,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         if (!ViewModel.IsUsingSimulatedInventory && !EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
-            && (group != Capacity
-                || SelectedPool() is not { } pool
+            && (SelectedPool() is not { } pool
                 || _working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId
                     && !EditWorkspace.IsDraftVirtualDisk(item.StableId)))) return;
         var wasFilling = _filling;
@@ -4750,7 +5057,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var creatingRealVirtualDisk = !ViewModel.IsUsingSimulatedInventory
             && !EditWorkspace.IsDraftPool(pool.StableId)
-            && group == Capacity
             && !_working.VirtualDisks.Any(item => item.PoolStableId == pool.StableId
                 && !EditWorkspace.IsDraftVirtualDisk(item.StableId));
         var memberIds = creatingRealVirtualDisk
@@ -4760,6 +5066,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             .Where(disk => memberIds.Contains(
                     disk.StableId, StringComparer.OrdinalIgnoreCase)
                 && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
+            .Where(disk => EditWorkspace.NormalizeMedia(disk.MediaType) == media)
             .ToArray();
         var resiliency = group.ResiliencyBox.SelectedItem as string ?? tier.ResiliencySettingName;
         var copies = NumValue(group.CopiesBox) is { } copyValue
@@ -4799,7 +5106,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var pool = SelectedPool();
         return pool is null || pool.IsPrimordial
             ? 0
-            : TierMap(pool.StableId).GetValueOrDefault(media)?.MemberPhysicalDiskIds.Count ?? 0;
+            : TierDataDisks(media).Count;
     }
 
     private IReadOnlyList<PhysicalDiskInfo> TierDataDisks(string media)
@@ -4811,11 +5118,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var tier = TierMap(pool.StableId).GetValueOrDefault(media);
+        var memberIds = tier is { VirtualDiskStableId: null } && !EditWorkspace.IsDraftPool(pool.StableId)
+            ? pool.MemberPhysicalDiskIds : tier?.MemberPhysicalDiskIds ?? [];
         return tier is null
             ? []
             : _working.PhysicalDisks
-                .Where(disk => tier.MemberPhysicalDiskIds.Contains(
+                .Where(disk => memberIds.Contains(
                     disk.StableId, StringComparer.OrdinalIgnoreCase)
+                    && EditWorkspace.NormalizeMedia(disk.MediaType) == media
                     && PhysicalDiskUsage.ContributesDataCapacity(disk.Usage))
                 .ToArray();
     }
@@ -4837,8 +5147,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (!ViewModel.IsUsingSimulatedInventory && !EditWorkspace.IsDraftPool(pool.StableId)
             && field == TierFieldKind.Size)
-            return group == Capacity && group.SizeBox.IsEnabled
-                && TryReadCreationSize(out _, out var maximum) && !maximum;
+            return group.SizeBox.IsEnabled && !_maximumSizeFields.Contains(MaximumKey(group));
 
         var baselineTier = EditingSession.Baseline.StorageTiers.FirstOrDefault(item =>
             item.StableId.Equals(tier.StableId, StringComparison.OrdinalIgnoreCase));
@@ -4892,8 +5201,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var selected = SelectedTier(group.Media);
         var baseline = selected is null ? null : EditingSession.Baseline.StorageTiers.FirstOrDefault(tier =>
             tier.StableId.Equals(selected.StableId, StringComparison.OrdinalIgnoreCase));
-        var creatingRealVirtualDisk = !ViewModel.IsUsingSimulatedInventory && group == Capacity
+        var creatingRealVirtualDisk = !ViewModel.IsUsingSimulatedInventory
             && SelectedPool() is { } pool
+            && !EditWorkspace.IsDraftPool(pool.StableId)
             && !_working.VirtualDisks.Any(vdisk => vdisk.PoolStableId == pool.StableId
                 && !EditWorkspace.IsDraftVirtualDisk(vdisk.StableId));
         if (baseline is not null && !(kind == "Size" && creatingRealVirtualDisk))
@@ -4921,7 +5231,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         if (!ViewModel.IsUsingSimulatedInventory && !EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
             && kind == "Size")
         {
-            if (group == Capacity && group.SizeBox.IsEnabled)
+            if (group.SizeBox.IsEnabled)
             {
                 _maximumSizeFields.Add(MaximumKey(group));
                 UpdateMaximumSizeText(group);

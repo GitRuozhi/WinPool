@@ -446,6 +446,120 @@ public sealed class RealStructureResultSynchronizationTests
         Assert.False(f.Submission.IsBlocked);
     }
 
+    [Fact]
+    public void MultiMemberPoolMappingPreservesRoleGoalsLiveHardwareAndMaximumKeys()
+    {
+        var f = new Fixture();
+        var first = f.Document.Snapshot.PhysicalDisks.Single() with { PoolStableId = null, Usage = PhysicalDiskUsage.AutoSelect };
+        var second = first with { StableId = "physical:second", SerialNumber = "SECOND", DeviceId = 8 };
+        var baseline = f.Project(f.Document.Snapshot with { StoragePools = [], PhysicalDisks = [first, second] }, false);
+        f.Session.Bind(baseline, baseline.Snapshot);
+        const string temporary = "draft:pool:multi";
+        const string created = "pool:verified-multi";
+        var pool = new StoragePoolInfo(temporary, false, "Multi", false, "Healthy", "OK", first.Size + second.Size, 0, null, [first.StableId, second.StableId]);
+        f.Session.Working = f.Session.Working with { StoragePools = [pool], PhysicalDisks = [first with { PoolStableId = temporary },
+            second with { PoolStableId = temporary, Usage = PhysicalDiskUsage.HotSpare }] };
+        var layout = new StorageLayoutParameters("Simple", 1, 16384);
+        var tiers = new[] { new PoolTierEditIntent("SSD", layout, 0, true) };
+        var usages = new[] { new PoolMemberEditIntent(first.StableId, PhysicalDiskUsage.AutoSelect), new PoolMemberEditIntent(second.StableId, PhysicalDiskUsage.HotSpare) };
+        f.Session.PoolIntents[temporary] = new(true, true, "NTFS", 65536, "Requested", Tiers: tiers, MemberUsages: usages);
+        f.Session.MaximumSizeFields.UnionWith([temporary + "|SSD", temporary + "-other|HDD"]);
+        var proposal = RealOperationProposalFactory.CreatePoolWithMembers(baseline.SystemId,
+            [new(baseline.SystemId, StorageObjectKind.PhysicalDisk, first.StableId), new(baseline.SystemId, StorageObjectKind.PhysicalDisk, second.StableId)], "Multi");
+        var frozen = Freeze(proposal);
+        f.Results.Register(f.Session, frozen, proposal, new(StorageObjectKind.StoragePool, temporary, "create-pool"));
+        var terminal = frozen with { State = RealOperationState.Succeeded,
+            Steps = [new("create-pool", RealOperationStepState.Verified, null, null, JsonSerializer.Serialize(new { CreatedObjectId = created }))] };
+        var fresh = ForOperation(f.Project(baseline.Snapshot with { StoragePools = [pool with { StableId = created, IsStable = true }],
+            PhysicalDisks = [first with { PoolStableId = created, CanPool = false }, second with { PoolStableId = created, Model = "Live model", CanPool = false }] }, true), terminal);
+        Assert.True(f.Results.Reconcile(terminal, fresh, true));
+        var intent = f.Session.PoolIntents[created];
+        Assert.Equal(tiers, intent.Tiers);
+        Assert.Equal(usages, intent.MemberUsages);
+        Assert.Equal("Live model", f.Session.Working.PhysicalDisks.Single(item => item.StableId == second.StableId).Model);
+        Assert.False(f.Session.Working.PhysicalDisks.Single(item => item.StableId == second.StableId).CanPool);
+        Assert.Equal(PhysicalDiskUsage.HotSpare, f.Session.Working.PhysicalDisks.Single(item => item.StableId == second.StableId).Usage);
+        Assert.False(PhysicalDiskUsage.IsHotSpare(f.Session.Baseline.PhysicalDisks.Single(item => item.StableId == second.StableId).Usage));
+        Assert.Contains(created + "|SSD", f.Session.MaximumSizeFields);
+        Assert.Contains(temporary + "-other|HDD", f.Session.MaximumSizeFields);
+        Assert.DoesNotContain(temporary + "|SSD", f.Session.MaximumSizeFields);
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("wrong-media")]
+    [InlineData("wrong-parent")]
+    [InlineData("unreliable")]
+    public void TemplateMappingValidatesIdentityParentMediaAndMergesOnlyVerifiedIdentity(string defect)
+    {
+        var f = new Fixture();
+        var physical = f.Document.Snapshot.PhysicalDisks.Single();
+        var layout = new StorageLayoutParameters("Simple", 1, 16384);
+        f.Session.PoolIntents[Fixture.PoolId] = f.Session.PoolIntents[Fixture.PoolId] with
+        { Tiers = [new("SSD", layout, 0, true), new("HDD", new("Parity", 3, 32768, 1, 1), 32L << 30, false)] };
+        var proposal = RealOperationProposalFactory.CreateTierTemplate(f.Document.SystemId,
+            new(f.Document.SystemId, StorageObjectKind.StoragePool, Fixture.PoolId),
+            [new(f.Document.SystemId, StorageObjectKind.PhysicalDisk, physical.StableId)], "Performance", "SSD", layout);
+        var frozen = Freeze(proposal);
+        f.Results.Register(f.Session, frozen, proposal, new(StorageObjectKind.StorageTier, Fixture.PoolId, "create-tier", "SSD"));
+        f.Session.PoolIntents[Fixture.PoolId] = f.Session.PoolIntents[Fixture.PoolId] with { VolumeName = "Newer label" };
+        var terminal = frozen with { State = RealOperationState.Succeeded,
+            Steps = [new("create-tier", RealOperationStepState.Verified, null, null, "{\"CreatedObjectId\":\"tier:verified\"}")] };
+        var tier = new StorageTierInfo("tier:verified", true, "Performance", defect == "wrong-media" ? "HDD" : "SSD", "Simple", 0, 0,
+            defect == "wrong-parent" ? "pool:other" : Fixture.PoolId, null, [physical.StableId], 1, 16384);
+        var snapshot = f.Document.Snapshot with { StorageTiers = [tier] };
+        if (defect == "wrong-parent") snapshot = snapshot with { StoragePools = [..snapshot.StoragePools,
+            snapshot.StoragePools[0] with { StableId = "pool:other", MemberPhysicalDiskIds = [] }] };
+        var fresh = ForOperation(f.Project(snapshot, true), terminal);
+        if (defect == "unreliable") fresh = fresh with { SourceFacts = fresh.SourceFacts! with { Objects = fresh.SourceFacts!.Objects.Select(item =>
+            item.Id == tier.StableId ? item with { HasReliableIdentity = false } : item).ToImmutableArray() } };
+        if (defect != "none")
+        {
+            Assert.Throws<InvalidDataException>(() => f.Results.Reconcile(terminal, fresh, true));
+            Assert.Null(f.Session.PoolIntents[Fixture.PoolId].Tiers![0].VerifiedTemplateId);
+            Assert.True(f.Session.RealResultSynchronizationPending);
+        }
+        else
+        {
+            Assert.True(f.Results.Reconcile(terminal, fresh, true));
+            var intent = f.Session.PoolIntents[Fixture.PoolId];
+            Assert.Equal("tier:verified", intent.Tiers![0].VerifiedTemplateId);
+            Assert.Equal(layout, intent.Tiers[0].Layout);
+            Assert.True(intent.Tiers[0].UseMaximumSize);
+            Assert.Null(intent.Tiers[1].VerifiedTemplateId);
+            Assert.Equal(32L << 30, intent.Tiers[1].SizeBytes);
+            Assert.Equal("Newer label", intent.VolumeName);
+        }
+    }
+
+    [Fact]
+    public void PoolMappingRejectsPartialPhysicalSetBeforeChangingTheDraft()
+    {
+        var f = new Fixture();
+        var physical = f.Document.Snapshot.PhysicalDisks.Single();
+        var proposal = RealOperationProposalFactory.CreatePoolWithMembers(f.Document.SystemId,
+            [new(f.Document.SystemId, StorageObjectKind.PhysicalDisk, physical.StableId), new(f.Document.SystemId, StorageObjectKind.PhysicalDisk, "physical:second")], "Multi");
+        var frozen = Freeze(proposal);
+        f.Results.Register(f.Session, frozen, proposal, new(StorageObjectKind.StoragePool, Fixture.PoolId, "create-pool"));
+        var terminal = frozen with { State = RealOperationState.Succeeded,
+            Steps = [new("create-pool", RealOperationStepState.Verified, null, null, "{\"CreatedObjectId\":\"pool:partial\"}")] };
+        var fresh = ForOperation(f.Project(f.Document.Snapshot with
+        {
+            StoragePools = [f.Document.Snapshot.StoragePools[0] with { StableId = "pool:partial" }],
+            PhysicalDisks = [physical with { PoolStableId = "pool:partial" }]
+        }, true), terminal);
+        var before = f.Session.Working;
+        Assert.Throws<InvalidDataException>(() => f.Results.Reconcile(terminal, fresh, true));
+        Assert.Same(before, f.Session.Working);
+        Assert.True(f.Session.PoolIntents.ContainsKey(Fixture.PoolId));
+        Assert.False(f.Session.PoolIntents.ContainsKey("pool:partial"));
+        Assert.True(f.Session.RealResultSynchronizationPending);
+    }
+
+    private static StorageSystemDocument ForOperation(StorageSystemDocument document, AgentRealOperationResponse response) =>
+        document with { SourceFacts = document.SourceFacts! with { ScopedCollection = document.SourceFacts!.ScopedCollection! with
+            { Scope = document.SourceFacts.ScopedCollection.Scope with { OperationId = response.Plan.OperationId } } } };
+
     private static AgentRealOperationResponse Freeze(RealOperationIntentRequest proposal)
     {
         var now = DateTimeOffset.UtcNow;

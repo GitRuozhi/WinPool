@@ -19,11 +19,19 @@ public sealed class RealPropertyActionAuthorization : IRealOperationAuthorizatio
             RenameVolumeCommand value => value.Volume,
             RenamePoolCommand value => value.Pool,
             RenameVirtualDiskCommand value => value.VirtualDisk,
+            RenameTierCommand value => value.Tier,
             _ => null
         } : null;
-        if (target?.Existing is not { } exact || proposal.Targets.Count != 1
-            || proposal.Targets[0] != exact || proposal.Steps[0].DependsOn.Count != 0)
+        if (target?.Existing is not { } exact || proposal.Targets.Count(item => item == exact) != 1
+            || proposal.Steps[0].DependsOn.Count != 0)
             throw new InvalidDataException("A property Check authorizes only one exact existing name or drive-letter target.");
+        var declaredMembers = proposal.Targets.Where(item => item.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+        var parentPools = proposal.Targets.Where(item => item != exact && item.Kind == StorageObjectKind.StoragePool).ToArray();
+        if (declaredMembers.Length == 0 ? proposal.Targets.Count != 1
+            : proposal.Targets.Any(item => item != exact && item.Kind != StorageObjectKind.PhysicalDisk
+                && !(proposal.Steps[0].Command is RenameTierCommand && item.Kind == StorageObjectKind.StoragePool))
+              || (proposal.Steps[0].Command is RenameTierCommand ? parentPools.Length != 1 : parentPools.Length != 0))
+            throw new InvalidDataException("A property Check may include only its exact pool member set and a tier's parent pool.");
         expected = proposal;
     }
 
@@ -40,10 +48,14 @@ public sealed class RealPropertyActionAuthorization : IRealOperationAuthorizatio
         ValidateProposal(proposal);
         var plan = frozen.Plan;
         var anchors = plan.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+        var declaredMembers = proposal.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+        var exactTargets = declaredMembers.Length > 0
+            ? plan.Targets.ToHashSet().SetEquals(proposal.Targets)
+            : anchors.Length == 1 && plan.Targets.ToHashSet().SetEquals(proposal.Targets.Append(anchors[0]));
         if (frozen.State != RealOperationState.Prepared || plan.RealOperation is not { } real
-            || anchors.Length != 1 || !RealOperationValidator.IsValid(plan)
+            || anchors.Length == 0 || !RealOperationValidator.IsValid(plan)
             || plan.PlanHash != OperationPlanHasher.Compute(plan) || plan.SystemId != proposal.SystemId
-            || plan.Intent != proposal.Intent || !plan.Targets.ToHashSet().SetEquals(proposal.Targets.Append(anchors[0]))
+            || plan.Intent != proposal.Intent || !exactTargets
             || !SameSteps(real.Steps, proposal.Steps))
             throw new InvalidDataException("The frozen property action changed its target, value or command.");
     }

@@ -53,7 +53,8 @@ public enum OperationIntent
     SetDriveLetter,
     RenameStorageObject,
     SetVolumeLabel,
-    RebuildStoragePool
+    RebuildStoragePool,
+    SetPhysicalDiskUsage
 }
 
 public sealed record EnvironmentProfile(

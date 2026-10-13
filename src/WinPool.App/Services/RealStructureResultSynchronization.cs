@@ -9,7 +9,7 @@ namespace WinPool.App.Services;
 /// This is read-only recovery state, never authority to accept or resume a write.</summary>
 public sealed class RealStructureResultSynchronization
 {
-    public sealed record OutputMapping(StorageObjectKind Kind, string PoolId, string StepId);
+    public sealed record OutputMapping(StorageObjectKind Kind, string PoolId, string StepId, string? MediaType = null);
     private sealed record Stage(SimulationEditingSession Session, long BindingGeneration,
         long ContentRevision, AgentRealOperationResponse Frozen, RealOperationIntentRequest Proposal,
         OutputMapping? Mapping, RealAutomaticLayoutProgress? Layout);
@@ -36,6 +36,13 @@ public sealed class RealStructureResultSynchronization
             || proposal.Steps.Any(step => !real.Steps.Any(item => item.Id == step.Id && item.Command.GetType() == step.Command.GetType())))
             throw new InvalidDataException("The draft stage must match its exact frozen plan.");
         if (HasPending(session)) throw new InvalidOperationException("A draft result is still being synchronized.");
+        if (mapping is { Kind: StorageObjectKind.StorageTier } tierMapping)
+        {
+            if (real.Steps.SingleOrDefault(item => item.Id == tierMapping.StepId)?.Command is not CreateTierCommand tier
+                || tierMapping.MediaType is { } requestedMedia && requestedMedia != tier.EffectiveMediaType)
+                throw new InvalidDataException("The tier mapping must match the frozen template creation and its exact media.");
+            mapping = tierMapping with { MediaType = tier.EffectiveMediaType };
+        }
         stages.Add(frozen.Plan.OperationId, new(session, session.BindingGeneration, session.ContentRevision,
             frozen, proposal, mapping, layout));
         session.SetRealResultSynchronizationPending(true);
@@ -97,6 +104,13 @@ public sealed class RealStructureResultSynchronization
         if (createdId is not null && stage.Mapping is { Kind: StorageObjectKind.VirtualDisk } vdMapping
             && !session.PoolIntents.ContainsKey(vdMapping.PoolId))
             throw new InvalidDataException("The verified virtual disk no longer has a matching draft goal.");
+        if (createdId is not null && stage.Mapping is { Kind: StorageObjectKind.StoragePool } poolMapping
+            && !session.PoolIntents.ContainsKey(poolMapping.PoolId))
+            throw new InvalidDataException("The verified pool no longer has a matching draft goal.");
+        if (createdId is not null && stage.Mapping is { Kind: StorageObjectKind.StorageTier } tierMapping
+            && (!session.PoolIntents.TryGetValue(tierMapping.PoolId, out var tierIntent)
+                || tierIntent.Tiers?.Count(item => item.MediaType == tierMapping.MediaType) != 1))
+            throw new InvalidDataException("The verified template no longer has one matching media draft goal.");
         if (stage.Layout is { } layout)
         {
             layout.ReconcileTerminal(stage.Proposal, response);
@@ -109,6 +123,12 @@ public sealed class RealStructureResultSynchronization
         if (createdId is not null && stage.Mapping is { } output)
         {
             if (output.Kind == StorageObjectKind.StoragePool) RemapCreatedPool(session, output.PoolId, createdId);
+            else if (output.Kind == StorageObjectKind.StorageTier)
+            {
+                var current = session.PoolIntents[output.PoolId];
+                session.PoolIntents[output.PoolId] = current with
+                { Tiers = current.Tiers!.Select(item => item.MediaType == output.MediaType ? item with { VerifiedTemplateId = createdId } : item).ToArray() };
+            }
             else
             {
                 RemapCreatedVirtualDisk(session, output.PoolId, createdId);
@@ -161,12 +181,18 @@ public sealed class RealStructureResultSynchronization
             || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
             throw new InvalidDataException("The verified creation step has no exact output identity.");
         var key = value.GetString()!;
-        if (fresh.SourceFacts?.Objects.SingleOrDefault(item => item.Id == key) is not { HasReliableIdentity: true })
+        var expectedType = mapping.Kind switch { StorageObjectKind.StoragePool => FactObjectType.StoragePool,
+            StorageObjectKind.VirtualDisk => FactObjectType.VirtualDisk, StorageObjectKind.StorageTier => FactObjectType.StorageTier,
+            _ => throw new InvalidDataException("This creation output mapping kind is not supported.") };
+        if (fresh.SourceFacts?.Objects.SingleOrDefault(item => item.Id == key) is not { HasReliableIdentity: true } source
+            || source.ObjectType != expectedType)
             throw new InvalidDataException("The verified output is absent from the fresh related inventory.");
         var exists = mapping.Kind switch
         {
             StorageObjectKind.StoragePool => fresh.Snapshot.StoragePools.Any(item => item.StableId == key),
             StorageObjectKind.VirtualDisk => fresh.Snapshot.VirtualDisks.Any(item => item.StableId == key && item.PoolStableId == mapping.PoolId),
+            StorageObjectKind.StorageTier => fresh.Snapshot.StorageTiers.Any(item => item.StableId == key && item.PoolStableId == mapping.PoolId
+                && item.MediaType == mapping.MediaType && item.VirtualDiskStableId is null),
             _ => false
         };
         if (!exists) throw new InvalidDataException("The verified output has the wrong kind or parent.");
@@ -179,13 +205,17 @@ public sealed class RealStructureResultSynchronization
                 || !fresh.Snapshot.OsDisks.Any(item => item.StableId == osId && item.VirtualDiskStableId == key))
                 throw new InvalidDataException("The verified VD has no unique reliable created OS disk in fresh facts.");
         }
-        else
+        else if (mapping.Kind == StorageObjectKind.StoragePool)
         {
             var members = response.Plan.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
             var pool = fresh.Snapshot.StoragePools.Single(item => item.StableId == key);
-            if (members.Length != 1 || pool.MemberPhysicalDiskIds.Count != 1
-                || pool.MemberPhysicalDiskIds[0] != members[0].ProviderKey)
-                throw new InvalidDataException("The verified pool belongs to a different physical member.");
+            if (pool.IsPrimordial || members.Length == 0 || members.Select(item => item.ProviderKey).Distinct(StringComparer.Ordinal).Count() != members.Length
+                || pool.MemberPhysicalDiskIds.Count != members.Length
+                || !pool.MemberPhysicalDiskIds.ToHashSet(StringComparer.Ordinal).SetEquals(members.Select(item => item.ProviderKey))
+                || members.Any(member => fresh.SourceFacts!.Objects.SingleOrDefault(item => item.Id == member.ProviderKey)
+                    is not { HasReliableIdentity: true, ObjectType: FactObjectType.PhysicalDisk }
+                    || !fresh.Snapshot.PhysicalDisks.Any(item => item.StableId == member.ProviderKey && item.PoolStableId == key)))
+                throw new InvalidDataException("The verified pool belongs to a different complete physical member set.");
         }
         return key;
     }
@@ -200,6 +230,11 @@ public sealed class RealStructureResultSynchronization
             PhysicalDisks = session.Working.PhysicalDisks.Select(disk => disk.PoolStableId == temporaryId ? disk with { PoolStableId = realId } : disk).ToArray()
         };
         if (session.PoolIntents.Remove(temporaryId, out var intent)) session.PoolIntents[realId] = intent;
+        foreach (var key in session.MaximumSizeFields.Where(key => key.StartsWith(temporaryId + "|", StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            session.MaximumSizeFields.Remove(key);
+            session.MaximumSizeFields.Add(realId + key[temporaryId.Length..]);
+        }
     }
 
     private static void RemapCreatedVirtualDisk(SimulationEditingSession session, string poolId, string realId)
@@ -224,6 +259,9 @@ public sealed class RealStructureResultSynchronization
         var old = session.Baseline;
         var target = session.Working;
         var actual = fresh.Snapshot;
+        var desiredUsages = session.PoolIntents.Values.SelectMany(intent => intent.MemberUsages ?? [])
+            .GroupBy(item => item.PhysicalDiskId, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key,
+                group => group.Select(item => PhysicalDiskUsage.Normalize(item.Usage)).Distinct(StringComparer.Ordinal).Single(), StringComparer.OrdinalIgnoreCase);
         static T[] Merge<T>(IReadOnlyList<T> baseline, IReadOnlyList<T> desired, IReadOnlyList<T> live, Func<T, string> id)
         {
             var oldIds = baseline.Select(id).ToHashSet();
@@ -239,8 +277,10 @@ public sealed class RealStructureResultSynchronization
             {
                 var desired = target.PhysicalDisks.SingleOrDefault(item => item.StableId == live.StableId);
                 var prior = old.PhysicalDisks.SingleOrDefault(item => item.StableId == live.StableId);
-                return desired is not null && prior is not null && desired.PoolStableId != prior.PoolStableId
-                    ? live with { PoolStableId = desired.PoolStableId } : live;
+                var poolId = desired is not null && prior is not null && desired.PoolStableId != prior.PoolStableId ? desired.PoolStableId : live.PoolStableId;
+                var usage = desiredUsages.TryGetValue(live.StableId, out var requestedUsage) ? requestedUsage
+                    : desired is not null && prior is not null && desired.Usage != prior.Usage ? desired.Usage : live.Usage;
+                return live with { PoolStableId = poolId, Usage = usage };
             }).ToArray(),
             StoragePools = Merge(old.StoragePools, target.StoragePools, actual.StoragePools, item => item.StableId),
             StorageTiers = Merge(old.StorageTiers, target.StorageTiers, actual.StorageTiers, item => item.StableId),

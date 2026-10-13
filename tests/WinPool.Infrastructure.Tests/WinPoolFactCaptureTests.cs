@@ -10,6 +10,48 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactCaptureTests
 {
     [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void PhysicalAssociationLocatorAcceptsResourceLineEndingsAndRetainsVirtualFirstOrder(string newline)
+    {
+        var source = string.Join(newline, new[]
+        {
+            "$diskPhysicalMap = @{}",
+            "foreach ($disk in $diskObjects) {",
+            "    try {",
+            "        $physicalMatch = @($disk | Get-PhysicalDisk | Select-Object -First 1)",
+            "        if ($physicalMatch.Count -gt 0) {",
+            "            $diskPhysicalMap[[int]$disk.Number] = Get-AssociationKey $physicalMatch[0] \"$($physicalMatch[0].DeviceId)|$($physicalMatch[0].FriendlyName)|$($physicalMatch[0].Size)\"",
+            "        }",
+            "    }",
+            "    catch {",
+            "    }",
+            "}",
+            "",
+            "$virtualDiskKeyByOsDisk = @{}",
+            "$physicalDisks = foreach ($physical in $physicalObjects) {"
+        });
+        var rewritten = EmbeddedStorageInventoryScript.AddPhysicalDiskAssociationFallback(source);
+        Assert.DoesNotContain("\r", rewritten);
+        Assert.DoesNotContain("$disk | Get-PhysicalDisk | Select-Object -First 1", rewritten);
+        Assert.True(rewritten.IndexOf("$diskPhysicalMap = @{}", StringComparison.Ordinal)
+            > rewritten.IndexOf("$virtualDiskKeyByOsDisk = @{}", StringComparison.Ordinal));
+        Assert.Contains("PhysicalDiskCurrentIdentityNotUnique", rewritten);
+    }
+
+    [Theory]
+    [InlineData(CollectionPurpose.Storage)]
+    [InlineData(CollectionPurpose.Hardware)]
+    public void FullCollectorNormalizesEveryMultilineRewriteBoundary(CollectionPurpose purpose)
+    {
+        var source = EmbeddedStorageInventoryScript.ForPurpose(purpose);
+        Assert.DoesNotContain("\r", source);
+        Assert.Contains("VirtualDiskToCurrentOsDiskAssociationNotUnique", source);
+        Assert.Contains("PhysicalDiskCurrentIdentityNotUnique", source);
+        Assert.Contains("PhysicalDiskAssociationKey = $deviceParents.PhysicalDiskAssociationKey", source);
+    }
+
+    [Theory]
     [InlineData("DeviceNumberFallback", true, true, "16", "", "uid:virtual", 0)]
     [InlineData("DeviceNumberFallback", true, true, "11", "", "uid:virtual", 0)]
     [InlineData("ProviderUniqueId", true, true, "16", "", "uid:virtual", 1)]

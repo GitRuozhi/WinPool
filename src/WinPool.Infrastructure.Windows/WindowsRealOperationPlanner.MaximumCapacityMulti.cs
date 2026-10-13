@@ -53,14 +53,15 @@ public sealed partial class WindowsRealOperationPlanner
     internal static RealExactPhysicalMemberSetClosure RequireMultiMaximumClosure(WindowsRealStorageTopology topology,
         IReadOnlyList<StorageObjectId> targets, CreateTieredVirtualDiskCommand command)
     {
-        if (command is not { UseMaximumSize: true, CreationMechanism: TieredVirtualDiskCreationMechanism.ExactTemplate, CapacityTiers.Count: > 1 }
+        if (command is not { CreationMechanism: TieredVirtualDiskCreationMechanism.ExactTemplate, CapacityTiers.Count: >= 1 }
+            || !command.CapacityTiers.Any(item => item.UsesMaximumSize(command.UseMaximumSize))
             || command.Pool.Existing is not { Kind: StorageObjectKind.StoragePool } pool
             || command.CapacityTiers.Any(item => item.Tier.Existing is not { Kind: StorageObjectKind.StorageTier }))
             throw new InvalidDataException("A multi MAX plan requires exact existing pool/templates.");
         var members = targets.Where(item => item.Kind == StorageObjectKind.PhysicalDisk).ToArray();
         if (members.Length == 0 || targets.Any(item => item.System != topology.SystemId)) throw new InvalidDataException("Approved member identities missing.");
         var closure = topology.RequireExactPhysicalMemberSet(pool, members);
-        if (closure.Objects.Count(item => item.ObjectType == FactObjectType.StorageTier) < 2
+        if (closure.Objects.Count(item => item.ObjectType == FactObjectType.StorageTier) < command.CapacityTiers.Count
             || command.CapacityTiers.Any(tier => !closure.Objects.Any(item => item.Id == tier.Tier.Existing!.Value.ProviderKey && item.ObjectType == FactObjectType.StorageTier)))
             throw new InvalidDataException("The complete frozen multi-template set is absent from the exact closure.");
         if (targets.Any(target => !closure.Objects.Any(item => item.Id == target.ProviderKey)))
@@ -81,8 +82,8 @@ public sealed partial class WindowsRealOperationPlanner
             var expected = member.PoolMemberRoleEvidence;
             var role = roles.Single(item => item.PhysicalStableId == member.PhysicalDiskId);
             if (role.InventoryVersion != topology.InventoryVersion || role.InventoryVersion != expected.InventoryVersion
-                || role.PoolStableId != closure.PoolId || role.PoolStableId != expected.PoolStableId
-                || role.VerificationMethod != "CompleteCurrentPoolAndOsDiskAssociations"
+                || role.PoolStableId != expected.PoolStableId
+                || role.VerificationMethod != expected.VerificationMethod
                 || role.IsBoot || role.IsSystem || role.IsPageFile || role.IsCrashDump
                 || expected.IsBoot || expected.IsSystem || expected.IsPageFile || expected.IsCrashDump
                 || !role.AssociatedOsDiskIds.Order(StringComparer.Ordinal).SequenceEqual(expected.AssociatedOsDiskIds.Order(StringComparer.Ordinal), StringComparer.Ordinal))

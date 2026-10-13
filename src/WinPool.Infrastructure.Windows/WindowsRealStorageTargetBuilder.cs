@@ -11,7 +11,16 @@ public static class WindowsRealStorageTargetBuilder
     public static WindowsStorageCommandTarget Build(
         WindowsRealStorageTopology topology,
         RealTargetReference reference,
-        IReadOnlyDictionary<string, string> verifiedStepOutputs)
+        IReadOnlyDictionary<string, string> verifiedStepOutputs) => BuildCore(topology, reference, verifiedStepOutputs, null);
+
+    public static WindowsStorageCommandTarget BuildForMemberSet(
+        WindowsRealStorageTopology topology, RealTargetReference reference,
+        IReadOnlyDictionary<string, string> verifiedStepOutputs, RealExactPhysicalMemberSetClosure members) =>
+        BuildCore(topology, reference, verifiedStepOutputs, members);
+
+    private static WindowsStorageCommandTarget BuildCore(
+        WindowsRealStorageTopology topology, RealTargetReference reference,
+        IReadOnlyDictionary<string, string> verifiedStepOutputs, RealExactPhysicalMemberSetClosure? members)
     {
         ArgumentNullException.ThrowIfNull(topology);
         ArgumentNullException.ThrowIfNull(reference);
@@ -23,11 +32,17 @@ public static class WindowsRealStorageTargetBuilder
         }
 
         var item = topology.RequireObject(id);
-        var closure = topology.RequireSinglePhysicalClosure([id]);
+        if (members is null && topology.FindConcretePoolForTarget(id) is { MemberPhysicalDiskIds.Count: > 1 } pool)
+            members = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
+                pool.MemberPhysicalDiskIds.Select(value => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, value)).ToArray());
+        var osDisk = ResolveOsDisk(topology.Snapshot, item.Id, reference.Kind);
+        var closure = members?.AsComponentClosure(id.Kind == StorageObjectKind.PhysicalDisk ? id.ProviderKey : osDisk?.PhysicalDiskStableId)
+            ?? topology.RequireSinglePhysicalClosure([id]);
+        if (!closure.Objects.Any(value => value.Id == id.ProviderKey))
+            throw new InvalidDataException("The exact target is outside the approved member component.");
         var physical = topology.Snapshot.PhysicalDisks.SingleOrDefault(disk =>
             StringComparer.Ordinal.Equals(disk.StableId, closure.PhysicalDiskId))
             ?? throw new InvalidDataException("The physical member is absent from the same fresh capture.");
-        var osDisk = ResolveOsDisk(topology.Snapshot, item.Id, reference.Kind);
         var partition = reference.Kind switch
         {
             StorageObjectKind.Partition => topology.Snapshot.Partitions.SingleOrDefault(value =>
@@ -45,7 +60,8 @@ public static class WindowsRealStorageTargetBuilder
         var parentId = ParentId(topology.Snapshot, item.Id, reference.Kind);
         var parent = parentId is null ? null : topology.Facts.Objects.SingleOrDefault(value =>
             StringComparer.Ordinal.Equals(value.Id, parentId));
-        var subsystem = ResolveSubsystem(topology, item.Id, reference.Kind);
+        var subsystem = members is null ? ResolveSubsystem(topology, item.Id, reference.Kind)
+            : topology.Facts.Objects.Single(value => value.Id == members.SubsystemStableId);
 
         return new WindowsStorageCommandTarget(
             reference.Kind,
@@ -71,7 +87,9 @@ public static class WindowsRealStorageTargetBuilder
             PartitionTypeGuid: partition?.PartitionTypeId ?? string.Empty,
             StorageSubsystemObjectId: subsystem is null ? string.Empty : Text(subsystem, "ObjectId"),
             PhysicalMemberObjectId: Text(topology.Facts.Objects.Single(value =>
-                value.Id == closure.PhysicalDiskId), "ObjectId"));
+                value.Id == closure.PhysicalDiskId), "ObjectId"),
+            PhysicalMembers: members?.Members.Select(value => new WindowsStoragePhysicalMemberTarget(
+                value.PhysicalDiskId, value.UniqueId, value.ObjectId, value.SerialNumber)).ToArray());
     }
 
     public static RealTargetReference GetReference(RealStorageCommand command) => command switch
@@ -86,6 +104,7 @@ public static class WindowsRealStorageTargetBuilder
         SetDriveLetterCommand value => value.Partition,
         RenameVolumeCommand value => value.Volume,
         CreatePoolCommand value => value.PhysicalDisk,
+        SetPhysicalDiskUsageCommand value => value.PhysicalDisk,
         DeletePoolCommand value => value.Pool,
         RenamePoolCommand value => value.Pool,
         CreateVirtualDiskCommand value => value.Pool,

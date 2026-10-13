@@ -39,7 +39,8 @@ public sealed class ExecutionSecurityTests
             OperationIntent.RebuildStoragePool,
             OperationIntent.RepairStorageObject,
             OperationIntent.ClearDisk,
-            OperationIntent.RawDeviceWrite
+            OperationIntent.RawDeviceWrite,
+            OperationIntent.SetPhysicalDiskUsage
         };
 
         Assert.Equal(

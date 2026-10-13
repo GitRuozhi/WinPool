@@ -1061,38 +1061,51 @@ public sealed class AgentRealOperationService : IRealOperationService
             : result;
     }
 
-    private static bool CapacityJournalProvesMaximum(RealOperationStep step,
+    internal static bool CapacityJournalProvesMaximum(RealOperationStep step,
         IReadOnlyList<MaximumCapacityAttemptRecord> attempts)
     {
         try
         {
             var policies = new Dictionary<string, MaximumCapacityPolicy>(StringComparer.Ordinal);
             var seeds = new Dictionary<string, long>(StringComparer.Ordinal);
-            if (step.Command is CreateTieredVirtualDiskCommand { CapacityTiers: { Count: > 1 } tiers })
+            if (step.Command is CreateTieredVirtualDiskCommand { CapacityTiers: { Count: >= 1 } tiers } tiered)
             {
-                var seed = attempts.FirstOrDefault();
-                if (seed?.Attempt is not { Phase: MaximumCapacityAttemptPhase.Seed, Ordinal: 1, SearchTargetKey: "seed" }
-                    || seed.State != MaximumCapacityAttemptState.Verified
-                    || seed.Result is not { SeedSuccessfulBytes: { } sizes } seedResult || sizes.Count != tiers.Count) return false;
+                var requiresSeed = tiers.Count > 1;
+                var seed = requiresSeed ? attempts.FirstOrDefault() : null;
+                var sizes = seed?.Result?.SeedSuccessfulBytes;
+                if (requiresSeed && (seed?.Attempt is not { Phase: MaximumCapacityAttemptPhase.Seed, Ordinal: 1, SearchTargetKey: "seed" }
+                    || seed.State != MaximumCapacityAttemptState.Verified || seed.Result?.State != MaximumCapacityAttemptState.Verified
+                    || sizes is null || sizes.Count != tiers.Count)) return false;
                 long total = 0;
                 foreach (var tier in tiers)
                 {
-                    if (tier.Tier.Existing is not { } id || tier.MaximumCapacity is not { } policy
-                        || !sizes.TryGetValue(id.ProviderKey, out var bytes)
-                        || bytes != MaximumCapacityAlgorithm.SeedBytes(policy.InitialCandidateBytes) || bytes <= 0)
-                        return false;
-                    policies.Add(id.ProviderKey, policy);
-                    seeds.Add(id.ProviderKey, bytes);
+                    if (tier.Tier.Existing is not { } id) return false;
+                    long expected;
+                    if (tier.UsesMaximumSize(tiered.UseMaximumSize))
+                    {
+                        var policy = tier.MaximumCapacity ?? (tiers.Count == 1 ? tiered.MaximumCapacity : null);
+                        if (policy is null) return false;
+                        policies.Add(id.ProviderKey, policy);
+                        expected = MaximumCapacityAlgorithm.SeedBytes(policy.InitialCandidateBytes);
+                    }
+                    else
+                    {
+                        if (tier.SizeBytes is not > 0 || tier.MaximumCapacity is not null) return false;
+                        expected = tier.SizeBytes.Value;
+                    }
+                    if (!requiresSeed) continue;
+                    if (!sizes!.TryGetValue(id.ProviderKey, out var bytes) || bytes != expected || bytes <= 0) return false;
+                    if (tier.UsesMaximumSize(tiered.UseMaximumSize)) seeds.Add(id.ProviderKey, bytes);
                     total = checked(total + bytes);
                 }
-                if (seed.Attempt.CandidateBytes != total || seedResult.LastSuccessfulBytes != total) return false;
+                if (policies.Count == 0 || requiresSeed && (seed!.Attempt.CandidateBytes != total || seed.Result!.LastSuccessfulBytes != total)) return false;
             }
             else
             {
                 var policy = step.Command switch
                 {
-                    CreateVirtualDiskCommand value => value.MaximumCapacity,
-                    CreateTieredVirtualDiskCommand value => value.MaximumCapacity,
+                    CreateVirtualDiskCommand { UseMaximumSize: true } value => value.MaximumCapacity,
+                    CreateTieredVirtualDiskCommand { UseMaximumSize: true } value => value.MaximumCapacity,
                     _ => null
                 };
                 if (policy is null) return false;

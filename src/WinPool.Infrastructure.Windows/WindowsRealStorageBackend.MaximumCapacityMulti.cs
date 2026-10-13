@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Application;
 using WinPool.Domain;
@@ -12,7 +12,7 @@ public sealed record WindowsMaximumCapacityMultiSearchEvidence(string AlgorithmV
     string VirtualDiskId, string OsDiskId, IReadOnlyList<WindowsMaximumCapacityTierBoundary> Tiers);
 public sealed record WindowsMaximumCapacityMultiObservation(string InventoryVersion, string MachineBinding, string Fingerprint,
     string PhysicalMemberFingerprint, IReadOnlyList<WinPoolSourceObject> Objects, IReadOnlyList<WinPoolFactRelationship> Associations,
-    IReadOnlyList<WindowsExactPhysicalMemberRoleEvidence> Members);
+    IReadOnlyList<WindowsExactPhysicalMemberRoleEvidence> Members, string? SubsystemIdentity = null);
 public sealed record WindowsMaximumCapacityMultiAttemptEvidence(WindowsStorageCommandResult Provider,
     WindowsMaximumCapacityMultiObservation Before, WindowsMaximumCapacityMultiObservation? First,
     WindowsMaximumCapacityMultiObservation? Second, IReadOnlyList<WindowsStorageJobAbsenceEvidence> StorageJobQueries,
@@ -34,7 +34,7 @@ public sealed partial class WindowsRealStorageBackend
         RequireMultiMaximumRaw(topology, closure);
         if (topology.Snapshot.VirtualDisks.Any(item => item.PoolStableId == closure.PoolId))
             throw new InvalidDataException("Multi MAX initial pool is no longer empty.");
-        foreach (var tier in command.CapacityTiers!)
+        foreach (var tier in command.CapacityTiers!.Where(item => item.UsesMaximumSize(command.UseMaximumSize)))
             if (tier.MaximumCapacity is not { AlgorithmVersion: MaximumCapacityAlgorithm.Version } policy
                 || policy.SourceFingerprint != closure.Fingerprint || policy.InitialCandidateBytes != MaximumCapacityAlgorithm.InitialCandidateBytes(policy.UpperBoundBytes))
                 throw new InvalidDataException("Multi MAX policy differs from frozen exact closure.");
@@ -51,7 +51,8 @@ public sealed partial class WindowsRealStorageBackend
             return MaximumUnknown("real.maximum.existing_attempts_never_replayed", new { plan.OperationId });
         var tiers = macro.CapacityTiers!;
         var seeds = tiers.ToDictionary(item => item.Tier.Existing!.Value.ProviderKey,
-            item => MaximumCapacityAlgorithm.SeedBytes(item.MaximumCapacity!.InitialCandidateBytes), StringComparer.Ordinal);
+            item => item.UsesMaximumSize(macro.UseMaximumSize) ? MaximumCapacityAlgorithm.SeedBytes(item.MaximumCapacity!.InitialCandidateBytes)
+                : item.SizeBytes ?? throw new InvalidDataException("Explicit tier bytes absent."), StringComparer.Ordinal);
         var actualIds = new Dictionary<string, string>(StringComparer.Ordinal);
         var sizes = new Dictionary<string, long>(seeds, StringComparer.Ordinal);
         var boundaries = new List<WindowsMaximumCapacityTierBoundary>();
@@ -59,26 +60,34 @@ public sealed partial class WindowsRealStorageBackend
         string? vdId = null, osId = null;
         var ordinal = 0;
         WindowsVerifiedStepEvidence? lastVerified = null;
-        var seedTotal = seeds.Values.Aggregate(0L, (sum, value) => checked(sum + value));
-        var seed = await AttemptAsync("seed", MaximumCapacityAttemptPhase.Seed, seedTotal, 0, sizes, null).ConfigureAwait(false);
-        if (seed is not { Verified: not null, ActualTierIds: not null }) return MaximumUnknown(seed.Code, seed);
-        lastVerified = seed.Verified; vdId = lastVerified.CreatedObjectId; osId = lastVerified.CreatedOsDiskId;
-        foreach (var pair in seed.ActualTierIds) actualIds.Add(pair.Key, pair.Value);
-        foreach (var item in tiers)
+        if (tiers.Count > 1)
+        {
+            var seedTotal = seeds.Values.Aggregate(0L, (sum, value) => checked(sum + value));
+            var seed = await AttemptAsync("seed", MaximumCapacityAttemptPhase.Seed, seedTotal, 0, sizes, null).ConfigureAwait(false);
+            if (seed is not { Verified: not null, ActualTierIds: not null }) return MaximumUnknown(seed.Code, seed);
+            lastVerified = seed.Verified; vdId = lastVerified.CreatedObjectId; osId = lastVerified.CreatedOsDiskId;
+            foreach (var pair in seed.ActualTierIds) actualIds.Add(pair.Key, pair.Value);
+        }
+        foreach (var item in tiers.Where(item => item.UsesMaximumSize(macro.UseMaximumSize)))
         {
             var key = item.Tier.Existing!.Value.ProviderKey;
-            var state = MaximumCapacitySearchState.Start(item.MaximumCapacity!.InitialCandidateBytes, seeds[key]);
+            var state = MaximumCapacitySearchState.Start(item.MaximumCapacity!.InitialCandidateBytes, tiers.Count > 1 ? seeds[key] : 0);
             var verifiedOrdinal = 1; var boundaryOrdinal = 0; long boundaryBytes = 0; var attemptsForTier = 0;
             while (!state.IsComplete)
             {
                 if (++attemptsForTier > item.MaximumCapacity.MaximumAttempts)
                     return MaximumUnknown("real.maximum.attempt_budget_without_boundary", new { key, state.LastSuccessfulBytes });
                 var requested = new Dictionary<string, long>(sizes, StringComparer.Ordinal) { [key] = state.CandidateBytes };
-                var receipt = await AttemptAsync(key, MaximumCapacityAttemptPhase.Resize, state.CandidateBytes,
-                    state.LastSuccessfulBytes, requested, actualIds[key]).ConfigureAwait(false);
+                var receipt = await AttemptAsync(key, vdId is null ? MaximumCapacityAttemptPhase.Create : MaximumCapacityAttemptPhase.Resize, state.CandidateBytes,
+                    state.LastSuccessfulBytes, requested, actualIds.GetValueOrDefault(key)).ConfigureAwait(false);
                 var success = receipt.Verified is not null;
                 if (!success && receipt.Code != "real.maximum.capacity_rejected_unchanged") return MaximumUnknown(receipt.Code, receipt);
-                if (success) { sizes[key] = state.CandidateBytes; lastVerified = receipt.Verified; verifiedOrdinal = ordinal; }
+                if (success)
+                {
+                    sizes[key] = state.CandidateBytes; lastVerified = receipt.Verified; verifiedOrdinal = ordinal;
+                    vdId ??= lastVerified!.CreatedObjectId; osId ??= lastVerified!.CreatedOsDiskId;
+                    foreach (var pair in receipt.ActualTierIds!) actualIds[pair.Key] = pair.Value;
+                }
                 else { boundaryOrdinal = ordinal; boundaryBytes = state.CandidateBytes; }
                 state.Observe(success);
             }
@@ -105,16 +114,18 @@ public sealed partial class WindowsRealStorageBackend
                 before = await CaptureOperationTopologyAsync(plan, step.Id + ":multi-before:" + (ordinal + 1), ct).ConfigureAwait(false);
                 closure = WindowsRealOperationPlanner.RequireMultiMaximumClosure(before, plan.Targets, macro);
                 RequireMultiMaximumIdentity(plan, before, closure, expected); RequireMultiMaximumRaw(before, closure);
-                command = phase == MaximumCapacityAttemptPhase.Seed
-                    ? macro with { SizeBytes = bytes, UseMaximumSize = false, MaximumCapacity = null }
+                command = phase is MaximumCapacityAttemptPhase.Seed or MaximumCapacityAttemptPhase.Create
+                    ? ExplicitTierAttempt(macro, requested)
                     : new ResizeTierCommand(RealTargetReference.ForExisting(new(before.SystemId, StorageObjectKind.StorageTier, actualTier!)), bytes);
                 target = BuildMultiMaximumTarget(before, closure,
-                    phase == MaximumCapacityAttemptPhase.Seed ? macro.Pool.Existing!.Value : new(before.SystemId, StorageObjectKind.StorageTier, actualTier!), vdId)
-                    with { MaximumCapacityAttempt = true, TierInputs = tiers.Select(item => {
+                    phase is MaximumCapacityAttemptPhase.Seed or MaximumCapacityAttemptPhase.Create ? macro.Pool.Existing!.Value : new(before.SystemId, StorageObjectKind.StorageTier, actualTier!), vdId)
+                    with { MaximumCapacityAttempt = true, Layout = phase is MaximumCapacityAttemptPhase.Seed or MaximumCapacityAttemptPhase.Create ? macro.EffectiveLayout
+                        : WindowsRealOperationPlanner.LayoutOf(before.Snapshot.StorageTiers.Single(value => value.StableId == actualTier)), TierInputs = tiers.Select(item => {
                         var template = before.RequireObject(item.Tier.Existing!.Value);
                         return new WindowsStorageTierTarget(template.Id, Text(template, "UniqueId"), Text(template, "ObjectId"),
-                            before.Snapshot.StorageTiers.Single(value => value.StableId == template.Id).MediaType, requested[template.Id]); }).ToArray() };
-                if (phase == MaximumCapacityAttemptPhase.Seed)
+                            before.Snapshot.StorageTiers.Single(value => value.StableId == template.Id).MediaType, requested[template.Id],
+                            item.Layout ?? WindowsRealOperationPlanner.LayoutOf(before.Snapshot.StorageTiers.Single(value => value.StableId == template.Id)), false); }).ToArray() };
+                if (phase is MaximumCapacityAttemptPhase.Seed or MaximumCapacityAttemptPhase.Create)
                     target = target with { RelatedUniqueId = target.TierInputs![0].UniqueId, RelatedObjectId = target.TierInputs[0].ObjectId };
                 _ = await planner.ValidateMultiMaximumSafetyAsync(before, closure, command, ct).ConfigureAwait(false);
             }
@@ -168,8 +179,8 @@ public sealed partial class WindowsRealStorageBackend
                 return new(provider, origin, null, null, [], null, null, "real.maximum.provider_output_identity_changed");
         }
         var capacity = IsExplicitMaximumCapacityRejection(command, provider,
-            macro.CapacityTiers!.All(item => before.Snapshot.StorageTiers.Single(value => value.StableId == item.Tier.Existing!.Value.ProviderKey)
-                is { ResiliencySettingName: "Simple", Interleave: 65536, NumberOfColumns: 1 }));
+            macro.CapacityTiers!.All(item => RequestedTierLayoutMatches(before.Snapshot.StorageTiers.Single(value => value.StableId == item.Tier.Existing!.Value.ProviderKey),
+                item.Layout ?? StorageLayoutParameters.LegacyDefault)));
         if (provider.Code != "provider.returned" && !capacity)
             return new(provider, origin, null, null, [], null, null, "real.maximum.provider_uncertain_or_noncapacity_failure");
         var deadline = timeProvider.GetUtcNow().Add(PostCallWindow);
@@ -231,48 +242,53 @@ public sealed partial class WindowsRealStorageBackend
         if (vds.Length != 1) return null;
         var vd = vds[0]; var source = topology.RequireObject(new(topology.SystemId, StorageObjectKind.VirtualDisk, vd.StableId));
         if (vdId is null ? Text(source, "UniqueId") != provider.UniqueId || Text(source, "ObjectId") != provider.ObjectId : vd.StableId != vdId) return null;
-        if (!MaximumAggregateLayoutMatches(source)) return null;
+        var layouts = macro.CapacityTiers!.Select(item => item.Layout ?? StorageLayoutParameters.LegacyDefault).Distinct().ToArray();
+        if (!layouts.All(layout => MaximumAggregateLayoutMatches(source, layout))) return null;
         var total = sizes.Values.Aggregate(0L, (sum, value) => checked(sum + value));
         var os = topology.Snapshot.OsDisks.Where(item => item.VirtualDiskStableId == vd.StableId).ToArray();
-        if (os.Length != 1 || (osId is not null && os[0].StableId != osId) || os[0].Size != total || vd.Size != total
-            || vd.FootprintOnPool != total || vd.TierStableIds.Count != sizes.Count) return null;
+        if (vd.FriendlyName != macro.Name || os.Length != 1 || os[0].PartitionStyle != "RAW" || os[0].IsBoot || os[0].IsSystem || os[0].IsOffline
+            || topology.Snapshot.Partitions.Any(item => item.OsDiskStableId == os[0].StableId) || (osId is not null && os[0].StableId != osId) || os[0].Size != total || vd.Size != total
+            || vd.FootprintOnPool < total || vd.TierStableIds.Count != sizes.Count) return null;
         var actual = topology.Snapshot.StorageTiers.Where(item => item.VirtualDiskStableId == vd.StableId).ToArray();
         if (actual.Length != sizes.Count || topology.Snapshot.StorageTiers.Count(item => item.PoolStableId == closure.PoolId) != 2 * sizes.Count) return null;
         var mapping = new Dictionary<string, string>(StringComparer.Ordinal);
+        long actualFootprint = 0;
         foreach (var item in macro.CapacityTiers!)
         {
             var template = topology.Snapshot.StorageTiers.Single(value => value.StableId == item.Tier.Existing!.Value.ProviderKey);
             var matches = actual.Where(value => value.MediaType == template.MediaType).ToArray();
             if (matches.Length != 1) return null;
             var tier = matches[0];
-            if (tier.PoolStableId != closure.PoolId || tier.Size != sizes[template.StableId] || tier.FootprintOnPool != tier.Size
-                || tier.ResiliencySettingName != "Simple" || tier.NumberOfColumns != 1 || tier.Interleave != 65536
-                || tier.NumberOfDataCopies != 1 || tier.PhysicalDiskRedundancy != 0
+            var layout = item.Layout ?? WindowsRealOperationPlanner.LayoutOf(template);
+            if (!RequestedTierLayoutMatches(template, layout) || tier.PoolStableId != closure.PoolId || tier.Size != sizes[template.StableId]
+                || !FootprintMatchesLayout(tier.Size, tier.FootprintOnPool, layout) || !RequestedTierLayoutMatches(tier, layout)
                 || (priorIds.TryGetValue(template.StableId, out var prior) && prior != tier.StableId)) return null;
             var tierSource = topology.RequireObject(new(topology.SystemId, StorageObjectKind.StorageTier, tier.StableId));
-            if (!ReturnedNumber(tierSource, "ProvisioningType", 2) || !ReturnedNumber(tierSource, "AllocatedSize", tier.Size)
+            if (!SourceLayoutMatches(tierSource, layout) || !ReturnedNumber(tierSource, "ProvisioningType", 2) || !ReturnedNumber(tierSource, "AllocatedSize", tier.Size)
                 || !ReturnedNumber(source, "AllocatedSize", total)) return null;
-            var allowed = closure.Members.Where(member => topology.Snapshot.PhysicalDisks.Single(value => value.StableId == member.PhysicalDiskId).MediaType == template.MediaType)
-                .Select(member => member.PhysicalDiskId).ToArray();
-            if (!SameStringSet(tier.MemberPhysicalDiskIds, allowed)) return null;
+            var allowed = WindowsRealOperationPlanner.DataMembers(topology, closure, template.MediaType).Select(member => member.StableId).ToHashSet(StringComparer.Ordinal);
+            if (tier.MemberPhysicalDiskIds.Count < RequiredAllocatedMembers(layout) || tier.MemberPhysicalDiskIds.Distinct(StringComparer.Ordinal).Count() != tier.MemberPhysicalDiskIds.Count
+                || tier.MemberPhysicalDiskIds.Any(id => !allowed.Contains(id))) return null;
+            actualFootprint = checked(actualFootprint + tier.FootprintOnPool);
             mapping.Add(template.StableId, tier.StableId);
         }
+        if (vd.FootprintOnPool != actualFootprint || !ReturnedNumber(source, "FootprintOnPool", actualFootprint)) return null;
         return (vd.StableId, os[0].StableId, mapping);
     }
 
-    internal static bool MaximumAggregateLayoutMatches(WinPoolSourceObject source)
+    private static long RequiredAllocatedMembers(StorageLayoutParameters layout) =>
+        layout.ResiliencySettingName == "Mirror" ? (long)layout.NumberOfColumns * layout.NumberOfDataCopies : layout.NumberOfColumns;
+
+    private static CreateTieredVirtualDiskCommand ExplicitTierAttempt(CreateTieredVirtualDiskCommand macro, IReadOnlyDictionary<string,long> sizes) => macro with {
+        SizeBytes = sizes.Values.Aggregate(0L, (sum, bytes) => checked(sum + bytes)), UseMaximumSize = false, MaximumCapacity = null,
+        CapacityTiers = macro.CapacityTiers!.Select(item => item with { SizeBytes = sizes[item.Tier.Existing!.Value.ProviderKey], UseMaximumSize = false, MaximumCapacity = null }).ToArray() };
+
+    internal static bool MaximumAggregateLayoutMatches(WinPoolSourceObject source, StorageLayoutParameters? layout = null)
     {
-        bool Matches(string name, object expected)
-        {
-            if (source.Field(name) is not { ReadState: FieldReadState.Returned, Value: { } value }) return false;
-            if (value.ValueKind == JsonValueKind.Null) return true;
-            if (expected is string text) return value.ValueKind == JsonValueKind.String && value.GetString() == text;
-            return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var actual)
-                && actual == Convert.ToInt64(expected, System.Globalization.CultureInfo.InvariantCulture);
-        }
-        return Matches("ResiliencySettingName", "Simple") && Matches("ProvisioningType", 2)
-            && Matches("NumberOfColumns", 1) && Matches("Interleave", 65536)
-            && Matches("NumberOfDataCopies", 1) && Matches("PhysicalDiskRedundancy", 0);
+        var provisioning = source.Field("ProvisioningType");
+        if (provisioning is not { ReadState: FieldReadState.Returned }
+            || provisioning.Value is { } value && value.ValueKind != JsonValueKind.Null && !ReturnedNumber(source, "ProvisioningType", 2)) return false;
+        return SourceLayoutMatches(source, layout ?? StorageLayoutParameters.LegacyDefault, aggregate: true);
     }
 
     private static bool ReturnedNumber(WinPoolSourceObject source, string name, long number) => source.Field(name) is
@@ -306,6 +322,6 @@ public sealed partial class WindowsRealStorageBackend
     {
         var ids = closure.Objects.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         return new(topology.InventoryVersion, topology.MachineBinding, closure.Fingerprint, closure.PhysicalMemberFingerprint, closure.Objects,
-            topology.Facts.Relationships.Where(edge => !edge.IsRetained && ids.Contains(edge.FromId) && ids.Contains(edge.ToId)).ToArray(), closure.Members);
+            topology.Facts.Relationships.Where(edge => !edge.IsRetained && ids.Contains(edge.FromId) && ids.Contains(edge.ToId)).ToArray(), closure.Members, "\nsubsystem|" + closure.SubsystemStableId + "|" + closure.SubsystemUniqueId + "|" + closure.SubsystemObjectId);
     }
 }

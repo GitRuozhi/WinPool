@@ -1,6 +1,22 @@
 # WinPool 验证与验收
 
-日期：2026-10-13。当前产品版本为 V0.59／迭代 9。25项编辑界面任务的原限定验收及按用户授权完成的WDC实机破坏性补验证均已结束，详见下方2026-10-13记录；历史计划的多盘、SCM与长期耐久范围不因此通过。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-14。当前产品版本为 V0.59／迭代 9。25项编辑界面任务的原限定验收及按用户授权完成的WDC实机破坏性补验证均已结束，详见下方2026-10-13记录；历史计划的多盘、SCM与长期耐久范围不因此通过。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+
+<a id="real-pool-generalization"></a>
+
+## 2026-10-13至14 新池成员与规格完整贯通（已完成）
+
+用户确认的新池完整成员、按介质分层、合法布局与成员角色已接入原Apply流程，取代此前仅清理草稿锁的范围。范围与收口见[Plan §10](Plan.md#real-pool-generalization)。最终标准Release构建29.26秒、0警告／错误；没有运行全量测试。定点失败和重试原日志均保留。
+
+授权WDC的真实GUI完成Clear→池→16 KiB HDD模板（AutoVD关闭仍创建模板）、Hot Spare及拖回原池恢复Auto-Select、手动创建16 KiB MAX VD、GPT／自动删除MSR／创建数据分区／NTFS 64 KiB格式化、名称打勾直接提交、解散池及物理盘恢复。MAX重试在3725 GiB被拒绝、3724 GiB成功；actual HDD tier、VD和OS disk均为3,998,614,552,576 bytes，实际交错16 KiB。一次Apply只进行一次业务确认，完成后待应用动作清空，页面遮罩和持续进度正常结束；期间切换硬件页仍保留进度。
+
+GUI暴露的问题均已修复：采集脚本CRLF／LF边界、主题资源查找崩溃、VD／解散／角色入口旧白名单、角色目标漏父池UID、未调用Windows却无法解除的错误锁定、角色结果说明漏项、同池恢复误调用成员迁移并重算provider容量、分层VD漏传共同布局。最后入口复测修正了Primordial误当已有真实池的判断，真实含数据WDC可拖入新草稿、拖回Primordial及Undo，恢复16 KiB／MAX草稿后Apply可用。分层漏参造成的旧MAX连续20次拒绝已停止并只读终结，无对象生成、无自动重放；修正参数后新的搜索两次即完成。该漏参为WinPool缺陷，未改用户算法及既有原生MAX微软侧结论。
+
+定点验证覆盖类型契约、合法布局、全成员闭包、能力／范围、MAX及恢复、App规划／授权／结果映射和固定脚本。末轮追加有效结果为：角色目标与无调用恢复13项、确认／结果与容量说明29项、unused template投影4项、固定脚本布局参数19项。最后两项脚本夹具起初因首次模块加载的CLIXML进度噪声失败，夹具设置SilentlyContinue后2/2通过；原17项脚本用例已通过，不重复计算。此前相关定点TRX均保留，不把旧完整工程门当成本轮源码验证。
+
+最终18个新真实计划全部只锚定WDC：16个Completed、2个经只读对账Failed，无未终结计划；Accepted增加18，普通步骤CallIssued增加23，MAX attempt CallIssued增加22（20次失败旧搜索＋2次修复后搜索），模拟提交未增加。CallIssued是账本边界，不代表每次均进入Windows：角色漏目标的失败有NoWindowsCall证明。Samsung物理／OS盘、分区、卷及对应身份关联与基线一致。WDC末态在线GPT，MSR起点1 MiB／16 MiB，数据分区起点17 MiB／4,000,767,279,104 bytes，NTFS 64 KiB、WinPool_Test、E:，无concrete pool／VD。偏好恢复（CreateMsr、AutoVD、AutoPart均Off）；原托盘正常退出App28276／Agent8308均0，正常重启Real Off且账本不变。末次Primordial入口修复后重编译并GUI核验，最终App29492保留用户16 KiB／MAX未应用草稿、Real On，未新增写入。
+
+证据：[目录说明](../artifacts/test-results/20261013-real-pool-generalization/README.md)、[MAX候选](../artifacts/test-results/20261013-real-pool-generalization/vd-max-journal-summary.json)、[末态与Samsung比较](../artifacts/test-results/20261013-real-pool-generalization/final-native-verification.json)、[账本](../artifacts/test-results/20261013-real-pool-generalization/final-ledger-verification.json)、[正常退出](../artifacts/test-results/20261013-real-pool-generalization/normal-exit-result.json)、[最终构建](../artifacts/test-results/20261013-real-pool-generalization/build-fifteenth.log)。多盘、SSD／SCM、冗余布局和多层MAX没有本轮对应实机硬件结果，受控夹具和命令验证不能外推为设备或耐久验收。版本保持V0.59，不推送。
 
 ## 2026-10-13 新池草稿成员和属性限制清理
 

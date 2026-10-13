@@ -131,7 +131,7 @@ public sealed class WindowsVirtualDiskCreationSizeReader : IVirtualDiskCreationS
             using var input = matches[0].GetMethodParameters("GetSupportedSize");
             if (input is null)
                 throw new NotSupportedException("The exact pool does not expose GetSupportedSize inputs.");
-            input["ResiliencySettingName"] = "Simple";
+            input["ResiliencySettingName"] = pool.Layout?.ResiliencySettingName ?? "Simple";
             using var output = matches[0].InvokeMethod("GetSupportedSize", input, null);
             if (output is null || output["ReturnValue"] is null)
                 throw new NotSupportedException("The exact pool did not return a GetSupportedSize result.");
@@ -139,7 +139,7 @@ public sealed class WindowsVirtualDiskCreationSizeReader : IVirtualDiskCreationS
             if (returnValue != 0)
                 throw new NotSupportedException("The exact pool rejected the read-only Simple GetSupportedSize query.");
             return new VirtualDiskCreationSupportProbe(pool.UniqueId, pool.ObjectId,
-                "Simple", returnValue, DateTimeOffset.UtcNow);
+                pool.Layout?.ResiliencySettingName ?? "Simple", returnValue, DateTimeOffset.UtcNow);
         }
         finally
         {
@@ -163,7 +163,7 @@ public sealed class WindowsVirtualDiskCreationSizeReader : IVirtualDiskCreationS
         {
             var matches = FindExactConcretePool(candidates, pool);
             using var input = matches[0].GetMethodParameters("GetSupportedSize");
-            input["ResiliencySettingName"] = "Simple";
+            input["ResiliencySettingName"] = pool.Layout?.ResiliencySettingName ?? "Simple";
             using var output = matches[0].InvokeMethod("GetSupportedSize", input, null);
             if (output is null || output["ReturnValue"] is null
                 || Convert.ToUInt32(output["ReturnValue"]) != 0)

@@ -17,9 +17,10 @@ public sealed partial class WindowsRealStorageBackend
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(attempt.TargetEvidenceJson)
             ?? throw new InvalidDataException("Exact pending target absent.");
         var before = receipt.Before;
-        var physical = before.Objects.Single(item => item.ObjectType == FactObjectType.PhysicalDisk);
+        var physicals = before.Objects.Where(item => item.ObjectType == FactObjectType.PhysicalDisk).ToArray();
+        var physical = physicals.First();
         var pool = before.Objects.Single(item => item.ObjectType == FactObjectType.StoragePool && item.Id == poolId);
-        if (before.Objects.Count != 2 || topology.MachineBinding != plan.RealOperation!.MachineBinding
+        if (before.Objects.Count != physicals.Length + 1 || topology.MachineBinding != plan.RealOperation!.MachineBinding
             || closure.PhysicalMemberFingerprint != plan.RealOperation.PhysicalMemberFingerprint
             || !target.MaximumCapacityAttempt || target.ExpectedFingerprint != attempt.BeforeFingerprint
             || target.UniqueId != Text(pool, "UniqueId") || target.ObjectId != Text(pool, "ObjectId")
@@ -27,17 +28,21 @@ public sealed partial class WindowsRealStorageBackend
             || target.PhysicalMemberObjectId != Text(physical, "ObjectId") || target.SerialNumber != Text(physical, "SerialNumber"))
             throw new InvalidDataException("Pending creation origin or hardware identity differs.");
 
+        if (target.PhysicalMembers is { } members && (members.Count != physicals.Length
+            || members.Any(member => physicals.SingleOrDefault(item => item.Id == member.StableId) is not { } source
+                || Text(source, "UniqueId") != member.UniqueId || Text(source, "ObjectId") != member.ObjectId || Text(source, "SerialNumber") != member.SerialNumber)))
+            throw new InvalidDataException("Pending creation exact member set differs.");
         var vdObject = closure.Objects.Single(item => item.ObjectType == FactObjectType.VirtualDisk
             && Text(item, "UniqueId") == receipt.Provider.UniqueId && Text(item, "ObjectId") == receipt.Provider.ObjectId);
         var vd = topology.Snapshot.VirtualDisks.Single(item => item.StableId == vdObject.Id);
         var os = topology.Snapshot.OsDisks.Single(item => item.VirtualDiskStableId == vd.StableId);
         var osObject = closure.Objects.Single(item => item.Id == os.StableId && item.ObjectType == FactObjectType.Disk);
-        if (closure.Objects.Count != 4 || vd.PoolStableId != poolId || vd.FriendlyName != macro.Name
+        if (closure.Objects.Count != before.Objects.Count + 2 || vd.PoolStableId != poolId || vd.FriendlyName != macro.Name
             || vd.Size != attempt.CandidateBytes || vd.Size <= 0 || vd.Size % MaximumCapacityAlgorithm.GiB != 0
-            || os.Size != vd.Size || vd.TierStableIds.Count != 0 || vd.ResiliencySettingName != "Simple"
-            || vd.ProvisioningType != "Fixed" || vd.NumberOfColumns != macro.DataColumns || vd.Interleave != macro.InterleaveBytes
+            || os.Size != vd.Size || vd.TierStableIds.Count != 0 || !SourceLayoutMatches(vdObject, macro.EffectiveLayout)
+            || vd.ProvisioningType != "Fixed"
             || !ReturnedNumber(vdObject, "AllocatedSize", vd.Size)
-            || !ReturnedNumber(vdObject, "FootprintOnPool", vd.Size)
+            || !ReturnedNumber(vdObject, "FootprintOnPool", vd.FootprintOnPool) || !FootprintMatchesLayout(vd.Size, vd.FootprintOnPool, macro.EffectiveLayout)
             || string.IsNullOrWhiteSpace(Text(osObject, "UniqueId")) || string.IsNullOrWhiteSpace(Text(osObject, "ObjectId")))
             throw new InvalidDataException("Pending creation residual layout or capacity differs.");
 

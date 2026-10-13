@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
@@ -9,6 +9,43 @@ namespace WinPool.Infrastructure.Tests;
 
 public sealed partial class WindowsRealStorageBackendTests
 {
+    [Theory]
+    [InlineData(3, new long[] { 5, 4, 3 })]
+    [InlineData(6, new long[] { 5, 6, 7 })]
+    public async Task SingleExactTierMaximumPreserves16KiBAndStartsAtWholeCandidateWithReadOnlyRecovery(int supportedGib, long[] attempts)
+    {
+        var setup = await MultiMaximumFixtureAsync(false, hddMaximumGib: supportedGib, single: true, interleave: 16384);
+        var result = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step, setup.Preflight, setup.Journal, default);
+        Assert.True(result.Outcome == RealStepOutcome.Verified, result.ResultEvidenceJson);
+        Assert.Equal(attempts, setup.Journal.Records.Select(item => item.Attempt.CandidateBytes / MaximumCapacityAlgorithm.GiB));
+        Assert.Equal(MaximumCapacityAttemptPhase.Create, setup.Journal.Records[0].Attempt.Phase);
+        Assert.All(setup.Journal.Records, row => Assert.Equal(16384, JsonSerializer.Deserialize<WindowsStorageCommandTarget>(row.Attempt.TargetEvidenceJson)!.TierInputs![0].Layout!.InterleaveBytes));
+        var calls = setup.Fixture.Adapter.CallCount;
+        var recovery = await setup.Fixture.Backend.ReconcileMaximumCapacitySearchAsync(setup.Plan, setup.Step,
+            new(setup.Step.Id, RealOperationStepState.OutcomeUnknown, "lost-receipt", setup.Preflight.TargetEvidenceJson, null), setup.Journal.Records, default);
+        Assert.True(recovery.State == RealOperationState.Succeeded, recovery.Code);
+        Assert.Equal(calls, setup.Fixture.Adapter.CallCount);
+    }
+
+    [Fact]
+    public async Task MixedMaximumLeavesExplicitLayerFixedThroughSearchAndRecovery()
+    {
+        var setup = await MultiMaximumFixtureAsync(false, explicitSsd: true, interleave: 16384);
+        var result = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step, setup.Preflight, setup.Journal, default);
+        Assert.True(result.Outcome == RealStepOutcome.Verified, result.ResultEvidenceJson);
+        Assert.DoesNotContain(setup.Journal.Records, row => row.Attempt.SearchTargetKey == "tier:ssd");
+        Assert.All(setup.Journal.Records, row => Assert.Equal(2 * MaximumCapacityAlgorithm.GiB,
+            JsonSerializer.Deserialize<WindowsStorageCommandTarget>(row.Attempt.TargetEvidenceJson)!.TierInputs!.Single(item => item.TemplateStableId == "tier:ssd").SizeBytes));
+        var summary = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson)!.MaximumCapacityMulti!;
+        Assert.Equal(8 * MaximumCapacityAlgorithm.GiB, summary.ActualSizeBytes);
+        Assert.Single(summary.Tiers);
+        var calls = setup.Fixture.Adapter.CallCount;
+        var recovered = await setup.Fixture.Backend.ReconcileMaximumCapacitySearchAsync(setup.Plan, setup.Step,
+            new(setup.Step.Id, RealOperationStepState.OutcomeUnknown, "lost-receipt", setup.Preflight.TargetEvidenceJson, null), setup.Journal.Records, default);
+        Assert.True(recovered.State == RealOperationState.Succeeded, recovered.Code);
+        Assert.Equal(calls, setup.Fixture.Adapter.CallCount);
+    }
+
     [Fact]
     public async Task MultiMaximumCreatesOneExactHalfGibSeedThenSearchesEachActualTierWithoutShrinking()
     {
@@ -70,6 +107,14 @@ public sealed partial class WindowsRealStorageBackendTests
         Assert.True(WindowsRealStorageBackend.MaximumAggregateLayoutMatches(source));
         var nullSource = source with { Fields = source.Fields.Select(field => field.Name == fieldName ? field with { Value = JsonSerializer.SerializeToElement<object?>(null) } : field).ToImmutableArray() };
         Assert.True(WindowsRealStorageBackend.MaximumAggregateLayoutMatches(nullSource));
+        Assert.True(WindowsRealStorageBackend.MaximumAggregateLayoutMatches(JsonSerializer.Deserialize<WinPoolSourceObject>(JsonSerializer.Serialize(nullSource))!));
+        if (fieldName == "Interleave")
+        {
+            // Only the differing dimension must be null; common provider dimensions remain concrete.
+            var differentInterleave = StorageLayoutParameters.LegacyDefault with { InterleaveBytes = 16384 };
+            Assert.True(WindowsRealStorageBackend.MaximumAggregateLayoutMatches(nullSource, differentInterleave));
+            Assert.False(WindowsRealStorageBackend.MaximumAggregateLayoutMatches(source, differentInterleave));
+        }
         var missing = source with { Fields = source.Fields.Where(field => field.Name != fieldName).ToImmutableArray() };
         Assert.False(WindowsRealStorageBackend.MaximumAggregateLayoutMatches(missing));
         var incompatible = source with { Fields = source.Fields.Select(field => field.Name == fieldName ? field with {
@@ -120,27 +165,27 @@ public sealed partial class WindowsRealStorageBackendTests
 
     private static async Task<(Fixture Fixture, OperationPlan Plan, RealOperationStep Step, RealStepPreflight Preflight, MaximumMemoryJournal Journal)>
         MultiMaximumFixtureAsync(bool partial, int initialGib = 5, int hddMaximumGib = 6, int ssdMaximumGib = 3,
-            bool physicalAllocationCounter = false)
+            bool physicalAllocationCounter = false, bool single = false, bool explicitSsd = false, int interleave = 65536)
     {
-        var fixture = new Fixture(secondDisk: true, storageJobs: new SyntheticStorageJobReader(), maximumCapacityClock: true);
+        var fixture = new Fixture(secondDisk: !single, storageJobs: new SyntheticStorageJobReader(), maximumCapacityClock: true);
         var allocated = new Dictionary<string, long>(StringComparer.Ordinal);
         StorageSnapshot Snapshot(StorageSnapshot snapshot)
         {
             var first = TieredCreationSnapshot(snapshot, false);
-            var hdd = first.StorageTiers.Single();
+            var hdd = first.StorageTiers.Single() with { Interleave = interleave };
             var ssd = hdd with { StableId = "tier:ssd", FriendlyName = "SSD template", MediaType = "SSD", MemberPhysicalDiskIds = [OtherPhysicalId] };
-            var templates = new[] { hdd, ssd };
+            var templates = single ? new[] { hdd } : new[] { hdd, ssd };
             var total = allocated.Values.Sum();
             return first with
             {
                 PhysicalDisks = snapshot.PhysicalDisks.Select(item => item with { Size = 100 * MaximumCapacityAlgorithm.GiB,
                     MediaType = item.StableId == OtherPhysicalId ? "SSD" : "HDD", PoolStableId = "pool:returned", CanPool = false }).ToArray(),
                 StoragePools = [first.StoragePools.Single(item => item.IsPrimordial) with { MemberPhysicalDiskIds = [] },
-                    first.StoragePools.Single(item => !item.IsPrimordial) with { MemberPhysicalDiskIds = [PhysicalId, OtherPhysicalId], Size = 200 * MaximumCapacityAlgorithm.GiB }],
+                    first.StoragePools.Single(item => !item.IsPrimordial) with { MemberPhysicalDiskIds = single ? [PhysicalId] : [PhysicalId, OtherPhysicalId], Size = (single ? 100 : 200) * MaximumCapacityAlgorithm.GiB }],
                 StorageTiers = allocated.Count == 0 ? templates : templates.Concat(templates.Select(item => item with {
                     StableId = item.StableId + ":actual", FriendlyName = "Provider allocated instance", VirtualDiskStableId = "vd:tiered",
                     Size = allocated[item.StableId], FootprintOnPool = allocated[item.StableId] })).ToArray(),
-                VirtualDisks = allocated.Count == 0 ? [] : [new("vd:tiered", true, "Tiered VD", "Healthy", "OK", "Simple", "Fixed", 1, 65536,
+                VirtualDisks = allocated.Count == 0 ? [] : [new("vd:tiered", true, "Tiered VD", "Healthy", "OK", "Simple", "Fixed", 1, interleave,
                     total, total, "pool:returned", templates.Select(item => item.StableId + ":actual").ToArray(), [9], NumberOfDataCopies: 1,
                     PhysicalDiskRedundancy: 0, AllocatedSize: total)],
                 OsDisks = allocated.Count == 0 ? [] : [new("disk:tiered", "Tiered VD", 9, "RAW", total, false, false, false, null, "vd:tiered")]
@@ -174,13 +219,15 @@ public sealed partial class WindowsRealStorageBackendTests
         };
         var topology = await fixture.Reader.CaptureAsync(default);
         var pool = fixture.Id(StorageObjectKind.StoragePool, "pool:returned");
-        var members = new[] { fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId), fixture.Id(StorageObjectKind.PhysicalDisk, OtherPhysicalId) };
+        var members = single ? new[] { fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId) } : new[] { fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId), fixture.Id(StorageObjectKind.PhysicalDisk, OtherPhysicalId) };
         var closure = topology.RequireExactPhysicalMemberSet(pool, members);
-        var templates = new[] { fixture.Id(StorageObjectKind.StorageTier, "tier:template"), fixture.Id(StorageObjectKind.StorageTier, "tier:ssd") };
+        var templates = single ? new[] { fixture.Id(StorageObjectKind.StorageTier, "tier:template") } : new[] { fixture.Id(StorageObjectKind.StorageTier, "tier:template"), fixture.Id(StorageObjectKind.StorageTier, "tier:ssd") };
         var policy = new MaximumCapacityPolicy(MaximumCapacityAlgorithm.Version, (initialGib + 1L) * MaximumCapacityAlgorithm.GiB, initialGib * MaximumCapacityAlgorithm.GiB,
             100 * MaximumCapacityAlgorithm.GiB, 204, "fixture provider", closure.Fingerprint, topology.Facts.InventoryCapturedAt);
         var command = new CreateTieredVirtualDiskCommand(RealTargetReference.ForExisting(pool), RealTargetReference.ForExisting(templates[0]),
-            "Tiered VD", 0, true, MaximumCapacity: policy, CapacityTiers: templates.Select(id => new MaximumCapacityTier(RealTargetReference.ForExisting(id), policy)).ToArray());
+            "Tiered VD", 0, true, MaximumCapacity: policy, CapacityTiers: templates.Select(id => new MaximumCapacityTier(RealTargetReference.ForExisting(id), explicitSsd && id.ProviderKey == "tier:ssd" ? null : policy,
+                explicitSsd && id.ProviderKey == "tier:ssd" ? 2 * MaximumCapacityAlgorithm.GiB : null,
+                !(explicitSsd && id.ProviderKey == "tier:ssd"), new("Simple", 1, interleave))).ToArray());
         var step = new RealOperationStep("max-multi", command, [], "Exact pool", "Per-tier boundaries", "RAW allocation", "fixture");
         var environment = new EnvironmentProfile(EnvironmentId.New(), EnvironmentKind.LocalMachine, MachineBinding,
             ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, topology.Facts.InventoryCapturedAt);
@@ -195,7 +242,7 @@ public sealed partial class WindowsRealStorageBackendTests
             var attempt = journal.Records[^1].Attempt;
             rejected = false;
             if (attempt.Phase == MaximumCapacityAttemptPhase.Seed)
-                foreach (var template in templates) allocated[template.ProviderKey] = initialGib * MaximumCapacityAlgorithm.GiB / 2;
+                foreach (var template in templates) allocated[template.ProviderKey] = explicitSsd && template.ProviderKey == "tier:ssd" ? 2 * MaximumCapacityAlgorithm.GiB : initialGib * MaximumCapacityAlgorithm.GiB / 2;
             else
             {
                 var bound = attempt.SearchTargetKey == "tier:template" ? (long)hddMaximumGib : ssdMaximumGib;
@@ -208,7 +255,7 @@ public sealed partial class WindowsRealStorageBackendTests
             var attempt = journal.Records[^1].Attempt;
             if (rejected) return new(true, "provider.error-outcome-unknown", null, null, null, null, null, null, "capacity",
                 ProviderFailure: new(40000, "cdxml-storagewmi-error-id", "StorageWMI 40000,Resize-StorageTier", null, null, null, null));
-            var id = attempt.Phase == MaximumCapacityAttemptPhase.Seed ? "vd:tiered" : attempt.SearchTargetKey + ":actual";
+            var id = attempt.Phase is MaximumCapacityAttemptPhase.Seed or MaximumCapacityAttemptPhase.Create ? "vd:tiered" : attempt.SearchTargetKey + ":actual";
             var provider = new WindowsStorageCommandResult(true, "provider.returned", id, id, null, null, null, null, null);
             return provider;
         };

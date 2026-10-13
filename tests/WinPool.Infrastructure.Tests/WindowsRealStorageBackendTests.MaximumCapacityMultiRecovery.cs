@@ -22,14 +22,14 @@ public sealed partial class WindowsRealStorageBackendTests
         var ids = closure.Objects.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         var observation = new WindowsMaximumCapacityMultiObservation(topology.InventoryVersion, topology.MachineBinding,
             closure.Fingerprint, closure.PhysicalMemberFingerprint, closure.Objects,
-            topology.Facts.Relationships.Where(edge => !edge.IsRetained && ids.Contains(edge.FromId) && ids.Contains(edge.ToId)).ToArray(), closure.Members);
+            topology.Facts.Relationships.Where(edge => !edge.IsRetained && ids.Contains(edge.FromId) && ids.Contains(edge.ToId)).ToArray(), closure.Members, "\nsubsystem|" + closure.SubsystemStableId + "|" + closure.SubsystemUniqueId + "|" + closure.SubsystemObjectId);
         var inputs = macro.CapacityTiers!.Select(item =>
         {
             var source = topology.RequireObject(item.Tier.Existing!.Value);
             var tier = topology.Snapshot.StorageTiers.Single(value => value.StableId == source.Id);
             return new WindowsStorageTierTarget(source.Id, source.Field("UniqueId")!.Value!.Value.GetString()!,
                 source.Field("ObjectId")!.Value!.Value.GetString()!, tier.MediaType,
-                MaximumCapacityAlgorithm.SeedBytes(item.MaximumCapacity!.InitialCandidateBytes));
+                MaximumCapacityAlgorithm.SeedBytes(item.MaximumCapacity!.InitialCandidateBytes), item.Layout);
         }).ToArray();
         var target = WindowsRealStorageBackend.BuildMultiMaximumTarget(topology, closure, macro.Pool.Existing!.Value, null)
             with { MaximumCapacityAttempt = true, TierInputs = inputs,
@@ -71,7 +71,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var result = await setup.Fixture.Backend.ReconcileMaximumCapacitySearchAsync(setup.Plan, setup.Step,
             new(setup.Step.Id, RealOperationStepState.OutcomeUnknown, "lost_parent_receipt", setup.Preflight.TargetEvidenceJson, null),
             setup.Journal.Records, default);
-        Assert.Equal(RealOperationState.Succeeded, result.State);
+        Assert.True(result.State == RealOperationState.Succeeded, result.Code);
         Assert.True(result.CanReleaseWriteBarrier);
         var evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(Assert.Single(result.Steps).ResultEvidence!)!;
         Assert.Equal((hdd + ssd) * MaximumCapacityAlgorithm.GiB, evidence.MaximumCapacityMulti!.ActualSizeBytes);
@@ -195,7 +195,7 @@ public sealed partial class WindowsRealStorageBackendTests
             var changed = new WindowsMaximumCapacityMultiObservation(topology.InventoryVersion, topology.MachineBinding,
                 closure.Fingerprint, closure.PhysicalMemberFingerprint, closure.Objects,
                 topology.Facts.Relationships.Where(edge => !edge.IsRetained && ids.Contains(edge.FromId) && ids.Contains(edge.ToId)).ToArray(),
-                closure.Members);
+                closure.Members, "\nsubsystem|" + closure.SubsystemStableId + "|" + closure.SubsystemUniqueId + "|" + closure.SubsystemObjectId);
             receipt = receipt with { First = changed,
                 Verified = receipt.Verified! with { PostFingerprint = closure.Fingerprint } };
             setup.Journal.Records[0] = row with { Result = row.Result! with { ResultEvidenceJson = JsonSerializer.Serialize(receipt) } };

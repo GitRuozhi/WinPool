@@ -1,6 +1,12 @@
 using WinPool.Domain;
+using System.Text.Json.Serialization;
 namespace WinPool.Application;
 public enum PoolVirtualDiskLayout { Ordinary, HddTiered }
+
+public sealed record PoolTierEditIntent(string MediaType, StorageLayoutParameters Layout,
+    long SizeBytes, bool UseMaximumSize, string? VerifiedTemplateId = null);
+
+public sealed record PoolMemberEditIntent(string PhysicalDiskId, string Usage);
 
 public sealed record PoolEditIntent(
         bool AutoCreateVirtualDisk,
@@ -17,7 +23,11 @@ public sealed record PoolEditIntent(
         string PartitionStyle = "GPT",
         bool QuickFormat = true,
         string? VerifiedVirtualDiskId = null,
-        bool PendingAutomaticLayout = false);
+        bool PendingAutomaticLayout = false,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<PoolTierEditIntent>? Tiers = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<PoolMemberEditIntent>? MemberUsages = null);
 
 public sealed record EditorDraftState(
         StorageSnapshot Snapshot,

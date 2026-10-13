@@ -9,6 +9,18 @@ namespace WinPool.App.Tests;
 
 public sealed class RealAutomaticLayoutProgressTests
 {
+    [Theory]
+    [InlineData("NTFS")]
+    [InlineData("ReFS")]
+    [InlineData("exFAT")]
+    public void VerifiedFormatRetainsTheRequestedFileSystemWithoutReplayingIt(string fileSystem)
+    {
+        var fixture = new Fixture(fileSystem: fileSystem);
+        fixture.Progress.Observe(fixture.Layout, Response(fixture.Layout, "create-msr", "create-data", "format-data"));
+        var next = fixture.Progress.BuildNext(fixture.Fresh(2, formatted: true), fixture.Intent)!;
+        Assert.IsType<SetDriveLetterCommand>(Assert.Single(next.Steps).Command);
+    }
+
     [Fact]
     public void CancelBeforeLayoutKeepsTheExactOriginalFirstStep()
     {
@@ -181,7 +193,7 @@ public sealed class RealAutomaticLayoutProgressTests
         public PoolEditIntent Intent { get; }
         public RealOperationIntentRequest Layout { get; }
         public RealAutomaticLayoutProgress Progress { get; }
-        public Fixture(bool providerMsr = false)
+        public Fixture(bool providerMsr = false, string fileSystem = "NTFS")
         {
             var source = SimulationLayouts.StandardTiered();
             var vd = source.VirtualDisks.First();
@@ -202,12 +214,12 @@ public sealed class RealAutomaticLayoutProgressTests
             empty = new(StorageSystemDocument.CurrentSchemaVersion, "local:layout-progress-tests", StorageSystemKind.Local,
                 "Progress tests", source, [], DateTimeOffset.UtcNow);
             empty = empty with { SourceFacts = WinPoolSimulationFacts.Create(source, empty.SystemId) with { IsSimulation = false } };
-            Intent = new(true, true, "NTFS", 65536, "Original label", VirtualDiskName: vd.FriendlyName,
+            Intent = new(true, true, fileSystem, 65536, "Original label", VirtualDiskName: vd.FriendlyName,
                 DriveLetter: 'E', VerifiedVirtualDiskId: vd.StableId, PendingAutomaticLayout: true);
             Layout = RealOperationProposalFactory.ConfigureInitializedDisk(empty.SystemId,
                 new(empty.SystemId, StorageObjectKind.OsDisk, disk.StableId), providerMsr
                     ? new StorageObjectId(empty.SystemId, StorageObjectKind.Partition, "partition:provider-msr") : null,
-                true, disk.Size, true, Intent.VolumeName, 'E')!;
+                true, disk.Size, true, Intent.VolumeName, 'E', 65536, fileSystem)!;
             Progress = new(Layout, vd.StableId, Intent);
         }
 
@@ -224,7 +236,7 @@ public sealed class RealAutomaticLayoutProgressTests
                     DriveLetter = assigned && command.Role == RealPartitionRole.BasicData ? "E" : "",
                     FileSystem = "", FileSystemLabel = "", AllocationUnitSize = null, Path = ""
                 }).ToArray();
-            var volumes = formatted ? new[] { new VolumeInfo("volume:verified-data", true, DataId, "NTFS", Intent.VolumeName,
+            var volumes = formatted ? new[] { new VolumeInfo("volume:verified-data", true, DataId, Intent.FileSystem, Intent.VolumeName,
                 additions.Single(partition => partition.StableId == DataId).Size, 0, 65536, "Healthy", "OK", assigned ? ["E:\\"] : []) } : [];
             return Project(snapshot with
             { Partitions = snapshot.Partitions.Concat(additions).ToArray(), Volumes = snapshot.Volumes.Concat(volumes).ToArray() });

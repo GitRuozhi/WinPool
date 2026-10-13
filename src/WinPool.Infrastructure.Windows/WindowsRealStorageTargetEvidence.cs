@@ -34,10 +34,13 @@ public sealed record WindowsStorageCommandTarget(
     string PhysicalMemberObjectId = "",
     bool MaximumCapacityAttempt = false,
     IReadOnlyList<WindowsStoragePhysicalMemberTarget>? PhysicalMembers = null,
-    IReadOnlyList<WindowsStorageTierTarget>? TierInputs = null);
+    IReadOnlyList<WindowsStorageTierTarget>? TierInputs = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StorageLayoutParameters? Layout = null);
 
 public sealed record WindowsStoragePhysicalMemberTarget(string StableId, string UniqueId, string ObjectId, string SerialNumber);
-public sealed record WindowsStorageTierTarget(string TemplateStableId, string UniqueId, string ObjectId, string MediaType, long SizeBytes);
+public sealed record WindowsStorageTierTarget(string TemplateStableId, string UniqueId, string ObjectId, string MediaType, long SizeBytes,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StorageLayoutParameters? Layout = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? UseMaximumSize = null);
 
 /// <summary>
 /// A command return is evidence for post-call capture, not a verified success.

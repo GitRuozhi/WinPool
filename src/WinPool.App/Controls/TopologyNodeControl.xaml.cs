@@ -32,6 +32,7 @@ public sealed partial class TopologyNodeControl : UserControl
     private TranslateTransform? _dragPreviewTransform;
     private Storyboard? _pendingAnimation;
     private double _pendingPerimeter;
+    private Brush? _pendingAccentBrush;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -42,6 +43,7 @@ public sealed partial class TopologyNodeControl : UserControl
     public TopologyNodeControl()
     {
         InitializeComponent();
+        _pendingAccentBrush = PendingMark.Fill;
         ContextHelp.Set(ExpandButton, "展开或折叠此结构节点。 / Expand or collapse this structure node.");
         ContextHelp.SetDisabledReason(ExpandButton, "当前节点没有可展开的子项。 / This node has no child items to expand.");
         Loaded += (_, _) => { UpdateSelectionVisual(); UpdateAvailabilityGeometry(); UpdatePendingOutline(); };
@@ -204,33 +206,18 @@ public sealed partial class TopologyNodeControl : UserControl
         NodeBorder.Padding = new Thickness(6);
         NodeBorder.CornerRadius = new CornerRadius(4);
 
-        if (ViewModel.IsSelected)
-        {
-            NodeBorder.Background = Brush("WinPoolAccentBrush");
-            NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
-            InteractionBorder.BorderBrush = Brush("WinPoolAccentBorderBrush");
-            InteractionBorder.Visibility = Visibility.Visible;
-            SetTextBrush(Brush("WinPoolAccentForegroundBrush"));
-            return;
-        }
+        var isEmphasized = ViewModel.IsSelected || _isPointerOver || _hasKeyboardFocus;
+        var state = ViewModel.IsSelected ? "Selected"
+            : isEmphasized ? "PointerOver" : "Normal";
+        // The XAML states resolve theme resources in the control's actual
+        // theme context. Looking up ThemeResource keys through
+        // Application.Current.Resources can throw when a key exists only in
+        // WinUI's theme dictionaries.
+        VisualStateManager.GoToState(this, state, false);
 
-        if (_isPointerOver || _hasKeyboardFocus)
-        {
-            NodeBorder.Background = Brush("WinPoolAccentHoverBrush");
-            NodeBorder.BorderBrush = Brush("CardStrokeColorDefaultBrush");
-            InteractionBorder.BorderBrush = Brush("WinPoolAccentBorderBrush");
-            InteractionBorder.Visibility = Visibility.Visible;
-            SetTextBrush(Brush("TextFillColorPrimaryBrush"));
-            return;
-        }
-
-        NodeBorder.Background = Brush("LayerFillColorDefaultBrush");
-        NodeBorder.BorderBrush = Brush("WinPoolTopologyRestStrokeBrush");
-        InteractionBorder.Visibility = Visibility.Collapsed;
-        DisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
-        TypeLabelText.Foreground = Brush("TextFillColorSecondaryBrush");
-        SummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
-        var iconBrush = Brush("TextFillColorSecondaryBrush");
+        var primaryBrush = DisplayNameText.Foreground;
+        var secondaryBrush = TypeLabelText.Foreground;
+        var iconBrush = isEmphasized ? primaryBrush : secondaryBrush;
         TypeIcon.Foreground = iconBrush;
         SingleLineTypeIcon.Foreground = iconBrush;
         ExpandIcon.Foreground = iconBrush;
@@ -242,42 +229,11 @@ public sealed partial class TopologyNodeControl : UserControl
         SingleLineWindowsSquare2.Fill = iconBrush;
         SingleLineWindowsSquare3.Fill = iconBrush;
         SingleLineWindowsSquare4.Fill = iconBrush;
-        SingleLineDisplayNameText.Foreground = Brush("TextFillColorPrimaryBrush");
-        SingleLineSummaryText.Foreground = Brush("TextFillColorSecondaryBrush");
-        ApplyStatusMarkBrushes(iconBrush, Brush("WinPoolAccentBrush"));
-    }
-
-    private static Brush Brush(string key) =>
-        (Brush)Application.Current.Resources[key];
-
-    private void SetTextBrush(Brush brush)
-    {
-        DisplayNameText.Foreground = brush;
-        TypeLabelText.Foreground = brush;
-        SummaryText.Foreground = brush;
-        TypeIcon.Foreground = brush;
-        SingleLineTypeIcon.Foreground = brush;
-        SingleLineDisplayNameText.Foreground = brush;
-        SingleLineSummaryText.Foreground = brush;
-        ExpandIcon.Foreground = brush;
-        WindowsMarkerSquare1.Fill = brush;
-        WindowsMarkerSquare2.Fill = brush;
-        WindowsMarkerSquare3.Fill = brush;
-        WindowsMarkerSquare4.Fill = brush;
-        SingleLineWindowsSquare1.Fill = brush;
-        SingleLineWindowsSquare2.Fill = brush;
-        SingleLineWindowsSquare3.Fill = brush;
-        SingleLineWindowsSquare4.Fill = brush;
-        ApplyStatusMarkBrushes(
-            brush,
-            ViewModel.IsSelected ? brush : Brush("WinPoolAccentBrush"));
-    }
-
-    private void ApplyStatusMarkBrushes(Brush presenceBrush, Brush pendingBrush)
-    {
-        StoredDataMark.Foreground = presenceBrush;
-        CannotLeaveMark.Foreground = presenceBrush;
-        PendingMark.Fill = pendingBrush;
+        SingleLineDisplayNameText.Foreground = primaryBrush;
+        SingleLineSummaryText.Foreground = isEmphasized ? primaryBrush : secondaryBrush;
+        StoredDataMark.Foreground = iconBrush;
+        CannotLeaveMark.Foreground = iconBrush;
+        PendingMark.Fill = ViewModel.IsSelected ? primaryBrush : _pendingAccentBrush ?? PendingMark.Fill;
     }
 
     private void TopologyNodeControl_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -509,13 +465,13 @@ public sealed partial class TopologyNodeControl : UserControl
         {
             Glyph = ViewModel.TypeGlyph,
             FontSize = 14,
-            Foreground = Brush("TextFillColorPrimaryBrush")
+            Foreground = DisplayNameText.Foreground
         });
         heading.Children.Add(new TextBlock
         {
             Text = ViewModel.Unit.DisplayName,
             MaxWidth = Math.Clamp(ActualWidth, 180, 300) - 52,
-            Foreground = Brush("TextFillColorPrimaryBrush"),
+            Foreground = DisplayNameText.Foreground,
             TextWrapping = TextWrapping.Wrap
         });
         var content = new StackPanel { Spacing = 4 };
@@ -523,7 +479,7 @@ public sealed partial class TopologyNodeControl : UserControl
         content.Children.Add(new TextBlock
         {
             Text = ViewModel.Summary,
-            Foreground = Brush("TextFillColorSecondaryBrush"),
+            Foreground = SummaryText.Foreground,
             TextWrapping = TextWrapping.Wrap
         });
 
@@ -537,8 +493,8 @@ public sealed partial class TopologyNodeControl : UserControl
             Child = content,
             Width = Math.Clamp(ActualWidth, 180, 300),
             Padding = new Thickness(10),
-            Background = Brush("LayerFillColorDefaultBrush"),
-            BorderBrush = Brush("WinPoolAccentBorderBrush"),
+            Background = NodeBorder.Background,
+            BorderBrush = InteractionBorder.BorderBrush,
             BorderThickness = new Thickness(2),
             CornerRadius = new CornerRadius(2),
             Opacity = 0.9,

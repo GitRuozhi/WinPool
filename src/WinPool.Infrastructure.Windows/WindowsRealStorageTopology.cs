@@ -90,6 +90,29 @@ public sealed class WindowsRealStorageTopology
         return value;
     }
 
+    internal StoragePoolInfo? FindConcretePoolForTarget(StorageObjectId target)
+    {
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>();
+        pending.Enqueue(RequireObject(target).Id);
+        while (pending.TryDequeue(out var id))
+        {
+            if (!visited.Add(id)) continue;
+            foreach (var neighbour in neighbours[id]) pending.Enqueue(neighbour);
+        }
+        var pools = Snapshot.StoragePools.Where(item => !item.IsPrimordial && visited.Contains(item.StableId)).ToArray();
+        if (pools.Length > 1) throw new InvalidDataException("The exact target spans multiple concrete pools.");
+        return pools.SingleOrDefault();
+    }
+
+    internal RealTargetClosure RequireCapabilityClosure(StorageObjectId target)
+    {
+        var pool = FindConcretePoolForTarget(target);
+        return pool is null || pool.MemberPhysicalDiskIds.Count == 1 ? RequireSinglePhysicalClosure([target])
+            : RequireExactPhysicalMemberSet(new(SystemId, StorageObjectKind.StoragePool, pool.StableId),
+                pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray()).AsComponentClosure();
+    }
+
     /// <summary>
     /// Includes the entire connected storage component: an existing pool's
     /// other members cannot be hidden by selecting only one child in the UI.
@@ -174,7 +197,7 @@ public sealed class WindowsRealStorageTopology
                     poolMemberRoles ??= RequirePoolMemberRoleEvidence(item);
                     continue;
                 }
-                if (IsUnallocatedTemplateCapacity(item, issue)) continue;
+                if (IsUnallocatedTemplateCapacity(item, issue) || IsNeutralSimpleLayoutField(item, issue)) continue;
                 if (IsOfflinePartitionHiddenUnavailable(item, issue))
                 {
                     offlinePartitionsNeedingNativeProof.Add(item.Id);
@@ -220,7 +243,7 @@ public sealed class WindowsRealStorageTopology
         if (concretePool.Kind != StorageObjectKind.StoragePool
             || concretePool.System != SystemId
             || approvedMembers is null
-            || approvedMembers.Count < 2)
+            || approvedMembers.Count < 1)
         {
             throw new InvalidDataException("Multi-tier MAX requires one existing pool and its complete approved physical member set.");
         }
@@ -333,7 +356,7 @@ public sealed class WindowsRealStorageTopology
                         throw new InvalidDataException("A physical role observation failed.");
                     continue;
                 }
-                if (IsUnallocatedTemplateCapacity(item, issue)) continue;
+                if (IsUnallocatedTemplateCapacity(item, issue) || IsNeutralSimpleLayoutField(item, issue)) continue;
                 if (IsOfflinePartitionHiddenUnavailable(item, issue)) continue;
                 throw new InvalidDataException("A related storage safety field could not be read.");
             }
@@ -350,7 +373,8 @@ public sealed class WindowsRealStorageTopology
                 RequireExactPoolMemberRoleEvidence(item, pool, membersById.Keys.ToHashSet(StringComparer.Ordinal))))
             .ToArray();
 
-        var component = "real-exact-physical-member-set-v1\n" + CanonicalComponent(connected, visited);
+        var component = "real-exact-physical-member-set-v1\n" + CanonicalComponent(connected, visited)
+            + "\nsubsystem|" + subsystem.Id + "|" + RequiredText(subsystem, "UniqueId") + "|" + RequiredText(subsystem, "ObjectId");
         var fingerprint = Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes(component))).ToLowerInvariant();
         var physicalMemberFingerprint = Convert.ToHexString(
@@ -358,7 +382,6 @@ public sealed class WindowsRealStorageTopology
             {
                 Version = "physical-member-set-v1",
                 MachineBinding,
-                Pool = new { Id = pool.Id, UniqueId = RequiredText(pool, "UniqueId"), ObjectId = RequiredText(pool, "ObjectId") },
                 Members = memberEvidence.Select(member => new
                 {
                     member.PhysicalDiskId,
@@ -385,7 +408,107 @@ public sealed class WindowsRealStorageTopology
             connected.OrderBy(item => item.Id, StringComparer.Ordinal).ToArray(),
             fingerprint,
             physicalMemberFingerprint,
-            memberEvidence);
+            memberEvidence)
+        {
+            SubsystemStableId = subsystem.Id,
+            SubsystemUniqueId = RequiredText(subsystem, "UniqueId"),
+            SubsystemObjectId = RequiredText(subsystem, "ObjectId")
+        };
+    }
+
+    /// <summary>Exact selected free members, before their new concrete pool exists.</summary>
+    public RealExactPhysicalMemberSetClosure RequireSelectedPhysicalMemberSet(IReadOnlyList<StorageObjectId> approvedMembers, bool requirePoolable = true)
+    {
+        if (approvedMembers is null || approvedMembers.Count == 0 || approvedMembers.Distinct().Count() != approvedMembers.Count)
+            throw new InvalidDataException("A nonempty unique selected physical member set is required.");
+        var components = new List<RealTargetClosure>();
+        var members = new List<WindowsExactPhysicalMemberRoleEvidence>();
+        WinPoolSourceObject? subsystem = null;
+        foreach (var id in approvedMembers.OrderBy(item => item.ProviderKey, StringComparer.Ordinal))
+        {
+            if (id.Kind != StorageObjectKind.PhysicalDisk) throw new InvalidDataException("Selected members must be physical disks.");
+            var physical = RequireObject(id);
+            var projected = Snapshot.PhysicalDisks.Single(item => item.StableId == id.ProviderKey);
+            var pools = Facts.Relationships.Where(item => !item.IsRetained && item.Kind == "pool-member" && item.ToId == id.ProviderKey).ToArray();
+            if (requirePoolable && !projected.CanPool || pools.Length != 1 || !IsPrimordialPool(objects[pools[0].FromId]))
+                throw new InvalidDataException("Every selected member must be poolable and belong only to its primordial pool.");
+            var parents = Facts.Relationships.Where(item => !item.IsRetained && item.Kind == "subsystem-pool" && item.ToId == pools[0].FromId).ToArray();
+            if (parents.Length != 1 || objects[parents[0].FromId] is not { ObjectType: FactObjectType.StorageSubsystem, HasReliableIdentity: true } current
+                || !HasIdentity(current) || string.IsNullOrWhiteSpace(RequiredText(current, "UniqueId")) || string.IsNullOrWhiteSpace(RequiredText(current, "ObjectId"))
+                || subsystem is not null && subsystem.Id != current.Id)
+                throw new InvalidDataException("Selected members must share one exact current storage subsystem.");
+            subsystem = current;
+            var component = RequireSinglePhysicalClosure([id]);
+            if (component.Objects.Any(item => item.ObjectType is FactObjectType.StoragePool or FactObjectType.VirtualDisk or FactObjectType.StorageTier))
+                throw new InvalidDataException("A selected free member is connected to an existing concrete storage structure.");
+            components.Add(component);
+            members.Add(new(id.ProviderKey, RequiredText(physical, "UniqueId"), RequiredText(physical, "ObjectId"),
+                RequiredText(physical, "SerialNumber"), RequiredPositiveInt64(physical, "Size"), RequireFreeMemberRoleEvidence(physical)));
+        }
+        var connected = components.SelectMany(item => item.Objects).DistinctBy(item => item.Id).OrderBy(item => item.Id, StringComparer.Ordinal).ToArray();
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("real-exact-physical-member-set-v1\n" +
+            CanonicalComponent(connected, connected.Select(item => item.Id).ToHashSet(StringComparer.Ordinal))
+            + "\nsubsystem|" + subsystem!.Id + "|" + RequiredText(subsystem, "UniqueId") + "|" + RequiredText(subsystem, "ObjectId")))).ToLowerInvariant();
+        var memberFingerprint = PhysicalSetFingerprint(members);
+        return new(default, "", "", "", InventoryVersion, connected, fingerprint, memberFingerprint, members)
+        {
+            SubsystemStableId = subsystem!.Id, SubsystemUniqueId = RequiredText(subsystem, "UniqueId"), SubsystemObjectId = RequiredText(subsystem, "ObjectId")
+        };
+    }
+
+    private string PhysicalSetFingerprint(IReadOnlyList<WindowsExactPhysicalMemberRoleEvidence> members) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        {
+            Version = "physical-member-set-v1", MachineBinding,
+            Members = members.OrderBy(item => item.PhysicalDiskId, StringComparer.Ordinal).Select(member => new
+            {
+                member.PhysicalDiskId, member.UniqueId, member.ObjectId, member.SerialNumber, member.SizeBytes,
+                Roles = new { member.PoolMemberRoleEvidence.IsBoot, member.PoolMemberRoleEvidence.IsSystem,
+                    member.PoolMemberRoleEvidence.IsPageFile, member.PoolMemberRoleEvidence.IsCrashDump }
+            }).ToArray()
+        })))).ToLowerInvariant();
+
+    private WindowsPoolMemberRoleEvidence RequireFreeMemberRoleEvidence(WinPoolSourceObject physical)
+    {
+        foreach (var disk in objects.Values.Where(item => item.ObjectType == FactObjectType.Disk))
+        {
+            var owners = Facts.Relationships.Where(item => !item.IsRetained && item.Kind == "same-device" && item.ToId == disk.Id).ToArray();
+            if (!disk.HasReliableIdentity || !HasIdentity(disk) || owners.Length != 1
+                || objects[owners[0].FromId] is not { HasReliableIdentity: true } owner || !HasIdentity(owner)
+                || owner.ObjectType is not (FactObjectType.PhysicalDisk or FactObjectType.VirtualDisk))
+                throw new InvalidDataException("A current OS disk lacks complete exact device ownership for free-member role proof.");
+        }
+        var related = Facts.Relationships.Where(item => !item.IsRetained && item.Kind == "same-device" && item.FromId == physical.Id)
+            .Select(item => objects[item.ToId]).ToArray();
+        var projected = Snapshot.PhysicalDisks.Single(item => item.StableId == physical.Id);
+        var projectedRolesKnown = !Snapshot.FieldIssues.Any(item => item.ObjectId == physical.Id && item.State != FieldReadState.Returned
+            && item.FieldName is "IsBoot" or "IsSystem" or "IsPageFile" or "IsCrashDump");
+        if (!projectedRolesKnown && related.Length == 0 && !projected.CanPool)
+            throw new InvalidDataException("A non-poolable member with unknown roles has no complete current device ownership proof.");
+        if (projected.IsBoot || projected.IsSystem || projected.IsPageFile || projected.IsCrashDump)
+            throw new InvalidDataException("A selected free member has a protected current Windows role.");
+        foreach (var name in new[] { "IsBoot", "IsSystem", "IsPageFile", "IsCrashDump" })
+        {
+            if (physical.Field(name) is not { } field) continue;
+            if (field.ReadState == FieldReadState.Failed
+                || field.Value is { } role && role.ValueKind is not (JsonValueKind.Null or JsonValueKind.True or JsonValueKind.False)
+                || field.Value is { ValueKind: JsonValueKind.True })
+                throw new InvalidDataException("A selected free member has a protected, failed or malformed Windows role.");
+        }
+        foreach (var disk in related)
+        {
+            if (disk.ObjectType != FactObjectType.Disk || RequireReturnedBoolean(disk, "IsBoot") || RequireReturnedBoolean(disk, "IsSystem"))
+                throw new InvalidDataException("A selected member backs a protected OS disk.");
+            if (projectedRolesKnown) continue;
+            var roles = Facts.Relationships.Where(item => !item.IsRetained && item.Kind == "disk-supplement" && item.FromId == disk.Id)
+                .Select(item => objects[item.ToId]).Where(item => Facts.Sources.Single(source => source.Id == item.SourceRef).ClassName == "Windows.DiskRoles").ToArray();
+            if (roles.Length != 1 || Facts.Sources.Single(item => item.Id == roles[0].SourceRef) is not { ReadState: FieldReadState.Returned, Namespace: "winpool/native" } source
+                || source.CapturedAt != Facts.InventoryCapturedAt || !SameReturnedInteger(disk.Field("Number"), roles[0].Field("DiskNumber"))
+                || RequireReturnedBoolean(roles[0], "IsPageFile") || RequireReturnedBoolean(roles[0], "IsCrashDump"))
+                throw new InvalidDataException("The selected OS disk lacks complete current native role proof.");
+        }
+        return new(InventoryVersion, physical.Id, Snapshot.PhysicalDisks.Single(item => item.StableId == physical.Id).PoolStableId ?? "",
+            related.Select(item => item.Id).Order(StringComparer.Ordinal).ToArray(), false, false, false, false);
     }
 
     private WindowsPoolMemberRoleEvidence RequirePoolMemberRoleEvidence(WinPoolSourceObject physical)
@@ -393,6 +516,7 @@ public sealed class WindowsRealStorageTopology
         var relations = Facts.Relationships.Where(item => !item.IsRetained).ToArray();
         var parents = relations.Where(item => item.Kind == "pool-member" && item.ToId == physical.Id
             && objects[item.FromId].ObjectType == FactObjectType.StoragePool && !IsPrimordialPool(objects[item.FromId])).ToArray();
+        if (parents.Length == 0) return RequireFreeMemberRoleEvidence(physical);
         if (parents.Length != 1 || objects[parents[0].FromId] is not { HasReliableIdentity: true } pool
             || !HasIdentity(pool) || !IsReturnedBoolean(pool, "IsPrimordial", false))
             throw new InvalidDataException("Unknown physical roles need one exact current concrete pool membership.");
@@ -599,6 +723,16 @@ public sealed class WindowsRealStorageTopology
                 && relation.Kind == "template-pool-member" && relation.FromId == item.Id);
     }
 
+    private static bool IsNeutralSimpleLayoutField(WinPoolSourceObject item, StorageFieldIssue issue) =>
+        item.ObjectType == FactObjectType.StorageTier
+        && issue.FieldName is "NumberOfDataCopies" or "PhysicalDiskRedundancy"
+        && issue.State is FieldReadState.NotCollected or FieldReadState.Unavailable
+        && item.Field("ResiliencySettingName") is { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.String } setting }
+        && setting.GetString() == "Simple"
+        && (item.Field(issue.FieldName) is null or { ReadState: FieldReadState.NotCollected or FieldReadState.Unavailable }
+            or { ReadState: FieldReadState.Returned, Value: null }
+            or { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.Null } });
+
     private bool IsOfflinePartitionHiddenUnavailable(WinPoolSourceObject item, StorageFieldIssue issue)
     {
         // Windows returns IsHidden=null after a basic GPT disk is taken offline.
@@ -753,7 +887,16 @@ public sealed record RealExactPhysicalMemberSetClosure(
     IReadOnlyList<WinPoolSourceObject> Objects,
     string Fingerprint,
     string PhysicalMemberFingerprint,
-    IReadOnlyList<WindowsExactPhysicalMemberRoleEvidence> Members);
+    IReadOnlyList<WindowsExactPhysicalMemberRoleEvidence> Members)
+{
+    public string SubsystemStableId { get; init; } = "";
+    public string SubsystemUniqueId { get; init; } = "";
+    public string SubsystemObjectId { get; init; } = "";
+    public bool IsSelectedFreeSet => string.IsNullOrEmpty(PoolId);
+    public RealTargetClosure AsComponentClosure(string? physicalId = null) => new(physicalId ?? Members[0].PhysicalDiskId,
+        Objects, Fingerprint, PhysicalMemberFingerprint)
+    { PoolMemberRoleEvidence = Members.Single(item => item.PhysicalDiskId == (physicalId ?? Members[0].PhysicalDiskId)).PoolMemberRoleEvidence };
+}
 
 public interface IWindowsRealStorageFactSource
 {
