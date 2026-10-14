@@ -1,10 +1,16 @@
 # WinPool 变更记录
 
+## 2026-10-14：拓扑与编辑工作区更新（V0.60，迭代 0）
+
+拓扑对象的外框、悬停、选中、拖入目标和待应用动画统一为1 DIP；悬停／选中状态组移至节点表面根布局。待应用描边采用默认色和主题色各一对分段，每个稳定对象单独随机生成缓慢周期，尺寸调整时保持原周期；Apply有净差异时也使用该描边动画。状态SVG无背景，原因文字增大；可用性遮罩使用半透明黑底和仓库原生链环SVG平铺裁剪，祖先实际绘制遮罩时跳过后代重复遮罩，保留现有命中、菜单和编辑资格。
+
+编辑栏当前基准为中文520 DIP、英文568 DIP，标签列112／160 DIP，值列至少144 DIP；右侧属性卡独立折叠。结构页改为响应式动作流，保留原有全局动作图标；待应用计数打开只读明细，预览与Apply使用同一净差异来源。新池合法编辑即时进入当前草稿，不设保存按钮，也不直接写入Windows；草稿、选择、意图、Undo／Redo及合法未提交输入在GUI生命周期内跨页和切换系统保留，GUI关闭后不恢复。原条带大小改称“条带单元”，新增完整条带行显示“数据 KiB + 额外写入 KiB”：Simple为0、Parity为校验数据、Mirror为明确标记的额外物理副本；未知布局留空。Pool01管理和编辑视图共用业务层选择器，避免模板与实际层重复呈现，同时保留Windows来源对象和原始详情；根因诊断见[Pool01拓扑报告](Review/Pool01-Topology-20261014.md)。最终Release零警告／错误，23项独立窄回归与定向GUI验证通过；真实存储未写入，模拟状态与偏好已恢复。完整范围、录屏和未测边界见[Quality](Quality.md#v060-editor-topology)。
+
 ## 2026-10-14：新池成员与布局限制端到端解除（V0.59）
 
 按用户确认，取消旧新池真实 Apply 的单 HDD／Simple／单列／64 KiB 白名单，当前创建仍使用 Fixed。类型化路径已贯通完整池成员集合、HDD／SSD／SCM 逐介质 tier goals、布局参数、成员 Usage，以及逐层明确容量／MAX；仍由原结构 Apply 的一次确认和 Agent 冻结计划执行。固定 PowerShell 脚本继续内嵌，经标准输入传送固定脚本帧及类型化 JSON；精确成员身份与目标指纹绑定计划，provider 回执保留对象身份、tier 输入、能力证据和失败信息，最终状态仍须由 fresh 来源闭包验证。
 
-WDC真实GUI已验证16 KiB池／模板、热备及同池恢复数据角色、3724 GiB的16 KiB MAX VD、自动GPT／NTFS 64 KiB布局、名称直接提交及解散，并恢复授权末态。修复角色父池UID漏传／错误锁定／结果说明漏项、同池恢复误重算容量、分层创建漏共同布局，以及Primordial误判为已有池的拖动限制。最终Release零警告／错误，定点验证通过，没有运行全量测试；Samsung保护比较一致，无未终结操作。多成员硬件、SSD／SCM、冗余布局和多层MAX没有本轮实机结果。精确 provider 能力／范围、完整成员身份、Windows 安全事实与未终结结果屏障仍适用，不接受自由格式存储命令。版本保持 V0.59；活动范围和最终证据见 [Plan §10](Plan.md#real-pool-generalization)。
+WDC真实GUI已验证16 KiB池／模板、热备及同池恢复数据角色、3724 GiB的16 KiB MAX VD、自动GPT／NTFS 64 KiB布局、名称直接提交及解散，并恢复授权末态。修复角色父池UID漏传／错误锁定／结果说明漏项、同池恢复误重算容量、分层创建漏共同布局，以及Primordial误判为已有池的拖动限制。最终Release零警告／错误，定点验证通过，没有运行全量测试；Samsung保护比较一致，无未终结操作。多成员硬件、SSD／SCM、冗余布局和多层MAX没有本轮实机结果。精确 provider 能力／范围、完整成员身份、Windows 安全事实与未终结结果屏障仍适用，不接受自由格式存储命令。版本保持 V0.59；历史范围和最终证据见[归档 Plan §10](Archive/20261014-v059-completed-plan/Plan.md#real-pool-generalization)。
 
 ## 2026-10-13：新池草稿成员与属性限制清理（V0.59 阶段记录；后由本条全链路范围取代）
 
@@ -12,19 +18,19 @@ WDC真实GUI已验证16 KiB池／模板、热备及同池恢复数据角色、37
 
 ## 2026-10-13：用户指定前端交互与视觉阶段收口（V0.59）
 
-完成Plan §8的23项界面与状态呈现验收，修正只读D盘range查询误用Resize mutation检查，并按用户确认解除真实Resize运行路径限制；Delete／Format／Offline及其他核验保持原状。最终Release构建21.89秒、0警告／错误，6项有效窄测及定向GUI核验通过；未跑全量或真实存储写入。末态对完整GUI基线只读核验通过，App与Agent正常退出。D盘当前容量为整数MiB；此前查询因运行路径检查而被拒绝，provider边界带小数不代表当前容量带小数。详细范围、限制和证据见[Quality](Quality.md#2026-10-13-用户指定前端交互与视觉阶段收口-v059)及[Plan §8](Plan.md#8-2026-10-13用户指定前端阶段23项已验证)。版本保持V0.59，不推送。
+完成Plan §8的23项界面与状态呈现验收，修正只读D盘range查询误用Resize mutation检查，并按用户确认解除真实Resize运行路径限制；Delete／Format／Offline及其他核验保持原状。最终Release构建21.89秒、0警告／错误，6项有效窄测及定向GUI核验通过；未跑全量或真实存储写入。末态对完整GUI基线只读核验通过，App与Agent正常退出。D盘当前容量为整数MiB；此前查询因运行路径检查而被拒绝，provider边界带小数不代表当前容量带小数。详细范围、限制和证据见[Quality](Quality.md#2026-10-13-用户指定前端交互与视觉阶段收口-v059)及[归档 Plan §8](Archive/20261014-v059-completed-plan/Plan.md#8-2026-10-13用户指定前端阶段23项已验证)。版本保持V0.59，不推送。
 
 ## 2026-10-13：WDC实机破坏性GUI验收收口与Apply刷新修复（V0.59）
 
 用户纠正此前擅自增加的Pool01／ReFS数据保留限制后，按已确认授权完成WDC真实GUI全链：32 GiB NTFS／4 KiB分区实测压缩与扩展各1 GiB、快速格式化64 KiB，拖盘创建单HDD层及3724 GiB MAX VD，并恢复授权的GPT／canonical 16 MiB MSR／NTFS 64 KiB `WinPool_Test` E:末态。Samsung 15对象保护闭包结构零差异；27个新增操作Completed、37步Verified。4 KiB仅为短时实测，不代表长期耐久或推荐，多盘、SCM等仍未设备验收。
 
-修复首次Primordial拖盘建池后Apply按钮未立即刷新的问题，保持原安全校验、偏好及MAX语义；最终Release重建后真实AutoVD／AutoPart开关关闭和开启的拖入均立即启用Apply，模拟Expand-HDD-1亦通过。标准Release构建56.15秒、0警告／错误；未运行新增自动测试或全量测试。恢复态、prefs、保护闭包、正常重启无自动写入和原托盘App／Agent exit 0均核验通过。版本保持V0.59，不推送。详细现场和证据见[Quality](Quality.md#2026-10-13-wdc真实界面破坏性补验与最终收口)及[活动计划](Plan.md)。
+修复首次Primordial拖盘建池后Apply按钮未立即刷新的问题，保持原安全校验、偏好及MAX语义；最终Release重建后真实AutoVD／AutoPart开关关闭和开启的拖入均立即启用Apply，模拟Expand-HDD-1亦通过。标准Release构建56.15秒、0警告／错误；未运行新增自动测试或全量测试。恢复态、prefs、保护闭包、正常重启无自动写入和原托盘App／Agent exit 0均核验通过。版本保持V0.59，不推送。详细现场和证据见[Quality](Quality.md#2026-10-13-wdc真实界面破坏性补验与最终收口)及[归档计划](Archive/20261014-v059-completed-plan/Plan.md)。
 
 ## 2026-10-12：编辑界面、整数输入与操作反馈统一（V0.59）
 
 完成本轮25项要求：分区两行起止／容量、默认最大与前端整数过滤夹紧、同窗扩缩Switch和固定公式极值、上下属性卡、Undo／Check、RAW卡高度、结构分组卡及创建文案、全页忙碌遮罩与跨页持续进度、各页卡片和分类通知图标。名称／盘符Check仅提交该单项；禁用MSR时初始化与本次provider MSR核验清理连续执行。保留既定整数GiB MAX搜索意图。
 
-GUI实测额外修复本机转换模拟的scope／coverage ID残留，以及硬件补充事实使旧池成员关系复活的问题。118项相关有效用例、最终Release零警告／错误及真实／模拟GUI验收通过，未跑全量；实机4次可逆属性写入均Verified并恢复，保留现有ReFS数据。真实创建／格式化／扩缩及MSR破坏性矩阵未执行，模拟GUI和窄回归覆盖范围准确分列于 [Quality](Quality.md)。旧Plan已归档，新 [Plan](Plan.md)限定验收完成；不升版、不推送。
+GUI实测额外修复本机转换模拟的scope／coverage ID残留，以及硬件补充事实使旧池成员关系复活的问题。118项相关有效用例、最终Release零警告／错误及真实／模拟GUI验收通过，未跑全量；实机4次可逆属性写入均Verified并恢复，保留现有ReFS数据。真实创建／格式化／扩缩及MSR破坏性矩阵未执行，模拟GUI和窄回归覆盖范围准确分列于 [Quality](Quality.md)。该历史Plan随后归档至[V0.59归档 Plan](Archive/20261014-v059-completed-plan/Plan.md)；当前阶段见[活动Plan](Plan.md)。不升版、不推送。
 
 ## 2026-10-12：打开后立即开启真实编辑的时序修复（V0.59）
 
@@ -136,7 +142,7 @@ GUI实测额外修复本机转换模拟的scope／coverage ID残留，以及硬�
 
 WDC 原界面验收已通过普通 MAX、单 HDD 分层 32 GiB 创建/重建与自动布局、MSR 开关、NTFS 扩缩文件哈希、RAW 双向扩缩及取消后仅提交剩余目标。最终物理布局恢复为在线 GPT、规范 16 MiB MSR、最大整 MiB NTFS/64 KiB 数据分区 `WinPool_Test`／E:。最终六次改名后的新独立生产full比较，两块 Samsung 的限定结构范围为 0 变化／0 证据缺口，保留 shared Primordial 政策的 4 项排除；不扩称全机无变化或无后台IO。
 
-实机调查修复了RAW subsystem与实际层父级闭包、分层VD缺失值的严格核验、同批结果观察竞态、对账步骤先落盘再推进终态、解散后物理盘显示、预期编辑缺口归因和重启后的监控恢复。App `0xC000027B` 关闭前清理修复后原生正常退出通过，旧失败保留。三盘新会话各4252样本、约20Hz/max65ms、Stopped/dropped0、当前gap0；六次改名中位数18.472→15.437秒，减少16.43%，旧15.76%因WDC未采样仅留历史。随后仅修复MonitorOff启动的历史pending误报警，未改历史端点/诊断，最后原生启动及托盘退出通过；该呈现变更后未重复性能写入。最终工程门1772 passed/0 failed/3 NotExecuted，restore/build零警告/错误，源码哈希稳定。详见活动[Plan](Plan.md)、[Quality](Quality.md)和[延迟报告](WinPool-Operation-Latency-20261008.md)。
+实机调查修复了RAW subsystem与实际层父级闭包、分层VD缺失值的严格核验、同批结果观察竞态、对账步骤先落盘再推进终态、解散后物理盘显示、预期编辑缺口归因和重启后的监控恢复。App `0xC000027B` 关闭前清理修复后原生正常退出通过，旧失败保留。三盘新会话各4252样本、约20Hz/max65ms、Stopped/dropped0、当前gap0；六次改名中位数18.472→15.437秒，减少16.43%，旧15.76%因WDC未采样仅留历史。随后仅修复MonitorOff启动的历史pending误报警，未改历史端点/诊断，最后原生启动及托盘退出通过；该呈现变更后未重复性能写入。最终工程门1772 passed/0 failed/3 NotExecuted，restore/build零警告/错误，源码哈希稳定。详见[归档 Plan](Archive/20261014-v059-completed-plan/Plan.md)、[Quality](Quality.md)和[延迟报告](WinPool-Operation-Latency-20261008.md)。
 
 **当时尚未关闭的验证：** 软件把 MAX 解析成池/模板范围交集的明确 bytes 后被 Windows 拒绝，两个原调用均经严格只读对账终结为 Failed/ObservedNoEffect，未重放。当时以缺少完整布局只读容量接口为由提出验收豁免；2026-10-09用户指出真实系统可以直接调用原生 MAX，该归因和豁免请求已撤回。此段只保留历史结果，不定义当前 MAX 行为。
 

@@ -193,7 +193,8 @@ public static class TopologyProjector
 
     public static int CalculatePoolWeight(StoragePoolInfo pool, StorageSnapshot snapshot)
     {
-        var poolTiers = snapshot.StorageTiers.Where(x => x.PoolStableId == pool.StableId).ToList();
+        var poolTiers = SelectPoolBusinessTiers(snapshot.StorageTiers.Where(
+            tier => string.Equals(tier.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)));
         var tierMembers = poolTiers
             .SelectMany(x => x.MemberPhysicalDiskIds)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -201,6 +202,26 @@ public static class TopologyProjector
         var virtualCount = snapshot.VirtualDisks.Count(x => x.PoolStableId == pool.StableId);
         var maxTierMembers = poolTiers.Count == 0 ? 0 : poolTiers.Max(x => x.MemberPhysicalDiskIds.Count);
         return Math.Max(1, Math.Max(virtualCount, Math.Max(directMembers, maxTierMembers)));
+    }
+
+    /// <summary>
+    /// Selects the tier records that represent a pool's visible media layers.
+    /// An allocated tier instance takes precedence over same-media unused
+    /// creation templates; without an instance, the source templates remain
+    /// visible. This affects only the topology projection, not source facts.
+    /// </summary>
+    public static IReadOnlyList<StorageTierInfo> SelectPoolBusinessTiers(
+        IEnumerable<StorageTierInfo> poolTiers)
+    {
+        ArgumentNullException.ThrowIfNull(poolTiers);
+        return poolTiers
+            .GroupBy(tier => NormalizeMedia(tier.MediaType), StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group =>
+            {
+                var instances = group.Where(tier => !string.IsNullOrWhiteSpace(tier.VirtualDiskStableId)).ToArray();
+                return instances.Length > 0 ? instances : group.ToArray();
+            })
+            .ToArray();
     }
 
     public static IEnumerable<TopologyNode> Flatten(TopologyNode root)
@@ -303,7 +324,8 @@ public static class TopologyProjector
             .DistinctBy(x => x.StableId, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var virtualDisks = snapshot.VirtualDisks.Where(x => x.PoolStableId == pool.StableId).ToList();
-        var poolTiers = snapshot.StorageTiers.Where(x => x.PoolStableId == pool.StableId).ToList();
+        var poolTiers = SelectPoolBusinessTiers(snapshot.StorageTiers.Where(
+            tier => string.Equals(tier.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)));
         var syntheticTiers = synthetic.Where(item => item.Kind == SyntheticStorageObjectKind.Tier
                          && string.Equals(item.ParentStableId, pool.StableId, StringComparison.OrdinalIgnoreCase))
                      .OrderBy(item => item.Name)

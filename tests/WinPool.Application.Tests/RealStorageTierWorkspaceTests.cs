@@ -38,7 +38,12 @@ public sealed class RealStorageTierWorkspaceTests
         Assert.Equal(PhysicalId, Assert.Single(templateNode.Children).Unit.StableId);
         Assert.DoesNotContain(poolNode.Children, item => item.Unit.Kind == StorageUnitKind.DirectDiskGroup);
         Assert.Empty(tier.MemberPhysicalDiskIds);
-        var managed = TopologyProjector.Flatten(TopologyProjector.Project(snapshot));
+        var managedRoot = TopologyProjector.Project(snapshot);
+        var managedPool = Assert.Single(managedRoot.Children, item => item.Unit.StableId == PoolId);
+        Assert.Equal([TemplateId], managedPool.Children
+            .Where(item => item.Unit.Kind == StorageUnitKind.StorageTier)
+            .Select(item => item.Unit.StableId));
+        var managed = TopologyProjector.Flatten(managedRoot);
         Assert.Empty(managed.Single(item => item.Unit.StableId == TemplateId).Children);
         Assert.Contains(managed, item => item.Unit.SyntheticName == SyntheticStorageName.UnallocatedLayer);
         Assert.Equal(TemplateId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId,
@@ -46,9 +51,11 @@ public sealed class RealStorageTierWorkspaceTests
     }
 
     [Fact]
-    public void EditorUsesAllocatedMediaLayerWhileManagementPreservesTemplateAndInstance()
+    public void ManagementAndEditorUseSameAllocatedMediaLayerWhileSourceRecordsRemain()
     {
         var snapshot = WinPoolStorageProjection.Project(ProviderFacts(withInstance: true));
+        var managedRoot = TopologyProjector.Project(snapshot);
+        var managedPool = Assert.Single(managedRoot.Children, item => item.Unit.StableId == PoolId);
         var pool = EditWorkspace.ProjectPoolWorkspace(snapshot, 0, showSourceTierTemplates: true)
             .Single(item => item.Unit.StableId == PoolId);
         var tiers = pool.Children.Where(item => item.Unit.Kind == StorageUnitKind.StorageTier).ToArray();
@@ -56,6 +63,13 @@ public sealed class RealStorageTierWorkspaceTests
         Assert.All(tiers, item => Assert.True(item.IsSelectable));
         Assert.Equal(PhysicalId, Assert.Single(tiers.Single(item => item.Unit.StableId == InstanceId).Children).Unit.StableId);
         Assert.DoesNotContain(pool.Children, item => item.Unit.Kind == StorageUnitKind.DirectDiskGroup);
+
+        var managedTiers = managedPool.Children.Where(item => item.Unit.Kind == StorageUnitKind.StorageTier).ToArray();
+        Assert.Equal([InstanceId], managedTiers.Select(item => item.Unit.StableId));
+        Assert.Equal(tiers.Select(item => item.Unit.StableId), managedTiers.Select(item => item.Unit.StableId));
+        Assert.Equal(VirtualDiskId, Assert.Single(managedPool.Children, item => item.Unit.Kind == StorageUnitKind.VirtualDisk).Unit.StableId);
+        Assert.Equal(VirtualDiskId, Assert.Single(pool.Children, item => item.Unit.Kind == StorageUnitKind.VirtualDisk).Unit.StableId);
+        Assert.Equal(PhysicalId, Assert.Single(managedTiers.Single().Children).Unit.StableId);
 
         var template = EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, TemplateId,
             VirtualDiskId, isSimulatedInventory: false)["HDD"];
@@ -74,8 +88,10 @@ public sealed class RealStorageTierWorkspaceTests
         Assert.Equal(InstanceId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null,
             null, isSimulatedInventory: false)["HDD"].StableId);
         var managed = TopologyProjector.Flatten(TopologyProjector.Project(snapshot));
-        Assert.Contains(managed, item => item.Unit.StableId == TemplateId);
+        Assert.DoesNotContain(managed, item => item.Unit.StableId == TemplateId);
         Assert.Contains(managed, item => item.Unit.StableId == InstanceId);
+        Assert.Contains(snapshot.StorageTiers, item => item.StableId == TemplateId);
+        Assert.Contains(snapshot.StorageTiers, item => item.StableId == InstanceId);
         Assert.Equal(2, snapshot.StorageTiers.Count);
     }
 
@@ -127,6 +143,15 @@ public sealed class RealStorageTierWorkspaceTests
             .Single(item => item.Unit.StableId == PoolId);
         Assert.Equal(2, pool.Children.Count(item => item.Unit.Kind == StorageUnitKind.StorageTier));
         Assert.DoesNotContain(pool.Children, item => item.Unit.StableId == TemplateId);
+        var managedPool = Assert.Single(TopologyProjector.Project(snapshot).Children,
+            item => item.Unit.StableId == PoolId);
+        var managedActualTierIds = managedPool.Children
+            .Where(item => item.Unit.Kind == StorageUnitKind.StorageTier)
+            .Select(item => item.Unit.StableId)
+            .ToArray();
+        Assert.Equal(pool.Children.Where(item => item.Unit.Kind == StorageUnitKind.StorageTier)
+            .Select(item => item.Unit.StableId), managedActualTierIds);
+        Assert.DoesNotContain(managedActualTierIds, item => item == TemplateId);
         Assert.Empty(EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null, null, false));
         Assert.Empty(EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId, null, null, true));
         Assert.Equal(second.StableId, EditWorkspace.SelectPoolTiersForForm(snapshot, PoolId,

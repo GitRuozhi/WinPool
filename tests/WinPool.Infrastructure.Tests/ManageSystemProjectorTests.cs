@@ -48,6 +48,45 @@ public sealed class ManageSystemProjectorTests
     }
 
     [Fact]
+    public void AllocatedTierReplacesUnusedTemplateInTreeWhileBothRemainInManagementObjects()
+    {
+        var source = Document();
+        var allocatedTier = source.Snapshot.StorageTiers.Single();
+        var template = allocatedTier with
+        {
+            StableId = "tier:template",
+            FriendlyName = "Capacity template",
+            VirtualDiskStableId = null,
+            MemberPhysicalDiskIds = [],
+            Size = 0,
+            FootprintOnPool = 0
+        };
+        var virtualDisk = source.Snapshot.VirtualDisks.Single() with
+        {
+            TierStableIds = [allocatedTier.StableId]
+        };
+        var document = source.WithCandidate(source.Snapshot with
+        {
+            StorageTiers = [template, allocatedTier],
+            VirtualDisks = [virtualDisk]
+        });
+
+        var projection = new ManageSystemProjector().Project(document);
+        var pool = Assert.Single(Flatten(projection.Root), node => node.Id.ProviderKey == "pool:1");
+        var displayedTiers = Flatten(pool)
+            .Where(node => node.Role == ManageObjectRole.StorageTier)
+            .ToArray();
+
+        Assert.Equal([allocatedTier.StableId], displayedTiers.Select(node => node.Id.ProviderKey));
+        Assert.Equal("physical:1", Assert.Single(displayedTiers.Single().Children).Id.ProviderKey);
+        Assert.Contains(projection.WorkspaceObjects, item => item.Role == ManageObjectRole.StorageTier
+            && item.Id.ProviderKey == template.StableId);
+        Assert.Contains(projection.WorkspaceObjects, item => item.Role == ManageObjectRole.StorageTier
+            && item.Id.ProviderKey == allocatedTier.StableId);
+        Assert.Equal(2, document.Snapshot.StorageTiers.Count);
+    }
+
+    [Fact]
     public void SyntheticPoolsKeepLogicalIdentityWithoutBecomingRealPools()
     {
         var source = Document();

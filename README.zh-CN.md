@@ -4,9 +4,9 @@
 
 WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控设备、编辑模拟系统和执行已支持的本机存储操作。
 
-当前产品版本为 **V0.59，迭代 9**；[阶段计划](docs/Plan.md)记录了已完成的实现与验收，硬件未验范围单独列明。此前 H01–H11 结果保留在[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。
+当前产品版本为 **V0.60，迭代 0（0.6 产品线）**；唯一活动范围见[当前计划](docs/Plan.md)。V0.59已完成计划原样保存在[归档](docs/Archive/20261014-v059-completed-plan/Plan.md)，此前 H01–H11 结果保留在[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。当前构建、回归和GUI验收状态以[Quality](docs/Quality.md)为准。
 
-`WINPOOL-MAX-GIB-1` 使用 `G = 1,073,741,824` bytes、`R = 4,000,000` bytes，计算 `C = floor((A - R - 1) / G)`。真实路径的 A 是 fresh provider 最大范围与物理容量预算中的较小值；模拟路径的 A 是应用布局折算并扣除已知物理占用后的逻辑余量。C 是起始候选而非保证的物理最大值：模拟每层直接采用其 C，真实 MAX 按 1 GiB 步长搜索，不传递 Windows `UseMaximumSize`。真实创建契约传递完整准确的池成员集合、类型化布局参数、HDD／SSD／SCM 逐介质 tier goals、成员 Usage，以及每层明确容量或 MAX。旧单 HDD／Simple／单列／64 KiB 创建白名单已移除；当前创建仍使用 Fixed；每次写入仍须通过 fresh Windows provider 能力／范围、精确成员身份和写后对账。下方 WDC MAX 数值是历史单 HDD 实测；2026-10-13至14已在WDC通过真实GUI完成单成员16 KiB池／模板、热备及恢复数据角色、16 KiB MAX VD（3724 GiB）、自动分区／NTFS 64 KiB、改名和解散；最终恢复授权物理布局。多成员硬件、SSD／SCM、冗余布局及多层MAX仍缺实机证据；本轮只运行相关定点验证。历史原生 `UseMaximumSize` 结果见[Quality](docs/Quality.md)。
+`WINPOOL-MAX-GIB-1` 使用 `G = 1,073,741,824` bytes、`R = 4,000,000` bytes，计算 `C = floor((A - R - 1) / G)`。真实路径的 A 是 fresh provider 最大范围与物理容量预算中的较小值；模拟路径的 A 是应用布局折算并扣除已知物理占用后的逻辑余量。C 是起始候选而非保证的物理最大值：模拟每层直接采用其 C，真实 MAX 按 1 GiB 步长搜索，不传递 Windows `UseMaximumSize`。真实创建契约传递完整准确的池成员集合、类型化布局参数、HDD／SSD／SCM 逐介质 tier goals、成员 Usage，以及每层明确容量或 MAX。旧单 HDD／Simple／单列／64 KiB 创建白名单已移除；当前创建仍使用 Fixed；每次写入仍须通过 fresh Windows provider 能力／范围、精确成员身份和写后对账。下方 WDC MAX 数值是历史单 HDD 实测；2026-10-13至14已在WDC通过真实GUI完成单成员16 KiB池／模板、热备及恢复数据角色、16 KiB MAX VD（3724 GiB）、自动分区／NTFS 64 KiB、改名和解散；最终恢复授权物理布局。多成员硬件、SSD／SCM、冗余布局及多层MAX仍缺对应WDC实机证据。这些是V0.59历史设备结果，不代表V0.60界面已经验收；当前验证状态以[Quality](docs/Quality.md)为准。历史原生 `UseMaximumSize` 结果见[Quality](docs/Quality.md)。
 
 在 2026-10-09 的历史 WDC／provider 运行中，普通搜索从 3,724 GiB 开始，3,724 与 3,725 GiB 均成功，3,726 GiB 收到结构化错误 40000；观测边界为 **3,725 GiB／3,999,688,294,400 bytes**。单 HDD 分层搜索在 3,725 GiB 收到 provider code 1，3,724 GiB 成功，**actual HDD tier、VD 与 OS disk 容量一致为 3,998,614,552,576 bytes**，自动布局完成。断言分别为 18/18 和 17/17：[普通 MAX](artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Ordinary-Retry/native-assertions.json)、[HDD 分层 MAX](artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Hdd/native-assertions.json)。独立复核分别通过普通路线 22/22 项、HDD 路线 23/23 项且无 evidence gaps：[普通复核](artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/ordinary-native-independent-review/review.json)、[HDD 复核](artifacts/test-results/20261009-integer-gib-max-1af833540a184658a06799c8c24ffd3c/Engineering/hdd-native-independent-review/review.json)。这些是该磁盘与 provider 的实测结果，不保证其它系统具有相同上限。
 
@@ -28,11 +28,14 @@ WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控
 - 查看 Computer、System、Mainboard、CPU、Memory、VirtualMemory、Storage、GPU、Monitor、Network 十段只读硬件报告及原始来源详情。
 - 在存储结构编辑和磁盘分区编辑两页修改模拟系统。
 - 两个编辑页都提供受控的真实操作入口，由 Agent 冻结计划、确认后按 `OperationId` 查询；普通启动时真实编辑关闭。结构页通过原表单、拓扑草稿和净差异 Apply 提交，分区页每项动作独立提交；已有名称按 Enter 单独改名。
+- 编辑栏默认中文520 DIP、英文568 DIP；项名列分别112／160 DIP，项值至少144 DIP。属性卡各自折叠。新池的合法属性修改立即进入草稿，不设保存按钮且不直接写入Windows；草稿、选择、意图、撤销／重做和合法未提交输入在GUI生命周期内跨页及切换系统保留，GUI关闭后不恢复。
+- 所有拓扑对象外框（悬停、选中、拖入及动画）统一1 DIP，三个视图均恢复主题匹配的悬停／选中状态；待应用描边与有净差异的Apply按钮使用默认色／主题色两对分段；每个稳定对象单独随机生成慢速周期并保持稳定，尺寸变化不重抽。待应用计数打开只读明细，预览和Apply共用净差异来源，既有全局动作图标保留。状态遮罩使用四种现有SVG、大字号原因、半透明黑底与仓库原生单条斜链SVG平铺并按卡片裁剪，长卡显示较多链环、短卡较少；祖先实际绘制遮罩时才抑制重复的后代遮罩，不影响命中、菜单或编辑资格。
+- 条带详情将原始值标为“条带单元”，并显示完整条带“数据 KiB + 额外写入 KiB”：Simple为0、Parity为校验数据量、Mirror为明确标记为副本的物理额外副本量。布局事实不全时留空。
 - “存储结构”按拖入的准确成员集合和每种介质的 tier goal 创建新池，没有普通／分层模式选择。`WINPOOL-MAX-GIB-1` 以 `G = 1,073,741,824`、`R = 4,000,000` 计算 `C = floor((A - R - 1) / G)`；模拟每层直接采用其 C，真实候选按 1 GiB 步长搜索，不传 Windows `UseMaximumSize`。历史 WDC 实测普通 MAX 为 3,725 GiB，单 HDD 分层 MAX 为 3,724 GiB；之后 WDC 单成员 16 KiB 池与模板创建另行实际 Verified。这些结果不证明多成员容量或角色／MAX 实机路径。明确容量与 MAX 始终绑定目标介质层，Agent 对准确目标核验当前 Windows provider 能力／范围；读查询不预留容量。自动分区前须复核新鲜身份、布局和实际容量。AutoVD 与 AutoPart 是独立偏好；切换不会改动已有对象或草稿。重建须在草稿中明确提出删除并重新创建，破坏性步骤会列入确认计划。
-- 以 JSON 导出存储系统。分区页的快速格式化与完整格式化互斥；模拟目标不写真实磁盘，真实写入仍须通过准确目标／成员身份、新鲜安全与 provider 证据及受控计划确认。V0.59 阶段仍按活动 Plan 收口；历史 MAX 结果仅覆盖其记录中的 WDC/provider 运行。
+- 以 JSON 导出存储系统。分区页的快速格式化与完整格式化互斥；模拟目标不写真实磁盘，真实写入仍须通过准确目标／成员身份、新鲜安全与 provider 证据及受控计划确认。V0.60迭代0正在实施；历史 MAX 结果仅覆盖其记录中的 WDC/provider 运行，当前状态见[活动计划](docs/Plan.md)和[Quality](docs/Quality.md)。
 - 在“磁盘分区”页，只有准确来源事实返回 `IsOffline` 时，联机/脱机按钮才可操作。RAW 可初始化为 GPT，GPT 显示已初始化；MBR→GPT 仅在模拟模式可转换，真实模式明确拒绝。独立的“清空至 RAW”在模拟模式按原规则支持 GPT/MBR；真实清空当前仅支持联机 GPT 普通数据/MSR 分区，或本次完整来源事实证明分区数为零的 GPT，真实 MBR 清空禁用。该操作不整盘写零、不初始化、不格式化也不建池。自动 GPT 布局沿用已保存的 MSR 偏好：AutoPart 开启且 MSR 开启时，在 1 MiB 处创建唯一 16 MiB MSR，BasicData 从 17 MiB 开始；MSR 关闭时不创建 MSR，BasicData 从 1 MiB 开始。单独初始化不会创建 BasicData、建池或格式化卷。
 - 在 1 MiB 网格上创建模拟 GPT 分区；创建容量使用整数 MiB，默认填入对齐后的最大容量，并提供 MAX 按钮。右侧同一个操作按钮随选择切换“新建分区／格式化分区”。
-- 以 JSON 导出存储系统。分区页的快速格式化与完整格式化互斥；模拟目标不写真实磁盘，真实写入仍须通过准确目标／成员身份、新鲜安全与 provider 证据及受控计划确认。V0.59 阶段仍按活动 Plan 收口；历史 MAX 结果仅覆盖其记录中的 WDC/provider 运行。
+- 管理、结构编辑和建池使用同一业务层选择器：有实际层时显示实际层，无实际层时才显示唯一模板，避免将模板和实际层重复列作两层；Windows来源对象和原始详情仍完整保留。Pool01诊断见[报告](docs/Review/Pool01-Topology-20261014.md)。
 - 监控受支持设备，持续显示会话运行时长；异常统一进入消息卡片和本次运行消息记录。
 - 新监控记录使用独立数据库，达到 1 GiB 轮换并以随附 7-Zip 归档；设置支持指定自定义 7Z 路径。
 - 使用中英文界面、主题与键盘导航。

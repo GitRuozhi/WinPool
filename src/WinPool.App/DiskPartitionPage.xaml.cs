@@ -37,7 +37,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private bool _formatModeControlsReady;
     private bool _narrowLayout;
     private bool _showPropertiesInNarrowLayout;
-    private GridLength _widePropertiesWidth = new(320);
+    private GridLength _widePropertiesWidth = new(EditorFormMetrics.SidebarWidth(isChinese: true));
     private ContentDialog? _resizeDialog;
     private CancellationTokenSource? _resizeCancellation;
     private bool _resizePromptOpen;
@@ -140,6 +140,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void LocalizeChrome()
     {
+        var isChinese = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
         ShowPropertiesButton.Content = Text("属性", "Properties");
         DiskOnlineStateButtonLabel.Text = Text("联机/脱机", "Online/offline");
@@ -241,6 +242,81 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FillFileSystemBox();
         FillClusterBox();
         FillPartitionTypeBox();
+        ApplyPropertyEditorMetrics(isChinese);
+        SetPropertyCardHeaderState(
+            DiskVolumeCardHeader, DiskVolumeCardTitle, DiskVolumeCardDirection,
+            DiskVolumeCardContent, "磁盘与卷", "Disk and volume");
+        SetPropertyCardHeaderState(
+            PartitionSettingsCardHeader, PartitionSettingsCardTitle, PartitionSettingsCardDirection,
+            PartitionSettingsCardContent, "分区", "Partition");
+    }
+
+    private void ApplyPropertyEditorMetrics(bool isChinese)
+    {
+        PageRootGrid.Margin = new Thickness(EditorFormMetrics.PageMargin);
+        _widePropertiesWidth = new GridLength(EditorFormMetrics.SidebarWidth(isChinese));
+        var labelWidth = EditorFormMetrics.LabelWidth(isChinese);
+        foreach (var grid in new[] { PartitionFormGrid, PartitionSettingsFormGrid })
+        {
+            grid.ColumnDefinitions[0].Width = new GridLength(labelWidth);
+            grid.ColumnDefinitions[2].MinWidth = EditorFormMetrics.MinimumValueWidth;
+        }
+
+        foreach (var label in new[]
+        {
+            DiskLocationLabel, StartOffsetLabel, EndOffsetLabel, DriveLetterLabel,
+            VolumeLabelCaption, PartitionTypeLabel, SizeLabel, SizeAdaptiveLabel,
+            FileSystemLabel, ClusterLabel, QuickFormatLabel, FullFormatLabel
+        })
+        {
+            label.TextWrapping = isChinese ? TextWrapping.NoWrap : TextWrapping.Wrap;
+            label.MaxLines = 2;
+        }
+
+        UpdateEditorLayout();
+    }
+
+    private void SetPropertyCardHeaderState(
+        Button header,
+        TextBlock title,
+        FontIcon direction,
+        FrameworkElement content,
+        string titleZh,
+        string titleEn)
+    {
+        var expanded = content.Visibility == Visibility.Visible;
+        direction.Glyph = expanded ? "\uE70D" : "\uE76C";
+        var localizedTitle = Text(titleZh, titleEn);
+        title.Text = localizedTitle;
+        var actionZh = expanded ? "收起" : "展开";
+        var actionEn = expanded ? "Collapse" : "Expand";
+        AutomationProperties.SetName(header, Text(
+            $"{titleZh}，{actionZh}", $"{titleEn}, {actionEn}"));
+        AutomationProperties.SetHelpText(header, Text(
+            expanded ? "收起此属性卡" : "展开此属性卡",
+            expanded ? "Collapse this property card" : "Expand this property card"));
+        ToolTipService.SetToolTip(header, Text(
+            $"{titleZh} · {actionZh}", $"{titleEn} · {actionEn}"));
+    }
+
+    private void PropertyCardHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReferenceEquals(sender, DiskVolumeCardHeader))
+        {
+            DiskVolumeCardContent.Visibility = DiskVolumeCardContent.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            SetPropertyCardHeaderState(
+                DiskVolumeCardHeader, DiskVolumeCardTitle, DiskVolumeCardDirection,
+                DiskVolumeCardContent, "磁盘与卷", "Disk and volume");
+        }
+        else if (ReferenceEquals(sender, PartitionSettingsCardHeader))
+        {
+            PartitionSettingsCardContent.Visibility = PartitionSettingsCardContent.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            SetPropertyCardHeaderState(
+                PartitionSettingsCardHeader, PartitionSettingsCardTitle, PartitionSettingsCardDirection,
+                PartitionSettingsCardContent, "分区", "Partition");
+        }
     }
 
     private void EditorLayoutGrid_SizeChanged(object sender, SizeChangedEventArgs e)

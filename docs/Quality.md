@@ -1,12 +1,32 @@
 # WinPool 验证与验收
 
-日期：2026-10-14。当前产品版本为 V0.59／迭代 9。25项编辑界面任务的原限定验收及按用户授权完成的WDC实机破坏性补验证均已结束，详见下方2026-10-13记录；历史计划的多盘、SCM与长期耐久范围不因此通过。逐阶段操作账本和历史结果保留在忽略提交的测试证据目录；详细第一阶段 H11 结果见 [H11 检查点](../artifacts/test-results/20261007-real-edit-stage1-9b7a6ce20531437aafe897e143628d43/runRoot/H11-final-closeout-checkpoint-20261007.md)。收口前 Quality 原文保存在 [Acceptance-history.md](Archive/20261007-real-edit-stage1/Acceptance-history.md)，不作为当前状态。
+日期：2026-10-14。当前产品版本为 V0.60／迭代0（0.6产品线）。本阶段仅做相关窄回归和GUI验收，不运行全量测试、不进行真实存储写入。V0.59及以前的工程门、实机写入和未测边界保留在下方历史记录，不自动成为V0.60全量通过结论。
+
+<a id="v060-editor-topology"></a>
+
+## 2026-10-14 V0.60拓扑与编辑交互
+
+范围按[本轮Plan](Plan.md)；原Plan逐字节归档至[历史记录](Archive/20261014-v059-completed-plan/Plan.md)，SHA-256 `BB6F1C6B1D49EDD7D4FE8F9841174E3D8528D4DB4B97488F4EC4C29F7078E076`。Pool01两页不一致的[诊断](Review/Pool01-Topology-20261014.md)确认管理构图重复呈现模板与actual tier，属于软件显示分叉；准确Windows对象和创建参数一致，未重建池。
+
+标准Release完整构建40.83秒、零警告／错误；GUI发现缓存续行边界后只重建App及直接测试项目，App构建31.71秒、零警告／错误；短卡状态说明布局调整仅重建App，22.27秒、零警告／错误；录屏发现选中描边覆盖动画后调整绘制顺序，最终仅重建App20.98秒、零警告／错误，并通过最终录屏复验。首次构建的两处Clip类型错误及级联XAML错误保留日志，按微软UIElement.Clip文档修正为RectangleGeometry；本机WinApp CLI缺少find-api命令，未安装／升级工具。
+
+当前有效独立窄回归共**23项通过**：完整条带6项，草稿重入5项（包括隐藏页放弃后刷新，以及隐藏页仍有剩余草稿），业务层工作区11项，管理来源对象保留1项。第一次App集合9项之后仅重跑重入集合5项，其中3项重复，不累计为14项。未运行全量、耐久、多盘硬件或本阶段真实写入矩阵。
+
+实际GUI已核对1440×900中英文、1000×800英文布局：中文项名一行，英文至多两行；默认侧栏520／568 DIP，项名112／160 DIP、项值至少144 DIP；属性卡独立折叠，顶部／下部字段同列对齐。真实Pool01两页均仅呈现实际HDD业务层Simple／1列／16 KiB／1926 GiB，管理页仍保留分区查看内容，原始详情仍有模板和实例两个Windows对象。
+
+模拟实际拖入Expand-HDD-1生成新池草稿，直接修改名称、64 GiB容量、16 KiB条带单元后，拓扑和动作数立即更新；切管理页再返回时名称、容量、布局、MAX意图及Undo／Redo保留。Undo将16 KiB恢复64 KiB，Redo恢复16 KiB；操作清单移入只读弹窗，原固定网格、常驻清单和保存按钮均消失。确认放弃后草稿与历史清除，未应用到模拟存储结构。
+
+健康对象悬停和选中已实际恢复；修改对象及Apply复用1 DIP两对移动描边。周期按稳定对象身份散列生成18–36秒的不同值，重绘不重抽。模拟RAW盘及含分区的VD联机／脱机实际切换，三个视图验证单斜链平铺、大小随卡片裁剪、父覆盖不重复画子覆盖、无底色大图标及原因文字；短卡采用横向图文，避免82 DIP卡片裁掉说明。只读／故障／失联图标完成SVG解析与共享加载路径检查，本阶段未分别制造这些故障做GUI矩阵。半透明纯黑通知在实际模拟操作中核对，进度及终态生命周期未改。
+
+GUI发现的额外缓存问题已修复：页面隐藏期间放弃／Apply完成，缓存HasChanges和表单输入可能过期，导致返回后仍保留旧来源；现在以BindingGeneration／ContentRevision失效缓存并重新判断剩余草稿。隐藏页确认放弃→分区页模拟VD脱机→返回结构页的复验已显示最新脱机状态且0待实施动作。
+
+只读末态比较保持本轮开始时真实Pool01、actual tier、VD、GPT／E: ReFS与两块Samsung的准确身份、布局和属性；真实Accepted／StepCallIssued／MaximumAttemptCallIssued增量均为0。模拟脱机测试结束后全部恢复联机。设置恢复中文、System主题及主题色、原AutoVD／AutoPart、MSR与监控偏好；最终GUI回到本机管理页、Real Off。详细证据在[本阶段目录](../artifacts/test-results/20261014-v060-editor/)，最终状态以该目录README和核验JSON为准。
 
 <a id="real-pool-generalization"></a>
 
 ## 2026-10-13至14 新池成员与规格完整贯通（已完成）
 
-用户确认的新池完整成员、按介质分层、合法布局与成员角色已接入原Apply流程，取代此前仅清理草稿锁的范围。范围与收口见[Plan §10](Plan.md#real-pool-generalization)。最终标准Release构建29.26秒、0警告／错误；没有运行全量测试。定点失败和重试原日志均保留。
+用户确认的新池完整成员、按介质分层、合法布局与成员角色已接入原Apply流程，取代此前仅清理草稿锁的范围。范围与收口见[Plan §10](Archive/20261014-v059-completed-plan/Plan.md#real-pool-generalization)。最终标准Release构建29.26秒、0警告／错误；没有运行全量测试。定点失败和重试原日志均保留。
 
 授权WDC的真实GUI完成Clear→池→16 KiB HDD模板（AutoVD关闭仍创建模板）、Hot Spare及拖回原池恢复Auto-Select、手动创建16 KiB MAX VD、GPT／自动删除MSR／创建数据分区／NTFS 64 KiB格式化、名称打勾直接提交、解散池及物理盘恢复。MAX重试在3725 GiB被拒绝、3724 GiB成功；actual HDD tier、VD和OS disk均为3,998,614,552,576 bytes，实际交错16 KiB。一次Apply只进行一次业务确认，完成后待应用动作清空，页面遮罩和持续进度正常结束；期间切换硬件页仍保留进度。
 

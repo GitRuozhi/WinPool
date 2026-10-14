@@ -10,7 +10,7 @@
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     mc:Ignorable="d">
 
-    <Grid Padding="24">
+    <Grid Padding="12">
         <Grid.RowDefinitions>
             <RowDefinition MinHeight="250" Height="3*" />
             <RowDefinition Height="8" />

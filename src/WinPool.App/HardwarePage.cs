@@ -67,7 +67,7 @@ public sealed partial class HardwarePage : Page
         actions.Children.Add(ContextHelp.Wrap(export));
         var content = new StackPanel
         {
-            Margin = new Thickness(24),
+            Margin = new Thickness(12),
             Spacing = cardGap,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };

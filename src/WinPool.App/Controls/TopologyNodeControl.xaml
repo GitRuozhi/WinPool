@@ -13,43 +13,42 @@
     PointerEntered="TopologyNodeControl_PointerEntered"
     PointerExited="TopologyNodeControl_PointerExited">
 
-    <VisualStateManager.VisualStateGroups>
-        <VisualStateGroup x:Name="InteractionStates">
-            <VisualState x:Name="Normal">
-                <VisualState.Setters>
-                    <Setter Target="NodeBorder.Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
-                    <Setter Target="NodeBorder.BorderBrush" Value="{ThemeResource WinPoolTopologyRestStrokeBrush}" />
-                    <Setter Target="InteractionBorder.Visibility" Value="Collapsed" />
-                    <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-                    <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-                </VisualState.Setters>
-            </VisualState>
-            <VisualState x:Name="PointerOver">
-                <VisualState.Setters>
-                    <Setter Target="NodeBorder.Background" Value="{StaticResource WinPoolAccentHoverBrush}" />
-                    <Setter Target="InteractionBorder.BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
-                    <Setter Target="InteractionBorder.Visibility" Value="Visible" />
-                    <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-                    <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-                    <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-                </VisualState.Setters>
-            </VisualState>
-            <VisualState x:Name="Selected">
-                <VisualState.Setters>
-                    <Setter Target="NodeBorder.Background" Value="{StaticResource WinPoolAccentBrush}" />
-                    <Setter Target="InteractionBorder.BorderBrush" Value="{StaticResource WinPoolAccentBorderBrush}" />
-                    <Setter Target="InteractionBorder.Visibility" Value="Visible" />
-                    <Setter Target="DisplayNameText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
-                    <Setter Target="TypeLabelText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
-                    <Setter Target="SummaryText.Foreground" Value="{StaticResource WinPoolAccentForegroundBrush}" />
-                </VisualState.Setters>
-            </VisualState>
-        </VisualStateGroup>
-    </VisualStateManager.VisualStateGroups>
-
     <!-- Keep the whole card a pointer surface, including empty header space. -->
     <Grid x:Name="NodeSurface" Width="{x:Bind ViewModel.PreferredWidth, Mode=OneWay}" Background="Transparent" SizeChanged="NodeSurface_SizeChanged">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="InteractionStates">
+                <VisualState x:Name="Normal">
+                    <VisualState.Setters>
+                        <Setter Target="NodeBorder.Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+                        <Setter Target="NodeBorder.BorderBrush" Value="{ThemeResource WinPoolTopologyRestStrokeBrush}" />
+                        <Setter Target="InteractionBorder.Visibility" Value="Collapsed" />
+                        <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                        <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="PointerOver">
+                    <VisualState.Setters>
+                        <Setter Target="NodeBorder.Background" Value="{ThemeResource WinPoolAccentHoverBrush}" />
+                        <Setter Target="InteractionBorder.BorderBrush" Value="{ThemeResource WinPoolAccentBorderBrush}" />
+                        <Setter Target="InteractionBorder.Visibility" Value="Visible" />
+                        <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                        <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                        <Setter Target="SummaryText.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="Selected">
+                    <VisualState.Setters>
+                        <Setter Target="NodeBorder.Background" Value="{ThemeResource WinPoolAccentBrush}" />
+                        <Setter Target="InteractionBorder.BorderBrush" Value="{ThemeResource WinPoolAccentBorderBrush}" />
+                        <Setter Target="InteractionBorder.Visibility" Value="Visible" />
+                        <Setter Target="DisplayNameText.Foreground" Value="{ThemeResource WinPoolAccentForegroundBrush}" />
+                        <Setter Target="TypeLabelText.Foreground" Value="{ThemeResource WinPoolAccentForegroundBrush}" />
+                        <Setter Target="SummaryText.Foreground" Value="{ThemeResource WinPoolAccentForegroundBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
         <Border
             x:Name="NodeBorder"
             MinHeight="{x:Bind ViewModel.MinimumCardHeight, Mode=OneWay}"
@@ -374,50 +373,78 @@
         </Border>
 
         <Canvas
+            x:Name="UnavailableOverlay"
             IsHitTestVisible="False"
             Visibility="{x:Bind ViewModel.UnavailableVisibility, Mode=OneWay}"
             AutomationProperties.Name="{x:Bind ViewModel.UnavailableName, Mode=OneWay}">
-        <Border x:Name="UnavailableOverlay" Background="#80000000" CornerRadius="4">
-            <Grid>
-                <Image Source="ms-appx:///Assets/StorageStatus/chains.svg" Stretch="Fill" Opacity="0.38" />
-                <Border Width="48" Height="48" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Background="#B0000000" CornerRadius="24">
-                    <Image Width="36" Height="36" Source="{x:Bind ViewModel.UnavailableIcon, Mode=OneWay}" />
-                </Border>
-            </Grid>
-        </Border>
+            <Border
+                x:Name="UnavailableOverlaySurface"
+                Background="#80000000"
+                CornerRadius="4">
+                <Grid>
+                    <Canvas x:Name="UnavailableChainCanvas" IsHitTestVisible="False" />
+                    <StackPanel
+                        x:Name="UnavailableStatusPanel"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Margin="12"
+                        Spacing="8"
+                        IsHitTestVisible="False">
+                        <Image
+                            x:Name="UnavailableIconImage"
+                            Width="52"
+                            Height="52"
+                            HorizontalAlignment="Center"
+                            Stretch="Uniform" />
+                        <TextBlock
+                            x:Name="UnavailableStatusText"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            MaxWidth="300"
+                            FontSize="20"
+                            FontWeight="SemiBold"
+                            Foreground="White"
+                            Text="{x:Bind ViewModel.UnavailableName, Mode=OneWay}"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Canvas>
         <Border
-            x:Name="DropTargetBorder"
-            BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
-            BorderThickness="2"
-            CornerRadius="4"
-            IsHitTestVisible="False"
-            Visibility="Collapsed" />
-        <Border
             x:Name="InteractionBorder"
-            BorderBrush="{StaticResource WinPoolAccentBorderBrush}"
-            BorderThickness="2"
+            BorderBrush="{ThemeResource WinPoolAccentBorderBrush}"
+            BorderThickness="1"
             CornerRadius="4"
             IsHitTestVisible="False"
             Visibility="Collapsed" />
+        <!-- Pending segments share the same one-DIP edge and stay visible
+             while the card retains its hover/selection background. -->
         <shapes:Rectangle
-            Margin="1"
+            x:Name="PendingRestOutline"
+            Margin="0.5"
             RadiusX="4"
             RadiusY="4"
             Stroke="{ThemeResource WinPoolTopologyRestStrokeBrush}"
-            StrokeThickness="2"
+            StrokeThickness="1"
             IsHitTestVisible="False"
             Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}" />
         <shapes:Rectangle
             x:Name="PendingOutline"
-            Margin="1"
+            Margin="0.5"
             RadiusX="4"
             RadiusY="4"
-            Stroke="{StaticResource WinPoolAccentBrush}"
-            StrokeThickness="2"
+            Stroke="{ThemeResource WinPoolAccentBrush}"
+            StrokeThickness="1"
             IsHitTestVisible="False"
             Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}"
             AutomationProperties.Name="{x:Bind ViewModel.PendingModificationName, Mode=OneWay}" />
+        <Border
+            x:Name="DropTargetBorder"
+            BorderBrush="{ThemeResource WinPoolAccentBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="4"
+            IsHitTestVisible="False"
+            Visibility="Collapsed" />
     </Grid>
 </UserControl>

@@ -19,6 +19,7 @@ public sealed partial class StorageStructurePage
         // offer actions for the previously selected object in that case.
         if (!IsTopologyNodeSelected(node)) return null;
         var menu = new MenuFlyout();
+        AddAction(PendingActionsButton, PendingActionsButtonLabel.Text, "\uE14C", PendingActions_Click);
         AddAction(UndoButton, ViewModel.Localization["Undo"], "\uE7A7", Undo_Click);
         AddAction(RedoButton, ViewModel.Localization["Redo"], "\uE7A6", Redo_Click);
         AddAction(DiscardAllButton, ViewModel.Localization["DiscardAll"], "\uE711", DiscardAll_Click);

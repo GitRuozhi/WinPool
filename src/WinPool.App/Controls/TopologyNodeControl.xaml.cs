@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Foundation;
 using WinPool.App.Services;
 using WinPool.App.ViewModels;
@@ -30,9 +30,14 @@ public sealed partial class TopologyNodeControl : UserControl
     private bool _suppressNextTap;
     private Popup? _dragPreview;
     private TranslateTransform? _dragPreviewTransform;
-    private Storyboard? _pendingAnimation;
-    private double _pendingPerimeter;
+    private PendingBorderAnimation? _pendingBorderAnimation;
     private Brush? _pendingAccentBrush;
+    private SvgImageSource? _chainTileSource;
+    private double _chainWidth = double.NaN;
+    private double _chainHeight = double.NaN;
+
+    private const double AvailabilityTileWidth = 160;
+    private const double AvailabilityTileHeight = 64;
 
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
@@ -53,7 +58,17 @@ public sealed partial class TopologyNodeControl : UserControl
         PointerReleased += TopologyNodeControl_PointerReleased;
         PointerCanceled += (_, _) => CancelInternalDrag();
         PointerCaptureLost += (_, _) => CancelInternalDrag();
-        Unloaded += (_, _) => { CancelInternalDrag(); StopPendingAnimation(); };
+        Unloaded += (_, _) =>
+        {
+            CancelInternalDrag();
+            _pendingBorderAnimation?.SetActive(false);
+            if (ReferenceEquals(s_hoveredControl, this))
+            {
+                s_hoveredControl = null;
+            }
+            _isPointerOver = false;
+            _hasKeyboardFocus = false;
+        };
     }
 
     public TopologyNodeViewModel ViewModel
@@ -66,7 +81,8 @@ public sealed partial class TopologyNodeControl : UserControl
     {
         var control = (TopologyNodeControl)dependencyObject;
         control.CancelInternalDrag();
-        control.StopPendingAnimation();
+        control._pendingBorderAnimation?.Dispose();
+        control._pendingBorderAnimation = null;
         if (args.OldValue is TopologyNodeViewModel oldValue)
         {
             oldValue.PropertyChanged -= control.ViewModel_PropertyChanged;
@@ -76,11 +92,20 @@ public sealed partial class TopologyNodeControl : UserControl
             newValue.PropertyChanged += control.ViewModel_PropertyChanged;
         }
         control.Bindings.Update();
+        if (args.NewValue is TopologyNodeViewModel currentValue)
+        {
+            control._pendingBorderAnimation = new PendingBorderAnimation(
+                control.NodeSurface,
+                control.PendingRestOutline,
+                control.PendingOutline,
+                currentValue.Unit.StableId);
+        }
         // This editor transfers a relationship inside this XamlRoot, never
         // data to the shell. Native data-transfer dragging fails elevated.
         control.CanDrag = false;
         control.AllowDrop = false;
         control.UpdateSelectionVisual();
+        control.UpdateAvailabilityGeometry();
         control.UpdatePendingOutline();
     }
 
@@ -104,52 +129,91 @@ public sealed partial class TopologyNodeControl : UserControl
     private void UpdateAvailabilityGeometry()
     {
         // Decorations use the measured card size and never enlarge its layout.
-        if (UnavailableOverlay is null) return;
-        UnavailableOverlay.Width = Math.Max(0, NodeSurface.ActualWidth);
-        UnavailableOverlay.Height = Math.Max(0, NodeSurface.ActualHeight);
-    }
+        if (UnavailableOverlay is null || ViewModel is null) return;
+        var width = Math.Max(0, NodeSurface.ActualWidth);
+        var height = Math.Max(0, NodeSurface.ActualHeight);
+        UnavailableOverlay.Width = width;
+        UnavailableOverlay.Height = height;
+        UnavailableOverlay.Clip = CreateCardClip(width, height);
+        UnavailableOverlaySurface.Width = width;
+        UnavailableOverlaySurface.Height = height;
+        UnavailableChainCanvas.Width = width;
+        UnavailableChainCanvas.Height = height;
+        UnavailableChainCanvas.Clip = CreateCardClip(width, height);
 
-    private void StopPendingAnimation()
-    {
-        _pendingAnimation?.Stop();
-        _pendingAnimation = null;
-        _pendingPerimeter = 0;
+        var compact = width < 180;
+        // Short, wide cards have room beside the icon, not below it.
+        // Keeping a vertical stack here clipped the reason on 82-DIP VD cards.
+        var horizontal = height < 112;
+        var iconSize = compact ? 32 : 52;
+        iconSize = (int)Math.Min(iconSize, Math.Max(16, height - 24));
+        UnavailableIconImage.Width = iconSize;
+        UnavailableIconImage.Height = iconSize;
+        UnavailableStatusText.FontSize = compact ? 14 : 20;
+        UnavailableStatusPanel.Orientation = horizontal ? Orientation.Horizontal : Orientation.Vertical;
+        UnavailableStatusPanel.Spacing = compact ? 4 : 8;
+        UnavailableStatusText.MaxWidth = Math.Max(32,
+            width - 24 - (horizontal ? iconSize + UnavailableStatusPanel.Spacing : 0));
+
+        if (ViewModel.UnavailableVisibility == Visibility.Visible)
+        {
+            UnavailableIconImage.Source = ViewModel.UnavailableIconSource;
+            UpdateUnavailableChainTiles(width, height);
+        }
+        else
+        {
+            UnavailableIconImage.Source = null;
+            UnavailableChainCanvas.Children.Clear();
+            _chainWidth = double.NaN;
+            _chainHeight = double.NaN;
+        }
     }
 
     private void UpdatePendingOutline()
     {
-        if (PendingOutline is null || !IsLoaded || ViewModel?.HasPendingModifications != true
-            || ViewModel.IsInvisibleLayoutContainer)
+        _pendingBorderAnimation?.SetActive(
+            IsLoaded
+            && ViewModel is { HasPendingModifications: true, IsInvisibleLayoutContainer: false });
+    }
+
+    private void UpdateUnavailableChainTiles(double width, double height)
+    {
+        if (Math.Abs(width - _chainWidth) < 1 && Math.Abs(height - _chainHeight) < 1)
         {
-            StopPendingAnimation();
             return;
         }
-        // A single theme-colour half travels around the original fixed-colour
-        // outline. Dash lengths are in stroke-width units, not pixels.
-        var width = Math.Max(0, NodeSurface.ActualWidth - 2);
-        var height = Math.Max(0, NodeSurface.ActualHeight - 2);
-        var perimeter = 2 * (width + height) - 8 * 4 + 2 * Math.PI * 4;
-        if (width <= 8 || height <= 8 || Math.Abs(perimeter - _pendingPerimeter) < 0.5) return;
-        StopPendingAnimation();
-        _pendingPerimeter = perimeter;
-        var half = perimeter / (2 * PendingOutline.StrokeThickness);
-        PendingOutline.StrokeDashArray = new DoubleCollection { half, half };
-        PendingOutline.StrokeDashOffset = 0;
-        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
-        var movement = new DoubleAnimation
+
+        _chainWidth = width;
+        _chainHeight = height;
+        UnavailableChainCanvas.Children.Clear();
+
+        var columns = (int)Math.Ceiling(width / AvailabilityTileWidth) + 2;
+        var rows = (int)Math.Ceiling(height / AvailabilityTileHeight) + 1;
+        for (var row = 0; row < rows; row++)
         {
-            From = 0,
-            To = half * 2,
-            Duration = new Duration(TimeSpan.FromSeconds(10)),
-            RepeatBehavior = RepeatBehavior.Forever,
-            EnableDependentAnimation = true
-        };
-        Storyboard.SetTarget(movement, PendingOutline);
-        Storyboard.SetTargetProperty(movement, "StrokeDashOffset");
-        _pendingAnimation = new Storyboard();
-        _pendingAnimation.Children.Add(movement);
-        _pendingAnimation.Begin();
+            var leftOffset = (row & 1) == 0 ? -AvailabilityTileWidth / 2 : 0;
+            for (var column = -1; column < columns; column++)
+            {
+                var tile = new Image
+                {
+                    Width = AvailabilityTileWidth,
+                    Height = AvailabilityTileHeight,
+                    Stretch = Stretch.Fill,
+                    Opacity = 0.24,
+                    IsHitTestVisible = false,
+                    Source = _chainTileSource ??= new SvgImageSource(
+                        new Uri("ms-appx:///Assets/StorageStatus/chains.svg"))
+                };
+                Canvas.SetLeft(tile, column * AvailabilityTileWidth + leftOffset);
+                Canvas.SetTop(tile, row * AvailabilityTileHeight - AvailabilityTileHeight / 2);
+                UnavailableChainCanvas.Children.Add(tile);
+            }
+        }
     }
+
+    // UIElement.Clip accepts RectangleGeometry only in this WinUI version.
+    private static RectangleGeometry CreateCardClip(double width, double height) =>
+        new() { Rect = new Rect(0, 0, Math.Max(0, width), Math.Max(0, height)) };
 
     private void UpdateSelectionVisual()
     {
@@ -213,7 +277,12 @@ public sealed partial class TopologyNodeControl : UserControl
         // theme context. Looking up ThemeResource keys through
         // Application.Current.Resources can throw when a key exists only in
         // WinUI's theme dictionaries.
-        VisualStateManager.GoToState(this, state, false);
+        var stateApplied = VisualStateManager.GoToState(this, state, false);
+        if (!stateApplied)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"TopologyNodeControl could not apply interaction state '{state}'.");
+        }
 
         var primaryBrush = DisplayNameText.Foreground;
         var secondaryBrush = TypeLabelText.Foreground;
@@ -495,7 +564,7 @@ public sealed partial class TopologyNodeControl : UserControl
             Padding = new Thickness(10),
             Background = NodeBorder.Background,
             BorderBrush = InteractionBorder.BorderBrush,
-            BorderThickness = new Thickness(2),
+            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(2),
             Opacity = 0.9,
             HorizontalAlignment = HorizontalAlignment.Left,

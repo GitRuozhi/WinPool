@@ -6,7 +6,7 @@
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
     <Grid
         x:Name="DevelopmentLayout"
-        Padding="24"
+        Padding="12"
         SizeChanged="DevelopmentLayout_SizeChanged">
         <Grid.RowDefinitions>
             <RowDefinition x:Name="UpperAreaRow" Height="2*" MinHeight="220" />
@@ -177,7 +177,7 @@
                 Height="180"
                 MaxWidth="640"
                 MaxHeight="380"
-                Margin="24"
+                Margin="12"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"

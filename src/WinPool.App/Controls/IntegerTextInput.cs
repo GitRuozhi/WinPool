@@ -26,6 +26,7 @@ public static class IntegerTextInput
     public static void Attach(TextBox box, Func<long?>? maximum = null, long minimum = 1,
         bool fillMaximumOnLostFocus = false)
     {
+        box.TextAlignment = TextAlignment.Right;
         if (TextBounds.TryGetValue(box, out var existing))
         {
             existing.Maximum = maximum;
@@ -90,6 +91,7 @@ public static class IntegerTextInput
             box.ApplyTemplate();
             if (FindTextBox(box) is { } input)
             {
+                input.TextAlignment = TextAlignment.Right;
                 Attach(input, () => double.IsFinite(box.Maximum) && box.Maximum < long.MaxValue
                         ? (long)Math.Floor(box.Maximum) : long.MaxValue,
                     double.IsFinite(box.Minimum) ? (long)Math.Max(0, Math.Ceiling(box.Minimum)) : 0);

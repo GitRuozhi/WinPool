@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media.Imaging;
 using WinPool.App.Services;
 using WinPool.Application;
 
@@ -27,18 +28,22 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     private readonly TopologyEditInteraction? _edit;
 
+    private SvgImageSource? _unavailableIconSource;
+
     public TopologyNodeViewModel(
         ManageTopologyNodeView node,
         WorkspaceViewModel owner,
         StorageSnapshot snapshot,
         TopologyEditInteraction? edit = null,
-        bool isLayoutRoot = false)
+        bool isLayoutRoot = false,
+        bool isUnavailableCoveredByAncestor = false)
     {
         _owner = owner;
         _snapshot = snapshot;
         _occurrenceKey = node.OccurrenceKey;
         _edit = edit;
         IsLayoutRoot = isLayoutRoot;
+        IsUnavailableCoveredByAncestor = isUnavailableCoveredByAncestor;
         var unit = ToStorageUnit(node, snapshot);
         ObjectId = node.Id;
         Role = node.Role;
@@ -67,14 +72,21 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         _isExpanded = unit.Kind == StorageUnitKind.VirtualDiskGroup
             ? true
             : owner.GetExpandedState(_occurrenceKey, node.IsExpanded);
+        Availability = TopologyAvailability.Resolve(unit, snapshot, owner.ActiveDocument.SourceFacts);
         Children = node.Children
-            .Select(child => new TopologyNodeViewModel(child, owner, snapshot, edit))
+            .Select(child => new TopologyNodeViewModel(
+                child,
+                owner,
+                snapshot,
+                edit,
+                isUnavailableCoveredByAncestor: IsUnavailableCoveredByAncestor
+                    || Availability != TopologyAvailabilityKind.Available
+                        && !IsInvisibleLayoutContainer))
             .ToList();
         IsOffline = unit.Kind is StorageUnitKind.PhysicalDisk
                 or StorageUnitKind.VirtualDisk
                 or StorageUnitKind.OsDisk
             && StorageEditRules.TouchesOfflineDisk(snapshot, [unit.StableId]);
-        Availability = TopologyAvailability.Resolve(unit, snapshot, owner.ActiveDocument.SourceFacts);
         (BadgeText, BadgeIsWarning) = ComputeBadge(owner, snapshot, unit);
         IsWindowsBacked = ComputeIsWindowsBacked(snapshot, unit);
         var physical = snapshot.PhysicalDisks.FirstOrDefault(item => item.StableId == unit.StableId);
@@ -112,10 +124,23 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public TopologyAvailabilityKind Availability { get; }
 
-    public Visibility UnavailableVisibility => Availability == TopologyAvailabilityKind.Available
-        ? Visibility.Collapsed : Visibility.Visible;
+    public SvgImageSource UnavailableIconSource
+    {
+        get
+        {
+            var iconName = Availability == TopologyAvailabilityKind.Available
+                ? "offline" : Availability.ToString().ToLowerInvariant();
+            return _unavailableIconSource ??= new SvgImageSource(new Uri(
+                $"ms-appx:///Assets/StorageStatus/{iconName}.svg"));
+        }
+    }
 
-    public string UnavailableIcon => $"ms-appx:///Assets/StorageStatus/{(Availability == TopologyAvailabilityKind.Available ? "offline" : Availability.ToString().ToLowerInvariant())}.svg";
+    public bool IsUnavailableCoveredByAncestor { get; }
+
+    public Visibility UnavailableVisibility => Availability == TopologyAvailabilityKind.Available
+        || IsUnavailableCoveredByAncestor
+        || IsInvisibleLayoutContainer
+        ? Visibility.Collapsed : Visibility.Visible;
 
     public string UnavailableName => Availability switch
     {

@@ -1168,21 +1168,22 @@ public sealed record StructureProblem(
 
         // The editor presents media layers. An unused creation template is
         // represented by the allocated tier once that media has an instance.
-        // Source identities and all original records remain in the snapshot
-        // and in the management projection.
+        // This only selects diagram nodes; source identities and original
+        // records remain in the snapshot.
         var displayedMembers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in snapshot.StorageTiers
-                     .Where(item => item.PoolStableId == pool.StableId)
+        var poolTiers = TopologyProjector.SelectPoolBusinessTiers(snapshot.StorageTiers
+            .Where(item => string.Equals(item.PoolStableId, pool.StableId, StringComparison.OrdinalIgnoreCase)));
+        foreach (var group in poolTiers
                      .GroupBy(item => NormalizeMedia(item.MediaType))
                      .OrderBy(group => TopologyProjector.TierSortOrder(group.Key)))
         {
-            var instances = group.Where(item => !string.IsNullOrWhiteSpace(item.VirtualDiskStableId)).ToArray();
-            var tiers = instances.Length > 0 ? instances : group.ToArray();
+            var tiers = group.ToArray();
+            var hasInstances = tiers.Any(item => !string.IsNullOrWhiteSpace(item.VirtualDiskStableId));
             foreach (var tier in tiers)
             {
                 var tierMembers = members.Where(disk => !disk.IsHotSpare && !disk.IsRetired
                     && tier.MemberPhysicalDiskIds.Contains(disk.StableId, StringComparer.OrdinalIgnoreCase)).ToList();
-                if (showSourceTierTemplates && instances.Length == 0 && tiers.Length == 1 && sourceFacts is not null)
+                if (showSourceTierTemplates && !hasInstances && tiers.Length == 1 && sourceFacts is not null)
                 {
                     // Template eligibility is only a display grouping, never
                     // an allocated tier-member fact or an editable record.
@@ -1193,7 +1194,7 @@ public sealed record StructureProblem(
                         && NormalizeMedia(disk.MediaType) == group.Key && eligible.Contains(disk.StableId)
                         && !tierMembers.Any(item => item.StableId == disk.StableId)));
                 }
-                if (tierMembers.Count == 0 && (instances.Length == 0
+                if (tierMembers.Count == 0 && (!hasInstances
                     || !(showSourceTierTemplates && !IsDraftPool(pool.StableId)))) continue;
                 displayedMembers.UnionWith(tierMembers.Select(disk => disk.StableId));
                 poolNode.Children.Add(CreateTierNode(pool, tier, snapshot, committed, tierMembers));
@@ -1253,15 +1254,9 @@ public sealed record StructureProblem(
         .Where(group => group.Count() == 1)
         .ToDictionary(group => group.Key, group => group.Single(), StringComparer.OrdinalIgnoreCase);
 
-    public static IReadOnlyList<StorageTierInfo> PoolBusinessTiers(StorageSnapshot snapshot, string poolId) => snapshot.StorageTiers
-        .Where(tier => string.Equals(tier.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase))
-        .GroupBy(tier => NormalizeMedia(tier.MediaType), StringComparer.OrdinalIgnoreCase)
-        .SelectMany(group =>
-        {
-            var instances = group.Where(tier => !string.IsNullOrWhiteSpace(tier.VirtualDiskStableId)).ToArray();
-            return instances.Length > 0 ? instances : group.ToArray();
-        })
-        .ToArray();
+    public static IReadOnlyList<StorageTierInfo> PoolBusinessTiers(StorageSnapshot snapshot, string poolId) =>
+        TopologyProjector.SelectPoolBusinessTiers(snapshot.StorageTiers.Where(
+            tier => string.Equals(tier.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// Manage-equivalent virtual-disk row: one disk stays a direct stack

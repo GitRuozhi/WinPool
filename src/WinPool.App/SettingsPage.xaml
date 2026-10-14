@@ -29,7 +29,7 @@
 
     <ScrollViewer HorizontalContentAlignment="Stretch">
         <StackPanel
-            Padding="24"
+            Padding="12"
             HorizontalAlignment="Stretch"
             Spacing="{StaticResource WinPoolCardGap}">
             <Border Style="{StaticResource SettingsCardBorder}">

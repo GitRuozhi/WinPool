@@ -68,7 +68,7 @@ public partial class EditorPageBase : Page
         new("e3c9e316-0b5c-4db8-817d-f92df00215ae");
 
     protected WorkspaceViewModel ViewModel { get; set; } = null!;
-    protected SimulationEditingSession EditingSession { get; } = new();
+    protected SimulationEditingSession EditingSession { get; set; } = new();
     protected StorageSnapshot _working { get => EditingSession.Working; set => EditingSession.Working = value; }
 
     protected const double MinTopologyWidth = 320;

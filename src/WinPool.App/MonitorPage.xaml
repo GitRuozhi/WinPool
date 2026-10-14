@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="WinPool_App.MonitorPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -10,7 +10,7 @@
     mc:Ignorable="d">
     <Grid
         x:Name="MonitorRoot"
-        Padding="24">
+        Padding="12">
         <Grid.RowDefinitions>
             <RowDefinition x:Name="GraphRow" Height="*" MinHeight="160" />
             <RowDefinition Height="8" />

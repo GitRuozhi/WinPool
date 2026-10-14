@@ -3,6 +3,7 @@
     x:Class="WinPool_App.Controls.NotificationCard"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedTheme="Dark"
     Width="384"
     MaxHeight="200"
     IsTabStop="True"
@@ -23,7 +24,7 @@
     <Grid>
         <InfoBar
             x:Name="NotificationInfoBar"
-            Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
+            Background="#C0000000"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             IsClosable="False"
@@ -33,7 +34,7 @@
         <Border
             x:Name="ProgressSurface"
             Padding="12"
-            Background="{ThemeResource WinPoolOpaqueSurfaceBrush}"
+            Background="#C0000000"
             Style="{StaticResource WinPoolCardBorderStyle}"
             Visibility="Collapsed">
             <Grid ColumnSpacing="12">

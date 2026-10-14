@@ -16,7 +16,7 @@ namespace WinPool_App;
 /// <summary>
 /// Storage structure editor: left pool topology, bottom-left wrapping
 /// structure operations, and a right-hand property card that sizes to its
-/// grouped pool / tier / disk-and-partition fields plus one Save row.
+/// grouped, independently collapsible pool / tier / disk-and-partition cards.
 /// Simulation editing and controlled real structure editing.
 /// </summary>
 public sealed partial class StorageStructurePage : EditorPageBase
@@ -31,7 +31,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _filling;
     private bool _applyingRealDraft;
     private RealStructureDraftPreview? _realDraftPreview;
-    private bool CanEditDraft => (ViewModel.IsUsingSimulatedInventory || ViewModel.CanSubmitRealOperation)
+    private bool CanEditDraft => EditingSession.SystemId == ViewModel.SelectedSystem.SystemId
+        && (ViewModel.IsUsingSimulatedInventory || ViewModel.CanSubmitRealOperation)
         && !_applyingRealDraft && !IsRealStructureApplyInProgress && !_renameInProgress
         && !_outcomeUnknown && !EditingSession.RealResultSynchronizationPending && !EditingSession.HasBaselineConflict
         && !ViewModel.IsRealOperationBusy;
@@ -50,7 +51,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _updatingAutoPartition;
     private bool _narrowLayout;
     private bool _showPropertiesInNarrowLayout;
-    private GridLength _widePropertiesWidth = new(320);
+    private GridLength _widePropertiesWidth = new(520);
 
     private Stack<EditorDraftState> _undoStack => EditingSession.UndoStack;
     private Stack<EditorDraftState> _redoStack => EditingSession.RedoStack;
@@ -76,6 +77,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         List<FrameworkElement> Rows,
         List<int> RowIndices)
     {
+        public TextBlock FullStripeDisplay { get; } = new()
+        {
+            TextAlignment = TextAlignment.Right, TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center
+        };
         public Border Card { get; set; } = null!;
         public Grid FormGrid { get; set; } = null!;
         public TextBox MaximumDisplay { get; } = new()
@@ -178,6 +184,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     public StorageStructurePage()
     {
         InitializeComponent();
+        NavigationCacheMode = NavigationCacheMode.Required;
         Performance = CreateTierFields("SSD", "PerformanceTier");
         Capacity = CreateTierFields("HDD", "CapacityTier");
         Dedicated = CreateTierFields("SCM", "DedicatedTier");
@@ -197,20 +204,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
-        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.IsUsingSimulatedInventory
-            ? EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot)
-            : ViewModel.EffectiveActiveSnapshot);
-        _selectedPoolId = ResolvePoolId(targetStableId);
-        _selectedPoolTierId = null;
-        _undoStack.Clear();
-        _redoStack.Clear();
-        _poolIntents.Clear();
-        _maximumSizeFields.Clear();
-        _capacityDefaultModesInitialized.Clear();
-        _programmaticCapacityText.Clear();
-        _userCapacityEdits.Clear();
-        _nameDefaults.Clear();
-        _formDirty = false;
+        var restoredForm = RestoreNavigationDraft(targetStableId);
         _interaction = new TopologyEditInteraction(
             IsTopologyNodeSelected,
             OnTopologySelected,
@@ -222,6 +216,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         LocalizeChrome();
         EnsureForm();
         RefreshAll();
+        if (restoredForm is not null) RestoreFormInputs(restoredForm);
+        UpdateButtonState();
     }
 
     internal void RefreshExecutionMode()
@@ -244,7 +240,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     protected override void OnRealInventoryRefreshed()
     {
-        if (ViewModel.IsUsingSimulatedInventory)
+        if (ViewModel.IsUsingSimulatedInventory || EditingSession.SystemId != ViewModel.SelectedSystem.SystemId)
             return;
 
         if (_applyingRealDraft || IsRealStructureApplyInProgress || _renameInProgress
@@ -332,11 +328,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
         RetireButtonLabel.Text = ViewModel.Localization["RetireDisk"];
         HotSpareButtonLabel.Text = ViewModel.Localization["HotSpareDisk"];
         CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘", "Create virtual disk");
-        SavePoolPropertiesButtonLabel.Text = ViewModel.Localization["SavePoolProperties"];
+        UndoButtonLabel.Text = ViewModel.Localization["Undo"];
+        RedoButtonLabel.Text = ViewModel.Localization["Redo"];
+        DiscardButtonLabel.Text = ViewModel.Localization["DiscardAll"];
+        ApplyButtonLabel.Text = ViewModel.Localization["ApplyAll"];
+        foreach (var localize in _localizeForm) localize();
+        ApplyFormMetrics();
         _multiVdiskWarning.Text = ViewModel.Localization["MultipleVirtualDiskWarning"];
         _volumeNameBox.PlaceholderText = ViewModel.Localization["VolumeName"];
-        PendingActionsTitle.Text = ViewModel.Localization["PendingActions"];
-        PendingActionsEmptyText.Text = ViewModel.Localization["NoPendingActions"];
+
         ContextHelp.Set(UndoButton, Text("撤销最近一项未应用的修改。", "Undo the most recent unapplied change."));
         ContextHelp.Set(RedoButton, Text("恢复最近撤销的修改。", "Redo the most recently undone change."));
         ContextHelp.Set(DiscardAllButton, Text("放弃所有未应用的修改。", "Discard all unapplied changes."));
@@ -349,7 +349,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(CreateVdiskButton, Text("为符合条件的存储池创建待应用的虚拟磁盘草稿；点击应用时核对并确认全部变更。", "Create a pending virtual disk draft for an eligible pool; review and confirm all changes when applying."));
         ContextHelp.Set(ShowHotSpareSwitch, Text("显示或隐藏热备层。", "Show or hide the hot-spare layer."));
         ContextHelp.Set(ShowRetiredSwitch, Text("显示或隐藏已退役层。", "Show or hide the retired layer."));
-        ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前属性到同一待应用草稿。", "Save the current properties to the same pending draft."));
+
     }
 
     private void EditorLayoutGrid_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -382,7 +382,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var showTargets = !_narrowLayout || !_showPropertiesInNarrowLayout;
         var showProperties = !_narrowLayout || _showPropertiesInNarrowLayout;
         TopologyBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
-        PendingActionsBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
         StructureChromeBorder.Visibility = showTargets ? Visibility.Visible : Visibility.Collapsed;
         PropertiesPane.Visibility = showProperties ? Visibility.Visible : Visibility.Collapsed;
         EditorSplitter.Visibility = _narrowLayout ? Visibility.Collapsed : Visibility.Visible;
@@ -530,7 +529,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _autoVdiskSwitch.Toggled += AutoVdiskSwitch_Toggled;
         _autoPartitionSwitch.Toggled += AutoPartitionSwitch_Toggled;
 
-        ContextHelp.Set(_poolNameBox, Text("输入名称后按 Enter 保存；离开焦点不会提交。", "Enter a name and press Enter to save; losing focus does not submit it."));
+        ContextHelp.Set(_poolNameBox, Text("新对象名称即时更新草稿；现有对象按 Enter 提交改名。", "Names for new objects update the draft immediately; press Enter to rename an existing object."));
         ContextHelp.Set(_virtualDiskNameBox, Text("输入名称后点击“检查”直接提交此名称；Enter 也可提交。", "Click Check to submit this name directly; Enter also submits it."));
         ContextHelp.Set(_volumeNameBox, Text("输入卷标后点击“检查”直接提交此名称；Enter 也可提交。", "Click Check to submit this label directly; Enter also submits it."));
         ContextHelp.Set(_autoVdiskSwitch, Text(
@@ -544,9 +543,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(_clusterBox, Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是 Windows 容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a Windows capacity guarantee."));
         foreach (var group in TierGroups())
         {
-            ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
+            ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；合法输入即时更新草稿，按 Enter 规范化。", "Enter the tier size in GiB; valid input updates the draft immediately. Press Enter to normalize."));
             ContextHelp.Set(group.ResiliencyBox, Text("选择支持的复原类型。", "Choose a supported resiliency type."));
-            ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
+            ContextHelp.Set(group.InterleaveBox, Text("选择条带单元；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the stripe unit; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
             ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
             ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
             ContextHelp.Set(group.ColumnsBox, Text("列数须符合数据盘数和副本数；按 Enter 规范化。", "Columns must fit the data disk and copy counts; press Enter to normalize."));
@@ -589,6 +588,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Grid.SetColumn(_multiVdiskWarning, 0);
         Grid.SetColumnSpan(_multiVdiskWarning, 5);
         DiskAndPartitionFormGrid.Children.Add(_multiVdiskWarning);
+        ApplyFormMetrics();
     }
 
     private void RefreshAutoCreateSwitches()
@@ -623,8 +623,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         try
         {
             await ViewModel.SetAutoCreateVirtualDiskAsync(_autoVdiskSwitch.IsOn);
-            // This is deliberately a preference-only update. It refreshes
-            // control availability but never inserts or removes existing drafts.
+            // Keep the new pool creation intent synchronized with its software preference.
+            if (SelectedPool() is { } pool && EditWorkspace.IsDraftPool(pool.StableId)) _formDirty = true;
             UpdateButtonState();
         }
         catch (Exception exception) when (
@@ -651,8 +651,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         try
         {
             await ViewModel.SetAutoCreatePartitionAsync(_autoPartitionSwitch.IsOn);
-            // Do not interpret changing a software preference as a request to
-            // alter an existing virtual disk or its partition.
+            // The preference changes the new pool intent; Apply retains its confirmation.
+            if (SelectedPool() is { } pool && EditWorkspace.IsDraftPool(pool.StableId)) _formDirty = true;
             UpdateButtonState();
         }
         catch (Exception exception) when (
@@ -776,6 +776,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 };
                 break;
             case NumberBox number:
+                HookLiveNumberInput(number);
                 number.ValueChanged += (_, _) =>
                 {
                     if (!_filling && control.IsEnabled && SelectedPool() is { IsPrimordial: false })
@@ -784,7 +785,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
                             ReferenceEquals(group.CopiesBox, number)
                             || ReferenceEquals(group.FailuresBox, number));
                         if (tierGroup is not null)
-                            RefreshColumnInputBounds(tierGroup);
+                        {
+                            _filling = true;
+                            try { LinkResiliency(tierGroup); }
+                            finally { _filling = false; }
+                        }
                         _formDirty = true;
                         UpdateButtonState();
                     }
@@ -896,6 +901,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+        var namingSession = EditingSession;
+        var namingSystemId = namingSession.SystemId;
         _renameInProgress = true;
         try
         {
@@ -933,7 +940,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     "No file data loss expected"));
                 if (renamed)
                 {
-                    SynchronizeCommittedName(targetId);
+                    if (ViewModel.SystemCatalog.Systems.SingleOrDefault(document => document.SystemId == namingSystemId) is { } renamedSystem)
+                        namingSession.AcceptRename(renamedSystem, targetId);
+                    if (!ReferenceEquals(EditingSession, namingSession) || ViewModel.SelectedSystem.SystemId != namingSystemId) return;
                     RefreshTopology();
                     UpdateButtonState();
                 }
@@ -971,26 +980,25 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     "storage-structure-editor");
                 if (result.Status == ApplicationStatus.OutcomeUnknown)
                 {
-                    _outcomeUnknown = true;
+                    namingSession.OutcomeUnknown = true;
                 }
                 return;
             }
 
-            SynchronizeCommittedName(targetId);
+            if (ViewModel.SystemCatalog.Systems.SingleOrDefault(document => document.SystemId == namingSystemId) is { } savedSystem)
+                namingSession.AcceptRename(savedSystem, targetId);
+            if (!ReferenceEquals(EditingSession, namingSession) || ViewModel.SelectedSystem.SystemId != namingSystemId) return;
             _currentPlan = null;
             RefreshTopology();
             UpdateButtonState();
         }
         finally
         {
-            _renameInProgress = false;
+            namingSession.RenameInProgress = false;
             RefreshTopology();
             UpdateButtonState();
         }
     }
-
-    private void SynchronizeCommittedName(string targetId) =>
-        EditingSession.AcceptRename(ViewModel.SelectedSystem, targetId);
 
     /// <summary>
     /// Commit-time normalization of tier numbers (Enter / focus loss): empty
@@ -1049,19 +1057,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
         return TierMap(pool.StableId).GetValueOrDefault(media);
     }
 
-    private static void ConfigureFormGrid(Grid grid)
+    private void ConfigureFormGrid(Grid grid)
     {
         grid.ColumnDefinitions.Clear();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorFormMetrics.LabelWidth(IsChinese)) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = EditorFormMetrics.MinimumValueWidth });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
         grid.ColumnSpacing = 4;
         grid.RowSpacing = 4;
     }
 
-    private static Grid CreateFormGrid()
+    private Grid CreateFormGrid()
     {
         var grid = new Grid
         {
@@ -1098,6 +1106,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         row = AddTierRow(row, group, "TierDiskCount", group.DiskCountBox, null);
         row = AddTierRow(row, group, "TierColumns", group.ColumnsBox, () => ResetTierField(group, "Columns"));
         row = AddTierRow(row, group, "TierStripeSize", group.InterleaveBox, () => ResetTierField(group, "Stripe"));
+        group.RowIndices.Add(row);
+        AddFormRow(group.FormGrid, row, "FullStripe", group.FullStripeDisplay, visibilityGroup: group.Rows,
+            labelText: Text("完整条带", "Full stripe"));
     }
 
     private int AddTierRow(
@@ -1162,7 +1173,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 return;
             }
 
-            reset();
+            _filling = true;
+            try { reset(); }
+            finally { _filling = false; }
             _formDirty = true;
             UpdateLinkedFields();
             UpdateButtonState();
@@ -1189,11 +1202,38 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"],
             Text = ViewModel.Localization[key]
         };
-        Grid.SetRow(label, row);
-        Grid.SetColumn(label, 0);
-        Grid.SetColumnSpan(label, 5);
-        formGrid.Children.Add(label);
-        visibilityGroup?.Add(label);
+        var arrow = new FontIcon { Glyph = "\uE70D", FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+        var header = new Grid();
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(label);
+        Grid.SetColumn(arrow, 1);
+        header.Children.Add(arrow);
+        var button = new Button
+        {
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0),
+            Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, Content = header
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, $"Structure{key}Header");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label.Text);
+        _localizeForm.Add(() =>
+        {
+            label.Text = ViewModel.Localization[key];
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label.Text);
+        });
+        _sectionHeaders[formGrid] = (button, arrow, false);
+        button.Click += (_, _) =>
+        {
+            var state = _sectionHeaders[formGrid];
+            _sectionHeaders[formGrid] = (state.Button, state.Arrow, !state.Collapsed);
+            ApplySectionCollapse(formGrid);
+        };
+        Grid.SetRow(button, row);
+        Grid.SetColumnSpan(button, 5);
+        formGrid.Children.Add(button);
+        visibilityGroup?.Add(button);
         return row + 1;
     }
 
@@ -1227,6 +1267,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             Text = labelText ?? ViewModel.Localization[key]
         };
+        _localizeForm.Add(() =>
+        {
+            label.Text = FormLabel(key, labelText);
+            label.MaxLines = IsChinese ? 1 : 2;
+        });
+        label.Text = FormLabel(key, labelText);
+        label.MaxLines = IsChinese ? 1 : 2;
         var indicator = new Border
         {
             Width = 6,
@@ -1626,6 +1673,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             _working = ApplyFormToWorking(_working);
             _formDirty = false;
+            _formHistoryCaptured = false;
             _undoStack.Push(priorState!);
             _redoStack.Clear();
         }
@@ -2108,6 +2156,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 _redoStack.Clear();
                 _working = next;
                 _formDirty = false;
+                _formHistoryCaptured = false;
                 ResetLayerSwitchesForSelection();
                 RefreshAll();
             }
@@ -2303,6 +2352,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             _filling = false;
             _formDirty = false;
+            _formHistoryCaptured = false;
         }
     }
 
@@ -2365,8 +2415,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         SetResiliency(group.ResiliencyBox, tier.ResiliencySettingName);
-        SetInterleave(group.InterleaveBox, tier.Interleave ?? 65536);
         var isDraft = EditWorkspace.IsDraftPool(tier.PoolStableId);
+        if (tier.Interleave is { } knownUnit) SetInterleave(group.InterleaveBox, knownUnit);
+        else if (isDraft || ViewModel.IsUsingSimulatedInventory) SetInterleave(group.InterleaveBox, 65536);
+        else group.InterleaveBox.SelectedItem = null;
         var capacityUnavailable = _working.FieldIssues.Any(issue =>
             issue.ObjectId.Equals(tier.StableId, StringComparison.OrdinalIgnoreCase)
             && issue.FieldName.Equals(nameof(StorageTierInfo.Size), StringComparison.OrdinalIgnoreCase)
@@ -2387,8 +2439,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         SetNum(group.ColumnsBox, tier.NumberOfColumns ?? (ViewModel.IsUsingSimulatedInventory || isDraft
             ? EditWorkspace.RecommendedTierColumns(tier.ResiliencySettingName, TierDataDisks(group.Media))
             : (int?)null));
-        SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? 1);
-        SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? 1);
+        SetNum(group.CopiesBox, tier.NumberOfDataCopies ?? (isDraft || ViewModel.IsUsingSimulatedInventory ? 1 : (int?)null));
+        SetNum(group.FailuresBox, tier.PhysicalDiskRedundancy ?? (isDraft || ViewModel.IsUsingSimulatedInventory ? 1 : (int?)null));
         group.DiskCountBox.Text = tier.MemberPhysicalDiskIds.Count.ToString();
         group.ProvisioningBox.SelectedItem = "Fixed";
         UpdateMaximumSizeText(group);
@@ -2559,10 +2611,15 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        LinkResiliency(Performance);
-        LinkResiliency(Capacity);
-        LinkResiliency(Dedicated);
-        RefreshClusterChoices();
+        _filling = true;
+        try
+        {
+            LinkResiliency(Performance);
+            LinkResiliency(Capacity);
+            LinkResiliency(Dedicated);
+            RefreshClusterChoices();
+        }
+        finally { _filling = false; }
     }
 
     /// <summary>
@@ -2644,38 +2701,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     /// <summary>
     /// Any uncommitted draft content: structural draft steps, object-backed
-    /// property saves, form-level partition edits, or plain dirty fields.
+    /// property edits, form-level partition edits, or plain dirty fields.
     /// </summary>
     private bool HasUncommittedChanges() =>
         (_formDirty && SelectedPool() is { IsPrimordial: false })
-        || EditWorkspace.HasStructuralChanges(_working, EditingSession.Baseline)
-        || EditWorkspace.HasAnyPoolPropertyChanges(_working, EditingSession.Baseline)
-        || HasStoredPartitionIntentChanges()
-        || _poolIntents.Values.Any(intent => intent.PendingAutomaticLayout)
-        || (!ViewModel.IsUsingSimulatedInventory && EditingSession.Baseline.StorageTiers.Any(tier =>
-            !_working.StorageTiers.Any(item => item.StableId == tier.StableId)));
-
-    private bool HasStoredPartitionIntentChanges()
-    {
-        foreach (var pair in _poolIntents)
-        {
-            if (!_working.StoragePools.Any(item => item.StableId == pair.Key)
-                || PrimaryPartition(pair.Key) is not { } finalPartition
-                || CommittedPrimaryPartition(pair.Key) is not { } committedPartition
-                || finalPartition.StableId != committedPartition.StableId)
-            {
-                continue;
-            }
-
-            if (!string.Equals(pair.Value.FileSystem, committedPartition.FileSystem, StringComparison.OrdinalIgnoreCase)
-                || pair.Value.AllocationUnitSize != committedPartition.AllocationUnitSize)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        || StructureDraftReentry.HasDraftContent(EditingSession);
 
     private void RefreshPendingActions()
     {
@@ -3044,7 +3074,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var current = SelectedCreationIntent();
-        if (!_poolIntents.TryGetValue(_selectedPoolId, out var previous) || current != previous)
+        if (!_poolIntents.TryGetValue(_selectedPoolId, out var previous) || !SamePoolIntent(previous, current))
             EditingSession.MarkDraftContentChanged();
         _poolIntents[_selectedPoolId] = current;
     }
@@ -3055,6 +3085,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         EditingSession.Restore(state);
         _formDirty = false;
+        _formHistoryCaptured = false;
     }
 
     private void AppendPartitionIntents(List<SimulationEditRequest> steps)
@@ -3221,13 +3252,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool HasInvalidSizeInput()
     {
         var pool = SelectedPool();
-        return pool is not null && TierGroups().Any(group =>
+        return pool is not null && (HasIncompleteNumberInput() || TierGroups().Any(group =>
             TierVisible(pool.StableId, group.Media)
             && group.SizeBox.IsEnabled
             && !_maximumSizeFields.Contains(MaximumKey(group))
             && (NumValue(group.SizeBox) is not { } size
                 || size > CapacityMaximumIntegerGiB(group))
-            && !CapacityTextMatchesCurrentTier(group));
+            && !CapacityTextMatchesCurrentTier(group)));
     }
 
     private bool CapacityTextMatchesCurrentTier(TierFields group)
@@ -3248,6 +3279,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void UpdateButtonState()
     {
+        CommitLiveFormEdit();
         var simulated = ViewModel.IsUsingSimulatedInventory;
         var pool = SelectedPool();
         var poolOffline = pool is not null
@@ -3264,6 +3296,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdateFormStates(formEnabled, pool, realVdisk, realVdisk is not null);
         RefreshTierVisibility();
         RefreshPendingActions();
+        UpdatePendingActionCount();
+        RefreshFullStripes();
         var hasUnapplied = HasUncommittedChanges();
 
         UndoButton.IsEnabled = CanEditDraft && _undoStack.Count > 0;
@@ -3282,12 +3316,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DissolveButton.IsEnabled = CanEditDraft
             && (simulated || EditWorkspace.IsDraftPool(pool?.StableId ?? "") || CanDissolveRealPool(pool))
             && pool is { IsPrimordial: false } && !poolOffline;
-        SavePoolPropertiesButton.IsEnabled = CanEditDraft
-            && _formDirty
-            && !HasInvalidSizeInput()
-            && pool is { IsPrimordial: false }
-            && !poolOffline;
-
         var selectedDisk = _working!.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedPoolDiskId);
         var canLayerDisk = selectedDisk is not null
             && CanStageDiskSpecialRole(selectedDisk)
@@ -3362,9 +3390,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     ? Text("该池包含数据或无法核实的成员、布局或关联；当前不能解散。",
                         "This pool contains data or has members, layouts, or associations that cannot be verified for dissolution.")
                     : Text("请选择可解散的普通存储池。", "Select a normal storage pool to dissolve.")));
-        SetDisabledReason(
-            SavePoolPropertiesButton,
-            structureReason ?? Text("没有可保存的池属性修改。", "There is no pool property change to save."));
         var diskRoleReason = structureReason
             ?? (selectedDisk is null
                 ? Text("请选择该池中的一块数据磁盘。", "Select a data disk in this pool.")
@@ -3403,6 +3428,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdateNameActionStates();
         if (TopologyControl.ItemsSource is IEnumerable<TopologyNodeViewModel> roots)
             foreach (var root in roots) ApplyPendingModificationStates(root);
+        foreach (var grid in _sectionHeaders.Keys) ApplySectionCollapse(grid);
+        UpdateApplyAnimation(hasUnapplied && PendingActionCount > 0);
     }
 
     private string? ResolveStructureDisabledReason(
@@ -3469,7 +3496,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(ApplyAllButton, ViewModel.IsUsingSimulatedInventory
             ? Text("确认风险后将待处理结构修改写入模拟系统。", "Write pending structural changes to the simulated system after confirming risks.")
             : Text("确认本次准确目标与全部结构变更后应用同一真实草稿。", "Confirm the exact target and all structural changes, then apply the same real draft."));
-        ContextHelp.Set(SavePoolPropertiesButton, Text("保存当前属性到同一待应用草稿。", "Save the current properties to the same pending draft."));
+
     }
 
     private static void SetDisabledReason(FrameworkElement element, string? reason) =>
@@ -3620,8 +3647,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             ContextHelp.Set(
                 group.InterleaveBox,
                 supportedInterleave
-                    ? Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。",
-                        "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it.")
+                    ? Text("选择条带单元；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。",
+                        "Choose the stripe unit; 64 KiB is the current tested recommendation and 256 KiB is outside it.")
                     : Text("当前 Interleave 值超出编辑范围，已按原值保留。", "The current interleave is outside the editable range and is preserved."));
             group.DiskCountBox.IsReadOnly = true;
             if (!tierVisible)
@@ -3632,7 +3659,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var resiliency = group.ResiliencyBox.SelectedItem as string ?? "Simple";
             var isMirror = resiliency.Equals("Mirror", StringComparison.OrdinalIgnoreCase);
             var isSimple = resiliency.Equals("Simple", StringComparison.OrdinalIgnoreCase);
-            LinkResiliency(group);
+            // Linking happens once in the user edit transaction. A state refresh
+            // must preserve an empty input and unknown provider facts.
             group.DiskCountBox.Text = TierMemberCount(pool.StableId, group.Media).ToString();
             group.CopiesBox.IsEnabled = specEditable && isMirror;
             group.FailuresBox.IsEnabled = specEditable && !isMirror && !isSimple;
@@ -3702,11 +3730,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void RestoreTierHelp(TierFields group)
     {
-        ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；按 Enter 规范化并保存草稿。", "Enter the tier size in GiB; press Enter to normalize and save the draft."));
+        ContextHelp.Set(group.SizeBox, Text("以 GiB 输入层大小；合法输入即时更新草稿，按 Enter 规范化。", "Enter the tier size in GiB; valid input updates the draft immediately. Press Enter to normalize."));
         ContextHelp.Set(group.MaximumButton, Text("使用 WinPool 内置算法计算整数 GiB 最大容量。", "Calculate a whole GiB maximum using WinPool's built-in algorithm."));
         ContextHelp.Set(group.ProvisioningBox, Text("当前仅支持固定预配。", "Fixed provisioning is currently supported."));
         ContextHelp.Set(group.ResiliencyBox, Text("选择支持的复原类型。", "Choose a supported resiliency type."));
-        ContextHelp.Set(group.InterleaveBox, Text("选择交织大小；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the interleave size; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
+        ContextHelp.Set(group.InterleaveBox, Text("选择条带单元；64 KiB 是当前测试建议，256 KiB 不在推荐范围内。", "Choose the stripe unit; 64 KiB is the current tested recommendation and 256 KiB is outside it."));
         ContextHelp.Set(group.CopiesBox, Text("镜像层的数据副本数；按 Enter 规范化。", "Data-copy count for a mirror tier; press Enter to normalize."));
         ContextHelp.Set(group.FailuresBox, Text("奇偶校验层可容忍的物理磁盘故障数；按 Enter 规范化。", "Physical-disk failures tolerated by a parity tier; press Enter to normalize."));
         ContextHelp.Set(group.ColumnsBox, Text("列数须符合数据盘数和副本数；按 Enter 规范化。", "Columns must fit the data disk and copy counts; press Enter to normalize."));
@@ -3768,16 +3796,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var merged = ApplyFormToWorking(_working);
         _working = merged;
         _formDirty = false;
+        _formHistoryCaptured = false;
     }
 
     private void CommitWorkingStep(StorageSnapshot next)
     {
         if (ReferenceEquals(next, _working))
         {
-            // Nothing object-backed changed (e.g. Save with only form-level
-            // partition fields edited, which Apply consumes directly). Keep
-            // the form text untouched and treat the edit as saved.
+            // An intent-only update keeps the current form text and working objects.
             _formDirty = false;
+            _formHistoryCaptured = false;
             UpdateButtonState();
             return;
         }
@@ -3786,6 +3814,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _redoStack.Clear();
         _working = next;
         _formDirty = false;
+        _formHistoryCaptured = false;
         RefreshAll();
     }
 
@@ -3864,6 +3893,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         EditingSession.Undo();
         _formDirty = false;
+        _formHistoryCaptured = false;
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         RefreshAll();
@@ -3882,6 +3912,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         EditingSession.Redo();
         _formDirty = false;
+        _formHistoryCaptured = false;
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         RefreshAll();
@@ -3896,6 +3927,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
+        var discardSession = EditingSession;
+        var discardSystemId = discardSession.SystemId;
         if (!await ConfirmAsync(
                 Text("放弃所有修改", "Discard all changes"),
                 Text(
@@ -3904,6 +3937,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             return;
         }
+
+        if (!ReferenceEquals(EditingSession, discardSession)
+            || ViewModel.SelectedSystem.SystemId != discardSystemId) return;
 
         _undoStack.Clear();
         _redoStack.Clear();
@@ -3914,6 +3950,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _outcomeUnknown = false;
         EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
         _formDirty = false;
+        _formHistoryCaptured = false;
         _selectedPoolId = null;
         _selectedPoolDiskId = null;
         _selectedPoolVdiskId = null;
@@ -4215,6 +4252,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _redoStack.Clear();
             _working = next;
             _formDirty = false;
+            _formHistoryCaptured = false;
             RefreshAll();
         }
         catch (InvalidOperationException exception)
@@ -4281,6 +4319,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private async void ApplyAll_Click(object sender, RoutedEventArgs e)
     {
         if (!CanEditDraft) return;
+        var submittedSession = EditingSession;
+        var submittedSystemId = submittedSession.SystemId;
+        bool IsCurrentSubmission() => ReferenceEquals(EditingSession, submittedSession)
+            && ViewModel.SelectedSystem.SystemId == submittedSystemId;
 
         if (!ViewModel.IsUsingSimulatedInventory)
         {
@@ -4293,10 +4335,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             UpdateButtonState();
             try
             {
-                if (await ApplyRealStructureDraftAsync(EditingSession))
+                var realApplied = await ApplyRealStructureDraftAsync(submittedSession);
+                if (!IsCurrentSubmission()) return;
+                if (realApplied)
                 {
                     EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
                     _formDirty = false;
+                    _formHistoryCaptured = false;
                     RestoreRealSelection(selectedPoolMembers, selectedMember);
                     RefreshAll();
                 }
@@ -4442,7 +4487,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        if (!CanEditDraft) return;
+        if (!CanEditDraft || !IsCurrentSubmission()) return;
 
         var plan = EditingSession.Prepare(planned);
         if (plan.IsEmpty)
@@ -4455,6 +4500,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         using var activity = BeginPageActivity(Text("正在应用结构修改", "Applying structural changes"));
         var applied = await ViewModel.ApplySimulationPlanAsync(plan);
+        if (!IsCurrentSubmission())
+        {
+            if (applied.Status == ApplicationStatus.OutcomeUnknown) submittedSession.OutcomeUnknown = true;
+            if (applied.IsSuccess && ViewModel.SystemCatalog.Systems.SingleOrDefault(system => system.SystemId == submittedSystemId) is { } completedSystem)
+                submittedSession.Bind(completedSystem, EditWorkspace.NormalizeTierCapacities(completedSystem.Snapshot));
+            return;
+        }
         if (!applied.IsSuccess)
         {
             await HandleFailedApplyAsync(applied, pending);
@@ -4473,6 +4525,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         NormalizeSelection();
         ResetLayerSwitchesForSelection();
         _formDirty = false;
+        _formHistoryCaptured = false;
         RefreshAll();
         PublishOperationFeedback(
             GlobalNotificationSeverity.Info,
@@ -4497,6 +4550,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _outcomeUnknown = true;
             _working = pending;
             _formDirty = false;
+            _formHistoryCaptured = false;
             RefreshAll();
             return Task.CompletedTask;
         }
@@ -4511,6 +4565,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         {
             _working = pending;
             _formDirty = false;
+            _formHistoryCaptured = false;
         }
 
         RefreshAll();
@@ -4518,9 +4573,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     /// <summary>
-    /// Writes every edited property-form field into the working copy as one
-    /// structural draft step (undoable). Partition-level create/format
-    /// values stay on the form and are consumed by Apply.
+    /// Projects property-form fields into the local working snapshot. The
+    /// caller controls the undo transaction; partition create/format values
+    /// are captured separately in the same draft intent.
     /// </summary>
     private StorageSnapshot ApplyFormToWorking(StorageSnapshot snapshot)
     {
@@ -4751,72 +4806,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         && left.PhysicalDiskRedundancy == right.PhysicalDiskRedundancy
         && left.NumberOfColumns == right.NumberOfColumns;
 
-    private async void SavePoolProperties_Click(object sender, RoutedEventArgs e)
-    {
-        var pool = SelectedPool();
-        if (!CanEditDraft || !_formDirty || HasInvalidSizeInput()
-            || pool is not { IsPrimordial: false }
-            || StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]))
-        {
-            return;
-        }
-
-        var priorState = CaptureDraftState();
-        var merged = ApplyFormToWorking(_working);
-        if (ViewModel.IsUsingSimulatedInventory)
-            merged = EditWorkspace.NormalizeTierCapacities(merged);
-        var committed = EditingSession.Baseline;
-        var objectChanged = EditWorkspace.HasPoolPropertyChanges(merged, committed, pool.StableId);
-        var tierChanged = objectChanged && RebuildsTierParameters(merged, committed, pool.StableId);
-        var hasData = EditWorkspace.PoolHoldsStoredData(committed, pool.StableId);
-        if (hasData && tierChanged)
-        {
-            await ShowMessageAsync(
-                ViewModel.Localization["RebuildBlockedTitle"],
-                ViewModel.Localization["RebuildBlockedMessage"]);
-            return;
-        }
-
-        var partitionChanged = FormPartitionDiffers(committed, pool.StableId, out var reformatsPartition);
-        if (hasData && partitionChanged && reformatsPartition)
-        {
-            await ShowMessageAsync(
-                ViewModel.Localization["RebuildBlockedTitle"],
-                ViewModel.Localization["RebuildBlockedMessage"]);
-            return;
-        }
-
-        CaptureSelectedIntent();
-        _undoStack.Push(priorState);
-        _redoStack.Clear();
-        _working = merged;
-        _formDirty = false;
-        RefreshAll();
-    }
-
-    private bool FormPartitionDiffers(
-        StorageSnapshot committed,
-        string poolId,
-        out bool reformatsPartition)
-    {
-        reformatsPartition = false;
-        var partition = CommittedPrimaryPartition(poolId);
-        if (partition is null)
-        {
-            return false;
-        }
-
-        var fileSystem = _fileSystemBox.SelectedItem as string ?? "NTFS";
-        var cluster = SelectedClusterSize();
-        var fsChanged = !string.Equals(
-            fileSystem,
-            partition.FileSystem,
-            StringComparison.OrdinalIgnoreCase);
-        var clusterChanged = cluster != partition.AllocationUnitSize;
-        reformatsPartition = fsChanged || clusterChanged;
-        return reformatsPartition;
-    }
-
     private static bool SameToken(ComboBox box, string value) =>
         string.Equals(box.SelectedItem as string, value, StringComparison.OrdinalIgnoreCase);
 
@@ -4951,6 +4940,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _undoStack.Push(CaptureDraftState());
         _redoStack.Clear();
         _maximumSizeFields.Add(key);
+        _formHistoryCaptured = true;
         UpdateMaximumSizeText(group);
         CaptureSelectedIntent();
         _formDirty = true;
@@ -4992,6 +4982,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _undoStack.Push(CaptureDraftState());
         _redoStack.Clear();
         _maximumSizeFields.Remove(key);
+        _formHistoryCaptured = true;
         CaptureSelectedIntent();
     }
 
