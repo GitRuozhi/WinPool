@@ -26,7 +26,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="TargetsColumn" Width="*" MinWidth="120" />
             <ColumnDefinition x:Name="SplitterColumn" Width="8" />
-            <ColumnDefinition x:Name="PropertiesColumn" Width="380" MinWidth="240" />
+            <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="240" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -125,10 +125,10 @@
                     </Grid>
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
-                    <Button x:Name="DissolveButton" MinHeight="32" Style="{StaticResource WinPoolButtonBaseStyle}" Click="Dissolve_Click">
+                    <Button x:Name="PoolActionButton" MinHeight="32" Style="{StaticResource WinPoolButtonBaseStyle}" Click="PoolAction_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon x:Name="DissolveButtonIcon" Glyph="&#xE74D;" FontSize="14" />
-                            <TextBlock x:Name="DissolveButtonLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            <FontIcon x:Name="PoolActionButtonIcon" Glyph="&#xE710;" FontSize="14" />
+                            <TextBlock x:Name="PoolActionButtonLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
                         </StackPanel>
                     </Button>
                 </controls:ContextHelpHost>
@@ -178,11 +178,10 @@
             </Grid.RowDefinitions>
             <ScrollViewer
                 x:Name="PropertiesScrollViewer"
-                SizeChanged="PropertiesScrollViewer_SizeChanged"
                 VerticalAlignment="Stretch"
                 VerticalScrollBarVisibility="Auto"
-                HorizontalScrollBarVisibility="Auto"
-                HorizontalScrollMode="Enabled">
+                HorizontalScrollBarVisibility="Disabled"
+                HorizontalScrollMode="Disabled">
                 <StackPanel
                     x:Name="PoolSectionsPanel"
                     Spacing="{StaticResource WinPoolCardGap}">
@@ -192,10 +191,6 @@
                             Margin="0"
                             ColumnSpacing="4"
                             RowSpacing="4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
                         </Grid>
                     </Border>
                     <Border
@@ -206,11 +201,6 @@
                             Margin="0"
                             ColumnSpacing="4"
                             RowSpacing="4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="32" />
-                                <ColumnDefinition Width="2*" />
-                            </Grid.ColumnDefinitions>
                         </Grid>
                     </Border>
                 </StackPanel>

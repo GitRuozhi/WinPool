@@ -25,7 +25,7 @@ public sealed partial class StorageStructurePage
         AddAction(DiscardAllButton, ViewModel.Localization["DiscardAll"], "\uE711", DiscardAll_Click);
         AddAction(ApplyAllButton, ViewModel.Localization["ApplyAll"], "\uE73E", ApplyAll_Click);
         menu.Items.Add(new MenuFlyoutSeparator());
-        AddAction(DissolveButton, DissolveButtonLabel.Text, "\uE74D", Dissolve_Click);
+        AddAction(PoolActionButton, PoolActionButtonLabel.Text, PoolActionButtonIcon.Glyph, PoolAction_Click);
         AddAction(CreateVdiskButton, CreateVdiskButtonLabel.Text,
             _virtualDiskActionDeletes ? "\uE74D" : "\uE710", VirtualDiskAction_Click);
         AddAction(RetireButton, RetireButtonLabel.Text, "\uE7E8", Retire_Click);

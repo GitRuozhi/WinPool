@@ -26,7 +26,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="TargetsColumn" Width="*" MinWidth="120" />
             <ColumnDefinition x:Name="SplitterColumn" Width="8" />
-            <ColumnDefinition x:Name="PropertiesColumn" Width="380" MinWidth="240" />
+            <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="240" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -267,36 +267,10 @@
         </Border>
         <ScrollViewer x:Name="PropertiesPane" Grid.Column="2" Grid.RowSpan="2"
                       VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
-            <StackPanel Spacing="{StaticResource WinPoolCardGap}">
+                      HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
+            <StackPanel x:Name="PartitionPropertiesPanel" Spacing="{StaticResource WinPoolCardGap}">
                 <Border x:Name="DiskVolumeCard" Padding="12" Style="{StaticResource WinPoolCardBorderStyle}">
-                    <StackPanel Spacing="4">
-                        <Button
-                            x:Name="DiskVolumeCardHeader"
-                            Style="{StaticResource WinPoolButtonBaseStyle}"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            MinHeight="32"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderBrush="Transparent"
-                            BorderThickness="0"
-                            Click="PropertyCardHeader_Click">
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <TextBlock x:Name="DiskVolumeCardTitle" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <FontIcon x:Name="DiskVolumeCardDirection" Grid.Column="1" Glyph="&#xE70D;" FontSize="12" VerticalAlignment="Center" />
-                            </Grid>
-                        </Button>
-                        <StackPanel x:Name="DiskVolumeCardContent" Spacing="4">
-                            <Grid x:Name="PartitionFormGrid" ColumnSpacing="4" RowSpacing="4">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="84" />
-                                    <ColumnDefinition Width="24" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="28" />
-                                    <ColumnDefinition Width="40" />
-                                </Grid.ColumnDefinitions>
+                    <Grid x:Name="PartitionFormGrid" ColumnSpacing="4" RowSpacing="4">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" MinHeight="40" />
                                     <RowDefinition Height="84" />
@@ -310,15 +284,10 @@
                                     <TextBlock x:Name="StartOffsetLabel" TextWrapping="Wrap" MaxLines="2" VerticalAlignment="Center" />
                                     <TextBlock x:Name="EndOffsetLabel" Grid.Row="1" TextWrapping="Wrap" MaxLines="2" VerticalAlignment="Center" />
                                 </Grid>
-                                <Grid Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="3" RowSpacing="4" ColumnSpacing="4" VerticalAlignment="Center">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Grid Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="3" RowSpacing="4" MinWidth="0" VerticalAlignment="Center">
                                     <Grid.RowDefinitions><RowDefinition Height="40" /><RowDefinition Height="40" /></Grid.RowDefinitions>
-                                    <TextBlock x:Name="StartOffsetValue" TextAlignment="Right" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="OffsetSeparator" Text="–" Grid.Column="1" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="EndOffsetValue" Grid.Column="2" TextAlignment="Right" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="StartOffsetAdaptiveValue" Grid.Row="1" TextAlignment="Right" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="OffsetAdaptiveSeparator" Text="–" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="EndOffsetAdaptiveValue" Grid.Row="1" Grid.Column="2" TextAlignment="Right" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="OffsetMibRangeValue" MinWidth="0" TextAlignment="Right" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="OffsetAdaptiveRangeValue" Grid.Row="1" MinWidth="0" TextAlignment="Right" TextWrapping="Wrap" VerticalAlignment="Center" />
                                 </Grid>
                                 <TextBlock x:Name="DriveLetterLabel" Grid.Row="2" TextWrapping="Wrap" MaxLines="2" VerticalAlignment="Center" />
                                 <Button x:Name="UndoDriveLetterButton" Grid.Row="2" Grid.Column="1" Style="{StaticResource WinPoolCompactIconButtonStyle}" Click="UndoDriveLetter_Click"><FontIcon Glyph="&#xE777;" FontSize="12" /></Button>
@@ -332,32 +301,11 @@
                                     <TextBox x:Name="VolumeLabelBox" Height="32" MinWidth="0" KeyDown="VolumeLabelBox_KeyDown" TextChanged="VolumeLabelBox_TextChanged" />
                                 </controls:ContextHelpHost>
                                 <Button x:Name="CommitVolumeLabelButton" Grid.Row="3" Grid.Column="4" HorizontalAlignment="Center" Style="{StaticResource WinPoolCompactIconButtonStyle}" Click="CommitVolumeLabel_Click"><FontIcon Glyph="&#xE73E;" FontSize="12" /></Button>
-                            </Grid>
-                        </StackPanel>
-                    </StackPanel>
+                    </Grid>
                 </Border>
                 <Border x:Name="PartitionSettingsCard" Padding="12" Style="{StaticResource WinPoolCardBorderStyle}">
                     <StackPanel Spacing="4">
-                        <Button
-                            x:Name="PartitionSettingsCardHeader"
-                            Style="{StaticResource WinPoolButtonBaseStyle}"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            MinHeight="32"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderBrush="Transparent"
-                            BorderThickness="0"
-                            Click="PropertyCardHeader_Click">
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <TextBlock x:Name="PartitionSettingsCardTitle" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <FontIcon x:Name="PartitionSettingsCardDirection" Grid.Column="1" Glyph="&#xE70D;" FontSize="12" VerticalAlignment="Center" />
-                            </Grid>
-                        </Button>
-                        <StackPanel x:Name="PartitionSettingsCardContent" Spacing="4">
                             <Grid x:Name="PartitionSettingsFormGrid" ColumnSpacing="4" RowSpacing="4">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="84" /><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /><ColumnDefinition Width="40" /></Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="40" /><RowDefinition Height="84" /><RowDefinition Height="40" /><RowDefinition Height="40" /><RowDefinition Height="40" /><RowDefinition Height="40" />
                                 </Grid.RowDefinitions>
@@ -413,7 +361,6 @@
                                     <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon x:Name="PartitionActionButtonIcon" Glyph="&#xE710;" FontSize="14" /><TextBlock x:Name="PartitionActionButtonLabel" VerticalAlignment="Center" /></StackPanel>
                                 </Button>
                             </controls:ContextHelpHost>
-                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>

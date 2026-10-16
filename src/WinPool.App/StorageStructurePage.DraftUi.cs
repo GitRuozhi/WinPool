@@ -20,7 +20,6 @@ public sealed partial class StorageStructurePage
     private bool _formHistoryCaptured;
     private PendingBorderAnimation? _applyAnimation;
     private PendingBorderAnimation? _pendingAnimation;
-    private bool IsChinese => ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
     private int PendingActionCount => ViewModel.IsUsingSimulatedInventory
         ? _currentPlan?.Steps.Count ?? 0 : _realDraftPreview?.Actions.Count ?? 0;
 
@@ -199,22 +198,6 @@ public sealed partial class StorageStructurePage
         "FullStripe" => Text("完整条带", "Full stripe"),
         _ => fallback ?? ViewModel.Localization[key]
     };
-
-    private void ApplyFormMetrics()
-    {
-        _widePropertiesWidth = new(EditorFormMetrics.SidebarWidth(IsChinese));
-        if (!_narrowLayout) PropertiesColumn.Width = _widePropertiesWidth;
-        UpdatePropertyContentWidth();
-        foreach (var grid in _sectionHeaders.Keys)
-            grid.ColumnDefinitions[0].Width = new(EditorFormMetrics.LabelWidth(IsChinese));
-    }
-
-    private void PropertiesScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePropertyContentWidth();
-
-    private void UpdatePropertyContentWidth() => PoolSectionsPanel.Width = Math.Max(1,
-        PropertiesScrollViewer.ViewportWidth > 0 ? PropertiesScrollViewer.ViewportWidth
-            : PropertiesScrollViewer.ActualWidth > 0 ? PropertiesScrollViewer.ActualWidth
-            : EditorFormMetrics.SidebarWidth(IsChinese));
 
     private void ApplySectionCollapse(Grid grid)
     {

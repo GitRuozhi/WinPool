@@ -37,7 +37,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private bool _formatModeControlsReady;
     private bool _narrowLayout;
     private bool _showPropertiesInNarrowLayout;
-    private GridLength _widePropertiesWidth = new(EditorFormMetrics.SidebarWidth(isChinese: true));
+    private GridLength _widePropertiesWidth = new(EditorFormMetrics.SidebarWidth);
     private ContentDialog? _resizeDialog;
     private CancellationTokenSource? _resizeCancellation;
     private bool _resizePromptOpen;
@@ -46,6 +46,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     public DiskPartitionPage()
     {
         InitializeComponent();
+        ApplyPropertyEditorMetrics();
         Unloaded += (_, _) => CancelResizePrompt();
         _formatModeControlsReady = true;
         SetFormatMode(quickFormat: true);
@@ -140,7 +141,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void LocalizeChrome()
     {
-        var isChinese = ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         ShowTargetsButton.Content = Text("目标与操作", "Targets and actions");
         ShowPropertiesButton.Content = Text("属性", "Properties");
         DiskOnlineStateButtonLabel.Text = Text("联机/脱机", "Online/offline");
@@ -241,26 +241,16 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         FillFileSystemBox();
         FillClusterBox();
         FillPartitionTypeBox();
-        ApplyPropertyEditorMetrics(isChinese);
-        SetPropertyCardHeaderState(
-            DiskVolumeCardHeader, DiskVolumeCardTitle, DiskVolumeCardDirection,
-            DiskVolumeCardContent, "磁盘与卷", "Disk and volume");
-        SetPropertyCardHeaderState(
-            PartitionSettingsCardHeader, PartitionSettingsCardTitle, PartitionSettingsCardDirection,
-            PartitionSettingsCardContent, "分区", "Partition");
     }
 
-    private void ApplyPropertyEditorMetrics(bool isChinese)
+    private void ApplyPropertyEditorMetrics()
     {
         PageRootGrid.Margin = new Thickness(
             EditorFormMetrics.PageMargin, 0, EditorFormMetrics.PageMargin, EditorFormMetrics.PageMargin);
-        _widePropertiesWidth = new GridLength(EditorFormMetrics.SidebarWidth(isChinese));
-        var labelWidth = EditorFormMetrics.LabelWidth(isChinese);
-        foreach (var grid in new[] { PartitionFormGrid, PartitionSettingsFormGrid })
-        {
-            grid.ColumnDefinitions[0].Width = new GridLength(labelWidth);
-            grid.ColumnDefinitions[2].MinWidth = EditorFormMetrics.MinimumValueWidth;
-        }
+        _widePropertiesWidth = new GridLength(EditorFormMetrics.SidebarWidth);
+        EditorFormMetrics.ConfigureColumns(PartitionFormGrid, PartitionPropertiesPanel);
+        EditorFormMetrics.ConfigureColumns(PartitionSettingsFormGrid, PartitionPropertiesPanel);
+        EditorFormMetrics.ConfigurePropertyPane(PropertiesPane, PartitionPropertiesPanel, PropertiesColumn);
 
         foreach (var label in new[]
         {
@@ -269,54 +259,11 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             FileSystemLabel, ClusterLabel, QuickFormatLabel, FullFormatLabel
         })
         {
-            label.TextWrapping = isChinese ? TextWrapping.NoWrap : TextWrapping.Wrap;
+            label.TextWrapping = TextWrapping.Wrap;
             label.MaxLines = 2;
         }
 
         UpdateEditorLayout();
-    }
-
-    private void SetPropertyCardHeaderState(
-        Button header,
-        TextBlock title,
-        FontIcon direction,
-        FrameworkElement content,
-        string titleZh,
-        string titleEn)
-    {
-        var expanded = content.Visibility == Visibility.Visible;
-        direction.Glyph = expanded ? "\uE70D" : "\uE76C";
-        var localizedTitle = Text(titleZh, titleEn);
-        title.Text = localizedTitle;
-        var actionZh = expanded ? "收起" : "展开";
-        var actionEn = expanded ? "Collapse" : "Expand";
-        AutomationProperties.SetName(header, Text(
-            $"{titleZh}，{actionZh}", $"{titleEn}, {actionEn}"));
-        AutomationProperties.SetHelpText(header, Text(
-            expanded ? "收起此属性卡" : "展开此属性卡",
-            expanded ? "Collapse this property card" : "Expand this property card"));
-        ToolTipService.SetToolTip(header, Text(
-            $"{titleZh} · {actionZh}", $"{titleEn} · {actionEn}"));
-    }
-
-    private void PropertyCardHeader_Click(object sender, RoutedEventArgs e)
-    {
-        if (ReferenceEquals(sender, DiskVolumeCardHeader))
-        {
-            DiskVolumeCardContent.Visibility = DiskVolumeCardContent.Visibility == Visibility.Visible
-                ? Visibility.Collapsed : Visibility.Visible;
-            SetPropertyCardHeaderState(
-                DiskVolumeCardHeader, DiskVolumeCardTitle, DiskVolumeCardDirection,
-                DiskVolumeCardContent, "磁盘与卷", "Disk and volume");
-        }
-        else if (ReferenceEquals(sender, PartitionSettingsCardHeader))
-        {
-            PartitionSettingsCardContent.Visibility = PartitionSettingsCardContent.Visibility == Visibility.Visible
-                ? Visibility.Collapsed : Visibility.Visible;
-            SetPropertyCardHeaderState(
-                PartitionSettingsCardHeader, PartitionSettingsCardTitle, PartitionSettingsCardDirection,
-                PartitionSettingsCardContent, "分区", "Partition");
-        }
     }
 
     private void EditorLayoutGrid_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -342,6 +289,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void UpdateEditorLayout()
     {
+        if (!_narrowLayout && PropertiesColumn.Width.IsAbsolute && PropertiesColumn.Width.Value > 0)
+            _widePropertiesWidth = PropertiesColumn.Width;
         NarrowPageNavigation.Visibility = _narrowLayout
             ? Visibility.Visible : Visibility.Collapsed;
         ShowTargetsButton.IsEnabled = _showPropertiesInNarrowLayout;
@@ -1857,29 +1806,35 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void SetOffsetValues(long? startBytes, long? endBytes)
     {
-        SetOffsetValue(startBytes, StartOffsetValue, StartOffsetAdaptiveValue);
-        SetOffsetValue(endBytes, EndOffsetValue, EndOffsetAdaptiveValue);
-        OffsetSeparator.Text = OffsetAdaptiveSeparator.Text = startBytes.HasValue && endBytes.HasValue ? "–" : string.Empty;
+        var culture = OffsetDisplayCulture();
+        SetOffsetRangeValue(startBytes, endBytes, OffsetMibRangeValue, culture, FormatOffsetMib);
+        SetOffsetRangeValue(startBytes, endBytes, OffsetAdaptiveRangeValue, culture, FormatAdaptiveBytes);
     }
 
-    private void SetOffsetValue(
-        long? bytes,
-        TextBlock mibValue,
-        TextBlock adaptiveValue)
+    private static void SetOffsetRangeValue(
+        long? startBytes,
+        long? endBytes,
+        TextBlock target,
+        System.Globalization.CultureInfo culture,
+        Func<long, System.Globalization.CultureInfo, string> format)
     {
-        var hasValue = bytes is long;
-        mibValue.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
-        adaptiveValue.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
-        if (bytes is not long value)
+        var hasValue = startBytes.HasValue || endBytes.HasValue;
+        target.Visibility = hasValue ? Visibility.Visible : Visibility.Collapsed;
+        if (!hasValue)
         {
-            mibValue.Text = adaptiveValue.Text = string.Empty;
+            target.Text = string.Empty;
             return;
         }
 
-        var culture = OffsetDisplayCulture();
-        mibValue.Text = $"{(value / BytesPerMiB).ToString("N0", culture)} MiB";
-        adaptiveValue.Text = FormatAdaptiveBytes(value, culture);
+        var start = startBytes is long startValue ? format(startValue, culture) : string.Empty;
+        var end = endBytes is long endValue ? format(endValue, culture) : string.Empty;
+        target.Text = startBytes.HasValue && endBytes.HasValue
+            ? $"{start} – {end}"
+            : startBytes.HasValue ? start : end;
     }
+
+    private static string FormatOffsetMib(long bytes, System.Globalization.CultureInfo culture) =>
+        $"{(bytes / BytesPerMiB).ToString("N0", culture)} MiB";
 
     private System.Globalization.CultureInfo OffsetDisplayCulture() =>
         System.Globalization.CultureInfo.GetCultureInfo(

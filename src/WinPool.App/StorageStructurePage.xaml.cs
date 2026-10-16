@@ -50,7 +50,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private bool _virtualDiskActionDeletes;
     private bool _narrowLayout;
     private bool _showPropertiesInNarrowLayout;
-    private GridLength _widePropertiesWidth = new(380);
+    private GridLength _widePropertiesWidth = new(EditorFormMetrics.SidebarWidth);
 
     private Stack<EditorDraftState> _undoStack => EditingSession.UndoStack;
     private Stack<EditorDraftState> _redoStack => EditingSession.RedoStack;
@@ -78,7 +78,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     {
         public TextBox FullStripeDisplay { get; } = new()
         {
-            IsReadOnly = true, IsTabStop = false, TextAlignment = TextAlignment.Right,
+            IsReadOnly = true, IsTabStop = false, TextAlignment = TextAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center
         };
         public Border Card { get; set; } = null!;
@@ -181,6 +181,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     public StorageStructurePage()
     {
         InitializeComponent();
+        EditorFormMetrics.ConfigurePropertyPane(PropertiesScrollViewer, PoolSectionsPanel, PropertiesColumn);
         NavigationCacheMode = NavigationCacheMode.Required;
         Performance = CreateTierFields("SSD", "PerformanceTier");
         Capacity = CreateTierFields("HDD", "CapacityTier");
@@ -317,7 +318,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(RedoButton, ViewModel.Localization["Redo"]);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(DiscardAllButton, ViewModel.Localization["DiscardAll"]);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ApplyAllButton, ViewModel.Localization["ApplyAll"]);
-        DissolveButtonLabel.Text = Text("解散选中池", "Dissolve selected pool");
         RetireButtonLabel.Text = Text("退役", "Retire");
         HotSpareButtonLabel.Text = Text("热备", "Hot spare");
         CreateVdiskButtonLabel.Text = Text("创建虚拟磁盘", "Create virtual disk");
@@ -326,7 +326,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         DiscardButtonLabel.Text = ViewModel.Localization["DiscardAll"];
         ApplyButtonLabel.Text = ViewModel.Localization["ApplyAll"];
         foreach (var localize in _localizeForm) localize();
-        ApplyFormMetrics();
         _multiVdiskWarning.Text = ViewModel.Localization["MultipleVirtualDiskWarning"];
         _volumeNameBox.PlaceholderText = ViewModel.Localization["VolumeName"];
 
@@ -336,7 +335,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(ApplyAllButton, ViewModel.IsUsingSimulatedInventory
             ? Text("确认风险后将待处理结构修改写入模拟系统。", "Write pending structural changes to the simulated system after confirming risks.")
             : Text("确认本次准确目标与全部结构变更后应用同一真实草稿。", "Confirm the exact target and all structural changes, then apply the same real draft."));
-        ContextHelp.Set(DissolveButton, Text("解散选中的存储池；真实删除会使其关联数据丢失。", "Dissolve the selected storage pool; real deletion loses its associated data."));
         ContextHelp.Set(RetireButton, Text("将选中的模拟池成员标为已退役。", "Mark the selected simulated pool member as retired."));
         ContextHelp.Set(HotSpareButton, Text("将选中的模拟池成员标为热备。", "Mark the selected simulated pool member as a hot spare."));
         ContextHelp.Set(CreateVdiskButton, Text("为符合条件的存储池创建待应用的虚拟磁盘草稿；点击应用时核对并确认全部变更。", "Create a pending virtual disk draft for an eligible pool; review and confirm all changes when applying."));
@@ -368,6 +366,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void UpdateEditorLayout()
     {
+        if (!_narrowLayout && PropertiesColumn.Width.IsAbsolute && PropertiesColumn.Width.Value > 0)
+            _widePropertiesWidth = PropertiesColumn.Width;
         NarrowPageNavigation.Visibility = _narrowLayout
             ? Visibility.Visible : Visibility.Collapsed;
         ShowTargetsButton.IsEnabled = _showPropertiesInNarrowLayout;
@@ -568,7 +568,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         Grid.SetColumn(_multiVdiskWarning, 0);
         Grid.SetColumnSpan(_multiVdiskWarning, 5);
         DiskAndPartitionFormGrid.Children.Add(_multiVdiskWarning);
-        ApplyFormMetrics();
     }
 
     private void UpdateAutomaticCreationChrome()
@@ -979,13 +978,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ConfigureFormGrid(Grid grid)
     {
-        grid.ColumnDefinitions.Clear();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorFormMetrics.LabelWidth(IsChinese)) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorFormMetrics.CompactActionButtonWidth) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = EditorFormMetrics.MinimumValueWidth });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorFormMetrics.UnitColumnWidth) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EditorFormMetrics.MaximumButtonWidth) });
-        grid.ColumnSpacing = 4;
+        EditorFormMetrics.ConfigureColumns(grid, PoolSectionsPanel);
         grid.RowSpacing = 4;
     }
 
@@ -1116,19 +1109,21 @@ public sealed partial class StorageStructurePage : EditorPageBase
         formGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var label = new TextBlock
         {
-            Margin = new Thickness(0, 0, 0, 4),
+            VerticalAlignment = VerticalAlignment.Center,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = 16,
             Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"],
             Text = ViewModel.Localization[key]
         };
         var arrow = new FontIcon { Glyph = "\uE70D", FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-        var header = new Grid();
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(label);
-        Grid.SetColumn(arrow, 1);
+        var header = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center
+        };
         header.Children.Add(arrow);
+        header.Children.Add(label);
         var button = new Button
         {
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
@@ -1190,10 +1185,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _localizeForm.Add(() =>
         {
             label.Text = FormLabel(key, labelText);
-            label.MaxLines = IsChinese ? 1 : 2;
+            label.MaxLines = 2;
         });
         label.Text = FormLabel(key, labelText);
-        label.MaxLines = IsChinese ? 1 : 2;
+        label.MaxLines = 2;
         var indicator = new Border
         {
             Width = 6,
@@ -1218,7 +1213,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         value.MinHeight = 32;
         value.MinWidth = 0;
         if (value is Control and not ToggleSwitch) value.Height = 32;
-        if (value is TextBox numeric && numeric != _poolNameBox && numeric != _virtualDiskNameBox && numeric != _volumeNameBox)
+        if (value is TextBox numeric && key != "FullStripe"
+            && numeric != _poolNameBox && numeric != _virtualDiskNameBox && numeric != _volumeNameBox)
             numeric.TextAlignment = TextAlignment.Right;
 
         Grid.SetRow(labelPanel, row);
@@ -1635,8 +1631,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
     }
 
     private bool CanCreatePoolNow() => CanEditDraft
-        && !_working.StoragePools.Any(pool => EditWorkspace.IsDraftPool(pool.StableId))
-        && _working.PhysicalDisks.Any(disk => CanDropDisk(disk.StableId, EditWorkspace.PlusStableId));
+        && !_working.StoragePools.Any(pool => EditWorkspace.IsDraftPool(pool.StableId));
 
     private bool CanDropDisk(string diskId, string targetId)
     {
@@ -2063,6 +2058,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
                     }
                     : CreateAutomaticIntent(draftPool.FriendlyName);
             }
+
+            if (EditWorkspace.IsDraftPool(poolId) && _poolIntents.TryGetValue(poolId, out var creationIntent))
+                _poolIntents[poolId] = WithDefaultDriveLetter(next, poolId, creationIntent);
 
             if (!ReferenceEquals(next, _working))
             {
@@ -2800,6 +2798,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private PoolEditIntent CreateAutomaticIntent(string volumeName) =>
         StructureCreationPolicy.NewPool(volumeName, ViewModel.CurrentPreferences.CreateMsrOnInitialize);
 
+    private PoolEditIntent WithDefaultDriveLetter(StorageSnapshot snapshot, string poolId, PoolEditIntent intent)
+    {
+        // Observed RAW VDs keep their current layout. Only an explicit new VD
+        // gets an automatic partition and a reserved default drive letter.
+        bool HasNewVirtualDisk(string id) => EditWorkspace.IsDraftPool(id)
+            || snapshot.VirtualDisks.Any(vd => vd.PoolStableId == id && EditWorkspace.IsDraftVirtualDisk(vd.StableId));
+        if (!HasNewVirtualDisk(poolId)) return intent;
+        var reservations = _poolIntents.Where(pair => HasNewVirtualDisk(pair.Key) || pair.Value.PendingAutomaticLayout)
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        return StructureCreationPolicy.WithDefaultDriveLetter(snapshot, poolId, intent, reservations,
+            ViewModel.IsUsingSimulatedInventory);
+    }
+
     private static string CreationGigabytes(long? bytes) =>
         RealVirtualDiskCreationCapacityResolver.FormatGigabytes(bytes);
 
@@ -2967,7 +2978,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 bytes = maximum ? null : tierGoals.Sum(tier => tier.SizeBytes);
             }
         }
-        return new PoolEditIntent(
+        var intent = new PoolEditIntent(
             StructureCreationPolicy.WantsVirtualDisk(_working, _selectedPoolId, prior),
             true,
             _fileSystemBox.SelectedItem as string ?? "NTFS",
@@ -2981,6 +2992,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             prior?.QuickFormat ?? true,
             prior?.VerifiedVirtualDiskId,
             prior?.PendingAutomaticLayout ?? false, tierGoals, memberGoals);
+        return WithDefaultDriveLetter(_working, _selectedPoolId ?? string.Empty, intent);
     }
 
     private void CaptureSelectedIntent()
@@ -3163,6 +3175,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && StorageEditRules.TouchesOfflineDisk(_working, [pool.StableId]);
         var (poolVdisks, deleteTarget) = PoolVirtualDiskState(pool);
         var realVdisk = poolVdisks.FirstOrDefault(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId));
+        var createPoolAction = pool is not { IsPrimordial: false };
+        var draftPoolExists = _working.StoragePools.Any(item => EditWorkspace.IsDraftPool(item.StableId));
         var formEnabled = CanEditDraft
             && pool is { IsPrimordial: false }
             && !poolOffline
@@ -3176,6 +3190,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdatePendingActionCount();
         RefreshFullStripes();
         var hasUnapplied = HasUncommittedChanges();
+        var structureReason = ResolveStructureDisabledReason(
+            simulated,
+            pool,
+            poolOffline,
+            poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)));
 
         UndoButton.IsEnabled = CanEditDraft && _undoStack.Count > 0;
         RedoButton.IsEnabled = CanEditDraft && _redoStack.Count > 0;
@@ -3190,9 +3209,19 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && !planBlocked
             && !HasInvalidSizeInput()
             && !_outcomeUnknown;
-        DissolveButton.IsEnabled = CanEditDraft
-            && (simulated || EditWorkspace.IsDraftPool(pool?.StableId ?? "") || CanDissolveRealPool(pool))
-            && pool is { IsPrimordial: false } && !poolOffline;
+        PoolActionButtonLabel.Text = createPoolAction
+            ? Text("新建存储池", "Create storage pool")
+            : Text("解散选中池", "Dissolve selected pool");
+        PoolActionButtonIcon.Glyph = createPoolAction ? "\uE710" : "\uE74D";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PoolActionButton, PoolActionButtonLabel.Text);
+        ContextHelp.Set(PoolActionButton, createPoolAction
+            ? Text("创建空存储池草稿；之后可以将磁盘拖入。", "Create an empty storage-pool draft; disks can be added afterward.")
+            : Text("解散选中的存储池；真实删除会使其关联数据丢失。", "Dissolve the selected storage pool; real deletion loses its associated data."));
+        PoolActionButton.IsEnabled = createPoolAction
+            ? CanEditDraft && !draftPoolExists
+            : CanEditDraft
+                && (simulated || EditWorkspace.IsDraftPool(pool!.StableId) || CanDissolveRealPool(pool))
+                && !poolOffline;
         var selectedDisk = _working!.PhysicalDisks.FirstOrDefault(item => item.StableId == _selectedPoolDiskId);
         var canLayerDisk = selectedDisk is not null
             && CanStageDiskSpecialRole(selectedDisk)
@@ -3225,11 +3254,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         ContextHelp.Set(CreateVdiskButton, _virtualDiskActionDeletes
             ? Text("删除虚拟磁盘及其分区；真实删除会使其数据丢失。", "Delete the virtual disk and its partitions; real deletion loses their data.")
             : Text("创建待应用的虚拟磁盘草稿。", "Create a pending virtual-disk draft."));
-        var structureReason = ResolveStructureDisabledReason(
-            simulated,
-            pool,
-            poolOffline,
-            poolVdisks.Count(item => !EditWorkspace.IsDraftVirtualDisk(item.StableId)));
         RestoreStructureActionHelp();
         var canPreviewSpecialRoles = simulated || pool is not null
             && (EditWorkspace.IsDraftPool(pool.StableId) || CanUseRealPool(pool));
@@ -3260,13 +3284,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
                                 : _outcomeUnknown
                                     ? structureReason
                                     : Text("需要可应用且未被规则阻止的修改。", "Applicable changes that pass the rules are required."));
-        SetDisabledReason(
-            DissolveButton,
-            structureReason
-                ?? (!simulated && pool is not null && !CanDissolveRealPool(pool)
+        var poolActionDisabledReason = createPoolAction
+            ? !CanEditDraft
+                ? structureReason ?? Text("当前不能新建存储池。", "A storage pool cannot be created right now.")
+                : draftPoolExists
+                    ? Text("当前草稿已有一个新建存储池。", "The current draft already has a new storage pool.")
+                    : null
+            : structureReason
+                ?? (!simulated && pool is { IsPrimordial: false } && !CanDissolveRealPool(pool)
                     ? Text("该池包含数据或无法核实的成员、布局或关联；当前不能解散。",
                         "This pool contains data or has members, layouts, or associations that cannot be verified for dissolution.")
-                    : Text("请选择可解散的普通存储池。", "Select a normal storage pool to dissolve.")));
+                    : Text("请选择可解散的普通存储池。", "Select a normal storage pool to dissolve."));
+        SetDisabledReason(PoolActionButton, poolActionDisabledReason);
         var diskRoleReason = structureReason
             ?? (selectedDisk is null
                 ? Text("请选择该池中的一块数据磁盘。", "Select a data disk in this pool.")
@@ -3704,7 +3733,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             RememberNameDefault(draftId, "Pool", draftName);
             RememberNameDefault(draftId, "VirtualDisk", draftName);
             RememberNameDefault(draftId, "Volume", draftName);
-            _poolIntents[draftId] = CreateAutomaticIntent(draftName);
+            _poolIntents[draftId] = WithDefaultDriveLetter(next, draftId, CreateAutomaticIntent(draftName));
             if (next.StoragePools.First(item => item.StableId == draftId).MemberPhysicalDiskIds.Count > 0)
             {
                 next = InsertVirtualDiskDraft(
@@ -3904,8 +3933,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
     }
 
-    private void CreatePool_Click(object sender, RoutedEventArgs e) => CreateDraftPoolAndSelect();
-
     private bool CanUseRealPool(StoragePoolInfo? pool)
     {
         if (!ViewModel.CanSubmitRealOperation || pool is not { IsStable: true, IsPrimordial: false }
@@ -4000,10 +4027,16 @@ public sealed partial class StorageStructurePage : EditorPageBase
         CanDissolveRealPool(pool)
         && _working.VirtualDisks.Count(item => string.Equals(item.PoolStableId, pool!.StableId, StringComparison.OrdinalIgnoreCase)) == 1;
 
-    private void Dissolve_Click(object sender, RoutedEventArgs e)
+    private void PoolAction_Click(object sender, RoutedEventArgs e)
     {
         var pool = SelectedPool();
-        if (!CanEditDraft || pool is null || pool.IsPrimordial
+        if (pool is not { IsPrimordial: false })
+        {
+            CreateDraftPoolAndSelect();
+            return;
+        }
+
+        if (!CanEditDraft
             || (!ViewModel.IsUsingSimulatedInventory
                 && !EditWorkspace.IsDraftPool(pool.StableId)
                 && !CanDissolveRealPool(pool))) return;
@@ -4119,8 +4152,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             _undoStack.Push(priorState);
             _redoStack.Clear();
             _working = next;
-            _poolIntents[pool.StableId] = StructureCreationPolicy.ChooseVirtualDisk(
-                _poolIntents.GetValueOrDefault(pool.StableId) ?? CreateAutomaticIntent(name), true);
+            _poolIntents[pool.StableId] = WithDefaultDriveLetter(next, pool.StableId,
+                StructureCreationPolicy.ChooseVirtualDisk(
+                    _poolIntents.GetValueOrDefault(pool.StableId) ?? CreateAutomaticIntent(name), true));
             _formDirty = false;
             _formHistoryCaptured = false;
             RefreshAll();

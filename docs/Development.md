@@ -16,7 +16,7 @@
 
 > 截至2026-10-09当时的实现与验收：新建普通／分层 MAX 使用共享整数 GiB 算法，详见[归档 Plan §10.4](Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证)。原UI普通3725 GiB、单HDD分层3724 GiB及自动布局已独立核验；多层仅模拟及backend夹具。下文原生 MAX／拒绝门和旧工程门是历史证据，不能据此恢复旧行为。本轮冻结完整门为1999项／1996通过／0失败／3既有测量未执行，412源码hash稳定；WDC末态、Samsung限定结构比较、偏好及普通重启／退出均通过，准确证据见该节。
 
-本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 **V0.60，迭代 0（0.6 产品线）**；唯一活动阶段见[Plan](Plan.md)。V0.59单盘真实修改、原编辑界面、WDC实机补验、23项前端阶段及新池端到端结果按各自范围保留在[归档 Plan](Archive/20261014-v059-completed-plan/Plan.md)和[Quality](Quality.md)。Pool01管理页模板／实际层重复属于软件投影问题，诊断见[Pool01拓扑报告](Review/Pool01-Topology-20261014.md)。当前V0.60构建、回归和GUI状态以[Quality](Quality.md)为准。下文旧原生 MAX、单 HDD 测量与拒绝门只证明其当时的调用和设备快照，不代表当前新池白名单。微软原生 MAX 的本机问题保留原归因，不能泛化为所有 Windows 版本的永久限制。
+本文件维护技术所有权、数据含义和开发方式。产品范围归 [Product](Product.md)，V0.57 基线见 [收口归档](Archive/20260927-v057-closeout/README.md)，测试要求归 [Quality](Quality.md)。当前产品版本为 **V0.60，迭代 0（0.6 产品线）**；唯一活动阶段见[Plan](Plan.md)。2026-10-16已完成的紧凑布局与动作呈现计划及其当时边界保留在[归档](Archive/20261016-v060-compact-actions-completed/README.md)；统一320 DIP表单和自动盘符是后续活动阶段，实施与验收状态以[Plan](Plan.md)和[Quality](Quality.md)为准，本文件不提前记录未完成的检查结论。V0.59单盘真实修改、原编辑界面、WDC实机补验、23项前端阶段及新池端到端结果按各自范围保留在[归档 Plan](Archive/20261014-v059-completed-plan/Plan.md)和[Quality](Quality.md)。Pool01管理页模板／实际层重复属于软件投影问题，诊断见[Pool01拓扑报告](Review/Pool01-Topology-20261014.md)。下文旧原生 MAX、单 HDD 测量与拒绝门只证明其当时的调用和设备快照，不代表当前新池白名单。微软原生 MAX 的本机问题保留原归因，不能泛化为所有 Windows 版本的永久限制。
 
 原生 MAX 修正前的源码通过[统一 Release 工程门](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/final-full-tests/20261008-223310/summary.md)：12 个测试项目共 1775 条，1772 Passed、0 Failed、3 NotExecuted，restore／build 成功且 0 warnings／errors，393 个源码文件 hash 前后一致、运行树 merge 无冲突。该历史结果仍有效，未执行项不计为通过，不代替本轮修正的工程门或实机核验。该构建已通过普通启动 RealOff／MonitorOff、无历史监控误报、真实 E: 与两块 Samsung 显示及原 Agent 托盘 Exit 两进程 exit 0；[退出结果](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-exit-result.json)与[退出后偏好／计数](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/presentation-final-after.json)保留准确现场。标题栏关闭 App exit 0、Agent 继续运行及后续正常重启也有[独立原生证据](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/B5/close-repaired-titlebar-native-result.json)；这不是原生分层 MAX 创建通过证明。
 
@@ -208,11 +208,11 @@ scoped 请求回包与 observer 事件可按任意顺序交付同一已提交批
 
 模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。当前编辑资格与几何边界见[模拟规则表](DesignTables/SimulationRules.md)；旧叙述稿已[归档](Archive/20260923-design-details/README.md)。
 
-模拟分区页手动新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。结构页仅对新建 VD 生成自动布局目标，与真实路径共用 `GetAutomaticPartitionCreateGeometry`，保留 1 MiB 尾端空间；MSR 开启时创建于 1–17 MiB，数据分区从 17 MiB 开始，关闭时数据分区从 1 MiB 开始。旧 AutoPart 设置不关闭此规则；已有 RAW VD 不回填，明确删除的 VD 不自动回生，左侧重新创建 VD 时生成新布局目标。草稿规划、规则校验及模拟提交沿用共享几何核对，不能由界面独自夹紧超界容量；已有导入结构保持原始偏移及容量，不自动重排。
+模拟分区页手动新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。结构页仅对新建 VD 生成自动布局目标，与真实路径共用 `GetAutomaticPartitionCreateGeometry`，保留 1 MiB 尾端空间；MSR 开启时创建于 1–17 MiB，数据分区从 17 MiB 开始，关闭时数据分区从 1 MiB 开始。新建 VD 的自动分区默认取当前系统首个可用盘符，真实范围D–Z、模拟范围C–Z；在连续阶段冻结已确定盘符，并检查同一草稿目标间的盘符冲突。旧 AutoPart 设置不关闭此规则；已有 RAW VD 不回填，明确删除的 VD 不自动回生，左侧重新创建 VD 时生成新布局目标。草稿规划、规则校验及模拟提交沿用共享几何核对，不能由界面独自夹紧超界容量；已有导入结构保持原始偏移及容量，不自动重排。
 
 当前页面布局基准为外层内容左／右／下8 DIP、上0 DIP；不可拖动卡片／块间距6 DIP。可拖动分隔槽总宽8 DIP，单个bar占满槽位，不能再在两侧叠加margin。卡片内边距保留为实际内容所需的局部设置，不与块间距混算；卡片外框1 DIP、圆角4 DIP。普通按钮和输入32 DIP高，普通字段行至少40 DIP、行距4 DIP。管理页与硬件页等高密度属性表沿用 `PropertyTableVisuals` 的32 DIP行高；同类密集表保持一致。拓扑节点与监控图表按内容及视口布局，保持现有滚动和响应式行为。普通卡片间距不创建拖动分隔槽。
 
-存储结构与磁盘分区编辑页右侧属性栏默认宽度为中文380 DIP、英文420 DIP，使用8 DIP可拖分隔槽调整；属性项名列分别为84／112 DIP，值列至少112 DIP，动作、单位、MAX列分别以24／28／40 DIP压紧。中文项名保持一行，英文最多两行。每张属性卡独立折叠，标题及方向图标保持可见；窄窗通过现有切栏和滚动保留内容。结构页使用响应式动作流，不保留固定四列两行网格或常驻待应用区；待应用计数打开只读明细，真实与模拟共用动作呈现器，动作及参数全部展开为普通内容、只允许滚动。预览和Apply读取同一净差异来源，原有四个全局动作图标保留。两编辑页顶部和底部对应列对齐；分区容量字段单位在输入框后，数字右对齐。无选择或起点／终点不可得时留空。起点/终点仍各两行、同列对齐：首行MiB向下取整，第二行显示自适应单位；终点为`start + size`的排他结束偏移。编辑期间的遮罩与居中72 DIP ProgressRing仍由Workspace owner控制，Shell导航与全局通知独立于遮罩。
+存储结构与磁盘分区编辑页共用 `EditorFormMetrics`：右侧属性栏默认320 DIP，不按中英文切换尺寸；项名与项值按80:106比例伸缩，默认宽度下分别为80与106 DIP，项值最小80 DIP，项名不设固定最小宽度。表单内容绑定侧栏目标宽度，测量前按有限宽度计算两列像素尺寸，避免长英文项名改变Grid星号列的测量下限。缩小时直接监听内容Width重算列宽，不依赖会被旧Pixel列撑住的Grid.ActualWidth／SizeChanged；两页复用同一方法。动作、单位、MAX列为24／28／40 DIP，列间距4 DIP；拖动分隔条时项名和值共同伸缩，本地化不另行改变栏宽，两种语言的项名使用相同的最多两行换行规则。结构页属性卡各自可折叠，箭头在标题左侧紧邻标题；分区页两张属性卡没有折叠标题、箭头或折叠状态，内容始终展开。窄窗通过现有切栏和滚动保留内容。结构页使用响应式动作流，不保留固定四列两行网格或常驻待应用区；待应用计数打开只读明细，真实与模拟共用动作呈现器，动作及参数全部展开为普通内容、只允许滚动。预览和Apply读取同一净差异来源，原有四个全局动作图标保留。没有选中具体池时池操作入口显示“新建存储池”并使用既有空池草稿创建流程；选中具体池时该入口解散所选池，菜单与按钮使用同一动作来源。两编辑页顶部和底部对应列对齐；分区容量字段单位在输入框后，数字右对齐。无选择或起点／终点不可得时留空。起点和终点以两行紧凑呈现，每行在同一值区靠右显示起点、短分隔符和终点；首行MiB向下取整，第二行显示自适应单位，终点为`start + size`的排他结束偏移。编辑期间的遮罩与居中72 DIP ProgressRing仍由Workspace owner控制，Shell导航与全局通知独立于遮罩。
 
 指定的三个拓扑视图根据目标自身的offline、read-only、fault、lost事实绘制四种无底色状态SVG、大字号原因文本和半透明黑色遮罩；仓库原生链环SVG由一条斜链平铺并按卡片边界裁剪，尺寸较大的卡片自然显示更多链环。祖先实际绘制状态遮罩时，后代不再重复绘制；离线状态不通过`TouchesOfflineDisk`传播到父池或Primordial，父池自身actual health故障仍按原规则映射。RealOff与单项unsupported不画fault。状态图形不改变命中、菜单或编辑资格。
 
@@ -220,7 +220,7 @@ scoped 请求回包与 observer 事件可按任意顺序交付同一已提交批
 
 右侧新池属性的合法改动即时进入当前池草稿，不另设保存动作，也不写Windows；同一GUI生命周期内跨页和切换系统保留草稿、选择、意图、Undo/Redo与合法未提交输入，GUI关闭后不恢复磁盘草稿。待实施明细真实与模拟共用渲染器，逐项展开动作和参数为普通内容，仅提供纵向滚动；状态对话框只读显示净差异和原因，不提交或清除草稿。Pool01管理和编辑视图共享业务层选择器：有实际层时选择实际层，没有时才选择唯一模板，避免同介质模板与实际层重复显示；Windows来源对象、原始字段和来源详情均保留。
 
-拓扑层详情以“条带单元”显示原始交错大小；完整条带只读输入框外观、右对齐显示“XX KiB + XX KiB”，数据与额外写入／镜像副本／校验的解释通过Tooltip和辅助功能描述提供。Simple额外量为0，Parity为校验数据量，Mirror按物理副本量计算。按当前条带单元、列数、副本数和容错数计算；任一必要布局事实无法确认时保持空白，不从名称或相邻对象推断。
+拓扑层详情以“条带单元”显示原始交错大小；完整条带只读输入框外观、左对齐显示“XX KiB + XX KiB”，数据与额外写入／镜像副本／校验的解释通过Tooltip和辅助功能描述提供。Simple额外量为0，Parity为校验数据量，Mirror按物理副本量计算。按当前条带单元、列数、副本数和容错数计算；任一必要布局事实无法确认时保持空白，不从名称或相邻对象推断。
 
 模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。该建模范围不是 Windows `Get-PartitionSupportedSize` 实测，不授权真实写入。
 

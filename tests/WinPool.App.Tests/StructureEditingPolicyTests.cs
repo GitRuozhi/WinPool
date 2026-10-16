@@ -1,6 +1,7 @@
 ﻿using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Execution;
 
 namespace WinPool.App.Tests;
 
@@ -67,6 +68,134 @@ public sealed class StructureEditingPolicyTests
         var chosen = StructureCreationPolicy.ChooseVirtualDisk(deleted, true);
         Assert.True(chosen.AutoCreatePartition);
         Assert.True(StructureCreationPolicy.WantsVirtualDisk(recreated, pool.StableId, chosen));
+    }
+
+    [Theory]
+    [InlineData(true, 'C')]
+    [InlineData(false, 'D')]
+    public void AutomaticDriveLetterStartsAtThePartitionEditorsFirstAvailableLetter(bool simulation, char expected)
+    {
+        var snapshot = EditWorkspace.InsertDraftPool(StorageSnapshot.Empty("letters"), "New");
+        var pool = Assert.Single(snapshot.StoragePools);
+        var intent = StructureCreationPolicy.NewPool("New", createMsr: true);
+
+        Assert.Equal(expected, StructureCreationPolicy.WithDefaultDriveLetter(snapshot, pool.StableId,
+            intent, new Dictionary<string, PoolEditIntent>(), simulation).DriveLetter);
+    }
+
+    [Fact]
+    public void AutomaticDriveLetterSkipsPartitionVolumeAccessPathsAndNetworkLetters()
+    {
+        var template = SimulationLayouts.StandardTiered();
+        var snapshot = EditWorkspace.InsertDraftPool(StorageSnapshot.Empty("letters"), "New") with
+        {
+            Partitions = [template.Partitions.First() with
+                { DriveLetter = "d:", Path = "", StableId = "partition:occupied" }],
+            Volumes = [template.Volumes.First() with
+                { PartitionStableId = null, AccessPaths = ["c:\\", "e:/", "C:\\MountedFolder\\"] }],
+            NetworkDisks = [new("network:occupied", true, "Share", "f:", "\\\\server\\share", "NTFS", 0, 0)]
+        };
+        var pool = Assert.Single(snapshot.StoragePools);
+
+        Assert.Equal('G', StructureCreationPolicy.WithDefaultDriveLetter(snapshot, pool.StableId,
+            StructureCreationPolicy.NewPool("New", true), new Dictionary<string, PoolEditIntent>(),
+            simulation: true).DriveLetter);
+    }
+
+    [Fact]
+    public void AutomaticDriveLetterReservesOtherNewTargetsButIgnoresDeletedVdsAndPools()
+    {
+        var snapshot = EditWorkspace.InsertDraftPool(StorageSnapshot.Empty("letters"), "First");
+        var pool = Assert.Single(snapshot.StoragePools);
+        var first = pool.StableId;
+        var second = first + ":second";
+        var deleted = first + ":deleted";
+        snapshot = snapshot with { StoragePools = [pool,
+            pool with { StableId = second, FriendlyName = "Second" },
+            pool with { StableId = deleted, FriendlyName = "Deleted VD" }] };
+        var intent = StructureCreationPolicy.NewPool("New", true);
+        var intents = new Dictionary<string, PoolEditIntent>
+        {
+            [first] = StructureCreationPolicy.WithDefaultDriveLetter(snapshot, first, intent,
+                new Dictionary<string, PoolEditIntent>(), simulation: true),
+            [second] = intent with { DriveLetter = 'Z' },
+            [deleted] = StructureCreationPolicy.ChooseVirtualDisk(intent with { DriveLetter = 'D' }, false),
+            ["removed:pool"] = intent with { DriveLetter = 'E' }
+        };
+
+        var selected = StructureCreationPolicy.WithDefaultDriveLetter(snapshot, second, intent, intents, simulation: true);
+        Assert.Equal('C', intents[first].DriveLetter);
+        Assert.Equal('D', selected.DriveLetter);
+        intents[second] = selected;
+        Assert.Equal('E', StructureCreationPolicy.WithDefaultDriveLetter(snapshot, deleted, intent,
+            intents, simulation: true).DriveLetter);
+    }
+
+    [Fact]
+    public void AutomaticDriveLetterPreservesChosenFrozenAndDisabledLayoutIntents()
+    {
+        var snapshot = EditWorkspace.InsertDraftPool(StorageSnapshot.Empty("letters"), "New");
+        var pool = Assert.Single(snapshot.StoragePools);
+        var intent = StructureCreationPolicy.NewPool("New", true);
+        var preserved = new[]
+        {
+            intent with { DriveLetter = 'W' },
+            intent with { PendingAutomaticLayout = true },
+            intent with { AutoCreateVirtualDisk = false },
+            intent with { AutoCreatePartition = false }
+        };
+        foreach (var original in preserved)
+            Assert.Same(original, StructureCreationPolicy.WithDefaultDriveLetter(snapshot, pool.StableId,
+                original, new Dictionary<string, PoolEditIntent>(), simulation: true));
+    }
+
+    [Fact]
+    public void AutomaticDriveLetterReachesTheSimulatedNewPartitionAndAppliedVolume()
+    {
+        var snapshot = SimulationLayouts.SingleDiskPool();
+        var pool = snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var intent = StructureCreationPolicy.WithDefaultDriveLetter(snapshot, pool.StableId,
+            StructureCreationPolicy.NewPool("New volume", true),
+            new Dictionary<string, PoolEditIntent>(), simulation: true);
+        var create = new SimulationEditRequest(SimulationEditKind.CreateVirtualDisk, pool.StableId,
+            Name: "New VD", SizeBytes: 32L << 30, Resiliency: "Simple", PerformanceDataCopies: 1,
+            AllocatedVirtualDiskId: "sim:vd:auto-letter", AllocatedOsDiskId: "sim:os:auto-letter");
+        var steps = new List<SimulationEditRequest> { create };
+        SimulationDraftPlanner.ConfigureAutomaticPartitionIntent(steps, create, intent,
+            "sim:partition:auto-letter", "sim:volume:auto-letter", "sim:msr:auto-letter");
+        var data = Assert.Single(steps, step => step.PartitionKind == PartitionKind.BasicData);
+        Assert.NotNull(intent.DriveLetter);
+        Assert.Equal(intent.DriveLetter.ToString(), data.DriveLetter);
+
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:auto-letter", StorageSystemKind.Simulation, "Automatic letter", snapshot, [], DateTimeOffset.UtcNow);
+        var result = new SimulationOperationService().ApplyPlan(document, SimulationDraftPlanner.Precheck(snapshot, steps));
+        Assert.True(result.Succeeded, result.Error);
+        var volume = result.Document.Snapshot.VolumeForPartition("sim:partition:auto-letter");
+        Assert.NotNull(volume);
+        Assert.Equal(data.DriveLetter, volume.DriveLetter);
+    }
+
+    [Fact]
+    public void AutomaticDriveLetterReachesTheRealNewPartitionAssignmentCommand()
+    {
+        var snapshot = EditWorkspace.InsertDraftPool(StorageSnapshot.Empty("letters"), "New");
+        var pool = Assert.Single(snapshot.StoragePools);
+        var intent = StructureCreationPolicy.WithDefaultDriveLetter(snapshot, pool.StableId,
+            StructureCreationPolicy.NewPool("New volume", true),
+            new Dictionary<string, PoolEditIntent>(), simulation: false);
+        var system = SystemId.New();
+        var disk = new StorageObjectId(system, StorageObjectKind.OsDisk, "os:new-vd");
+        var proposal = RealOperationProposalFactory.ConfigureInitializedDisk(system, disk, null,
+            intent.CreateMsr, 32L << 30, true, intent.VolumeName, intent.DriveLetter,
+            checked((int)intent.AllocationUnitSize), intent.FileSystem)!;
+        var assignment = Assert.Single(proposal.Steps, step => step.Command is SetDriveLetterCommand);
+        var command = Assert.IsType<SetDriveLetterCommand>(assignment.Command);
+        Assert.Equal('D', command.NewLetter);
+        Assert.Equal(intent.DriveLetter, command.NewLetter);
+        Assert.Null(command.PreviousLetter);
+        Assert.Null(command.Partition.Existing);
+        Assert.Contains(command.Partition.CreatedByStep!, assignment.DependsOn);
     }
 
     [Theory]
