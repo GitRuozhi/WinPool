@@ -7,8 +7,8 @@ namespace WinPool_App.Controls;
 internal static class EditorFormMetrics
 {
     public const double SidebarWidth = 320;
-    public const double LabelWidth = 80;
-    public const double ValueColumnWeight = 106;
+    public const double LabelWidth = 100;
+    public const double ValueColumnWeight = 86;
     public const double MinimumValueWidth = 80;
     public const double PageMargin = 8;
     public const double CompactActionButtonWidth = 24;
