@@ -4,6 +4,8 @@
 
 WinPool 是 Windows 存储系统桌面应用，用于查看存储拓扑、监控设备、编辑模拟系统和执行已支持的本机存储操作。
 
+两个编辑页使用紧凑属性栏，待实施动作在统一展开的弹窗中查看。结构页新池默认创建虚拟磁盘，新建虚拟磁盘自动配置分区；左侧可删除和重新创建虚拟磁盘，已有RAW虚拟磁盘不会自动补建分区。最新GUI和实际操作结果见[Quality](docs/Quality.md#v060-compact-actions)。
+
 当前产品版本为 **V0.60，迭代 0（0.6 产品线）**；唯一活动范围见[当前计划](docs/Plan.md)。V0.59已完成计划原样保存在[归档](docs/Archive/20261014-v059-completed-plan/Plan.md)，此前 H01–H11 结果保留在[历史归档](docs/Archive/20261007-real-edit-stage1/Plan.md)。当前构建、回归和GUI验收状态以[Quality](docs/Quality.md)为准。
 
 `WINPOOL-MAX-GIB-1` 使用 `G = 1,073,741,824` bytes、`R = 4,000,000` bytes，计算 `C = floor((A - R - 1) / G)`。真实路径的 A 是 fresh provider 最大范围与物理容量预算中的较小值；模拟路径的 A 是应用布局折算并扣除已知物理占用后的逻辑余量。C 是起始候选而非保证的物理最大值：模拟每层直接采用其 C，真实 MAX 按 1 GiB 步长搜索，不传递 Windows `UseMaximumSize`。真实创建契约传递完整准确的池成员集合、类型化布局参数、HDD／SSD／SCM 逐介质 tier goals、成员 Usage，以及每层明确容量或 MAX。旧单 HDD／Simple／单列／64 KiB 创建白名单已移除；当前创建仍使用 Fixed；每次写入仍须通过 fresh Windows provider 能力／范围、精确成员身份和写后对账。下方 WDC MAX 数值是历史单 HDD 实测；2026-10-13至14已在WDC通过真实GUI完成单成员16 KiB池／模板、热备及恢复数据角色、16 KiB MAX VD（3724 GiB）、自动分区／NTFS 64 KiB、改名和解散；最终恢复授权物理布局。多成员硬件、SSD／SCM、冗余布局及多层MAX仍缺对应WDC实机证据。这些是V0.59历史设备结果，不代表V0.60界面已经验收；当前验证状态以[Quality](docs/Quality.md)为准。历史原生 `UseMaximumSize` 结果见[Quality](docs/Quality.md)。

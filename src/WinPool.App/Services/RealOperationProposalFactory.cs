@@ -253,9 +253,7 @@ public static class RealOperationProposalFactory
             new FormatVolumeCommand(RealTargetReference.ForExisting(partition),
                 format.Value, clusterBytes, fullFormat, label),
             $"Partition formatted as {format.Value}",
-            format == RealFileSystem.ReFs
-                ? "All existing files and volume data on the selected partition are erased; ReFS has no long-run evidence equivalent to the current tested 64 KiB NTFS recommendation"
-                : "All existing files and volume data on the selected partition are erased");
+            "All existing files and volume data on the selected partition are erased");
         RealOperationValidator.Validate(request);
         return request;
     }

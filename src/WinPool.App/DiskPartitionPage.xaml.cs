@@ -217,8 +217,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(FileSystemBox,
             Text("选择格式化文件系统；真实模式仅开放本阶段已验证的组合。", "Choose a format file system; real mode allows only combinations verified for this stage."));
         ContextHelp.Set(ClusterBox,
-            Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。",
-                "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
+            Text("选择文件系统的分配单元大小。", "Choose the file-system allocation unit size."));
         ContextHelp.Set(QuickFormatSwitch,
             Text(
                 "选择快速格式化；真实操作将在单独确认后格式化目标分区。",
@@ -253,7 +252,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void ApplyPropertyEditorMetrics(bool isChinese)
     {
-        PageRootGrid.Margin = new Thickness(EditorFormMetrics.PageMargin);
+        PageRootGrid.Margin = new Thickness(
+            EditorFormMetrics.PageMargin, 0, EditorFormMetrics.PageMargin, EditorFormMetrics.PageMargin);
         _widePropertiesWidth = new GridLength(EditorFormMetrics.SidebarWidth(isChinese));
         var labelWidth = EditorFormMetrics.LabelWidth(isChinese);
         foreach (var grid in new[] { PartitionFormGrid, PartitionSettingsFormGrid })
@@ -1298,7 +1298,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         ContextHelp.Set(FileSystemBox,
             Text("选择格式化文件系统；真实模式仅开放本阶段已验证的组合。", "Choose a format file system; real mode allows only combinations verified for this stage."));
         ContextHelp.Set(ClusterBox,
-            Text("选择分配单元；64 KiB NTFS 是当前已测试建议，不是容量保证。", "Choose the allocation unit; 64 KiB NTFS is the current tested recommendation, not a capacity guarantee."));
+            Text("选择文件系统的分配单元大小。", "Choose the file-system allocation unit size."));
         ContextHelp.Set(QuickFormatSwitch,
             Text(
                 "选择快速格式化；真实操作将在单独确认后格式化目标分区。",
@@ -2336,11 +2336,6 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var fileSystem = partitionKind == PartitionKind.MicrosoftReserved
             ? string.Empty
             : SelectedFileSystemToken();
-        if (fileSystem == "ReFS")
-        {
-            PublishRefsNotice();
-        }
-
         var letter = DriveLetterBox.SelectedItem as string;
         if (letter == Text("无", "None"))
         {
@@ -2997,19 +2992,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
 
         var holdsData = EditWorkspace.PartitionHoldsStoredData(partition);
-        var usesRefs = fileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase);
         var quick = QuickFormatSwitch.IsOn;
         if (holdsData
             && !await ConfirmAsync(
                 ViewModel.Localization["Format"],
-                FormatConfirmationText(quick, usesRefs)))
+                FormatConfirmationText(quick)))
         {
             return;
-        }
-
-        if (!holdsData && usesRefs)
-        {
-            PublishRefsNotice();
         }
 
         var ok = await SubmitAsync(
@@ -3028,7 +3017,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         _ = ok;
     }
 
-    private string FormatConfirmationText(bool quickFormat, bool usesRefs)
+    private string FormatConfirmationText(bool quickFormat)
     {
         var modeWarning = quickFormat
             ? Text(
@@ -3037,29 +3026,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             : Text(
                 "模拟完整格式化会清除该分区上的已用数据；不会格式化真实磁盘。",
                 "Simulated full formatting clears used data on this partition; it does not format a real disk.");
-        if (!usesRefs)
-        {
-            return Text($"{modeWarning} 确定继续？", $"{modeWarning} Continue?");
-        }
-
-        var refsWarning = Text(
-            "ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。",
-            "ReFS has no long-run evidence equivalent to 64 KiB NTFS.");
-        return Text(
-            $"{modeWarning} {refsWarning} 确定继续？",
-            $"{modeWarning} {refsWarning} Continue?");
+        return Text($"{modeWarning} 确定继续？", $"{modeWarning} Continue?");
     }
-
-    private void PublishRefsNotice() =>
-        PublishOperationFeedback(
-            GlobalNotificationSeverity.Warning,
-            Text("ReFS 提示", "ReFS notice"),
-            Text(
-                "ReFS 尚无与 64 KiB NTFS 同等的长期测试证据。操作将继续。",
-                "ReFS has no long-run evidence equivalent to 64 KiB NTFS. The operation will continue."),
-            "disk-partition-editor",
-            "partition.refs-evidence",
-            showNotification: true);
 
     private async Task<bool> SubmitAsync(
         SimulationEditRequest request,

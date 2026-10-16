@@ -16,7 +16,8 @@ public sealed record TopologyEditInteraction(
     Action<string, string>? OnDiskDropped = null,
     Func<bool>? CanEditNow = null,
     Func<string, string, bool>? CanDropDisk = null,
-    Func<TopologyNodeViewModel, MenuFlyout?>? ContextMenuFactory = null);
+    Func<TopologyNodeViewModel, MenuFlyout?>? ContextMenuFactory = null,
+    Func<bool>? CanCreatePoolNow = null);
 
 public sealed partial class TopologyNodeViewModel : ObservableObject
 {
@@ -283,6 +284,19 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 
     public bool HasPendingModifications => ShowsEditStatus && _hasPendingModifications;
 
+    public bool IsNewPoolCreationAvailable =>
+        EditWorkspace.IsPlus(Unit.StableId)
+        && _edit is { AllowDiskDrag: true, CanEditNow: not null, CanCreatePoolNow: not null } interaction
+        && interaction.CanEditNow?.Invoke() == true
+        && interaction.CanCreatePoolNow?.Invoke() == true;
+
+    public bool ShouldShowPendingOutline =>
+        !IsInvisibleLayoutContainer
+        && (HasPendingModifications || IsNewPoolCreationAvailable);
+
+    public Visibility PendingOutlineVisibility =>
+        ShouldShowPendingOutline ? Visibility.Visible : Visibility.Collapsed;
+
     public Visibility OfflineVisibility =>
         IsOffline ? Visibility.Visible : Visibility.Collapsed;
 
@@ -305,6 +319,8 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         _hasPendingModifications = value;
         OnPropertyChanged(nameof(PendingModificationVisibility));
         OnPropertyChanged(nameof(HasPendingModifications));
+        OnPropertyChanged(nameof(ShouldShowPendingOutline));
+        OnPropertyChanged(nameof(PendingOutlineVisibility));
     }
 
     /// <summary>

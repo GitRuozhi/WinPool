@@ -495,6 +495,31 @@ public sealed class RealStructureDraftPlannerTests
     }
 
     [Fact]
+    public void RealPendingPresentationUsesTheSameExpandedParameterModelWithoutInventingSteps()
+    {
+        var session = Draft(PoolVirtualDiskLayout.Ordinary, maximum: true);
+        var preview = RealStructureDraftPlanner.Build(session).Preview;
+        Assert.True(preview.CanApply, string.Join("; ", preview.BlockingReasons));
+        Assert.Equal(preview.Actions, preview.Presentation.Select(action => action.Title));
+        var layout = Assert.Single(preview.Presentation, action => action.Parameters.Any(parameter => parameter.Key == "FileSystem"));
+        Assert.Contains(new PendingStructureParameter("FileSystem", "NTFS"), layout.Parameters);
+        Assert.Contains(new PendingStructureParameter("AllocationUnitSize", "65536"), layout.Parameters);
+        Assert.DoesNotContain(preview.Presentation, action => action.Title.StartsWith("Format-Volume", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExistingRawVdIsNotBackfilledByTheNewVdPartitionPolicy()
+    {
+        var session = Session(ExistingSnapshot(withVirtualDisk: true));
+        var pool = session.Working.StoragePools.Single(item => !item.IsPrimordial);
+        session.PoolIntents[pool.StableId] = StructureCreationPolicy.NewPool("Existing", createMsr: true);
+        var preview = RealStructureDraftPlanner.Build(session).Preview;
+        Assert.Empty(preview.Actions);
+        Assert.Empty(preview.Presentation);
+        Assert.Empty(preview.BlockingReasons);
+    }
+
+    [Fact]
     public void ExistingEmptyPoolFirstVdDoesNotRecreateThePoolOrAddAutomaticLayoutWhenOff()
     {
         var session = Session(ExistingSnapshot());

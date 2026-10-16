@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using WinPool.App.Services;
@@ -19,6 +19,7 @@ public sealed partial class StorageStructurePage
     private bool _committingLiveForm;
     private bool _formHistoryCaptured;
     private PendingBorderAnimation? _applyAnimation;
+    private PendingBorderAnimation? _pendingAnimation;
     private bool IsChinese => ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
     private int PendingActionCount => ViewModel.IsUsingSimulatedInventory
         ? _currentPlan?.Steps.Count ?? 0 : _realDraftPreview?.Actions.Count ?? 0;
@@ -38,6 +39,8 @@ public sealed partial class StorageStructurePage
                 HasUncommittedChanges(), EditingSession.ContentRevision, EditingSession.BindingGeneration);
         _applyAnimation?.Dispose();
         _applyAnimation = null;
+        _pendingAnimation?.Dispose();
+        _pendingAnimation = null;
         base.OnNavigatedFrom(e);
     }
 
@@ -188,8 +191,6 @@ public sealed partial class StorageStructurePage
 
     private string FormLabel(string key, string? fallback) => key switch
     {
-        "AutoCreateVirtualDisk" => Text("创建虚拟磁盘", "Create virtual disk"),
-        "AutoCreatePartition" => Text("创建分区", "Create partition"),
         "ShowHotSpareLayer" => Text("显示热备层", "Show hot-spare layer"),
         "ShowRetiredLayer" => Text("显示退役层", "Show retired layer"),
         "TierToleratedFailures" => Text("容忍故障数", "Tolerated failures"),
@@ -210,8 +211,10 @@ public sealed partial class StorageStructurePage
 
     private void PropertiesScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePropertyContentWidth();
 
-    private void UpdatePropertyContentWidth() => PoolSectionsPanel.Width = Math.Max(
-        EditorFormMetrics.SidebarWidth(IsChinese) - 16, PropertiesScrollViewer.ActualWidth - 16);
+    private void UpdatePropertyContentWidth() => PoolSectionsPanel.Width = Math.Max(1,
+        PropertiesScrollViewer.ViewportWidth > 0 ? PropertiesScrollViewer.ViewportWidth
+            : PropertiesScrollViewer.ActualWidth > 0 ? PropertiesScrollViewer.ActualWidth
+            : EditorFormMetrics.SidebarWidth(IsChinese));
 
     private void ApplySectionCollapse(Grid grid)
     {
@@ -239,6 +242,12 @@ public sealed partial class StorageStructurePage
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(PendingActionsButton, "StructurePendingActionsButton");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PendingActionsButton, PendingActionsButtonLabel.Text);
         PendingActionsButton.IsEnabled = true;
+        var active = PendingActionCount > 0;
+        _pendingAnimation ??= new PendingBorderAnimation(PendingButtonHost, PendingDefaultOutline,
+            PendingThemeOutline, "structure-pending-count");
+        PendingDefaultOutline.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        PendingThemeOutline.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        _pendingAnimation.SetActive(active);
     }
 
     private async void PendingActions_Click(object sender, RoutedEventArgs e)
@@ -286,6 +295,9 @@ public sealed partial class StorageStructurePage
             input.TextChanged += (_, _) =>
             {
                 if (_filling || updating || !number.IsEnabled || SelectedPool() is not { IsPrimordial: false }) return;
+                if (TierGroups().FirstOrDefault(group => ReferenceEquals(group.ColumnsBox, number)) is { } columnGroup
+                    && int.TryParse(input.Text, out var chosenColumns))
+                    _columnSuggestions[ColumnSuggestionKey(columnGroup)] = ColumnChoice(columnGroup).Choose(chosenColumns);
                 _formDirty = true;
                 if (long.TryParse(input.Text, out var typed) && typed >= number.Minimum && typed <= number.Maximum)
                 {
@@ -311,8 +323,12 @@ public sealed partial class StorageStructurePage
             var redundancy = editable ? FailuresCount(group.FailuresBox) : tier?.PhysicalDiskRedundancy;
             var stripe = FullStripeCalculator.Calculate(layout, unit, columns, copies, redundancy);
             group.FullStripeDisplay.Text = stripe is null ? string.Empty
-                : Text($"{stripe.DataBytes / 1024m:0.##} KiB 数据 + {stripe.ExtraBytes / 1024m:0.##} KiB { (stripe.ExtraKind == StripeExtraKind.Copies ? "副本" : stripe.ExtraKind == StripeExtraKind.Parity ? "校验" : "额外写入")}",
-                    $"{stripe.DataBytes / 1024m:0.##} KiB data + {stripe.ExtraBytes / 1024m:0.##} KiB {(stripe.ExtraKind == StripeExtraKind.Copies ? "copies" : stripe.ExtraKind == StripeExtraKind.Parity ? "parity" : "extra")}");
+                : $"{stripe.DataBytes / 1024m:0.##} KiB + {stripe.ExtraBytes / 1024m:0.##} KiB";
+            var semantics = stripe is null ? string.Empty : Text(
+                $"数据 + {(stripe.ExtraKind == StripeExtraKind.Copies ? "额外镜像副本" : stripe.ExtraKind == StripeExtraKind.Parity ? "校验" : "额外写入")}",
+                $"Data + {(stripe.ExtraKind == StripeExtraKind.Copies ? "additional mirror copies" : stripe.ExtraKind == StripeExtraKind.Parity ? "parity" : "extra writes")}");
+            ToolTipService.SetToolTip(group.FullStripeDisplay, semantics);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(group.FullStripeDisplay, semantics);
         }
     }
 }

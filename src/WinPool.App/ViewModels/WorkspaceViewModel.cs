@@ -1599,20 +1599,20 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             var (title, message) = finding.Kind switch
             {
                 StorageFindingKind.MultiplePerformanceTiers => (
-                    zh ? "存储池布局建议" : "Pool layout suggestion",
+                    zh ? "存储池布局" : "Pool layout",
                     zh
-                        ? $"存储池 {finding.TargetName} 含有多个容量不为 0 的性能层。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
-                        : $"Pool {finding.TargetName} has more than one non-empty performance tier. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                        ? $"存储池 {finding.TargetName} 含有多个容量不为 0 的性能层。请按各层的实际关联查看布局。"
+                        : $"Pool {finding.TargetName} has more than one non-empty performance tier. Inspect the layout using each tier's actual associations."),
                 StorageFindingKind.MultipleCapacityTiers => (
-                    zh ? "存储池布局建议" : "Pool layout suggestion",
+                    zh ? "存储池布局" : "Pool layout",
                     zh
-                        ? $"存储池 {finding.TargetName} 含有多个容量不为 0 的容量层。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
-                        : $"Pool {finding.TargetName} has more than one non-empty capacity tier. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                        ? $"存储池 {finding.TargetName} 含有多个容量不为 0 的容量层。请按各层的实际关联查看布局。"
+                        : $"Pool {finding.TargetName} has more than one non-empty capacity tier. Inspect the layout using each tier's actual associations."),
                 StorageFindingKind.MultipleVirtualDisks => (
-                    zh ? "存储池布局建议" : "Pool layout suggestion",
+                    zh ? "存储池布局" : "Pool layout",
                     zh
-                        ? $"存储池 {finding.TargetName} 含有多个虚拟磁盘。推荐一个存储池只保留 1 个性能层、1 个容量层、1 个虚拟磁盘，避免混淆。"
-                        : $"Pool {finding.TargetName} has more than one virtual disk. Keeping one performance tier, one capacity tier, and one virtual disk per pool is recommended."),
+                        ? $"存储池 {finding.TargetName} 含有多个虚拟磁盘。请按各虚拟磁盘的实际关联查看布局。"
+                        : $"Pool {finding.TargetName} has more than one virtual disk. Inspect the layout using each virtual disk's actual associations."),
                 StorageFindingKind.ConflictingTopologyRelationship => (
                     zh ? "存储关系冲突" : "Storage relationship conflict",
                     zh

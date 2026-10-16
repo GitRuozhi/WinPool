@@ -5,7 +5,10 @@ using System.Text.Json;
 namespace WinPool.App.Services;
 
 public sealed record RealStructureDraftPreview(bool CanApply,
-    IReadOnlyList<string> Actions, IReadOnlyList<string> BlockingReasons);
+    IReadOnlyList<string> Actions, IReadOnlyList<string> BlockingReasons)
+{
+    public IReadOnlyList<PendingStructureAction> Presentation { get; init; } = [];
+}
 
 public sealed record RealPoolCreationDraft(StoragePoolInfo Pool, string PhysicalDiskId,
     PoolEditIntent Intent, bool CreatePool, bool CreateVirtualDisk, bool ContinueLayout = false, bool CreateTier = false)
@@ -36,6 +39,14 @@ public static class RealStructureDraftPlanner
     public static RealStructureDraftPlan Build(SimulationEditingSession session, bool chinese = false)
     {
         var actions = new List<string>();
+        var presentation = new List<PendingStructureAction>();
+        void AddAction(string title, params PendingStructureParameter[] parameters)
+        {
+            actions.Add(title);
+            presentation.Add(new(title, parameters.Where(parameter => parameter.Key != "SizeBytes"
+                || parameter.Value.Length > 0).ToArray()));
+        }
+        PendingStructureParameter P(string key, object? value) => PendingStructureAction.Parameter(key, value);
         var blocks = new List<string>();
         string T(string zh, string en) => chinese ? zh : en;
         var before = session.Baseline;
@@ -66,8 +77,8 @@ public static class RealStructureDraftPlanner
             if (before.VirtualDisks.Any(vd => vd.PoolStableId == pool.StableId && !SupportedObservedVirtualDisk(session, vd))
                 || before.StorageTiers.Any(tier => tier.PoolStableId == pool.StableId && !SupportedObservedTier(session, tier)))
                 blocks.Add(T("旧池包含本阶段未支持的 VD 或层结构；不能借解散绕过能力核验。", "The old pool contains an unsupported VD or tier layout."));
-            actions.Add(T($"解散 {pool.FriendlyName}：删除其 VD、分区、卷、层模板和池；全部数据丢失。",
-                $"Dissolve {pool.FriendlyName}: remove its VD, partitions, volumes, templates and pool; all data is lost."));
+            AddAction(T($"解散 {pool.FriendlyName}：删除其 VD、分区、卷、层模板和池；全部数据丢失。",
+                $"Dissolve {pool.FriendlyName}: remove its VD, partitions, volumes, templates and pool; all data is lost."), P("Target", pool.StableId), P("Name", pool.FriendlyName));
         }
         foreach (var vd in removedVds)
         {
@@ -77,7 +88,7 @@ public static class RealStructureDraftPlanner
                 blocks.Add(T("删除 VD 需要准确且包含成员的非原始池。", "Deleting a VD requires an exact non-primordial pool with distinct members."));
             if (!SupportedObservedVirtualDisk(session, vd))
                 blocks.Add(T("所选 VD 布局不在本阶段支持范围内。", "The selected VD layout is outside the supported scope."));
-            actions.Add(T($"删除 VD {vd.FriendlyName} 及全部子分区、卷和数据。", $"Delete VD {vd.FriendlyName}, its child partitions, volumes and data."));
+            AddAction(T($"删除 VD {vd.FriendlyName} 及全部子分区、卷和数据。", $"Delete VD {vd.FriendlyName}, its child partitions, volumes and data."), P("Target", vd.StableId), P("VirtualDiskName", vd.FriendlyName));
         }
         foreach (var pool in after.StoragePools.Where(pool => !pool.IsPrimordial))
         {
@@ -343,15 +354,15 @@ public static class RealStructureDraftPlanner
                     if (priorOwners.Any(owner => owner.MemberId == memberId)
                         || direct is not null && (!direct.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
                             || before.Partitions.Any(partition => partition.OsDiskStableId == direct.StableId)))
-                        actions.Add(T($"清除成员 {memberId} 上的现有分区和数据。", $"Clear existing partitions and data on member {memberId}."));
+                        AddAction(T($"清除成员 {memberId} 上的现有分区和数据。", $"Clear existing partitions and data on member {memberId}."), P("Target", memberId));
                 }
-                actions.Add(T($"创建包含 {memberIds.Length} 个准确成员的池 {pool.FriendlyName}。",
-                    $"Create pool {pool.FriendlyName} with {memberIds.Length} exact members."));
+                AddAction(T($"创建包含 {memberIds.Length} 个准确成员的池 {pool.FriendlyName}。",
+                    $"Create pool {pool.FriendlyName} with {memberIds.Length} exact members."), P("Target", pool.StableId), P("Name", pool.FriendlyName), P("Members", string.Join(", ", memberIds)));
                 foreach (var memberId in memberIds)
                 {
                     var media = NormalizeMedia(physicalById.GetValueOrDefault(memberId)?.MediaType) ?? "Unknown";
                     var role = roleByMember.GetValueOrDefault(memberId) ?? "Unknown";
-                    actions.Add(T($"成员 {memberId}：{media}，角色 {role}。", $"Member {memberId}: {media}, usage {role}."));
+                    AddAction(T($"成员 {memberId}：{media}，角色 {role}。", $"Member {memberId}: {media}, usage {role}."), P("Target", memberId), P("Media", media), P("Usage", role));
                 }
             }
             foreach (var role in roleGoals)
@@ -360,16 +371,16 @@ public static class RealStructureDraftPlanner
                 var normalized = NormalizeMemberRole(role.Usage);
                 if (!newPool && normalized is not null && (source is null
                     || PhysicalDiskUsage.Normalize(source.Usage) != normalized))
-                    actions.Add(T($"成员 {role.PhysicalDiskId} 使用角色 {normalized}。",
-                        $"Set member {role.PhysicalDiskId} usage to {normalized}."));
+                    AddAction(T($"成员 {role.PhysicalDiskId} 使用角色 {normalized}。",
+                        $"Set member {role.PhysicalDiskId} usage to {normalized}."), P("Target", role.PhysicalDiskId), P("Usage", normalized));
             }
             if (createTier)
             {
                 foreach (var goal in tierGoals.Where(goal => !HasVerifiedTemplate(session, pool, goal, dataMembers)))
                 {
                     var media = NormalizeMedia(goal.MediaType)!;
-                    actions.Add(T($"为 {media} 成员创建层模板：{FormatLayout(goal.Layout, chinese)}；VD 目标容量 {FormatCapacity(goal.SizeBytes, goal.UseMaximumSize, chinese)}。",
-                        $"Create a {media} tier template: {FormatLayout(goal.Layout, false)}; VD target capacity {FormatCapacity(goal.SizeBytes, goal.UseMaximumSize, false)}."));
+                    AddAction(T($"为 {media} 成员创建层模板：{FormatLayout(goal.Layout, chinese)}；VD 目标容量 {FormatCapacity(goal.SizeBytes, goal.UseMaximumSize, chinese)}。",
+                        $"Create a {media} tier template: {FormatLayout(goal.Layout, false)}; VD target capacity {FormatCapacity(goal.SizeBytes, goal.UseMaximumSize, false)}."), P("Target", pool.StableId), P("Media", media), P("Resiliency", goal.Layout.ResiliencySettingName), P("Columns", goal.Layout.NumberOfColumns), P("Interleave", goal.Layout.InterleaveBytes), P("Copies", goal.Layout.NumberOfDataCopies), P("Failures", goal.Layout.PhysicalDiskRedundancy), P("SizeBytes", goal.UseMaximumSize && goal.SizeBytes == 0 ? null : goal.SizeBytes), P("Maximum", goal.UseMaximumSize));
                 }
             }
             if (createVd || continueLayout)
@@ -384,12 +395,12 @@ public static class RealStructureDraftPlanner
                         ? string.Join("; ", tierGoals.Select(goal => $"{NormalizeMedia(goal.MediaType)} {FormatLayout(goal.Layout, chinese)}"))
                         : draftVds.Length == 0 || RequestedLayout(draftVds[0]) is not { } requested
                             ? "" : FormatLayout(requested, chinese);
-                    actions.Add(T($"创建{kind} VD {intent.VirtualDiskName}，{layout}，{capacity}。",
-                        $"Create {kind} VD {intent.VirtualDiskName}: {layout}, {capacity}."));
+                    AddAction(T($"创建{kind} VD {intent.VirtualDiskName}，{layout}，{capacity}。",
+                        $"Create {kind} VD {intent.VirtualDiskName}: {layout}, {capacity}."), P("Target", pool.StableId), P("VirtualDiskName", intent.VirtualDiskName), P("Layout", layout), P("Capacity", capacity));
                 }
                 if (intent.AutoCreatePartition)
-                    actions.Add(T($"自动 GPT 布局，{(intent.CreateMsr ? "规范 16 MiB MSR" : "无 MSR")}，{intent.FileSystem}/{FormatClusterSize(intent.AllocationUnitSize)}，卷标 {intent.VolumeName}，盘符 {intent.DriveLetter?.ToString() ?? "无"}。",
-                        $"Automatic GPT layout, {(intent.CreateMsr ? "canonical 16 MiB MSR" : "no MSR")}, {intent.FileSystem}/{FormatClusterSize(intent.AllocationUnitSize)}, label {intent.VolumeName}, letter {intent.DriveLetter?.ToString() ?? "none"}."));
+                    AddAction(T($"自动 GPT 布局，{(intent.CreateMsr ? "规范 16 MiB MSR" : "无 MSR")}，{intent.FileSystem}/{FormatClusterSize(intent.AllocationUnitSize)}，卷标 {intent.VolumeName}，盘符 {intent.DriveLetter?.ToString() ?? "无"}。",
+                        $"Automatic GPT layout, {(intent.CreateMsr ? "canonical 16 MiB MSR" : "no MSR")}, {intent.FileSystem}/{FormatClusterSize(intent.AllocationUnitSize)}, label {intent.VolumeName}, letter {intent.DriveLetter?.ToString() ?? "none"}."), P("Target", pool.StableId), P("PartitionStyle", "GPT"), P("CreateMsr", intent.CreateMsr), P("FileSystem", intent.FileSystem), P("AllocationUnitSize", intent.AllocationUnitSize), P("VolumeName", intent.VolumeName), P("DriveLetter", intent.DriveLetter), P("QuickFormat", intent.QuickFormat));
             }
         }
         foreach (var old in before.StorageTiers.Where(t => removedPools.All(p => p.StableId != t.PoolStableId)
@@ -405,8 +416,8 @@ public static class RealStructureDraftPlanner
                     .All(vd => removedVds.Any(removed => removed.StableId == vd.StableId)))
             {
                 removedTiers.Add(old);
-                actions.Add(T($"删除未使用的准确 {NormalizeMedia(old.MediaType) ?? old.MediaType} 模板 {old.FriendlyName}。",
-                    $"Delete exact unused {NormalizeMedia(old.MediaType) ?? old.MediaType} template {old.FriendlyName}."));
+                AddAction(T($"删除未使用的准确 {NormalizeMedia(old.MediaType) ?? old.MediaType} 模板 {old.FriendlyName}。",
+                    $"Delete exact unused {NormalizeMedia(old.MediaType) ?? old.MediaType} template {old.FriendlyName}."), P("Target", old.StableId), P("Name", old.FriendlyName), P("Media", old.MediaType));
             }
             else if (current is null || current.ResiliencySettingName != old.ResiliencySettingName
                 || current.NumberOfColumns != old.NumberOfColumns || current.Interleave != old.Interleave
@@ -466,7 +477,8 @@ public static class RealStructureDraftPlanner
         var unblocked = blocks.Count == 0;
         // Unsupported drafts remain editable, but must not describe a different
         // supported layout as if it were the user's executable target.
-        return new(new(actions.Count > 0 && unblocked, unblocked ? actions : [], blocks.Distinct().ToArray()),
+        return new(new(actions.Count > 0 && unblocked, unblocked ? actions : [], blocks.Distinct().ToArray())
+            { Presentation = unblocked ? presentation : [] },
             unblocked ? removedPools : [], unblocked ? removedVds : [],
             unblocked ? removedTiers : [], unblocked ? creations : []);
     }

@@ -278,7 +278,8 @@
                     <ItemsPanelTemplate>
                         <controls:AdaptiveFlowPanel
                             HorizontalAlignment="Stretch"
-                            />
+                            HorizontalSpacing="6"
+                            VerticalSpacing="6" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
@@ -302,7 +303,10 @@
                 </ItemsControl.ItemContainerStyle>
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <controls:WeightedPoolPanel HorizontalAlignment="Stretch" />
+                        <controls:WeightedPoolPanel
+                            HorizontalAlignment="Stretch"
+                            HorizontalSpacing="6"
+                            VerticalSpacing="6" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
@@ -326,7 +330,7 @@
                 </ItemsControl.ItemContainerStyle>
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <controls:SurfaceStackPanel Spacing="8" />
+                        <controls:SurfaceStackPanel Spacing="6" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
@@ -406,7 +410,8 @@
                             Foreground="White"
                             Text="{x:Bind ViewModel.UnavailableName, Mode=OneWay}"
                             TextAlignment="Center"
-                            TextWrapping="Wrap" />
+                            TextWrapping="NoWrap"
+                            TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -418,7 +423,7 @@
             CornerRadius="4"
             IsHitTestVisible="False"
             Visibility="Collapsed" />
-        <!-- Pending segments share the same one-DIP edge and stay visible
+        <!-- Animated segments share the same one-DIP edge and stay visible
              while the card retains its hover/selection background. -->
         <shapes:Rectangle
             x:Name="PendingRestOutline"
@@ -428,7 +433,7 @@
             Stroke="{ThemeResource WinPoolTopologyRestStrokeBrush}"
             StrokeThickness="1"
             IsHitTestVisible="False"
-            Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}" />
+            Visibility="{x:Bind ViewModel.PendingOutlineVisibility, Mode=OneWay}" />
         <shapes:Rectangle
             x:Name="PendingOutline"
             Margin="0.5"
@@ -437,8 +442,7 @@
             Stroke="{ThemeResource WinPoolAccentBrush}"
             StrokeThickness="1"
             IsHitTestVisible="False"
-            Visibility="{x:Bind ViewModel.PendingModificationVisibility, Mode=OneWay}"
-            AutomationProperties.Name="{x:Bind ViewModel.PendingModificationName, Mode=OneWay}" />
+            Visibility="{x:Bind ViewModel.PendingOutlineVisibility, Mode=OneWay}" />
         <Border
             x:Name="DropTargetBorder"
             BorderBrush="{ThemeResource WinPoolAccentBorderBrush}"

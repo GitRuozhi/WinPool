@@ -111,7 +111,8 @@ public sealed partial class TopologyNodeControl : UserControl
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TopologyNodeViewModel.HasPendingModifications))
+        if (e.PropertyName is nameof(TopologyNodeViewModel.HasPendingModifications)
+            or nameof(TopologyNodeViewModel.PendingOutlineVisibility))
             UpdatePendingOutline();
         if (e.PropertyName is nameof(TopologyNodeViewModel.IsSelected)
             or nameof(TopologyNodeViewModel.IsExpanded))
@@ -142,18 +143,31 @@ public sealed partial class TopologyNodeControl : UserControl
         UnavailableChainCanvas.Clip = CreateCardClip(width, height);
 
         var compact = width < 180;
-        // Short, wide cards have room beside the icon, not below it.
-        // Keeping a vertical stack here clipped the reason on 82-DIP VD cards.
-        var horizontal = height < 112;
-        var iconSize = compact ? 32 : 52;
-        iconSize = (int)Math.Min(iconSize, Math.Max(16, height - 24));
+        var verticalMargin = Math.Min(12, Math.Max(0, (height - 28) / 2));
+        UnavailableStatusPanel.Margin = new Thickness(12, verticalMargin, 12, verticalMargin);
+        var availableHeight = Math.Max(0, height - (2 * verticalMargin));
+        var contentWidth = Math.Max(0, width - 24);
+        var spacing = compact ? 4 : 8;
+        var minimumTextWidth = Math.Min(32, contentWidth * 0.4);
+        var iconWidthLimit = Math.Max(0, contentWidth - spacing - minimumTextWidth);
+        var iconSize = Math.Min(compact ? 32 : 52, Math.Min(availableHeight, iconWidthLimit));
         UnavailableIconImage.Width = iconSize;
         UnavailableIconImage.Height = iconSize;
-        UnavailableStatusText.FontSize = compact ? 14 : 20;
-        UnavailableStatusPanel.Orientation = horizontal ? Orientation.Horizontal : Orientation.Vertical;
-        UnavailableStatusPanel.Spacing = compact ? 4 : 8;
-        UnavailableStatusText.MaxWidth = Math.Max(32,
-            width - 24 - (horizontal ? iconSize + UnavailableStatusPanel.Spacing : 0));
+        var textWidth = Math.Max(0, contentWidth - iconSize - spacing);
+        var fullReason = ViewModel.UnavailableName;
+        var preferredFontSize = compact ? 14 : 20;
+        var averageCharacterWidth = fullReason.Any(character => character > '\u2E80') ? 1d : 0.55d;
+        var widthLimitedFontSize = fullReason.Length == 0
+            ? preferredFontSize
+            : textWidth / (fullReason.Length * averageCharacterWidth);
+        UnavailableStatusText.FontSize = availableHeight < 36
+            ? 12
+            : Math.Clamp(widthLimitedFontSize, 12, preferredFontSize);
+        UnavailableStatusPanel.Orientation = Orientation.Horizontal;
+        UnavailableStatusPanel.Spacing = spacing;
+        UnavailableStatusText.MaxWidth = textWidth;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(UnavailableStatusText, fullReason);
+        ToolTipService.SetToolTip(UnavailableStatusText, fullReason);
 
         if (ViewModel.UnavailableVisibility == Visibility.Visible)
         {
@@ -173,7 +187,7 @@ public sealed partial class TopologyNodeControl : UserControl
     {
         _pendingBorderAnimation?.SetActive(
             IsLoaded
-            && ViewModel is { HasPendingModifications: true, IsInvisibleLayoutContainer: false });
+            && ViewModel is { ShouldShowPendingOutline: true });
     }
 
     private void UpdateUnavailableChainTiles(double width, double height)

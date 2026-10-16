@@ -7,7 +7,7 @@
     xmlns:editors="using:WinPool_App"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
-    <Grid Margin="12">
+    <Grid Margin="8,0,8,8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -16,7 +16,7 @@
             x:Name="NarrowPageNavigation"
             Orientation="Horizontal"
             Spacing="8"
-            Margin="0,0,0,8"
+            Margin="0,0,0,6"
             Visibility="Collapsed">
             <Button x:Name="ShowTargetsButton" Click="ShowTargets_Click" />
             <Button x:Name="ShowPropertiesButton" Click="ShowProperties_Click" />
@@ -26,7 +26,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="TargetsColumn" Width="*" MinWidth="120" />
             <ColumnDefinition x:Name="SplitterColumn" Width="8" />
-            <ColumnDefinition x:Name="PropertiesColumn" Width="520" MinWidth="240" />
+            <ColumnDefinition x:Name="PropertiesColumn" Width="380" MinWidth="240" />
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -57,7 +57,7 @@
                     </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical" Spacing="8" />
+                            <StackPanel Orientation="Vertical" Spacing="6" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
@@ -71,18 +71,22 @@
             </ScrollViewer>
             </Grid>
         </Border>
-        <Border x:Name="StructureChromeBorder" Grid.Row="1" Margin="0,8,0,0"
+        <Border x:Name="StructureChromeBorder" Grid.Row="1" Margin="0,6,0,0"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="4">
             <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="12">
             <controls:StructureActionsFlowPanel x:Name="StructureActionsPanel" Spacing="8">
                 <controls:ContextHelpHost>
+                    <Grid x:Name="PendingButtonHost">
                     <Button x:Name="PendingActionsButton" MinHeight="32" Style="{StaticResource WinPoolButtonBaseStyle}" Click="PendingActions_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon x:Name="PendingActionsButtonIcon" Glyph="&#xE14C;" FontSize="14" />
                             <TextBlock x:Name="PendingActionsButtonLabel" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                        <Rectangle x:Name="PendingDefaultOutline" Stroke="{ThemeResource CardStrokeColorDefaultBrush}" StrokeThickness="1" Fill="Transparent" IsHitTestVisible="False" Margin="0.5" RadiusX="4" RadiusY="4" Visibility="Collapsed" />
+                        <Rectangle x:Name="PendingThemeOutline" Stroke="{ThemeResource AccentFillColorDefaultBrush}" StrokeThickness="1" Fill="Transparent" IsHitTestVisible="False" Margin="0.5" RadiusX="4" RadiusY="4" Visibility="Collapsed" />
+                    </Grid>
                 </controls:ContextHelpHost>
                 <controls:ContextHelpHost>
                     <Button x:Name="UndoButton" Width="32" MinWidth="32" Height="32" Padding="0" Style="{StaticResource WinPoolButtonBaseStyle}" Click="Undo_Click">
@@ -182,10 +186,10 @@
                 <StackPanel
                     x:Name="PoolSectionsPanel"
                     Spacing="{StaticResource WinPoolCardGap}">
-                    <Border Style="{StaticResource WinPoolCardBorderStyle}">
+                    <Border Style="{StaticResource WinPoolCardBorderStyle}" Padding="12">
                         <Grid
                             x:Name="PoolFormGrid"
-                            Margin="12"
+                            Margin="0"
                             ColumnSpacing="4"
                             RowSpacing="4">
                             <Grid.ColumnDefinitions>
@@ -196,10 +200,10 @@
                     </Border>
                     <Border
                         x:Name="DiskAndPartitionCard"
-                        Style="{StaticResource WinPoolCardBorderStyle}">
+                        Style="{StaticResource WinPoolCardBorderStyle}" Padding="12">
                         <Grid
                             x:Name="DiskAndPartitionFormGrid"
-                            Margin="12"
+                            Margin="0"
                             ColumnSpacing="4"
                             RowSpacing="4">
                             <Grid.ColumnDefinitions>

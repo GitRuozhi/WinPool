@@ -186,6 +186,6 @@ internal sealed class PendingBorderAnimation : IDisposable
             hash *= prime;
         }
 
-        return TimeSpan.FromSeconds(18 + hash % 19);
+        return TimeSpan.FromSeconds(9 + hash % 10);
     }
 }

@@ -10,7 +10,7 @@
     mc:Ignorable="d">
     <Grid
         x:Name="MonitorRoot"
-        Padding="12">
+        Padding="8,0,8,8">
         <Grid.RowDefinitions>
             <RowDefinition x:Name="GraphRow" Height="*" MinHeight="160" />
             <RowDefinition Height="8" />

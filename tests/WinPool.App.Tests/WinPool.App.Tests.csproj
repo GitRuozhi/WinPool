@@ -17,6 +17,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\src\WinPool.App\Services\StructureDraftReentry.cs" Link="StructureDraftReentry.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\StructurePartitionBaseline.cs" Link="StructurePartitionBaseline.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\StructureColumnSuggestion.cs" Link="StructureColumnSuggestion.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\StructureCreationPolicy.cs" Link="StructureCreationPolicy.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\PendingStructureAction.cs" Link="PendingStructureAction.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\FullStripeCalculator.cs" Link="FullStripeCalculator.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\IntegerInputPolicy.cs" Link="IntegerInputPolicy.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\IRealOperationAuthorization.cs" Link="IRealOperationAuthorization.cs" />

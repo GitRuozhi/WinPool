@@ -58,14 +58,6 @@ public static class StructureDraftReentry
         return false;
     }
 
-    private static PartitionInfo? PrimaryPartition(StorageSnapshot snapshot, string poolId)
-    {
-        var vdisk = snapshot.VirtualDisks.FirstOrDefault(item =>
-            string.Equals(item.PoolStableId, poolId, StringComparison.OrdinalIgnoreCase));
-        if (vdisk is null) return null;
-        var disk = snapshot.OsDisks.FirstOrDefault(item => item.VirtualDiskStableId == vdisk.StableId);
-        return snapshot.Partitions.Where(item => item.OsDiskStableId == disk?.StableId
-                && item.Type is "Primary" or "BasicData")
-            .OrderBy(item => item.Offset).FirstOrDefault();
-    }
+    private static PartitionInfo? PrimaryPartition(StorageSnapshot snapshot, string poolId) =>
+        StructurePartitionBaseline.ForPool(snapshot, poolId);
 }

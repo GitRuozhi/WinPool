@@ -6,7 +6,7 @@
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
     <Grid
         x:Name="DevelopmentLayout"
-        Padding="12"
+        Padding="8,0,8,8"
         SizeChanged="DevelopmentLayout_SizeChanged">
         <Grid.RowDefinitions>
             <RowDefinition x:Name="UpperAreaRow" Height="2*" MinHeight="220" />

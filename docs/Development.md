@@ -54,7 +54,7 @@ C#、WinUI 3、.NET 10、Windows App SDK 2.4；SDK 以 `global.json` 为准。Wi
 
 新无调用失败回执绑定PlanHash和StepId。完整成员只读恢复须核验冻结步骤数量／顺序、已验证前缀、完整当前身份／指纹、已知NoWindowsCall代码及准确目标，成立才终结Failed／PartiallyCompleted并释放屏障，不自动续写。历史角色漏父池UID的兼容只允许该旧closed-target拒绝回执重建父池标识作比较；其它目标字段必须完全一致。同池恢复用途只更改Usage，不调用成员迁移去重算provider池容量或unused template占用。成员迁移限制仅用于已有concrete pool；Primordial中的磁盘及尚未应用的新池草稿不属于这个限制。
 
-结构页真实创建和重建使用原表单、拓扑拖放及同一草稿，不另开参数向导或独立重建入口。新池按准确成员集合形成介质 tier goals，覆盖 HDD／SSD／SCM；AutoVD 关闭仍创建并保留所选层规格，AutoVD 只决定是否创建 VD。类型化命令承载 Simple／Mirror／Parity、列数、交错、数据副本／校验冗余等布局参数，成员 Usage 与逐层明确容量／MAX 也进入同一冻结计划。`RealStructureDraftPlanner` 从基线与目标的净差异生成封闭动作，`RealStructureEditorFlow` 在原 Apply 的一次完整确认下，为每段重新 Prepare、执行前核验并接受准确计划。已知布局能力先只读查询，拒绝后不提交删除；显式解散旧池后按实时物理盘和直接 OS 磁盘关联复核，如仍有 GPT/MSR，须清至零分区 RAW 并复采，再按目标介质创建池层及所需 VD。GPT 初始化与自动布局仍需各自准确的内部核验，不产生新的用户确认仪式。取消、失败或结果未知停止后续写入，不重放不确定调用；普通更新失败不能暗中转为删除重建。实际执行仍受精确 Windows provider 能力、范围和安全事实约束；多成员硬件尚未实测。
+结构页真实创建和重建使用原表单、拓扑拖放及同一草稿，不另开参数向导或独立重建入口。含成员的新池按准确成员集合形成 HDD／SSD／SCM 介质 tier goals，并默认生成虚拟磁盘和分区目标；旧 AutoVD／AutoPart 偏好不再控制这条规则。类型化命令承载 Simple／Mirror／Parity、列数、交错、数据副本／校验冗余等布局参数，成员 Usage 与逐层明确容量／MAX 也进入同一冻结计划。`RealStructureDraftPlanner` 从基线与目标的净差异生成封闭动作，`RealStructureEditorFlow` 在原 Apply 的一次完整确认下，为每段重新 Prepare、执行前核验并接受准确计划。已知布局能力先只读查询，拒绝后不提交删除；显式解散旧池后按实时物理盘和直接 OS 磁盘关联复核，如仍有 GPT/MSR，须清至零分区 RAW 并复采，再按目标介质创建池层及所需 VD。左侧明确删除 VD 后删除意图持续，不因刷新或旧偏好重建；已有 RAW VD 不自动补建分区；左侧创建 VD 才生成自动分区目标。GPT 初始化与自动布局仍需各自准确的内部核验，不产生新的用户确认仪式。取消、失败或结果未知停止后续写入，不重放不确定调用；普通更新失败不能暗中转为删除重建。实际执行仍受精确 Windows provider 能力、范围和安全事实约束；多成员硬件尚未实测。
 
 `EditorPageBase` 对单个已接受 operation 最多轮询 1200 次，每次先等待 250 ms，再查询同一个 `OperationId` 的持久状态；等待间隔合计约 300 秒，另有查询与调度耗时。这不是操作完成时间保证。通用查询不再次发送 Accept；结构 Apply 的专用编排只会在同次封闭授权内，待前段 Verified 后重新准备并核验下一段，不另要用户确认。超过等待窗口时保留准确操作身份，执行中的真实写入仍由 Agent 管理；结果未知时只读查询和对账，不自动重放。
 
@@ -93,7 +93,7 @@ Agent 的退出信号覆盖全部 App 启动目标，包括独立 `--page Welcom
 
 真实拓扑 canonical fingerprint 对 `PhysicalDisk.AllocatedSize` 只保留字段存在状态和 `ReadState`，将 provider counter 的 value 规范为固定标记；Windows 清盘后该缓存计数可能在后续发现时变化。盘身份、几何、关系、HealthStatus／OperationalStatus，以及 StoragePool／StorageTier／VirtualDisk 的 `AllocatedSize` 仍精确比较；App post-fingerprint 安全检查保留，也不靠每步额外 full refresh 回避差异。根因与单字段差异见 [阶段证据](../artifacts/test-results/20261011-pool-drag-product-alignment/physical-allocation-counter-proof.json)。
 
-`SimulationEditingSession` 是结构页模拟与真实草稿的共同会话，保存 SystemId、Baseline/Revision、Working、`PoolEditIntent`、MAX 意图、undo/redo 和冲突/未知状态。模拟仍生成同一批类型化步骤并原子提交；真实路径只比较最终关系和参数，不执行模拟命令，也不将成员拖放翻译为 `MovePhysicalDisk`。新池和模拟池按成员介质创建或填充相应草稿层，沿用既有层规格／容量；AutoVD=false 仍会为 HDD 成员生成 HDD 模板，但不创建 VD。AutoVD 与 AutoPart 各自只控制 VD 创建和分区布局。已有成员只有在同一草稿显式解散旧池后，才可分配给新 replacement 草稿池。无成员的真实空池只保留输入，不生成创建计划；不支持的既有对象改动必须列明阻止原因，不能静默忽略。
+`SimulationEditingSession` 是结构页模拟与真实草稿的共同会话，保存 SystemId、Baseline/Revision、Working、`PoolEditIntent`、MAX 意图、undo/redo 和冲突/未知状态。模拟仍生成同一批类型化步骤并原子提交；真实路径只比较最终关系和参数，不执行模拟命令，也不将成员拖放翻译为 `MovePhysicalDisk`。新池和模拟池按成员介质创建或填充相应草稿层，沿用既有层规格／容量；含成员的新池默认同时生成 VD 和分区目标。已有 RAW VD 不回填；明确删除 VD 后也不因刷新重建，只有左侧重新创建才生成分区目标。旧自动创建偏好不参与决策。已有成员只有在同一草稿显式解散旧池后，才可分配给新 replacement 草稿池。无成员的真实空池只保留输入，不生成创建计划；不支持的既有对象改动必须列明阻止原因，不能静默忽略。
 
 工作区的 `RealStructureResultSynchronization` 在准确冻结计划获当批授权后、首次 Accept 前登记阶段，持有 ID/hash、会话绑定代际、提案和类型化输出映射。传输失联、Running、轮询耗尽和成功待刷新共用这份上下文；完成同步前冻结所属草稿编辑。后台恢复只读取得完整相关事实后，先核验输出并重基剩余目标，再通知页面和释放全局身份；刷新失败保留阶段。明确无调用的取消／拒绝同样在后台刷新后推进基线，避免误标冲突。映射只合并已验证身份和布局进度，不回写捕获的整份旧参数；内容修订与重新绑定代际分开。重新绑定不能把旧输出写入新草稿，重启不恢复写入授权或自动续写。
 
@@ -105,7 +105,7 @@ Agent 的退出信号覆盖全部 App 启动目标，包括独立 `--page Welcom
 
 真实 Apply 的 `finally` 必须在 `_applyingRealDraft` 清零后调用 `RefreshExecutionMode()`，重新生成拓扑交互并恢复 `AllowDiskDrag`。若 Apply 中途 `RefreshAll`／`RefreshTopology` 在草稿仍标记 applying 时执行，重画时拖动权限会被关掉；finally 只恢复按钮状态不足以恢复拖动。最新 Release 与真实 Apply 后拖动复验已通过；WDC 末态恢复及 Samsung 保护比较也已通过，证据见 [Quality §10.7](Quality.md#2026-10-11-按介质自动建层与原-apply限定范围验收)。模拟 SSD 仅核验自动 Performance 层／VD 草稿并放弃，SCM 本轮未原生检查，不外推为全介质矩阵完成。
 
-`PoolEditIntent` 集中承载完整成员集合、成员 Usage、各介质层的布局／名称／明确 bytes 或 MAX，以及独立自动 VD／分区偏好和适用的 MSR、文件系统、簇、卷标、盘符等参数；不提供普通／分层模式选择。容量意图按准确介质层绑定；HDD／SSD／SCM 成员各自形成相应模板／目标层，AutoVD 只控制 VD。新建层规格与容量沿用该介质层草稿，不以额外 VD 容量行覆盖。真实 VD 草稿占位不填估算容量作为授权。Agent 和 Windows adapter 仍验证布局参数、成员闭包、实际范围与 provider 能力，表单可编辑不等于 Windows 一定接受。已有对象名称 Enter 独立走准确改名计划，失焦不提交；`AcceptRename` 同步当前草稿及 undo/redo，改名不随结构放弃回退。待创建名称仍属创建参数。
+`PoolEditIntent` 集中承载完整成员集合、成员 Usage、各介质层的布局／名称／明确 bytes 或 MAX，以及适用的 MSR、文件系统、簇、卷标、盘符等参数；不提供普通／分层模式选择，也不以旧 AutoVD／AutoPart 偏好分叉新建策略。容量意图按准确介质层绑定；HDD／SSD／SCM 成员各自形成相应模板／目标层。新建层规格与容量沿用该介质层草稿，不以额外 VD 容量行覆盖。新建 Mirror 列数的建议为 `max(1, floor(合格数据成员数 / 副本数))`，排除热备／退役成员；成员数或副本数变化时仅在仍使用自动建议时更新，显式列数不覆盖。已有层复原返回实际当前列数。真实 VD 草稿占位不填估算容量作为授权。Agent 和 Windows adapter 仍验证布局参数、成员闭包、实际范围与 provider 能力，表单可编辑不等于 Windows 一定接受。已有对象名称 Enter 独立走准确改名计划，失焦不提交；`AcceptRename` 同步当前草稿及 undo/redo，改名不随结构放弃回退。待创建名称仍属创建参数。
 
 已存在 VD 的解散与 `PendingAutomaticLayout` 续行按同次 fresh SourceFacts 核对其准确 VD、父池、全部成员和实际 tier 闭包；unused template 与 actual tier 分开识别。Returned-null 保留其原始读取状态，不补造默认值；缺失、歧义、冲突关系或不完整几何仍阻止执行。逻辑容量、已分配量与物理 footprint 分别核对，不要求 mirror/parity 的物理 footprint 等于逻辑容量。旧单 HDD SourceFacts 证据[真实 SourceFacts 纯规划与 codec 证据](../artifacts/test-results/20261008-v059-product-alignment-86c03bd2996348d3a3b47132ad83dd89/Engineering/native-tier-draft-gates/review.md)记录当时现场形态；它不是当前新池布局白名单。
 
@@ -143,7 +143,7 @@ Agent 的退出信号覆盖全部 App 启动目标，包括独立 `--page Welcom
 
 前轮普通原生 MAX 操作 [b085439f8cd645bb9f65512503f23359](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/create-native-maximum/b085439f8cd645bb9f65512503f23359.json)冻结 `SizeBytes=0`／`UseMaximumSize=true`，由 Windows 决定容量，未以 provider range 最大值或估算 bytes 调用。实际 VD／唯一 OS 磁盘容量均为 3999688294400 bytes；VD 为 Simple／Fixed／1 列／65536-byte interleave，没有模板或 actual tier；随后按实际 OS 容量确认 GPT、规范 16 MiB MSR、BasicData／NTFS 64 KiB／`WinPool_V059_Data`／`W:`。见[只读布局证明](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/native-maximum-layout-readonly-proof.json)与[断言](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Ordinary/native-maximum-layout-assertion.json)。[原 Agent 托盘 Exit](../artifacts/test-results/20261009-v059-native-maximum-81428d1f9c2249bfbeb4d30c21b08219/Final/ordinary-native-max-observed-exit-result.json)确认 App4860／Agent4936 均 exit 0。这验证本机普通原生 MAX；该轮物理盘收口另有上文独立证据，不能由普通成功推定分层 MAX 通过，也不代替本次容量调查的最终恢复核验。
 
-开启 AutoPart 时，已知的显式 bytes 在草稿 preview 阶段即由 `RealOperationProposalFactory.ValidateAutomaticLayoutCapacity` 验证，先于解散旧池或其他写入；非整 MiB、或不足以容纳所选 MSR 与 BasicData 几何的目标被阻止。blocked 草稿保留输入和说明，但 `RemovedPools`、`RemovedVirtualDisks`、`RemovedTiers`、`Creations` 等类型化执行集合为空。原生 MAX 不存在预先解析的准确 bytes；本轮修正要求创建 Verified 后，以唯一 fresh 实际 OS 磁盘容量准备后续 GPT／MSR／BasicData 步骤，不预冻结虚构容量的分区几何，不为满足布局改小 VD。后续容量或几何不受支持时保留已核验结果与剩余目标并停止续写。`ConfigureInitializedDisk` 与明确容量前置校验共用几何 helper，并调用 `EditWorkspace.GetRealPartitionCreateGeometry`；关闭 AutoPart 时不附加这些分区布局条件。
+仅对本次新建 VD 生成自动 GPT 布局目标；已知显式 bytes 在草稿 preview 阶段即由 `RealOperationProposalFactory.ValidateAutomaticLayoutCapacity` 验证，先于解散旧池或其他写入；非整 MiB、或不足以容纳所选 MSR 与 BasicData 几何的目标被阻止。blocked 草稿保留输入和说明，但 `RemovedPools`、`RemovedVirtualDisks`、`RemovedTiers`、`Creations` 等类型化执行集合为空。原生 MAX 不存在预先解析的准确 bytes；创建 Verified 后，以唯一 fresh 实际 OS 磁盘容量准备后续 GPT／MSR／BasicData 步骤，不预冻结虚构容量的分区几何，不为满足布局改小 VD。后续容量或几何不受支持时保留已核验结果与剩余目标并停止续写。`ConfigureInitializedDisk` 与明确容量前置校验共用几何 helper，并调用 `EditWorkspace.GetRealPartitionCreateGeometry`。既有 RAW VD 不自动补建布局，明确删除的 VD 不自动回生；MSR偏好仍只决定新布局是否包含MSR。
 
 历史原生 MAX 的类型化命令区分 `UseMaximumSize=true` 与明确 bytes；兼容占位 `SizeBytes=0` 只允许与原生开关同时出现，不能作为实际容量或旧计划的隐式 MAX。模式参与计划 hash、确认摘要和 provider input receipt，旧明确容量计划与恢复证据不重新解释。普通路径要求本次可靠 VD 输出与唯一 fresh OS 磁盘容量一致；分层路径还要求唯一 actual tier、完整规格和非 retained 的 pool／member 父链。缺 actual tier 必须停止后续布局，不能将普通残留改称分层成功。
 
@@ -152,6 +152,8 @@ b0 的严格只读对账以两轮完整 fresh 相同残留指纹、原物理成�
 真实 GPT 创建统一使用 `EditWorkspace.GetRealPartitionCreateGeometry`：选定空隙与磁盘尾部 1 MiB 预留区取交集，再按 1 MiB 对齐。手动 MAX、自动布局和 Agent 校验共用此计算，保留相邻分区重叠检查；模拟几何继续使用自身规则。准备阶段的能力拒绝返回 `agent.real_operation.prepare_failed`，没有准备计划或写调用，不能误记为执行结果未知。
 
 分区页联机状态只读准确 SourceFacts 的 `IsOffline`，要求 Returned 的有效布尔值，不用默认值代替未知证据。RAW 初始化 GPT 后复采，再按 MSR 偏好规范化；不自动创建 BasicData，已 GPT 不另给“完成布局”，真实 MBR→GPT 仍按 C03 拒绝。真实 clear 需要完整当前分区事实，成功空集合才可证明零分区；真实清空清除所选盘分区并置 RAW，不等于全盘写零、格式化或初始化。模拟清空使用独立 `SimulationEditKind.ClearDisk`，只移除选定模拟盘的分区/关联卷并置 RAW。
+
+格式化成功后根据准确分区及唯一关联卷的实际文件系统事实更新当前值、Undo基线与净差异；如果写入后实际为ReFS，复原／Reset也回到ReFS。不得合成NTFS回退、额外格式化或虚假复原动作。新建对象按默认值恢复，既有对象按实际当前值恢复。
 
 - 保留适用的采集值及来源；改名等无容量影响的操作不重新估算。
 - 成员、布局或分配相关参数改变后，使受影响的容量/能力证据失效，重新估算并标记，保留未受影响事实。
@@ -206,19 +208,19 @@ scoped 请求回包与 observer 事件可按任意顺序交付同一已提交批
 
 模拟格式化方式由 `SimulationEditRequest.QuickFormat` 携带，默认沿用快速方式；分区页两个互斥开关只决定此意图。计划与解释性命令预览保留完整方式的差异，当前模拟卷结果仍按现有 `StorageSnapshot` 字段生成，不增加介质扫描或真实 Windows 命令执行。系统导出保持现有 `StorageSystemDocument` JSON 结构，以 `.json` 扩展名写出；旧 `.winpool` 文件只作为导入兼容入口。当前编辑资格与几何边界见[模拟规则表](DesignTables/SimulationRules.md)；旧叙述稿已[归档](Archive/20260923-design-details/README.md)。
 
-模拟分区页手动新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。结构页的新 VD 自动布局与真实路径共用 `GetAutomaticPartitionCreateGeometry`，保留 1 MiB 尾端空间；MSR 开启时创建于 1–17 MiB，数据分区从 17 MiB 开始，关闭时数据分区从 1 MiB 开始。AutoPart 关闭则保留 RAW、无分区。草稿规划、规则校验及模拟提交沿用共享几何核对，不能由界面独自夹紧超界容量；已有导入结构保持原始偏移及容量，不自动重排。
+模拟分区页手动新建分区以 `EditWorkspace.GetPartitionCreateGeometry` 计算可用范围：把起点向上吸附到 1 MiB 网格，可用长度向下取整到整 MiB；不足一个整 MiB 返回明确不可创建原因。结构页仅对新建 VD 生成自动布局目标，与真实路径共用 `GetAutomaticPartitionCreateGeometry`，保留 1 MiB 尾端空间；MSR 开启时创建于 1–17 MiB，数据分区从 17 MiB 开始，关闭时数据分区从 1 MiB 开始。旧 AutoPart 设置不关闭此规则；已有 RAW VD 不回填，明确删除的 VD 不自动回生，左侧重新创建 VD 时生成新布局目标。草稿规划、规则校验及模拟提交沿用共享几何核对，不能由界面独自夹紧超界容量；已有导入结构保持原始偏移及容量，不自动重排。
 
-当前页面布局基准为内容外边距12 DIP（Shell标题区例外）、卡片内边距12 DIP、1 DIP卡片外框与4 DIP圆角、卡间距8 DIP、可拖分隔槽8 DIP；普通按钮和输入32 DIP高，普通字段行至少40 DIP、行距4 DIP。管理页与硬件页等高密度属性表沿用 `PropertyTableVisuals` 的32 DIP行高；同类密集表保持一致。拓扑节点与监控图表按内容及视口布局，保持现有滚动和响应式行为。普通卡片间距不创建拖动分隔槽。
+当前页面布局基准为外层内容左／右／下8 DIP、上0 DIP；不可拖动卡片／块间距6 DIP。可拖动分隔槽总宽8 DIP，单个bar占满槽位，不能再在两侧叠加margin。卡片内边距保留为实际内容所需的局部设置，不与块间距混算；卡片外框1 DIP、圆角4 DIP。普通按钮和输入32 DIP高，普通字段行至少40 DIP、行距4 DIP。管理页与硬件页等高密度属性表沿用 `PropertyTableVisuals` 的32 DIP行高；同类密集表保持一致。拓扑节点与监控图表按内容及视口布局，保持现有滚动和响应式行为。普通卡片间距不创建拖动分隔槽。
 
-存储结构与磁盘分区编辑页右侧属性栏默认宽度为中文520 DIP、英文568 DIP，使用8 DIP可拖分隔槽调整；属性项名列分别为112／160 DIP，值列至少144 DIP。每张属性卡独立折叠，标题及方向图标保持可见；窄窗通过现有切栏和滚动保留内容。结构页使用响应式动作流，不保留固定四列两行网格或常驻待应用区；待应用计数打开只读动作明细，预览和Apply读取同一净差异来源，原有四个全局动作图标保留。两编辑页顶部和底部对应列对齐；分区容量字段单位在输入框后，数字右对齐。无选择或起点／终点不可得时留空。起点/终点仍各两行、同列对齐：首行MiB向下取整，第二行显示自适应单位；终点为`start + size`的排他结束偏移。编辑期间的遮罩与居中72 DIP ProgressRing仍由Workspace owner控制，Shell导航与全局通知独立于遮罩。
+存储结构与磁盘分区编辑页右侧属性栏默认宽度为中文380 DIP、英文420 DIP，使用8 DIP可拖分隔槽调整；属性项名列分别为84／112 DIP，值列至少112 DIP，动作、单位、MAX列分别以24／28／40 DIP压紧。中文项名保持一行，英文最多两行。每张属性卡独立折叠，标题及方向图标保持可见；窄窗通过现有切栏和滚动保留内容。结构页使用响应式动作流，不保留固定四列两行网格或常驻待应用区；待应用计数打开只读明细，真实与模拟共用动作呈现器，动作及参数全部展开为普通内容、只允许滚动。预览和Apply读取同一净差异来源，原有四个全局动作图标保留。两编辑页顶部和底部对应列对齐；分区容量字段单位在输入框后，数字右对齐。无选择或起点／终点不可得时留空。起点/终点仍各两行、同列对齐：首行MiB向下取整，第二行显示自适应单位；终点为`start + size`的排他结束偏移。编辑期间的遮罩与居中72 DIP ProgressRing仍由Workspace owner控制，Shell导航与全局通知独立于遮罩。
 
 指定的三个拓扑视图根据目标自身的offline、read-only、fault、lost事实绘制四种无底色状态SVG、大字号原因文本和半透明黑色遮罩；仓库原生链环SVG由一条斜链平铺并按卡片边界裁剪，尺寸较大的卡片自然显示更多链环。祖先实际绘制状态遮罩时，后代不再重复绘制；离线状态不通过`TouchesOfflineDisk`传播到父池或Primordial，父池自身actual health故障仍按原规则映射。RealOff与单项unsupported不画fault。状态图形不改变命中、菜单或编辑资格。
 
-所有拓扑对象外框、悬停、选中、拖入目标和待应用动画描边统一为1 DIP。待应用边框由默认色和主题色各一对分段组成；每个稳定对象单独随机生成慢速周期，尺寸调整只更新路径几何，不重新抽取周期。悬停／选中状态组位于节点表面根布局并使用当前主题色，动画层不能覆盖交互边框；有待应用差异时，Apply按钮共用待办描边动画。结构页待应用计数打开只读对话框，不修改草稿；Apply与预览共用净差异。既有全局四个动作图标与合法动作入口继续可用，状态遮罩不作为编辑门。
+所有拓扑对象外框、悬停、选中、拖入目标和待应用动画描边统一为1 DIP。待应用边框由默认色和主题色各一对分段组成；每个稳定对象独立保持9–18秒周期，尺寸调整只更新路径几何，不重新抽取周期。悬停／选中状态组位于节点表面根布局并使用当前主题色，动画层不能覆盖交互边框；有待应用差异时，Apply按钮共用待办描边动画。待实施计数大于0时计数按钮动画；“+”卡仅在当前允许新建池时动画，不可创建时不暗示可操作。结构页待应用计数打开只读对话框，不修改草稿；Apply与预览共用净差异。既有全局四个动作图标与合法动作入口继续可用，状态遮罩不作为编辑门。
 
-右侧新池属性的合法改动即时进入当前池草稿，不另设保存动作，也不写Windows；同一GUI生命周期内跨页和切换系统保留草稿、选择、意图、Undo/Redo与合法未提交输入，GUI关闭后不恢复磁盘草稿。状态对话框只读显示净差异和原因，不提交或清除草稿。Pool01管理和编辑视图共享业务层选择器：有实际层时选择实际层，没有时才选择唯一模板，避免同介质模板与实际层重复显示；Windows来源对象、原始字段和来源详情均保留。
+右侧新池属性的合法改动即时进入当前池草稿，不另设保存动作，也不写Windows；同一GUI生命周期内跨页和切换系统保留草稿、选择、意图、Undo/Redo与合法未提交输入，GUI关闭后不恢复磁盘草稿。待实施明细真实与模拟共用渲染器，逐项展开动作和参数为普通内容，仅提供纵向滚动；状态对话框只读显示净差异和原因，不提交或清除草稿。Pool01管理和编辑视图共享业务层选择器：有实际层时选择实际层，没有时才选择唯一模板，避免同介质模板与实际层重复显示；Windows来源对象、原始字段和来源详情均保留。
 
-拓扑层详情以“条带单元”显示原始交错大小；完整条带另显示“数据 KiB + 额外写入 KiB”。Simple额外写入为0，Parity为校验数据量，Mirror按物理副本量标记为额外副本而非校验。按当前条带单元、列数、副本数和容错数计算；任一必要布局事实无法确认时保持空白，不从名称或相邻对象推断。
+拓扑层详情以“条带单元”显示原始交错大小；完整条带只读输入框外观、右对齐显示“XX KiB + XX KiB”，数据与额外写入／镜像副本／校验的解释通过Tooltip和辅助功能描述提供。Simple额外量为0，Parity为校验数据量，Mirror按物理副本量计算。按当前条带单元、列数、副本数和容错数计算；任一必要布局事实无法确认时保持空白，不从名称或相邻对象推断。
 
 模拟分区扩缩的容量能力与提交共用 `StorageEditRules` 的建模计划。目标是总容量并按 1 MiB 对齐，依据保存的磁盘范围、下一分区边界和卷已用容量检查；分区与关联卷以同一增量更新，保留合法容量差，不将文件系统容量强制等同分区范围。该建模范围不是 Windows `Get-PartitionSupportedSize` 实测，不授权真实写入。
 
@@ -230,7 +232,7 @@ scoped 请求回包与 observer 事件可按任意顺序交付同一已提交批
 
 内置模拟与导入模拟均可删除。`BuiltInSimulationCatalogPolicy` 只在首次成功初始化或显式恢复默认时补齐样例；`UserPreferences.BuiltInSimulationCatalogSeeded` 在持久化成功后设置，正常重载不重建已删除样例。目录可以没有模拟系统，此时使用本机选择。单项导入、转换及删除先完成仓储操作再更新内存目录；批量恢复默认逐项同步成功结果，避免失败重试使用旧修订。
 
-自动创建虚拟磁盘、分区保存在 App 的 `UserPreferences`，结构页开关保留原位置；选择对象不修改偏好，偏好变更不反向增删已有结构。新建操作读取偏好，相关保存串行取最新偏好以避免快速连切丢失字段。前台文件选择器采用带窗口身份的 `Microsoft.Windows.Storage.Pickers`，不再用提升模式不支持的旧 picker；不因此新增管理员写入存储的权限。
+旧自动创建虚拟磁盘／分区偏好已不再驱动结构页新建策略，界面不提供对应开关。新池默认创建VD并生成其分区布局目标；仅新建VD执行自动布局，既有RAW VD不回填，明确删除的VD不因旧偏好重生。MSR创建偏好仍单独保存在 `UserPreferences`，只影响新布局是否包含MSR。前台文件选择器采用带窗口身份的 `Microsoft.Windows.Storage.Pickers`，不再用提升模式不支持的旧 picker；不因此新增管理员写入存储的权限。
 
 ## 通知与上下文帮助
 
