@@ -24,7 +24,7 @@ C#、WinUI 3、.NET 10；SDK 由 `global.json` 固定，当前为 10.0.400／lat
 
 - `WinPoolFacts` 保存来源、时间、类型、读取状态和关联；`WinPoolSystem`／`StorageSnapshot` 是派生视图。图形布局、管理表和导航不另存可修改关系。显示用假池／假层不进入来源或真实命令。
 - 内部稳定 ID 与 provider locator 分工；名称、盘符、DiskNumber、顺序不是持久身份。未知、失败、不支持、否、零和成功空集合分别表达，不用默认值制造可写或无保护角色。
-- 关系只按准确唯一证据组合。分区联合体、派生对象和字段来源详见[UnifiedModel](UnifiedModel.md)，不在此复制其字段表。
+- 关系只按准确唯一证据组合。分区联合体、派生对象和字段来源详见[UnifiedModel](Reference/UnifiedModel.md)，不在此复制其字段表。
 - 显示合并缓存可以保留旧事实；真实临写事实必须新鲜且覆盖本次准确目标闭包。局部删除只依据完整成功覆盖域中的 absence；迟到结果不能覆盖新代事实。共享 Primordial 不扩大到无关兄弟盘。
 - `SimulationEditingSession` 已有基线、ContentRevision、BindingGeneration、意图与 undo/redo。草稿与提交结果分开；外部改动保留草稿并报告冲突，传输失败不等于未提交。预览不能把本机来源重种成模拟来源。
 - 校验放在外部输入、持久化读回及真实临写边界，边界内复用类型化结果。不要每层重复 `IsValid`、hash、编码再解码或日志再抛出。保留实质事务、身份、权限和 Unknown 语义。
@@ -92,6 +92,6 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 | 重要已完成变化 | CHANGELOG |
 | 授权、文件处置、Git | AGENTS |
 
-只更新变化事实的归属位置，不复制历史数值、逐日过程或完整对话。Review 是证据材料，Design 是未排期储备；只有活动 Plan 采纳的部分进入范围。结束或被替代的文档按本项目规则原样归档，不伪称完成；普通小修不新增 Plan。
+只更新变化事实的归属位置，不复制历史数值、逐日过程或完整对话。`docs/` 根仅放 Product、Development、Quality、Plan、CHANGELOG。按需资料分为 [Reference](Reference/README.md) 的专项说明／调查／源码入口、[Review](Review/README.md) 的本轮审查来源、[Design](Design/README.md) 的未来方案和 [Archive](Archive/README.md) 的阶段历史；只有活动 Plan 采纳的部分进入实施范围。结束或被替代的文档按本项目规则原样归档，不伪称完成；普通小修不新增 Plan、报告或副本表。
 
 唯一版本源为 `Directory.Build.props`：`WinPoolVersionMajor=0`、`Minor=6`、`Iteration=0` 当前显示 V0.60。**用户已明确：现在只写 V0.61 文档目标；下一轮代码修改收口时将 Iteration 改为 1，生成 V0.61／0.6.1／0.6.1.0，其他字段按现有公式派生。** 不用另起版本分阶段，不创建迭代 10。V0.68／V0.69 仅在未来确需迭代时收紧范围，首稿不为用完版本号等待。

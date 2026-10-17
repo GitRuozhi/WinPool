@@ -23,9 +23,9 @@
 | [2026-10-17 仓库审查 §§3、11–12](Review/WinPool-Repository-Audit-20261017.md) | 首轮 2418 passed／34 failed／3 skip；两个守卫在停止进程后通过，修正 admission 口径后的汇总 2420／32／3 不是重跑全套；30 个恢复 fixture 和2个文本断言须处理 |
 | [同报告 §12](Review/WinPool-Repository-Audit-20261017.md) | Medium 默认 Storage 55.204 s／7条失败，现有无 discovery 参数探针 3.389 s／0失败；候选诊断，不是产品已修复，也不外推通用倍数 |
 | [全量审查](Review/WinPool-Full-Review-20261017.md)、[接手审查](Review/WinPool-Takeover-Review-20261017.md) | 不同运行条件下的发现；后者额外超时、归档和轮转问题须按实际故障确认，不能把所有失败加成同一产品 bug 数 |
-| [2026-10-16 VD耗时](Review/Pool-VD-Timing-20261016.md) | 删除和 MAX 创建／自动布局中的重复采集成本；不是 V0.61 的性能结果 |
+| [2026-10-16 VD耗时](Reference/Pool-VD-Timing-20261016.md) | 删除和 MAX 创建／自动布局中的重复采集成本；不是 V0.61 的性能结果 |
 | [历史完整 Quality](Archive/20261017-v061-document-baseline/Quality-before.md) | V0.58–V0.60 各日期、动作、GUI、设备、工程门的原始结论与未测边界 |
-| [单HDD容量调查](Review/Single-Hdd-Tier-Capacity-20261009.md)、[整数GiB算法验收](Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证) | 已有本机 WDC 的明确容量及普通／单HDD MAX 证据，不证明新重构或多成员硬件已验证 |
+| [单HDD容量调查](Reference/Single-Hdd-Tier-Capacity-20261009.md)、[整数GiB算法验收](Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证) | 已有本机 WDC 的明确容量及普通／单HDD MAX 证据，不证明新重构或多成员硬件已验证 |
 
 <a id="editor-320"></a>
 <a id="v060-compact-actions"></a>

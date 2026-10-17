@@ -24,7 +24,7 @@
 | 上个公开包升级／完整平台门 | 不适用当前阶段。使用现有受支持schema夹具和开发数据副本；外部测试覆盖环境差异，不以购置设备或完成所有组合阻塞首稿 |
 | 两轮修改、一次收口、一个Plan | 保留。删除按路径替换同步做；文档只维护变化事实，不另建审查台账 |
 
-诊断证据按需查：[仓库审查](Review/WinPool-Repository-Audit-20261017.md)、[全量检视](Review/WinPool-Full-Review-20261017.md)、[接手审查](Review/WinPool-Takeover-Review-20261017.md)、[VD耗时](Review/Pool-VD-Timing-20261016.md)。执行者先读所属工作包和源码，不重新全文审查仓库。
+诊断证据按需查：[仓库审查](Review/WinPool-Repository-Audit-20261017.md)、[全量检视](Review/WinPool-Full-Review-20261017.md)、[接手审查](Review/WinPool-Takeover-Review-20261017.md)、[VD耗时](Reference/Pool-VD-Timing-20261016.md)。执行者先读所属工作包和源码，不重新全文审查仓库。
 
 ## 2. 固定范围与执行规则
 
@@ -181,6 +181,7 @@ dotnet test tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj -c 
 
 - 唯一活动Plan为本文件；原方案／已完成计划、Quality长历史、旧README／Product／Development／CHANGELOG及已被替代设计原样[集中归档](Archive/20261017-v061-document-baseline/README.md)，不清测试证据、不恢复用户删除报告。
 - README只讲使用；Product管产品，Development管技术／构建，Quality管方法／短状态与证据。精确尺寸／图标直接读共享源码，取消逐控件同步多份表的步骤；旧控件／规则／图标／样式表原样归档，当前代码V0.60与目标V0.61分开。
+- 非核心资料按用途整理：[Review](Review/README.md)只保留本轮三份审查并区分基线与方法；统一对象、专项调查及源码入口归[Reference](Reference/README.md)；旧阶段调查／静态复审／拓扑诊断和通知表[原样归档](Archive/20261017-noncore-docs/README.md)。不再维护单独DesignTables目录。
 - 小改闭环为实现并删旧→相关验证→只更新变化事实→本地提交。一个执行方验证；无新全面报告、日报、附加审批门或每提交全套回归。
 - 委派只需消息中的目标、所有权、固定决定和验收；主代理负责共享合同及集成，不为用满并发拆分。本地main提交，发布仍按用户实际指令。
 

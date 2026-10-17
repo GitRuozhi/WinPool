@@ -16,7 +16,7 @@
 | 模块、数据、构建、版本 | [Development](docs/Development.md) |
 | 验证范围、命令、证据 | [Quality](docs/Quality.md) |
 | 重要变化 | [CHANGELOG](docs/CHANGELOG.md) |
-| 未排期方案或历史 | [Design 索引](docs/Design/README.md)、[Archive 索引](docs/Archive/README.md) |
+| 按需专项资料 | [Reference](docs/Reference/README.md)、[Review](docs/Review/README.md)、[Design](docs/Design/README.md)、[Archive](docs/Archive/README.md) |
 
 Design、Reference、Review、Archive 按需查阅；旧正文中的“必须”不自动成为当前要求，不要求执行者全文重读审查报告。
 
@@ -47,7 +47,7 @@ Design、Reference、Review、Archive 按需查阅；旧正文中的“必须”
 
 本机分层原生 MAX 失效归因于微软 Windows Storage 接口／提供程序，不是 WinPool 容量算法问题。单 HDD 可以建立实际 HDD 层。`StorageTiers + UseMaximumSize` 的互斥错误、`MediaType HDD + UseMaximumSize` 返回普通 VD，与已修复的层／池步长混用和采集超时是不同问题；不重问归因，也不宣称微软已公开确认或所有 Windows 版本相同。
 
-2026-10-09 用户已授权真实与模拟共用整数 GiB 搜索，普通 MAX 也使用该算法。准确语义归 [Product](docs/Product.md#max)，历史验证见[归档 §10.4](docs/Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证)及[调查](docs/Review/Single-Hdd-Tier-Capacity-20261009.md)。不得恢复原生 MAX、旧 4 GiB 对齐或固定扣 2 GiB fallback；实验 `TierSizeMax - 8 × TierSizeDivisor` 不是产品容量规则。
+2026-10-09 用户已授权真实与模拟共用整数 GiB 搜索，普通 MAX 也使用该算法。准确语义归 [Product](docs/Product.md#max)，历史验证见[归档 §10.4](docs/Archive/20261012-editor-ui-baseline/Plan.md#104-用户指定的内置整数-gib-max-算法已验证)及[调查](docs/Reference/Single-Hdd-Tier-Capacity-20261009.md)。不得恢复原生 MAX、旧 4 GiB 对齐或固定扣 2 GiB fallback；实验 `TierSizeMax - 8 × TierSizeDivisor` 不是产品容量规则。
 
 ### WDC 持续真实操作授权（2026-10-07）
 
